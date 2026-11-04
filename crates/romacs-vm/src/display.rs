@@ -639,7 +639,8 @@ impl Vm {
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
         let chrome = self.pane_chrome()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar })
+        let no_font = self.no_font_display();
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
@@ -877,6 +878,21 @@ impl Vm {
     pub fn take_display_diagnostics(&mut self) -> Vec<String> {
         drop(self.display_state.theme());
         std::mem::take(self.display_state.diagnostics.get_mut())
+    }
+    /// How a window-system frame shows a character no font has a glyph for:
+    /// `glyphless-char-display''s `no-font' extra slot, as
+    /// lookup_glyphless_char_display reads it for C -1, the graphical half
+    /// of a cons, nil or any other method being `empty-box'.
+    pub(crate) fn no_font_display(&mut self) -> romacs_layout_input::NoFont {
+        use romacs_layout_input::NoFont;
+        let slot = self.slot("glyphless-char-display");
+        let table = self.variable_value(slot).unwrap_or(Value::NIL);
+        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras.first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
+        let method = self.cons_pair(method).map_or(method, |(graphical, _)| graphical);
+        if method == self.display_symbol("hex-code") { NoFont::HexCode }
+        else if method == self.display_symbol("thin-space") { NoFont::ThinSpace }
+        else if let Some(text) = self.str_view(method).and_then(|view| view.as_str().map(str::to_owned)) { NoFont::Acronym(text) }
+        else { NoFont::EmptyBox }
     }
     pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
@@ -1515,7 +1531,8 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }],
+            no_font: self.no_font_display() };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
@@ -1788,6 +1805,7 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                no_font: self.no_font_display(),
                 faces: faces.clone(),
                 text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
             };
@@ -2536,6 +2554,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
         };
@@ -2679,6 +2698,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces: vec![face],
             text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
@@ -2716,6 +2736,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };

@@ -35,7 +35,7 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
 fn lay_out(snapshot: WindowSnapshot) -> (Vec<String>, Option<(f32, f32)>, Vec<(u16, FringeSide)>, WindowEnd) {
     let width = snapshot.width + snapshot.chrome.left_fringe + snapshot.chrome.right_fringe;
     let x = snapshot.chrome.left_fringe;
-    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), width, height: 200,
+    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width, height: 200,
         windows: vec![PlacedWindowSnapshot { x, y: 0, snapshot }], background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None };
     let color = romacs_display_protocol::Color::from_pixel(0xffffff);
     let (painted, mut ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame, 1, Some((1, color))).unwrap();

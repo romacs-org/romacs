@@ -33,7 +33,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
 fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnapshot {
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width: 116, height: 200 + y,
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
         windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(), status_bar: None,
     }
 }
@@ -237,7 +237,7 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
     assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
     let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(),
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(),
         faces: snapshot.faces.clone(), text: snapshot.text.clone(),
     }).unwrap();
     let advances: Vec<u32> = measured.glyphs.iter().map(|g| g.0).collect();

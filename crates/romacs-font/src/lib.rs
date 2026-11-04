@@ -32,7 +32,7 @@ pub mod system;
 
 pub use fontset::{FontsetEntry, FontsetFontSpec, FontsetMode, FontsetPolicy, FontsetTarget};
 pub use frame::{PublishedFace, publish_face_text};
-pub use resolver::{CharResolution, CharResolutionSource, FontResolveError, FontResolver};
+pub use resolver::{CharResolution, CharResolutionSource, FontResolveError, FontResolver, InkExtents};
 pub use style::{FontRequest, StyleScore, style_score};
 
 /// Make a font file visible to this process's platform catalog, the way an

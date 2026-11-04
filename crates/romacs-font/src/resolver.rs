@@ -159,6 +159,37 @@ impl OpenedFace {
             }
         }
     }
+
+    /// CH's advance and how far its ink rises above and falls below the
+    /// baseline, in whole pixels (ftcrfont_glyph_extents: the ascent
+    /// floored up from the bearing, the descent ceiled).
+    fn ink(&self, ch: char) -> Option<(f32, f32, f32)> {
+        let (_, advance) = self.glyph(ch)?;
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::FreeType(face) => {
+                let metrics = face.glyph().metrics();
+                let (top, height) = (metrics.horiBearingY as f32 / 64.0, metrics.height as f32 / 64.0);
+                Some((advance, top.ceil(), (height - top).ceil()))
+            }
+            Self::Sfnt { data, index, pixel_size } => {
+                let face = ttf_parser::Face::parse(data, *index).ok()?;
+                let scale = pixel_size / f32::from(face.units_per_em());
+                let bounds = face.glyph_index(ch).and_then(|glyph| face.glyph_bounding_box(glyph));
+                Some(bounds.map_or((advance, 0.0, 0.0), |b| (advance, (f32::from(b.y_max) * scale).ceil(), (-f32::from(b.y_min) * scale).ceil())))
+            }
+        }
+    }
+}
+
+/// GNU's `text_extents' for a run of characters in one font: the sum of
+/// their advances and the most any one's ink rises above and falls below
+/// the baseline, in whole pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct InkExtents {
+    pub width: f32,
+    pub ascent: f32,
+    pub descent: f32,
 }
 
 /// Vertical metrics and space advance from the sfnt tables, for faces
@@ -479,6 +510,18 @@ impl FontResolver {
         let selector = font.identity.freetype_selector()?;
         self.opened_face(&file, selector, font.pixel_size)?
             .glyph(ch)
+    }
+
+    /// TEXT's extents in FONT (font->driver->text_extents), or None when
+    /// the font cannot be opened or lacks one of its glyphs.
+    pub fn ink_extents(&mut self, font: &ResolvedFont, text: &str) -> Option<InkExtents> {
+        let file = font.identity.file_path.clone()?;
+        let selector = font.identity.freetype_selector()?;
+        let face = self.opened_face(&file, selector, font.pixel_size)?;
+        text.chars().try_fold(InkExtents::default(), |sum, ch| {
+            let (advance, ascent, descent) = face.ink(ch)?;
+            Some(InkExtents { width: sum.width + advance, ascent: sum.ascent.max(ascent), descent: sum.descent.max(descent) })
+        })
     }
 
     fn file_bytes(&mut self, file: &str) -> Option<std::sync::Arc<Vec<u8>>> {

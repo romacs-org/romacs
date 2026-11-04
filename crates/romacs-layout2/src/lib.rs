@@ -5,6 +5,8 @@ mod selection_order_tests;
 #[cfg(test)]
 mod alternative_state_tests;
 mod fringe;
+mod glyphless;
+use glyphless::Glyphless;
 use fringe::RowMarks;
 use romacs_display_protocol::frame_glyphs::GlyphRowRole;
 use romacs_display_protocol::{
@@ -12,7 +14,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{ChildFrameSnapshot, STATUS_BAR_ACCENT, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{NoFont, ChildFrameSnapshot, STATUS_BAR_ACCENT, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -96,7 +98,7 @@ impl LayoutEngine {
     pub fn layout(&mut self, snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyphBuffer, String> {
         let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
         frame.background = color(snapshot.faces.first().ok_or("missing face")?.background);
-        append_window(snapshot, &mut frame, &mut self.resolver, 0.0, 0.0, None)?;
+        append_window(snapshot, &mut frame, &mut self.resolver, 0.0, 0.0, None, &NoFont::default())?;
         Ok(frame)
     }
 }
@@ -158,10 +160,10 @@ fn layout_frame_inner(snapshot: &FrameSnapshot, presentation: u64, cursor: Optio
         // Windows with a mode line always own a cursor; the minibuffer (no mode
         // line) only while it is the selected window, i.e. a prompt is active.
         let owns = |&(id, _): &(u64, Color)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id;
-        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)))?);
+        ends.push(append_window(&placed.snapshot, &mut frame, resolver, placed.x as f32, placed.y as f32, cursor.filter(owns).map(|(id, color)| (id == placed.snapshot.id, color)), &snapshot.no_font)?);
     }
-    if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver)?; }
-    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, snapshot.chrome.focus, resolver)?; }
+    if let Some(tab_bar) = &snapshot.tab_bar { paint_tab_bar(&mut frame, tab_bar, snapshot.width as f32, resolver, &snapshot.no_font)?; }
+    if let Some(bar) = &snapshot.status_bar { paint_status_bar(&mut frame, bar, snapshot.chrome.focus, resolver, &snapshot.no_font)?; }
     frame.panes = panes(snapshot);
     Ok((frame, ends))
 }
@@ -191,14 +193,14 @@ fn panes(snapshot: &FrameSnapshot) -> Vec<romacs_display_protocol::Pane> {
 /// background, then each character in its face, in faces published above
 /// the windows'. A click finds its character by these glyphs, which are
 /// the tab bar's only ones and in its text's order.
-fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: f32, resolver: &mut FontResolver) -> Result<(), String> {
+fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: f32, resolver: &mut FontResolver, no_font: &NoFont) -> Result<(), String> {
     let text = &tab_bar.text;
     validate_runs(text, tab_bar.faces.len())?;
     let face = tab_bar.face.0 as usize;
     if face >= tab_bar.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid tab bar".into()); }
     let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let face_text = face_text(tab_bar.faces.len(), &[(text, face)]);
-    let metrics = realize_faces(&tab_bar.faces, &face_text, |index| index == face, frame, resolver, face_base, Default::default())?;
+    let (metrics, glyphless) = realize_faces(&tab_bar.faces, &face_text, |index| index == face, frame, resolver, face_base, Default::default(), no_font)?;
     let bounds = Rect::new(0.0, 0.0, width, tab_bar.height as f32);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(tab_bar.faces[face].background));
     frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::TabBar, Some(bounds));
@@ -210,8 +212,13 @@ fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: 
         let advance = advance(frame, id, ch, cell);
         let background = color(tab_bar.faces[index].background);
         if index != face { frame.add_background(x, 0.0, advance, bounds.height, background); }
-        frame.add_char(ch, x, 0.0, advance, height, ascent, false);
-        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
+        match glyphless.get(index, ch) {
+            Some(shown) => glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true)?,
+            None => {
+                frame.add_char(ch, x, 0.0, advance, height, ascent, false);
+                *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
+            }
+        }
         x += advance;
     }
     Ok(())
@@ -236,7 +243,7 @@ fn is_icon(ch: char) -> bool {
 /// Paint the status bar BAR (VM2-STATUS-BAR), a marked band whose
 /// accent block is FOCUS where its window holds the input focus, else its
 /// face's foreground dimmed.
-fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus: Option<[u8; 3]>, resolver: &mut FontResolver) -> Result<(), String> {
+fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus: Option<[u8; 3]>, resolver: &mut FontResolver, no_font: &NoFont) -> Result<(), String> {
     let face = bar.face.0 as usize;
     if face >= bar.faces.len() { return Err("invalid status bar".into()); }
     let (foreground, background) = (bar.faces[face].foreground, bar.faces[face].background);
@@ -244,7 +251,7 @@ fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus
     let accent = if bar.focused { focus.unwrap_or(foreground) } else { dimmed };
     let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
     let band = Marked { text: &bar.text, faces: &bar.faces, face, marks: &bar.marks, bounds, accent: Some(accent) };
-    paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver)?;
+    paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver, no_font)?;
     frame.status_bar = Some(bounds);
     Ok(())
 }
@@ -266,7 +273,7 @@ struct Marked<'a> {
 /// that background (an icon in place of the character it marks, a pill's
 /// text in the pill's foreground), the part after its `right-align'
 /// marker flush with the right edge (`BandMarks::places').
-fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver) -> Result<(), String> {
+fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver, no_font: &NoFont) -> Result<(), String> {
     let (text, face, bounds) = (band.text, band.face, band.bounds);
     validate_runs(text, band.faces.len())?;
     if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
@@ -275,7 +282,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut face_text = face_text(faces.len(), &[(text, face)]);
     for &(byte, icon) in &band.marks.icons { face_text[face_at(text, byte, face)].push(icon); }
-    let metrics = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base, Default::default())?;
+    let (metrics, glyphless) = realize_faces(&faces, &face_text, |index| index == face, frame, resolver, face_base, Default::default(), no_font)?;
     // Each character once, in order: its byte, what is drawn (an icon in
     // place of the character it marks), its face and advance.
     let mut icons = band.marks.icons.iter().peekable();
@@ -318,7 +325,8 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         }
     }
     // A pill's text colour: copies of the faces it uses, in that foreground.
-    let mut next = face_base + faces.len() as u32;
+    // Above every face realized for the band, its glyphless ones too.
+    let mut next = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(face_base).max(glyphless.end);
     let mut recoloured: std::collections::HashMap<(usize, [u8; 3]), FaceId> = std::collections::HashMap::new();
     let mut ids: Vec<FaceId> = chars.iter().map(|c| FaceId::new(face_base + c.2 as u32)).collect();
     for (range, foreground) in &pill_text {
@@ -352,6 +360,10 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         let Some((x, width)) = *place else { continue };
         if marker.as_ref().is_some_and(|m| m.contains(&byte)) { continue; }
         let (ascent, height, _, _) = metrics[index];
+        if let Some(glyph) = glyphless.get(index, shown) {
+            glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true)?;
+            continue;
+        }
         frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
         *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
     }
@@ -407,6 +419,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
     let frame_snapshot = FrameSnapshot {
         font_selection: snapshot.font_selection, font_alternatives: snapshot.font_alternatives.clone(),
         width: child.width, height: child.height, windows: child.windows.clone(), background_alpha: child.background_alpha, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
+        no_font: snapshot.no_font.clone(),
     };
     let cursor = cursor.filter(|(id, _)| child.windows.iter().any(|w| w.snapshot.id == *id));
     let (mut frame, ends) = layout_frame_inner(&frame_snapshot, presentation, cursor, resolver)?;
@@ -526,12 +539,12 @@ pub fn layout(snapshot: &WindowSnapshot, presentation: u64) -> Result<FrameGlyph
     let mut frame = new_frame(snapshot.width, snapshot.height, presentation)?;
     frame.background = color(snapshot.faces.first().ok_or("missing face")?.background);
     let mut resolver = FontResolver::new().map_err(|e| e.to_string())?;
-    append_window(snapshot, &mut frame, &mut resolver, 0.0, 0.0, None)?;
+    append_window(snapshot, &mut frame, &mut resolver, 0.0, 0.0, None, &NoFont::default())?;
     Ok(frame)
 }
 
 /// Paint SNAPSHOT's window at OX, OY, and report its rows (`WindowEnd`).
-fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>) -> Result<WindowEnd, String> {
+fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, ox: f32, oy: f32, cursor: Option<(bool, Color)>, no_font: &NoFont) -> Result<WindowEnd, String> {
     let text = &snapshot.text.utf8;
     if snapshot.height == 0
         || snapshot.faces.is_empty()
@@ -596,7 +609,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         || snapshot.text.extends.windows(2).any(|w| w[0].byte >= w[1].byte) {
         return Err("invalid extend face".into());
     }
-    let metrics = realize_faces(&snapshot.faces, &face_text, |index| band_faces.contains(&index), frame, resolver, face_base, snapshot.underline_rules)?;
+    let (metrics, glyphless) = realize_faces(&snapshot.faces, &face_text, |index| band_faces.contains(&index), frame, resolver, face_base, snapshot.underline_rules, no_font)?;
     if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
     // A band is as tall as its tallest face.
     let band_height = |(band, face): (&Option<TextSlice>, FaceHandle)| band.as_ref().map_or(0.0, |band| {
@@ -826,7 +839,12 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
                     let width = advance(frame, id, c, cell);
-                    if visible && at - shift < snapshot.width as f32 { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; }
+                    if visible && at - shift < snapshot.width as f32 {
+                        match glyphless.get(index, c) {
+                            Some(shown) => glyphless.paint(frame, index, shown, ox + at, oy + y, (ascent, height), id, false)?,
+                            None => glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?,
+                        }
+                    }
                     first.get_or_insert(width);
                     at += width;
                 }
@@ -914,12 +932,12 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if let Some(band) = &snapshot.header_line {
         copy += 1;
         let bounds = Rect::new(band_x, window_top, band_width, header_height);
-        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), &metrics)?;
+        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), (&metrics, &glyphless))?;
     }
     if let Some(band) = &snapshot.mode_line {
         copy += 1;
         let bounds = Rect::new(band_x, oy + body_height, band_width, snapshot.height as f32 - header_height - body_height);
-        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
+        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), (&metrics, &glyphless))?;
     }
     Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, point: place })
 }
@@ -929,7 +947,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
 /// published from FACE_BASE plus COPY face tables on.
 #[allow(clippy::too_many_arguments)]
 fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &TextSlice, face: FaceHandle, bounds: Rect,
-              role: GlyphRowRole, (face_base, copy): (u32, u32), metrics: &[(f32, f32, f32, f32)]) -> Result<(), String> {
+              role: GlyphRowRole, (face_base, copy): (u32, u32), (metrics, glyphless): (&[Metrics], &Glyphless)) -> Result<(), String> {
     let default = face.0 as usize;
     let background = color(snapshot.faces[default].background);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, background);
@@ -954,8 +972,13 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
         let (ascent, height, cell, _) = metrics[index];
         let advance = advance(frame, id, ch, cell);
         if x < bounds.width {
-            frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
-            *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
+            match glyphless.get(index, ch) {
+                Some(shown) => glyphless.paint(frame, index, shown, bounds.x + x, bounds.y, (ascent, height), id, false)?,
+                None => {
+                    frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
+                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
+                }
+            }
         }
         x += advance;
     }
@@ -1115,11 +1138,6 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     text
 }
 
-/// Publish the FACES something paints into FRAME from FACE_BASE on and
-/// resolve the fonts their characters need: each face's ascent, row
-/// height, nominal advance and space width. A face no character uses is
-/// not published, except the default and those KEEP accepts; its metrics
-/// are unused.
 /// Where FACE's underline goes in FONT, and how thick it is, as xterm.c
 /// x_draw_glyph_string decides: the font's thickness, else 1; at the
 /// descent line (less `:position' pixels) under RULES' at-descent-line or a
@@ -1138,80 +1156,164 @@ fn underline_placement(face: &Face, font: &romacs_display_protocol::font::Resolv
     (UnderlinePosition::FontMetric { offset_from_baseline: position.max(rules.minimum_offset.min(i32::MAX as u32) as i32) }, thickness)
 }
 
-fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> bool, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32, rules: romacs_layout_input::UnderlineRules) -> Result<Vec<(f32, f32, f32, f32)>, String> {
+/// Each face's ascent, height, nominal advance and space width, as
+/// `realize_face' publishes it from FACE_BASE on, and the glyphless glyphs
+/// of the characters no font has (`glyphless'), in faces published above
+/// every copy of the table a window's bands make. A face no character uses
+/// is not published, except the default and those KEEP accepts; its
+/// metrics are unused.
+#[allow(clippy::too_many_arguments)]
+fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> bool, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver,
+                 face_base: u32, rules: romacs_layout_input::UnderlineRules, no_font: &NoFont) -> Result<(Vec<Metrics>, Glyphless), String> {
     let policy = FontsetPolicy::new();
     let mut metrics = Vec::new();
+    let mut glyphless = Glyphless::default();
+    let len = u32::try_from(faces.len()).map_err(|e| e.to_string())?;
+    // Above a window's band copies (face_base + 1 and 2 tables): each
+    // face's digit and box-line faces, then two copies of its digit face.
+    let derived = len.checked_mul(3).and_then(|n| n.checked_add(face_base)).ok_or("too many faces")?;
+    glyphless.end = len.checked_mul(4).and_then(|n| n.checked_add(derived)).ok_or("too many faces")?;
+    let id_at = |base: u32, index: usize| u32::try_from(index).ok().and_then(|i| base.checked_add(i)).map(FaceId::new).ok_or("too many faces");
     for (index, face) in faces.iter().enumerate() {
-        if face.family.is_empty() || !face.pixel_size.is_finite() || face.pixel_size <= 0.0 {
-            return Err("invalid font request".into());
-        }
         if index != 0 && !keep(index) && face_text[index].is_empty() {
             metrics.push((0.0, 0.0, 0.0, 0.0));
             continue;
         }
-        let id = FaceId::new(face_base.checked_add(u32::try_from(index).map_err(|e| e.to_string())?).ok_or("too many faces")?);
-        let line = |line: Option<romacs_layout_input::Line>| line.map_or((0, None), |l| (l.style, l.color.map(color)));
-        let ((underline, underline_color), (strike, strike_color), (overline, overline_color)) =
-            (line(face.decor.underline), line(face.decor.strike), line(face.decor.overline));
-        frame.set_face_with_font(
-            id,
-            color(face.foreground),
-            Some(color(face.background)),
-            &face.family,
-            face.weight,
-            face.italic,
-            face.pixel_size,
-            underline,
-            underline_color,
-            strike,
-            strike_color,
-            overline,
-            overline_color,
-            false,
-        );
-        // Icons are bound from the resolver's one answer for them, not
-        // resolved through the face's fallback on every layout.
-        let request = font_request(face);
-        let text = &face_text[index];
-        let plain: std::borrow::Cow<str> = if text.chars().any(is_icon) { text.chars().filter(|&c| !is_icon(c)).collect::<String>().into() } else { text.into() };
-        let published = publish_face_text(resolver, frame, id, &request, &policy, &plain).map_err(|e| e.to_string())?;
-        for icon in text.chars().filter(|&c| is_icon(c)) {
-            let resolution = resolver.resolve_sole(&request, icon, &policy).map_err(|e| e.to_string())?;
-            if !frame.fonts.contains_key(&resolution.font.id) { frame.fonts.insert(resolution.font.id, resolution.font.clone()); }
-            frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph.clone());
+        let id = id_at(face_base, index)?;
+        let realized = realize_face(face, faces.first(), id, &face_text[index], frame, resolver, &policy, rules)?;
+        metrics.push(realized.metrics);
+        if realized.unresolved.is_empty() { continue; }
+        // GNU's no-font glyph (produce_glyphless_glyph), its code in
+        // `glyphless-char' (the character's face at 0.6 of its height) and
+        // its box in the face's foreground.
+        let (digits, line) = (id_at(derived, 2 * index)?, id_at(derived, 2 * index + 1)?);
+        let spare = [id_at(derived, 2 * faces.len() + 2 * index)?, id_at(derived, 2 * faces.len() + 2 * index + 1)?];
+        let small = Face { pixel_size: (face.pixel_size * glyphless::DIGIT_SCALE).round().max(1.0), decor: Default::default(), ..face.clone() };
+        let shown: String = realized.unresolved.iter().filter_map(|&ch| glyphless::text_of(no_font, ch)).collect();
+        let digit_face = realize_face(&small, None, digits, &shown, frame, resolver, &policy, Default::default()).ok();
+        let fg = color(face.foreground);
+        frame.set_face_with_font(line, fg, Some(fg), &face.family, face.weight, face.italic, face.pixel_size, 0, None, 0, None, 0, None, false);
+        let primary = frame.fonts[&realized.primary].clone();
+        let digit_font = digit_face.as_ref().map(|d| frame.fonts[&d.primary].clone());
+        let base_width = resolver.ink_extents(&primary, "x").map_or(realized.metrics.2, |x| x.width).round() as i32;
+        let base = glyphless::Base { ascent: primary.ascent_px.round() as i32, descent: primary.descent_px.round() as i32, width: base_width };
+        let shown_in = glyphless::Faces { digits: digit_face.as_ref().map(|d| (digits, d.metrics.2)), line, spare };
+        for &ch in &realized.unresolved {
+            let mut extents = |text: &str| digit_font.as_ref().and_then(|font| resolver.ink_extents(font, text));
+            let glyph = glyphless::layout(no_font, ch, base, &mut extents);
+            glyphless.bind(frame, (index, id), &primary, ch, glyph, shown_in);
         }
-        if !published.unresolved.is_empty() {
-            return Err(format!("unresolved face text: {:?}", published.unresolved));
-        }
-        let font = &frame.fonts[&published.primary];
-        let placement = underline_placement(face, font, rules);
-        if let Some(published) = frame.faces.get_mut(&id) {
-            (published.underline_placement, published.underline_thickness) = placement;
-            (published.font_ascent, published.font_descent) = (font.ascent_px.round() as i32, font.descent_px.round() as i32);
-        }
-        let font = &frame.fonts[&published.primary];
-        let ascent = font.ascent_px;
-        let height = (font.ascent_px + font.descent_px).ceil();
-        let cell = font.glyph_advance.cell_advance_px().unwrap_or(font.space_advance_px);
-        let space = font.space_advance_px;
-        let per_glyph = font.glyph_advance.cell_advance_px().is_none();
-        if !cell.is_finite() || cell <= 0.0 { return Err("font has no positive nominal advance".into()); }
-        if per_glyph {
-            // Dual-width fonts such as Iosevka report per-glyph advances. The
-            // nominal space is only the frame column metric; text uses the
-            // resolver's exact cached advance, including ASCII.
-            let request = font_request(face);
-            let mut ascii: Vec<_> = face_text[index].chars().filter(|c| c.is_ascii() && !c.is_control()).collect();
-            ascii.sort_unstable(); ascii.dedup();
-            for ch in ascii {
-                let resolved = resolver.resolve_char(&request, ch, &policy).map_err(|e| e.to_string())?;
-                frame.fonts.insert(resolved.font.id, resolved.font);
-                frame.char_fonts.entry(id).or_default().insert(ch, resolved.glyph);
+    }
+    Ok((metrics, glyphless))
+}
+
+/// A face's ascent, height, nominal advance and space width.
+type Metrics = (f32, f32, f32, f32);
+
+/// What `realize_face' made of one face: its metrics, its primary font,
+/// and the characters of its text no installed font has a glyph for.
+struct Realized {
+    metrics: Metrics,
+    primary: romacs_display_protocol::font::ResolvedFontId,
+    unresolved: Vec<char>,
+}
+
+/// Note WHAT once per process: a display-time font failure is degraded,
+/// never fatal, and is reported the first time it happens.
+fn warn_once(what: String) {
+    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+    let Ok(mut seen) = SEEN.lock() else { return };
+    let seen = seen.get_or_insert_with(Default::default);
+    if seen.len() < 256 && seen.insert(what.clone()) { eprintln!("romacs-layout: {what}"); }
+}
+
+/// Publish FACE as ID with its font, binding the characters of TEXT, and
+/// its metrics: its ascent, height, nominal advance and space width.
+/// Nothing here stops the display: a face whose font cannot be had falls
+/// back to the DEFAULT face's family and then to `monospace' (GNU falls
+/// back to the frame's font), a font without a positive advance to its
+/// space or half its size, and a character no font has is left for the
+/// caller to show glyphless.
+#[allow(clippy::too_many_arguments)]
+fn realize_face(face: &Face, default: Option<&Face>, id: FaceId, text: &str, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver,
+                policy: &FontsetPolicy, rules: romacs_layout_input::UnderlineRules) -> Result<Realized, String> {
+    let valid = |f: &Face| !f.family.is_empty() && f.pixel_size.is_finite() && f.pixel_size > 0.0;
+    let pixel_size = if face.pixel_size.is_finite() && face.pixel_size > 0.0 { face.pixel_size }
+        else { default.filter(|d| valid(d)).map_or(16.0, |d| d.pixel_size) };
+    let asked = FontRequest { pixel_size, ..font_request(face) };
+    // The families tried after the face's own, built only when it fails.
+    let fallbacks = [default.filter(|d| valid(d)).map(|d| d.family.as_str()), Some("monospace")];
+    let line = |line: Option<romacs_layout_input::Line>| line.map_or((0, None), |l| (l.style, l.color.map(color)));
+    let ((underline, underline_color), (strike, strike_color), (overline, overline_color)) =
+        (line(face.decor.underline), line(face.decor.strike), line(face.decor.overline));
+    // Icons are bound from the resolver's one answer for them, not
+    // resolved through the face's fallback on every layout.
+    let plain: std::borrow::Cow<str> = if text.chars().any(is_icon) { text.chars().filter(|&c| !is_icon(c)).collect::<String>().into() } else { text.into() };
+    let mut failure = None;
+    let (request, published) = 'found: {
+        let mut tried: Vec<&str> = vec![];
+        for family in std::iter::once(None).chain(fallbacks.into_iter().flatten().map(Some)) {
+            let request = match family {
+                None => asked.clone(),
+                Some(family) if family == asked.family || tried.contains(&family) => continue,
+                Some(family) => { tried.push(family); FontRequest { family: family.to_owned(), ..asked.clone() } }
+            };
+            if request.family.is_empty() { continue; }
+            frame.set_face_with_font(id, color(face.foreground), Some(color(face.background)), &request.family, face.weight, face.italic, pixel_size,
+                underline, underline_color, strike, strike_color, overline, overline_color, false);
+            match publish_face_text(resolver, frame, id, &request, policy, &plain) {
+                Ok(published) => break 'found (request, published),
+                Err(error) => { failure.get_or_insert(error); }
             }
         }
-        metrics.push((ascent, height, cell, space));
+        return Err(format!("no font for face {:?}: {}", face.family, failure.map_or_else(String::new, |e| e.to_string())));
+    };
+    if let Some(error) = failure { warn_once(format!("face family {:?} shows in {:?}: {error}", face.family, request.family)); }
+    for icon in text.chars().filter(|&c| is_icon(c)) {
+        match resolver.resolve_sole(&request, icon, policy) {
+            Ok(resolution) => {
+                if !frame.fonts.contains_key(&resolution.font.id) { frame.fonts.insert(resolution.font.id, resolution.font.clone()); }
+                frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph.clone());
+            }
+            Err(error) => warn_once(format!("icon U+{:04X}: {error}", icon as u32)),
+        }
     }
-    Ok(metrics)
+    let unresolved: Vec<char> = published.unresolved.iter().map(|&(ch, _)| ch).collect();
+    for (ch, error) in &published.unresolved { warn_once(format!("U+{:04X} shows glyphless: {error}", *ch as u32)); }
+    let font = &frame.fonts[&published.primary];
+    let placement = underline_placement(face, font, rules);
+    let (ascent_px, descent_px) = (font.ascent_px, font.descent_px);
+    if let Some(published) = frame.faces.get_mut(&id) {
+        (published.underline_placement, published.underline_thickness) = placement;
+        (published.font_ascent, published.font_descent) = (ascent_px.round() as i32, descent_px.round() as i32);
+    }
+    let font = &frame.fonts[&published.primary];
+    let height = (font.ascent_px + font.descent_px).ceil();
+    let space = font.space_advance_px;
+    let per_glyph = font.glyph_advance.cell_advance_px().is_none();
+    let mut cell = font.glyph_advance.cell_advance_px().unwrap_or(space);
+    let ascent = font.ascent_px;
+    if !cell.is_finite() || cell <= 0.0 {
+        warn_once(format!("font {:?} has no positive nominal advance", font.family));
+        cell = if space.is_finite() && space > 0.0 { space } else { (pixel_size / 2.0).round().max(1.0) };
+    }
+    if per_glyph {
+        // Dual-width fonts such as Iosevka report per-glyph advances. The
+        // nominal space is only the frame column metric; text uses the
+        // resolver's exact cached advance, including ASCII.
+        let mut ascii: Vec<_> = text.chars().filter(|c| c.is_ascii() && !c.is_control()).collect();
+        ascii.sort_unstable(); ascii.dedup();
+        for ch in ascii {
+            match resolver.resolve_char(&request, ch, policy) {
+                Ok(resolved) => {
+                    frame.fonts.insert(resolved.font.id, resolved.font);
+                    frame.char_fonts.entry(id).or_default().insert(ch, resolved.glyph);
+                }
+                Err(error) => warn_once(format!("{ch:?} in {:?}: {error}", request.family)),
+            }
+        }
+    }
+    Ok(Realized { metrics: (ascent, height, cell, space), primary: published.primary, unresolved })
 }
 
 /// The font FACE asks for: its family, size, weight, slant and width.
@@ -1241,7 +1343,7 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     let mut frame = new_frame(1, 1, 1)?;
     let face_text = face_text(input.faces.len(), &[(&input.text, 0)]);
     // A face no character uses answers no row height (0).
-    let metrics = realize_faces(&input.faces, &face_text, |_| false, &mut frame, resolver, 0, Default::default())?;
+    let (metrics, _) = realize_faces(&input.faces, &face_text, |_| false, &mut frame, resolver, 0, Default::default(), &input.no_font)?;
     let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
