@@ -951,7 +951,9 @@ Exit with current input if prefix ARG is given."
   (let ((buffer (get-buffer-create (format " *romacs-complete-%d*" (max 1 (minibuffer-depth))))))
     (with-current-buffer buffer
       (setq-local truncate-lines t mode-line-format nil header-line-format nil
-                  cursor-type nil cursor-in-non-selected-windows nil))
+                  cursor-type nil cursor-in-non-selected-windows nil
+                  ;; A truncated candidate ends in an ellipsis, not `$'.
+                  buffer-display-table (romacs-layer-display-table)))
     buffer))
 
 (defun romacs-complete--frame ()

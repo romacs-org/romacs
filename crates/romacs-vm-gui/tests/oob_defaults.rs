@@ -3,7 +3,8 @@
 //! session turns them on before the user's init, as standard values, the
 //! modes the first frame does not need before its first command (whose
 //! prompt has the saved history) unless the init toggled them: typing
-//! pairs delimiters and C-x o o repeats; `romacs-defaults-mode' off
+//! pairs delimiters, and C-x o o inserts o as in GNU (repeat-mode stays
+//! off); `romacs-defaults-mode' off
 //! gives every option GNU's standard value back but one the init set
 //! itself; -Q never turns them on.
 #[path = "../src/command.rs"]
@@ -165,13 +166,13 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         "(pgtk t t)",
-        "(nil t nil nil t (savehist-mode repeat-mode global-auto-revert-mode))",
+        "(nil t nil nil t (savehist-mode global-auto-revert-mode))",
         "(t t nil t)",
-        "(t t t t t nil t t custom t t command-completion-default-include-p t prefix)",
+        "(t t t t nil nil t t custom t t command-completion-default-include-p t prefix)",
         "(global-auto-revert-mode)",
         "(t t t t t t)",
         "(\"(a)\" 3)",
-        "(t \"\" nil)",
+        "(nil \"o\" nil)",
         "(nil nil nil nil nil nil nil nil side-window nil mine nil nil nil)",
         "((kill-do-not-save-duplicates . mine))",
         "(\"(a\" 3)",
@@ -185,7 +186,7 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
 fn an_init_turning_the_modes_off_keeps_their_state() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let (mut vm, _) = session("init-off", false);
-        vm.eval_source("(recentf-mode -1) (which-key-mode -1) (setopt savehist-mode nil) (repeat-mode -1)").unwrap();
+        vm.eval_source("(recentf-mode -1) (which-key-mode -1) (setopt savehist-mode nil)").unwrap();
         let mut report = vec![printed(&mut vm, "(list (with-temp-buffer (insert-file-contents recentf-save-file)
             (and (search-forward \"/oob/kept.txt\" nil t) t))
             (and (numberp echo-keystrokes) (equal echo-keystrokes which-key--echo-keystrokes-backup))

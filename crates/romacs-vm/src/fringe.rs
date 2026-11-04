@@ -80,8 +80,36 @@ impl Vm {
         } else {
             self.fringe_indicators(buffer, mini, [left_fringe, right_fringe], fringe_face, table)?
         };
+        // Only a side without a fringe shows a truncation or continuation glyph.
+        let line_glyphs = if left_fringe == 0 || right_fringe == 0 { self.line_glyphs(buffer)? } else { [None; 2] };
         Ok(romacs_layout_input::WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins,
-                                               fringe_face: fringe_background, border, indicators, right_divider, bottom_divider })
+                                               fringe_face: fringe_background, border, indicators, right_divider, bottom_divider, line_glyphs })
+    }
+
+    /// The truncation and continuation glyphs (slots 0 and 1) of BUFFER's
+    /// display table, its `buffer-display-table' else `standard-display-table'
+    /// (window_display_table), that are characters without a face.
+    pub(crate) fn line_glyphs(&mut self, buffer: Value) -> Result<[Option<char>; 2]> {
+        for name in ["buffer-display-table", "standard-display-table"] {
+            let table = self.buffer_variable(buffer, name)?;
+            if let Some(slots) = self.display_table_line_slots(table) {
+                return Ok(slots.map(|glyph| self.plain_glyph(glyph)));
+            }
+        }
+        Ok([None; 2])
+    }
+
+    /// TABLE's truncation and continuation slots when it is a display table.
+    pub(crate) fn display_table_line_slots(&mut self, table: Value) -> Option<[Value; 2]> {
+        let purpose = self.display_symbol("display-table");
+        let Some(crate::data::Object::CharTable(t)) = self.object_if(table) else { return None };
+        (t.purpose == purpose && t.extras.len() >= 2).then(|| [t.extras[0], t.extras[1]])
+    }
+
+    /// GLYPH, a glyph code, as the character it shows when it has no face
+    /// (GLYPH_CODE_CHAR, GLYPH_CODE_FACE 0).
+    pub(crate) fn plain_glyph(&self, glyph: Value) -> Option<char> {
+        glyph.integer_value().filter(|&code| code >= 0 && code >> 22 == 0).and_then(|code| char::from_u32(code as u32))
     }
 
     /// update_window_fringes's choices for BUFFER's rows: each logical

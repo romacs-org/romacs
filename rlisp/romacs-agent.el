@@ -114,10 +114,10 @@ not started, `outcome unknown' when it had)."
   journal-start
   ;; What its views show, kept as its events arrive: the harness's permission
   ;; mode, the tokens of its last prompt and its model's window, the last
-  ;; record's time, when the running turn began, the cost before it and the
-  ;; last turn's, whether the title is generated (the first prompt replaces
-  ;; it), and the last turn end its chat has shown.
-  permission-mode context-used context-window last-time turn-start (cost-base 0) turn-cost
+  ;; record's time, when the running turn began, whether the title is
+  ;; generated (the first prompt replaces it), and the last turn end its
+  ;; chat has shown.
+  permission-mode context-used context-window last-time turn-start
   title-auto (seen-seq 0)
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
@@ -168,15 +168,173 @@ form, readable, and a digest of all of it, since ids made close together
       (insert-file-contents file)
       (ignore-errors (json-parse-buffer :object-type 'hash-table :null-object nil :false-object nil)))))
 
+;; The endpoint harness relays reach.  A named server serves its own
+;; name's socket (romacs-server.el); any other editor serves its own,
+;; agents/editor/PID.sock.  Neither outlives its process, so a session's
+;; relay names neither: it names the session's own route,
+;; agents/route/KEY.sock, a link to the endpoint of the process attached to
+;; that session.  Attachment is exclusive at the session's supervisor, so
+;; exactly one live process leads each route, and the process attaching
+;; after a restart (it restores at startup) leads it to itself.  Two
+;; editors attached to different sessions each get their own sessions'
+;; tools.  A relay an earlier build started names that editor's
+;; romacs/session-PID/server.sock; the process attaching its session leads
+;; that path to itself the same way.
+
+(defun romacs-agent--own-socket ()
+  "This editor's own endpoint, when it is no named server."
+  (expand-file-name (format "editor/%d.sock" (emacs-pid)) (romacs-agent--runtime-root)))
+
+(defun romacs-agent--route (session)
+  "The path SESSION's relays name: a link to its attached process's endpoint,
+named by the session's id (its record's directory name)."
+  (expand-file-name (format "route/%s.sock" (romacs-agent-id session)) (romacs-agent--runtime-root)))
+
+(defun romacs-agent--sessions-base ()
+  "Where earlier builds kept per-process endpoints: romacs/session-PID/."
+  (expand-file-name "romacs/" (or (getenv "XDG_RUNTIME_DIR") temporary-file-directory)))
+
+(defun romacs-agent--private-directory (directory)
+  (make-directory directory t)
+  (set-file-modes directory #o700)
+  directory)
+
 (defun romacs-agent--endpoint ()
-  "The native endpoint's socket, started for this session when needed."
-  (or romacs-mcp--socket
-      (let ((directory (expand-file-name (format "romacs/session-%d/" (emacs-pid))
-                                         (or (getenv "XDG_RUNTIME_DIR") temporary-file-directory))))
-        (make-directory directory t)
-        (set-file-modes directory #o700)
-        (romacs-mcp-start (expand-file-name "server.sock" directory))
-        romacs-mcp--socket)))
+  "This process's endpoint, started when first needed: a named server's,
+else this editor's own."
+  (unless romacs-mcp--socket
+    (let ((own (romacs-agent--own-socket)))
+      (romacs-agent--private-directory (file-name-directory own))
+      (romacs-mcp-start own)))
+  romacs-mcp--socket)
+
+(defun romacs-agent--listening-p (socket)
+  "Whether something answers at SOCKET, a link followed."
+  (condition-case nil
+      (progn (delete-process (make-network-process :name "romacs-agent-probe" :family 'local
+                                                   :service socket :noquery t))
+             t)
+    ;; Refused, absent, or a path no socket can have: nothing answers.
+    (error nil)))
+
+(defun romacs-agent--lead (path)
+  "Make PATH a link to this process's endpoint, replacing a link there
+atomically (rename(2)).  Another node there (a socket) is left alone."
+  (let ((temporary (format "%s.%d" path (emacs-pid))) (delete-by-moving-to-trash nil))
+    (when (or (file-symlink-p path) (not (file-exists-p path)))
+      (when (file-symlink-p temporary) (delete-file temporary))
+      (make-symbolic-link (romacs-agent--endpoint) temporary)
+      (rename-file temporary path t))))
+
+(defun romacs-agent--legacy-relays (session)
+  "The romacs/session-PID/ endpoints SESSION's relays name, from an
+earlier build."
+  (let ((sockets nil))
+    (dolist (file '("mcp.json" "manifest.json"))
+      (let ((path (expand-file-name file (romacs-agent-dir session))))
+        (when (file-readable-p path)
+          (with-temp-buffer
+            (insert-file-contents path)
+            (while (re-search-forward "[^\"\\]*/session-[0-9]+/server\\.sock" nil t)
+              (push (match-string 0) sockets))))))
+    (delete-dups sockets)))
+
+(defun romacs-agent--socket-pid (socket)
+  "The process number an editor's own SOCKET path carries."
+  (and (string-match "/\\(?:session-\\([0-9]+\\)/server\\|editor/\\([0-9]+\\)\\)\\.sock\\'" socket)
+       (string-to-number (or (match-string 1 socket) (match-string 2 socket)))))
+
+(defun romacs-agent--own-directory-p (directory)
+  "Whether DIRECTORY is a private directory of this user, not a link."
+  (let ((attributes (file-attributes directory 'integer)))
+    (and (eq (file-attribute-type attributes) t)
+         (eql (file-attribute-user-id attributes) (user-uid))
+         (equal (file-attribute-modes attributes) "drwx------"))))
+
+(defun romacs-agent--stale-p (path)
+  "Whether PATH is a socket of ours its process left (that process gone,
+nothing listening) or a link of ours to nothing that answers."
+  (let ((attributes (file-attributes path 'integer)))
+    (and attributes (eql (file-attribute-user-id attributes) (user-uid))
+         (or (stringp (file-attribute-type attributes))
+             (string-prefix-p "s" (file-attribute-modes attributes)))
+         (not (process-attributes (or (romacs-agent--socket-pid path) 0)))
+         (not (romacs-agent--listening-p path)))))
+
+(defun romacs-agent--route-here (session)
+  "SESSION is attached here: its route, and any earlier build's path its
+relay names, lead to this process.  A legacy path keeps a live listener;
+a socket its ended editor left is replaced."
+  (romacs-agent--private-directory (file-name-directory (romacs-agent--route session)))
+  (romacs-agent--lead (romacs-agent--route session))
+  (dolist (socket (romacs-agent--legacy-relays session))
+    (when (and (romacs-agent--own-directory-p (file-name-directory socket))
+               (not (equal (file-symlink-p socket) romacs-mcp--socket)))
+      (let ((delete-by-moving-to-trash nil))
+        (when (and (file-exists-p socket) (not (file-symlink-p socket)) (romacs-agent--stale-p socket))
+          (delete-file socket))
+        (when (or (not (file-exists-p socket)) (romacs-agent--stale-p socket))
+          (romacs-agent--lead socket))))))
+
+(defun romacs-agent--drop-relays (session)
+  "SESSION is no longer attached here: its relays' connections to this
+endpoint close, so they reconnect through its route to the process that
+attaches it next."
+  (dolist (peer (copy-sequence romacs-mcp--peers))
+    (when (equal (process-get peer 'romacs-agent-session) (romacs-agent-id session))
+      (romacs-mcp--close peer))))
+
+(defun romacs-agent--kept (session process)
+  "PROCESS's first line from SESSION's supervisor that is no refusal: the
+attachment is kept (a refusal is the only line a refused attach gets, and
+a kept one always gets one: the replay starts at the last record seen, or
+the acknowledgement {\"attached\": ID} a supervisor sends).  SESSION's
+relays lead here from now."
+  (unless (process-get process 'romacs-agent-kept)
+    (process-put process 'romacs-agent-kept t)
+    (when (eq (romacs-agent-connection session) process) (romacs-agent--route-here session))))
+
+(defun romacs-agent--route-attached ()
+  "This process's endpoint changed (a named server took over): every
+session whose attachment here is kept leads here again."
+  (maphash (lambda (_ session)
+             (let ((connection (romacs-agent-connection session)))
+               (when (and (process-live-p connection) (process-get connection 'romacs-agent-kept))
+                 (romacs-agent--route-here session))))
+           romacs-agent--sessions))
+
+(defun romacs-agent--sweep ()
+  "Remove what ended processes left: routes of sessions gone, other
+editors' own sockets, and earlier builds' romacs/session-PID/ directories
+no session's relay names.  Only nodes of this user whose process is gone
+and that nothing answers at."
+  (let ((runtime (romacs-agent--runtime-root))
+        (legacy (make-hash-table :test #'equal)) (delete-by-moving-to-trash nil))
+    (maphash (lambda (_ session)
+               (dolist (socket (romacs-agent--legacy-relays session)) (puthash socket t legacy)))
+             romacs-agent--sessions)
+    ;; A route whose session's record is gone: its record is made before
+    ;; its route (romacs-agent--create, then the launch), so a session
+    ;; another process is creating keeps its route.
+    (let ((routes (expand-file-name "route/" runtime)))
+      (when (romacs-agent--own-directory-p routes)
+        (dolist (route (directory-files routes t "\\.sock\\'"))
+          (unless (file-directory-p (expand-file-name (file-name-base route) (romacs-agent--state-root)))
+            (when (file-symlink-p route) (delete-file route))))))
+    (let ((editor (expand-file-name "editor/" runtime)))
+      (when (romacs-agent--own-directory-p editor)
+        (dolist (socket (directory-files editor t "\\`[0-9]+\\.sock\\'"))
+          (when (and (not (equal socket romacs-mcp--socket)) (romacs-agent--stale-p socket))
+            (delete-file socket)))))
+    (let ((base (romacs-agent--sessions-base)))
+      (dolist (directory (and (file-directory-p base) (directory-files base t "\\`session-[0-9]+\\'")))
+        (let ((socket (expand-file-name "server.sock" directory)))
+          (when (and (romacs-agent--own-directory-p directory) (not (gethash socket legacy))
+                     (not (process-attributes (romacs-agent--socket-pid socket))))
+            (when (romacs-agent--stale-p socket) (delete-file socket))
+            ;; Only an emptied directory: anything else in it is not ours.
+            (unless (or (file-exists-p socket) (file-symlink-p socket))
+              (ignore-errors (delete-directory directory)))))))))
 
 ;;; Provider instances
 
@@ -275,7 +433,7 @@ RESUME is non-nil."
       "mcpServers" (romacs-mcp--object
                     "romacs" (romacs-mcp--object
                               "command" (romacs-agent--program "romacs-mcp")
-                              "args" (vector "--socket" (romacs-agent--endpoint) "--reconnect"
+                              "args" (vector "--socket" (romacs-agent--route session) "--reconnect"
                                              "--session" (romacs-agent-id session)
                                              "--reply-timeout" (number-to-string romacs-agent-reply-timeout))))))
     (append (romacs-agent--environment-words session)
@@ -448,7 +606,7 @@ stdin; RESUME non-nil continues its thread."
   (list "-c" (format "mcp_servers.romacs.command=%S" (romacs-agent--program "romacs-mcp"))
         "-c" (format "mcp_servers.romacs.args=[%s]"
                      (mapconcat (lambda (word) (format "%S" word))
-                                (list "--socket" (romacs-agent--endpoint) "--reconnect"
+                                (list "--socket" (romacs-agent--route session) "--reconnect"
                                       "--session" (romacs-agent-id session)
                                       "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
                                 ","))))
@@ -551,11 +709,9 @@ goes on whatever becomes of this server."
            (romacs-agent--note-end session)
            (when (plist-get event :context-window)
              (setf (romacs-agent-context-window session) (plist-get event :context-window)))
-           ;; Claude's cost is the session's so far: a turn's is its increase.
+           ;; Claude's cost is the session's so far, for queries; no view shows it.
            (when (numberp (plist-get event :cost))
-             (setf (romacs-agent-turn-cost session) (- (plist-get event :cost) (romacs-agent-cost-base session))
-                   (romacs-agent-cost-base session) (plist-get event :cost)
-                   (romacs-agent-cost session) (plist-get event :cost))))
+             (setf (romacs-agent-cost session) (plist-get event :cost))))
     ('exit
      (unless (eq (romacs-agent-state session) 'idle)
        ;; It ended mid-turn: that turn failed.
@@ -646,7 +802,9 @@ byte FROM (a record's start) when given."
           (cond ((not (hash-table-p record)))
                 ((gethash "refused" record)
                  (romacs-agent--raise session (list :type 'error :text "another server is attached")))
-                (t (condition-case err (romacs-agent--record session record)
+                ((gethash "attached" record) (romacs-agent--kept session process))
+                (t (romacs-agent--kept session process)
+                   (condition-case err (romacs-agent--record session record)
                      (error (message "romacs-agent: %s" (error-message-string err)))))))))
     (process-put process 'pending (substring text start))))
 
@@ -655,6 +813,7 @@ byte FROM (a record's start) when given."
     (let ((session (process-get process 'romacs-agent)))
       (when (eq (romacs-agent-connection session) process)
         (setf (romacs-agent-connection session) nil)
+        (romacs-agent--drop-relays session)
         (if (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle))
             (romacs-agent--run-ended session)
           (unless (eq (romacs-agent-state session) 'ended)
@@ -672,9 +831,12 @@ Retried for a while: a new supervisor takes a moment to listen."
                       :filter #'romacs-agent--filter :sentinel #'romacs-agent--sentinel)))
         (process-put process 'romacs-agent session)
         (setf (romacs-agent-connection session) process)
+        ;; From the last record seen, not the one after: a kept attachment
+        ;; always hears a line back (that record, seen and skipped, or the
+        ;; acknowledgement), the proof its relays may lead here.
         (process-send-string
          process (concat (json-serialize
-                          (romacs-mcp--object "attach" (romacs-mcp--object "from" (1+ (romacs-agent-seq session))
+                          (romacs-mcp--object "attach" (romacs-mcp--object "from" (max 1 (romacs-agent-seq session))
                                                                            "steal" (if steal t :false))))
                          "\n"))
         process)
@@ -758,6 +920,8 @@ shows on a command line other users can read."
   "Run SESSION's supervisor with harness ARGV, as a user unit when a user
 manager answers, else detached.  INPUT is a file the supervisor gives the
 harness as its whole stdin."
+  ;; The process launching it attaches it: its relays lead here from the start.
+  (romacs-agent--route-here session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
          (command (append (list host "--dir" (romacs-agent-dir session)
                                 "--socket" (romacs-agent-host-socket session))
@@ -1066,7 +1230,26 @@ A server runs this at its start, so sessions survive it."
   (when (file-directory-p (romacs-agent--state-root))
     (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
       (romacs-agent--load dir)))
+  ;; A session whose supervisor runs may call a tool any moment: the
+  ;; endpoint listens now, where its relay looks.
+  (when (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
+                 (hash-table-values romacs-agent--sessions))
+    (romacs-agent--endpoint))
+  (romacs-agent--sweep)
   (run-hooks 'romacs-agent-restored-hook))
+
+;; At startup, cheaply, without loading this library unless a supervisor
+;; runs: then its sessions are known and its tools answer with no command.
+;;;###autoload
+(progn
+  (defun romacs-agent--restore-at-startup ()
+    "Once started, restore agent sessions when any supervisor runs."
+    (unless noninteractive
+      (let ((root (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR")
+                                                         (format "/tmp/romacs%d" (user-uid))))))
+        (when (and (file-directory-p root) (file-expand-wildcards (concat root "*/host.sock")))
+          (run-at-time 0 nil (lambda () (require 'romacs-agent) (romacs-agent-restore)))))))
+  (add-hook 'after-init-hook #'romacs-agent--restore-at-startup))
 
 (defun romacs-agent-sessions ()
   "Every known session, newest first."
@@ -1098,6 +1281,11 @@ started: a request repeated after a lost reply finds its session.")
    (process-put peer 'romacs-agent-session (gethash "session" params))
    ;; Its incarnation: a resumed harness's relay numbers its calls anew.
    (process-put peer 'romacs-agent-relay (gethash "relay" params))
+   ;; A known session another process is attached to: its relay belongs
+   ;; there, through its route, and retries until the route leads there.
+   (when-let* ((session (romacs-agent-get (gethash "session" params))))
+     (unless (process-live-p (romacs-agent-connection session))
+       (run-at-time 0 nil (lambda () (when (memq peer romacs-mcp--peers) (romacs-mcp--close peer))))))
    (romacs-mcp--object)))
 
 (provide 'romacs-agent)

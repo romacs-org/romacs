@@ -315,6 +315,7 @@ close the window; the session goes on (`romacs --stop' ends it)."
 
 (defvar romacs-layer-toast-timeout)
 (declare-function romacs-layer-toast "romacs-layer")
+(declare-function romacs-agent--route-attached "romacs-agent")
 
 (defvar romacs-server--build nil
   "The watched build's identity when this server started, then when it
@@ -399,7 +400,12 @@ beside its build.json), or nil."
     (advice-add 'server-create-tty-frame :override #'romacs-server--refuse-tty)
     (advice-add 'server-process-filter :around #'romacs-server--filter)
     (advice-add 'save-buffers-kill-terminal :around #'romacs-server--kill-terminal)
+    ;; An endpoint started before this (agent sessions restored at
+    ;; startup) gives way: a server serves its own name's.
+    (when romacs-mcp--listener (romacs-mcp-stop))
     (romacs-mcp-start (expand-file-name "server.sock" directory))
+    ;; Sessions attached here already lead to the endpoint just replaced.
+    (when (fboundp 'romacs-agent--route-attached) (romacs-agent--route-attached))
     (when romacs-server-gnu-socket
       (setq server-name name)
       (server-start))

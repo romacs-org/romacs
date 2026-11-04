@@ -584,6 +584,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         for face in [numbers.face, numbers.current] { face_text[face.0 as usize].push_str("0123456789 "); }
     }
+    // A display table's truncation and continuation glyphs show in the
+    // default face, from whichever font has them.
+    if let Some(default) = face_text.first_mut() { default.extend(snapshot.chrome.line_glyphs.iter().flatten()); }
     // A band's own face sets its height even where no character uses it,
     // as the faces of the fringes' bitmaps set their colours.
     let band_faces: Vec<usize> = bands.iter().filter(|(band, _)| band.is_some()).map(|(_, face)| face.0 as usize)
@@ -620,7 +623,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // its TABs, as from the line start.
     // A horizontally scrolled window truncates its lines (init_iterator).
     let truncate = snapshot.wrap == LineWrap::Truncate || !snapshot.hscroll.is_zero();
-    let special = if truncate { '$' } else { '\\' };
+    // A display table's glyph, where it sets one, for GNU's `$' and `\\'.
+    let [truncation, continuation] = snapshot.chrome.line_glyphs;
+    let special = if truncate { truncation.unwrap_or('$') } else { continuation.unwrap_or('\\') };
     let default_id = FaceId::new(face_base);
     let glyphs_mark = snapshot.chrome.right_fringe == 0;
     let last_x = snapshot.width as f32 - if glyphs_mark { advance(frame, default_id, special, metrics[0].2) } else { 0.0 };
@@ -631,7 +636,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     let shift_of = |line: usize| if line == point_line { snapshot.hscroll.point_row } else { snapshot.hscroll.rows } as f32;
     // A scrolled row's left truncation glyph, without a left fringe
     // (insert_left_trunc_glyphs): it hides the glyphs it covers.
-    let dollar = if snapshot.chrome.left_fringe == 0 { advance(frame, default_id, '$', metrics[0].2) } else { 0.0 };
+    let left_glyph = truncation.unwrap_or('$');
+    let dollar = if snapshot.chrome.left_fringe == 0 { advance(frame, default_id, left_glyph, metrics[0].2) } else { 0.0 };
     let left_mark = |shift: f32| if shift > 0.0 { dollar } else { 0.0 };
     // Line numbers take each row's first glyphs, its line's label or as
     // many blanks, in cells of their face.
@@ -718,7 +724,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
                 if shift > 0.0 && left_mark(shift) > 0.0 && y < body_height && y + metrics[0].1 > 0.0 {
-                    glyph(frame, '$', ox + x0, oy + y, metrics[0], default_id)?;
+                    glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?;
                 }
                 if let Some(place) = place.as_mut().filter(|_| row_start <= snapshot.point_byte && snapshot.point_byte <= byte) {
                     place.truncated_right = hidden;
@@ -863,7 +869,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let scrolled = shift > 0.0 && row_start < text.len();
         rows.push(Row { start: row_start, y, height: row_height });
         marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: scrolled });
-        if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, '$', ox + x0, oy + y, metrics[0], default_id)?; }
+        if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?; }
     }
     fringe::paint(frame, snapshot, &rows, &marks, fringe::Area { ox, oy, body_height, line: metrics[0].1, text_len: text.len(), reached_end: end_byte == text.len(), face_base })?;
     // A row starting a numbered line shows its label; any other, blanks,
