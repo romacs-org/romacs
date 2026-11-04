@@ -1318,7 +1318,8 @@ def logging(args, base):
     record, as the launcher keeps a session's: STATE/romacs/sessions/
     START-PID/ with usage.jsonl and session.json.  An error a real key
     causes is logged with the functions its signal went through (first of
-    its kind), a command slow in its command loop has its slow record, a
+    its kind), a command slow in its command loop has its slow record, as
+    does one fast itself whose redisplay is slow (the host's time of it), a
     stop writes the record's end, and the unit's end (`--server-exited',
     as systemd runs it for this invocation) fills how it exited in."""
     a = Agents(args, base, 'lg', env_extra={'INVOCATION_ID': 'live-logging-1'})
@@ -1335,14 +1336,23 @@ def logging(args, base):
         a.eval('(progn (defun logging-live-fail () (interactive) (car 1)) '
                '(defun logging-live-slow () (interactive) (sleep-for 0.15)) '
                '(global-set-key (kbd "<f9>") (function logging-live-fail)) '
-               '(global-set-key (kbd "<f8>") (function logging-live-slow)) t)')
-        for key in ('F9', 'F9', 'F8'):
+               '(global-set-key (kbd "<f8>") (function logging-live-slow)) '
+               # Fast itself; the redisplay after it slow (its header
+               # line's :eval spins 80 ms, once).
+               '(defvar logging-live-spin 0) '
+               '(defun logging-live-spin () (let ((end (+ (float-time) (/ logging-live-spin 1000.0)))) '
+               '(setq logging-live-spin 0) (while (< (float-time) end))) "spun") '
+               '(defun logging-live-paint () (interactive) (setq logging-live-spin 80) '
+               '(setq header-line-format (list (list :eval (list (quote logging-live-spin)))))) '
+               '(global-set-key (kbd "<f7>") (function logging-live-paint)) t)')
+        for key in ('F9', 'F9', 'F8', 'F7'):
             a.keys('-k', key)
             time.sleep(1)
         a.eval('(progn (romacs-usage-log-flush) t)')
         lines = [json.loads(line) for line in (directory / 'usage.jsonl').read_text().splitlines()]
         errors = [l for l in lines if l.get('kind') == 'error' and l.get('command') == 'logging-live-fail']
         slow = [l for l in lines if l.get('kind') == 'slow' and l.get('command') == 'logging-live-slow']
+        painted = [l for l in lines if l.get('kind') == 'slow' and l.get('command') == 'logging-live-paint']
         started = json.loads((directory / 'session.json').read_text())
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
@@ -1351,12 +1361,15 @@ def logging(args, base):
                        env={**a.env, 'INVOCATION_ID': 'live-logging-1', 'SERVICE_RESULT': 'success',
                             'EXIT_CODE': 'exited', 'EXIT_STATUS': '0'})
         ended = json.loads((directory / 'session.json').read_text())
-        result = {'directory': directory.name, 'errors': errors, 'slow': slow,
+        result = {'directory': directory.name, 'errors': errors, 'slow': slow, 'painted': painted,
                   'started': {k: started.get(k) for k in ('pid', 'server', 'start', 'end')},
                   'ended': {k: ended.get(k) for k in ('end', 'seconds', 'status')}}
         result['ok'] = (len(errors) == 2 and isinstance(errors[0].get('backtrace'), list)
                         and 'logging-live-fail' in errors[0]['backtrace'] and 'backtrace' not in errors[1]
-                        and slow and slow[0]['max'] >= 150 and started.get('server') == a.name and 'end' not in started
+                        and slow and slow[0]['max'] >= 150 and slow[0]['ms'] >= 150
+                        and painted and painted[0]['ms'] < 50 and painted[0]['redisplay_ms'] >= 80
+                        and painted[0]['max'] >= 80
+                        and started.get('server') == a.name and 'end' not in started
                         and isinstance(own_end.get('end'), (int, float)) and 'status' not in own_end
                         and ended.get('end') == own_end['end'] and ended.get('status') == 0
                         and ended.get('service', {}).get('result') == 'success')

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "7a5b68a927dc95aeca0313d45c3c199a043a3101843fef797bc1a9a31831a7ae",
+  "source_fingerprint": "6815bb63ad13fe53bac15d97980aaf643954d51512af69950d2b198efcd2ff0a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1291,
-  "parsed_vm2_only": 1291
+  "parsed_total": 1292,
+  "parsed_vm2_only": 1292
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4583,6 +4583,11 @@
    "name": "romacs--record-input",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:280"
+  },
+  "romacs--redisplay-since-mark": {
+   "name": "romacs--redisplay-since-mark",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/profiler.rs:62"
   },
   "romacs--replace-range": {
    "name": "romacs--replace-range",

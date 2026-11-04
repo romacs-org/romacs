@@ -230,6 +230,8 @@ mod leaf {
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
         pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
+        pub(crate) fn redisplay_since_mark(&self) -> Option<Option<u64>> { self.vm.redisplay_since_mark }
+        pub(crate) fn set_redisplay_since_mark(&mut self, mark: Option<Option<u64>>) { self.vm.redisplay_since_mark = mark; }
         pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) {
             self.vm.idle_since = since;
             crate::compiled_lisp::note_idle(since);

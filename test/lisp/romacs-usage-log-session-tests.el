@@ -1,5 +1,6 @@
 ;;; romacs-usage-log-session-tests.el --- A server's session record -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'cl-lib)
 (require 'romacs-usage-log)
 
 (defmacro romacs-usage-log-test--isolated (&rest body)
@@ -99,6 +100,73 @@
      (should-not (plist-get (nth 1 errors) :backtrace))
      (should (equal (plist-get (nth 2 errors) :command) "romacs-usage-log-test-other"))
      (should (vectorp (plist-get (nth 2 errors) :backtrace))))))
+
+(ert-deftest romacs-usage-log-slow-counts-the-redisplay ()
+  ;; A command fast itself whose redisplay is slow counts, the two summed
+  ;; against the threshold; one fast with no redisplay (input pending)
+  ;; does not.  The host's timer is stood in for: 40 ms after each mark.
+  (romacs-usage-log-test--isolated
+   (setq romacs-usage-log-file (expand-file-name "usage.jsonl" state))
+   (let ((marked nil))
+     (cl-letf (((symbol-function 'romacs--redisplay-since-mark)
+                (lambda (&optional mark) (prog1 (and marked 40000) (setq marked (and mark t))))))
+       (romacs-usage-log--settle "next-line" "org-mode" (- (float-time) 0.02))
+       (romacs-usage-log--settled)
+       (romacs-usage-log--pre-command)
+       (romacs-usage-log--post-command)
+       (setq marked nil)
+       (romacs-usage-log--settle "forward-char" "org-mode" (- (float-time) 0.02))
+       (romacs-usage-log--settled)
+       (setq marked nil)
+       (romacs-usage-log--pre-command)
+       (romacs-usage-log--post-command)))
+   (romacs-usage-log-flush)
+   (let ((slow (seq-filter (lambda (l) (equal (plist-get l :kind) "slow"))
+                           (romacs-usage-log-test--lines romacs-usage-log-file))))
+     (should (equal (mapcar (lambda (l) (plist-get l :command)) slow) '("next-line")))
+     (should (= (plist-get (car slow) :redisplay_ms) 40))
+     (should (>= (plist-get (car slow) :ms) 19))
+     (should (>= (plist-get (car slow) :max) 59)))))
+
+(ert-deftest romacs-usage-log-write-waits-for-the-redisplay ()
+  ;; A write between a command's end and its redisplay (a paint held back
+  ;; while an earlier one renders, the write's timer run meanwhile) keeps
+  ;; it: the next write has its one record, its redisplay in it.
+  (romacs-usage-log-test--isolated
+   (setq romacs-usage-log-file (expand-file-name "usage.jsonl" state))
+   (let ((took nil))
+     (cl-letf (((symbol-function 'romacs--redisplay-since-mark)
+                (lambda (&optional mark) (prog1 took (when mark (setq took nil))))))
+       (romacs-usage-log--settle "scroll-up-command" "text-mode" (- (float-time) 0.002))
+       (romacs-usage-log--settled)
+       (romacs-usage-log-flush)
+       (setq took 80000)
+       (romacs-usage-log-flush)
+       (romacs-usage-log-flush)))
+   (let ((slow (seq-filter (lambda (l) (equal (plist-get l :kind) "slow"))
+                           (romacs-usage-log-test--lines romacs-usage-log-file))))
+     (should (= (length slow) 1))
+     (should (equal (plist-get (car slow) :command) "scroll-up-command"))
+     (should (= (plist-get (car slow) :n) 1))
+     (should (= (plist-get (car slow) :redisplay_ms) 80)))))
+
+(ert-deftest romacs-usage-log-write-charges-without-a-timer ()
+  ;; With no host timing of redisplays (GNU), a write charges the command
+  ;; at once, its redisplay none: an idle session's next write has it.
+  (romacs-usage-log-test--isolated
+   (setq romacs-usage-log-file (expand-file-name "usage.jsonl" state))
+   (cl-letf (((symbol-function 'fboundp)
+              (let ((real (symbol-function 'fboundp)))
+                (lambda (symbol) (and (not (eq symbol 'romacs--redisplay-since-mark)) (funcall real symbol))))))
+     (romacs-usage-log--settle "compile" "text-mode" (- (float-time) 0.06))
+     (romacs-usage-log--settled)
+     (romacs-usage-log-flush)
+     (romacs-usage-log-flush))
+   (let ((slow (seq-filter (lambda (l) (equal (plist-get l :kind) "slow"))
+                           (romacs-usage-log-test--lines romacs-usage-log-file))))
+     (should (= (length slow) 1))
+     (should (= (plist-get (car slow) :redisplay_ms) 0))
+     (should (>= (plist-get (car slow) :ms) 59)))))
 
 (ert-deftest romacs-usage-log-backtrace-is-its-own-signals ()
   ;; A signal a command caught (`kill-whole-line' at an unterminated last

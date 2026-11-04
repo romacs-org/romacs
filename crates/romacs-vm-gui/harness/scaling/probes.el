@@ -842,7 +842,7 @@ thousandth a stack mark."
                 (define-error 'scaling-usage-error "Scaling usage error")
                 (setq romacs-usage-log-file (make-temp-file "scaling-usage-" nil ".jsonl"))
                 (dotimes (i n)
-                  (puthash (format "command-%d fundamental-mode" i) (vector 1 60 60) romacs-usage-log--slow)
+                  (puthash (format "command-%d fundamental-mode" i) (vector 1 60 60 0) romacs-usage-log--slow)
                   (puthash (format "command-%d error" i) t romacs-usage-log--traced)
                   (puthash (format "command-%d scaling-usage-error" i) 0 romacs-usage-log--captured))
                 (dotimes (_ n) (run-at-time 3600 nil #'ignore))

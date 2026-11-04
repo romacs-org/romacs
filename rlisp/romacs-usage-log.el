@@ -18,12 +18,15 @@
 ;;       an error the command loop reported, through `command-error-function';
 ;;   {"kind":"session","event":"start"|"init-done"|"kill","seconds":S}
 ;;       S seconds after `before-init-time';
-;;   {"kind":"slow","command":C,"mode":M,"n":N,"ms":TOTAL,"max":MAX}
+;;   {"kind":"slow","command":C,"mode":M,"n":N,"ms":TOTAL,"redisplay_ms":R,"max":MAX}
 ;;       commands C in mode M whose command loop (from `pre-command-hook'
-;;       to the end of `post-command-hook', its other functions too) took
-;;       `romacs-usage-log-slow-loop-ms' or more: how many, their total
-;;       and their longest, written with the counts.  The redisplay after
-;;       a command has no hook to time it by, and is not counted.
+;;       to the end of `post-command-hook', its other functions too) and
+;;       the redisplay after it (the first: the frame's snapshot, layout
+;;       and paint's submission, as the host times it) took
+;;       `romacs-usage-log-slow-loop-ms' or more together: how many, their
+;;       loops' total, their redisplays' total and the longest of the two
+;;       together, written with the counts.  A redisplay is charged to its
+;;       command at the next command's start, or at a write after it ran.
 ;; An error record of a kind (its command and its error symbol) not yet
 ;; seen this session also has "backtrace": the names of the functions
 ;; its signal went through, innermost first (no arguments, no text).
@@ -60,7 +63,11 @@
   "How many session records a server keeps.")
 
 (defvar romacs-usage-log--slow (make-hash-table :test 'equal)
-  "\"COMMAND MODE\" to [N TOTAL-MS MAX-MS], since the last write.")
+  "\"COMMAND MODE\" to [N LOOP-MS MAX-MS REDISPLAY-MS], since the last write.")
+
+(defvar romacs-usage-log--redisplayed nil
+  "The command whose loop ended and whose redisplay is to come: [COMMAND
+MODE LOOP-MS].")
 
 (defvar romacs-usage-log--settling nil
   "The command whose loop is ending: [COMMAND MODE START], for the last
@@ -99,21 +106,43 @@ its `recursion-depth', its start by `float-time' and its major mode.")
 (defun romacs-usage-log--pre-command ()
   ;; A backtrace belongs to the command whose signal took it.
   (setq romacs-usage-log--capture nil)
+  (romacs-usage-log--charge)
   (push (vector (recursion-depth) (float-time) major-mode) romacs-usage-log--open))
 
 (defun romacs-usage-log--settled ()
-  "The command's loop ends (the last `post-command-hook' function): count
-it when slow."
+  "The command's loop ends (the last `post-command-hook' function): time
+it, and mark the host's redisplay for it."
   (when-let* ((settling romacs-usage-log--settling))
     (setq romacs-usage-log--settling nil)
-    (let ((ms (* 1000 (- (float-time) (aref settling 2)))))
-      (when (>= ms romacs-usage-log-slow-loop-ms)
-        (let* ((key (concat (aref settling 0) " " (aref settling 1)))
+    ;; One still waiting (a recursive edit's, ended with its caller):
+    ;; no redisplay ran for it.
+    (romacs-usage-log--charge)
+    (aset settling 2 (* 1000 (- (float-time) (aref settling 2))))
+    (setq romacs-usage-log--redisplayed settling)
+    (when (fboundp 'romacs--redisplay-since-mark) (romacs--redisplay-since-mark t))))
+
+(defun romacs-usage-log--charge (&optional waiting)
+  "Count the last command whose loop ended when its loop and its
+redisplay (the first after its mark; none when the next command came
+first, input pending) were slow together.  WAITING non-nil (a write
+between commands): one whose redisplay has not run yet stays to be
+charged."
+  (let* ((done romacs-usage-log--redisplayed)
+         (timed (fboundp 'romacs--redisplay-since-mark))
+         (micros (and done timed (romacs--redisplay-since-mark))))
+    ;; A host that times no redisplay has none to wait for.
+    (when (and done (or micros (not waiting) (not timed)))
+      (setq romacs-usage-log--redisplayed nil)
+      (let* ((redisplay (if micros (/ micros 1000.0) 0))
+             (loop (aref done 2)) (both (+ loop redisplay)))
+        (when (>= both romacs-usage-log-slow-loop-ms)
+        (let* ((key (concat (aref done 0) " " (aref done 1)))
                (slot (or (gethash key romacs-usage-log--slow)
-                         (puthash key (vector 0 0 0) romacs-usage-log--slow))))
+                         (puthash key (vector 0 0 0 0) romacs-usage-log--slow))))
           (aset slot 0 (1+ (aref slot 0)))
-          (aset slot 1 (+ (aref slot 1) ms))
-          (aset slot 2 (max (aref slot 2) ms)))))))
+          (aset slot 1 (+ (aref slot 1) loop))
+          (aset slot 2 (max (aref slot 2) both))
+          (aset slot 3 (+ (aref slot 3) redisplay))))))))
 
 (defun romacs-usage-log--settle (command mode start)
   "COMMAND's loop ends with the last `post-command-hook' function."
@@ -207,6 +236,7 @@ The first of its kind carries the backtrace its signal left, if one was taken."
 (defun romacs-usage-log-flush ()
   "Append the queued lines and the counts since the last write to the log."
   (when romacs-usage-log-file
+    (romacs-usage-log--charge t)
     (let ((counts nil))
       (maphash (lambda (mode table)
                  (maphash (lambda (command n)
@@ -220,7 +250,8 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                  (let ((space (string-search " " key)))
                    (push (json-serialize (list :kind "slow" :command (substring key 0 space)
                                                :mode (substring key (1+ space)) :n (aref slot 0)
-                                               :ms (round (aref slot 1)) :max (round (aref slot 2))))
+                                               :ms (round (aref slot 1)) :redisplay_ms (round (aref slot 3))
+                                               :max (round (aref slot 2))))
                          counts)))
                romacs-usage-log--slow)
       (clrhash romacs-usage-log--slow)
@@ -250,6 +281,8 @@ The first of its kind carries the backtrace its signal left, if one was taken."
 
 (defun romacs-usage-log--kill ()
   (romacs-usage-log--event "kill")
+  ;; No redisplay comes now.
+  (romacs-usage-log--charge)
   (romacs-usage-log-flush))
 
 (defun romacs-usage-log--enable (file)
@@ -277,7 +310,7 @@ The first of its kind carries the backtrace its signal left, if one was taken."
   (remove-hook 'kill-emacs-hook #'romacs-usage-log--kill)
   (remove-function command-error-function #'romacs-usage-log--command-error)
   (when (eq signal-hook-function #'romacs-usage-log--signal) (setq signal-hook-function nil))
-  (setq romacs-usage-log--settling nil)
+  (setq romacs-usage-log--settling nil romacs-usage-log--redisplayed nil)
   (clrhash romacs-usage-log--slow)
   (when romacs-usage-log--timer (cancel-timer romacs-usage-log--timer))
   (setq romacs-usage-log--timer nil))

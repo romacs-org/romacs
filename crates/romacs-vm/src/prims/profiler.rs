@@ -59,6 +59,20 @@ fn romacs_native_stack_room(_cx) {
     }
 }}
 
+defsubr! { name = "romacs--redisplay-since-mark", gnu = "romacs:profiler", effect = Global,
+fn romacs_redisplay_since_mark(cx; optional mark: Value) {
+    // Microseconds the first redisplay after the last mark took on the
+    // evaluator: the frame's snapshot, its layout and its paint's submission
+    // (a prompt's paint waits for its render too); nil before one ran, or
+    // with no mark. MARK non-nil sets a new mark. No allocation: a fixnum.
+    let took = cx.redisplay_since_mark().flatten();
+    if mark != Value::NIL { cx.set_redisplay_since_mark(Some(None)); }
+    match took {
+        Some(micros) => Value::integer(i64::try_from(micros).unwrap_or(i64::MAX)).map_err(Fault::Error),
+        None => Ok(Value::NIL),
+    }
+}}
+
 fn truth(b: bool) -> Value {
     if b { Value::TRUE } else { Value::NIL }
 }
