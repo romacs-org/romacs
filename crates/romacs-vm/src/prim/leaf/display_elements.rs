@@ -64,6 +64,8 @@ pub(super) struct Source<'l, 'a> {
     /// A byte and the lines of the accessible text before it, from which
     /// `line_at' counts on.
     lines: (usize, i64),
+    /// How many columns a character takes (width_rule.rs), read once.
+    rule: crate::width_rule::WidthRule,
 }
 
 #[derive(Clone, Copy)]
@@ -94,14 +96,17 @@ impl<'l, 'a> Source<'l, 'a> {
         let syms = Syms::new(leaf);
         let look = Look::new(leaf)?;
         let byte = leaf.buffer_byte(view.buffer, start)?;
+        let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1) })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
     pub(super) fn window(&self) -> Value { self.view.window }
     /// The leaf the elements come from, for a host layout to measure them.
     pub(super) fn leaf(&mut self) -> &mut Leaf<'a> { self.leaf }
+    /// C's columns (CHARACTER_WIDTH).
+    pub(super) fn width(&self, c: u32) -> i64 { self.rule.width(c) as i64 }
 
     /// Deliver from START again, a line start.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
@@ -520,7 +525,7 @@ impl<'l, 'a> Source<'l, 'a> {
             0x0a => Shape::Glyph { c, width: 0 },
             0x20..0x7f => Shape::Glyph { c, width: 1 },
             _ if romacs_regex_engine::emacs_char::char_byte8_p(c) => Shape::Glyph { c, width: 1 },
-            _ => Shape::Glyph { c, width: self.leaf.character_width(c)? },
+            _ => Shape::Glyph { c, width: self.width(c) },
         })
     }
 
@@ -628,7 +633,7 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(if method == Value::NIL { None }
             else if method == s.zero_width { Some((0, None)) }
             else if method == s.thin_space { Some((1, Some(Glyphless::ThinSpace))) }
-            else if method == s.empty_box { Some((self.leaf.character_width(c)?.clamp(1, 4) + 2, Some(Glyphless::EmptyBox))) }
+            else if method == s.empty_box { Some((self.width(c).clamp(1, 4) + 2, Some(Glyphless::EmptyBox))) }
             else if method == s.hex_code { Some((if c < 0x10000 { 6 } else { 8 }, Some(Glyphless::HexCode))) }
             else if let Some(view) = self.leaf.vm.str_view(method) {
                 let width = if view.chars == 1 { 1 } else { view.bytes().iter().take_while(|b| b.is_ascii()).take(6).count() as i64 + 2 };

@@ -2449,14 +2449,7 @@ impl Vm {
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
-        let tab_width = {
-            let slot = self.slot("tab-width");
-            self.variable_value(slot)?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as usize
-        };
-        let ctl_arrow = {
-            let slot = self.slot("ctl-arrow");
-            self.variable_value(slot)? != Value::NIL
-        };
+        let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
         // keyboard.el's Frecursive_edit keeps it.
@@ -2485,16 +2478,8 @@ impl Vm {
             }
         }
         let line_start = text[begv_byte..point_byte].rfind('\n').map_or(begv_byte, |n| begv_byte + n + 1);
-        // GNU current_column: tab stops, ^X control characters, wide characters.
-        let mut column = 0;
-        for c in text[line_start..point_byte].chars() {
-            column += match c {
-                '\t' => tab_width - column % tab_width,
-                '\u{0}'..='\u{1f}' | '\u{7f}' => if ctl_arrow { 2 } else { 4 },
-                '\u{80}'..='\u{9f}' => 4,
-                _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
-            };
-        }
+        // GNU current_column, by the width rule (width_rule.rs).
+        let column = rule.string_columns(&text[line_start..point_byte]);
         Ok(mode_line::SpecState {
             buffer_name,
             start: char_at(start_byte)?,

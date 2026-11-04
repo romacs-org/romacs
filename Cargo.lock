@@ -4755,7 +4755,6 @@ dependencies = [
  "twox-hash",
  "unicode-bidi",
  "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]

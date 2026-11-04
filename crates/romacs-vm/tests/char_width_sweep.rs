@@ -65,3 +65,30 @@ fn every_code_points_width_and_column_match_pinned_gnu() {
     assert!(gnu == mine, "first differing run: gnu {:?} romacs {:?} ({} vs {} runs)",
         first.map(|i| g[i]), first.map(|i| m[i]), g.len(), m.len());
 }
+
+/// A session that never loads characters.el (the default workspace) has
+/// GNU's dumped `char-width-table' (char_widths.rs): every code point's
+/// `char-width' matches pinned GNU's.
+#[test]
+fn a_bare_session_has_gnus_dumped_widths() {
+    const WIDTHS: &str = r#"(let ((out nil) (start 0) (last (char-width 0)) (c 1))
+  (while (<= c #x3FFFFF)
+    (let ((w (char-width c)))
+      (unless (equal w last) (push (list start (1- c) last) out) (setq start c last w)))
+    (setq c (1+ c)))
+  (push (list start #x3FFFFF last) out)
+  (nreverse out))"#;
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {WIDTHS}))")])
+        .stdin(std::process::Stdio::null()).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    let mine = std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source(&format!("(prin1-to-string {WIDTHS})")).and_then(|v| v.display())
+            .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
+    }).unwrap().join().unwrap().unwrap();
+    assert_eq!(gnu, mine);
+}
