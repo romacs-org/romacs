@@ -943,7 +943,7 @@ impl Vm {
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if !active {
-            self.request_code.since_collection = 0;
+            self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
         // entry into one is left (swept above), so their ids can be reused.

@@ -64,7 +64,6 @@ lib.rs unbind_one unbind 1 clean  # backtrace bookkeeping, runs no Lisp
 lib.rs unwind unbind_one 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 loader.rs bind_named bind_variable 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 loader.rs build_load_history set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-loader.rs eval_load_toplevel cached_source_form 1 held  # an open compiler builder holds collection
 loader.rs eval_load_toplevel compile_request 1 held  # an open compiler builder holds collection
 loader.rs eval_load_toplevel eval_load_toplevel 3 clean  # FORM's objects are rooted; only the last child's value is returned
 loader.rs eval_load_toplevel execute_raw 1 clean  # FORM's objects are rooted
@@ -203,8 +202,7 @@ threaded.rs poll_collect collect 1 collector  # the engine is suspended first
 threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
 threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
-threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
-threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
+threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are the trampoline's registers; the caller's registers are set aside
 threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
 threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
 threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
