@@ -74,3 +74,17 @@ fn arena_census(cx) {
         cx.cons(key, tail)
     }))
 }}
+
+// The GNU/Linux sysinfo branch, in KiB; a handler for `default-directory'
+// answers for a remote host.
+defsubr! { name = "memory-info", gnu = "alloc.c:7154", effect = Global,
+fn memory_info(cx) -> Step {
+    let directory = super::fileio::var(cx, "default-directory")?;
+    if let Some(call) = super::fileio::handler(cx, directory, "memory-info", vec![])? { return call; }
+    let Some(info) = crate::host::memory_info() else { return Ok(Step::Done(Value::NIL)) };
+    let list = info.iter().rev().fold(Value::NIL, |list, bytes| {
+        let kib = cx.bigint((bytes / 1024).into());
+        cx.cons(kib, list)
+    });
+    Ok(Step::Done(list))
+}}

@@ -133,7 +133,7 @@ impl Leaf<'_> {
             }
             let code = (n & !FLAGS) as u32;
             let table = self.current_case_mapping(down)?;
-            let unibyte = code < 256 && !self.casing_multibyte()?;
+            let unibyte = code < 256 && !self.buffer_multibyte()?;
             let lookup = byte_code(code, unibyte);
             let mapped = self
                 .case_override(table, lookup, down)?
