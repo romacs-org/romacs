@@ -403,12 +403,14 @@ impl Vm {
             value
         } else {
             self.seed_file_specials = true;
+            self.file_level_request = true;
             let compiled = self.expanding_for_load(|vm| if !lazy && let Some(source) = source {
                 vm.cached_source_form(source, form)
             } else {
                 vm.compile_request(form).map(|(function, _)| function)
             });
             self.seed_file_specials = false;
+            self.file_level_request = false;
             let compiled = match compiled {
                 Ok(function) => Ok(function),
                 Err(error) => Err(self.eager_expansion_failure(error)),
