@@ -112,8 +112,6 @@ pub(crate) struct ImageEntry {
     pub dependencies: Vec<Dependency>,
     /// A GIF's extension blocks for `image-metadata' (graphics' `extension-data').
     pub extension: Vec<(u8, Vec<u8>)>,
-    /// When it was last looked up (GNU's `img->timestamp').
-    pub used: std::time::Instant,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,10 +133,8 @@ impl ImageCache {
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub(crate) fn get(&mut self, key: &ImageKey) -> Option<&ImageEntry> {
-        let entry = self.entries.get_mut(key)?;
-        entry.used = std::time::Instant::now();
-        Some(entry)
+    pub(crate) fn get(&self, key: &ImageKey) -> Option<&ImageEntry> {
+        self.entries.get(key)
     }
     /// Cache ENTRY under KEY, and its `lookup-image' id.
     pub(crate) fn insert(&mut self, key: ImageKey, entry: ImageEntry) -> u64 {
