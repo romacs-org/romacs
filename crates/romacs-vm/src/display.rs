@@ -208,8 +208,18 @@ pub(super) struct DisplayState {
     diagnostics: std::cell::RefCell<Vec<String>>,
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
+    /// The layout questions displayed windows answered by approximation
+    /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
+    pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+
+/// A refusal of the hosted measurement a displayed window answered by
+/// approximation instead: its CLASS (the refusal's message), the major
+/// MODE of the buffer asked about, and how many times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LayoutRefusal { pub class: String, pub mode: String, pub n: u64 }
+romacs_snapshot::snapshot_struct!(LayoutRefusal { class, mode, n });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -361,6 +371,7 @@ impl DisplayState {
             building_band: false,
             diagnostics: Default::default(),
             mode_line_evals: 0,
+            refusals: vec![],
         }
     }
 }

@@ -1989,12 +1989,16 @@ impl<'a> Windows<'a> {
         };
         let (start, buffer) = { let x = self.get(w)?; (x.start, x.buffer) };
         let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
-        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
-            return Err(internal("buffer required".into()));
+        // A unibyte buffer's positions are its bytes'.
+        let (begv, zv) = match self.vm.object(buffer).map_err(internal)? {
+            Object::Buffer(b) => {
+                let accessible = b.accessible();
+                let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+                (char_at(accessible.start)?, char_at(accessible.end)?)
+            }
+            Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            _ => return Err(internal("buffer required".into())),
         };
-        let accessible = b.accessible();
-        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
-        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
         if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
             return Ok(None);
         }

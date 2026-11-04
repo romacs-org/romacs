@@ -396,6 +396,11 @@ fn window_pixel_top(cx; optional window: Value) {
 }}
 
 // GNU's motion over the initial terminal frame's display, or over the host's
+// The layout questions displayed windows answered by approximation, as
+// (CLASS MODE N) lists, since the last call (DIVERGENCES.md VM2-WTPS1).
+defsubr! { name = "romacs--layout-refusals", gnu = "romacs:display", effect = Global,
+fn romacs_layout_refusals(cx) { cx.take_layout_refusals() }}
+
 // layout once a host lays the frame out (DIVERGENCES.md VM2-WTPS1).
 defsubr! { name = "window-text-pixel-size", gnu = "xdisp.c:12078", effect = Reads,
 fn window_text_pixel_size(cx; optional window: Value, from: Value, to: Value, x_limit: Value, y_limit: Value, mode_lines: Value, ignore_line_at_end: Value) {
