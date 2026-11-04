@@ -587,7 +587,7 @@ impl Vm {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
             Some(Object::Buffer(t)) => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
-            Some(Object::ByteBuffer(t)) => Object::Bytes(t.bytes[a.0..b.0].to_vec()),
+            Some(Object::ByteBuffer(t)) => t.text_object(a..b),
             _ => return Err(Fault::Error("buffer required".into())),
         };
         Ok(self.allocate_object(object))

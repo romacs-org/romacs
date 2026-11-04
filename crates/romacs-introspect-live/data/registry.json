@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "adde17b49a6e3aeef6aeda0bbc99b0574f239a8b5c400305d4f3a3ce5c30737a",
+    "input_hash": "0fbd4956a399e15674b451491c308768474ce0aa092a63e163439b22ae033cc5",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8000
+    "vm2_universe": 8002
   },
   "schema": 2,
   "vm2": {
-    "count": 1305,
+    "count": 1306,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -1153,6 +1153,7 @@
       "time-subtract",
       "top-level",
       "translate-region-internal",
+      "transpose-regions",
       "treesit--linecol-at",
       "treesit--linecol-cache",
       "treesit--linecol-cache-set",

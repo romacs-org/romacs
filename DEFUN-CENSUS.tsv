@@ -382,7 +382,6 @@ tool-bar-height	needed	lane A (editing, windows, frames, minibuffer readers, dis
 tool-bar-pixel-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
 trace-redisplay	absent	GNU C core debugging aid: Romacs's diagnostics are its own
 trace-to-stderr	absent	GNU C core debugging aid: Romacs's diagnostics are its own
-transpose-regions	needed	lane A (editing, windows, frames, minibuffer readers, display)
 tty--output-buffer-size	absent	terminal frames: Romacs has none (GUI and batch only)
 tty--set-output-buffer-size	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-display-pixel-height	absent	terminal frames: Romacs has none (GUI and batch only)

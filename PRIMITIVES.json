@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "cf5f6f6709834ea0ea2aa95d954aecfea61f7a8cba36075fa7de085eecb7f4f5",
+  "source_fingerprint": "03a5a39dceac9f45b6e5fee7173da70c420e6a4316e78764198c13f83a0fd63a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1297,
-  "parsed_vm2_only": 1297
+  "parsed_total": 1298,
+  "parsed_vm2_only": 1298
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -5876,6 +5876,11 @@
    "name": "translate-region-internal",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/translate_region.rs:4"
+  },
+  "transpose-regions": {
+   "name": "transpose-regions",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/transpose_regions.rs:13"
   },
   "treesit--linecol-at": {
    "name": "treesit--linecol-at",

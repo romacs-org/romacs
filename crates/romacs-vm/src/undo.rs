@@ -2,7 +2,7 @@
 //! and the undo commands themselves are GNU's simple.el).
 use super::*;
 use data::Object;
-use crate::coordinates::CharOffset;
+use crate::coordinates::{ByteOffset, CharOffset};
 
 impl Vm {
     fn current_undo_buffer(&mut self) -> Result<usize> {
@@ -153,18 +153,25 @@ impl Vm {
     /// record_change: the character at BEG of buffer BUFFER is about to be
     /// replaced by one other, recorded as its deletion and an insertion.
     pub(crate) fn record_change(&mut self, buffer: usize, beg: i64) -> Result<()> {
-        if self.undo_list_of(buffer) == Value::TRUE { return Ok(()); }
+        self.record_change_span(buffer, beg, 1)
+    }
+
+    /// record_change of LENGTH characters from BEG: their text, with its
+    /// properties, recorded as deleted and as many inserted.
+    pub(crate) fn record_change_span(&mut self, buffer: usize, beg: i64, length: i64) -> Result<()> {
+        if self.undo_list_of(buffer) == Value::TRUE || length == 0 { return Ok(()); }
+        let (from, to) = ((beg - 1) as usize, (beg - 1 + length) as usize);
         let object = match &self.objects[buffer] {
             Object::Buffer(b) => {
-                let (a, z) = (b.byte_of_char(CharOffset((beg - 1) as usize))?, b.byte_of_char(CharOffset(beg as usize))?);
+                let (a, z) = (b.byte_of_char(CharOffset(from))?, b.byte_of_char(CharOffset(to))?);
                 data::string_object(b.lisp_string(a..z)?)
             }
-            Object::ByteBuffer(b) => Object::Bytes(vec![b.bytes[(beg - 1) as usize]]),
+            Object::ByteBuffer(b) => b.text_object(ByteOffset(from)..ByteOffset(to)),
             _ => return Err("buffer required".into()),
         };
         let text = self.allocate_object(object);
         self.record_delete(buffer, beg, text, false)?;
-        self.record_insert(buffer, beg, 1, false)
+        self.record_insert(buffer, beg, length, false)
     }
 
     /// Fundo_boundary: a nil boundary unless one is already on top.
