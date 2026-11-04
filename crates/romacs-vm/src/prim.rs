@@ -1749,6 +1749,7 @@ mod leaf {
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
     mod width;
+    pub(crate) mod graphics;
     mod coding_safe;
     mod coding_mule;
     mod display_motion;

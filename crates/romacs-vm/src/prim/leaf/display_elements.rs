@@ -982,7 +982,7 @@ impl Leaf<'_> {
         let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(fault("text buffer required")) };
         Ok(b.byte_of_char(CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0)
     }
-    fn number_value(&self, v: Value) -> Option<f64> {
+    pub(crate) fn number_value(&self, v: Value) -> Option<f64> {
         v.integer_value().map(|n| n as f64).or_else(|| self.float_value(v).ok())
     }
 }

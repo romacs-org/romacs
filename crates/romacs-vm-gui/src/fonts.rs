@@ -36,12 +36,18 @@ pub struct Display {
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
+    /// GNU's image loaders: the renderer's semantic decoder, and the pixels
+    /// of each image the VM's cache holds, by id, for the renderer.
+    images: romacs_renderer_wgpu::image_cache::SemanticImageDecoder,
+    decoded: HashMap<u64, romacs_renderer_wgpu::image_cache::SemanticImageDecoded>,
+    next_image: u64,
 }
 
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, policy: FontsetPolicy::new(),
-                  opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None })
+                  opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None,
+                  images: Default::default(), decoded: HashMap::new(), next_image: 0 })
     }
     /// This display, sending each `alpha' setter to HOOK.
     pub fn with_alpha_hook(self, hook: impl FnMut(u64, [f32; 2], f32) + 'static) -> Self {
@@ -132,6 +138,81 @@ impl romacs_vm::DisplayHost for Display {
     fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) {
         if let Some(hook) = &mut self.alpha_hook { hook(frame, alpha, limit); }
     }
+    fn decode_image(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
+        use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
+        use romacs_display_protocol::{EncodedBytes, ImageAnimationPolicy, ImageSequenceId};
+        use romacs_renderer_wgpu::image_cache::{SemanticImageRequest, SemanticImageSource};
+        self.next_image += 1;
+        let id = self.next_image;
+        let (source, subject) = match query.source {
+            romacs_vm::ImageSource::File(path) => {
+                let path = path.to_string_lossy().into_owned();
+                (SemanticImageSource::File(path.clone()), ImageDiagnosticSubject::File(path))
+            }
+            romacs_vm::ImageSource::Data { bytes, base_uri } => {
+                let resources = base_uri.map_or(romacs_renderer_wgpu::SvgResourceContext::Isolated,
+                                                romacs_renderer_wgpu::SvgResourceContext::BaseUri);
+                (SemanticImageSource::Data { data: EncodedBytes::new(bytes), resources },
+                 ImageDiagnosticSubject::Spec(format!("(image :type {} :data ...)", query.kind)))
+            }
+        };
+        // GNU's loaders read only their own format: bytes that are plainly
+        // another's fail as the declared type's loader reports them.
+        let head = match &source {
+            SemanticImageSource::File(path) => {
+                use std::io::Read;
+                let mut head = Vec::with_capacity(512);
+                std::fs::File::open(path).and_then(|f| f.take(512).read_to_end(&mut head)).ok().map(|_| head)
+            }
+            SemanticImageSource::Data { data, .. } => Some(data.as_slice()[..data.as_slice().len().min(512)].to_vec()),
+        };
+        if let Some(found) = head.as_deref().and_then(sniff_image_format) && found != query.kind {
+            let diagnostic = romacs_display_protocol::image_diagnostic::ImageDiagnostic::NotAFormat {
+                format: ImageFormatName::from_lisp_type(&query.kind), subject: subject.clone() };
+            return Err(diagnostic.message());
+        }
+        let request = SemanticImageRequest {
+            source, size: query.size, rotation: query.rotation, realization: query.realization, colors: query.colors,
+            mask: query.mask, animation: ImageAnimationPolicy::disabled(), frame: query.frame,
+            sequence: ImageSequenceId::new(id).expect("image ids start at 1"), limit: query.limit,
+            identity: ImageLoadIdentity::new(ImageFormatName::from_lisp_type(&query.kind), subject),
+        };
+        let decoded = self.images.decode_pixels(request).map_err(|diagnostic| {
+            self.release_image(id);
+            diagnostic.message()
+        })?;
+        let metadata = decoded.metadata();
+        let (width, height) = metadata.reported.dimensions();
+        let facts = romacs_vm::ImageFacts { id, width, height, mask: metadata.mask.has_clipping_mask(),
+                                            metadata: metadata.embedded.clone() };
+        self.decoded.insert(id, decoded);
+        Ok(facts)
+    }
+    fn release_image(&mut self, id: u64) {
+        // A multi-frame decode keeps its frames in the decoder's sequence
+        // cache under the image's id, animation off or not.
+        self.decoded.remove(&id);
+        if let Some(sequence) = romacs_display_protocol::ImageSequenceId::new(id) {
+            self.images.retire(romacs_display_protocol::ImageSequenceRetirement::One(sequence));
+        }
+    }
+}
+
+/// The image type BYTES plainly are, by their signature.
+fn sniff_image_format(bytes: &[u8]) -> Option<&'static str> {
+    let text = String::from_utf8_lossy(bytes);
+    Some(match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "png",
+        [0xff, 0xd8, 0xff, ..] => "jpeg",
+        [b'G', b'I', b'F', b'8', ..] => "gif",
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "webp",
+        [b'I', b'I', 0x2a, 0, ..] | [b'M', b'M', 0, 0x2a, ..] => "tiff",
+        [b'P', b'1'..=b'6', ..] => "pbm",
+        _ if text.contains("/* XPM */") => "xpm",
+        _ if text.contains("<svg") => "svg",
+        _ if text.contains("#define") => "xbm",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

@@ -93,6 +93,14 @@ pub trait DisplayHost {
     /// inactive, negative leaving its opacity alone, raised to LIMIT,
     /// `frame-alpha-lower-limit'.
     fn set_frame_alpha(&mut self, _frame: u64, _alpha: [f32; 2], _limit: f32) {}
+    /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
+    /// pixels under the facts' id until `release_image'.  An error is the
+    /// loader's message; the image then shows as a placeholder.
+    fn decode_image(&mut self, _query: crate::ImageQuery) -> Result<crate::ImageFacts, String> {
+        Err("images are not supported on this display".into())
+    }
+    /// Forget the pixels kept under ID.
+    fn release_image(&mut self, _id: u64) {}
 }
 
 /// The attached display: closed until the session opens it.

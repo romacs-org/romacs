@@ -1042,6 +1042,25 @@ thousandth a stack mark."
   :setup (scaling--wrapped-line n nil)
   :body (with-current-buffer it (scaling--wrapped-step i)))
 
+;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
+
+;; N distinct images, each measured, then all N again from the cache: a
+;; lookup is one hash of the spec's copied plist, so the work is linear
+;; in the images and a lookup never scans the cache.
+(defun scaling--image-specs (n)
+  "N distinct SVG image specs, a size each."
+  (let (specs)
+    (dotimes (i n)
+      (push (list 'image :type 'svg
+                  :data (format "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"8\"/>" (1+ i)))
+            specs))
+    (nreverse specs)))
+
+(scaling-probe images :gui t :n 100 :steps 1
+  :setup (progn (clear-image-cache t) (scaling--image-specs n))
+  ;; The message is the step's visible change, so the host paints it.
+  :body (let (size) (dotimes (_ 2) (dolist (spec it) (setq size (image-size spec t)))) (message "%S" size)))
+
 ;;;; Running
 
 (defun scaling--probe (name)
