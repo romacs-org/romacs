@@ -446,6 +446,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot));
     a.font_selection == b.font_selection
         && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
+        && a.no_font == b.no_font
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
@@ -503,7 +504,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     if g1 {
         // Preserve G1's explicitly full-height legacy selected-window fixture.
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
-            font_alternatives: vm.font_alternative_state()?,
+            font_alternatives: vm.font_alternative_state()?, no_font: Default::default(),
             width: 400, height: 300,
             background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,

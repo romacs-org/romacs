@@ -632,6 +632,8 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // display (romacs-gui-loadup.el), and the chrome colours layers use.
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
+        // Romacs's menus over layers: one look, motion and keyboard model.
+        vm.eval_source(include_str!("../../../rlisp/romacs-popup.el"))?;
         // Its icons and its mode line, off until `romacs-mode-line-mode'
         // is enabled.
         vm.eval_source(include_str!("../../../rlisp/romacs-icons.el"))?;
@@ -640,6 +642,9 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // `romacs-complete-mode' is enabled.
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
             vm.eval_source(include_str!("../../../rlisp/romacs-complete.el"))?;
+            // Evaluation results in a chip after the sexp, off until
+            // `romacs-eval-chip-mode' is enabled.
+            vm.eval_source(include_str!("../../../rlisp/romacs-eval-chip.el"))?;
         }
     }
     // The scheduler for animations drawn in buffer text, and the startup

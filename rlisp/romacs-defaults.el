@@ -66,13 +66,13 @@
     ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
     ;; counted from point, the current line by its own number.
     (display-line-numbers-type 'relative)
-    ;; Key hints in a layer over the frame, which resizes no window
-    ;; (rlisp/romacs-layer.el), where the window system has layers.
-    ,@(and (fboundp 'romacs-layer-which-key-show)
+    ;; Key hints in a panel over the frame, which resizes no window
+    ;; (rlisp/romacs-popup.el), where the window system has layers.
+    ,@(and (fboundp 'romacs-popup-which-key-show)
            '((which-key-popup-type 'custom)
-             (which-key-custom-show-popup-function #'romacs-layer-which-key-show)
-             (which-key-custom-hide-popup-function #'romacs-layer-which-key-hide)
-             (which-key-custom-popup-max-dimensions-function #'romacs-layer-which-key-max-dimensions)))
+             (which-key-custom-show-popup-function #'romacs-popup-which-key-show)
+             (which-key-custom-hide-popup-function #'romacs-popup-which-key-hide)
+             (which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions)))
     (which-key-mode t)
     (backup-directory-alist
      (list (cons "." (expand-file-name "backups/" user-emacs-directory))))

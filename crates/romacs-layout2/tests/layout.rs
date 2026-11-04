@@ -294,7 +294,7 @@ fn measuring_counts_a_box_run_s_edges() {
     let text = TextSlice { utf8: "xaby".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
     let mut measure = |faces: Vec<Face>| engine.measure(&MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(), faces, text: text.clone() }).unwrap();
+        font_selection: Default::default(), font_alternatives: Default::default(), faces, text: text.clone(), no_font: Default::default() }).unwrap();
     let (boxed, unboxed) = (measure(snapshot.faces.clone()), measure(plain));
     let advance = |m: &romacs_layout_input::Measured, i: usize| m.glyphs[i].0;
     assert_eq!((advance(&boxed, 0), advance(&boxed, 1), advance(&boxed, 2), advance(&boxed, 3)),
@@ -323,7 +323,7 @@ fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
     let placed = romacs_layout_input::FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 300,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snapshot.clone() }], background_alpha: 1.0,
-        children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
+        children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, no_font: Default::default(),
     };
     let (frame, _) = romacs_layout2::layout_frame_with_cursors(&placed, 1, snapshot.id, Color::from_pixel(0xffffff)).unwrap();
     let cursor = frame.active_cursor().unwrap();

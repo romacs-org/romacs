@@ -364,7 +364,19 @@ impl Vm {
         Ok(Some(function))
     }
     pub(super) fn cached_source_form(&mut self, source: &str, form: &Form) -> Result<usize> {
+        // A loading file's form declares its value-less defvars for the
+        // file's rest (`Builder::file_level'); the same text evaluated
+        // elsewhere does not: they compile apart, under keys apart.
+        let file_level = self.file_level_request;
+        let namespaced;
+        let source = if file_level {
+            namespaced = format!("\0file\0{source}");
+            namespaced.as_str()
+        } else {
+            source
+        };
         if let Some(f) = self.cached_submission(source) {
+            self.file_level_request = false;
             return Ok(f);
         }
         let k = key(source);
@@ -408,6 +420,7 @@ impl Vm {
                     }
                 }
                 portable.seed_file_specials = true;
+                portable.file_level_request = file_level;
                 let function = portable.compile(form)?;
                 portable.source_cache.store = self.source_cache.store.clone();
                 let disk_entry = Entry {
