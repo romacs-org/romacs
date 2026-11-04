@@ -31,6 +31,7 @@ mod batch;
 mod user_init;
 mod measure;
 mod fonts;
+mod grammars;
 mod timers;
 mod world;
 mod isolate_worker;
@@ -360,7 +361,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.tab_bar = Some(romacs_layout_input::TabBarSnapshot { height: 20, face: Default::default(), faces: vec![],
-            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
+            text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] } });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![(0.0, 10.0), (10.0, 12.0)], status_bar: Default::default() };
         let click = |x, y, button, pressed| super::tab_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
@@ -382,7 +383,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let mut painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         painted.snapshot.status_bar = Some(romacs_layout_input::StatusBarSnapshot { x: 6, y: 760, width: 1188, height: 20,
-            text: romacs_layout_input::TextSlice { utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
             face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
                                    status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], Some(2)) };
@@ -561,6 +562,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
+    grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
     fonts::register_icon_font();
     let mut args = argv.into_iter();
@@ -1538,6 +1540,9 @@ fn evaluate(
                 let processes = vm.process_wait_fds();
                 // A termination signal whose wake other work took: back to the top.
                 if romacs_vm::host::termination_signal(true).is_some() { continue; }
+                // A user signal `debug-on-event' names sets `quit-flag': its
+                // quit key runs into the debugger.
+                vm.take_debug_event();
                 if vm.take_quit_key() { pending.push_back(quit::quit_key()); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => pending.push_back(event),

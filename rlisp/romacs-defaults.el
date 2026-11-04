@@ -8,7 +8,8 @@
 ;; and no package for them: paired delimiters, minibuffer history, recent
 ;; files and places kept across sessions, repeatable key sequences, key
 ;; hints, buffers that follow their files, relative line numbers in
-;; programming buffers, and backups and auto-saves kept out of the
+;; programming buffers, tree-sitter modes for the languages whose
+;; grammars Romacs ships, and backups and auto-saves kept out of the
 ;; directories being edited.  `romacs-defaults-settings' lists
 ;; them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
 ;;
@@ -44,6 +45,7 @@
 (require 'imenu)
 (require 'use-package-core)
 (require 'display-line-numbers)
+(require 'treesit)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
   "Options of the libraries above whose standard value names a per-user file.")
@@ -88,6 +90,14 @@
     (save-interprogram-paste-before-kill t)
     (kill-do-not-save-duplicates t)
     (read-extended-command-predicate #'command-completion-default-include-p)
+    ;; Tree-sitter modes in place of the regex modes, for the languages
+    ;; whose grammars Romacs ships (`romacs-treesit-bundled-grammars'):
+    ;; GNU's :set remaps each mode to its ts mode.  markdown-ts-mode is
+    ;; left out until its cost per key is measured within budget.
+    (treesit-enabled-modes
+     '(bash-ts-mode c-ts-mode c++-ts-mode c-or-c++-ts-mode css-ts-mode go-ts-mode
+       js-ts-mode json-ts-mode mhtml-ts-mode python-ts-mode rust-ts-mode
+       toml-ts-mode tsx-ts-mode typescript-ts-mode yaml-ts-mode))
     (imenu-auto-rescan t)
     (imenu-flatten 'prefix)
     ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".

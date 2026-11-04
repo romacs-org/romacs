@@ -1,7 +1,7 @@
 use romacs_display_protocol::{Color, FrameGlyph};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 fn scene() -> WindowSnapshot {
-    WindowSnapshot {
+    WindowSnapshot { underline_rules: Default::default(),
         id: 1,
         width: 400,
         height: 300,
@@ -10,8 +10,8 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(),
-        text: TextSlice {
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+        text: TextSlice { extends: vec![],
             raw: vec![],
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {
@@ -20,13 +20,13 @@ fn scene() -> WindowSnapshot {
             }],
         },
         faces: vec![
-            Face {
+            Face { decor: Default::default(),
                 foreground: [255; 3],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
                 pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
-            Face {
+            Face { decor: Default::default(),
                 foreground: [255, 0, 0],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
@@ -80,7 +80,7 @@ fn malformed_snapshot_is_rejected() {
 fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
     let mut s = scene();
     s.tab_width = 4;
-    s.text = TextSlice { utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![], raw: vec![] };
+    s.text = TextSlice { extends: vec![], utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![], raw: vec![] };
     let frame = romacs_layout2::layout(&s, 1).unwrap();
     let shown: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
@@ -97,7 +97,7 @@ fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
 fn rows_continue_and_truncate_as_gnu_without_fringes() {
     let mut s = scene();
     s.width = 120; // ten 12px columns
-    s.text = TextSlice { utf8: "abcdefghijkl\nxy".into(), face_runs: vec![], raw: vec![] };
+    s.text = TextSlice { extends: vec![], utf8: "abcdefghijkl\nxy".into(), face_runs: vec![], raw: vec![] };
     let shown = |s: &WindowSnapshot| -> Vec<(char, f32, f32)> {
         romacs_layout2::layout(s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
             FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
@@ -117,7 +117,7 @@ fn rows_continue_and_truncate_as_gnu_without_fringes() {
 fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
     let mut s = scene();
     s.width = 120; // ten 12px columns: a row holds nine before its `\'
-    s.text = TextSlice { utf8: "abcdefghijkl\tz".into(), face_runs: vec![], raw: vec![] };
+    s.text = TextSlice { extends: vec![], utf8: "abcdefghijkl\tz".into(), face_runs: vec![], raw: vec![] };
     let z = |s: &WindowSnapshot| romacs_layout2::layout(s, 1).unwrap().glyphs.iter().find_map(|g| match g {
         FrameGlyph::Char { char: 'z', x, y, .. } => Some((*x, *y)),
         _ => None,
@@ -136,7 +136,7 @@ fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
 fn stretches_paint_as_gnus_window_system_stretches() {
     use romacs_layout_input::{Stretch, StretchWidth};
     let mut snapshot = scene();
-    snapshot.text = TextSlice { utf8: "a b\nc d\n \nz".into(), face_runs: vec![], raw: vec![] };
+    snapshot.text = TextSlice { extends: vec![], utf8: "a b\nc d\n \nz".into(), face_runs: vec![], raw: vec![] };
     snapshot.stretches = vec![
         Stretch { byte: 1, width: StretchWidth::Width { width: 30, zero_ok: true } },
         Stretch { byte: 5, width: StretchWidth::AlignTo(200) },
@@ -190,4 +190,55 @@ fn a_bold_or_italic_face_is_set_in_that_font() {
     assert!(regular.weight < 700 && bold.weight >= 700, "{regular:?} {bold:?}");
     assert_eq!(regular.slant, romacs_display_protocol::font::FontSlantKind::Normal);
     assert_ne!(italic.slant, romacs_display_protocol::font::FontSlantKind::Normal, "{italic:?}");
+}
+
+/// A row ending in a newline with an end-of-line face paints past its text
+/// to the text area's edge in that face (xdisp.c
+/// extend_face_to_end_of_line); a row without one, or the last row with no
+/// newline, paints nothing there.
+#[test]
+fn a_row_s_extend_face_paints_to_the_text_area_s_edge() {
+    use romacs_layout_input::Extend;
+    let mut snapshot = scene();
+    snapshot.faces.push(Face { background: [0x20, 0x30, 0x40], ..snapshot.faces[0].clone() });
+    snapshot.text = TextSlice { utf8: "ab\ncd\nef".into(), face_runs: vec![], raw: vec![],
+                                extends: vec![Extend { byte: 2, face: FaceHandle(2) }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let stretches: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Stretch { x, y, width, bg, .. } => Some((*x, *y, *width, *bg)),
+        _ => None,
+    }).collect();
+    let b = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'b', x, y, width, .. } => Some((*x, *y, *width)), _ => None }).unwrap();
+    assert_eq!(stretches.len(), 1, "{stretches:?}");
+    let (x, y, width, bg) = stretches[0];
+    assert_eq!((x, y, x + width), (b.0 + b.2, b.1, 400.0));
+    assert_eq!(bg, Color::from_pixel(0x203040));
+}
+
+/// A face's underline goes where xterm.c puts it: at the descent line less
+/// `:position' pixels, else the font's own position (at least the window's
+/// minimum offset); and a short mode line's face, lines included, fills the
+/// rest of its band (display_mode_line).
+#[test]
+fn underlines_go_where_gnu_puts_them_and_a_band_s_face_fills_it() {
+    use romacs_display_protocol::face::UnderlinePosition;
+    use romacs_layout_input::{Decor, Line, UnderlineRules};
+    let mut snapshot = scene();
+    let underline = |position| Decor { underline: Some(Line { style: 1, color: None, position }), ..Default::default() };
+    snapshot.faces[1].decor = underline(Some(2));
+    snapshot.faces.push(Face { decor: underline(None), ..snapshot.faces[0].clone() });
+    snapshot.faces.push(Face { decor: Decor { overline: Some(Line { style: 1, color: None, position: None }), ..Default::default() }, ..snapshot.faces[0].clone() });
+    snapshot.text = TextSlice { utf8: "ab".into(), face_runs: vec![FaceRun { bytes: 0..1, face: FaceHandle(1) }, FaceRun { bytes: 1..2, face: FaceHandle(2) }], raw: vec![], extends: vec![] };
+    snapshot.underline_rules = UnderlineRules { minimum_offset: 7, at_descent_line: false, use_position: false };
+    snapshot.mode_line = Some(TextSlice { utf8: "x".into(), face_runs: vec![], raw: vec![], extends: vec![] });
+    snapshot.mode_line_face = FaceHandle(3);
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let face = |index: u32| frame.faces.get(&romacs_display_protocol::FaceId::new(index)).unwrap();
+    assert_eq!(face(1).underline_placement, UnderlinePosition::DescentLine { pixels_above: 2 });
+    // Half the descent would be above the minimum offset of 7.
+    assert_eq!(face(2).underline_placement, UnderlinePosition::FontMetric { offset_from_baseline: 7 });
+    // The mode line's rest: a stretch to the band's edge in its face.
+    let rest = frame.glyphs.iter().filter_map(|g| match g { FrameGlyph::Stretch { x, width, face_id, .. } => Some((*x, *width, *face_id)), _ => None }).last().unwrap();
+    assert_eq!(rest.0 + rest.1, 400.0);
+    assert!(frame.faces[&rest.2].attributes.contains(romacs_display_protocol::FaceAttributes::OVERLINE));
 }

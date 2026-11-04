@@ -5,7 +5,7 @@ use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FaceRun, FrameSnapshot,
     PlacedWindowSnapshot, BandMarks, Pill, Segment, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowChrome, WindowSnapshot};
 
 fn face(foreground: [u8; 3], background: [u8; 3]) -> Face {
-    Face { foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
+    Face { decor: Default::default(), foreground, background, family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
 }
 
 fn bitmap(number: u16) -> FringeBitmap {
@@ -20,11 +20,11 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         continuation: [Some(bitmap(7)), Some(bitmap(8))],
         ..Indicators::default()
     };
-    WindowSnapshot {
+    WindowSnapshot { underline_rules: Default::default(),
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
-        text: TextSlice { utf8: text.into(), face_runs: vec![], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], line_numbers: None,
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None,
         faces: vec![face([255; 3], [0; 3]), face([1, 2, 3], [200, 0, 0]), face([0, 255, 0], [0; 3])],
         chrome: WindowChrome { left_fringe: 8, right_fringe: 8, fringe_face: FaceHandle(1), indicators, ..WindowChrome::default() },
     }
@@ -115,7 +115,7 @@ fn a_window_with_a_left_neighbour_draws_the_vertical_border_in_its_fringe() {
 fn the_tab_bar_paints_its_row_above_the_windows() {
     let tab_bar = TabBarSnapshot {
         height: 20,
-        text: TextSlice { utf8: " a  b ".into(), face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: " a  b ".into(), face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }], raw: vec![] },
         face: FaceHandle(0),
         faces: vec![face([0; 3], [217; 3]), face([0; 3], [191; 3])],
     };
@@ -135,7 +135,7 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
     let mut snapshot = frame(window("x", LineWrap::Window), None);
     snapshot.status_bar = Some(StatusBarSnapshot {
         x: 4, y: 150, width: 116 - 8, height: 20,
-        text: TextSlice { utf8: "abcdefghijklmnop".into(), face_runs: vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: "abcdefghijklmnop".into(), face_runs: vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }], raw: vec![] },
         face: FaceHandle(0), faces: vec![face([0; 3], [30, 40, 50]), face([9; 3], [200, 0, 0])], window: 1, focused: true,
         marks: Default::default(),
     });
@@ -168,7 +168,7 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     let band = [30, 40, 50];
     let bar = |text: &str, marks: BandMarks| StatusBarSnapshot {
         x: 0, y: 150, width: 116, height: 20,
-        text: TextSlice { utf8: text.into(), face_runs: vec![], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         face: FaceHandle(0), faces: vec![face([200; 3], band)], window: 1, focused: true, marks,
     };
     let marker = |at: usize| Segment { bytes: at..at + 1, name: "right-align".into(), pill: None };
@@ -254,7 +254,7 @@ fn a_context_segment_keeps_its_own_background() {
     let mut snapshot = frame(window("x", LineWrap::Window), None);
     snapshot.status_bar = Some(StatusBarSnapshot {
         x: 0, y: 150, width: 116, height: 20,
-        text: TextSlice { utf8: "ab | cd".into(), face_runs: vec![FaceRun { bytes: 2..7, face: FaceHandle(1) }], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: "ab | cd".into(), face_runs: vec![FaceRun { bytes: 2..7, face: FaceHandle(1) }], raw: vec![] },
         face: FaceHandle(0), faces: vec![face([200; 3], band), face([0; 3], inactive)], window: 1, focused: true,
         marks: BandMarks { segments: vec![Segment { bytes: 2..7, name: "context".into(), pill: None }], icons: vec![] },
     });

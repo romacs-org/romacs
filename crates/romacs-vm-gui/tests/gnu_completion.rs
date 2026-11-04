@@ -461,7 +461,7 @@ fn romacs_theme_lisp_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-custom-test.el");
 }
 
-/// The stock theme is the configured Rum look, face for face
+/// `rum' is the configured Rum look, face for face
 /// (tests/romacs-theme-rum-test.el), in a session of its own: the
 /// comparison defines faces and realises them for a graphic display.
 #[test]

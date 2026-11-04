@@ -281,7 +281,9 @@ impl Vm {
             let accessible = text.accessible();
             text.point = ByteOffset(next_point.clamp(accessible.start.0, accessible.end.0));
             text.state.set_modified(false);
-            self.finish_annotation_edit(buffer)?;
+            if prefix != end || prefix != inserted_end {
+                self.evaporate_overlays_at(buffer, ByteOffset(prefix)..ByteOffset(inserted_end))?;
+            }
             if !following.is_empty() {
                 let point = Value::integer(snapshot.text[..snapshot.cursor_byte].chars().count() as i64 + 1)?;
                 let start = Value::integer(snapshot.text[..snapshot.screen_start_byte].chars().count() as i64 + 1)?;
@@ -646,7 +648,7 @@ mod tests {
     #[test]
     fn base_colours_come_from_the_theme_s_sixteen() {
         use super::{TerminalColor, TerminalStyle};
-        let default = romacs_layout_input::Face { foreground: [200, 200, 200], background: [0, 0, 0], family: String::new(), pixel_size: 10.0, weight: 400, italic: false, width: 5 };
+        let default = romacs_layout_input::Face { decor: Default::default(), foreground: [200, 200, 200], background: [0, 0, 0], family: String::new(), pixel_size: 10.0, weight: 400, italic: false, width: 5 };
         let mut ansi = super::DEFAULT_ANSI;
         ansi[1] = [100, 50, 10];
         let style = |foreground| TerminalStyle { foreground, ..Default::default() }.face(&default, &ansi).foreground;

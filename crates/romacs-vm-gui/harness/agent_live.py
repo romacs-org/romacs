@@ -34,6 +34,13 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  composer   real keys typed into a chat's composer: before the first
+             prompt, after a turn, DEL, after M-> and a recenter in a long
+             wrapped transcript; no command signals.
+  history    the harnesses' own transcripts (fixtures in private
+             configuration directories) listed per project, opened
+             read-only, resumed through the harness's own resume, and
+             never written.
   probe      sessions (1, 10, 100): one event dispatched to one session;
              a session's call log (1, 100, 1000 calls): recording one and
              looking one up; a chat of 1, 100, 1000 tool calls: one result;
@@ -210,8 +217,8 @@ def session(args, base):
         chat = a.chat(sid)
         result = {'edited': edited, 'evaluated': evaluated, 'approval': approval, 'interrupt_s': round(interrupt_s, 2),
                   'attached_after_reshow': attached,
-                  'chat_has': {k: k in chat for k in ('❯ say hello', 'hello from the fake harness',
-                                                      '▸ mcp__romacs__romacs_buffer_edit', '✓', '⚠ Bash asks')}}
+                  'chat_has': {k: k in chat for k in ('> say hello', 'hello from the fake harness',
+                                                      '✓ romacs_buffer_edit', '✓', '◆ Bash asks')}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
                         and approval.get('behavior') == 'allow'
                         and approval.get('updatedInput', {}).get('run_in_background') is False
@@ -280,7 +287,10 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        shown = parity_live.read_sexp(parity_live.read_sexp(a.eval("(prin1-to-string (mapcar (lambda (e) (aref (cadr e) 1)) (romacs-agents--entries)))")))
+        # The home page names each session's instance.
+        home = parity_live.read_sexp(a.eval('(with-temp-buffer (romacs-agents-mode) (romacs-agent-ui--home) '
+                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
+        shown = sorted({p for p in ('claude2', 'claude') if any(line.split('  ')[-1].startswith(p) or f' {p} ·' in line or line.rstrip().endswith(p) for line in home.splitlines())})
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
@@ -979,6 +989,356 @@ def gnosis(args, base):
         a.close()
 
 
+def composer_real(args, base):
+    """`composer' with a real Claude Code (--claude-model): costs money."""
+    return composer(args, base, real=True)
+
+
+def composer(args, base, real=False):
+    """Real keys typed into a chat's composer in the GUI: before the first
+    prompt, after the first turn (the buffer renamed by it), DEL at the
+    composer, and after M-> and a recenter in a long wrapped transcript;
+    each time the composer holds exactly what was typed and no command
+    signalled."""
+    a = Agents(args, base, 'cm')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        if real:
+            a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'),
+                          ['--model', args.claude_model])])
+        a.keyboard_ready()
+        time.sleep(1.5)  # the readiness probe's C-g presses, all taken
+        sid = a.start('')
+        chat = f'(romacs-agent-buffer {a.s(sid)})'
+        a.eval(f'(progn (delete-other-windows) (romacs-agent-show {a.s(sid)}) t)')
+        mark = a.eval('(with-current-buffer "*Messages*" (point-max))')
+
+        def look():
+            # The composer's text, point, the end marker, point-max, the
+            # buffer's name, whether it is shown, the window's start, and
+            # whether its text shows: any invisible character, its
+            # properties, and its width as laid out in the window.
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer {chat} (let ((end (marker-position romacs-agent-ui--end))) '
+                '(list (romacs-agent-ui--composer-text) (point) end (point-max) (buffer-name) '
+                '(eq (window-buffer (selected-window)) (current-buffer)) (window-start (selected-window)) '
+                '(cl-loop for p from end below (point-max) thereis (invisible-p p)) '
+                '(and (< end (point-max)) (format "%S" (text-properties-at end))) '
+                '(and (< end (point-max)) (car (window-text-pixel-size (selected-window) end (point-max)))))))'))
+
+        def messages():
+            return parity_live.read_sexp(a.eval(f'(with-current-buffer "*Messages*" '
+                                                f'(buffer-substring-no-properties (min {mark} (point-max)) (point-max)))'))
+
+        steps = {}
+
+        def typed(name, text, expect=None):
+            if text:
+                a.keys(text)
+            expect = text if expect is None else expect
+            try:
+                until(lambda: look()[0] == expect, 10, f'{name} typed')
+            except RuntimeError:
+                pass
+            state = look()
+            steps[name] = {'state': state, 'expect': expect}
+            return state[0] == expect and not state[7] and state[8] in (None, 'nil') and (state[9] or 0) > 0
+
+        def cleared(name):
+            """Kill the composer's line, as a user would: C-a C-k."""
+            a.keys('-M', 'ctrl', '-k', 'a', '-m', 'ctrl', '-M', 'ctrl', '-k', 'k', '-m', 'ctrl')
+            try:
+                until(lambda: look()[0] == '', 10, name)
+            except RuntimeError:
+                steps[name] = {'state': look(), 'expect': ''}
+                # Cleared for the steps after, whatever the keys did.
+                a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-ui--end (point-max)))')
+                return False
+            return True
+
+        def turn(name):
+            done = a.eval(f'(romacs-agent-done-seq {a.s(sid)})')
+            a.keys('-k', 'Return')
+            until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != done, 120, f'{name} answered')
+            a.idle(sid)
+
+        good = [typed('before_first_prompt', 'say hello from Romacs')]
+        turn('first')
+        # A collapsed tool output is the transcript's last text while a turn
+        # runs: typing then, and after the turn ends, shows.
+        release = a.root / 'release-hold'
+        a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
+        # Held until released: the folded output stays the transcript's last text.
+        until(lambda: a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
+                             '(quote romacs-agent-output)) t))') == 't', 15, 'tool output last')
+        steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-ui--end))))')
+        good.append(typed('while_output_last', 'typed while'))
+        good.append(a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
+                           '(quote romacs-agent-output)) t))') == 't' and a.state(sid) == 'running')
+        release.write_text('')
+        a.idle(sid)
+        good.append(typed('after_output_turn', ' and after', 'typed while and after'))
+        good.append(cleared('composer cleared'))
+        good.append(typed('after_first_turn', 'say again'))
+        a.keys('-k', 'BackSpace', '-k', 'BackSpace')
+        good.append(typed('after_del', 'x', 'say agax'))
+        good.append(cleared('composer cleared for selection'))
+        # With delete-selection-mode, a selection in the composer is
+        # replaced by a typed key, as anywhere.
+        a.keys('replace me')
+        until(lambda: look()[0] == 'replace me', 10, 'selection text typed')
+        a.keys('-M', 'ctrl', '-k', 'a', '-m', 'ctrl', '-M', 'ctrl', '-k', 'space', '-m', 'ctrl',
+               '-M', 'ctrl', '-k', 'e', '-m', 'ctrl')
+        a.eval('(progn (delete-selection-mode 1) t)')
+        good.append(typed('selection_replaced', 'x', 'x'))
+        # A region-using key (electric-pair's quote) wraps the selection, as
+        # self-insert-command does.
+        good.append(cleared('composer cleared for pairing'))
+        a.keys('keep me')
+        until(lambda: look()[0] == 'keep me', 10, 'pairing text typed')
+        a.eval('(progn (electric-pair-mode 1) t)')
+        a.keys('-M', 'ctrl', '-k', 'a', '-m', 'ctrl', '-M', 'ctrl', '-k', 'space', '-m', 'ctrl',
+               '-M', 'ctrl', '-k', 'e', '-m', 'ctrl')
+        good.append(typed('selection_wrapped', '"', '"keep me"'))
+        a.eval('(progn (electric-pair-mode -1) (delete-selection-mode -1) t)')
+        good.append(cleared('composer cleared for yank'))
+        # Transcript text copied and yanked into the composer: plain text there.
+        a.eval(f'(with-current-buffer {chat} (kill-new (buffer-substring (point-min) (+ (point-min) 5))) t)')
+        yanked = parity_live.read_sexp(a.eval(f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) (+ (point-min) 5)))'))
+        a.keys('-M', 'ctrl', '-k', 'y', '-m', 'ctrl')
+        good.append(typed('yanked_transcript', '', yanked))
+        steps['after_change_hook_kept'] = a.eval(f'(with-current-buffer {chat} (and (memq (function romacs-agent-ui--composer-plain) after-change-functions) t))')
+        good.append(steps['after_change_hook_kept'] == 't')
+        good.append(cleared('composer killed'))
+        # A long wrapped transcript: replies far wider than the window.
+        words = ' '.join(f'word{i}' for i in range(120))
+        for _ in range(1 if real else 4):
+            a.send(sid, f'say {words}' if not real else f'Repeat these words exactly, nothing else: {words}')
+            a.idle(sid, 120)
+        a.keys('-M', 'alt', '>', '-m', 'alt')
+        good.append(typed('after_end_of_buffer', 'third'))
+        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
+        good.append(typed('after_recenter', ' fourth', 'third fourth'))
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
+        good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
+        # Point in the transcript (M-<, as a scroll leaves it): a key typed
+        # there goes to the composer; M-> from there reaches it too.
+        a.keys('-M', 'alt', '<', '-m', 'alt')
+        good.append(typed('typed_in_transcript', ' sixth', 'third fourth fifth sixth'))
+        a.keys('-M', 'alt', '<', '-m', 'alt')
+        a.keys('-M', 'alt', '>', '-m', 'alt')
+        good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth sixth seventh'))
+        good.append(cleared('composer killed again'))
+        # A session started from the home page with c, its prompt typed in
+        # the minibuffer: its chat is shown, and its composer takes keys.
+        a.eval(f'(progn (delete-other-windows) (romacs-agents) (delete-other-windows) (cd {lisp(a.work)}) t)')
+        before = set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or [])
+        a.keys('c')
+        until(lambda: a.eval('(and (minibufferp (window-buffer (minibuffer-window))) (active-minibuffer-window) t)') == 't',
+              10, 'directory asked')
+        a.keys('-k', 'Return')
+        until(lambda: 'Prompt' in (parity_live.read_sexp(a.eval('(and (active-minibuffer-window) (minibuffer-prompt))')) or ''),
+              10, 'prompt asked')
+        a.keys('say hello from Romacs')
+        a.keys('-k', 'Return')
+        until(lambda: set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or []) - before,
+              10, 'session started')
+        sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
+        chat = f'(romacs-agent-buffer {a.s(sid)})'
+        until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 120, 'home session answered')
+        a.idle(sid)
+        good.append(typed('home_session', 'say from home'))
+        turn('home')
+        good.append(typed('home_after_turn', 'more'))
+        said = messages()
+        result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
+        result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
+        return result
+    finally:
+        a.close()
+
+
+def history_fixtures(claude_dir, codex_home, cwd):
+    """A Claude Code transcript and a Codex rollout of a conversation in
+    CWD, as the harnesses write them: an injected context before each first
+    prompt, and Codex's long instructions before its own."""
+    def lines(path, objects):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(''.join(json.dumps(o, separators=(',', ':')) + '\n' for o in objects))
+    cid, tid = '11111111-2222-4333-8444-555555555555', '01a1a2ee-0000-7000-8000-000000000001'
+    at = lambda s: f'2026-11-03T10:00:{s:02d}.000Z'
+    user = lambda content, s, **extra: {'parentUuid': None, 'isSidechain': False, 'type': 'user', 'cwd': str(cwd),
+                                        'message': {'role': 'user', 'content': content}, 'timestamp': at(s), **extra}
+    said = lambda mid, block, s: {'isSidechain': False, 'type': 'assistant', 'timestamp': at(s),
+                                  'message': {'model': 'claude-haiku-5-5', 'id': mid, 'type': 'message', 'role': 'assistant',
+                                              'content': [block], 'usage': {'input_tokens': 10, 'cache_read_input_tokens': 2000}}}
+    lines(claude_dir / 'projects' / str(cwd).replace('/', '-') / f'{cid}.jsonl', [
+        {'type': 'queue-operation', 'operation': 'enqueue', 'timestamp': at(0), 'sessionId': cid},
+        user('<command-name>/clear</command-name>', 0, isMeta=True),
+        user('list the files here\nplease', 1, permissionMode='default'),
+        said('msg_1', {'type': 'text', 'text': 'Sure, **listing** now.'}, 2),
+        said('msg_1', {'type': 'tool_use', 'id': 'toolu_1', 'name': 'Bash', 'input': {'command': 'ls'}}, 3),
+        user([{'type': 'tool_result', 'tool_use_id': 'toolu_1', 'content': 'a.txt\nb.txt'}], 4),
+        said('msg_2', {'type': 'text', 'text': 'Two files: a.txt and b.txt.'}, 9)])
+    item = lambda s, kind, payload: {'timestamp': at(s), 'type': kind, 'payload': payload}
+    lines(codex_home / 'sessions/2026/11/03' / f'rollout-2026-11-03T10-00-00-{tid}.jsonl', [
+        item(0, 'session_meta', {'id': tid, 'cwd': str(cwd), 'base_instructions': 'x' * 200000}),
+        item(0, 'response_item', {'type': 'message', 'role': 'user',
+                                  'content': [{'type': 'input_text', 'text': '# AGENTS.md instructions for here'}]}),
+        item(0, 'turn_context', {'model': 'gpt-6-luna', 'cwd': str(cwd)}),
+        item(1, 'event_msg', {'type': 'item_completed', 'thread_id': tid,
+                              'item': {'type': 'UserMessage', 'content': [{'type': 'text', 'text': 'count the lines of a.txt'}]}}),
+        item(1, 'response_item', {'type': 'reasoning', 'encrypted_content': 'zzz'}),
+        item(2, 'response_item', {'type': 'function_call', 'name': 'exec_command', 'arguments': '{"cmd":"wc -l a.txt"}',
+                                  'call_id': 'call_1'}),
+        item(3, 'response_item', {'type': 'function_call_output', 'call_id': 'call_1', 'output': '3 a.txt'}),
+        item(4, 'event_msg', {'type': 'token_count', 'info': {'last_token_usage': {'input_tokens': 4200},
+                                                              'model_context_window': 272000}}),
+        item(5, 'response_item', {'type': 'message', 'role': 'assistant',
+                                  'content': [{'type': 'output_text', 'text': 'a.txt has 3 lines.'}]}),
+        item(6, 'event_msg', {'type': 'task_complete'})])
+    return cid, tid
+
+
+def tree_state(*roots):
+    return {str(p): (p.stat().st_size, p.stat().st_mtime_ns) for root in roots for p in sorted(root.rglob('*'))}
+
+
+def history(args, base):
+    """The harnesses' own sessions, as T3 Code imports them: a Claude Code
+    transcript and a Codex rollout in private configuration directories are
+    listed under their project, titled by the first typed prompt (injected
+    context skipped, Codex's past a long head); opened read-only in the
+    chat's look; resumed through the harness's own resume (claude --resume
+    <id> in the instance's directory, codex exec resume <thread>), the
+    transcript drawn before the session's own turns and no longer listed as
+    history; after a restart both are sessions again.  Nothing is written
+    under the configuration directories."""
+    a = Agents(args, base, 'hi')
+    try:
+        a.up()
+        claude_dir, codex_home = a.home / '.config/claude/acct', a.home / '.config/codex-acct'
+        a.work.mkdir(parents=True, exist_ok=True)
+        cid, tid = history_fixtures(claude_dir, codex_home, a.work)
+        before = tree_state(claude_dir, codex_home)
+        setting = [('claude', claude_dir), ('codex', codex_home, CODEX, [])]
+        a.providers(setting)
+        text = lambda form: parity_live.read_sexp(a.eval(form))
+        home = text('(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
+                    '(buffer-substring-no-properties (point-min) (point-max))))')
+        item = lambda ident: (f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(ident)})) '
+                              '(romacs-agent-history-items))')
+        views = {}
+        for ident in (cid, tid):
+            views[ident] = text(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open {item(ident)})) '
+                                '(format "%s|%s|%s" (buffer-name) buffer-read-only '
+                                '(buffer-substring-no-properties (point-min) (point-max))))')
+        resumed = {}
+        for ident, prompt in ((cid, 'say resumed one'), (tid, 'say resumed two')):
+            sid = a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-resume {item(ident)})) '
+                         '(romacs-agent-id romacs-agent-ui--session))').strip('"')
+            a.idle(sid) if ident == tid else until(
+                lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(sid)})) t)') == 't', 15, 'resumed')
+            a.send(sid, prompt)
+            until(lambda: prompt.removeprefix('say ') in a.chat(sid), 30, f'{prompt} answered')
+            a.idle(sid)
+            resumed[ident] = sid
+        claude_run = [e for e in a.logged() if e.get('started') == cid]
+        codex_run = [e for e in a.codex_runs() if e.get('codex') == tid]
+        chats = {ident: a.chat(sid) for ident, sid in resumed.items()}
+        listed = text('(progn (romacs-agent-history-list) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        a.providers(setting)
+        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list) '
+                     f'(list (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)) '
+                     f'(plist-get (romacs-agent-imported {a.s(resumed[cid])}) :path) '
+                     f'(romacs-agent-harness-session {a.s(resumed[tid])})))')
+        chat_again = a.chat(resumed[cid])
+        untouched = tree_state(claude_dir, codex_home) == before
+        # Another server's import of a conversation already going on finds its
+        # session (the harness has since appended to the transcript: the cut stays).
+        transcript = next((claude_dir / 'projects').rglob(f'{cid}.jsonl'))
+        cut = transcript.stat().st_size
+        with open(transcript, 'a') as handle:
+            handle.write('{"type":"user","message":{"role":"user","content":"later"}}\n')
+        imported_again = text(f'(let ((s (romacs-agent-import \'claude {lisp_text(cid)} {lisp_text(str(transcript))} '
+                              f'{lisp(a.work)} "x" "claude" {lisp_text(str(claude_dir))}))) '
+                              f'(list (eq s {a.s(resumed[cid])}) (plist-get (romacs-agent-imported s) :size)))')
+        # A stale history row of a stopped session resumes it.
+        a.eval(f'(romacs-agent-stop {a.s(resumed[cid])})')
+        until(lambda: a.state(resumed[cid]) in ('ended', 'detached'), 15, 'stopped')
+        runs = len([e for e in a.logged() if e.get('started') == cid])
+        a.eval(f'(save-window-excursion (romacs-agent-history-resume (list :id {lisp_text(cid)} :harness \'claude '
+               f':path {lisp_text(str(transcript))} :cwd {lisp(a.work)} :title "x" :provider "claude" '
+               f':config-dir {lisp_text(str(claude_dir))})))')
+        until(lambda: len([e for e in a.logged() if e.get('started') == cid]) > runs, 15, 'stale row resumed')
+        # A conversation another server is importing right now is refused.
+        busy = '01a1a2ee-0000-7000-8000-0000000000ff'
+        (a.home / '.local/state/romacs/agents' / busy).mkdir()
+        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} "/nonexistent" {lisp(a.work)} '
+                       f'"x" "codex" {lisp_text(str(codex_home))}) (user-error (cadr err)))')
+        # Two conversations whose time-ordered ids share their first
+        # characters run overlapping turns, each with its own supervisor.
+        twins = ['01a1a2ee-0000-7000-8000-0000000000a1', '01a1a2ee-0000-7000-8000-0000000000a2']
+        for twin in twins:
+            rollout = codex_home / 'sessions/2026/11/03' / f'rollout-2026-11-03T10-00-01-{twin}.jsonl'
+            rollout.write_text(json.dumps({'timestamp': '2026-11-03T10:00:01.000Z', 'type': 'session_meta',
+                                           'payload': {'id': twin, 'cwd': str(a.work)}}) + '\n')
+            a.eval(f'(romacs-agent-import \'codex {lisp_text(twin)} {lisp_text(str(rollout))} {lisp(a.work)} '
+                   f'"twin" "codex" {lisp_text(str(codex_home))})')
+        sockets = text(f'(list (romacs-agent-host-socket {a.s(twins[0])}) (romacs-agent-host-socket {a.s(twins[1])}))')
+        for twin in twins:
+            a.send(twin, 'slow 2')
+        for twin in twins:
+            until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(twin)})') != '0', 30, f'{twin} answered')
+        twin_runs = sorted({e.get('codex') for e in a.codex_runs() if e.get('codex') in twins})
+        twin_failed = text(f'(list (romacs-agent-failed {a.s(twins[0])}) (romacs-agent-failed {a.s(twins[1])}))')
+        # Byte ranges: a line starting at BEG is whole; one cut at BEG (inside
+        # a UTF-8 character) or at END is left out.
+        ranges = a.work / 'ranges.jsonl'
+        rows = ['{"type":"a"}\n', '{"type":"b","t":"é"}\n', '{"type":"c"}\n']
+        ranges.write_bytes(''.join(rows).encode())
+        b0, b1 = len(rows[0].encode()), len(rows[0].encode()) + len(rows[1].encode())
+        read = lambda beg, end: text(f'(mapcar (lambda (o) (gethash "type" o)) (romacs-agent-history--read '
+                                     f'{lisp_text(str(ranges))} {beg} {end} (lambda (&rest _) t)))') or []
+        cuts = {'aligned': read(b0, b1 + len(rows[2])), 'in-char': read(b0 + 18, b1 + len(rows[2])),
+                'partial-end': read(0, b1 + 3), 'whole': read(0, b1 + len(rows[2]))}
+        order = lambda chat, first, then: first in chat and then in chat and chat.index(first) < chat.index(then)
+        result = {
+            'home': home, 'views': {k: v[:400] for k, v in views.items()},
+            'claude_argv': claude_run[-1]['argv'] if claude_run else None,
+            'claude_config_dir': claude_run[-1].get('config_dir') if claude_run else None,
+            'codex_argv': codex_run[-1]['argv'] if codex_run else None,
+            'chats': {k: v[:500] for k, v in chats.items()}, 'listed_after': listed, 'after_restart': again,
+            'untouched': untouched, 'imported_again': imported_again, 'refused': refused, 'cuts': cuts,
+            'twin_sockets': sockets, 'twin_runs': twin_runs, 'twin_failed': twin_failed}
+        result['ok'] = bool(
+            '◇ list the files here' in home and '◇ count the lines of a.txt' in home and 'AGENTS.md' not in home
+            and home.index(a.work.name) < home.index('◇')
+            and all(v.split('|')[1] == 't' for v in views.values())
+            and views[cid].startswith('*history: list the files here*')
+            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
+            and claude_run[-1].get('config_dir') == str(claude_dir)
+            and codex_run and codex_run[-1]['argv'][codex_run[-1]['argv'].index('resume') + 1] == tid
+            and order(chats[cid], '> list the files here', '> say resumed one')
+            and order(chats[tid], '> count the lines of a.txt', '> say resumed two')
+            and cid not in listed and tid not in listed
+            and again[0] in (None, []) and again[1].endswith(f'{cid}.jsonl') and again[2] == tid
+            and order(chat_again, '> list the files here', '> say resumed one')
+            and imported_again == ['t', cut] and 'Another Romacs' in (refused or '')
+            and cuts == {'aligned': ['b', 'c'], 'in-char': ['c'], 'partial-end': ['a', 'b'], 'whole': ['a', 'b', 'c']}
+            and sockets[0] != sockets[1] and twin_runs == twins and twin_failed in (None, [None, None], [])
+            and untouched)
+        return result
+    finally:
+        a.close()
+
+
 def real_program(name):
     """NAME's real executable on PATH, past version-manager shims and
     wrappers, which need the real HOME's configuration."""
@@ -1042,9 +1402,63 @@ def real(args, base):
         a.close()
 
 
+def history_real(args, base):
+    """A real Claude Code conversation (--claude-model) and a real Codex one
+    (--codex-model), each made outside Romacs in the real configuration
+    directories, are listed on the home page, resumed through the harness's
+    own resume, and asked what they were told before.  Costs money: not a
+    default workflow.  Leaves the two conversations in those directories."""
+    a = Agents(args, base, 'hr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        env = {k: v for k, v in os.environ.items() if k not in ('CLAUDE_CONFIG_DIR', 'CODEX_HOME')}
+        made = subprocess.run([claude, '-p', '--model', args.claude_model, '--output-format', 'json',
+                               'Remember the word PAPAYA. Reply only OK.'],
+                              cwd=a.work, env={**env, 'CLAUDE_CONFIG_DIR': args.claude_config},
+                              capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        cid = json.loads(made.stdout)['session_id']
+        made = subprocess.run([codex, 'exec', '--json', '--skip-git-repo-check', '-m', args.codex_model,
+                               '-c', f'model_reasoning_effort="{args.codex_effort}"', 'Remember the word MANGO. Reply only OK.'],
+                              cwd=a.work, env={**env, 'CODEX_HOME': args.codex_home},
+                              capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        tid = next(json.loads(line)['thread_id'] for line in made.stdout.splitlines()
+                   if line.startswith('{') and json.loads(line).get('type') == 'thread.started')
+        a.providers([('claude', args.claude_config, claude, ['--model', args.claude_model]),
+                     ('codex', args.codex_home, codex, ['-m', args.codex_model,
+                                                        '-c', f'model_reasoning_effort="{args.codex_effort}"'])])
+        home = parity_live.read_sexp(a.eval('(progn (save-window-excursion (romacs-agents)) (with-current-buffer "*romacs-agents*" '
+                                            '(buffer-substring-no-properties (point-min) (point-max))))'))
+        answers, ids = {}, {}
+        for ident, word in ((cid, 'PAPAYA'), (tid, 'MANGO')):
+            sid = a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-resume '
+                         f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(ident)})) (romacs-agent-history-items)))) '
+                         '(romacs-agent-id romacs-agent-ui--session))').strip('"')
+            ids[ident] = sid
+            if ident == cid:
+                until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(sid)})) t)') == 't', 60, 'resumed')
+            a.send(sid, 'What word did I ask you to remember? Answer with the word only.')
+            until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 300, f'{word} answered')
+            a.idle(sid, 60)
+            answers[word] = a.eval(f'(romacs-agent-reply {a.s(sid)})')
+        chats = {word: a.chat(ids[ident])[:600] for ident, word in ((cid, 'PAPAYA'), (tid, 'MANGO'))}
+        cost = [r['out'].get('total_cost_usd') for r in a.journal(ids[cid])
+                if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
+        result = {'claude_session': cid, 'codex_thread': tid, 'answers': answers, 'chats': chats, 'claude_cost': cost,
+                  'listed': [line for line in home.splitlines() if 'Remember the word' in line]}
+        result['ok'] = (len(result['listed']) == 2 and 'PAPAYA' in answers['PAPAYA'] and 'MANGO' in answers['MANGO']
+                        and all(c.index('> Remember the word') < c.index('> What word') for c in chats.values()))
+        return result
+    finally:
+        a.close()
+
+
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
-             'gnosis': gnosis}
+             'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
+             'composer-real': composer_real}
 
 
 def main():
@@ -1066,7 +1480,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)

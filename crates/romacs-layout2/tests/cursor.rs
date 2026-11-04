@@ -42,10 +42,10 @@ fn point_uses_text_geometry_and_selection_switches_cursor_kind() {
 fn unused_faces_do_not_multiply_unicode_bindings() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let snapshot = romacs_layout_input::WindowSnapshot {
+    let snapshot = romacs_layout_input::WindowSnapshot { underline_rules: Default::default(),
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
-        text: romacs_layout_input::TextSlice { utf8: "Καλημέρα Жизнь".into(), face_runs: vec![], raw: vec![] },
-        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(),
+        text: romacs_layout_input::TextSlice { extends: vec![], utf8: "Καλημέρα Жизнь".into(), face_runs: vec![], raw: vec![] },
+        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         faces: vec![face; 24],
     };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();

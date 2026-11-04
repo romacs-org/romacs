@@ -115,6 +115,39 @@ CASES = [
         '(progn (scroll-up) (list (window-start) (point)))',
         '(progn (goto-char (point-max)) (recenter -1) (list (window-start) (point)))',
     ]),
+    # Wrapped lines: `visual-line-mode' (word wrap) and plain continuation
+    # measure and move as GNU's rows break, as the chat composer and
+    # C-k (`kill-visual-line') ask; truncated lines measure to their end.
+    ('visual-line', '(visual-line-mode 1) (dotimes (i 6) (insert "The quick brown fox jumps over the lazy dog, again and again, until this line wraps more than once in the window " (number-to-string i) "\\n"))', [
+        '(window-text-pixel-size)', '(window-text-pixel-size nil 1 (save-excursion (goto-char 1) (line-end-position)))',
+        '(progn (goto-char 1) (list (vertical-motion 1) (point) (vertical-motion 2) (point) (vertical-motion -1) (point)))',
+        '(progn (goto-char 1) (end-of-visual-line) (point))', '(progn (goto-char 150) (beginning-of-visual-line) (point))',
+        '(progn (goto-char 1) (forward-word 14) (list (progn (end-of-visual-line) (point)) (progn (beginning-of-visual-line) (point))))',
+        '(list (pos-visible-in-window-p 200 nil t) (pos-visible-in-window-p 330 nil t))',
+        '(let ((p (posn-at-point 150))) (list (nth 2 p) (nth 6 p)))',
+        '(progn (goto-char (point-min)) (next-line 3) (list (point) (current-column)))',
+        '(progn (goto-char 30) (kill-visual-line) (list (point) (buffer-substring (line-beginning-position) (line-end-position)) (car kill-ring)))',
+        '(progn (goto-char (point-max)) (forward-line -2) (forward-char 20) (kill-visual-line 2) (list (point) (current-kill 0)))',
+        '(window-end nil t)',
+    ]),
+    # Under word wrap an element is whitespace by the text under it, and a
+    # row's first glyph stays on it after the line number though too wide.
+    ('wrap-elements', '(visual-line-mode 1) (insert "abc" (propertize "X" (quote display) (quote (space :width 1))) (make-string 100 ?d) " tail\\n" (make-string 10 ?a) (propertize " " (quote display) "Y") (make-string 100 ?b) " tail\\n")', [
+        '(list (pos-visible-in-window-p 5 nil t) (pos-visible-in-window-p 90 nil t) (pos-visible-in-window-p 120 nil t) (pos-visible-in-window-p 125 nil t))',
+        '(progn (goto-char 1) (list (vertical-motion 1) (point) (vertical-motion 1) (point) (vertical-motion 1) (point)))',
+        '(progn (goto-char 2) (kill-visual-line) (list (point) (car kill-ring)))',
+        '(progn (setq display-line-numbers t tab-width 300) (erase-buffer) (insert "\\tafter\\nnext") (goto-char 2) (list (vertical-motion 0) (point) (progn (goto-char 1) (vertical-motion 1)) (point) (nth 2 (posn-at-point 2))))',
+    ]),
+    ('continued', '(setq truncate-lines nil word-wrap nil) (dotimes (i 6) (insert "The quick brown fox jumps over the lazy dog, again and again, until this line wraps more than once in the window " (number-to-string i) "\\n"))', [
+        '(window-text-pixel-size)', '(progn (goto-char 1) (list (vertical-motion 1) (point) (vertical-motion 2) (point)))',
+        '(list (pos-visible-in-window-p 200 nil t) (pos-visible-in-window-p 330 nil t))',
+        '(progn (goto-char (point-min)) (next-line 3) (list (point) (current-column)))', '(window-end nil t)',
+    ]),
+    ('truncated', '(setq truncate-lines t) (dotimes (i 6) (insert "The quick brown fox jumps over the lazy dog, again and again, until this line passes the edge of the window " (number-to-string i) "\\n"))', [
+        '(window-text-pixel-size)', '(window-text-pixel-size nil 1 (save-excursion (goto-char 1) (line-end-position)))',
+        '(list (pos-visible-in-window-p 20 nil t) (pos-visible-in-window-p 150 nil t))',
+        '(progn (goto-char 1) (list (vertical-motion (cons 40 2)) (point)))', '(window-end nil t)',
+    ]),
     # The session browser itself: a tabulated list, its header line, its
     # padded and ellipsized columns.
     ('tabulated-list', '(tabulated-list-mode) (setq tabulated-list-format [("Session" 24 t) ("Title" 36 t) ("Msgs" 6 t) ("Source" 10 t)]) (setq tabulated-list-entries (let (es) (dotimes (i 200) (push (list i (vector (format "20261022_%06d_b0ad48db%d" i i) (if (= (% i 3) 0) "A title long enough to be cut short by its column" "Short") (number-to-string i) "xmpp")) es)) (nreverse es))) (tabulated-list-init-header) (tabulated-list-print)', [

@@ -161,6 +161,7 @@ impl Vm {
         if !self.quit.busy() {
             return None;
         }
+        self.take_debug_event();
         for _ in 0..self.quit.take() {
             self.handle_interrupt();
         }
@@ -200,6 +201,44 @@ impl Vm {
                 Err("Quit".into())
             }
         }
+    }
+
+    /// keyboard.c handle_user_signal for a signal that arrived since the
+    /// last look, from a busy evaluator's safepoint, a read's wait or a
+    /// host's idle loop: one whose event `debug-on-event' names is taken
+    /// and quits into the debugger ([`Self::debug_event`]); any other stays
+    /// an input event for the next read. Whether one was taken.
+    pub fn take_debug_event(&mut self) -> bool {
+        crate::host::clear_user_signal_arrival();
+        let taken = crate::host::take_user_signals(self.debug_event_mask());
+        if taken {
+            self.debug_event();
+        }
+        taken
+    }
+
+    /// The user signals `debug-on-event' names, as a mask of
+    /// host::USER_SIGNAL_NAMES: what a native probe stops for.
+    pub(crate) fn debug_event_mask(&self) -> u8 {
+        let [variable, events @ ..] = self.debug_event_slots;
+        let value = self.slots[variable].value;
+        events.iter().enumerate().fold(0, |mask, (i, &slot)| if value == Value::reference(slot + 1, 7) { mask | 1 << i } else { mask })
+    }
+
+    /// Whether `debug-on-event' names EVENT.
+    pub(crate) fn debugs_on(&self, event: &str) -> bool {
+        crate::host::USER_SIGNAL_NAMES.iter().position(|&name| name == event)
+            .is_some_and(|i| self.debug_event_mask() & 1 << i != 0)
+    }
+
+    /// keyboard.c handle_user_signal's "enter the debugger in many ways":
+    /// `debug-on-next-call' and `debug-on-quit' on, `inhibit-quit' off and
+    /// `quit-flag' set, so the next safepoint quits into the debugger.
+    pub(crate) fn debug_event(&mut self) {
+        self.set_quit_variable("debug-on-next-call", Value::TRUE);
+        self.set_quit_variable("debug-on-quit", Value::TRUE);
+        self.set_quit_variable("inhibit-quit", Value::NIL);
+        self.set_quit_variable("quit-flag", Value::TRUE);
     }
 
     /// keyboard.c handle_interrupt for a graphical frame: `quit-flag' set,
@@ -280,25 +319,31 @@ impl Vm {
         }
     }
 
-    /// Store NAME, a quit variable, as GNU's C does: no watcher runs.
+    /// Store NAME, a quit or debugger variable, as GNU's C does: no
+    /// watcher runs.
     fn set_quit_variable(&mut self, name: &str, value: Value) {
         let slot = self.slot(name);
         // A forwarded object variable always takes a store.
         let _ = self.assign_variable(slot, value);
     }
 
-    /// subprocess::poll of FDS for at most TIMEOUT, which a host's C-g ends
-    /// early, as keyboard input wakes GNU's select: while a host shares the
-    /// signal the wait goes in slices of [`QUIT_SLICE`], and returns no
-    /// events once a press waits, for the caller's next safepoint to quit.
+    /// subprocess::poll of FDS for at most TIMEOUT, which a host's C-g or a
+    /// debug event ends early, as keyboard input or a signal wakes GNU's
+    /// select: while a host shares the signal or `debug-on-event' names
+    /// one, the wait goes in slices of [`QUIT_SLICE`], and returns no
+    /// events once a press or debug event waits, for the caller's next
+    /// safepoint to quit.
     pub(crate) fn poll_quittable(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
                                  -> std::io::Result<Vec<i16>> {
-        if std::sync::Arc::strong_count(&self.quit) == 1 {
+        // A debug event ends it too, without a host (handle_user_signal
+        // interrupts GNU's select).
+        let debug = self.debug_event_mask();
+        if std::sync::Arc::strong_count(&self.quit) == 1 && debug == 0 {
             return crate::subprocess::poll(fds, timeout);
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
-            if self.quit.pressed() {
+            if self.quit.pressed() || crate::host::user_signal_waiting(debug) {
                 return Ok(vec![0; fds.len()]);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));

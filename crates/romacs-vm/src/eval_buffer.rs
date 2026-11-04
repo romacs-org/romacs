@@ -1,28 +1,24 @@
 //! Ordinary buffer/startup data-model operations; no window or redisplay ownership.
 use crate::{coordinates::ByteOffset, data::Object, *};
+use crate::text::Newlines;
 use std::path::{Path, PathBuf};
 
-fn line_motion(bytes: &[u8], point: usize, count: i64) -> (usize, i64) {
-    let mut pos = point;
+/// GNU forward-line's motion of COUNT lines from byte POINT of TEXT
+/// within the bytes R: the new point and the lines short.
+fn line_motion(text: &(impl Newlines + ?Sized), r: std::ops::Range<usize>, point: usize, count: i64) -> (usize, i64) {
     let mut remaining = count;
+    let line_start = |end: usize| text.previous_newline(end, r.start).map_or(r.start, |i| i + 1);
+    let mut pos;
     if count <= 0 {
-        pos = bytes[..pos]
-            .iter()
-            .rposition(|b| *b == b'\n')
-            .map_or(0, |i| i + 1);
-        while remaining < 0 && pos > 0 {
-            pos = bytes[..pos - 1]
-                .iter()
-                .rposition(|b| *b == b'\n')
-                .map_or(0, |i| i + 1);
+        pos = line_start(point);
+        while remaining < 0 && pos > r.start {
+            pos = line_start(pos - 1);
             remaining += 1;
         }
     } else {
-        while remaining > 0 && pos < bytes.len() {
-            pos = bytes[pos..]
-                .iter()
-                .position(|b| *b == b'\n')
-                .map_or(bytes.len(), |i| pos + i + 1);
+        pos = point;
+        while remaining > 0 && pos < r.end {
+            pos = text.next_newline(pos, r.end).map_or(r.end, |i| i + 1);
             remaining -= 1;
         }
     }
@@ -101,22 +97,14 @@ impl Vm {
                 let shortage = match &mut self.objects[index] {
                     Object::Buffer(b) => {
                         let range = b.accessible();
-                        let (pos, shortage) = line_motion(
-                            &b.as_str().as_bytes()[range.start.0..range.end.0],
-                            b.point.0 - range.start.0,
-                            count,
-                        );
-                        b.point = ByteOffset(pos + range.start.0);
+                        let (pos, shortage) = line_motion(b.body(), range.start.0..range.end.0, b.point.0, count);
+                        b.point = ByteOffset(pos);
                         shortage
                     }
                     Object::ByteBuffer(b) => {
-                        let range = b.restriction.clone();
-                        let (pos, shortage) = line_motion(
-                            &b.bytes[range.start.0..range.end.0],
-                            b.point.0 - range.start.0,
-                            count,
-                        );
-                        b.point = ByteOffset(pos + range.start.0);
+                        let range = b.restriction.start.0..b.restriction.end.0;
+                        let (pos, shortage) = line_motion(b.bytes.as_slice(), range, b.point.0, count);
+                        b.point = ByteOffset(pos);
                         shortage
                     }
                     _ => unreachable!(),

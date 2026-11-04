@@ -162,6 +162,29 @@ thousandth a stack mark."
             (dolist (o overlays) (move-overlay o (overlay-start o) (1+ (overlay-start o))))
             (mapc #'delete-overlay overlays))))
 
+;; N edits of a buffer holding N evaporating overlays (as a notmuch
+;; search holds one per result): each edit asks only the overlays at the
+;; span it leaves whether they emptied.  Half the edits empty an overlay,
+;; which is deleted, as GNU's are; they delete its span by the overlay's
+;; own positions, so no text is read between edits.
+(scaling-probe evaporating-overlays :n 2000
+  :setup (with-current-buffer (scaling--lines-buffer " scaling-evaporate" n)
+           (goto-char (point-min))
+           (let (overlays)
+             (dotimes (i n)
+               (let ((o (make-overlay (point) (line-end-position))))
+                 (overlay-put o 'evaporate t)
+                 (when (cl-evenp i) (push o overlays)))
+               (forward-line 1))
+             (cons (current-buffer) overlays)))
+  :body (with-current-buffer (car it)
+          (goto-char (point-max))
+          (dotimes (_ (/ n 2))
+            (insert-before-markers "xy")
+            (delete-region (- (point) 2) (point)))
+          (dolist (o (cdr it))
+            (delete-region (overlay-start o) (overlay-end o)))))
+
 (scaling-probe text-properties :n 2000
   :setup (scaling--lines-buffer " scaling-props" n)
   :body (with-current-buffer it
@@ -174,6 +197,23 @@ thousandth a stack mark."
           (let ((pos (point-min)))
             (while (setq pos (next-single-property-change pos 'face))))))
 
+;; The buffer walked by next-property-change, as motion over invisible
+;; text and redisplay do, where one key reads one value under many stamps
+;; (each line's `fontified' put on its own, adjacent, as jit-lock puts its
+;; chunks) and another changes every 50 lines.
+(scaling-probe property-change-walk :n 20000
+  :setup (with-current-buffer (scaling--lines-buffer " scaling-walk" n)
+           (goto-char (point-min))
+           (dotimes (i n)
+             (when (zerop (% i 50)) (put-text-property (point) (line-end-position) 'face 'bold))
+             (put-text-property (point) (progn (forward-line 1) (point)) 'fontified t))
+           (current-buffer))
+  :body (with-current-buffer it
+          (let ((pos (point-min)))
+            (while (setq pos (next-property-change pos))))
+          (let ((pos (point-max)))
+            (while (setq pos (previous-property-change pos))))))
+
 (scaling-probe undo :n 2000
   :setup (with-current-buffer (get-buffer-create " scaling-undo")
            (buffer-enable-undo)
@@ -182,6 +222,36 @@ thousandth a stack mark."
           (dotimes (_ n) (insert "x") (undo-boundary))
           (undo-start)
           (undo-more n)))
+
+;;;; Lambda lists
+
+;; N `(lambda ...)' lists, each called five times: one compile per list,
+;; then hits (`Vm::lambda_list_closure'); the cache holds what was called
+;; since the last collection.
+(scaling-probe lambda-lists :n 200
+  :setup (let (functions)
+           (dotimes (i n) (push (list 'lambda '(x) (list '+ 'x i)) functions))
+           functions)
+  :body (dotimes (_ 5) (dolist (f it) (funcall f 1))))
+
+;;;; Tree-sitter
+
+;; A Rust buffer of N lines parsed by the bundled grammar, then twenty
+;; edits, each forcing a reparse and a capture over its line: the parse is
+;; linear in the text, an edit's reparse and capture are not in N.
+(scaling-probe treesit-parse-edit :n 2000
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit")
+           (dotimes (i n)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (current-buffer))
+  :body (with-current-buffer it
+          (let ((parser (treesit-parser-create 'rust)))
+            (treesit-parser-root-node parser)
+            (goto-char (/ (point-max) 2))
+            (dotimes (_ 20)
+              (insert "x")
+              (treesit-query-capture (treesit-parser-root-node parser) "(identifier) @i"
+                                     (line-beginning-position) (line-end-position))))))
 
 ;;;; Windows
 
@@ -696,6 +766,127 @@ thousandth a stack mark."
             (romacs-agent-ui--render it (list :type 'tool :state 'completed :id (format "t%d" i) :output "ok"
                                               :seq (+ 1 n i) :last t)))))
 
+;; The home page over N sessions, half of them delegated children.
+(scaling-probe agent-home :n 200
+  :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (dotimes (i n)
+                  (let ((s (romacs-agent--make :id (format "%08d-home" i) :harness 'claude :provider "claude"
+                                               :title (format "session %d" i) :cwd (format "/tmp/project-%d" (% i 7))
+                                               :last-time (+ 1e9 i) :state 'idle :turns 1
+                                               :options (and (cl-oddp i) (list :parent (format "%08d-home" (1- i)))))))
+                    (puthash (romacs-agent-id s) s romacs-agent--sessions)))
+                (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+  :body (with-current-buffer it (romacs-agent-ui--home)))
+
+;; The home page over N projects of one session each, and over N roots in one project.
+(defun scaling--agent-sessions (n project)
+  (scaling--agent)
+  (clrhash romacs-agent--sessions)
+  (dotimes (i n)
+    (let ((s (romacs-agent--make :id (format "%08d-proj" i) :harness 'claude :provider "claude"
+                                 :title (format "session %d" i) :cwd (funcall project i)
+                                 :last-time (+ 1e9 i) :state 'idle :turns 1)))
+      (puthash (romacs-agent-id s) s romacs-agent--sessions)))
+  (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+
+(scaling-probe agent-home-projects :n 200
+  :setup (scaling--agent-sessions n (lambda (i) (format "/tmp/project-%d" i)))
+  :body (with-current-buffer it (romacs-agent-ui--home)))
+
+(scaling-probe agent-home-roots :n 200
+  :setup (scaling--agent-sessions n (lambda (_) "/tmp/one-project"))
+  :body (with-current-buffer it (romacs-agent-ui--home)))
+
+;; One event to each of N sessions with the home page shown: its refresh is
+;; scheduled, never rebuilt per event.
+(scaling-probe agent-dispatch-home :n 200
+  :setup (progn (scaling--agent-sessions n (lambda (i) (format "/tmp/project-%d" (% i 5))))
+                (hash-table-values romacs-agent--sessions))
+  :body (let ((record (json-parse-string "{\"seq\": 1, \"out\": {\"type\": \"result\", \"total_cost_usd\": 0}}"
+                                         :object-type 'hash-table :null-object :null :false-object :false)))
+          ;; As if the page were shown (batch has no visible window).
+          (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window))))
+            (dolist (session it) (romacs-agent--record session record)))
+          (when (timerp romacs-agents--refresh) (cancel-timer romacs-agents--refresh) (setq romacs-agents--refresh nil))))
+
+;; The harnesses' history: N Claude Code transcripts in one configuration
+;; directory, listed (stat only) once described, and listed and described anew.
+(defun scaling--history (n)
+  "A Claude Code configuration directory of N transcripts over 7 projects."
+  (scaling--agent)
+  (require 'romacs-agent-history)
+  (let ((dir (make-temp-file "scaling-claude-" t)))
+    (dotimes (i n)
+      (let ((project (expand-file-name (format "projects/-tmp-project-%d" (% i 7)) dir)))
+        (make-directory project t)
+        (with-temp-file (expand-file-name (format "%08x-0000-4000-8000-%012x.jsonl" i i) project)
+          (insert (format "{\"type\":\"user\",\"cwd\":\"/tmp/project-%d\",\"message\":{\"role\":\"user\",\"content\":\"task %d\"}}\n"
+                          (% i 7) i)))))
+    (setq romacs-agent-history-limit (max n 1)
+          romacs-agent-history--descriptions (make-hash-table :test #'equal))
+    dir))
+
+(defmacro scaling--with-history-place (dir &rest body)
+  "BODY with DIR as the only place history is kept."
+  `(cl-letf (((symbol-function 'romacs-agent-history--places) (lambda () (list (list ,dir 'claude "claude" ,dir)))))
+     ,@body))
+
+(scaling-probe agent-history-relist :n 200
+  :setup (let ((dir (scaling--history n))) (scaling--with-history-place dir (romacs-agent-history-list)) dir)
+  :body (scaling--with-history-place it (romacs-agent-history-list)))
+
+(scaling-probe agent-history-describe :n 100
+  :setup (scaling--history n)
+  :body (scaling--with-history-place it
+          (clrhash romacs-agent-history--descriptions)
+          (romacs-agent-history-list)))
+
+;; The history's places over N provider instances.
+(defvar romacs-agent-providers)
+(scaling-probe agent-history-places :n 1000
+  :setup (progn (scaling--agent) (require 'romacs-agent-history)
+                (cl-loop for i below n collect (cons (format "claude-%d" i) (format "/tmp/claude-config-%d" i))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent-history--places)))
+
+;; The home page over N transcripts beside a session per project.
+(scaling-probe agent-home-history :n 200
+  :setup (let ((dir (scaling--history n)))
+           (scaling--with-history-place dir (romacs-agent-history-list))
+           (clrhash romacs-agent--sessions)
+           (with-current-buffer (get-buffer-create "*romacs-agents*") (romacs-agents-mode) (current-buffer)))
+  :body (with-current-buffer it (romacs-agent-ui--home)))
+
+;; A transcript of N turns (a prompt, a tool call and its result, a reply), viewed.
+(scaling-probe agent-history-view :n 50
+  :setup (let ((file (make-temp-file "scaling-transcript-" nil ".jsonl")))
+           (scaling--agent)
+           (require 'romacs-agent-history)
+           (romacs-agent-ui--helpers)
+           (with-temp-file file
+             (dotimes (i n)
+               (insert (format "{\"type\":\"user\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-11-03T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"prompt %d\"}}\n" i)
+                       (format "{\"message\":{\"id\":\"a%d\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t%d\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}]},\"type\":\"assistant\"}\n" i i)
+                       (format "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t%d\",\"content\":\"a.txt\"}]}}\n" i)
+                       (format "{\"message\":{\"id\":\"b%d\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One **file**.\"}]},\"type\":\"assistant\",\"timestamp\":\"2026-11-03T10:00:05Z\"}\n" i))))
+           (list :path file :id "scaling-view" :harness 'claude :provider "claude" :cwd "/tmp" :title "view"))
+  :body (kill-buffer (romacs-agent-history-open it)))
+
+;; A chat of N whole turns: the prompt, a streamed reply, its Markdown, the footer.
+(scaling-probe agent-chat-turns :n 100
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-turns-chat" :harness 'claude :title "turns"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  session))
+  :body (dotimes (i n)
+          (let ((seq (* 10 i)) (id (format "m%d" i)))
+            (romacs-agent-ui--render it (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
+            (dotimes (k 4)
+              (romacs-agent-ui--render it (list :type 'delta :text "some **reply** text " :message id :seq (+ seq 2 k) :last t)))
+            (romacs-agent-ui--render it (list :type 'message-end :message id :seq (+ seq 7) :last t))
+            (romacs-agent-ui--render it (list :type 'done :seq (+ seq 8) :last t :duration 1.0)))))
+
 ;;;; Session images (rlisp/warm-restart.el)
 
 (defun scaling--session (n)
@@ -811,6 +1002,35 @@ thousandth a stack mark."
                 (insert "\n") (setq-local truncate-lines t) (goto-char 10)
                 (current-buffer))
   :body (with-current-buffer it (if (cl-evenp i) (forward-char 1) (backward-char 1))))
+
+;; Motion and measurement in one long wrapped line of N words, around its
+;; middle: a step's rows are laid out from the line's start, so the work
+;; is linear in the line; a rescan per row would make it quadratic.
+(defun scaling--wrapped-line (n word-wrap)
+  "Show one line of N words, wrapped at words when WORD-WRAP; return its buffer."
+  (switch-to-buffer (get-buffer-create "scaling-wrapped")) (erase-buffer)
+  (dotimes (i n) (insert (format "word%d " i)))
+  (insert "\n")
+  (setq-local truncate-lines nil)
+  (if word-wrap (visual-line-mode 1) (setq-local word-wrap nil))
+  (goto-char (/ (point-max) 2))
+  (current-buffer))
+
+(defun scaling--wrapped-step (i)
+  "Move vertically from the middle, to the visual line's ends, and measure."
+  (goto-char (/ (point-max) 2))
+  (vertical-motion (if (cl-evenp i) 3 -3))
+  (end-of-visual-line)
+  (beginning-of-visual-line)
+  (window-text-pixel-size nil (line-beginning-position) (point)))
+
+(scaling-probe wrapped-line-words :gui t :n 1000 :steps 20
+  :setup (scaling--wrapped-line n t)
+  :body (with-current-buffer it (scaling--wrapped-step i)))
+
+(scaling-probe wrapped-line-continued :gui t :n 1000 :steps 20
+  :setup (scaling--wrapped-line n nil)
+  :body (with-current-buffer it (scaling--wrapped-step i)))
 
 ;;;; Running
 

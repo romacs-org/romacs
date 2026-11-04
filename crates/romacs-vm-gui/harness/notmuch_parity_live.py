@@ -18,7 +18,9 @@ network is touched; the mail sync command is never run.
 usage: notmuch_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
                               [--workflow NAME]... [--snippet FILE [--accounts-variable NAME]]
 
-Workflows: `read' (hello, a saved search, motion, tagging, archiving,
+Workflows: `controls' (a search whose headers carry control characters,
+no-break spaces and emoji: M->, M-<, scrolling and recentering),
+`read' (hello, a saved search, motion, tagging, archiving,
 notmuch-show with HTML parts, notmuch-tree), `compose-send' (a new mail
 with address completion, an attachment and a saved draft, sent over
 STARTTLS) and `reply-send' (a reply from the identity it was addressed to;
@@ -209,7 +211,56 @@ REPLY_SEND = [
          trigger=[C('c'), C('c')], ready=f'(and (not {COMPOSE}) {SENT(lisp_string("001.eml"))})', settle=2),
 ]
 
-WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND}
+# Headers with control characters, no-break spaces and emoji: motion to
+# the ends and scrolling keep point and the window start as GNU's.
+CONTROLS = [
+    key('hello', [C('x'), T('m')], HELLO),
+    key('search-prompt', [T('s')], MINIBUFFER),
+    typed('search', 'tag:controls', [K('Return')], SEARCH, settle=1),
+    key('end', [M('>')], SEARCH),
+    key('beginning', [M('<')], SEARCH),
+    key('end-again', [M('>')], SEARCH),
+    key('scroll-back', [M('v')], SEARCH),
+    key('scroll', [C('v')], SEARCH),
+    key('beginning-again', [M('<')], SEARCH),
+    key('next', [T('n')], SEARCH),
+    key('recenter', [C('l')], SEARCH),
+    key('quit-search', [T('q')], HELLO),
+]
+
+# isearch for a name whose first match is below the window: the window
+# scrolls to it, the match in `isearch', other matches lazily highlighted.
+ISEARCHING = '(and (boundp (quote isearch-mode)) isearch-mode)'
+ISEARCH = [
+    key('hello', [C('x'), T('m')], HELLO),
+    key('search-prompt', [T('s')], MINIBUFFER),
+    typed('search', 'tag:inbox', [K('Return')], SEARCH, settle=1),
+    key('isearch-start', [C('s')], ISEARCHING),
+    dict(name='isearch-name', keys=[T('Caro')], keys_ready=f'(and {ISEARCHING} (equal isearch-string "Caro"))',
+         trigger=[T('l')], ready=f'(and {ISEARCHING} (equal isearch-string "Carol"))', settle=1),
+    key('isearch-next', [C('s')], ISEARCHING, settle=1),
+    key('isearch-exit', [K('Return')], f'(and {SEARCH} (not {ISEARCHING}))', settle=1),
+    key('quit-search', [T('q')], HELLO),
+]
+
+# The same in a plain buffer, to tell isearch from notmuch's text.
+ISEARCH_PLAIN = [
+    key('scratch', [C('x'), T('b')], MINIBUFFER),
+    typed('scratch-name', '*scratch*', [K('Return')], BUFFER_IS(lisp_string('*scratch*'))),
+    key('eval-prompt', [M(':')], MINIBUFFER),
+    # A needle every 40 lines: the second and third matches scroll the window.
+    typed('fill', '(progn (dotimes (i 200) (insert (format (if (= (% i 40) 39) "needle line %d\\n" "plain line %d\\n") i))) (goto-char (point-min)))',
+          [K('Return')], f'(not {MINIBUFFER})', settle=1),
+    key('isearch-start', [C('s')], ISEARCHING),
+    dict(name='isearch-needle', keys=[T('needl')], keys_ready=f'(and {ISEARCHING} (equal isearch-string "needl"))',
+         trigger=[T('e')], ready=f'(and {ISEARCHING} (equal isearch-string "needle"))', settle=1),
+    key('isearch-next', [C('s')], ISEARCHING, settle=1),
+    key('isearch-next-2', [C('s')], ISEARCHING, settle=1),
+    key('isearch-exit', [K('Return')], f'(not {ISEARCHING})', settle=1),
+]
+
+WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND, 'controls': CONTROLS,
+             'isearch': ISEARCH, 'isearch-plain': ISEARCH_PLAIN}
 
 
 def normalised_mail(engine):

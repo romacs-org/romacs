@@ -366,7 +366,7 @@ impl Vm {
         let margin = self.scroll_margin_px(window, laid.body_height)?;
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();
-        let from = crate::prim::line_beginning(b.as_str().as_bytes(), accessible.start.0, accessible.end.0, point_byte, -lines);
+        let from = crate::prim::line_beginning(b.body(), accessible.start.0, accessible.end.0, point_byte, -lines);
         let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
         if !minimal {
             // Each row and whether it starts a line, as the recentring's
@@ -507,13 +507,14 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
         .map(|r| FaceRun { bytes: r.bytes.start.max(from) - from..r.bytes.end.min(to) - from, face: handle(r.face) }).collect();
     let raw = published.text.raw.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let stretches = published.stretches.iter().filter(|s| (from..to).contains(&s.byte)).map(|s| Stretch { byte: s.byte - from, width: s.width }).collect();
+    let wrap_flips = published.wrap_flips.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let faces = used.iter().map(|&f| published.faces.get(f as usize).cloned()).collect::<Option<Vec<_>>>()?;
-    Some(WindowSnapshot {
+    Some(WindowSnapshot { underline_rules: Default::default(),
         id: published.id, width: published.width, height: 1 << 24, start_byte: 0, point_byte: point - from, buffer_version: 0,
-        text: TextSlice { utf8: text[from..to].into(), face_runs, raw },
+        text: TextSlice { extends: vec![], utf8: text[from..to].into(), face_runs, raw },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: published.hscroll, faces, tab_width: published.tab_width, wrap: published.wrap,
-        cursor_off: false, stretches, line_numbers: None,
+        cursor_off: false, stretches, wrap_flips, line_numbers: None,
         // Only the fringes' widths place the row; their bitmaps' faces are not kept.
         chrome: WindowChrome { left_fringe: published.chrome.left_fringe, right_fringe: published.chrome.right_fringe,
             left_margin: published.chrome.left_margin, right_margin: published.chrome.right_margin, ..WindowChrome::default() },

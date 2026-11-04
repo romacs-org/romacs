@@ -438,10 +438,16 @@ fn set_idle(cx, idle: Value) {
 }}
 
 // kbd_buffer_get_event's USER_SIGNAL_EVENT: a pending SIGUSR1 or SIGUSR2
-// as the event read_char reads next, or nil.
+// as the event read_char reads next, or nil. One `debug-on-event' names is
+// no event: as GNU's handle_user_signal does, it sets `quit-flag' with
+// `debug-on-quit', so the read returns the quit into the debugger.
 defsubr! { name = "romacs--take-user-signal", gnu = "keyboard.c:8561", effect = Global,
 fn take_user_signal(cx) {
-    Ok(crate::host::take_user_signal().map_or(Value::NIL, |event| cx.intern(event)))
+    match crate::host::take_user_signal() {
+        Some(event) if cx.debugs_on_event(event) => { cx.debug_event(); Ok(Value::NIL) }
+        Some(event) => Ok(cx.intern(event)),
+        None => Ok(Value::NIL),
+    }
 }}
 
 defsubr! { name = "input-pending-p", gnu = "keyboard.c:12076", effect = Reads,

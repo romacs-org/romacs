@@ -44,6 +44,15 @@ with the session before its harness starts.  Return the session.
 (register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
 
 
+;;; Generated autoloads from romacs-agent-history.el
+
+(autoload 'romacs-agent-history-open "romacs-agent-history"
+"Show the transcript ITEM (one of `romacs-agent-history-items') read-only.
+
+(fn ITEM)")
+(register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
+
+
 ;;; Generated autoloads from romacs-agent-tools.el
 
 (register-definition-prefixes "romacs-agent-tools" '("romacs-agent-"))
@@ -52,7 +61,7 @@ with the session before its harness starts.  Return the session.
 ;;; Generated autoloads from romacs-agent-ui.el
 
 (autoload 'romacs-agents "romacs-agent-ui"
-"Show every agent session." t)
+"Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
 
 

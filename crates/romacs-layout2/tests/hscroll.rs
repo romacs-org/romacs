@@ -7,7 +7,7 @@ use romacs_layout_input::{BitmapAlign, Face, FaceHandle, FrameSnapshot, FringeBi
     PlacedWindowSnapshot, TextSlice, WindowChrome, WindowEnd, WindowSnapshot};
 
 fn face() -> Face {
-    Face { foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
+    Face { decor: Default::default(), foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
 }
 
 fn cell() -> f32 { romacs_layout2::frame_metrics(&face()).unwrap().1 as f32 }
@@ -19,12 +19,12 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
     let bitmap = |number| FringeBitmap { number, bits: vec![0x1800; 8], width: 8, align: BitmapAlign::Center, period: 0, face: FaceHandle(0) };
     let indicators = Indicators { truncation: [Some(bitmap(3)), Some(bitmap(4))], ..Indicators::default() };
     let px = |cells: u32| cells * cell() as u32;
-    WindowSnapshot {
+    WindowSnapshot { underline_rules: Default::default(),
         id: 1, width: px(10), height: 200, start_byte: 0, point_byte: point, buffer_version: 1,
-        text: TextSlice { utf8: text.into(), face_runs: vec![], raw: vec![] },
+        text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: Hscroll { rows: px(hscroll), point_row: px(point_row) }, tab_width: 8, wrap: LineWrap::Truncate,
-        cursor_off: false, stretches: vec![], line_numbers: None, faces: vec![face()],
+        cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, faces: vec![face()],
         chrome: if fringes { WindowChrome { left_fringe: 8, right_fringe: 8, indicators, ..WindowChrome::default() } } else { WindowChrome::default() },
     }
 }

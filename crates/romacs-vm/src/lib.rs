@@ -4,6 +4,8 @@
 #[cfg(test)]
 mod callint_tests;
 #[cfg(test)]
+mod search_scaling_tests;
+#[cfg(test)]
 mod file_name_handler_tests;
 #[cfg(test)]
 mod keymap_tests;
@@ -88,6 +90,7 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod treesit;
+pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
 mod posix_tz;
@@ -1245,6 +1248,10 @@ pub struct Vm {
     /// the expander's forms, by variable slot, while the value is the same
     /// object: cleared by every collection, which can move it.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
+    /// The closures `(lambda ...)' lists called as functions compiled to,
+    /// by the list object (`Vm::lambda_list_closure'): cleared by every
+    /// collection, which can move the lists and what their snapshots hold.
+    lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
     /// The status bar's last fitted line (a `display::mode_line::Band'),
     /// kept for a click to read (`Vm::status_bar_target'); its object
     /// constants are traced handles.
@@ -1289,6 +1296,9 @@ pub struct Vm {
     /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
     /// the evaluator's quit polls (quit.rs).
     quit_slots: [usize; 3],
+    /// The slots of `debug-on-event' and of the user signal events, in
+    /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
+    debug_event_slots: [usize; 3],
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
@@ -1623,9 +1633,11 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit,
     force_quit_count,
     quit_slots,
+    debug_event_slots,
 } at_rest {
     regexp_cache,
     mode_line_forms,
+    lambda_lists,
     status_bar_line,
     suspended_code,
     host_input,
@@ -1699,6 +1711,7 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
+            lambda_lists: Default::default(),
             status_bar_line: None,
             execution_fatal: false,
             loader: loader::Loader::default(),
@@ -1722,6 +1735,7 @@ impl Vm {
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
+            debug_event_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
             subprocesses: subprocess::Table::default(),
@@ -1852,6 +1866,8 @@ impl Vm {
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
+        let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
+        vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);

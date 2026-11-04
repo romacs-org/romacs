@@ -1479,7 +1479,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
-    let quit = if crate::host::interrupt_pending() || engine.vm.quit_due() {
+    let quit = if crate::host::safepoint_pending() || engine.vm.quit_due() {
         engine.budget = 0;
         interrupt_quit(&mut engine)
     } else {
@@ -1886,10 +1886,10 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     } else {
         e.vm.collect_poll = false;
     }
-    // GNU's maybe_quit: a host's C-g (quit.rs) or an isolate's interrupt
-    // (SIGUSR1, `isolate.rs`) is `quit` at this safepoint unless
-    // `inhibit-quit' is bound.
-    if (crate::host::interrupt_pending() || e.vm.quit_poll_due()) && let Some(value) = interrupt_quit(e) {
+    // GNU's maybe_quit: a host's C-g (quit.rs), a debug event, or an
+    // isolate's interrupt (SIGUSR1, `isolate.rs`) is `quit` at this
+    // safepoint unless `inhibit-quit' is bound.
+    if (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && let Some(value) = interrupt_quit(e) {
         return value;
     }
     unsafe { next(e, r, pc) }
@@ -3518,13 +3518,14 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 }
 /// eval.c funcall_lambda of a `(lambda ARGS . BODY)' list: GNU interprets
 /// it with dynamic binding (lexenv nil). VM2 evaluates the list in that
-/// dialect, as `(function LIST)', and calls the closure; the list itself
+/// dialect, as `(function LIST)', and calls the closure, compiled once
+/// while the list is unchanged (`Vm::lambda_list_closure'); the list itself
 /// stays the function. Returns the rebased caller registers and the
 /// closure, or None with the condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
-    unsafe { nested_then(e, r, |vm| vm.eval_primitive(&[list, Value::NIL])) }
+    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
 }
 /// specbind of SLOT to VALUE from compiled code or a call site: a protected
 /// variable (most-positive-fixnum, enable-multibyte-characters, ...) is

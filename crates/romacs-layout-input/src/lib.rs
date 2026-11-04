@@ -208,8 +208,48 @@ pub struct Face {
     pub italic: bool,
     /// OS/2 width class, 5 normal (`:width').
     pub width: u16,
+    /// The lines the face draws over its text (`:underline', `:overline',
+    /// `:strike-through').
+    pub decor: Decor,
 }
-romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size, weight, italic, width });
+romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size, weight, italic, width, decor });
+
+/// A face's lines, GNU's `:underline', `:overline' and `:strike-through'.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Decor {
+    pub underline: Option<Line>,
+    pub overline: Option<Line>,
+    pub strike: Option<Line>,
+}
+romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike });
+
+/// One line a face draws: STYLE is romacs-display-protocol's
+/// `UnderlineStyle' code (1 line, 2 double, 3 wave, 4 dotted, 5 dashed;
+/// overlines and strike-throughs are 1), COLOR the line's own colour, else
+/// the face's foreground; for an underline POSITION, `:position' (at the
+/// descent line, that many pixels above it), else where the font says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub style: u8,
+    pub color: Option<[u8; 3]>,
+    pub position: Option<u16>,
+}
+romacs_snapshot::snapshot_struct!(Line { style, color, position });
+
+/// Where a window's underlines go (xterm.c x_draw_glyph_string): its
+/// buffer's `underline-minimum-offset', `x-underline-at-descent-line' and
+/// `x-use-underline-position-properties'.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnderlineRules {
+    pub minimum_offset: u32,
+    pub at_descent_line: bool,
+    pub use_position: bool,
+}
+romacs_snapshot::snapshot_struct!(UnderlineRules { minimum_offset, at_descent_line, use_position });
+
+impl Default for UnderlineRules {
+    fn default() -> Self { Self { minimum_offset: 1, at_descent_line: false, use_position: true } }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FaceRun {
@@ -225,8 +265,21 @@ pub struct TextSlice {
     /// Byte offsets into `utf8` of characters that are raw bytes
     /// (GNU's eight-bit characters), shown as `\NNN`; sorted.
     pub raw: Vec<u32>,
+    /// The newlines whose row paints past its text to the window's edge,
+    /// each with the face it paints in; sorted by byte.
+    pub extends: Vec<Extend>,
 }
-romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs, raw });
+romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs, raw, extends });
+
+/// xdisp.c extend_face_to_end_of_line's face for the row the newline at
+/// BYTE of a text ends: the merge of only those faces there whose
+/// `:extend' is non-nil.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Extend {
+    pub byte: u32,
+    pub face: FaceHandle,
+}
+romacs_snapshot::snapshot_struct!(Extend { byte, face });
 impl TextSlice {
     /// Whether the character at BYTE is a raw byte.
     pub fn is_raw(&self, byte: usize) -> bool {
@@ -262,13 +315,20 @@ pub struct WindowSnapshot {
     pub cursor_off: bool,
     /// The characters of TEXT shown as stretches, in byte order.
     pub stretches: Vec<Stretch>,
+    /// The bytes of TEXT whose character's word-wrap class is not its own,
+    /// sorted: a space or TAB there is no wrap whitespace, another
+    /// character is. GNU's IT_DISPLAYING_WHITESPACE looks under a stretch
+    /// or a string at the buffer's text.
+    pub wrap_flips: Vec<u32>,
     /// `display-line-numbers': what starts each row.
     pub line_numbers: Option<LineNumbers>,
     /// The margins and fringes around the text area: WIDTH is the text
     /// area's, and the window's placed X its left edge.
     pub chrome: WindowChrome,
+    /// Where its underlines go.
+    pub underline_rules: UnderlineRules,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, line_numbers, chrome });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, wrap_flips, line_numbers, chrome, underline_rules });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -618,10 +678,11 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, line_numbers, chrome } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, wrap_flips, line_numbers, chrome, underline_rules } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
-            && *wrap == other.wrap && *stretches == other.stretches && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
+            && *wrap == other.wrap && *stretches == other.stretches && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
+            && *underline_rules == other.underline_rules
     }
 }
 

@@ -498,6 +498,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
 /// (romacs-loadup-bootstrap.el); `--gnu-lisp' shows GNU's Lisp alone.
 fn declare_stock_theme(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
     policy(vm, root, "romacs-theme.el", include_str!("../../../rlisp/romacs-theme.el"))?;
+    policy(vm, root, "../etc/themes/romacs-theme-rum.el", include_str!("../../../etc/themes/romacs-theme-rum.el"))?;
     policy(vm, root, "../etc/themes/default-theme.el", include_str!("../../../etc/themes/default-theme.el"))
 }
 

@@ -827,6 +827,31 @@ pub struct ResolvedFont {
     /// The per-glyph, bitmap cell, or multi-cell outline advance contract.
     #[serde(default)]
     pub glyph_advance: ResolvedFontAdvance,
+    /// The font's own underline metrics, as GNU's font driver records them.
+    #[serde(default)]
+    pub underline: FontUnderline,
+}
+
+/// GNU `font->underline_position` (pixels below the baseline; negative when
+/// the font gives none) and `font->underline_thickness` (0 when none), for
+/// the underline xterm.c draws (`x-use-underline-position-properties').
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FontUnderline {
+    pub position: i32,
+    pub thickness: i32,
+}
+
+impl Default for FontUnderline {
+    fn default() -> Self { Self { position: -1, thickness: 0 } }
+}
+
+impl FontUnderline {
+    /// A scalable font's metrics, POSITION and THICKNESS already in pixels:
+    /// ftcrfont_open raises a line thicker than 2 pixels by half its
+    /// thickness.
+    pub fn scaled(position: i32, thickness: i32) -> Self {
+        Self { position: if thickness > 2 { position - thickness / 2 } else { position }, thickness }
+    }
 }
 
 /// Resolved font table carried by frame state, keyed by [`ResolvedFontId`].

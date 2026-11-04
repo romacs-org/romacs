@@ -155,6 +155,14 @@ impl SyntaxSource {
     pub(crate) fn table(&self) -> Value {
         self.table
     }
+    /// This source for an engine whose first byte is byte BASE of the
+    /// subject.
+    pub(crate) fn rebased(mut self, base: usize) -> Self {
+        if let Some(subject) = &mut self.subject {
+            subject.base = base;
+        }
+        self
+    }
 }
 
 /// A string or buffer whose `syntax-table' properties a search reads, and

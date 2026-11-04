@@ -2,19 +2,19 @@ use romacs_display_protocol::{Color, FrameGlyph, GlyphRowRole};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 fn scene() -> WindowSnapshot {
-    WindowSnapshot {
+    WindowSnapshot { underline_rules: Default::default(),
         id: 1,
         width: 100,
         height: 60,
         start_byte: 0,
         point_byte: 0,
         buffer_version: 1,
-        text: TextSlice {
+        text: TextSlice { extends: vec![],
             utf8: "body\nnext\nlast".into(),
             face_runs: vec![],
             raw: vec![],
         },
-        mode_line: Some(TextSlice {
+        mode_line: Some(TextSlice { extends: vec![],
             raw: vec![],
             utf8: "g1 Ω v=0".into(),
             face_runs: vec![FaceRun {
@@ -23,21 +23,21 @@ fn scene() -> WindowSnapshot {
             }],
         }),
         mode_line_face: FaceHandle(1), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], line_numbers: None, chrome: Default::default(),
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         faces: vec![
-            Face {
+            Face { decor: Default::default(),
                 foreground: [255; 3],
                 background: [0; 3],
                 family: "Liberation Mono".into(),
                 pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
-            Face {
+            Face { decor: Default::default(),
                 foreground: [255; 3],
                 background: [0, 0, 255],
                 family: "Liberation Mono".into(),
                 pixel_size: 20.0, weight: 400, italic: false, width: 5,
             },
-            Face {
+            Face { decor: Default::default(),
                 foreground: [255, 0, 0],
                 background: [0, 255, 0],
                 family: "Liberation Mono".into(),
@@ -225,7 +225,7 @@ fn empty_band_still_reserves_height_and_none_preserves_body() {
 #[test]
 fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
     let mut header = scene();
-    header.header_line = Some(TextSlice { utf8: "head".into(), face_runs: vec![], raw: vec![] });
+    header.header_line = Some(TextSlice { extends: vec![], utf8: "head".into(), face_runs: vec![], raw: vec![] });
     header.header_line_face = FaceHandle(1);
     header.mode_line = None;
     let mut below = scene();

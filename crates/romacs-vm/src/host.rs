@@ -2239,6 +2239,13 @@ pub fn catch_isolate_signals() -> io::Result<()> {
 pub fn interrupt_pending() -> bool {
     INTERRUPT.load(std::sync::atomic::Ordering::Relaxed) || TERMINATE.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// What the engine's safepoints poll: an interrupt or termination, or a
+/// user signal that arrived since one last looked, which may be a debug
+/// event (`Vm::take_debug_event'). Three relaxed loads.
+#[inline(always)]
+pub fn safepoint_pending() -> bool {
+    interrupt_pending() || USER_SIGNAL_ARRIVED.load(std::sync::atomic::Ordering::Relaxed)
+}
 /// keyboard.c handle_user_signal: SIGUSR1 and SIGUSR2 are input, counted
 /// here until read as `sigusr1' and `sigusr2' events, never the end of the
 /// process. An isolate worker gives SIGUSR1 its own meaning afterwards
@@ -2248,9 +2255,38 @@ static USER_SIGNALS: [std::sync::atomic::AtomicU32; 2] =
 /// In the order store_user_signal_events reads them: GNU's list holds
 /// SIGUSR2 first, the one registered last.
 const USER_SIGNAL_EVENTS: [(libc::c_int, &str); 2] = [(libc::SIGUSR2, "sigusr2"), (libc::SIGUSR1, "sigusr1")];
+/// A user signal arrived since a safepoint last looked: it may name
+/// `debug-on-event', which GNU's handler acts on at once
+/// (`Vm::take_debug_event').
+static USER_SIGNAL_ARRIVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 extern "C" fn note_user_signal(signal: libc::c_int) {
+    use std::sync::atomic::Ordering;
     let index = usize::from(signal == libc::SIGUSR1);
-    USER_SIGNALS[index].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    USER_SIGNALS[index].fetch_add(1, Ordering::SeqCst);
+    USER_SIGNAL_ARRIVED.store(true, Ordering::SeqCst);
+    // A waiting session wakes to read it, as GNU's select returns on a
+    // signal; write(2) is async-signal-safe, and the end is non-blocking.
+    let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
+    if fd >= 0 { let _ = unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) }; }
+}
+/// Forget that a user signal arrived: the safepoints stop asking.
+pub fn clear_user_signal_arrival() {
+    USER_SIGNAL_ARRIVED.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+/// The user signal events, in USER_SIGNAL_EVENTS's order: bit I of a mask
+/// is the Ith.
+pub const USER_SIGNAL_NAMES: [&str; 2] = [USER_SIGNAL_EVENTS[0].1, USER_SIGNAL_EVENTS[1].1];
+/// Whether a user signal of MASK is pending: one relaxed load each, for a
+/// native probe (a search, a process wait) to stop for a debug event.
+#[inline]
+pub fn user_signal_waiting(mask: u8) -> bool {
+    USER_SIGNALS.iter().enumerate().any(|(i, count)| mask & 1 << i != 0 && count.load(std::sync::atomic::Ordering::Relaxed) != 0)
+}
+/// Take one pending user signal of each event in MASK: whether any was.
+pub fn take_user_signals(mask: u8) -> bool {
+    USER_SIGNALS.iter().enumerate().filter(|&(i, count)| {
+        mask & 1 << i != 0 && count.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
+    }).count() != 0
 }
 pub fn catch_user_signals() -> io::Result<()> {
     for (signal, _) in USER_SIGNAL_EVENTS {
@@ -2304,7 +2340,8 @@ pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
 
 /// The SIGTERM or SIGHUP noted and not yet taken, else 0.
 static TERMINATION: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-/// The write end of the pipe the handler wakes `catch_termination_signals''s thread with.
+/// The write end of the pipe the termination and user-signal handlers wake
+/// `catch_termination_signals''s thread with.
 static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 extern "C" fn note_termination(signal: libc::c_int) {
@@ -2322,6 +2359,9 @@ extern "C" fn note_termination(signal: libc::c_int) {
 pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> io::Result<()> {
     use std::os::fd::IntoRawFd;
     let (reader, writer) = pipe()?;
+    // The handlers never block: a full pipe already holds a wake. A new
+    // pipe's end has no other status flag to keep.
+    status(unsafe { libc::fcntl(std::os::fd::AsRawFd::as_raw_fd(&writer), libc::F_SETFL, libc::O_NONBLOCK) })?;
     TERMINATION_PIPE.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
     std::thread::Builder::new().name("romacs-signals".into()).spawn(move || {
         let mut byte = 0u8;

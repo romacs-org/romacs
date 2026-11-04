@@ -83,6 +83,22 @@ lines, by a screen-full when N is nil or `-', in DIRECTION (1 up, -1 down)."
           ((>= lines (- limit margin)) (setq lines (- limit margin 1))))
     (vertical-motion (cons romacs--scroll-preserve-hpos lines) window)))
 
+(defun romacs--point-visible-p (window lines)
+  "Whether point shows in WINDOW, as `pos-visible-in-window-p' tells; where
+the host's layout cannot measure that, whether it lies within WINDOW's
+LINES screen lines from its start, as on a terminal frame."
+  (condition-case err
+      (pos-visible-in-window-p (point) window)
+    (error
+     (unless (and (stringp (car (cdr err))) (string-match "\\`VM2 window-text-pixel-size " (car (cdr err))))
+       (signal (car err) (cdr err)))
+     ;; Where the motion stops short of LINES rows, at the end of the
+     ;; buffer, that end shows too.
+     (let* ((start (window-start window)) (pt (point))
+            (end (save-excursion (goto-char start) (cons (vertical-motion lines window) (point)))))
+       (and (>= pt start)
+            (if (< (car end) lines) (<= pt (cdr end)) (< pt (cdr end))))))))
+
 (defun romacs--window-scroll (window n whole)
   "window.c window_scroll_line_based: scroll WINDOW N lines, or N
 screen-fulls when WHOLE, keeping point in view."
@@ -99,7 +115,7 @@ screen-fulls when WHOLE, keeping point in view."
           (setq romacs--scroll-preserve-vpos (cdr at)
                 romacs--scroll-preserve-hpos (+ (car at) (window-hscroll window)))))
       (setq original (cons romacs--scroll-preserve-hpos romacs--scroll-preserve-vpos)))
-    (unless (pos-visible-in-window-p (point) window)
+    (unless (romacs--point-visible-p window ht)
       (vertical-motion (- (/ ht 2)) window)
       (setq start (point)))
     (goto-char start)
