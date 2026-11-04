@@ -97,21 +97,27 @@ much of it its deltas wrote.")
       (setq depth (1+ depth) parent (gethash parent tools)))
     depth))
 
+(defun romacs-agent-ui--sealed (text)
+  "TEXT as the transcript holds it: read-only, and passing none of its
+properties to text typed after it (the composer), so no fold, face or
+mark of the transcript's end hides or styles what is typed there."
+  (let ((text (copy-sequence text)))
+    (add-text-properties 0 (length text) '(read-only t front-sticky (read-only) rear-nonsticky t) text)
+    text))
+
 (defun romacs-agent-ui--insert-at (position text)
-  "Insert TEXT at POSITION in the transcript.  At its end, before the end
-marker and every marker there (the composer, a window's point at the
-composer, follow the transcript); a row's mark or a message's start is
-always taken after its own text is in."
+  "Insert TEXT, sealed, at POSITION in the transcript.  At its end, before
+the end marker and every marker there (the composer, a window's point at
+the composer, follow the transcript); a row's mark or a message's start
+is always taken after its own text is in."
   (save-excursion
-    (let ((inhibit-read-only t))
+    (let ((inhibit-read-only t) (text (romacs-agent-ui--sealed text)))
       (goto-char position)
       (if (= position romacs-agent-ui--end) (insert-before-markers text) (insert text)))))
 
 (defun romacs-agent-ui--insert (text &rest properties)
-  "Insert TEXT at the transcript's end with PROPERTIES, read-only."
-  (romacs-agent-ui--insert-at romacs-agent-ui--end
-                              (apply #'propertize text 'read-only t 'front-sticky '(read-only) 'rear-nonsticky '(read-only)
-                                     properties)))
+  "Insert TEXT at the transcript's end with PROPERTIES, sealed."
+  (romacs-agent-ui--insert-at romacs-agent-ui--end (apply #'propertize text properties)))
 
 (defun romacs-agent-ui--line (session event text &rest properties)
   "Start a new row for EVENT, indented by its nesting."
@@ -168,15 +174,14 @@ always taken after its own text is in."
                ;; The mark settles; the row recedes (hermes-chat--entry-head-face).
                (goto-char mark)
                (delete-char 1)
-               (insert (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-done)
-                                   'read-only t 'front-sticky '(read-only)))
+               (insert (romacs-agent-ui--sealed
+                        (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-done))))
                (add-face-text-property (point) (line-end-position) (if failed 'romacs-agent-error 'romacs-agent-dim))
                (forward-line 1))
              (unless (string-empty-p (string-trim output))
                (romacs-agent-ui--insert-at
                 (point) (propertize (concat (string-trim-right output) "\n")
-                                    'face 'romacs-agent-dim 'read-only t 'front-sticky '(read-only)
-                                    'rear-nonsticky '(read-only) 'romacs-agent-output id
+                                    'face 'romacs-agent-dim 'romacs-agent-output id
                                     'invisible 'romacs-agent-output))))))))))
 
 (defun romacs-agent-ui--message-end (id)
@@ -194,7 +199,7 @@ range its deltas wrote."
             (goto-char start)
             (delete-region start (+ start (length body)))
             (romacs-agent-ui--insert-at
-             start (propertize fontified 'read-only t 'front-sticky '(read-only) 'rear-nonsticky '(read-only)))))))
+             start fontified)))))
     (set-marker (car range) nil)))
 
 (defun romacs-agent-ui--footer (session event)
@@ -240,8 +245,8 @@ resize, over the turns' rules)."
                 (fill (max 0 (- width (string-width (buffer-substring (line-beginning-position) position))))))
             (delete-region position end)
             (goto-char position)
-            (insert (propertize (make-string fill ?─) 'face 'romacs-agent-rule 'romacs-agent-rule-fill t
-                                'read-only t 'front-sticky '(read-only) 'rear-nonsticky '(read-only)))
+            (insert (romacs-agent-ui--sealed
+                     (propertize (make-string fill ?─) 'face 'romacs-agent-rule 'romacs-agent-rule-fill t)))
             (setq position (point))))))
     (romacs-agent-ui--composer-update)))
 
@@ -453,6 +458,7 @@ or a repeat."
     (define-key map (kbd "RET") #'romacs-agent-chat-return)
     (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
     (define-key map (kbd "DEL") #'romacs-agent-chat-delete-backward)
+    (define-key map [remap self-insert-command] #'romacs-agent-chat-self-insert)
     (define-key map (kbd "C-c C-c") #'romacs-agent-chat-interrupt)
     (define-key map (kbd "C-c C-k") #'romacs-agent-chat-stop)
     (define-key map (kbd "C-c C-r") #'romacs-agent-chat-resume)
@@ -477,6 +483,7 @@ or a repeat."
   (setq-local scroll-conservatively 101)
   ;; The hint shows exactly while the composer is empty.
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
+  (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
   ;; Shown again while its turn runs: the live rule ticks again.
   (add-hook 'window-buffer-change-functions #'romacs-agent-ui--shown-again nil t))
@@ -581,6 +588,24 @@ harness's own transcript it was imported from, when it was."
         (romacs-agent-send romacs-agent-ui--session text)
         (push text romacs-agent-ui--history)
         (delete-region romacs-agent-ui--end (point-max))))))
+
+(defun romacs-agent-ui--composer-plain (beg end _length)
+  "Text typed or yanked into the composer is plain: whatever it inherited
+or brought, nothing hides or styles it."
+  (when (and (markerp romacs-agent-ui--end) (< beg end) (>= beg romacs-agent-ui--end))
+    ;; Yanked transcript text arrives read-only; yank drops that only after this.
+    (let ((inhibit-modification-hooks t) (inhibit-read-only t)) (set-text-properties beg end nil))))
+
+(defun romacs-agent-chat-self-insert (n)
+  "Insert the typed character N times in the composer: typed in the
+transcript, it goes to the composer's end."
+  (interactive "p")
+  (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
+  (self-insert-command n))
+
+;; A selection in the composer is replaced by what is typed, as with
+;; `self-insert-command'.
+(put 'romacs-agent-chat-self-insert 'delete-selection 'delete-selection-uses-region-p)
 
 (defun romacs-agent-chat-delete-backward (n)
   "Delete N characters backward in the composer; at its start, nothing:
