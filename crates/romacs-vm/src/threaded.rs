@@ -1952,12 +1952,18 @@ fn isolate_quit(e: &mut Engine<'_>) -> bool {
 #[cold]
 #[inline(never)]
 fn poll_collect(e: &mut Engine<'_>) {
+    poll_collect_unless_key(e, false);
+}
+/// Collect, or with UNTIL_KEY stop while marking once a key press is queued
+/// (`Vm::collect_until_key'): whether it collected.
+fn poll_collect_unless_key(e: &mut Engine<'_>, until_key: bool) -> bool {
     // Forward in place without moving instruction buffers: suspended PCs and
     // entry pointers stay valid.
     let roots = e.suspend_code();
     debug_assert!(e.vm.may_collect(0), "collecting while a frame holds untraced Values");
-    e.vm.collect(&mut []);
+    let collected = e.vm.collect_until_key(&mut [], until_key);
     e.resume_code(roots);
+    collected
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need
@@ -2871,6 +2877,12 @@ unsafe fn take_step(
                     *r.add((*pc).a) = Value::NIL;
                     return Continue::At(r, pc.add(1));
                 }
+            }
+            Ok(prim::Step::CollectIdle) => {
+                leave_native(e);
+                let collected = e.vm.may_collect(1) && poll_collect_unless_key(e, true);
+                *r.add((*pc).a) = if collected { Value::TRUE } else { Value::NIL };
+                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);

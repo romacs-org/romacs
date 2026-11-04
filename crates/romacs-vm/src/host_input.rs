@@ -60,6 +60,12 @@ pub trait HostInput {
     /// True when an event is already queued. GNU's `read_char' does not
     /// redisplay while input is pending (keyboard.c, `detect_input_pending').
     fn input_pending(&mut self) -> bool;
+    /// True when a key press is queued: what ends an idle collection while
+    /// it is still marking (`Vm::collect_garbage_until_key'). A host that
+    /// cannot tell keys from other events answers whether any is queued.
+    fn key_pending(&mut self) -> bool {
+        self.input_pending()
+    }
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
     fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;

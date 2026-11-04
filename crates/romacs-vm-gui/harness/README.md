@@ -345,6 +345,26 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+## Typing while background work allocates (`gc_typing_live.py`)
+
+Key latency against collections: one isolated `-Q --loadup` session with
+org, eshell, dired and cc-mode loaded, a timer allocating as an agent's
+stream does (`--rate` heap units a second), and 400 keys typed in bursts
+with pauses (a fixed schedule from `--seed`), into the visited file or,
+with `--prompt`, into a `read-string` prompt. A key's latency runs from
+just before it is typed to its command's end, by the wall clock; a key met
+a collection when it overlaps one (`gcs-done` and `gc-elapsed` from a
+`post-command-hook`) and took 50 ms or more. It reports the latency
+percentiles, the collections, the keys that met one and the worst of
+those, and refuses a run whose keys and records do not match. `--setup`
+evaluates more Lisp with the setup, such as a variant's
+`romacs-gc-idle-delay`.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/gc_typing_live.py --binary BIN --output DIR \
+  [--prompt] [--seed N] [--tools LABWC-DIR:WLR-RANDR-DIR]   # about 3 minutes
+```
+
 # Driving Romacs through its MCP tools (`romacs_mcp_client.py`)
 
 A live harness can drive a Romacs session the way an agent does, through
