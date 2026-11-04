@@ -64,6 +64,8 @@
     ;; toasts (romacs-eval-chip.el, DIVERGENCES.md VM2-ECHO-LAYER).
     ,@(and window-system (fboundp 'romacs-complete-mode) (fboundp 'romacs-eval-chip-mode)
            '((romacs-eval-chip-mode t)))
+    ;; The keys of an active transient map (repeat-mode's) as hints.
+    ,@(and window-system (fboundp 'romacs-popup-hints-mode) '((romacs-popup-hints-mode t)))
     ;; Romacs's mode line (romacs-mode-line.el, DIVERGENCES.md VM2-MODE-LINE).
     ,@(and window-system (fboundp 'romacs-mode-line-mode) '((romacs-mode-line-mode t))))
   "Romacs's standard value for each completion option, in the order set.")

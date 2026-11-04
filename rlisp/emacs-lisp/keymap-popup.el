@@ -1725,6 +1725,7 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
 ;; mode-line text becomes its first row; the layer's window has no mode line.
 
 (declare-function romacs-popup-show "romacs-popup" (kind buffer &rest args))
+(defvar romacs-popup-hints-inhibit)
 (declare-function romacs-popup-hide "romacs-popup" (buffer))
 
 (defun keymap-popup--show-layer (buf)
@@ -2457,9 +2458,11 @@ Use ACTIVE instead of deriving the initial navigation state when non-nil."
                    (plist-get active :exit-key))))
     (keymap-popup--set-active buf :wrapper-map wrapper)
     (let ((exit-function
-           (set-transient-map wrapper
-                              (keymap-popup--make-keep-pred buf)
-                              (keymap-popup--make-on-exit buf))))
+           ;; The popup shows these keys itself: no hints of them (Romacs).
+           (let ((romacs-popup-hints-inhibit t))
+             (set-transient-map wrapper
+                                (keymap-popup--make-keep-pred buf)
+                                (keymap-popup--make-on-exit buf)))))
       (when (buffer-live-p buf)
         (keymap-popup--set-active buf :exit-function exit-function)))))
 

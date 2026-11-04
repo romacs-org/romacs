@@ -223,6 +223,104 @@ fn menus_share_one_look_and_motion() {
         report.push(printed(&mut vm, "(let ((buf (keymap-popup--popup-buffer)))
             (with-current-buffer buf (text-mode)) (kill-buffer buf)
             (= (hash-table-count romacs-layer--frames) chip-layers))"));
+        // Hints: the innermost registered map of `overriding-terminal-local-map'
+        // is the target; an inner map's exit gives the outer back; an inhibited
+        // or ignored map, or any while a panel shows, has none.
+        report.push(printed(&mut vm, "(let* ((outer (define-keymap \"a\" #'forward-char)) (inner (define-keymap \"b\" #'backward-char))
+                 (exit-outer (set-transient-map outer t)) (exit-inner (set-transient-map inner t))
+                 (r (list (eq (romacs-popup--hint-target) inner))))
+            (funcall exit-inner) (push (eq (romacs-popup--hint-target) outer) r)
+            (let ((romacs-popup-hints-inhibit t)) (setq exit-inner (set-transient-map (define-keymap \"c\" #'ignore) t)))
+            (push (eq (romacs-popup--hint-target) outer) r) (funcall exit-inner)
+            (setq exit-inner (set-transient-map universal-argument-map t)) (push (eq (romacs-popup--hint-target) outer) r) (funcall exit-inner)
+            (romacs-popup-which-key-show '(1 . 40)) (push (romacs-popup--hint-target) r) (romacs-popup-which-key-hide)
+            (push (eq (romacs-popup--hint-target) outer) r)
+            (funcall exit-outer) (push (romacs-popup--hint-target) r)
+            (nreverse r))"));
+        // Labels: one traversal; a closure by its doc's first line, a prefix as
+        // +…, a range split around the keys a child rebinds, remaps left out.
+        report.push(printed(&mut vm, "(let* ((parent (make-keymap)) (child (make-sparse-keymap)))
+            (define-key parent [remap undo] #'ignore)
+            (set-char-table-range (nth 1 parent) '(?a . ?e) #'self-insert-command)
+            (set-keymap-parent child parent)
+            (define-key child \"c\" nil) (define-key child \"x\" (lambda () \"Do the thing.\nMore.\" (interactive)))
+            (define-key child \"p\" (make-sparse-keymap)) (define-key child \"w\" #'windmove-left)
+            (mapcar (lambda (e) (cons (car e) (string-to-multibyte (cdr e)))) (romacs-popup--hint-entries child)))"));
+        // A hint shows the map's keys at the selected window's bottom left; its
+        // MESSAGE's toast is retired, and the MESSAGE claimed while it shows.
+        vm.eval_source("(defvar chip-hint-hidden nil)").unwrap();
+        report.push(printed(&mut vm, "(let* ((map (define-keymap \"<left>\" #'indent-rigidly-left \"<right>\" #'indent-rigidly-right))
+                 (exit (set-transient-map map t nil \"Indent with %k\")))
+            (romacs-layer-toast (current-message))
+            (romacs-popup--hints-show map)
+            (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf)) (e (window-edges nil t nil t)))
+              (prog1 (list (frame-parameter f 'romacs-popup-kind) (frame-visible-p f)
+                           (with-current-buffer buf (buffer-string))
+                           (< (nth 0 e) (car (frame-position f))) (< (+ (cdr (frame-position f)) (frame-pixel-height f)) (nth 3 e))
+                           (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts)
+                           (romacs-popup--hints-claim (current-message)))
+                (funcall exit) (romacs-popup--hints-reconcile)
+                (push (frame-visible-p f) chip-hint-hidden))))"));
+        report.push(printed(&mut vm, "chip-hint-hidden"));
+        report.push(printed(&mut vm, "(let ((map (define-keymap \"o\" #'other-window \"O\" #'ignore)) r)
+            (let ((romacs-popup-hints-mode nil)) (romacs-popup-repeat-echo map)
+              (push (and romacs-mode-line-repeat (string-match-p \"o O\" romacs-mode-line-repeat) \"\") r))
+            (romacs-popup-repeat-echo nil) (romacs-popup-repeat-echo map) (push romacs-mode-line-repeat r)
+            (nreverse r))"));
+        // A range binds what the first map in the traversal binds it to:
+        // a child's range over its parent's key, overlapping inherited
+        // ranges once, and single keys amid function keys.
+        report.push(printed(&mut vm, "(let* ((parent (define-keymap \"c\" #'forward-char)) (child (make-keymap))
+                 (grand (make-keymap)) (mixed (make-sparse-keymap)) (base (make-keymap)))
+            (set-char-table-range (nth 1 child) '(?a . ?e) #'backward-char)
+            (set-char-table-range (nth 1 grand) '(?c . ?h) #'ignore)
+            (set-keymap-parent parent grand) (set-keymap-parent child parent)
+            (set-char-table-range (nth 1 base) '(?a . ?e) #'undo)
+            (define-key mixed \"d\" #'forward-char) (define-key mixed [f1] #'ignore)
+            (define-key mixed \"b\" #'backward-char) (define-key mixed [f2] #'ignore)
+            (set-keymap-parent mixed base)
+            (mapcar (lambda (map) (mapcar (lambda (e) (cons (car e) (string-to-multibyte (cdr e)))) (romacs-popup--hint-entries map)))
+                    (list child mixed)))"));
+        // The hints follow `overriding-terminal-local-map' set directly
+        // (isearch replaces and restores it), a toggle of the mode, the
+        // pause's own timer, and the selected window.
+        report.push(printed(&mut vm, "(let* ((map (define-keymap \"o\" #'other-window)) (exit (set-transient-map map t))
+                 (f (romacs-layer--frame-of (romacs-popup--hints-buffer))) r)
+            (romacs-popup--hints-show map)
+            (setq romacs-popup--hints-scheduled nil)
+            (let ((saved overriding-terminal-local-map))
+              (setq overriding-terminal-local-map (define-keymap \"s\" #'ignore))
+              (push romacs-popup--hints-scheduled r) (romacs-popup--hints-reconcile)
+              (push (list (romacs-popup--hint-target) romacs-popup--hints-shown (frame-visible-p f) romacs-popup--hints-pending) r)
+              (setq overriding-terminal-local-map saved)
+              (push romacs-popup--hints-scheduled r) (romacs-popup--hints-reconcile)
+              (push (eq (car romacs-popup--hints-pending) map) r))
+            (romacs-popup-hints-mode -1) (push romacs-popup--hints-pending r)
+            (romacs-popup-hints-mode 1) (push (eq (car romacs-popup--hints-pending) map) r)
+            (romacs-popup--hints-cancel) (romacs-popup--hints-due map)
+            (push (list (eq romacs-popup--hints-shown map) romacs-popup--hints-pending) r)
+            (let ((other (split-window-right)))
+              (select-window other) (romacs-popup--hints-reconcile)
+              (push (list (eq (car romacs-popup--hints-place) other)
+                          (>= (car (frame-position f)) (nth 0 (window-edges other t nil t)))
+                          (and (memq #'romacs-popup--hints-follow window-selection-change-functions) t))
+                    r)
+              (delete-window other))
+            (funcall exit) (romacs-popup--hints-reconcile)
+            (push (list romacs-popup--hints-shown (memq #'romacs-popup--hints-follow window-selection-change-functions)) r)
+            (nreverse r))"));
+        // A panel's buffer killed leaves the panels.
+        report.push(printed(&mut vm, "(let ((buffer (get-buffer-create \" chip-panel\")))
+            (with-current-buffer buffer (insert \"x\"))
+            (romacs-popup-show 'panel buffer :lines 1)
+            (list (gethash buffer romacs-popup--panels) (progn (kill-buffer buffer) (gethash buffer romacs-popup--panels))))"));
+        // `read-key' binds the map around each read: with no hints shown or
+        // due and registered maps kept, those bindings schedule nothing.
+        report.push(printed(&mut vm, "(let ((map (define-keymap \"z\" #'ignore)))
+            (funcall (set-transient-map map)) (romacs-popup--hints-reconcile)
+            (setq romacs-popup--hints-scheduled nil)
+            (dotimes (_ 5) (let ((overriding-terminal-local-map (make-sparse-keymap))) (ignore)))
+            (list (and (gethash map romacs-popup--hint-maps) t) romacs-popup--hints-shown romacs-popup--hints-pending romacs-popup--hints-scheduled))"));
         report
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
@@ -259,5 +357,15 @@ fn menus_share_one_look_and_motion() {
         "(t panel 1 t)",
         "(nil t)",
         "t",
+        "(t t t t nil t nil)",
+        "((\"w\" . \"left\") (\"p\" . \"+…\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
+        "(hints t \"<right> indent-rigidly-right   <left> indent-rigidly-left\" t t nil t)",
+        "(nil)",
+        // The status bar's repeat segment: the keys without hints, nothing with them.
+        "(\"\" nil)",
+        "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"<f1>\" . \"ignore\") (\"d\" . \"forward-char\") (\"a\" . \"undo\") (\"c\" . \"undo\") (\"e\" . \"undo\")))",
+        "(t (nil nil nil nil) t t nil t (t nil) (t t t) (nil nil))",
+        "(t nil)",
+        "(t nil nil nil)",
     ]);
 }

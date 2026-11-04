@@ -30,7 +30,7 @@
 `center': a box centred on the frame.
 `point': below point in the selected window.
 A caller may also give `romacs-layer-show' (at WINDOW POS): after POS on
-its row in WINDOW."
+its row in WINDOW; or (window-bottom WINDOW): at the bottom left of its text."
   :type '(choice (const bottom) (const center) (const point)))
 
 (defcustom romacs-layer-animation t
@@ -167,6 +167,11 @@ text size, in pixels."
          (list (+ inset (/ (- frame-width width) 2)) (+ inset (/ (- (frame-text-height root) outer-height) 2)) width height)))
       (`(at ,window ,pos)
        (romacs-layer--after window pos width height border))
+      (`(window-bottom ,window)
+       ;; At the bottom left of WINDOW's text, a margin inside it.
+       (pcase-let ((`(,left ,_ ,right ,bottom) (window-edges window t nil t)))
+         (let ((width (min width (- right left 24 (* 2 border)))))
+           (list (+ left 12) (- bottom 12 outer-height) (max cw width) height))))
       ('point
        (let* ((edges (window-edges nil t nil t))
               (posn (posn-x-y (posn-at-point)))

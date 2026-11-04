@@ -423,6 +423,21 @@ whole buffer shows (GNU's `All' is dropped)."
   "The point the segments after it are laid out from the right edge."
   :format " ")
 
+(defvar romacs-mode-line-repeat nil
+  "The keys a pending repeat takes, as the status bar shows them, or nil:
+set by `romacs-popup-repeat-echo' where hints do not show them.")
+
+(defun romacs-mode-line-repeat-text (map)
+  "MAP's keys after the keyboard glyph, as the repeat segment shows them."
+  (let (keys)
+    (map-keymap (lambda (event binding) (when (and binding (not (consp event))) (push (key-description (vector event)) keys))) map)
+    (concat (or (romacs-mode-line--icon 'keyboard) "") (string-join (nreverse keys) " ") " ")))
+
+(romacs-mode-line-define-segment repeat
+  "The keys a pending repeat takes, where hints do not show them."
+  :priority 60
+  :format ("" romacs-mode-line-repeat))
+
 (romacs-mode-line-define-segment misc
   "What packages and the user add (`mode-line-misc-info', with
 `global-mode-string': the time, a clock, a timer)."
@@ -594,7 +609,7 @@ mode-line constructs."
   :set #'romacs-mode-line--set-layout)
 
 (defcustom romacs-mode-line-right
-  '(misc lsp encoding major-mode vc diagnostics)
+  '(repeat misc lsp encoding major-mode vc diagnostics)
   "The mode line's segments laid out from the right edge."
   :type '(repeat sexp)
   :set #'romacs-mode-line--set-layout)

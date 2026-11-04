@@ -511,6 +511,73 @@ thousandth a stack mark."
   :body (progn (romacs-popup-key-grid (cdr it) 160)
                (with-current-buffer (car it) (insert "x"))))
 
+;; One `set-transient-map' activation and exit at depth 1 with N other
+;; maps registered (retained by the setup): the hints' registration and
+;; reconcile do the same work whatever N is.
+(scaling-probe menu-hints-activate :gui t :n 100 :steps 10
+  :setup (let ((maps (mapcar (lambda (_) (define-keymap "a" #'ignore)) (make-list n nil))))
+           (dolist (map maps) (funcall (set-transient-map map)))
+           (cons (switch-to-buffer (get-buffer-create "scaling-hints")) maps))
+  :body (progn (funcall (set-transient-map (define-keymap "b" #'ignore)))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a map of N bindings whose sparse child rebinds or
+;; unbinds half of them: one traversal, a seen-key hash, no lookup per key.
+(scaling-probe menu-hints-keys :gui t :n 400 :steps 1
+  :setup (let ((parent (make-sparse-keymap)) (child (make-sparse-keymap)))
+           (dotimes (i n) (define-key parent (vector (+ #x1000 i)) #'ignore))
+           (dotimes (i (/ n 2)) (define-key child (vector (+ #x1000 (* 2 i))) (and (cl-oddp i) #'forward-char)))
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-keys")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a child of N character ranges over a parent of 2N
+;; keys inside and beside them and a grandparent of N ranges overlapping
+;; them all: each interval painted once over the sorted bounds, never a
+;; scan of the keys per range.
+(scaling-probe menu-hints-ranges :gui t :n 200 :steps 1
+  :setup (let ((grand (make-keymap)) (parent (make-sparse-keymap)) (child (make-keymap)))
+           (dotimes (i n)
+             (let ((lo (+ #x1000 (* 10 i))))
+               (set-char-table-range (nth 1 child) (cons lo (+ lo 3)) (if (cl-oddp i) #'forward-char #'backward-char))
+               (define-key parent (vector (+ lo 1)) #'ignore)
+               (define-key parent (vector (+ lo 5)) #'ignore)
+               (set-char-table-range (nth 1 grand) (cons (+ lo 2) (+ lo 7)) (if (cl-oddp i) #'undo #'redo))))
+           (set-keymap-parent parent grand)
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-ranges")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; The hint target after N panels shown and their buffers killed: a
+;; killed panel leaves the registry, so the target asks about none.
+(scaling-probe popup-panels-cycle :gui t :n 20 :steps 10
+  :setup (progn (dotimes (i n)
+                  (let ((buffer (get-buffer-create (format " scaling-panel-%d" i))))
+                    (with-current-buffer buffer (insert "x"))
+                    (romacs-popup-show 'panel buffer :lines 1)
+                    (kill-buffer buffer)))
+                (set-transient-map (define-keymap "a" #'ignore) t)
+                (switch-to-buffer (get-buffer-create "scaling-panels")))
+  :body (progn (romacs-popup--hint-target)
+               (with-current-buffer it (insert "x"))))
+
+;; One of N panels kept shown hidden and shown again: the panel registry
+;; adds and removes it in O(1), the hint target stops at the first shown.
+(scaling-probe popup-panels-kept :gui t :n 10 :steps 10
+  :setup (let (buffers)
+           (dotimes (i n)
+             (let ((buffer (get-buffer-create (format " scaling-kept-panel-%d" i))))
+               (with-current-buffer buffer (insert "x"))
+               (romacs-popup-show 'panel buffer :lines 1)
+               (push buffer buffers)))
+           ;; An active map, so the hint target asks about the panels.
+           (set-transient-map (define-keymap "a" #'ignore) t)
+           (cons (switch-to-buffer (get-buffer-create "scaling-kept-panels")) (car (last buffers))))
+  :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
+               (with-current-buffer (car it) (insert "x"))))
+
 ;; Clearing N toasts (the echo area's clearing at the next command) with N
 ;; more layers kept hidden: each toast hidden once, no restacking per
 ;; toast, its layer found without a walk over the kept ones.

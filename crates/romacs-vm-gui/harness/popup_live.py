@@ -198,6 +198,22 @@ LAYER_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
 '''
 
 
+REPEAT_INIT = '''(repeat-mode 1)
+(split-window-right)
+(defun popup-live--state ()
+  (write-region (prin1-to-string (list :command (and (symbolp this-command) (symbol-name this-command))
+                                       :window (format "%S" (selected-window))
+                                       :repeat (and repeat-in-progress (symbol-name repeat-in-progress))
+                                       :hints (and (bound-and-true-p romacs-popup--hints-shown) t)
+                                       :bar-repeat (bound-and-true-p romacs-mode-line-repeat)
+                                       :hint-window (and (bound-and-true-p romacs-popup--hints-place)
+                                                         (format "%S" (car romacs-popup--hints-place)))))
+                nil {state} nil 'quiet))
+(add-hook 'post-command-hook #'popup-live--state 90)
+(advice-add 'romacs-popup--hints-show :after (lambda (&rest _) (popup-live--state)))
+'''
+
+
 WHICH_KEY_INIT = '''(require 'which-key)
 (setq which-key-popup-type 'custom
       which-key-custom-show-popup-function #'romacs-popup-which-key-show
@@ -226,6 +242,46 @@ WHICH_KEY_INIT = '''(require 'which-key)
      nil {state} nil (quote quiet))))
 (advice-add 'romacs-popup-which-key-show :after #'popup-live--record)
 '''
+
+
+def check_repeat(args, output, report, env, process, state, keys, glyphs):
+    """C-x o in a split frame: repeat-mode's map shows as hints of its keys
+    in a layer (and not also in the status bar); a bare o repeats
+    other-window with the hints still shown; another key ends the repeat
+    and the hints go."""
+    def hint_rows():
+        return [text for _, text, _ in rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text') if 'other-window' in text]
+
+    def read():
+        return read_plist(state.read_text()) if state.exists() else {}
+
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'o')
+    fio.wait(lambda: read().get('repeat') == 'other-window-repeat-map', args.timeout, 'repeat after C-x o', process)
+    first = read()
+    fio.wait(lambda: hint_rows(), args.timeout, 'hints after C-x o', process)
+    time.sleep(.5)
+    fio.shot(output / 'hints.png', env, report)
+    shown = read()
+    report['captures'].append({'name': 'hints', 'rows': hint_rows(), 'state': shown})
+    if shown.get('bar-repeat'):
+        raise AssertionError(f"the status bar shows the repeat too: {shown['bar-repeat']!r}")
+    state.unlink()
+    keys('o')
+    fio.wait(lambda: read().get('command') == 'other-window', args.timeout, 'o repeats other-window', process)
+    again = read()
+    if again['window'] == first['window'] or again.get('repeat') != 'other-window-repeat-map':
+        raise AssertionError(f'o did not repeat: {first} then {again}')
+    fio.wait(lambda: hint_rows(), args.timeout, 'hints after the repeat', process)
+    # The hints follow the selection into the window o selected.
+    fio.wait(lambda: read().get('hint-window') == again['window'], args.timeout, 'hints in the selected window', process)
+    state.unlink()
+    keys('-M', 'ctrl', 'f', '-m', 'ctrl')
+    fio.wait(lambda: read().get('command') is not None, args.timeout, 'C-f', process)
+    fio.wait(lambda: not hint_rows(), args.timeout, 'hints gone after C-f', process)
+    done = read()
+    if done.get('repeat'):
+        raise AssertionError(f'repeat still in progress after C-f: {done}')
+    report['checks'].append({'hints': report['captures'][-1]['rows'], 'repeated': again['window'], 'ended': done.get('command')})
 
 
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
@@ -467,6 +523,7 @@ def main():
     parser.add_argument('--which-key', action='store_true', help="which-key's popup in a layer")
     parser.add_argument('--layer', action='store_true', help="keymap-popup's Romacs panel backend")
     parser.add_argument('--width', type=int, default=1280, help='the output width: a narrow one reflows the menu')
+    parser.add_argument('--repeat', action='store_true', help="repeat-mode's map as hints after C-x o")
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -483,7 +540,8 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else LAYER_INIT if args.layer else INIT
+            init = (REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
+                    else LAYER_INIT if args.layer else INIT)
             faces_state = work / 'popup-faces.el'
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
                                                                    faces=json.dumps(str(faces_state))) if args.layer else init.format(state=json.dumps(str(state))))
@@ -535,6 +593,11 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.repeat:
+                    time.sleep(1)
+                    check_repeat(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
                 if args.which_key:
                     time.sleep(1)
                     check_which_key(args, output, report, env, process, state, keys, glyphs)
