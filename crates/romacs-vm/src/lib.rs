@@ -1442,6 +1442,9 @@ pub struct Vm {
     /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
     /// collector reach them as they reach `execution`.
     spare_programs: Vec<threaded::Program>,
+    /// By argument count, the permanent function through which native code
+    /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
+    reader_trampolines: Vec<Option<usize>>,
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
@@ -1630,6 +1633,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     conditions,
     rooted,
     spread_reserve,
+    reader_trampolines,
     quit,
     force_quit_count,
     quit_slots,
@@ -1804,6 +1808,7 @@ impl Vm {
             spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
+            reader_trampolines: Vec::new(),
             closures: vec![],
             cells: vec![],
             cell_pairs: HashMap::default(),
@@ -1976,7 +1981,8 @@ impl Vm {
             .version
             .checked_add(1)
             .ok_or("function version overflow")?;
-        self.slots[slot].function = value;
+        let old = std::mem::replace(&mut self.slots[slot].function, value);
+        self.charge_definition(old, value);
         self.slots[slot].version = version;
         if is_macro {
             self.macros.insert(slot);

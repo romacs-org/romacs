@@ -225,6 +225,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
 
 
+;;; Generated autoloads from romacs-help.el
+
+(register-definition-prefixes "romacs-help" '("describe-" "help--describe-vector" "internal-describe-syntax-value" "romacs-help--" "text-char-description"))
+
+
 ;;; Generated autoloads from romacs-icons.el
 
 (register-definition-prefixes "romacs-icons" '("romacs-icon"))
@@ -242,7 +247,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-landing.el

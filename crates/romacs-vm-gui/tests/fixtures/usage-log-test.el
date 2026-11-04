@@ -103,17 +103,27 @@ with MS `open', COMMAND only starts."
          (lines (usage-log-test--logging file
                   (setq command-error-function (lambda (data _context _signal) (setq reported data)))
                   (romacs-usage-log--init-done)
-                  (let ((real-this-command 'find-file))
+                  (let ((real-this-command 'find-file) (major-mode 'text-mode))
                     (funcall command-error-function
                              '(file-missing "Opening input file" "No such file or directory" "/home/someone/secret.org")
                              "" nil))))
          (errors (usage-log-test--kind "error" lines)))
     (should (equal (car reported) 'file-missing))
     (should (equal errors
-                          '((:kind "error" :command "find-file"
+                          '((:kind "error" :command "find-file" :mode "text-mode"
                              :error "(file-missing . \"<file>\")"))))
     (should (member "init-done" (mapcar (lambda (line) (plist-get line :event))
                                                (usage-log-test--kind "session" lines))))))
+
+(ert-deftest usage-log-counts-layout-refusals-by-class-and-mode ()
+  (let* ((taken nil)
+         (lines (cl-letf (((symbol-function 'romacs--layout-refusals)
+                           (lambda () (prog1 (unless taken '(("VM2 window-text-pixel-size of composed text is unsupported" "emacs-lisp-mode" 3)))
+                                        (setq taken t)))))
+                  (usage-log-test--logging file nil))))
+    (should (equal (usage-log-test--kind "refusal" lines)
+                   '((:kind "refusal" :class "VM2 window-text-pixel-size of composed text is unsupported"
+                      :mode "emacs-lisp-mode" :n 3))))))
 
 (ert-deftest usage-log-scrubs-file-names-and-long-messages ()
   (dolist (text '("Cannot open ~/notes/a.org: denied" "No such file, /home/me/Private Notes/secret.txt"

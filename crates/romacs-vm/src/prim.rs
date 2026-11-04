@@ -104,6 +104,9 @@ pub(crate) type Then = fn(&mut Leaf<'_>, Value, &[Value]) -> Next;
 pub(crate) enum Step {
     /// Request collection at the engine's traced boundary, never inside a leaf.
     Collect,
+    /// The command loop's idle collection there (`Vm::collect_garbage_until_key'):
+    /// t when it collected, nil when held or abandoned for a key press.
+    CollectIdle,
     /// Return this value from the primitive.
     Done(Value),
     /// Establish non-unwinding signal handlers for the dynamic extent of BODY.
@@ -2362,7 +2365,7 @@ mod tests {
             Body::Leaf(f) => f(&mut cx, args),
             Body::Call(f) => match f(&mut cx, args)? {
                 Step::Done(v) => Ok(v),
-                Step::Call { .. } | Step::Handle { .. } | Step::Collect => panic!("expected immediate test result"),
+                Step::Call { .. } | Step::Handle { .. } | Step::Collect | Step::CollectIdle => panic!("expected immediate test result"),
             },
         }
     }

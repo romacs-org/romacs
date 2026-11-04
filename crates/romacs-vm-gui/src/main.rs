@@ -1536,6 +1536,10 @@ fn evaluate(
                     live_presentation.changed();
                     continue;
                 }
+                // An event the idle pass took from the channel to see it
+                // (`input-pending-p', an idle collection giving way to a
+                // key) is queued here now: read it rather than wait.
+                if !pending.is_empty() { continue; }
                 // read_char's wait_reading_process_output also selects on
                 // the processes: one ready wakes the loop to read it.
                 let processes = vm.process_wait_fds();

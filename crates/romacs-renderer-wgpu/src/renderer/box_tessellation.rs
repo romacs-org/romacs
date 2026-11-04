@@ -21,24 +21,42 @@ fn offset_clip(clip: Option<Rect>, offset_x: f32, offset_y: f32) -> Option<Rect>
     })
 }
 
+/// The top-left and bottom-right colours of a sharp box, as pgtkterm.c
+/// draws them: a line in BOX_COLOR; a raised or pressed button's relief
+/// (pgtk_setup_relief_colors) from the box colour given (`:color') else
+/// the face's background, lightened by 1.2 and darkened by 0.6.
 fn sharp_edge_colors(face: &Face, box_color: Color) -> (Color, Color) {
-    let light = Color {
-        r: (box_color.r * 1.4).min(1.0),
-        g: (box_color.g * 1.4).min(1.0),
-        b: (box_color.b * 1.4).min(1.0),
-        a: box_color.a,
-    };
-    let dark = Color {
-        r: box_color.r * 0.6,
-        g: box_color.g * 0.6,
-        b: box_color.b * 0.6,
-        a: box_color.a,
-    };
+    let base = face.box_color.unwrap_or(face.background);
+    let light = lighter_color(base, 1.2, 0x8000);
+    let dark = lighter_color(base, 0.6, 0x4000);
     match face.box_type {
         BoxType::Raised3D => (light, dark),
         BoxType::Sunken3D => (dark, light),
         _ => (box_color, box_color),
     }
+}
+
+/// pgtkterm.c pgtk_compute_lighter_color: COLOR's 16-bit sRGB channels
+/// times FACTOR, a dark colour (brightness under 48000) moved further by
+/// a share of DELTA, and DELTA added when that changes nothing.
+fn lighter_color(color: Color, factor: f64, delta: i64) -> Color {
+    let channel = |c: f32| i64::from(Color::linear_component_to_srgb_u8(c)) * 257;
+    let (r, g, b) = (channel(color.r), channel(color.g), channel(color.b));
+    let scale = |c: i64| ((factor * c as f64) as i64).min(0xffff);
+    let (mut nr, mut ng, mut nb) = (scale(r), scale(g), scale(b));
+    let bright = (2 * r + 3 * g + b) / 6;
+    if bright < 48000 {
+        let dimness = 1.0 - bright as f64 / 48000.0;
+        let min_delta = (delta as f64 * dimness * factor / 2.0) as i64;
+        let shift = |c: i64| if factor < 1.0 { (c - min_delta).max(0) } else { (c + min_delta).min(0xffff) };
+        (nr, ng, nb) = (shift(nr), shift(ng), shift(nb));
+    }
+    let pixel = |r: i64, g: i64, b: i64| ((r >> 8) << 16 | (g >> 8) << 8 | (b >> 8)) as u32;
+    let mut new = pixel(nr, ng, nb);
+    if new == pixel(r, g, b) {
+        new = pixel((delta + r).min(0xffff), (delta + g).min(0xffff), (delta + b).min(0xffff));
+    }
+    Color { a: color.a, ..Color::from_pixel(new) }
 }
 
 impl WgpuRenderer {
@@ -124,6 +142,10 @@ impl WgpuRenderer {
             .logical_geometry(device_scale)
             .paint_thickness()
             .get();
+        // `:line-width (VWIDTH . HWIDTH)': the left and right edges' own width.
+        let side_width = face
+            .box_vertical_line_width
+            .map_or(border_width, |width| width.logical_geometry(device_scale).paint_thickness().get());
         let clip = offset_clip(span.clip, offset_x, offset_y);
         let x = span.x + offset_x;
         let y = span.y + offset_y;
@@ -164,19 +186,37 @@ impl WgpuRenderer {
             &bottom_right,
         );
         if span.box_vertical_edges.owns_left() {
-            self.add_rect(sharp, x, y, border_width, span.height, &top_left);
+            self.add_rect(sharp, x, y, side_width, span.height, &top_left);
         }
         if span.box_vertical_edges.owns_right() {
             self.add_rect(
                 sharp,
-                x + span.width - border_width,
+                x + span.width - side_width,
                 y,
-                border_width,
+                side_width,
                 span.height,
                 &bottom_right,
             );
         }
         super::pointer_override::clip_new_rect_vertices(sharp, start, clip.as_ref());
         false
+    }
+}
+
+#[cfg(test)]
+mod relief_tests {
+    use super::lighter_color;
+    use romacs_display_protocol::Color;
+
+    /// pgtk_compute_lighter_color's answers: black's relief is #4c4c4c
+    /// above (the dark boost) and #404040 below (unchanged, so DELTA is
+    /// added); a mid grey #808080 lightens to #b2b2b2 and darkens to #474747.
+    #[test]
+    fn relief_colours_are_gnu_s() {
+        let srgb = |c: Color| [c.r, c.g, c.b].map(Color::linear_component_to_srgb_u8);
+        assert_eq!(srgb(lighter_color(Color::from_pixel(0x000000), 1.2, 0x8000)), [0x4c; 3]);
+        assert_eq!(srgb(lighter_color(Color::from_pixel(0x000000), 0.6, 0x4000)), [0x40; 3]);
+        assert_eq!(srgb(lighter_color(Color::from_pixel(0x808080), 1.2, 0x8000)), [0xb2; 3]);
+        assert_eq!(srgb(lighter_color(Color::from_pixel(0x808080), 0.6, 0x4000)), [0x47; 3]);
     }
 }
