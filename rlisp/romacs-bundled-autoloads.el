@@ -36,6 +36,9 @@ with the session before its harness starts.  Return the session.
 (fn CWD &optional PROMPT TITLE PROVIDER OPTIONS KNOWN)" t)
 (defvar romacs-agent-restored-hook nil
 "Run after `romacs-agent-restore' has loaded every recorded session.")
+(defun romacs-agent--restore-at-startup nil
+"Once started, restore agent sessions when any supervisor runs." (unless noninteractive (let ((root (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR") (format "/tmp/romacs%d" (user-uid)))))) (when (and (file-directory-p root) (file-expand-wildcards (concat root "*/host.sock"))) (run-at-time 0 nil (lambda nil (require 'romacs-agent) (romacs-agent-restore)))))))
+(add-hook 'after-init-hook #'romacs-agent--restore-at-startup)
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
 
 
@@ -222,6 +225,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
 
 
+;;; Generated autoloads from romacs-help.el
+
+(register-definition-prefixes "romacs-help" '("describe-" "help--describe-vector" "internal-describe-syntax-value" "romacs-help--" "text-char-description"))
+
+
 ;;; Generated autoloads from romacs-icons.el
 
 (register-definition-prefixes "romacs-icons" '("romacs-icon"))
@@ -239,7 +247,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-landing.el

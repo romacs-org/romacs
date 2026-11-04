@@ -137,9 +137,14 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
             if seq >= from && writeln!(stream, "{line}").is_err() { return None; }
         }
     }
-    shared.next_attachment += 1;
-    let id = shared.next_attachment;
-    shared.attached = Some((id, stream.try_clone().ok()?));
+    let id = shared.next_attachment + 1;
+    // Kept: the server may now act as this session's (its relays' route).
+    // Told first, then published: a server gone before it hears this is
+    // never the attached one.
+    if writeln!(stream, "{}", json!({"attached": id})).is_err() { return None; }
+    let clone = stream.try_clone().ok()?;
+    shared.next_attachment = id;
+    shared.attached = Some((id, clone));
     Some(id)
 }
 
@@ -289,6 +294,53 @@ mod tests {
         std::fs::write(&path, format!("{}\n{}\n", record(1, "out", "a"), record(2, "in", "b"))).unwrap();
         assert_eq!(last_seq(&path), 2);
         assert_eq!(last_seq(&dir.join("none")), 0);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_kept_attachment_is_acknowledged_after_the_replay_and_a_second_is_refused() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-attach-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
+        let journal = OpenOptions::new().append(true).open(&path).unwrap();
+        let shared = Arc::new(Mutex::new(Shared { seq: 1, journal, path: path.clone(), attached: None, next_attachment: 0,
+                                                  stdin: Arc::new(Mutex::new(None)) }));
+        let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
+        let (server, ours) = UnixStream::pair().unwrap();
+        assert_eq!(attach(&shared, server, &request), Some(1));
+        let mut lines = BufReader::new(ours.try_clone().unwrap()).lines();
+        let replayed: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(replayed["seq"], 1);
+        let kept: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(kept["attached"], 1);
+        let (other, theirs) = UnixStream::pair().unwrap();
+        assert_eq!(attach(&shared, other, &request), None);
+        let refused: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
+        assert_eq!(refused["refused"], "attached");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_server_gone_before_its_acknowledgement_is_never_attached() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-gone-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let journal = OpenOptions::new().append(true).open(&path).unwrap();
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, journal, path: path.clone(), attached: None, next_attachment: 0,
+                                                  stdin: Arc::new(Mutex::new(None)) }));
+        let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
+        let (server, ours) = UnixStream::pair().unwrap();
+        drop(ours);
+        assert_eq!(attach(&shared, server, &request), None);
+        assert!(shared.lock().unwrap().attached.is_none());
+        let (next, theirs) = UnixStream::pair().unwrap();
+        assert!(attach(&shared, next, &request).is_some());
+        let kept: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
+        assert!(kept["attached"].is_u64());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }

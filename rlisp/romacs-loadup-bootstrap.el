@@ -117,6 +117,8 @@
 (load "romacs-frame.el" nil t t)
 ;; GNU computes the active keymaps in C; Romacs in Lisp.
 (load "romacs-keymap.el" nil t t)
+;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.
+(load "romacs-help.el" nil t t)
 (load "font-core.el" nil t t)
 (load "emacs-lisp/syntax.el" nil t t)
 (load "font-lock.el" nil t t)

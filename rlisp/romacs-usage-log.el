@@ -14,8 +14,13 @@
 ;;       a command that took `romacs-usage-log-slow-ms' or more, from
 ;;       `pre-command-hook' to `post-command-hook' (a command that reads
 ;;       input itself counts the wait);
-;;   {"kind":"error","command":C,"error":"(SYMBOL . MESSAGE)"}
-;;       an error the command loop reported, through `command-error-function';
+;;   {"kind":"error","command":C,"mode":M,"error":"(SYMBOL . MESSAGE)"}
+;;       an error the command loop reported, through `command-error-function',
+;;       M the current buffer's major mode;
+;;   {"kind":"refusal","class":MESSAGE,"mode":M,"n":N}
+;;       how often a displayed window's layout question in major mode M
+;;       was answered by approximation where the host's measurement refused
+;;       (MESSAGE, `romacs--layout-refusals'), written with the counts;
 ;;   {"kind":"session","event":"start"|"init-done"|"kill","seconds":S}
 ;;       S seconds after `before-init-time'.
 ;;
@@ -97,6 +102,7 @@ can tell where a file name in it starts or ends."
   "Log the command loop's error DATA, before `command-error-function' reports it."
   (condition-case nil
       (romacs-usage-log--push :kind "error" :command (romacs-usage-log--name real-this-command)
+                              :mode (romacs-usage-log--name major-mode)
                               :error (romacs-usage-log--error-text data))
     (error nil)))
 
@@ -120,6 +126,11 @@ can tell where a file name in it starts or ends."
                           table))
                romacs-usage-log--counts)
       (clrhash romacs-usage-log--counts)
+      (when (fboundp 'romacs--layout-refusals)
+        (dolist (refusal (romacs--layout-refusals))
+          (push (json-serialize (list :kind "refusal" :class (romacs-usage-log--scrub (nth 0 refusal))
+                                      :mode (nth 1 refusal) :n (nth 2 refusal)))
+                counts)))
       (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts))))
         (setq romacs-usage-log--pending nil)
         (when lines (romacs-usage-log--append lines))))))

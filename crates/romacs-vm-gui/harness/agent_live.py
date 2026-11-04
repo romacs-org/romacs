@@ -34,6 +34,10 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  launcher   an editor started with no --server, restarted with its
+             sessions detached: the next one serves the same agents'
+             endpoint at once, sessions pinned to an ended editor's
+             per-process path reach it by a link, stale ones go.
   composer   real keys typed into a chat's composer: before the first
              prompt, after a turn, DEL, after M-> and a recenter in a long
              wrapped transcript; no command signals.
@@ -989,6 +993,198 @@ def gnosis(args, base):
         a.close()
 
 
+def launcher(args, base):
+    """Editors started as the launcher starts them (no `--server'),
+    restarted with their sessions detached.  A session's relay names its
+    own route, a link the process attached to it leads to itself: the next
+    editor, restoring at startup with no command, attaches and leads each
+    route to itself, so a harness's next romacs_eval reaches it.  Two
+    editors attached to different sessions each get their own sessions'
+    calls; an attach the supervisor refuses changes no route.  A session an
+    earlier build started (its relay naming that editor's session-PID path)
+    is led the same way.  Stale endpoints of ended processes are removed;
+    nothing live or not ours is touched."""
+    import socket as sockets
+    a = Agents(args, base, 'ln')
+    editors = []
+    try:
+        runtime = a.runtime / 'romacs'
+        relay = Path(args.romacs).with_name('romacs-mcp')
+        later = '"later 20 call romacs_eval {\\"instance\\": \\"?\\", \\"code\\": \\"(emacs-pid)\\"}"'
+        own = lambda editor: runtime / f'agents/editor/{editor.pid}.sock'
+
+        def start():
+            log = (a.root / f'editor-{len(editors)}.log').open('w')
+            # As the launcher starts it: GNU's Lisp loaded, no server.
+            editor = subprocess.Popen([args.romacs, '--loadup'], env=a.env, cwd=a.root / 'work', stdout=log, stderr=log,
+                                      stdin=subprocess.DEVNULL)
+            editors.append(editor)
+            a.pid = editor.pid
+            return editor
+
+        def ask(socket, code):
+            with RomacsMcp.connect(socket, relay, a.env) as client:
+                return client.call('romacs_eval', code=code)
+
+        def stop(editor):
+            editor.terminate()
+            editor.wait(30)
+
+        def pids(sid):
+            return {e.get('pid') for e in a.logged() if e.get('started') == sid}
+
+        def reached(sid, editor, after=0):
+            return any(e.get('tool') == 'romacs_eval' and e['text'].strip() == str(editor.pid)
+                       and e.get('pid') in pids(sid) and e['t'] > after for e in a.logged())
+
+        def route(sid):
+            path = json.loads((a.home / '.local/state/romacs/agents' / sid / 'mcp.json').read_text())
+            return Path(path['mcpServers']['romacs']['args'][1])
+
+        def started(socket):
+            sid = str(ask(socket, f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} "say ready"))')).strip('"')
+            until(lambda: ask(socket, f'(romacs-agent-state (romacs-agent-get {lisp_text(sid)}))') == 'idle', 30, f'{sid} idle')
+            return sid
+
+        a.work.mkdir(parents=True, exist_ok=True)
+        # Editor 0 is as editors were: its endpoint on its own pid's path,
+        # which its sessions' relays name.
+        (a.home / '.config/romacs/init.el').write_text(
+            (a.home / '.config/romacs/init.el').read_text() + f"""
+(setq romacs-agent-claude-program {lisp(HARNESS)})
+(when (file-exists-p {lisp(a.root / 'old-endpoint')})
+  (run-at-time 0.5 nil
+               (lambda ()
+                 (require 'romacs-agent)
+                 (let ((socket (format "%sromacs/session-%d/server.sock" (file-name-as-directory (getenv "XDG_RUNTIME_DIR")) (emacs-pid))))
+                   (make-directory (file-name-directory socket) t)
+                   (set-file-modes (file-name-directory socket) #o700)
+                   (romacs-mcp-start socket)
+                   (defun romacs-agent--route (_) socket)))))
+""")
+        (a.root / 'old-endpoint').write_text('')
+        old = start()
+        old_socket = runtime / f'session-{old.pid}/server.sock'
+        until(lambda: old_socket.is_socket(), 60, 'the old per-process endpoint')
+        pinned = started(old_socket)
+        (a.root / 'old-endpoint').unlink()
+        # Earlier builds' directories: one of an editor long gone, its socket
+        # stale (removed); a live listener under a dead number (a server so
+        # named) and a link to a directory elsewhere (both untouched).
+        def plant(name, listen=False):
+            directory = runtime / name
+            directory.mkdir(mode=0o700)
+            node = sockets.socket(sockets.AF_UNIX)
+            node.bind(str(directory / 'server.sock'))
+            if listen:
+                node.listen()
+                return node
+            node.close()
+        plant('session-999999')
+        listener = plant('session-999998', listen=True)
+        elsewhere = a.root / 'elsewhere'
+        elsewhere.mkdir()
+        (elsewhere / 'server.sock').write_text('not a socket')
+        (runtime / 'session-999997').symlink_to(elsewhere)
+        ask(old_socket, f'(romacs-agent-send (romacs-agent-get {lisp_text(pinned)}) {later})')
+        stop(old)
+        # Editor 1: started with no command; it attaches the pinned session
+        # and leads that session's old path to itself.
+        one = start()
+        until(lambda: reached(pinned, one), 60, 'the pinned session reached editor 1')
+        linked = os.readlink(old_socket) if old_socket.is_symlink() else None
+        fresh = started(own(one))
+        fresh_route = route(fresh)
+        for sid in (pinned, fresh):
+            ask(own(one), f'(romacs-agent-send (romacs-agent-get {lisp_text(sid)}) {later})')
+        stop(one)
+        two = start()
+        until(lambda: reached(pinned, two) and reached(fresh, two), 60, 'both sessions reached editor 2')
+        # Editor 3 starts while editor 2 is attached: the supervisors refuse
+        # it and no route moves.  Editor 2 then lets the fresh session go
+        # (its supervisor connection closed) and editor 3 attaches it: only
+        # that session's calls reach editor 3, the pinned one's editor 2.
+        three = start()
+        until(lambda: own(three).is_socket(), 60, "editor 3's endpoint")
+        # Longer than any supervisor takes to refuse (an earlier one, with no
+        # acknowledgement, is taken as kept only after 3 s connected).
+        time.sleep(4)
+        kept = (os.readlink(fresh_route), os.readlink(old_socket))
+        ask(own(two), f'(progn (delete-process (romacs-agent-connection (romacs-agent-get {lisp_text(fresh)}))) t)')
+        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10) t)')
+        until(lambda: os.readlink(fresh_route) == str(own(three)), 15, "the fresh route led to editor 3")
+        mark = time.time()
+        ask(own(three), f'(romacs-agent-send (romacs-agent-get {lisp_text(fresh)}) {later})')
+        ask(own(two), f'(romacs-agent-send (romacs-agent-get {lisp_text(pinned)}) {later})')
+        until(lambda: reached(fresh, three, mark) and reached(pinned, two, mark), 60, 'each session reached its own editor')
+        # A supervisor that refuses late (another server's long replay held
+        # it): an attach it never keeps moves no route, even with the
+        # endpoint replaced (a promotion) while the refusal is pending.
+        import threading
+        late_id = '22222222-3333-4444-8555-666666666666'
+        late_dir = a.home / '.local/state/romacs/agents' / late_id
+        late_dir.mkdir(mode=0o700)
+        late_socket = runtime / 'agents/late.sock'
+        late = sockets.socket(sockets.AF_UNIX)
+        late.bind(str(late_socket))
+        late.listen()
+
+        def refuse_late():
+            peer, _ = late.accept()
+            peer.recv(4096)
+            time.sleep(6)
+            peer.sendall(b'{"refused": "attached", "pid": 1}\n')
+            peer.close()
+        threading.Thread(target=refuse_late, daemon=True).start()
+        (late_dir / 'manifest.json').write_text(json.dumps(
+            {'id': late_id, 'harness': 'claude', 'provider': 'claude', 'configDir': None, 'cwd': str(a.work),
+             'title': 'late', 'hostSocket': str(late_socket), 'argv': [], 'options': {}}))
+        late_route = runtime / f'agents/route/{late_id}.sock'
+        late_started = time.time()
+        ask(own(three), f'(progn (romacs-agent--load {lisp(late_dir)}) t)')
+        # Editor 3 becomes a named server: its endpoint is replaced, and the
+        # session attached to it leads to the new one.
+        try:
+            # Answered by nothing: the call's own endpoint is the one replaced.
+            ask(own(three), '(progn (run-at-time 0 nil (lambda () (romacs-server-start "promoted"))) t)')
+        except Exception:  # noqa: BLE001
+            pass
+        promoted = runtime / 'promoted/server.sock'
+        until(lambda: os.readlink(fresh_route) == str(promoted), 15, 'the fresh route led to the promoted server')
+        mark = time.time()
+        ask(promoted, f'(romacs-agent-send (romacs-agent-get {lisp_text(fresh)}) {later})')
+        until(lambda: reached(fresh, three, mark), 60, 'the fresh session reached the promoted server')
+        time.sleep(max(0, late_started + 7 - time.time()))
+        late_moved = os.path.lexists(late_route)
+        late.close()
+        # Both gone, a named server starts: it attaches both, leads both routes.
+        for sid, socket in ((fresh, promoted), (pinned, own(two))):
+            ask(socket, f'(romacs-agent-send (romacs-agent-get {lisp_text(sid)}) {later})')
+        stop(two)
+        stop(three)
+        mark = time.time()
+        a.up()
+        until(lambda: reached(fresh, a, mark - 25) and reached(pinned, a, mark - 25), 60, 'both sessions reached the server')
+        listener.close()
+        left = sorted(p.name for p in runtime.glob('session-*'))
+        editor_dir = sorted(p.name for p in (runtime / 'agents/editor').iterdir())
+        result = {'editors': [e.pid for e in editors], 'fresh_route': str(fresh_route), 'old_link': linked,
+                  'kept_on_refusal': kept, 'late_refusal_moved_route': late_moved,
+                  'session_dirs_left': left, 'editor_dir_at_end': editor_dir,
+                  'evals': [e['text'] for e in a.logged() if e.get('tool') == 'romacs_eval']}
+        result['ok'] = (fresh_route.parent == runtime / 'agents/route' and linked == str(own(one))
+                        and kept == (str(own(two)), str(own(two))) and not late_moved
+                        and left == sorted([f'session-{old.pid}', 'session-999997', 'session-999998'])
+                        and (elsewhere / 'server.sock').read_text() == 'not a socket'
+                        and editor_dir == [])
+        return result
+    finally:
+        for editor in editors:
+            if editor.poll() is None:
+                editor.kill()
+        a.close()
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -1458,7 +1654,7 @@ def history_real(args, base):
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
-             'composer-real': composer_real}
+             'composer-real': composer_real, 'launcher': launcher}
 
 
 def main():
@@ -1480,7 +1676,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
