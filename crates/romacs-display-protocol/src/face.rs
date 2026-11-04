@@ -598,6 +598,11 @@ pub struct Face {
     /// GNU scalar box line width, including inside/outside sign semantics.
     pub box_line_width: BoxLineWidth,
 
+    /// The left and right edges' width where `:line-width (VWIDTH . HWIDTH)'
+    /// gives them their own (`face->box_vertical_line_width'); else
+    /// `box_line_width''s magnitude.
+    pub box_vertical_line_width: Option<BoxLineWidth>,
+
     /// Box corner radius (0 = sharp corners)
     pub box_corner_radius: i32,
 
@@ -683,6 +688,7 @@ impl Default for Face {
             underline_style: UnderlineStyle::None,
             box_type: BoxType::None,
             box_line_width: BoxLineWidth::default(),
+            box_vertical_line_width: None,
             box_corner_radius: 0,
             box_border_style: BoxBorderStyle::Solid,
             box_border_speed: 1.0,
@@ -908,6 +914,7 @@ impl FaceDataFFI {
             underline_style,
             box_type,
             box_line_width: BoxLineWidth::from_gnu(self.box_line_width),
+            box_vertical_line_width: None,
             box_corner_radius: self.box_corner_radius,
             // FFI edge: decode the raw C style code; unknown codes fall back
             // to the solid border rather than propagating garbage.
