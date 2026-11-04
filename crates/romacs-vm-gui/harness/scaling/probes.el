@@ -500,6 +500,115 @@ thousandth a stack mark."
           (unless (get-text-property 0 'local-map s) (error "The shared keymap is not projected"))
           s))
 
+;; A key grid of N entries: one tall group of N/2 and N/2 more in groups
+;; of four, laid out in bands; linear, each row one `aref' per block.
+(scaling-probe menu-key-grid :gui t :n 400 :steps 1
+  :setup (let ((entry (lambda (i) (cons (format "k%d" i) (format "command %d" i)))))
+           (cons (switch-to-buffer (get-buffer-create "scaling-grid"))
+                 (cons (cons "Tall" (mapcar entry (number-sequence 1 (/ n 2))))
+                       (seq-map-indexed (lambda (_ g) (cons (format "G%d" g) (mapcar entry (number-sequence 1 4))))
+                                        (make-list (/ n 8) nil)))))
+  :body (progn (romacs-popup-key-grid (cdr it) 160)
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One `set-transient-map' activation and exit at depth 1 with N other
+;; maps registered (retained by the setup): the hints' registration and
+;; reconcile do the same work whatever N is.
+(scaling-probe menu-hints-activate :gui t :n 100 :steps 10
+  :setup (let ((maps (mapcar (lambda (_) (define-keymap "a" #'ignore)) (make-list n nil))))
+           (dolist (map maps) (funcall (set-transient-map map)))
+           (cons (switch-to-buffer (get-buffer-create "scaling-hints")) maps))
+  :body (progn (funcall (set-transient-map (define-keymap "b" #'ignore)))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a map of N bindings whose sparse child rebinds or
+;; unbinds half of them: one traversal, a seen-key hash, no lookup per key.
+(scaling-probe menu-hints-keys :gui t :n 400 :steps 1
+  :setup (let ((parent (make-sparse-keymap)) (child (make-sparse-keymap)))
+           (dotimes (i n) (define-key parent (vector (+ #x1000 i)) #'ignore))
+           (dotimes (i (/ n 2)) (define-key child (vector (+ #x1000 (* 2 i))) (and (cl-oddp i) #'forward-char)))
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-keys")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a child of N character ranges over a parent of 2N
+;; keys inside and beside them and a grandparent of N ranges overlapping
+;; them all: each interval painted once over the sorted bounds, never a
+;; scan of the keys per range.
+(scaling-probe menu-hints-ranges :gui t :n 200 :steps 1
+  :setup (let ((grand (make-keymap)) (parent (make-sparse-keymap)) (child (make-keymap)))
+           (dotimes (i n)
+             (let ((lo (+ #x1000 (* 10 i))))
+               (set-char-table-range (nth 1 child) (cons lo (+ lo 3)) (if (cl-oddp i) #'forward-char #'backward-char))
+               (define-key parent (vector (+ lo 1)) #'ignore)
+               (define-key parent (vector (+ lo 5)) #'ignore)
+               (set-char-table-range (nth 1 grand) (cons (+ lo 2) (+ lo 7)) (if (cl-oddp i) #'undo #'redo))))
+           (set-keymap-parent parent grand)
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-ranges")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; The hint target after N panels shown and their buffers killed: a
+;; killed panel leaves the registry, so the target asks about none.
+(scaling-probe popup-panels-cycle :gui t :n 20 :steps 10
+  :setup (progn (dotimes (i n)
+                  (let ((buffer (get-buffer-create (format " scaling-panel-%d" i))))
+                    (with-current-buffer buffer (insert "x"))
+                    (romacs-popup-show 'panel buffer :lines 1)
+                    (kill-buffer buffer)))
+                (set-transient-map (define-keymap "a" #'ignore) t)
+                (switch-to-buffer (get-buffer-create "scaling-panels")))
+  :body (progn (romacs-popup--hint-target)
+               (with-current-buffer it (insert "x"))))
+
+;; One more package entry written to a `mode-line-modes' of N: the
+;; watcher rebuilds the extras once per write, linear in the entries,
+;; and nothing per key or redisplay.
+(scaling-probe mode-line-modes-writes :gui t :n 50 :steps 10
+  :setup (let ((saved (default-value 'mode-line-modes)))
+           (dotimes (i n) (add-to-list 'mode-line-modes (list t (format "[p%d] " i)) t))
+           (cons (switch-to-buffer (get-buffer-create "scaling-modes")) saved))
+  :body (progn (setq-default mode-line-modes (cons (list t (format "[w%d] " i)) (cdr (default-value 'mode-line-modes))))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One of N panels kept shown hidden and shown again: the panel registry
+;; adds and removes it in O(1), the hint target stops at the first shown.
+(scaling-probe popup-panels-kept :gui t :n 10 :steps 10
+  :setup (let (buffers)
+           (dotimes (i n)
+             (let ((buffer (get-buffer-create (format " scaling-kept-panel-%d" i))))
+               (with-current-buffer buffer (insert "x"))
+               (romacs-popup-show 'panel buffer :lines 1)
+               (push buffer buffers)))
+           ;; An active map, so the hint target asks about the panels.
+           (set-transient-map (define-keymap "a" #'ignore) t)
+           (cons (switch-to-buffer (get-buffer-create "scaling-kept-panels")) (car (last buffers))))
+  :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Clearing N toasts (the echo area's clearing at the next command) with N
+;; more layers kept hidden: each toast hidden once, no restacking per
+;; toast, its layer found without a walk over the kept ones.
+(scaling-probe toasts-clear :gui t :n 20 :steps 1
+  :setup (progn (dotimes (i n) (romacs-layer--frame (get-buffer-create (format " scaling-layer-%d" i))))
+                (setq romacs-layer-toast-max n romacs-layer-toast-timeout 600)
+                (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
+                n)
+  :body (romacs-layer-toast-clear))
+
+;; N toasts following the selection between two windows, with N more
+;; layers kept hidden: one restack of N toasts per change, for the root
+;; frame only, never one per child frame's own window change.
+(scaling-probe toasts-follow :gui t :n 10 :steps 10
+  :setup (progn (dotimes (i n) (romacs-layer--frame (get-buffer-create (format " scaling-layer-%d" i))))
+                (delete-other-windows) (split-window-right)
+                (setq romacs-layer-toast-max n romacs-layer-toast-timeout 600 romacs-layer-toast-position 'window)
+                (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
+                n)
+  :body (select-window (next-window)))
+
 ;; `face-font' for N faces each asking a distinct font (size, weight,
 ;; slant), then the same N again: the display's per-request font caches
 ;; grow by one entry per request and answer the repeats from the cache.

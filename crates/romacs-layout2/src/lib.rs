@@ -462,6 +462,7 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_displa
         radius: child.radius as f32,
         glow: child.glow.map(color),
         shadow: child.shadow,
+        outline: child.outline.map(color),
     }
 }
 

@@ -191,6 +191,10 @@ pub struct ChildFrameSnapshot {
     pub radius: u32,
     pub glow: Option<[u8; 3]>,
     pub shadow: bool,
+    /// A 1px hairline round it in this colour, drawn even on a glowing
+    /// layer: the foreground of the face its `romacs-layer-outline-face'
+    /// parameter names (an error toast's).
+    pub outline: Option<[u8; 3]>,
 }
 
 /// `romacs-layer-animation': no layer animation, fades only, or fades,

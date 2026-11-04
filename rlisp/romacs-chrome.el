@@ -140,7 +140,24 @@ derived is left out."
      `((romacs-layer-glow :foreground ,accent)
        (romacs-pane-border :foreground ,(romacs-chrome-mix 0.15))
        (romacs-layer-glass :background ,(romacs-chrome-mix 0.08))
-       (romacs-complete-current :background ,(romacs-chrome-mix 0.2) :extend t)))))
+       (romacs-complete-current :background ,(romacs-chrome-mix 0.2) :extend t)
+       (romacs-mode-line-mark :foreground ,(romacs-chrome--mark-color))))))
+
+(defconst romacs-chrome-mark-red "#ff5f59"
+  "The Romacs mark's red (assets/branding.md: Modus Vivendi's red).")
+
+(defun romacs-chrome--mark-color ()
+  "The colour Romacs's R draws in on the status bar: the mark's red where
+it reaches the 3:1 contrast WCAG asks of graphics on the bar's background,
+else the bar's foreground."
+  (let* ((bg (face-background 'mode-line-active nil t))
+         ;; A named colour (tango's "grey75") as #rrggbb, which the contrast takes.
+         (hex (and (stringp bg) (color-defined-p bg)
+                   (apply #'format "#%02x%02x%02x" (mapcar (lambda (c) (/ c 256)) (color-values bg))))))
+    (if (and hex (fboundp 'romacs-color-contrast)
+             (>= (romacs-color-contrast romacs-chrome-mark-red hex) 3.0))
+        romacs-chrome-mark-red
+      (face-foreground 'mode-line-active nil t))))
 
 (defun romacs-chrome--set-faces (&rest _)
   "Make `romacs-chrome-derived-faces' the faces' default specs.  A

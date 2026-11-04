@@ -714,13 +714,18 @@ impl Vm {
             // A glass layer (one with rounded corners) takes its colours
             // from faces: its background from `romacs-layer-glass', or the
             // face its `romacs-layer-face' parameter names (a toast's), and
-            // its glow from `romacs-layer-glow'.
+            // its glow from `romacs-layer-glow', or the face its
+            // `romacs-layer-glow-face' parameter names (an error toast's).
             let (background, glow) = if radius > 0 {
-                let face = match self.frame_parameter_of(frame, "romacs-layer-face")? {
-                    Some(v) => self.symbol_name_of(v).unwrap_or_else(|| "romacs-layer-glass".into()),
-                    None => "romacs-layer-glass".into(),
+                let named = |vm: &mut Self, parameter: &str, default: &str| -> Result<String> {
+                    Ok(match vm.frame_parameter_of(frame, parameter)? {
+                        Some(v) => vm.symbol_name_of(v).filter(|name| name != "nil").unwrap_or_else(|| default.into()),
+                        None => default.into(),
+                    })
                 };
-                (self.display_face(&face)?.background, Some(self.display_face("romacs-layer-glow")?.foreground))
+                let face = named(self, "romacs-layer-face", "romacs-layer-glass")?;
+                let glow = named(self, "romacs-layer-glow-face", "romacs-layer-glow")?;
+                (self.display_face(&face)?.background, Some(self.display_face(&glow)?.foreground))
             } else {
                 (self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background), None)
             };
@@ -746,10 +751,23 @@ impl Vm {
             let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
                 .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
             let shadow = self.frame_parameter_of(frame, "romacs-layer-shadow")?.is_some_and(|v| v != Value::NIL);
+            // A hairline in a face's foreground, glass or not: an error toast's.
+            let outline = match self.frame_parameter_of(frame, "romacs-layer-outline-face")?.and_then(|v| self.symbol_name_of(v)) {
+                Some(face) if face != "nil" => Some(self.display_face(&face)?.foreground),
+                _ => None,
+            };
+            // A layer whose `romacs-layer-motion' is `fade' (a chip, hints)
+            // only fades: the slide and tweens are off for it.
+            let fade = self.intern("fade");
+            let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
+            let animation = match self.layer_animation() {
+                romacs_layout_input::LayerAnimation::Full if fades => romacs_layout_input::LayerAnimation::Reduced,
+                animation => animation,
+            };
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, background_alpha, windows,
-                                                                     animation: self.layer_animation(), edge, selection,
-                                                                     radius, glow, shadow });
+                                                                     animation, edge, selection,
+                                                                     radius, glow, shadow, outline });
         }
         Ok(children)
     }

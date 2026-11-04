@@ -19,6 +19,10 @@
   "The colour a raised layer glows in, the theme's accent: the focus edge,
 a layer's glow, completion matches.")
 
+(defface romacs-mode-line-mark '((t))
+  "Romacs's R in the status bar: the mark's red where it shows on the
+bar (`romacs-chrome-derived-faces'), else the bar's own foreground.")
+
 (defface romacs-pane-focus '((t :inherit romacs-layer-glow))
   "The selected pane's edge: its foreground.")
 
@@ -30,6 +34,9 @@ a layer's glow, completion matches.")
 
 (defface romacs-layer-toast '((t :inherit romacs-layer-glass))
   "A message toast's text and background.")
+
+(defface romacs-layer-toast-error '((t :inherit error))
+  "An error toast: its foreground is the toast's glow.")
 
 (defface romacs-layer-selection '((t :inherit region))
   "The band a layer's selected row is drawn on.")

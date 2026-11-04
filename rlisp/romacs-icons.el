@@ -42,7 +42,9 @@
     (javascript #xFE029 nil nil) (typescript #xFE02A nil nil) (go #xFE02B nil nil) (java #xFE02C nil nil)
     (nix #xFE02D nil nil) (haskell #xFE02E nil nil) (json #xFE02F nil nil) (html #xFE030 nil nil)
     (css #xFE031 nil nil) (lua #xFE032 nil nil) (conf #xFE033 nil nil) (data #xFE034 nil nil)
-    (calendar #xFE035 nil nil) (info #xFE036 nil nil) (database #xFE037 nil nil))
+    (calendar #xFE035 nil nil) (info #xFE036 nil nil) (database #xFE037 nil nil)
+    ;; Romacs's own R, for a buffer no mode icon names.
+    (romacs #xFE038 nil nil))
   "Each icon: (NAME CODEPOINT TEXT ASCII), the character of Romacs Icons
 \(assets/icons/codepoints.txt), the Unicode symbol shown without that
 font, and the ASCII character with `romacs-icons-ascii'; a mode's icon
