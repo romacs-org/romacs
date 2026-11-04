@@ -1105,10 +1105,13 @@ of `romacs-layer-echo-claim-functions' shows it otherwise.  TEXT nil,
 the echo area's clearing as the next command starts, fades the toasts,
 as GNU's echo area clears."
   (cond
-   ((null text) (romacs-complete--hide-message))
+   ((null text) (setq romacs-layer--command-error nil) (romacs-complete--hide-message))
    ((equal text ""))
-   ((run-hook-with-args-until-success 'romacs-layer-echo-claim-functions text))
-   (t (romacs-layer-toast text))))
+   ((seq-some (lambda (regexp) (string-match-p regexp text)) romacs-layer-toast-ignore)
+    (setq romacs-layer--command-error nil))
+   ((run-hook-with-args-until-success 'romacs-layer-echo-claim-functions text)
+    (setq romacs-layer--command-error nil))
+   (t (romacs-layer-toast text (romacs-layer-toast-kind)))))
 
 (defun romacs-complete--hide-message ()
   "Hide every message toast."
@@ -1141,12 +1144,16 @@ frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode
     (add-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (add-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
     (add-hook 'romacs-echo-area-functions #'romacs-complete--message)
+    (advice-add 'romacs--cmd-error :before #'romacs-layer--note-command-error)
+    (advice-add 'undefined :before #'romacs-layer--note-undefined)
     (add-hook 'rfn-eshadow-update-overlay-hook #'romacs-complete-directory-tidy)
     (romacs-complete--frame))
    (t
     (remove-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (remove-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
     (remove-hook 'romacs-echo-area-functions #'romacs-complete--message)
+    (advice-remove 'romacs--cmd-error #'romacs-layer--note-command-error)
+    (advice-remove 'undefined #'romacs-layer--note-undefined)
     (remove-hook 'rfn-eshadow-update-overlay-hook #'romacs-complete-directory-tidy)
     (romacs-complete--hide-message)
     (romacs--host-minibuffer nil)

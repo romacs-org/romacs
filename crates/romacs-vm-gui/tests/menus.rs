@@ -251,7 +251,8 @@ fn menus_share_one_look_and_motion() {
         vm.eval_source("(defvar chip-hint-hidden nil)").unwrap();
         report.push(printed(&mut vm, "(let* ((map (define-keymap \"<left>\" #'indent-rigidly-left \"<right>\" #'indent-rigidly-right))
                  (exit (set-transient-map map t nil \"Indent with %k\")))
-            (romacs-layer-toast (current-message))
+            ;; Its toast shaped narrower than the message: still retired.
+            (let ((romacs-layer-toast-width 140)) (romacs-layer-toast (current-message)))
             (romacs-popup--hints-show map)
             (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf)) (e (window-edges nil t nil t)))
               (prog1 (list (frame-parameter f 'romacs-popup-kind) (frame-visible-p f)

@@ -318,7 +318,7 @@ its MESSAGE (shown once, here, while the hints show)."
     (romacs-popup-show 'hints buffer :anchor window :columns (1+ (string-width text)) :lines 1)
     (romacs-popup--hints-follow-hooks t)
     (when (stringp message)
-      (dolist (toast (seq-filter (lambda (toast) (equal (nth 1 toast) message)) romacs-layer--toasts))
+      (dolist (toast (seq-filter (lambda (toast) (equal (nth 3 toast) message)) romacs-layer--toasts))
         (cancel-timer (nth 2 toast))
         (romacs-layer--toast-expire (car toast))))))
 

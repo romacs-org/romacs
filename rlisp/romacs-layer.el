@@ -288,8 +288,21 @@ columns and lines."
 clears the echo area first."
   :type 'number)
 
-(defcustom romacs-layer-toast-max 3
-  "Most message toasts shown at once; the oldest goes first."
+(defcustom romacs-layer-toast-max 1
+  "Most message toasts shown at once; the oldest goes first.  At 1, a new
+message replaces the shown one in place."
+  :type 'natnum)
+
+(defcustom romacs-layer-toast-ignore '("\\`Quit\\'")
+  "Regexps of messages never shown as toasts; *Messages* still logs them."
+  :type '(repeat regexp))
+
+(defcustom romacs-layer-toast-width 420
+  "Widest a toast is, in pixels; never wider than its pane less 24."
+  :type 'natnum)
+
+(defcustom romacs-layer-toast-lines 2
+  "Most rows a toast shows; longer text ends in `…' (*Messages* has it all)."
   :type 'natnum)
 
 (defcustom romacs-layer-toast-position 'window
@@ -305,7 +318,9 @@ toast, each called with the text; one returning non-nil has shown it
 otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
 
 (defvar romacs-layer--toasts nil
-  "The toasts shown, newest first: each (BUFFER TEXT TIMER).")
+  "The toasts shown, newest first: each (BUFFER SHOWN TIMER TEXT COLUMNS),
+SHOWN the text as it fits (`romacs-layer--toast-text'), TEXT the
+message, COLUMNS SHOWN's widest line as painted, measured once.")
 
 (defun romacs-layer--toast-buffer ()
   "A toast buffer no shown toast uses."
@@ -313,23 +328,166 @@ otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
     (while (memq (setq buffer (get-buffer-create (format " *romacs-toast-%d*" n))) used)
       (setq n (1+ n)))
     (with-current-buffer buffer
-      (setq-local mode-line-format nil header-line-format nil cursor-type nil)
+      (setq-local mode-line-format nil header-line-format nil cursor-type nil
+                  tab-width romacs-layer--toast-tab-width)
       (romacs-layer-wrap-words))
     buffer))
 
+(defconst romacs-layer--toast-path-regexp
+  "\\(?:\\`\\|[[:space:]\"'`(]\\)\\(\\(?:/\\|~[^/[:space:]\"'`)]*/\\)[^[:space:]\"'`)]*\\)"
+  "A file name in a message: an absolute or home-relative one (`~/',
+`~USER/'), after a space, a quote or a parenthesis.")
+
+(defun romacs-layer--toast-width (string)
+  "STRING's width in the root frame's columns as the display paints it:
+a glyph the font draws wider than a cell (Iosevka's `…') counts as
+painted, which `string-width' does not know; ASCII, and anything where
+the display cannot measure, by `string-width'."
+  (or (and (string-match-p "[^[:ascii:]]" string) (display-graphic-p) (fboundp 'string-pixel-width)
+           (ignore-errors (ceiling (string-pixel-width string) (float (frame-char-width (romacs-layer--root-frame))))))
+      (string-width string)))
+
+(defun romacs-layer--toast-shorten (name room)
+  "NAME, a file name, at most ROOM columns where it can be: its
+directories dropped from the front behind `…/', then, for a basename
+wider than that, the basename's middle, keeping its end."
+  (if (<= (romacs-layer--toast-width name) room) name
+    (let* ((head (if (string-match "\\`\\(?:/\\|~[^/]*/\\)" name) (match-string 0 name) ""))
+           (base (file-name-nondirectory name))
+           (dirs (split-string (substring (or (file-name-directory name) head) (length head)) "/" t))
+           (fixed (+ (romacs-layer--toast-width head) (romacs-layer--toast-width "…/") (romacs-layer--toast-width base)))
+           (widths (mapcar (lambda (d) (1+ (romacs-layer--toast-width d))) dirs))
+           (total (apply #'+ widths)))
+      ;; Drop directories from the front, each measured once.
+      (while (and dirs (> (+ fixed total) room))
+        (setq total (- total (pop widths)) dirs (cdr dirs)))
+      (if (<= (+ fixed total) room)
+          (concat head "…/" (mapconcat (lambda (d) (concat d "/")) dirs "") base)
+        (let* ((lead (concat head "…/"))
+               (left (- room (romacs-layer--toast-width lead) (romacs-layer--toast-width "…")))
+               (suffix (romacs-layer--toast-tail base (max 1 (/ (* 2 left) 3))))
+               (front (truncate-string-to-width base (max 0 (- left (romacs-layer--toast-width suffix))))))
+          (concat lead front "…" suffix))))))
+
+(defun romacs-layer--toast-tail (string columns)
+  "The longest end of STRING at most COLUMNS wide as painted (one
+character at least)."
+  (let ((i (length string)) (used 0))
+    (while (and (> i 0) (<= (+ used (char-width (aref string (1- i)))) columns))
+      (setq used (+ used (char-width (aref string (1- i)))) i (1- i)))
+    (substring string (min i (max 0 (1- (length string)))))))
+
+(defconst romacs-layer--toast-tab-width 8
+  "The tab stops of a toast's text: its buffer's `tab-width', and its
+shaping's, whatever the buffer the message came from.")
+
+(defun romacs-layer--untab (line)
+  "LINE with each tab as the spaces to its next stop
+\(`romacs-layer--toast-tab-width'), as the toast's window shows it."
+  (if (not (string-search "\t" line)) line
+    (let ((column 0) (width romacs-layer--toast-tab-width))
+      (mapconcat (lambda (c)
+                   (if (eq c ?\t)
+                       (let ((n (- width (% column width)))) (setq column (+ column n)) (make-string n ?\s))
+                     (setq column (+ column (char-width c))) (string c)))
+                 line ""))))
+
+(defun romacs-layer--toast-path-word-p (word)
+  "Whether WORD, a word of a message, is a file name (a quote or a
+parenthesis before it allowed)."
+  (string-match-p "\\`[\"'`(]?\\(?:/\\|~[^/[:space:]]*/\\)" word))
+
+(defun romacs-layer--toast-rows (line columns)
+  "LINE's rows as a window COLUMNS wide wraps it at words: a list of
+strings.  A file name too wide for a row is shortened to fit
+\(`romacs-layer--toast-shorten'); another word too wide is broken across
+rows, as the window breaks it."
+  (let ((words (split-string line " ")) rows (row nil) (used 0))
+    ;; A line one file name's directories make too wide for a row: cut
+    ;; them there, so the line keeps one row with its basename whole.
+    (let* ((widths (mapcar #'romacs-layer--toast-width words))
+           (total (+ (apply #'+ widths) (1- (length words))))
+           (path (seq-reduce (lambda (best i) (if (and (romacs-layer--toast-path-word-p (nth i words))
+                                                       (or (null best) (> (nth i widths) (nth best widths))))
+                                                  i best))
+                             (number-sequence 0 (1- (length words))) nil)))
+      (when (and path (> total columns))
+        (let* ((word (nth path words))
+               (room (- columns (- total (nth path widths))))
+               (lead (if (string-match "\\`[\"'`(]" word) (match-string 0 word) ""))
+               (base (file-name-nondirectory (substring word (length lead)))))
+          (when (>= room (+ (length lead) (romacs-layer--toast-width "…/") (romacs-layer--toast-width base)))
+            (setf (nth path words) (concat lead (romacs-layer--toast-shorten (substring word (length lead)) (- room (length lead)))))))))
+    (dolist (word words)
+      (let* ((word (if (and (> (romacs-layer--toast-width word) columns) (romacs-layer--toast-path-word-p word))
+                       (let ((lead (if (string-match "\\`[\"'`(]" word) (match-string 0 word) "")))
+                         (concat lead (romacs-layer--toast-shorten (substring word (length lead)) (- columns (length lead)))))
+                     word))
+             (width (romacs-layer--toast-width word)))
+        (cond
+         ((and row (<= (+ used 1 width) columns))
+          (setq row (concat row " " word) used (+ used 1 width)))
+         (t (when row (push row rows))
+            (while (> (romacs-layer--toast-width word) columns)
+              (let ((piece (truncate-string-to-width word columns)))
+                (push piece rows)
+                (setq word (substring word (length piece)))))
+            (setq row word used (romacs-layer--toast-width word))))))
+    (nreverse (if row (cons row rows) rows))))
+
+(defun romacs-layer--toast-text (text columns)
+  "TEXT as a toast COLUMNS wide shows it: its file names abbreviated
+\(`abbreviate-file-name'), its lines wrapped at words into rows as the
+window wraps them, a file name too wide for a row cut in its
+directories, and at most `romacs-layer-toast-lines' rows, the last ending
+in `…' where more follow, never inside a file name.  TEXT itself when it
+fits unchanged; else the rows, one per line."
+  (let* ((abbreviated (replace-regexp-in-string
+                       romacs-layer--toast-path-regexp
+                       (lambda (match) (let ((name (match-string 1 match)))
+                                         (replace-match (if (file-name-absolute-p name) (abbreviate-file-name name) name)
+                                                        t t match 1)))
+                       text t t))
+         (lines (mapcar #'romacs-layer--untab (split-string abbreviated "\n")))
+         (rows (mapcan (lambda (line) (or (romacs-layer--toast-rows line columns) (list ""))) lines))
+         (budget (max 1 romacs-layer-toast-lines)))
+    (cond
+     ((and (equal abbreviated text) (<= (length rows) budget)
+           (seq-every-p (lambda (line) (<= (romacs-layer--toast-width line) columns)) lines))
+      text)
+     ((<= (length rows) budget) (string-join rows "\n"))
+     (t
+      (let* ((kept (seq-take rows budget))
+             (last (car (last kept)))
+             (ellipsis (romacs-layer--toast-width "…"))
+             (words (split-string last " ")))
+        ;; The last row, its words dropped from the end until `…' fits;
+        ;; a file name is dropped whole, never cut.
+        (while (and (cdr words) (> (+ (romacs-layer--toast-width (string-join words " ")) 1 ellipsis) columns))
+          (setq words (butlast words)))
+        (let* ((row (string-join words " "))
+               (row (if (> (+ (romacs-layer--toast-width row) 1 ellipsis) columns)
+                        (if (romacs-layer--toast-path-word-p row)
+                            (romacs-layer--toast-shorten row (- columns 1 ellipsis))
+                          (truncate-string-to-width row (- columns 1 ellipsis)))
+                      row)))
+          (string-join (append (butlast kept) (list (concat row " …"))) "\n")))))))
+
 (defun romacs-layer--toast-columns (text columns)
-  "The columns a toast of TEXT takes, at most COLUMNS: its widest line's."
-  (min columns (max 1 (apply #'max (mapcar #'string-width (split-string text "\n"))))))
+  "The columns a toast of TEXT takes, at most COLUMNS: its widest line's,
+as painted."
+  (min columns (max 1 (apply #'max (mapcar #'romacs-layer--toast-width (split-string text "\n"))))))
 
 (defun romacs-layer--toast-lines (frame text columns)
-  "The rows TEXT takes in toast FRAME as its window wraps it, at most 6;
+  "The rows TEXT takes in toast FRAME as its window wraps it, at most
+`romacs-layer-toast-lines';
 without a host's layout to measure, its lines in rows of COLUMNS."
   (let* ((ch (frame-char-height frame))
          (rows (condition-case nil
                    (ceiling (cdr (window-text-pixel-size (frame-root-window frame))) (float ch))
                  (error (apply #'+ (mapcar (lambda (line) (max 1 (ceiling (string-width line) (float columns))))
                                            (split-string text "\n")))))))
-    (max 1 (min 6 rows))))
+    (max 1 (min (max 1 romacs-layer-toast-lines) rows))))
 
 (defun romacs-layer--toast-window ()
   "The window toasts show in: the root frame's selected window, or the
@@ -360,18 +518,19 @@ its padding and margin inside it takes the frame's area instead."
   (let* ((root (romacs-layer--root-frame))
          (cw (frame-char-width root))
          (window (and (eq romacs-layer-toast-position 'window) (romacs-layer--toast-window)))
-         (third (max 20 (/ (frame-text-cols root) 3)))
-         ;; The columns an area of PIXELS holds for a toast's text: less
-         ;; the margin, the glass padding either side and the column a
-         ;; window's last keeps for its continuation glyph.
-         (columns (lambda (pixels) (1- (/ (- pixels 12 (* 2 romacs-layer--toast-padding)) cw)))))
+         ;; The columns a toast PIXELS wide holds for its text: less the
+         ;; glass padding either side and the column a window's last keeps
+         ;; for its continuation glyph.
+         (columns (lambda (pixels) (1- (/ (- pixels (* 2 romacs-layer--toast-padding)) cw))))
+         (widest (funcall columns romacs-layer-toast-width)))
     (or (and (window-live-p window)
              (pcase-let ((`(,left ,top ,right ,bottom) (window-edges window t nil t)))
-               (let ((room (funcall columns (- right left))))
+               (let ((room (funcall columns (- right left 24))))
                  (and (>= room romacs-layer-toast-min-columns)
-                      (list left top right (min bottom (romacs-chrome-bottom root)) (min third room))))))
+                      (list left top right (min bottom (romacs-chrome-bottom root)) (min widest room))))))
         (list 0 (romacs-chrome-top root) (- (frame-native-width root) (frame-internal-border-width root))
-              (romacs-chrome-bottom root) third))))
+              (romacs-chrome-bottom root)
+              (min widest (funcall columns (- (frame-native-width root) 24)))))))
 
 (defun romacs-layer--toast-follow (frame)
   "Restack the toasts after a change to FRAME's windows (the selection, a
@@ -397,13 +556,22 @@ downward, newest on top; a toast that would pass its bottom waits hidden."
     (dolist (toast romacs-layer--toasts)
       (let* ((frame (romacs-layer--frame (car toast)))
              (border (or (frame-parameter frame 'child-frame-border-width) 0))
-             (columns (romacs-layer--toast-columns (nth 1 toast) most))
+             (columns (max 1 (min most (nth 4 toast))))
              ;; One column more: a window's last holds its continuation glyph.
              (width (* (1+ columns) cw)) height)
         ;; Its rows as its width wraps them at words.
         (set-frame-size frame width (frame-text-height frame) t)
         (setq height (* (romacs-layer--toast-lines frame (nth 1 toast) columns) ch))
         (set-frame-size frame width height t)
+        ;; Never over the minibuffer's layer (the command panel): below it
+        ;; where they would meet.
+        (when-let* ((host (and (fboundp 'romacs--minibuffer-host) (romacs--minibuffer-host)))
+                    ((frame-visible-p host)))
+          (pcase-let ((`(,hx . ,hy) (frame-position host))
+                      (x (- right width (* 2 border) margin)))
+            (when (and (< x (+ hx (frame-pixel-width host))) (< hx (+ x width (* 2 border)))
+                       (< top (+ hy (frame-pixel-height host))) (< hy (+ top height (* 2 border))))
+              (setq top (+ hy (frame-pixel-height host) gap)))))
         (set-frame-position frame (- right width (* 2 border) margin) top)
         (set-frame-parameter frame 'romacs-layer-edge 'top)
         (if (> (+ top height (* 2 border)) bottom)
@@ -429,25 +597,62 @@ when none shows: the echo area clears as every command starts."
         (cancel-timer (nth 2 toast))
         (romacs-layer-hide (car toast))))))
 
-(defun romacs-layer-toast (text)
+(defun romacs-layer-toast (text &optional kind)
   "Show TEXT as a toast for `romacs-layer-toast-timeout' seconds.
-The same TEXT as the newest toast shows that one longer instead."
-  (if (equal text (nth 1 (car romacs-layer--toasts)))
+KIND `error' draws it with `romacs-layer-toast-error''s glow.  The same
+TEXT as the newest toast shows that one longer instead.  With the most
+toasts shown, the oldest's layer shows TEXT in its place."
+  (if (equal text (nth 3 (car romacs-layer--toasts)))
       (timer-set-time (nth 2 (car romacs-layer--toasts))
                       (timer-relative-time nil romacs-layer-toast-timeout))
-    (while (>= (length romacs-layer--toasts) (max 1 romacs-layer-toast-max))
-      (let ((oldest (car (last romacs-layer--toasts))))
-        (cancel-timer (nth 2 oldest))
-        (romacs-layer--toast-expire (car oldest))))
-    (let ((buffer (romacs-layer--toast-buffer)))
-      (with-current-buffer buffer
-        (let ((inhibit-read-only t)) (erase-buffer) (insert text)))
-      (let ((frame (romacs-layer--frame buffer)))
-        (modify-frame-parameters frame (romacs-layer-glass-parameters romacs-layer-glass 'romacs-layer-toast))
-        (set-window-start (frame-root-window frame) 1))
-      (push (list buffer text (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer))
-            romacs-layer--toasts)
-      (romacs-layer--toast-stack))))
+    (let ((reused nil))
+      (while (>= (length romacs-layer--toasts) (max 1 romacs-layer-toast-max))
+        (let ((oldest (car (last romacs-layer--toasts))))
+          (cancel-timer (nth 2 oldest))
+          (setq romacs-layer--toasts (butlast romacs-layer--toasts))
+          (if (or reused (> (length romacs-layer--toasts) (1- (max 1 romacs-layer-toast-max))))
+              (romacs-layer-hide (car oldest))
+            (setq reused (car oldest)))))
+      (let* ((buffer (or reused (romacs-layer--toast-buffer)))
+             (glyph (and (eq kind 'error) (fboundp 'romacs-icon) (romacs-icon 'error 'romacs-layer-toast-error)))
+             (glyph (and glyph (not (string-empty-p glyph)) (concat glyph " ")))
+             (columns (nth 4 (romacs-layer--toast-area)))
+             ;; An error leads with the error glyph, shaped with its text in
+             ;; one budget; the text keeps the toast's foreground.
+             (shown (romacs-layer--toast-text (if glyph (concat glyph text) text) columns)))
+        (with-current-buffer buffer
+          (let ((inhibit-read-only t)) (erase-buffer) (insert shown)))
+        (let ((frame (romacs-layer--frame buffer)))
+          (modify-frame-parameters frame `(,@(romacs-layer-glass-parameters romacs-layer-glass 'romacs-layer-toast)
+                                           (romacs-layer-glow-face . ,(and (eq kind 'error) 'romacs-layer-toast-error))
+                                           (romacs-layer-outline-face . ,(and (eq kind 'error) 'romacs-layer-toast-error))))
+          (set-window-start (frame-root-window frame) 1))
+        (push (list buffer shown (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer) text
+                    (romacs-layer--toast-columns shown columns))
+              romacs-layer--toasts)
+        (romacs-layer--toast-stack)))))
+
+;; A command's error, reported by the command loop, and an undefined key's
+;; message show as error toasts (`romacs-complete--message').
+
+(defvar romacs-layer--command-error nil
+  "Non-nil from the command loop's report of an error (not a quit) until
+the echo area's next message or clearing.")
+
+(defun romacs-layer--note-command-error (data &rest _)
+  "Before the command loop reports DATA: its message is an error's."
+  (unless (memq 'quit (get (car data) 'error-conditions))
+    (setq romacs-layer--command-error t)))
+
+(defun romacs-layer--note-undefined (&rest _)
+  "Before `undefined' reports a key bound to nothing: an error's message."
+  (setq romacs-layer--command-error t))
+
+(defun romacs-layer-toast-kind ()
+  "The kind of toast the echo area's new message takes, and forget it:
+`error' after a command error or an undefined key, else nil."
+  (prog1 (and romacs-layer--command-error 'error)
+    (setq romacs-layer--command-error nil)))
 
 ;; The minibuffer and the echo area wrap at words too: minibuffers as each
 ;; is entered, the echo area at its first message (DIVERGENCES.md

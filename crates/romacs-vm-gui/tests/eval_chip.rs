@@ -197,7 +197,8 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         // The claim is the chip's own text, once: another message (a timer's,
         // one synced during the evaluation) is a toast, and the value's
         // display after it is still claimed; a second display is a toast.
-        report.push(printed(&mut vm, "(progn (romacs-eval-chip--show \"7\" (cons (selected-window) (copy-marker (point))) nil)
+        report.push(printed(&mut vm, "(let ((romacs-layer-toast-max 3))
+            (romacs-eval-chip--show \"7\" (cons (selected-window) (copy-marker (point))) nil)
             (romacs-eval-chip--arm \"7\" 'value)
             (dolist (m '(\"other\" \"7\" \"7\")) (romacs-complete--message m))
             (prog1 (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts) (romacs-complete--message nil) (romacs-eval-chip-hide)))"));

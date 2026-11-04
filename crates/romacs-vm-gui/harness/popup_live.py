@@ -214,6 +214,32 @@ REPEAT_INIT = '''(repeat-mode 1)
 '''
 
 
+TOASTS_INIT = '''(split-window-right)
+(defun popup-live--toasts ()
+  (write-region
+   (prin1-to-string
+    (list :toasts (mapcar (lambda (toast)
+                            (let ((f (romacs-layer--frame (car toast))))
+                              (list (substring-no-properties (nth 1 toast)) (frame-visible-p f)
+                                    (car (frame-position f)) (cdr (frame-position f)) (frame-pixel-width f) (frame-pixel-height f)
+                                    (and (frame-parameter f 'romacs-layer-glow-face) t))))
+                          romacs-layer--toasts)
+          :host (let ((host (romacs--minibuffer-host)))
+                  (and host (frame-visible-p host)
+                       (list (car (frame-position host)) (cdr (frame-position host)) (frame-pixel-width host) (frame-pixel-height host))))
+          :pane (window-edges (frame-selected-window (romacs-layer--root-frame)) t nil t)
+          :command (and (symbolp last-command) (symbol-name last-command))))
+   nil {state} nil 'quiet))
+(defun popup-live-path () (interactive)
+  (message "Wrote %s" (expand-file-name "Projects/rust/romacs/rlisp/romacs-defaults.el" "~")))
+(global-set-key (kbd "<f5>") #'popup-live-path)
+(add-hook 'post-command-hook (lambda () (run-at-time 0.3 nil #'popup-live--toasts)) 90)
+;; A toast while the M-x panel shows (a message there shows in the panel's
+;; own echo, as GNU's echo area does over a minibuffer): placed below it.
+(add-hook 'minibuffer-setup-hook (lambda () (run-at-time 0.4 nil (lambda () (romacs-layer-toast "Saved frame.rs (41234 bytes)") (run-at-time 0.4 nil #'popup-live--toasts)))))
+'''
+
+
 INDICATORS_INIT = '''(run-at-time 1 nil (lambda ()
   (switch-to-buffer (get-buffer-create "w.el"))
   (emacs-lisp-mode)
@@ -298,6 +324,67 @@ def check_repeat(args, output, report, env, process, state, keys, glyphs):
     if done.get('repeat'):
         raise AssertionError(f'repeat still in progress after C-f: {done}')
     report['checks'].append({'hints': report['captures'][-1]['rows'], 'repeated': again['window'], 'ended': done.get('command')})
+
+
+def check_toasts(args, output, report, env, process, state, keys, glyphs):
+    """One toast at a time, in the selected pane's top right: a long file
+    name abbreviated and cut in its directories; an undefined key's message
+    replacing it with the error glow; C-g toasting nothing; a message while
+    the M-x panel shows placed below the panel; the next command clearing it."""
+    def read():
+        return read_plist(state.read_text()) if state.exists() else {}
+
+    def wait_for(pred, what):
+        def holds():
+            try:
+                return pred(read())
+            except Exception as error:
+                report['state_error'] = repr(error)
+                return False
+        try:
+            fio.wait(holds, args.timeout, what, process)
+        except AssertionError:
+            report['last_state'] = state.read_text() if state.exists() else None
+            raise
+        return read()
+
+    keys('-k', 'F5')
+    shown = wait_for(lambda s: s.get('command') == 'popup-live-path' and s.get('toasts'), 'path toast')
+    time.sleep(.6)
+    fio.shot(output / 'toast-path.png', env, report)
+    report['captures'].append({'name': 'path', 'state': shown})
+    [(text, visible, x, y, width, height, glow)] = shown['toasts']
+    left, top, right, bottom = shown['pane']
+    if not (visible and text.startswith('Wrote ~/') and '…/' in text and text.endswith('romacs-defaults.el')):
+        raise AssertionError(f'path toast {text!r} visible {visible}')
+    if not (left <= x and x + width <= right and top <= y) or width > 420 or glow:
+        raise AssertionError(f'path toast at {x},{y} {width}x{height} in pane {shown["pane"]}, glow {glow}')
+    keys('-k', 'F9')
+    error = wait_for(lambda s: s.get('toasts') and 'undefined' in s['toasts'][0][0], 'undefined-key toast')
+    time.sleep(.6)
+    fio.shot(output / 'toast-error.png', env, report)
+    report['captures'].append({'name': 'error', 'state': error})
+    if len(error['toasts']) != 1 or not error['toasts'][0][6]:
+        raise AssertionError(f'error toast {error["toasts"]}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    quiet = wait_for(lambda s: s.get('command') == 'keyboard-quit', 'C-g')
+    if quiet.get('toasts'):
+        raise AssertionError(f'C-g toasted {quiet["toasts"]}')
+    keys('-M', 'alt', 'x', '-m', 'alt')
+    panel = wait_for(lambda s: s.get('host') and s.get('toasts') and s['toasts'][0][0].startswith('Saved'), 'toast over the panel')
+    time.sleep(.6)
+    fio.shot(output / 'toast-panel.png', env, report)
+    report['captures'].append({'name': 'panel', 'state': panel})
+    hx, hy, hw, hh = panel['host']
+    _, _, x, y, width, height, _ = panel['toasts'][0]
+    if x < hx + hw and hx < x + width and y < hy + hh and hy < y + height:
+        raise AssertionError(f'toast at {x},{y} {width}x{height} over the panel {panel["host"]}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    keys('-M', 'ctrl', 'f', '-m', 'ctrl')
+    cleared = wait_for(lambda s: s.get('command') == 'forward-char', 'C-f')
+    if any(t[1] for t in cleared.get('toasts') or []):
+        raise AssertionError(f'toasts after the next command {cleared["toasts"]}')
+    report['checks'].append({'path': text, 'error': error['toasts'][0][0], 'panel': [panel['host'], panel['toasts'][0][2:6]]})
 
 
 def check_indicators(args, output, report, env, process, state, keys, glyphs):
@@ -574,6 +661,8 @@ def main():
     parser.add_argument('--width', type=int, default=1280, help='the output width: a narrow one reflows the menu')
     parser.add_argument('--repeat', action='store_true', help="repeat-mode's map as hints after C-x o")
     parser.add_argument('--indicators', action='store_true', help="packages' indicators in the status bar")
+    parser.add_argument('--toasts', action='store_true', help='messages as toasts')
+    parser.add_argument('--theme', help='a theme loaded first (modus-operandi: a light one)')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -590,8 +679,11 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            init = (INDICATORS_INIT if args.indicators else REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
+            init = (TOASTS_INIT if args.toasts else INDICATORS_INIT if args.indicators else REPEAT_INIT if args.repeat else WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame
                     else LAYER_INIT if args.layer else INIT)
+            if args.theme:
+                # Doubled braces survive the init's format below.
+                init = f"(mapc #'disable-theme custom-enabled-themes) (load-theme '{args.theme} t)\n" + init
             faces_state = work / 'popup-faces.el'
             (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
                                                                    faces=json.dumps(str(faces_state))) if args.layer else init.format(state=json.dumps(str(state))))
@@ -643,6 +735,11 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.toasts:
+                    time.sleep(1)
+                    check_toasts(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
                 if args.indicators:
                     check_indicators(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'

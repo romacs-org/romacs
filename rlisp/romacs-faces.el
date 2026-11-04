@@ -35,6 +35,9 @@ bar (`romacs-chrome-derived-faces'), else the bar's own foreground.")
 (defface romacs-layer-toast '((t :inherit romacs-layer-glass))
   "A message toast's text and background.")
 
+(defface romacs-layer-toast-error '((t :inherit error))
+  "An error toast: its foreground is the toast's glow.")
+
 (defface romacs-layer-selection '((t :inherit region))
   "The band a layer's selected row is drawn on.")
 
