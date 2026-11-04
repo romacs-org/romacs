@@ -21,27 +21,15 @@ impl Leaf<'_> {
         }
         Ok(None)
     }
-    /// CHARACTER_WIDTH.
+    /// CHARACTER_WIDTH of one character, by the current buffer's rule
+    /// (width_rule.rs); a scan reads the rule once instead.
     pub(super) fn character_width(&mut self, c: u32) -> std::result::Result<i64, Fault> {
-        Ok(match c {
-            0x20..0x7f => 1,
-            0x80.. => {
-                let table = self.intern("char-width-table");
-                let table = self.variable_value(table)?.unwrap_or(Value::NIL);
-                let width = self.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
-                width.integer_value().filter(|w| (0..=1000).contains(w)).unwrap_or(1000)
-            }
-            0x09 => self.tab_width()? as i64,
-            0x0a => 0,
-            _ => {
-                let ctl_arrow = self.intern("ctl-arrow");
-                if self.variable_value(ctl_arrow)?.is_some_and(|v| v != Value::NIL) { 2 } else { 4 }
-            }
-        })
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
+        Ok(rule.width(c) as i64)
     }
     /// char_width: a display-table vector entry is the sum of its glyphs'
     /// widths (a glyph code's character, or a character).
-    fn char_width_in(&mut self, c: u32, display: Option<Value>) -> std::result::Result<i64, Fault> {
+    fn char_width_in(&mut self, c: u32, display: Option<Value>, rule: &crate::width_rule::WidthRule) -> std::result::Result<i64, Fault> {
         if let Some(table) = display {
             let entry = self.vm.char_table_get(table, c as usize).map_err(Fault::Error)?;
             if let Ok(glyphs) = self.vector_values(entry) {
@@ -53,16 +41,17 @@ impl Leaf<'_> {
                         Some(_) => None,
                         None => glyph.integer_value().filter(|&g| g >= 0).map(|g| g & 0x3fffff),
                     };
-                    if let Some(c) = c { width += self.character_width(c as u32)?; }
+                    if let Some(c) = c { width += rule.width(c as u32) as i64; }
                 }
                 return Ok(width);
             }
         }
-        self.character_width(c)
+        Ok(rule.width(c) as i64)
     }
     pub(crate) fn char_width(&mut self, c: u32) -> super::super::Out {
         let display = self.display_table()?;
-        Value::integer(self.char_width_in(c, display)?).map_err(Fault::Error)
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
+        Value::integer(self.char_width_in(c, display, &rule)?).map_err(Fault::Error)
     }
     /// lisp_string_width over characters FROM..TO. A unibyte string's
     /// characters are its bytes, as GNU reads them.
@@ -80,8 +69,9 @@ impl Leaf<'_> {
         let chars: Vec<u32> = if view.multibyte { view.chars().skip(from).take(to - from).collect() }
             else { view.bytes[from..to].iter().map(|&b| u32::from(b)).collect() };
         let display = self.display_table()?;
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let mut width = 0i64;
-        for c in chars { width += self.char_width_in(c, display)?; }
+        for c in chars { width += self.char_width_in(c, display, &rule)?; }
         Value::integer(width).map_err(Fault::Error)
     }
 }

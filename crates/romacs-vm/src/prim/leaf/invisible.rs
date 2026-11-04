@@ -59,31 +59,6 @@ impl Leaf<'_> {
         }
         Ok(())
     }
-    /// What scan_for_column (indent.c) counts a line's characters by, read
-    /// once per scan: `tab-width', `char-width-table' and `ctl-arrow'.
-    fn column_rules(&mut self) -> std::result::Result<ColumnRules, Fault> {
-        let tab = self.tab_width()?;
-        let table = self.intern("char-width-table");
-        let table = self.variable_value(table)?.unwrap_or(Value::NIL);
-        let ctl_arrow = self.intern("ctl-arrow");
-        let ctl_arrow = self.variable_value(ctl_arrow)?.is_some_and(|v| v != Value::NIL);
-        Ok(ColumnRules { tab, table, ctl_arrow })
-    }
-    /// Columns C occupies at COLUMN, as current-column counts them: a tab
-    /// to the next stop, else CHARACTER_WIDTH (buffer.h), `char-width-table'
-    /// for a multibyte character, as `char-width' counts it.
-    fn char_columns(&self, c: char, column: usize, rules: &ColumnRules) -> std::result::Result<usize, Fault> {
-        Ok(match c as u32 {
-            0x09 => rules.tab - column % rules.tab,
-            0x0a => 0,
-            0x20..0x7f => 1,
-            0x80.. => {
-                let width = self.vm.char_table_get(rules.table, c as usize).map_err(Fault::Error)?;
-                width.integer_value().filter(|w| (0..=1000).contains(w)).unwrap_or(1000) as usize
-            }
-            _ => if rules.ctl_arrow { 2 } else { 4 },
-        })
-    }
     /// indent.c position_indentation from the start of point's line:
     /// spaces and tabs, and characters of category `\s'.
     pub fn current_indentation(&mut self) -> super::super::Out {
@@ -106,14 +81,14 @@ impl Leaf<'_> {
     /// column reached and the absolute byte position and column before the
     /// last character, with that character.
     pub fn scan_to_column(&mut self, goal: usize) -> std::result::Result<(usize, usize, usize, Option<char>), Fault> {
-        let rules = self.column_rules()?;
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let (line, _, low) = self.line_text()?;
         let (mut column, mut at) = (0, 0);
         let (mut prev_at, mut prev_column, mut prev_char) = (0, 0, None);
         for c in line.chars() {
             if column >= goal { break; }
             (prev_at, prev_column, prev_char) = (at, column, Some(c));
-            column += self.char_columns(c, column, &rules)?;
+            column += rule.columns(c as u32, column);
             at += c.len_utf8();
         }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -125,10 +100,9 @@ impl Leaf<'_> {
         Ok((column, low + prev_at, prev_column, prev_char))
     }
     pub fn native_current_column(&mut self) -> super::super::Out {
-        let rules = self.column_rules()?;
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let (line, point, _) = self.line_text()?;
-        let mut column = 0;
-        for c in line[..point].chars() { column += self.char_columns(c, column, &rules)?; }
+        let column = line[..point].chars().fold(0, |column, c| column + rule.columns(c as u32, column));
         Value::integer(column as i64).map_err(Fault::Error)
     }
 
@@ -198,6 +172,3 @@ impl Leaf<'_> {
         self.character_property(Value::integer(n).map_err(Fault::Error)?, key)
     }
 }
-
-/// The variables scan_for_column reads, read once per scan.
-struct ColumnRules { tab: usize, table: Value, ctl_arrow: bool }

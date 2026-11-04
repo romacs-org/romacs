@@ -123,12 +123,15 @@ impl Vm {
                 let code = code as u32;
                 let mut encoded = [0; 5];
                 let width = crate::lstring::char_string(code, &mut encoded);
-                spec.character(encoded[..width].to_vec(), code)
+                let rule = if spec.counts_columns() { Some(self.width_rule()?) } else { None };
+                spec.character(encoded[..width].to_vec(), code, rule.as_ref())
             } else if spec.conversion == 's'
                 && let Some(text) = self.str_view(value)
             {
                 raw = !text.is_multibyte();
-                let (piece, padding) = spec.text_field(text.bytes().to_vec(), !raw, 8);
+                let bytes = text.bytes().to_vec();
+                let rule = if spec.counts_columns() { Some(self.width_rule()?) } else { None };
+                let (piece, padding) = spec.text_field(bytes, !raw, rule.as_ref());
                 leading = padding;
                 piece
             } else if matches!(spec.conversion, 's' | 'S') {
@@ -139,7 +142,8 @@ impl Vm {
                     .and_then(|i| self.symbol_names.get(i.checked_sub(1)?)).cloned();
                 let printed = match name { Some(name) => name, None => self.print_render(value, spec.conversion == 'S', Value::NIL, true)? };
                 let printed = crate::symkey::to_internal(&printed).unwrap_or_else(|| printed.into_bytes());
-                spec.text(printed, true, 8)
+                let rule = if spec.counts_columns() { Some(self.width_rule()?) } else { None };
+                spec.text(printed, true, rule.as_ref())
             } else {
                 let numeric = if matches!(spec.conversion, 'e' | 'f' | 'g') {
                     if let Some(number) = self.bigint_value(value)

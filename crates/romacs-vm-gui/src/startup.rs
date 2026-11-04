@@ -196,28 +196,10 @@ fn parse_position_number(value: &str) -> Option<u64> {
     value.parse().ok()
 }
 
+/// startup.el's `(move-to-column (1- column))' for `+LINE:COLUMN', whose
+/// columns count as current-column's do (width_rule.rs).
 fn visit_column(vm: &mut Vm, target: u64) -> Result<(), String> {
-    use romacs_vm::coordinates::ByteOffset;
-    vm.eval_source("(beginning-of-line)")?;
-    let value = vm.eval_source("(let ((start (point))) (end-of-line) (prog1 (buffer-substring start (point)) (goto-char start)))")?.typed_value()?;
-    let line = value["value"].as_str().ok_or("startup column requires Unicode text")?;
-    let tab = vm.eval_source("(if (boundp 'tab-width) tab-width 8)")?.as_integer()?.max(1) as u64;
-    let mut column = 0;
-    let mut characters = 0;
-    for character in line.chars() {
-        if column >= target { break; }
-        let width = if character == '\t' { tab - column % tab }
-        else if character.is_ascii_control() { 2 }
-        else {
-            let mut encoded = [0; 4];
-            let scalar = character.encode_utf8(&mut encoded);
-            let text = romacs_vm::text::Text::new(scalar.as_bytes())?;
-            text.display_width(ByteOffset(0)..ByteOffset(scalar.len()))?.0 as u64
-        };
-        column += width;
-        characters += 1;
-    }
-    vm.eval_source(&format!("(forward-char {characters})"))?;
+    vm.eval_source(&format!("(move-to-column {target})"))?;
     Ok(())
 }
 

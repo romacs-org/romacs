@@ -165,20 +165,26 @@ impl FormatSpec {
         decimal_point(fixed, self.alternate)
     }
 
-    pub fn text(&self, text: Vec<u8>, multibyte: bool, tab: usize) -> Vec<u8> {
-        self.text_field(text, multibyte, tab).0
+    pub(crate) fn text(&self, text: Vec<u8>, multibyte: bool, rule: Option<&crate::width_rule::WidthRule>) -> Vec<u8> {
+        self.text_field(text, multibyte, rule).0
     }
+
+    /// Whether a field width or precision makes the text's columns count:
+    /// only then is a width rule needed.
+    pub(crate) fn counts_columns(&self) -> bool { self.width > 0 || self.precision.is_some() }
 
     /// `text', and how many bytes of padding come before the text: where
     /// GNU's field starts for the text's properties (editfns.c:3787, 3797).
-    pub fn text_field(&self, mut text: Vec<u8>, multibyte: bool, tab: usize) -> (Vec<u8>, usize) {
+    /// RULE counts the columns (lisp_string_width), given when
+    /// `counts_columns'.
+    pub(crate) fn text_field(&self, mut text: Vec<u8>, multibyte: bool, rule: Option<&crate::width_rule::WidthRule>) -> (Vec<u8>, usize) {
+        let Some(rule) = rule.filter(|_| self.counts_columns()) else { return (text, 0) };
         if self.precision == Some(0) { text.clear(); }
         let mut at = 0;
         let mut columns = 0;
         while at < text.len() {
             let (code, bytes) = if multibyte { crate::lstring::string_char(&text[at..]) } else { (u32::from(text[at]), 1) };
-            let width = match code { 9 => tab, 10 => 0, 0..=31 | 127 => 2,
-                _ => char::from_u32(code).and_then(unicode_width::UnicodeWidthChar::width).unwrap_or(1) };
+            let width = rule.width(code);
             if self.precision.is_some_and(|limit| columns + width > limit) { break; }
             columns += width;
             at += bytes;
@@ -188,8 +194,8 @@ impl FormatSpec {
         (self.pad_text(text, columns), leading)
     }
 
-    pub fn character(&self, text: Vec<u8>, code: u32) -> Vec<u8> {
-        if code >= 128 { return self.text(text, true, 8); }
+    pub(crate) fn character(&self, text: Vec<u8>, code: u32, rule: Option<&crate::width_rule::WidthRule>) -> Vec<u8> {
+        if code >= 128 { return self.text(text, true, rule); }
         let text = if self.precision == Some(0) { Vec::new() } else { text };
         let columns = text.len();
         self.pad_text(text, columns)

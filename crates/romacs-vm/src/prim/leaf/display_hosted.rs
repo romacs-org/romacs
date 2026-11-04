@@ -122,7 +122,7 @@ fn glyphless_pixels(source: &mut Source<'_, '_>, e: &Elem) -> R<i64> {
     let base = measure(source, "x", face_key(e))?;
     let text = match how {
         Glyphless::ThinSpace => return Ok(1),
-        Glyphless::EmptyBox => return Ok(base * source.leaf().character_width(c)?.clamp(1, 4)),
+        Glyphless::EmptyBox => return Ok(base * source.width(c).clamp(1, 4)),
         Glyphless::HexCode => if c < 0x10000 { format!("{c:04X}") } else { format!("{c:06X}") },
         Glyphless::Acronym(string) => source.leaf().vm.str_view(string).map(|v| v.chars().map_while(char::from_u32).take_while(char::is_ascii).take(6).collect()).unwrap_or_default(),
     };

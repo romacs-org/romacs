@@ -15,6 +15,7 @@ mod lazy_tests;
 mod plist_tests;
 mod keymap;
 mod char_table;
+mod width_rule;
 mod map_keymap;
 #[cfg(test)]
 mod map_keymap_tests;
@@ -143,6 +144,7 @@ mod numbers;
 mod metadata;
 mod variable_definitions;
 mod variable_runtime;
+mod char_widths;
 mod forwarded;
 mod eval_depth;
 mod eval_data;

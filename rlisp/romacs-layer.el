@@ -282,8 +282,15 @@ columns and lines."
     buffer))
 
 (defun romacs-layer--toast-columns (text columns)
-  "The columns a toast of TEXT takes, at most COLUMNS: its widest line's."
-  (min columns (max 1 (apply #'max (mapcar #'string-width (split-string text "\n"))))))
+  "The columns a toast of TEXT takes, at most COLUMNS: its widest line's,
+as drawn where a host measures it (a character can draw wider than its
+`char-width' columns, as an emoji in a narrower font does)."
+  (let ((cell (float (frame-char-width))))
+    (min columns
+         (max 1 (apply #'max (mapcar (lambda (line)
+                                       (max (string-width line)
+                                            (ceiling (or (ignore-errors (string-pixel-width line)) 0) cell)))
+                                     (split-string text "\n")))))))
 
 (defun romacs-layer--toast-lines (frame text columns)
   "The rows TEXT takes in toast FRAME as its window wraps it, at most 6;

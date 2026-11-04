@@ -565,6 +565,45 @@ pub(super) fn visit_char_table_node_values(
     }
 }
 
+/// INDEX's value in the table of ROOT, ASCII and DEFAULT (the default for
+/// nil) and the inclusive character range of its slot.
+fn span(root: &CharTableNodeHandle, ascii: &CharTableSlot, default: Value, index: usize) -> Result<(Value, usize, usize)> {
+    if index >= CharTable::LEN { return Err("index out of range".into()); }
+    let (value, from, to) = match ascii {
+        _ if index >= 128 => {
+            let (value, from, to) = CharTableNode::checked_span(root, index)?;
+            (value, from.max(128), to)
+        }
+        CharTableSlot::Value(value) => (*value, 0, 127),
+        CharTableSlot::Node(node) => {
+            let node = node.lock().unwrap();
+            if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
+            match node.slots.get(index) {
+                Some(CharTableSlot::Value(value)) => (*value, index, index),
+                _ => return Err("invalid ASCII sub-char-table".into()),
+            }
+        }
+    };
+    Ok((if value == Value::NIL { default } else { value }, from, to))
+}
+
+/// A char-table's own values, read without the VM, for the length of one
+/// scan: its nodes are shared, not copied.  `WidthRule` reads
+/// `char-width-table` through these, its parents' after it.
+#[derive(Clone)]
+pub(crate) struct CharTableView {
+    root: CharTableNodeHandle,
+    ascii: CharTableSlot,
+    default: Value,
+}
+
+impl CharTableView {
+    /// INDEX's value, the default for nil (nil out of range).
+    pub(crate) fn get(&self, index: usize) -> Value {
+        span(&self.root, &self.ascii, self.default, index).map_or(Value::NIL, |(value, ..)| value)
+    }
+}
+
 pub(super) struct CharTable {
     pub purpose: Value,
     pub(super) root: CharTableNodeHandle,
@@ -665,23 +704,11 @@ impl CharTable {
     /// reads the table's own ASCII slot, which a literal may detach from the
     /// root; the root's range for a higher character starts above it.
     pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
-        if index >= Self::LEN { return Err("index out of range".into()); }
-        let (value, from, to) = match &self.ascii {
-            _ if index >= 128 => {
-                let (value, from, to) = CharTableNode::checked_span(&self.root, index)?;
-                (value, from.max(128), to)
-            }
-            CharTableSlot::Value(value) => (*value, 0, 127),
-            CharTableSlot::Node(node) => {
-                let node = node.lock().unwrap();
-                if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
-                match node.slots.get(index) {
-                    Some(CharTableSlot::Value(value)) => (*value, index, index),
-                    _ => return Err("invalid ASCII sub-char-table".into()),
-                }
-            }
-        };
-        Ok((if value == Value::NIL { self.default } else { value }, from, to))
+        span(&self.root, &self.ascii, self.default, index)
+    }
+    /// A read view of this table's own values that shares its nodes.
+    pub(crate) fn view(&self) -> CharTableView {
+        CharTableView { root: self.root.clone(), ascii: self.ascii.clone(), default: self.default }
     }
     pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
         self.set_range(index, index, value)
