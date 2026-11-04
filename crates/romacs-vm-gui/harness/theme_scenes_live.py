@@ -8,6 +8,7 @@ split with an Emacs Lisp buffer, an active region and line numbers beside
 an empty buffer (`code'); org headings, markup and a source block
 (`org'); help for `find-file' beside a diff (`help-diff'); Emacs Lisp
 beside dired (`elisp-dired'); a message, which Romacs shows as a toast (`toast');
+Customize's buttons (`custom');
 the command panel open (`complete'); with --gnosis-db, gnosis-dashboard
 over a copy of that database (`gnosis'); and,
 when the system has notmuch and its Lisp, notmuch-hello, a search and a
@@ -130,6 +131,8 @@ SCENES = r'''
 (global-set-key (kbd "<f10>") (lambda () (interactive)
   (message "Wrote %s (%d lines)" (abbreviate-file-name (getenv "TS_SRC")) 1234) (ts-done 'toast)))
 (global-set-key (kbd "<f9>") (lambda () (interactive) (delete-other-windows) (switch-to-buffer "*scratch*") (ts-done 'scratch)))
+(global-set-key (kbd "<f12>") (lambda () (interactive)
+  (delete-other-windows) (customize-group 'faces) (delete-other-windows) (goto-char (point-min)) (ts-done 'custom)))
 (when (getenv "TS_GNOSIS")
   (setq gnosis-dir (getenv "TS_GNOSIS"))
   (global-set-key (kbd "<f11>") (lambda () (interactive) (delete-other-windows) (gnosis-dashboard) (delete-other-windows) (ts-done 'gnosis))))
@@ -246,6 +249,7 @@ def session(engine, binary, theme, args, out):
                     scene('F8', 'show', 2.5)
                 scene('F9', 'scratch', 1)
                 scene('F10', 'toast', .6)
+                scene('F12', 'custom', 2.5)
                 if args.gnosis_db:
                     scene('F11', 'gnosis', 4)
                 keys('-M', 'alt', 'x', '-m', 'alt')

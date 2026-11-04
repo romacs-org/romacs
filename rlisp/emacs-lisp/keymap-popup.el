@@ -54,13 +54,18 @@ Common values:
   :type display-buffer--action-custom-type
   :group 'keymap-popup)
 
-(defcustom keymap-popup-backend #'keymap-popup-backend-side-window
+(defcustom keymap-popup-backend
+  (if (fboundp 'romacs-popup-show) #'keymap-popup-backend-layer #'keymap-popup-backend-side-window)
   "Function returning a display backend plist (:show :fit :hide).
 Each backend function receives a single buffer argument.
 :show displays the buffer, :fit refits after content changes,
-:hide removes the display and cleans up."
+:hide removes the display and cleans up.  A backend's :title non-nil
+draws the popup's title (its mode line's text) as its first row.
+The default is Romacs's layer where Romacs's menus are present, else
+a side window."
   :type '(choice (function-item :tag "Side window" keymap-popup-backend-side-window)
                  (function-item :tag "Child frame" keymap-popup-backend-child-frame)
+                 (function-item :tag "Romacs panel" keymap-popup-backend-layer)
                  (function :tag "Custom backend"))
   :group 'keymap-popup)
 
@@ -152,6 +157,7 @@ no explicit :exit-key, for both `keymap-popup-define' and
 (defface keymap-popup-key
   '((t :inherit help-key-binding))
   "Face for key bindings in the popup.")
+
 
 (defface keymap-popup-group-header
   '((t :weight bold))
@@ -1470,7 +1476,7 @@ target.  Inapt-key handling is folded into the keep-pred via
                          (let ((control (keymap-popup--key-events key)))
                            (and control
                                 (equal control (seq-take events (length control))))))
-                       (list (plist-get active :exit-key) "C-u"))))
+                       (list (plist-get active :exit-key) "C-u" "C-M-v" "C-M-S-v"))))
          (plist-get group :entries)))))))
 
 (defun keymap-popup--inapt-key-p (buf key-str)
@@ -1496,10 +1502,19 @@ Returns nil when BUF is dead (the popup already closed)."
          ;; The columns a line can fill: a window without fringes keeps its
          ;; last for the continuation glyph (`window-max-chars-per-line').
          (width (and window (max 1 (window-max-chars-per-line window))))
-         (content (keymap-popup--render-columns rendered-rows width)))
+         (content (keymap-popup--render-columns rendered-rows width))
+         ;; The first line shown, kept across the rewrite of the same menu (a
+         ;; scrolled popup refreshing); another menu starts at its top.
+         (menu (plist-get (keymap-popup--session-get buf :active) :keymap))
+         (first (and window (eq menu (keymap-popup--session-get buf :viewport-menu))
+                     (with-current-buffer buf (line-number-at-pos (window-start window))))))
+    (keymap-popup--set-session buf :viewport-menu menu)
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (when-let* (((plist-get (keymap-popup--session-get buf :backend) :title))
+                    (title (keymap-popup--title buf)))
+          (insert (keymap-popup--fit-line title width) "\n\n"))
         (insert content)
         ;; This describes navigation, not the swallowed source binding.
         ;; Keep it outside the action columns and without mouse properties.
@@ -1514,7 +1529,11 @@ Returns nil when BUF is dead (the popup already closed)."
                                     "Back" "Dismiss menu"))
                    width)
                   "\n"))
-        (goto-char (point-min))))
+        (goto-char (point-min))
+        (when (and first (> first 1))
+          ;; At most the last full page of what is there now.
+          (let ((last (max 1 (- (count-lines (point-min) (point-max)) (window-body-height window) -1))))
+            (set-window-start window (save-excursion (forward-line (1- (min first last))) (point)))))))
     (when-let* ((fit (plist-get (keymap-popup--session-get buf :backend) :fit)))
       (funcall fit buf))
     rendered-rows))
@@ -1700,6 +1719,50 @@ Frame parameters are taken from `keymap-popup-child-frame-parameters'."
   (list :show #'keymap-popup--show-child-frame
         :fit #'keymap-popup--fit-child-frame
         :hide #'keymap-popup--hide-child-frame))
+
+;; Romacs's `panel' menu (rlisp/romacs-popup.el): a layer across the
+;; frame's bottom above the status bar, in Romacs's menu look.  The popup's
+;; mode-line text becomes its first row; the layer's window has no mode line.
+
+(declare-function romacs-popup-show "romacs-popup" (kind buffer &rest args))
+(defvar romacs-popup-hints-inhibit)
+(declare-function romacs-popup-hide "romacs-popup" (buffer))
+
+(defun keymap-popup--show-layer (buf)
+  "Show BUF in a `panel' layer and own its window."
+  (with-current-buffer buf (setq-local mode-line-format nil))
+  (let ((frame (romacs-popup-show 'panel buf)))
+    (keymap-popup--set-session buf :frame frame)
+    (keymap-popup--set-session buf :window (frame-root-window frame))))
+
+(defun keymap-popup--fit-layer (buf)
+  "Size BUF's panel to its text as its window shows it."
+  (when-let* ((frame (keymap-popup--session-get buf :frame))
+              ((frame-live-p frame))
+              (window (keymap-popup--display-window buf)))
+    (romacs-popup-show 'panel buf
+                       :lines (max 1 (ceiling (cdr (window-text-pixel-size window nil nil nil nil nil))
+                                              (frame-char-height frame))))))
+
+(defun keymap-popup--hide-layer (buf)
+  "Hide BUF's panel, which fades; killing BUF deletes it."
+  (when (keymap-popup--session-get buf :frame)
+    (romacs-popup-hide buf)))
+
+(defun keymap-popup-backend-layer ()
+  "Return a backend showing the popup in Romacs's bottom `panel' menu."
+  (list :show #'keymap-popup--show-layer
+        :fit #'keymap-popup--fit-layer
+        :hide #'keymap-popup--hide-layer
+        :title t))
+
+(defun keymap-popup--title (buf)
+  "BUF's title row: the text its mode line would show, in that text's
+own faces, or nil."
+  (when-let* ((format (alist-get 'mode-line-format keymap-popup-buffer-parameters))
+              (title (string-trim (format-mode-line format nil nil buf)))
+              ((not (string-empty-p title))))
+    title))
 
 (defun keymap-popup--prepare-buffer ()
   "Allocate and configure a new popup buffer without claiming a name."
@@ -2033,6 +2096,7 @@ remove the native exit hook while leaving its transient map installed."
                        '(universal-argument universal-argument-more
                          digit-argument negative-argument
                          keymap-popup--prefix-argument
+                         keymap-popup-scroll-up keymap-popup-scroll-down
                          describe-key describe-key-briefly)))
                 ((keymap-popup--same-key-p key-str (plist-get active :exit-key)) nil)
                 ((eq this-command 'keyboard-quit) nil)
@@ -2152,7 +2216,37 @@ subsequent digit and `negative-argument' keys refine the prefix."
 The exit key is bound to `ignore'; the keep-pred exits on the key
 itself, so the binding only needs to exist and do nothing."
   (list (cons exit-key #'ignore)
-        (cons "C-u" #'keymap-popup--prefix-argument)))
+        (cons "C-u" #'keymap-popup--prefix-argument)
+        (cons "C-M-v" #'keymap-popup-scroll-up)
+        (cons "C-M-S-v" #'keymap-popup-scroll-down)))
+
+(defun keymap-popup--scroll (direction)
+  "Scroll the active popup's window a page in DIRECTION, 1 or -1, from
+its first line to its last full page; a popup that fits stays.  The
+window is not selected: its start moves, so the source keeps focus."
+  (when-let* ((buf (keymap-popup--popup-buffer))
+              (window (keymap-popup--display-window buf)))
+    (with-current-buffer buf
+      (let* ((page (max 1 (1- (window-body-height window))))
+             (lines (count-lines (point-min) (point-max)))
+             (last (max 1 (- lines (window-body-height window) -1)))
+             (first (line-number-at-pos (window-start window)))
+             (target (max 1 (min last (+ first (* direction page))))))
+        (unless (= target first)
+          (save-excursion
+            (goto-char (point-min))
+            (forward-line (1- target))
+            (set-window-start window (point))))))))
+
+(defun keymap-popup-scroll-up ()
+  "Show the next page of a popup taller than its window."
+  (interactive)
+  (keymap-popup--scroll 1))
+
+(defun keymap-popup-scroll-down ()
+  "Show the previous page of a popup taller than its window."
+  (interactive)
+  (keymap-popup--scroll -1))
 
 (defun keymap-popup--refuse-inapt (buf)
   "Refuse an inapt key press for the popup in BUF.
@@ -2364,9 +2458,11 @@ Use ACTIVE instead of deriving the initial navigation state when non-nil."
                    (plist-get active :exit-key))))
     (keymap-popup--set-active buf :wrapper-map wrapper)
     (let ((exit-function
-           (set-transient-map wrapper
-                              (keymap-popup--make-keep-pred buf)
-                              (keymap-popup--make-on-exit buf))))
+           ;; The popup shows these keys itself: no hints of them (Romacs).
+           (let ((romacs-popup-hints-inhibit t))
+             (set-transient-map wrapper
+                                (keymap-popup--make-keep-pred buf)
+                                (keymap-popup--make-on-exit buf)))))
       (when (buffer-live-p buf)
         (keymap-popup--set-active buf :exit-function exit-function)))))
 
@@ -2403,7 +2499,8 @@ Activates KEYMAP as a transient map.  Switch keys execute and re-render
 without closing.  Inapt keys are refused with \"Command unavailable\"
 and keep the popup open; outside a popup, `:inapt-if' does not block
 dispatch.  Sub-menu keys push a navigation stack.
-The exit key and \\[universal-argument] are popup controls; source actions
+The exit key, \\[universal-argument], and C-M-v and C-M-S-v (a popup taller
+than its window pages, its source keeping focus) are popup controls; source actions
 shadowed by those controls are omitted from the displayed entries.
 \\[universal-argument] toggles prefix mode."
   (let ((active (keymap-popup--state-for-keymap keymap)))

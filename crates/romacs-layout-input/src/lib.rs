@@ -192,6 +192,10 @@ pub struct ChildFrameSnapshot {
     pub radius: u32,
     pub glow: Option<[u8; 3]>,
     pub shadow: bool,
+    /// A 1px hairline round it in this colour, drawn even on a glowing
+    /// layer: the foreground of the face its `romacs-layer-outline-face'
+    /// parameter names (an error toast's).
+    pub outline: Option<[u8; 3]>,
 }
 
 /// `romacs-layer-animation': no layer animation, fades only, or fades,
@@ -238,8 +242,24 @@ pub struct Decor {
     pub underline: Option<Line>,
     pub overline: Option<Line>,
     pub strike: Option<Line>,
+    /// GNU's `:box'.
+    pub boxed: Option<BoxLine>,
 }
-romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike });
+romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike, boxed });
+
+/// A face's box (xfaces.c realize_gui_face): VERTICAL the left and right
+/// edges' width, HORIZONTAL the top and bottom edges', in device pixels,
+/// each drawn outside the text when positive (widening the run and the
+/// row) and inside it when negative; COLOR, else the foreground; STYLE 1 a
+/// line, 2 a released button, 3 a pressed one (protocol `BoxType' codes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoxLine {
+    pub vertical: i16,
+    pub horizontal: i16,
+    pub color: Option<[u8; 3]>,
+    pub style: u8,
+}
+romacs_snapshot::snapshot_struct!(BoxLine { vertical, horizontal, color, style });
 
 /// One line a face draws: STYLE is romacs-display-protocol's
 /// `UnderlineStyle' code (1 line, 2 double, 3 wave, 4 dotted, 5 dashed;

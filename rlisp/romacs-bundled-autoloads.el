@@ -179,6 +179,44 @@ disabled.
 (register-definition-prefixes "romacs-ert-batch" '("ert--" "romacs-ert--batch-context"))
 
 
+;;; Generated autoloads from romacs-eval-chip.el
+
+(defvar romacs-eval-chip-mode nil
+"Non-nil if Romacs-Eval-Chip mode is enabled.
+See the `romacs-eval-chip-mode' command
+for a description of this minor mode.
+Setting this variable directly does not take effect;
+either customize it (see the info node `Easy Customization')
+or call the function `romacs-eval-chip-mode'.")
+(custom-autoload 'romacs-eval-chip-mode "romacs-eval-chip" nil)
+(autoload 'romacs-eval-chip-mode "romacs-eval-chip"
+"Show evaluation results in a chip after the evaluated sexp.
+
+`eval-last-sexp', `eval-defun', `pp-eval-last-sexp' and
+`eval-expression' then show the value they print in the echo area, or
+their error, in a small layer after the sexp, not as a toast, and the
+error a command run in a buffer window signals shows in one at point
+(`romacs-eval-chip-command-errors'); the text is still the echo area's
+message and logged in *Messages*.
+
+This is a global minor mode.  If called interactively, toggle the
+`Romacs-Eval-Chip mode' mode.  If the prefix argument is positive,
+enable the mode, and if it is zero or negative, disable the mode.
+
+If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
+mode if ARG is nil, omitted, or is a positive number.  Disable the mode
+if ARG is a negative number.
+
+To check whether the minor mode is enabled in the current buffer,
+evaluate `(default-value \\='romacs-eval-chip-mode)'.
+
+The mode's hook is called both when the mode is enabled and when it is
+disabled.
+
+(fn &optional ARG)" t)
+(register-definition-prefixes "romacs-eval-chip" '("romacs-eval-chip-"))
+
+
 ;;; Generated autoloads from romacs-find-file.el
 
 (register-definition-prefixes "romacs-find-file" '("auto-mode-alist" "file-name-history" "find-file-" "romacs-find-file-"))
@@ -225,6 +263,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
 
 
+;;; Generated autoloads from romacs-help.el
+
+(register-definition-prefixes "romacs-help" '("describe-" "help--describe-vector" "internal-describe-syntax-value" "romacs-help--" "text-char-description"))
+
+
 ;;; Generated autoloads from romacs-icons.el
 
 (register-definition-prefixes "romacs-icons" '("romacs-icon"))
@@ -242,7 +285,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-landing.el
@@ -380,6 +423,11 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-pgtk.el
 
 (register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-g"))
+
+
+;;; Generated autoloads from romacs-popup.el
+
+(register-definition-prefixes "romacs-popup" '("romacs-popup-"))
 
 
 ;;; Generated autoloads from romacs-precompile.el
@@ -639,7 +687,8 @@ Activates KEYMAP as a transient map.  Switch keys execute and re-render
 without closing.  Inapt keys are refused with \"Command unavailable\"
 and keep the popup open; outside a popup, `:inapt-if' does not block
 dispatch.  Sub-menu keys push a navigation stack.
-The exit key and \\[universal-argument] are popup controls; source actions
+The exit key, \\[universal-argument], and C-M-v and C-M-S-v (a popup taller
+than its window pages, its source keeping focus) are popup controls; source actions
 shadowed by those controls are omitted from the displayed entries.
 \\[universal-argument] toggles prefix mode.
 

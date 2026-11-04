@@ -547,6 +547,7 @@ enum Primitive {
     CustomVariableP,
     DefvarBoundp,
     DefvarSetDefault,
+    DefvarFileLocal,
     DeepEqual,
     Min,
     Append,
@@ -811,6 +812,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("custom-variable-p", Primitive::CustomVariableP),
     ("#:vm2-defvar-boundp", Primitive::DefvarBoundp),
     ("#:vm2-defvar-set-default", Primitive::DefvarSetDefault),
+    ("#:vm2-defvar-file-local", Primitive::DefvarFileLocal),
     ("equal", Primitive::DeepEqual),
     ("min", Primitive::Min),
     ("append", Primitive::Append),
@@ -1022,8 +1024,10 @@ struct LazyBody {
     /// Compiled for `eval' (`evaluating'): its quoted objects are the very
     /// structure `eval' was handed, as GNU's interpreter evaluates it.
     evaluated: bool,
+    /// A deferred form of a loading file's own (`Builder::file_level`).
+    file_level: bool,
 }
-romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred, evaluated });
+romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred, evaluated, file_level });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
@@ -1056,6 +1060,9 @@ struct Builder {
     /// interpreter): a top-level request (`compile`) or a form deferred to
     /// its reach, never a lambda body nested in one.
     loader_order: bool,
+    /// A loading file's form itself (`compile` seeded with the file's
+    /// specials), whose value-less defvars declare for the file's rest.
+    file_level: bool,
 }
 impl Builder {
     fn reg(&mut self) -> usize {
@@ -1322,6 +1329,10 @@ pub struct Vm {
     /// so that compilation (and nothing nested in it) starts from
     /// `file_specials`.
     seed_file_specials: bool,
+    /// The next built function is a loading file's form (`Builder::file_level`):
+    /// set by the loader around its top-level compile, and by a deferred
+    /// form's thunk made in one.
+    file_level_request: bool,
     /// R215: compile `lambda' bodies lazily (GNU's non-eager load regime).
     lazy_regime: bool,
     /// R215: compile a failing form as a deferred reach-time expansion.
@@ -1442,6 +1453,9 @@ pub struct Vm {
     /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
     /// collector reach them as they reach `execution`.
     spare_programs: Vec<threaded::Program>,
+    /// By argument count, the permanent function through which native code
+    /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
+    reader_trampolines: Vec<Option<usize>>,
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
@@ -1556,6 +1570,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     pending_specials,
     file_specials,
     seed_file_specials,
+    file_level_request,
     lazy_regime,
     defer_expansion_errors,
     evaluating,
@@ -1630,6 +1645,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     conditions,
     rooted,
     spread_reserve,
+    reader_trampolines,
     quit,
     force_quit_count,
     quit_slots,
@@ -1748,6 +1764,7 @@ impl Vm {
             pending_specials: NameSet::default(),
             file_specials: NameSet::default(),
             seed_file_specials: false,
+            file_level_request: false,
             lazy_regime: false,
             defer_expansion_errors: false,
             evaluating: false,
@@ -1804,6 +1821,7 @@ impl Vm {
             spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
+            reader_trampolines: Vec::new(),
             closures: vec![],
             cells: vec![],
             cell_pairs: HashMap::default(),
@@ -1976,7 +1994,8 @@ impl Vm {
             .version
             .checked_add(1)
             .ok_or("function version overflow")?;
-        self.slots[slot].function = value;
+        let old = std::mem::replace(&mut self.slots[slot].function, value);
+        self.charge_definition(old, value);
         self.slots[slot].version = version;
         if is_macro {
             self.macros.insert(slot);
@@ -2109,6 +2128,7 @@ impl Vm {
             sites: vec![],
             local_specials: local_specials.clone(),
             loader_order: std::mem::take(&mut self.loader_order_request),
+            file_level: std::mem::take(&mut self.file_level_request),
         };
         // Stable order is essential: HashMap iteration order is not a closure ABI.
         let mut names: Vec<_> = outer.keys().cloned().collect();
@@ -2339,6 +2359,7 @@ impl Vm {
             dynamic_scope: self.dynamic_scope,
             deferred,
             evaluated: self.evaluating,
+            file_level: deferred && b.file_level,
         };
         let id = self.install_function(Function {
             capture_mutations: vec![true; names.len()],
@@ -2401,6 +2422,7 @@ impl Vm {
         // A deferred form is evaluated at its reach, as GNU's interpreter
         // evaluates it: an unbound head is named before the arguments run.
         self.loader_order_request = lazy.deferred;
+        self.file_level_request = lazy.file_level;
         let result = self.compile_lazy_request(&lazy.args, &body, &outer, &lazy.local_specials);
         self.keep_captures = false;
         self.compile_depth -= 1;
@@ -2807,6 +2829,17 @@ impl Vm {
                             }
                         } else {
                             b.local_specials.insert(name.into());
+                            // GNU Fdefvar (eval.c:944) adds the name to the
+                            // interpreter environment it is evaluated in; a
+                            // loading file's own one is kept for its rest
+                            // (readevalloop binds it once): declared where
+                            // evaluation reaches it in a load form, outside
+                            // any lexical binding or function body.
+                            if b.file_level && b.env.is_empty() {
+                                let call = Form::List(vec![Form::Sym("#:vm2-defvar-file-local".into()),
+                                                           Form::List(vec![Form::Sym("quote".into()), rest[0].clone()])]);
+                                self.expr(b, &call)?;
+                            }
                         }
                         let r = b.reg();
                         b.emit(Op::Const(r, Value::reference(slot + 1, 7)));

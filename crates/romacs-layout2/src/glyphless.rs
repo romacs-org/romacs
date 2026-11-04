@@ -141,17 +141,19 @@ impl Glyphless {
     /// box's text in the digit face on that background. In a band whose
     /// clicks find characters by their glyphs (the tab and status bars,
     /// ONE_GLYPH), the box is empty and a blank character glyph inside it
-    /// stands for CH.
+    /// stands for CH. The background, TRAIL wider for the side of a box
+    /// run it ends, is the glyph's cell in that run: its index is returned.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn paint(&self, frame: &mut FrameGlyphBuffer, index: usize, glyph: &Glyph, x: f32, y: f32,
-                        (ascent, height): (f32, f32), face: FaceId, one_glyph: bool) -> Result<(), String> {
+                        (ascent, height): (f32, f32), face: FaceId, one_glyph: bool, trail: f32) -> Result<usize, String> {
         let width = glyph.width as f32;
         let bg = frame.faces.get(&face).map(|f| f.background).unwrap_or_default();
         let fill = |frame: &mut FrameGlyphBuffer, face: FaceId, (x, y, w, h): (f32, f32, f32, f32)| {
             let bg = frame.faces.get(&face).map(|f| f.background).unwrap_or_default();
             frame.add_stretch(x, y, w, h, bg, face, false);
         };
-        fill(frame, face, (x, y, width, height));
+        fill(frame, face, (x, y, width + trail, height));
+        let cell = frame.glyphs.len() - 1;
         // The text's cells stay inside the bars, which their backgrounds
         // would otherwise cover.
         let (top, inside) = if glyph.boxed { (y + 1.0, (height - 2.0).max(0.0)) } else { (y, height) };
@@ -159,23 +161,23 @@ impl Glyphless {
             let left = if glyph.boxed { 1.0 } else { 0.0 };
             crate::glyph_of(frame, ' ', x + left, top, (width - 2.0 * left).max(0.0), (ascent - (top - y), inside), face)?;
         }
-        let Some(&Faces { digits, line, spare }) = self.faces.get(&index) else { return Ok(()) };
+        let Some(&Faces { digits, line, spare }) = self.faces.get(&index) else { return Ok(cell) };
         if glyph.boxed && width >= 1.0 && height >= 1.0 {
             for rect in [(x, y, width, 1.0), (x, y + height - 1.0, width, 1.0), (x, y, 1.0, height), (x + width - 1.0, y, 1.0, height)] {
                 fill(frame, line, rect);
             }
         }
-        let Some((digits, cell)) = digits.filter(|_| !one_glyph) else { return Ok(()) };
+        let Some((digits, digit_cell)) = digits.filter(|_| !one_glyph) else { return Ok(cell) };
         let digits = self.on_background(frame, (index, digits), bg, spare);
         for half in &glyph.halves {
             let mut at = x + half.x as f32;
             for c in half.text.chars() {
-                let advance = crate::advance(frame, digits, c, cell);
+                let advance = crate::advance(frame, digits, c, digit_cell);
                 crate::glyph_of(frame, c, at, top, advance, (ascent + half.y as f32 - (top - y), inside), digits)?;
                 at += advance;
             }
         }
-        Ok(())
+        Ok(cell)
     }
 
     /// DIGITS, face INDEX's, or its copy on BG (a band's copy of the

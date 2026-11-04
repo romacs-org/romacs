@@ -142,3 +142,23 @@ fn a_retained_engine_lays_out_again_for_another_method() {
     let thin = engine.layout_frame(&frame(&text, NoFont::ThinSpace), 2, None).unwrap().0;
     assert_eq!((digits(&hex), digits(&thin)), (6, 2));
 }
+
+#[test]
+fn a_glyphless_character_ending_a_box_run_closes_it() {
+    use romacs_display_protocol::{BoxVerticalEdges, FaceId, GlyphRowRole};
+    use romacs_layout_input::{BoxLine, Decor};
+    let mut boxed = face("Liberation Mono");
+    boxed.decor = Decor { boxed: Some(BoxLine { vertical: 2, horizontal: 1, color: None, style: 1 }), ..Default::default() };
+    let text = format!("a{NONE}");
+    let mut snapshot = window(&text, vec![face("Liberation Mono"), boxed]);
+    snapshot.mode_line = None;
+    snapshot.text.face_runs = vec![FaceRun { bytes: 0..text.len(), face: FaceHandle(1) }];
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let run: Vec<_> = frame.glyphs.iter()
+        .filter(|g| g.face_id() == Some(FaceId::new(1)) && g.row_role() == Some(GlyphRowRole::Text))
+        .map(|g| (matches!(g, FrameGlyph::Stretch { .. }), g.box_vertical_edges())).collect();
+    assert_eq!(run.first().map(|g| g.1), Some(Some(BoxVerticalEdges::Left)), "{run:?}");
+    assert_eq!(run.last(), Some(&(true, Some(BoxVerticalEdges::Right))), "the box's cell closes the run: {run:?}");
+    // Its digits are inside the run, in a face of their own without a box.
+    assert!(chars(&frame).iter().any(|c| c.0 == '7'));
+}

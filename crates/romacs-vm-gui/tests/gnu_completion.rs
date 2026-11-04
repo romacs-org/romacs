@@ -283,9 +283,12 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report.push(printed(&mut vm, "(prog1 (list rc-pick-result (car rc-pick-seen) (length rc-pick-seen)
                                                   (seq-every-p (lambda (r) (<= (nth 3 r) (- (nth 4 r) 20))) rc-pick-seen))
                                           (delete-other-windows) (setq romacs-complete-position 'top))"));
-        // Messages stack as toasts in the top-right corner, newest on top, at
-        // most three; the same message again extends the newest.
-        report.push(printed(&mut vm, "(progn (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
+        // Messages stack as toasts, newest on top, at most
+        // `romacs-layer-toast-max' (here three); the same message again
+        // extends the newest. In the frame's top-right corner with
+        // `romacs-layer-toast-position' `frame' (the selected window's
+        // corner, the default, is tests/menus.rs's).
+        report.push(printed(&mut vm, "(let ((romacs-layer-toast-position 'frame) (romacs-layer-toast-max 3)) (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
             (list (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts)
                   (let ((tops (mapcar (lambda (toast) (cdr (frame-position (romacs-layer--frame (car toast))))) romacs-layer--toasts)))
                     (equal tops (sort (copy-sequence tops) #'<)))
@@ -293,6 +296,69 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                     (list (frame-parameter f 'romacs-layer-edge)
                           (= (+ (car (frame-position f)) (frame-pixel-width f) 12 (frame-internal-border-width)) (frame-native-width))))
                   (current-message)))"));
+        // One toast at a time by default: a new message replaces the shown
+        // one in its own layer. `Quit' never shows; a command's error and an
+        // undefined key's message glow as errors; a long message is at most
+        // 420 px wide and two rows, its file names abbreviated.
+        report.push(printed(&mut vm, "(progn (romacs-layer-toast-clear)
+          (let (r)
+            (romacs-layer-toast \"first\")
+            (let ((buffer (caar romacs-layer--toasts)))
+              (romacs-layer-toast \"second\")
+              (push (list (length romacs-layer--toasts) (eq buffer (caar romacs-layer--toasts)) (nth 1 (car romacs-layer--toasts))) r))
+            (romacs-layer-toast-clear)
+            (romacs-complete--message \"Quit\") (push romacs-layer--toasts r)
+            (let ((glow (lambda () (frame-parameter (romacs-layer--frame (caar romacs-layer--toasts)) 'romacs-layer-glow-face))))
+              (romacs-layer--note-command-error '(buffer-read-only))
+              (romacs-complete--message \"Buffer is read-only: #<buffer x>\") (push (funcall glow) r)
+              (cl-letf (((symbol-function 'ding) #'ignore) ((symbol-function 'this-single-command-keys) (lambda () [f9])))
+                (undefined))
+              (romacs-complete--message (current-message)) (push (funcall glow) r)
+              (romacs-layer--note-command-error '(quit))
+              (romacs-complete--message \"Saved\") (push (funcall glow) r))
+            (romacs-complete--message (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/rlisp/romacs-defaults.el\" \"~\") \" \" (make-string 120 ?x)))
+            (let* ((f (romacs-layer--frame (caar romacs-layer--toasts))) (text (nth 1 (car romacs-layer--toasts))))
+              ;; Its outer width, the glass padding included.
+              (push (list (<= (frame-pixel-width f) 420)
+                          (<= (frame-text-height f) (* 2 (frame-char-height f)))
+                          (and (string-match-p \"\\\\`Wrote\\n~/…/[a-z/]*romacs-defaults\\\\.el …\\\\'\" text) t) (string-suffix-p \"…\" text))
+                    r))
+            (romacs-layer-toast-clear)
+            ;; The minibuffer's layer over the toasts' corner: the toast
+            ;; starts below it.
+            (let ((host romacs-complete--layer))
+              (make-frame-visible host)
+              (set-frame-position host (- (frame-native-width) (frame-pixel-width host) 6) 6)
+              (cl-letf (((symbol-function 'romacs--minibuffer-host) (lambda () host)))
+                (romacs-layer-toast \"below\"))
+              (push (>= (cdr (frame-position (romacs-layer--frame (caar romacs-layer--toasts))))
+                        (+ 6 (frame-pixel-height host)))
+                    r)
+              (make-frame-invisible host))
+            (romacs-layer-toast-clear)
+            (nreverse r)))"));
+        // A toast's text as the window shows it: rows wrapped at words, a
+        // file name's directories cut (only that name: a URL's path stays),
+        // a long basename kept whole at its end, at most two rows, the last
+        // ending in `…' where more follow (pinned GNU 32 batch: the same).
+        report.push(printed(&mut vm, "(progn
+            (mapcar (lambda (c) (string-to-multibyte (romacs-layer--toast-text (car c) (cadr c))))
+                    (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/rlisp/romacs-defaults.el\" \"~\")) 36)
+                          (list \"Open /tmp/long-directory/test.el or https://example.org/tmp/long-directory/test.el\" 60)
+                          (list (concat \"Wrote /tmp/\" (make-string 60 ?a) \".txt\") 40)
+                          (list \"abcdefghijk lmnopqrstuv wxyzabcdefg\" 20)
+                          (list \"line one\\nline two\\nline three\" 20)
+                          ;; A wide-character basename keeps its end within the row; tabs at
+                          ;; their stops; an error's glyph in the same budget as its text.
+                          (list (concat \"Wrote /tmp/\" (make-string 40 ?界) \".txt\") 37)
+                          (list \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" 37)
+                          (list (concat \"! \" (make-string 35 ?a) \"\\nsecond\") 37))))"));
+        // A toast's tab stops are its own, whatever the caller's `tab-width':
+        // the line is 39 columns at the toast's 8, so it wraps and the third
+        // row is cut with `…'; the toast buffer renders at 8.
+        report.push(printed(&mut vm, "(let ((tab-width 4))
+            (list (string-to-multibyte (romacs-layer--toast-text (concat \"a\\t\" (make-string 31 ?b) \"\\nlast row\") 37))
+                  (with-current-buffer (romacs-layer--toast-buffer) tab-width)))"));
         // Only the characters fzf matched carry the match face; a file shows
         // its name, then its directory, muted.
         report.push(printed(&mut vm, "(let* ((completion-styles '(fzf)) (completion-lazy-hilit nil)
@@ -338,6 +404,9 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         "(768 ((top 330 93 600 80 8 top) (center 330 260 600 80 8 top) (bottom 330 468 600 80 8 top)))",
                         "(200 7 0)", "(\"cand-06\" (5 5 60 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
+                        "((1 t \"second\") nil romacs-layer-toast-error romacs-layer-toast-error nil (t t t t) t)",
+                        "(\"Wrote ~/…/rlisp/romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/…/aaaaaaaaaaaa…aaaaaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv …\" \"line one\\nline two …\" \"Wrote\\n/…/界界界界界…界界界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
+                        "(\"a      \\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb …\" 8)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal
                         // border (VM2-PANE-CHROME), centred on the native 500.
@@ -385,6 +454,23 @@ fn chrome_colours_follow_the_theme() {
             vm.eval_source(step).unwrap();
             report.push(probe(&mut vm));
         }
+        // An error toast glows and is outlined in `romacs-layer-toast-error''s
+        // foreground, leads with the error glyph, and keeps the toast's text
+        // colour; the outline is a graphic of at least 3:1 (WCAG) on both
+        // the toast and the frame, in the stock theme and a light one.
+        for theme in ["(enable-theme 'default)", "(progn (mapc #'disable-theme custom-enabled-themes) (load-theme 'modus-operandi t))"] {
+            vm.eval_source(theme).unwrap();
+            vm.eval_source("(progn (romacs-layer-toast-clear) (romacs-layer-toast \"boom\" 'error))").unwrap();
+            let frame = vm.frame_snapshot(1280, 800).unwrap();
+            let toast = frame.children.iter().rev().find(|c| c.radius > 0).expect("a glass toast");
+            let lisp = vm.eval_source("(let* ((hex (lambda (face bg) (romacs-chrome--hex (if bg (face-background face nil t) (face-foreground face nil t)))))
+                     (error (funcall hex 'romacs-layer-toast-error nil)) (toast (funcall hex 'romacs-layer-toast t)) (frame (funcall hex 'default t)))
+                (format \"%s %s %s %s\" error (>= (romacs-color-contrast error toast) 3.0) (>= (romacs-color-contrast error frame) 3.0)
+                        (let ((text (nth 1 (car romacs-layer--toasts))))
+                          (list (= (aref text 0) (aref (romacs-icon 'error) 0)) (get-text-property 2 'face text)))))").unwrap().display().unwrap();
+            report.push(format!("{} {} {lisp}", hex(toast.glow), hex(toast.outline)));
+        }
+        vm.eval_source("(progn (romacs-layer-toast-clear) (mapc #'disable-theme custom-enabled-themes) (enable-theme 'default))").unwrap();
         report
     }).unwrap().join().unwrap();
     // Themes, default bg, selected row, match; painted edge, hairline, glow, glass.
@@ -401,7 +487,10 @@ fn chrome_colours_follow_the_theme() {
         r##"(tc-focus tango-dark) "#2e3436" "#54595a" "#fce94f" "#ff0000" "#4b5051" "#fce94f" "#3d4345""##,
         // No theme: GNU's stock faces, and the built-in accent.
         r##"nil "#ffffff" "#cccccc" "#d48a20" "#d48a20" "#d9d9d9" "#d48a20" "#ebebeb""##,
-        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##]);
+        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        // Rum's error colour, then modus-operandi's.
+        r##""#c97054" "#c97054" "#c97054 t t (t nil)""##,
+        r##""#a60000" "#a60000" "#a60000 t t (t nil)""##]);
 }
 
 /// A theme switch recomputes the frame's background mode as GNU's does

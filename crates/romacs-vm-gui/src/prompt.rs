@@ -244,6 +244,12 @@ impl HostInput for GuiHost {
         shared.closed || !shared.pending.is_empty()
     }
 
+    fn key_pending(&mut self) -> bool {
+        self.drain();
+        let shared = self.shared.borrow();
+        shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
+    }
+
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         // As the loop's changed_frame: a timer run in a prompt that left the
         // frame as this prompt last painted it, with nothing presented

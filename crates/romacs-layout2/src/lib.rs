@@ -213,7 +213,7 @@ fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: 
         let background = color(tab_bar.faces[index].background);
         if index != face { frame.add_background(x, 0.0, advance, bounds.height, background); }
         match glyphless.get(index, ch) {
-            Some(shown) => glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true)?,
+            Some(shown) => { glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true, 0.0)?; }
             None => {
                 frame.add_char(ch, x, 0.0, advance, height, ascent, false);
                 *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
@@ -361,7 +361,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         if marker.as_ref().is_some_and(|m| m.contains(&byte)) { continue; }
         let (ascent, height, _, _) = metrics[index];
         if let Some(glyph) = glyphless.get(index, shown) {
-            glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true)?;
+            glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true, 0.0)?;
             continue;
         }
         frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
@@ -462,6 +462,7 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_displa
         radius: child.radius as f32,
         glow: child.glow.map(color),
         shadow: child.shadow,
+        outline: child.outline.map(color),
     }
 }
 
@@ -667,7 +668,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     };
     // A `word-wrap' window's rows break where GNU's word wrap breaks them.
     let word = snapshot.wrap == LineWrap::Word && !truncate;
-    let mut breaks = WordBreaks { row: line_start, continued: 0.0, next: None, done: !word };
+    // Text that shows no box skips the box runs' work (`box_step').
+    let boxes = shows_box(&snapshot.faces, &snapshot.text);
+    let mut breaks = WordBreaks { row: line_start, continued: 0.0, next: None, done: !word, boxes, box_open: false };
     let mut x0 = gutter(line_start).0;
     let mut x = x0;
     let mut shift = shift_of(line_start);
@@ -689,6 +692,10 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // The width of the rows of this line above this one, and the glyphs
     // on this row; past the truncation glyph, the rest of the line is hidden.
     let (mut continued, mut hpos, mut hidden) = (0.0f32, 0usize, false);
+    // Whether the glyph before is in a box run; the tallest box top on the
+    // row being built, and where its glyphs start (`settle_row').
+    let mut box_open = false;
+    let (mut row_box_top, mut row_glyphs) = (0.0f32, frame.glyphs.len());
     let mut drawing = line_start == snapshot.start_byte;
     // The first byte of the row being built, and the end of the rows
     // above it that show whole: a row is fully visible when it lies
@@ -737,6 +744,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                     }
                 }
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
+                (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
                 if shift > 0.0 && left_mark(shift) > 0.0 && y < body_height && y + metrics[0].1 > 0.0 {
@@ -748,6 +757,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 row_start = byte + 1;
             }
             continuation = false;
+            box_open = false;
             x0 = gutter(byte + 1).0;
             x = x0;
             shift = shift_of(byte + 1);
@@ -775,7 +785,16 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         // a TAB stops as from after the line number (x_produce_glyphs).
         let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32|
             shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, line_x, x0, (!truncate).then_some(last_x));
-        let mut advance_px = width(frame, x, x + continued, x0);
+        // A box run (xdisp.c start_of_box_run_p, end_of_box_run_p): its
+        // text's first and last glyphs own its left and right edges; edges
+        // outside the text are spacers of their width, the run's advance.
+        let step = if boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, shows_glyphs(&shown), box_open, false) } else { BoxStep::NONE };
+        // The run's state past this character, on every path below; a row
+        // break alone opens no new run (the iterator's box state carries).
+        let opening = !box_open;
+        box_open = step.open;
+        let (lead, trail) = (step.lead, step.trail);
+        let mut advance_px = width(frame, x, x + continued, x0) + lead + trail;
         if measuring { x += advance_px; continue; }
         // A word-wrapped row breaks where `WordBreaks' finds; another, at
         // the glyph that would pass the text area.
@@ -786,6 +805,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
+                (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: true, continuation, truncated: false, truncated_left: false });
                 row_start = byte;
@@ -796,7 +817,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x0 = gutter(byte).0;
             (x, y, row_height, hpos) = (x0, y + row_height, metrics[0].1, 0);
             if starting { (drawing, starting, y) = (true, false, top); }
-            advance_px = width(frame, x0, x0 + continued, x0);
+            advance_px = width(frame, x0, x0 + continued, x0) + lead + trail;
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         if starting {
@@ -806,7 +827,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             continued += x;
             x0 = gutter(byte).0;
             (drawing, x, y, row_height, hpos) = (true, x0, top, metrics[0].1, 0);
-            advance_px = width(frame, x0, x0 + continued, x0);
+            advance_px = width(frame, x0, x0 + continued, x0) + lead + trail;
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         row_height = row_height.max(height);
@@ -827,25 +848,36 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let left_edge = x0 + shift + left_mark(shift);
         let visible = visible && x + advance_px > x0 + shift && (x >= left_edge || (snapshot.line_numbers.is_none() && left_mark(shift) == 0.0));
         let ox = ox - shift;
+        use romacs_display_protocol::BoxVerticalEdges as Edges;
+        // A stretch in a box run owns the run's edges at its ends; its
+        // advance has the sides in it.
+        let stretch_edges = |frame: &mut FrameGlyphBuffer| if step.boxed { set_box_edges(frame, edges(opening, step.ends)); };
         let cursor = match &shown {
             Shown::Tab => {
-                if visible { frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false); }
+                if visible {
+                    frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false);
+                    stretch_edges(frame);
+                }
                 // GNU's cursor on a stretch is no wider than a column
                 // (`x-stretch-cursor' nil).
                 advance_px.min(metrics[0].2)
             }
             // A stretch that is not positive is no glyph (nglyphs 0).
             Shown::Stretch(_) => {
-                if visible && advance_px > 0.0 { frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false); }
+                if visible && advance_px > 0.0 {
+                    frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false);
+                    stretch_edges(frame);
+                }
                 advance_px.clamp(0.0, metrics[0].2)
             }
-            Shown::Glyphs(glyphs) => {
+            // Outside a box run, a character's glyphs are only themselves.
+            Shown::Glyphs(glyphs) if !step.boxed => {
                 let (mut at, mut first) = (x, None);
                 for c in glyphs.chars() {
                     let width = advance(frame, id, c, cell);
                     if visible && at - shift < snapshot.width as f32 {
                         match glyphless.get(index, c) {
-                            Some(shown) => glyphless.paint(frame, index, shown, ox + at, oy + y, (ascent, height), id, false)?,
+                            Some(shown) => { glyphless.paint(frame, index, shown, ox + at, oy + y, (ascent, height), id, false, 0.0)?; }
                             None => glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?,
                         }
                     }
@@ -854,14 +886,48 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 }
                 first.unwrap_or(cell)
             }
-            Shown::Composed { end, advance } => {
-                if visible && x - shift < snapshot.width as f32 {
-                    publish_selected_glyph(frame, resolver, id, &text[byte..*end]);
-                    frame.add_composed_char(&text[byte..*end], ch, ox + x, oy + y, *advance, height, ascent, false);
-                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
+            Shown::Glyphs(glyphs) => {
+                // A side outside the text: the left a spacer before it, the
+                // right the last glyph's own (its cell, the cursor's width).
+                if visible && lead > 0.0 {
+                    frame.add_stretch(ox + x, oy + y, lead, height, color(snapshot.faces[index].background), id, false);
+                    set_box_edges(frame, Edges::Left);
                 }
-                composed = (x, *advance);
-                *advance
+                let (mut at, mut first) = (x + lead, None);
+                let count = glyphs.chars().count();
+                for (n, c) in glyphs.chars().enumerate() {
+                    let last = n + 1 == count;
+                    let width = advance(frame, id, c, cell) + if last { trail } else { 0.0 };
+                    if visible && at - shift < snapshot.width as f32 {
+                        // A glyphless character's cell in the run is its background.
+                        let at_cell = match glyphless.get(index, c) {
+                            Some(shown) => glyphless.paint(frame, index, shown, ox + at, oy + y, (ascent, height), id, false, width - shown.width as f32)?,
+                            None => { glyph_of(frame, c, ox + at, oy + y, width, (ascent, height), id)?; frame.glyphs.len() - 1 }
+                        };
+                        set_glyph_box_edges(frame, at_cell, edges(step.side == 0.0 && n == 0 && opening, last && step.ends));
+                    }
+                    first.get_or_insert(width);
+                    at += width;
+                }
+                if visible { row_box_top = row_box_top.max(step.top); }
+                // The cursor covers the glyph with its box's sides.
+                first.unwrap_or(cell) + lead
+            }
+            Shown::Composed { end, advance } => {
+                // A sequence's glyph takes a box run's sides as a character's does.
+                if visible && x - shift < snapshot.width as f32 {
+                    if lead > 0.0 {
+                        frame.add_stretch(ox + x, oy + y, lead, height, color(snapshot.faces[index].background), id, false);
+                        set_box_edges(frame, Edges::Left);
+                    }
+                    publish_selected_glyph(frame, resolver, id, &text[byte..*end]);
+                    frame.add_composed_char(&text[byte..*end], ch, ox + x + lead, oy + y, *advance + trail, height, ascent, false);
+                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
+                    if step.boxed { set_box_edges(frame, edges(step.side == 0.0 && opening, step.ends)); }
+                    row_box_top = row_box_top.max(step.top);
+                }
+                composed = (x, *advance + lead);
+                *advance + lead
             }
             Shown::Inside => 0.0,
         };
@@ -901,6 +967,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     if end_byte == text.len() && y < body_height {
         let scrolled = shift > 0.0 && row_start < text.len();
+        row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
         rows.push(Row { start: row_start, y, height: row_height });
         marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: scrolled });
         if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?; }
@@ -981,30 +1048,162 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
             frame.char_fonts.insert(target, chars);
         }
     }
-    let mut x = 0.0;
+    use romacs_display_protocol::BoxVerticalEdges as Edges;
+    // The band's face fills its rest (display_mode_line), so a boxed band
+    // face's run goes on into the fill, whose end closes it.
+    let fill_boxed = snapshot.faces[default].decor.boxed.is_some();
+    let (mut x, mut box_open, mut boxed_top) = (0.0, false, false);
+    let first_glyph = frame.glyphs.len();
+    // The last glyph painted while a run stays open past it.
+    let mut open_glyph = None;
     for (byte, ch) in band.utf8.char_indices() {
         let index = face_at(band, byte, default);
         let id = FaceId::new(face_base + offset + index as u32);
         let (ascent, height, cell, _) = metrics[index];
+        let step = box_step(&snapshot.faces, band, (default, index), byte, ch, true, box_open, fill_boxed);
+        let opening = !box_open;
+        box_open = step.open;
         let advance = advance(frame, id, ch, cell);
         if x < bounds.width {
-            match glyphless.get(index, ch) {
-                Some(shown) => glyphless.paint(frame, index, shown, bounds.x + x, bounds.y, (ascent, height), id, false)?,
-                None => {
-                    frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
-                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
-                }
+            if step.lead > 0.0 {
+                frame.add_stretch(bounds.x + x, bounds.y, step.lead, height, background, id, false);
+                set_box_edges(frame, Edges::Left);
             }
+            // The right side outside the text is the glyph's own; a
+            // glyphless character's cell in the run is its background.
+            let at_cell = match glyphless.get(index, ch) {
+                Some(shown) => glyphless.paint(frame, index, shown, bounds.x + x + step.lead, bounds.y, (ascent, height), id, false, step.trail)?,
+                None => {
+                    frame.add_char(ch, bounds.x + x + step.lead, bounds.y, advance + step.trail, height, ascent, false);
+                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
+                    frame.glyphs.len() - 1
+                }
+            };
+            if step.boxed {
+                set_glyph_box_edges(frame, at_cell, edges(step.side == 0.0 && opening, step.ends));
+                boxed_top |= step.top > 0.0;
+            }
+            open_glyph = step.open.then_some(at_cell);
         }
-        x += advance;
+        x += advance + step.lead + step.trail;
     }
     // display_mode_line: the rest of the band is the band's face, as the
     // spaces GNU fills it with; past the background, only its lines show.
     if x < bounds.width && snapshot.faces[default].decor != Default::default() {
         frame.add_stretch(bounds.x + x, bounds.y, bounds.width - x, bounds.height, background,
                           FaceId::new(face_base + offset + default as u32), false);
+        if fill_boxed { set_box_edges(frame, if box_open { Edges::Right } else { Edges::Both }); }
+    } else if let Some(at) = open_glyph {
+        // Text that fills or passes the band: its last glyph shown closes
+        // the run at the band's edge.
+        let closed = match frame.glyphs[at].box_vertical_edges() { Some(Edges::Left | Edges::Both) => Edges::Both, _ => Edges::Right };
+        set_glyph_box_edges(frame, at, closed);
+        // Its cell ends at the band's edge, so the edge shows
+        // (pgtkterm.c clamps the box's right to the area's).
+        if let romacs_display_protocol::FrameGlyph::Char { x, width, .. } | romacs_display_protocol::FrameGlyph::Stretch { x, width, .. } = &mut frame.glyphs[at] {
+            *width = width.min(bounds.x + bounds.width - *x).max(0.0);
+        }
+    }
+    // One baseline for the band, a box's top included.
+    if boxed_top {
+        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &metrics, face_base + offset);
     }
     Ok(())
+}
+
+/// A box run at one character (xdisp.c start_of_box_run_p,
+/// end_of_box_run_p), a TAB's or a stretch's too: whether its face (DEFAULT
+/// where TEXT names none; INDEX, the character's) has a box; for a character PADS (text, not a TAB
+/// or a stretch, whose widths GNU keeps: IT_APPLY_FACE_BOX), the side spacers before it (a run
+/// starts where the glyph before, OPEN or not, was not in one) and after
+/// it (the run ends where the next character's face has none, at a
+/// newline, or at the text's end unless TAIL continues it); the side and
+/// top widths outside the text; whether the run goes on past it.
+struct BoxStep { boxed: bool, lead: f32, trail: f32, side: f32, top: f32, ends: bool, open: bool }
+
+impl BoxStep {
+    /// A character outside any box run.
+    const NONE: BoxStep = BoxStep { boxed: false, lead: 0.0, trail: 0.0, side: 0.0, top: 0.0, ends: false, open: false };
+}
+
+#[allow(clippy::too_many_arguments)]
+fn box_step(faces: &[Face], text: &TextSlice, (default, index): (usize, usize), byte: usize, ch: char, pads: bool, open: bool, tail: bool) -> BoxStep {
+    let boxed = faces[index].decor.boxed;
+    if boxed.is_none() { return BoxStep::NONE; }
+    let next = byte + ch.len_utf8();
+    let utf8 = &text.utf8;
+    let ends = boxed.is_some() && if next >= utf8.len() { !tail } else {
+        utf8[next..].starts_with('\n') || faces[face_at(text, next, default)].decor.boxed.is_none()
+    };
+    let side = boxed.map_or(0.0, |b| f32::from(b.vertical.max(0)));
+    BoxStep {
+        boxed: boxed.is_some(),
+        lead: if open || !pads { 0.0 } else { side },
+        trail: if ends && pads { side } else { 0.0 },
+        side,
+        top: boxed.map_or(0.0, |b| f32::from(b.horizontal.max(0))),
+        ends,
+        open: boxed.is_some() && !ends,
+    }
+}
+
+/// Whether any character of TEXT shows in a face of FACES with a box: the
+/// default face's, or a run's.  A window's face table is the frame's, so
+/// most of its boxed faces show nowhere in its text.
+fn shows_box(faces: &[Face], text: &TextSlice) -> bool {
+    let boxed = |index: usize| faces.get(index).is_some_and(|face| face.decor.boxed.is_some());
+    boxed(0) || text.face_runs.iter().any(|run| boxed(run.face.0 as usize))
+}
+
+/// Settle the row at TOP, HEIGHT tall, whose glyphs start at FROM, on one
+/// baseline, as produce_glyphs's row ascent is the largest of its glyphs'
+/// (a boxed glyph's grown by its box's top): each character and each
+/// stretch shorter than the row moves down by that ascent less its own
+/// (the ascent METRICS[face - FACE_BASE] gives a stretch); the row's new height.  Only a
+/// row with a box (BOXED) is settled.
+fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, boxed: bool, metrics: &[(f32, f32, f32, f32)], face_base: u32) -> f32 {
+    use romacs_display_protocol::FrameGlyph;
+    if !boxed { return height; }
+    let ascent_of = |glyph: &FrameGlyph| match glyph {
+        FrameGlyph::Char { ascent, .. } => Some(*ascent),
+        FrameGlyph::Stretch { height: h, face_id, .. } if *h < height =>
+            metrics.get((face_id.get() as usize).wrapping_sub(face_base as usize)).map(|m| m.0),
+        _ => None,
+    };
+    let row_ascent = frame.glyphs[from..].iter().filter_map(ascent_of).fold(0.0f32, f32::max);
+    let mut bottom = height;
+    for glyph in &mut frame.glyphs[from..] {
+        let Some(own) = ascent_of(glyph) else { continue };
+        let shift = row_ascent - own;
+        match glyph {
+            FrameGlyph::Char { y, baseline, height: h, .. } => { *y += shift; *baseline += shift; bottom = bottom.max(*y + *h - top); }
+            FrameGlyph::Stretch { y, height: h, .. } => { *y += shift; bottom = bottom.max(*y + *h - top); }
+            _ => {}
+        }
+    }
+    bottom
+}
+
+/// A box run glyph's edges: the LEFT and the RIGHT, either or neither.
+fn edges(left: bool, right: bool) -> romacs_display_protocol::BoxVerticalEdges {
+    use romacs_display_protocol::BoxVerticalEdges as Edges;
+    match (left, right) { (true, true) => Edges::Both, (true, false) => Edges::Left, (false, true) => Edges::Right, (false, false) => Edges::Neither }
+}
+
+/// Which of its box run's vertical edges the glyph AT owns.
+fn set_glyph_box_edges(frame: &mut FrameGlyphBuffer, at: usize, edges: romacs_display_protocol::BoxVerticalEdges) {
+    use romacs_display_protocol::FrameGlyph;
+    if let Some(FrameGlyph::Char { box_vertical_edges, .. } | FrameGlyph::Stretch { box_vertical_edges, .. }) = frame.glyphs.get_mut(at) {
+        *box_vertical_edges = edges;
+    }
+}
+
+/// Which of its box run's vertical edges the glyph just added owns.
+fn set_box_edges(frame: &mut FrameGlyphBuffer, edges: romacs_display_protocol::BoxVerticalEdges) {
+    use romacs_display_protocol::FrameGlyph;
+    if let Some(FrameGlyph::Char { box_vertical_edges, .. } | FrameGlyph::Stretch { box_vertical_edges, .. }) = frame.glyphs.last_mut() {
+        *box_vertical_edges = edges;
+    }
 }
 
 /// Draw CH at X, Y in face ID, whose ascent, height and nominal advance
@@ -1087,6 +1286,12 @@ fn sequence_at(text: &TextSlice, byte: usize, ch: char, inside: &mut usize, fram
     shown(ch, raw)
 }
 
+/// Whether SHOWN draws glyphs (a composed sequence's included), which a
+/// box run's edges belong to, rather than a stretch.
+fn shows_glyphs(shown: &Shown) -> bool {
+    matches!(shown, Shown::Glyphs(_) | Shown::Composed { .. } | Shown::Inside)
+}
+
 /// Publish the one glyph a sequence of a single character and its
 /// selectors (VS-16's `❤️') shows in face ID, when it has one: the
 /// character's glyph in the font its representative resolved to (the emoji
@@ -1131,7 +1336,7 @@ fn shown_advance(frame: &FrameGlyphBuffer, shown: &Shown, id: FaceId, cell: f32,
 /// its TABs stopping as from the line's start (a TAB that does not fit,
 /// from the text area's edge). Rows are found only as the layout reaches
 /// them, so a long line costs what the window shows.
-struct WordBreaks { row: usize, continued: f32, next: Option<usize>, done: bool }
+struct WordBreaks { row: usize, continued: f32, next: Option<usize>, done: bool, boxes: bool, box_open: bool }
 
 impl WordBreaks {
     /// Whether a row breaks at BYTE; BYTEs ascend.
@@ -1152,21 +1357,28 @@ impl WordBreaks {
         let stretch_at = |byte: usize| snapshot.stretches.binary_search_by_key(&byte, |s| s.byte).ok().map(|i| snapshot.stretches[i].width);
         while self.row < text.len() {
             let (row, x0) = (self.row, gutter(self.row));
-            let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32)>);
+            let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32, bool)>);
             let (mut end, mut inside) = (None, 0);
             for (byte, ch) in text[row..].char_indices().map(|(at, ch)| (row + at, ch)) {
-                if ch == '\n' { end = Some((byte + 1, None)); break; }
+                if ch == '\n' { end = Some((byte + 1, None)); self.box_open = false; break; }
                 let whitespace = (ch == ' ' || ch == '\t') != snapshot.wrap_flips.binary_search(&(byte as u32)).is_ok();
-                if may_wrap && !whitespace { wrap_at = Some((byte, x)); }
+                // The box state before BYTE, where the row may restart.
+                let before = self.box_open;
+                if may_wrap && !whitespace { wrap_at = Some((byte, x, before)); }
                 may_wrap = whitespace;
                 let index = face_at(&snapshot.text, byte, 0);
                 let (_, _, cell, space) = metrics[index];
                 let id = FaceId::new(face_base + index as u32);
                 let shown = shown_at(&snapshot.text, byte, ch, stretch_at(byte), &mut inside, frame, id, cell);
-                let advance = shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, x + self.continued, x0, Some(last_x));
+                // A box run's sides count as painting counts them.
+                let step = if self.boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, shows_glyphs(&shown), self.box_open, false) } else { BoxStep::NONE };
+                self.box_open = step.open;
+                let advance = shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, x + self.continued, x0, Some(last_x))
+                    + step.lead + step.trail;
                 // No row breaks inside a composed sequence.
                 if hpos > 0 && x + advance > last_x && !matches!(shown, Shown::Inside) {
-                    let (at, x) = wrap_at.unwrap_or((byte, if matches!(shown, Shown::Tab) { last_x } else { x }));
+                    let (at, x, open) = wrap_at.unwrap_or((byte, if matches!(shown, Shown::Tab) { last_x } else { x }, before));
+                    self.box_open = open;
                     end = Some((at, Some(x)));
                     break;
                 }
@@ -1396,7 +1608,17 @@ fn realize_face(face: &Face, default: Option<&Face>, id: FaceId, text: &str, fra
             }
         }
     }
-    Ok(Realized { metrics: (ascent, height, cell, space), primary: published.primary, unresolved })
+    // A box's edges outside the text grow the face's row by their width
+    // above and below (produce_glyphs: `it->ascent += thick').
+    let thick = face.decor.boxed.map_or(0.0, |b| f32::from(b.horizontal.max(0)));
+    if let Some(boxed) = face.decor.boxed && let Some(published) = frame.faces.get_mut(&id) {
+        use romacs_display_protocol::face::{BoxLineWidth, BoxType};
+        published.box_type = BoxType::from_gnu_code(boxed.style).unwrap_or(BoxType::Line);
+        published.box_line_width = BoxLineWidth::from_gnu(i32::from(boxed.horizontal));
+        published.box_vertical_line_width = Some(BoxLineWidth::from_gnu(i32::from(boxed.vertical.unsigned_abs())));
+        published.box_color = boxed.color.map(color);
+    }
+    Ok(Realized { metrics: (ascent + thick, height + 2.0 * thick, cell, space), primary: published.primary, unresolved })
 }
 
 /// The font FACE asks for: its family, size, weight, slant and width.
@@ -1432,14 +1654,20 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
     let mut glyphs = Vec::with_capacity(input.text.utf8.len());
     let mut inside = 0;
+    // A box run's outside side edges add to its first and last glyphs'
+    // advances, as append_window paints them.
+    let (boxes, mut box_open) = (shows_box(&input.faces, &input.text), false);
     for (byte, ch) in input.text.utf8.char_indices() {
-        if ch == '\n' { glyphs.push((0, face_heights[0])); continue; }
+        if ch == '\n' { glyphs.push((0, face_heights[0])); box_open = false; continue; }
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
         let id = FaceId::new(index as u32);
-        let width = match shown_at(&input.text, byte, ch, None, &mut inside, &frame, id, cell) {
+        let shown = shown_at(&input.text, byte, ch, None, &mut inside, &frame, id, cell);
+        let step = if boxes { box_step(&input.faces, &input.text, (0, index), byte, ch, shows_glyphs(&shown), box_open, false) } else { BoxStep::NONE };
+        box_open = step.open;
+        let width = step.lead + step.trail + match shown {
             Shown::Tab | Shown::Stretch(_) => space,
-            Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, id, glyph, cell)).sum(),
+            Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, id, glyph, cell)).sum::<f32>(),
             Shown::Composed { advance, .. } => advance,
             Shown::Inside => 0.0,
         };
