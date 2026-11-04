@@ -1023,6 +1023,16 @@ pub struct ThreadComms {
     pub capabilities: Arc<SharedRenderCapabilities>,
     pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
+    pub lost_images: Arc<Mutex<LostImages>>,
+}
+
+/// Images the renderer no longer has though nothing retired them: those
+/// it evicted, by id, and whether a GPU rebuild lost every one.  The
+/// render thread records them; the evaluator's residency takes them.
+#[derive(Debug, Default)]
+pub struct LostImages {
+    pub evicted: Vec<u32>,
+    pub reset: bool,
 }
 
 impl ThreadComms {
@@ -1042,6 +1052,7 @@ impl ThreadComms {
             capabilities,
             tooltip_context: Arc::default(),
             frame_opacity: Arc::default(),
+            lost_images: Arc::default(),
         }
     }
 
@@ -1050,6 +1061,7 @@ impl ThreadComms {
         let emacs = EmacsComms {
             tooltip_context: self.tooltip_context.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
+            lost_images: Arc::clone(&self.lost_images),
             frame_tx: self.frame_tx,
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
@@ -1065,6 +1077,7 @@ impl ThreadComms {
             input_stream: Default::default(),
             tooltip_context: self.tooltip_context,
             frame_opacity: self.frame_opacity,
+            lost_images: self.lost_images,
             frame_rx: self.frame_rx,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
@@ -1089,6 +1102,7 @@ pub struct EmacsComms {
     pub capabilities: Arc<SharedRenderCapabilities>,
     pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
+    pub lost_images: Arc<Mutex<LostImages>>,
 }
 
 /// The evaluator's out-of-band quit, as the render thread sees it. GNU
@@ -1120,6 +1134,7 @@ pub struct RenderComms {
     pub capabilities: Arc<SharedRenderCapabilities>,
     pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
+    pub lost_images: Arc<Mutex<LostImages>>,
 }
 
 impl RenderComms {

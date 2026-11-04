@@ -52,6 +52,9 @@ pub struct ImageFacts {
     /// GNU's `img->mask': the image has a clipping mask.
     pub mask: bool,
     pub metadata: ImageEmbeddedMetadata,
+    /// GNU's IMAGE_BACKGROUND (its four corners' guess, 0xRRGGBB) when
+    /// that is not transparent: a relief's colors start from it.
+    pub background: Option<u32>,
 }
 
 /// A Lisp value of a spec's plist, copied: a string longer than
@@ -126,6 +129,8 @@ pub(crate) enum Dependency {
 #[derive(Default)]
 pub(crate) struct ImageCache {
     entries: HashMap<ImageKey, ImageEntry>,
+    /// The last lookup environment, under what it was computed from.
+    env: Option<([u64; 7], crate::prim::ImageEnv)>,
     /// The next id for `lookup-image' (GNU's cache slot index).
     ids: HashMap<ImageKey, u64>,
     next_id: u64,
@@ -134,6 +139,12 @@ pub(crate) struct ImageCache {
 impl ImageCache {
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+    pub(crate) fn env(&self, stamp: &[u64; 7]) -> Option<crate::prim::ImageEnv> {
+        self.env.as_ref().filter(|(s, _)| s == stamp).map(|(_, env)| env.clone())
+    }
+    pub(crate) fn keep_env(&mut self, stamp: [u64; 7], env: crate::prim::ImageEnv) {
+        self.env = Some((stamp, env));
     }
     pub(crate) fn get(&mut self, key: &ImageKey) -> Option<&ImageEntry> {
         let entry = self.entries.get_mut(key)?;

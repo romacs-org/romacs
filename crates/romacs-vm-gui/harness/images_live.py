@@ -16,6 +16,11 @@ labwc with the same font, and evaluates the same forms in both.
               lookup-image-map; image-transforms-p.
   cache       image-flush and clear-image-cache: a file rewritten with
               another size reads the old size until flushed, then the new.
+  display     images in a buffer: notmuch's flagged star (:ascent center,
+              :mask heuristic) in a line of text, an image alone, :ascent
+              100 with :margin, a slice: line-pixel-height,
+              window-text-pixel-size, posn-at-point and vertical-motion
+              over them.
 
 Fixtures are in harness/fixtures/images.  `canvas' is GNU's Android-only
 type (DIVERGENCES VM2-IMAGE-CANVAS), so the forms leave it out.  COMPARISON POLICY: every form's
@@ -116,6 +121,24 @@ WORKFLOWS = {
         '(list (im-try (image-size (im-spec "plain.png" :width (quote (2 . em))) t)) '
         '(im-try (image-size (im-spec "plain.png" :height (quote (1 . ch))) t)) '
         '(im-try (image-size (im-spec "plain.png" :width (quote (3 . cw))) t))))',
+    ],
+    'display': [
+        # notmuch's flagged star (notmuch-tag-format-image-data) and its logo.
+        '(progn (switch-to-buffer (get-buffer-create "im-display")) (delete-other-windows) (erase-buffer) '
+        '(insert "ab " (propertize "flagged" (quote display) (list (quote image) :type (quote svg) :data '
+        '(with-temp-buffer (insert-file-contents (im-file "star.svg")) (buffer-string)) :ascent (quote center) :mask (quote heuristic))) " cd\\n") '
+        '(insert-image (im-spec "plain.png")) (insert " plain\\n") '
+        '(insert-image (im-spec "sized.svg" :ascent 100 :margin 2)) (insert " a100\\n") '
+        '(insert-image (im-spec "photo.jpg") nil nil (list 0 0 0.5 0.5)) (insert " slice\\nlast\\n") '
+        '(goto-char (point-min)) (redisplay t) (list (buffer-size) (count-lines (point-min) (point-max))))',
+        *[f'(with-selected-window (get-buffer-window "im-display") (redisplay t) {form})' for form in (
+            '(save-excursion (goto-char (point-min)) (let (h) (dotimes (_ 5) (push (line-pixel-height) h) (forward-line 1)) (nreverse h)))',
+            '(list (window-text-pixel-size nil (point-min) (point-max)) (window-text-pixel-size nil (point-min) (save-excursion (goto-char (point-min)) (line-end-position))))',
+            '(save-excursion (goto-char 4) (let ((p (posn-at-point))) (list (posn-point p) (posn-x-y p) (posn-object-x-y p) (posn-object-width-height p) (car-safe (posn-image p)))))',
+            '(save-excursion (goto-char (point-min)) (forward-line 1) (let ((p (posn-at-point))) (list (posn-point p) (posn-x-y p) (posn-object-width-height p) (car-safe (posn-image p)))))',
+            '(save-excursion (goto-char (point-min)) (forward-line 2) (end-of-line) (posn-x-y (posn-at-point)))',
+            '(save-excursion (goto-char (point-min)) (list (vertical-motion 2) (point) (vertical-motion 1) (point)))',
+        )],
     ],
 }
 

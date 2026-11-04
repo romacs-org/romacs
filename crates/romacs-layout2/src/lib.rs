@@ -28,7 +28,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -578,7 +578,14 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         || snapshot.stretches.iter().any(|s| text.get(s.byte..s.byte + 1) != Some(" ")) {
         return Err("stretches out of order or not on a placeholder space".into());
     }
+    if snapshot.images.windows(2).any(|w| w[0].byte >= w[1].byte)
+        || snapshot.images.iter().any(|i| text.get(i.byte..i.byte + 1) != Some(" ")) {
+        return Err("images out of order or not on a placeholder space".into());
+    }
     let mut stretches = snapshot.stretches.iter().peekable();
+    let mut images = snapshot.images.iter().peekable();
+    // The row's images so far: their glyphs' indexes and ascents.
+    let mut row_images: Vec<(usize, f32)> = vec![];
     let bands = [(&snapshot.header_line, snapshot.header_line_face), (&snapshot.mode_line, snapshot.mode_line_face)];
     for (band, face) in bands {
         let Some(band) = band else { continue };
@@ -741,8 +748,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                     }
                 }
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
-                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
                 (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
+                row_images.clear();
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
                 if shift > 0.0 && left_mark(shift) > 0.0 && y < body_height && y + metrics[0].1 > 0.0 {
@@ -765,6 +773,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         while stretches.next_if(|s| s.byte < byte).is_some() {}
         let stretch = stretches.next_if(|s| s.byte == byte).map(|s| s.width);
+        while images.next_if(|i| i.byte < byte).is_some() {}
+        let image = images.next_if(|i| i.byte == byte).copied();
         // Past the truncation, only point's x on its line still counts.
         let measuring = hidden && drawing && row_start >= point_line && byte < snapshot.point_byte;
         if hidden && !measuring {
@@ -777,7 +787,13 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
-        let shown = match stretch { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
+        let shown = match (image, stretch) {
+            (Some(image), _) => Shown::Image(image),
+            (None, Some(width)) => Shown::Stretch(width),
+            (None, None) => shown(ch, snapshot.text.is_raw(byte)),
+        };
+        // An image's slot is its own height (produce_image_glyph).
+        let (ascent, height) = match &shown { Shown::Image(i) => (i.ascent as f32, (i.ascent + i.descent) as f32), _ => (ascent, height) };
         // X on the row and from the line's start (`continued' before it);
         // a TAB stops as from after the line number (x_produce_glyphs).
         let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32|
@@ -801,8 +817,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
-                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
                 (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
+                row_images.clear();
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: true, continuation, truncated: false, truncated_left: false });
                 row_start = byte;
@@ -865,6 +882,51 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                     stretch_edges(frame);
                 }
                 advance_px.clamp(0.0, metrics[0].2)
+            }
+            // The slot in the face's background, the image's slice in it.
+            Shown::Image(image) => {
+                if visible {
+                    frame.add_stretch(ox + x, oy + y, advance_px, height, color(snapshot.faces[index].background), id, false);
+                    if image.image != 0 {
+                        let (sx, sy, sw, sh) = image.source;
+                        let (fw, fh) = (image.full.0.max(1) as f32, image.full.1.max(1) as f32);
+                        let source = romacs_display_protocol::image::ImageSourceRect::new(sx as f32 / fw, sy as f32 / fh, sw as f32 / fw, sh as f32 / fh)
+                            .unwrap_or(romacs_display_protocol::image::ImageSourceRect::FULL);
+                        frame.add_image(romacs_display_protocol::ImageId::new(image.image),
+                                        ox + x + image.body_x as f32, oy + y + image.body_y as f32, sw as f32, sh as f32);
+                        // The face's background under the image is its body's; the
+                        // slot's stretch paints the margins, where a relief goes.
+                        if let Some(romacs_display_protocol::FrameGlyph::Image { source_rect, slot_rect, face_id, .. }) = frame.glyphs.last_mut() {
+                            *source_rect = source;
+                            *slot_rect = romacs_display_protocol::Rect::new(ox + x, oy + y, advance_px, height);
+                            *face_id = id;
+                        }
+                    }
+                    // The background slot and the image in it move together,
+                    // listed in glyph order.
+                    let slot_at = frame.glyphs.len() - 1 - usize::from(image.image != 0);
+                    row_images.extend((slot_at..frame.glyphs.len()).map(|at| (at, ascent)));
+                    // An image that failed to load: a rectangle of its size in
+                    // the face's foreground (x_draw_image_foreground).
+                    if image.image == 0 {
+                        let (_, _, sw, sh) = image.source;
+                        let (bx, by, bw, bh) = (ox + x + image.body_x as f32, oy + y + image.body_y as f32, sw as f32, sh as f32);
+                        let ink = color(snapshot.faces[index].foreground);
+                        for (sx, sy, w, h) in [(bx, by, bw, 1.0), (bx, by + bh - 1.0, bw, 1.0), (bx, by, 1.0, bh), (bx + bw - 1.0, by, 1.0, bh)] {
+                            frame.add_stretch(sx, sy, w, h, ink, id, false);
+                            row_images.push((frame.glyphs.len() - 1, ascent));
+                        }
+                    }
+                    let base = image.relief_background.unwrap_or_else(|| {
+                        let [r, g, b] = snapshot.faces[index].background;
+                        u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
+                    });
+                    for (sx, sy, sw, sh, pixel) in relief_strips(&image, ox + x, oy + y, base) {
+                        frame.add_stretch(sx, sy, sw, sh, Color::from_pixel(pixel), id, false);
+                        row_images.push((frame.glyphs.len() - 1, ascent));
+                    }
+                }
+                advance_px
             }
             // Outside a box run, a character's glyphs are only themselves.
             Shown::Glyphs(glyphs) if !step.boxed => {
@@ -944,7 +1006,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     if end_byte == text.len() && y < body_height {
         let scrolled = shift > 0.0 && row_start < text.len();
-        row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &metrics, face_base);
+        row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
         rows.push(Row { start: row_start, y, height: row_height });
         marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: scrolled });
         if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?; }
@@ -1083,7 +1145,7 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
     }
     // One baseline for the band, a box's top included.
     if boxed_top {
-        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &metrics, face_base + offset);
+        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &[], &metrics, face_base + offset);
     }
     Ok(())
 }
@@ -1138,27 +1200,87 @@ fn shows_box(faces: &[Face], text: &TextSlice) -> bool {
 /// stretch shorter than the row moves down by that ascent less its own
 /// (the ascent METRICS[face - FACE_BASE] gives a stretch); the row's new height.  Only a
 /// row with a box (BOXED) is settled.
-fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, boxed: bool, metrics: &[(f32, f32, f32, f32)], face_base: u32) -> f32 {
+fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, boxed: bool, images: &[(usize, f32)],
+              metrics: &[(f32, f32, f32, f32)], face_base: u32) -> f32 {
     use romacs_display_protocol::FrameGlyph;
-    if !boxed { return height; }
-    let ascent_of = |glyph: &FrameGlyph| match glyph {
-        FrameGlyph::Char { ascent, .. } => Some(*ascent),
-        FrameGlyph::Stretch { height: h, face_id, .. } if *h < height =>
-            metrics.get((face_id.get() as usize).wrapping_sub(face_base as usize)).map(|m| m.0),
-        _ => None,
+    if !boxed && images.is_empty() { return height; }
+    // An image's slot and the image in it rise to its own ascent.
+    // IMAGES are in glyph order.
+    let ascent_of = |at: usize, glyph: &FrameGlyph| match images.binary_search_by_key(&at, |&(i, _)| i) {
+        Ok(k) => Some(images[k].1),
+        Err(_) => match glyph {
+            FrameGlyph::Char { ascent, .. } => Some(*ascent),
+            FrameGlyph::Stretch { height: h, face_id, .. } if *h < height =>
+                metrics.get((face_id.get() as usize).wrapping_sub(face_base as usize)).map(|m| m.0),
+            _ => None,
+        },
     };
-    let row_ascent = frame.glyphs[from..].iter().filter_map(ascent_of).fold(0.0f32, f32::max);
+    let row_ascent = frame.glyphs[from..].iter().enumerate().filter_map(|(k, g)| ascent_of(from + k, g)).fold(0.0f32, f32::max);
     let mut bottom = height;
-    for glyph in &mut frame.glyphs[from..] {
-        let Some(own) = ascent_of(glyph) else { continue };
+    for k in from..frame.glyphs.len() {
+        let Some(own) = ascent_of(k, &frame.glyphs[k]) else { continue };
         let shift = row_ascent - own;
-        match glyph {
+        match &mut frame.glyphs[k] {
             FrameGlyph::Char { y, baseline, height: h, .. } => { *y += shift; *baseline += shift; bottom = bottom.max(*y + *h - top); }
             FrameGlyph::Stretch { y, height: h, .. } => { *y += shift; bottom = bottom.max(*y + *h - top); }
+            FrameGlyph::Image { y, slot_rect, box_rect, .. } => {
+                *y += shift;
+                slot_rect.y += shift;
+                box_rect.y += shift;
+                bottom = bottom.max(slot_rect.y + slot_rect.height - top);
+            }
             _ => {}
         }
     }
     bottom
+}
+
+/// pgtk_draw_image_relief's strips around IMAGE's slice, its slot at X,
+/// Y: |relief| thick just inside its margin, the top and left lighter
+/// and the bottom and right darker than BASE when raised, the other way
+/// when sunken (pgtk_setup_relief_colors), each side only where the slice
+/// has the image's edge.  As rectangles: GNU's mitred corners aside.
+fn relief_strips(image: &romacs_layout_input::InlineImage, x: f32, y: f32, base: u32) -> Vec<(f32, f32, f32, f32, u32)> {
+    let thick = image.relief.abs() as f32;
+    if thick == 0.0 { return vec![]; }
+    let (light, dark) = (lighter_color(base, 1.2, 0x8000), lighter_color(base, 0.6, 0x4000));
+    let (top_left, bottom_right) = if image.relief > 0 { (light, dark) } else { (dark, light) };
+    let (sx, sy, sw, sh) = image.source;
+    let (left, top) = (x + image.body_x as f32 - thick, y + image.body_y as f32 - thick);
+    let (width, height) = (sw as f32 + 2.0 * thick, sh as f32 + 2.0 * thick);
+    let (left_p, top_p) = (sx == 0, sy == 0);
+    let (right_p, bot_p) = (sx + sw == image.full.0, sy + sh == image.full.1);
+    let mut strips = vec![];
+    if left_p { strips.push((left, top, thick, height, top_left)); }
+    if right_p { strips.push((left + width - thick, top, thick, height, bottom_right)); }
+    // The top stops short of the right side, the bottom of the left.
+    if top_p { strips.push((left, top, width - if right_p { thick } else { 0.0 }, thick, top_left)); }
+    if bot_p { let from = if left_p { thick } else { 0.0 }; strips.push((left + from, top + height - thick, width - from, thick, bottom_right)); }
+    // A relief wider than a pixel has a pixel of the other color outside.
+    if left_p && thick > 1.0 { strips.push((left, top, 1.0, height, bottom_right)); }
+    if top_p && thick > 1.0 { strips.push((left, top, width, 1.0, bottom_right)); }
+    strips
+}
+
+/// pgtk_compute_lighter_color: PIXEL (0xRRGGBB) scaled by FACTOR, a dark
+/// one moved DELTA (of 0xffff) further, or DELTA added where that changes
+/// nothing.
+fn lighter_color(pixel: u32, factor: f64, delta: i64) -> u32 {
+    let channel = |shift: u32| i64::from((pixel >> shift) & 0xff) * 257;
+    let (r, g, b) = (channel(16), channel(8), channel(0));
+    let scale = |c: i64| ((factor * c as f64) as i64).min(0xffff);
+    let (mut nr, mut ng, mut nb) = (scale(r), scale(g), scale(b));
+    let bright = (2 * r + 3 * g + b) / 6;
+    if bright < 48000 {
+        let dimness = 1.0 - bright as f64 / 48000.0;
+        let min_delta = (delta as f64 * dimness * factor / 2.0) as i64;
+        let adjust = |c: i64| if factor < 1.0 { (c - min_delta).max(0) } else { (c + min_delta).min(0xffff) };
+        (nr, ng, nb) = (adjust(nr), adjust(ng), adjust(nb));
+    }
+    let pack = |r: i64, g: i64, b: i64| ((r >> 8) << 16 | (g >> 8) << 8 | (b >> 8)) as u32;
+    let new = pack(nr, ng, nb);
+    if new != pixel { return new; }
+    pack((delta + r).min(0xffff), (delta + g).min(0xffff), (delta + b).min(0xffff))
 }
 
 /// A box run glyph's edges: the LEFT and the RIGHT, either or neither.
@@ -1202,7 +1324,7 @@ fn glyph_of(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, width: f32, 
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
 /// for one beyond ASCII), anything else as itself; a placeholder space
 /// the snapshot names a stretch, as that stretch.
-enum Shown { Tab, Stretch(StretchWidth), Glyphs(Glyphs) }
+enum Shown { Tab, Stretch(StretchWidth), Image(romacs_layout_input::InlineImage), Glyphs(Glyphs) }
 
 /// At most four glyphs, the longest escape (`\NNN`), held without
 /// allocating.
@@ -1240,6 +1362,7 @@ fn shown_advance(frame: &FrameGlyphBuffer, shown: &Shown, id: FaceId, cell: f32,
     match shown {
         Shown::Tab => tab_advance(f64::from(line_x - x0), f64::from(space), tab_width) as f32,
         Shown::Stretch(width) => stretch_advance(*width, f64::from(x), f64::from(line_x), last_x.map(f64::from)) as f32,
+        Shown::Image(image) => image.width as f32,
         Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
     }
 }
@@ -1272,6 +1395,7 @@ impl WordBreaks {
                  face_base: u32, last_x: f32, gutter: &dyn Fn(usize) -> f32) -> Option<usize> {
         let text = &snapshot.text.utf8;
         let stretch_at = |byte: usize| snapshot.stretches.binary_search_by_key(&byte, |s| s.byte).ok().map(|i| snapshot.stretches[i].width);
+        let image_at = |byte: usize| snapshot.images.binary_search_by_key(&byte, |i| i.byte).ok().map(|i| snapshot.images[i]);
         while self.row < text.len() {
             let (row, x0) = (self.row, gutter(self.row));
             let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32, bool)>);
@@ -1285,7 +1409,11 @@ impl WordBreaks {
                 may_wrap = whitespace;
                 let index = face_at(&snapshot.text, byte, 0);
                 let (_, _, cell, space) = metrics[index];
-                let shown = match stretch_at(byte) { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
+                let shown = match (image_at(byte), stretch_at(byte)) {
+                    (Some(image), _) => Shown::Image(image),
+                    (None, Some(width)) => Shown::Stretch(width),
+                    (None, None) => shown(ch, snapshot.text.is_raw(byte)),
+                };
                 let id = FaceId::new(face_base + index as u32);
                 // A box run's sides count as painting counts them.
                 let step = if self.boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, matches!(shown, Shown::Glyphs(_)), self.box_open, false) } else { BoxStep::NONE };
@@ -1329,7 +1457,7 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
         for (byte, ch) in slice.utf8.char_indices() {
             let face = &mut text[face_at(slice, byte, *default)];
             match shown(ch, slice.is_raw(byte)) {
-                Shown::Tab | Shown::Stretch(_) => face.push(' '),
+                Shown::Tab | Shown::Stretch(_) | Shown::Image(_) => face.push(' '),
                 Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
             }
         }
@@ -1556,22 +1684,25 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     let pixels = |value: f32| if value.fract() == 0.0 && value >= 0.0 && value <= u32::MAX as f32 { Ok(value as u32) }
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
+    let face_ascents: Vec<u32> = metrics.iter().map(|m| m.0.round().max(0.0) as u32).collect();
     let mut glyphs = Vec::with_capacity(input.text.utf8.len());
+    let mut ascents = Vec::with_capacity(input.text.utf8.len());
     // A box run's outside side edges add to its first and last glyphs'
     // advances, as append_window paints them.
     let (boxes, mut box_open) = (shows_box(&input.faces, &input.text), false);
     for (byte, ch) in input.text.utf8.char_indices() {
-        if ch == '\n' { glyphs.push((0, face_heights[0])); box_open = false; continue; }
+        if ch == '\n' { glyphs.push((0, face_heights[0])); ascents.push(face_ascents[0]); box_open = false; continue; }
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
         let shown = shown(ch, input.text.is_raw(byte));
         let step = if boxes { box_step(&input.faces, &input.text, (0, index), byte, ch, matches!(shown, Shown::Glyphs(_)), box_open, false) } else { BoxStep::NONE };
         box_open = step.open;
         let width = step.lead + step.trail + match shown {
-            Shown::Tab | Shown::Stretch(_) => space,
+            Shown::Tab | Shown::Stretch(_) | Shown::Image(_) => space,
             Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, FaceId::new(index as u32), glyph, cell)).sum::<f32>(),
         };
         glyphs.push((pixels(width)?, face_heights[index]));
+        ascents.push(face_ascents[index]);
     }
-    Ok(Measured { glyphs, face_heights })
+    Ok(Measured { glyphs, face_heights, ascents, face_ascents })
 }

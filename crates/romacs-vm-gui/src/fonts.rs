@@ -25,6 +25,10 @@ pub fn register_icon_font() -> bool {
     font.is_file() && romacs_font::register_font_file(&font)
 }
 
+/// The decoded pixels this display keeps for the renderer.
+#[path = "residency.rs"]
+pub mod residency;
+
 pub struct Display {
     resolver: FontResolver,
     policy: FontsetPolicy,
@@ -37,9 +41,10 @@ pub struct Display {
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
-    /// of each image the VM's cache holds, by id, for the renderer.
+    /// of each image the VM's cache holds, by id, for the renderer
+    /// (residency.rs).
     images: romacs_renderer_wgpu::image_cache::SemanticImageDecoder,
-    decoded: HashMap<u64, romacs_renderer_wgpu::image_cache::SemanticImageDecoded>,
+    decoded: residency::Shared,
     next_image: u64,
 }
 
@@ -47,7 +52,11 @@ impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, policy: FontsetPolicy::new(),
                   opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None,
-                  images: Default::default(), decoded: HashMap::new(), next_image: 0 })
+                  images: Default::default(), decoded: Default::default(), next_image: 0 })
+    }
+    /// This display, keeping decoded images' pixels in IMAGES.
+    pub fn with_images(self, images: residency::Shared) -> Self {
+        Self { decoded: images, ..self }
     }
     /// This display, sending each `alpha' setter to HOOK.
     pub fn with_alpha_hook(self, hook: impl FnMut(u64, [f32; 2], f32) + 'static) -> Self {
@@ -142,8 +151,11 @@ impl romacs_vm::DisplayHost for Display {
         use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
         use romacs_display_protocol::{EncodedBytes, ImageAnimationPolicy, ImageSequenceId};
         use romacs_renderer_wgpu::image_cache::{SemanticImageRequest, SemanticImageSource};
+        // The renderer's image ids are 32 bits; the VM's take the upper half,
+        // apart from those the renderer allocates for itself (its toolbar).
+        if self.next_image >= u64::from(u32::MAX >> 1) { return Err("too many images loaded".into()); }
         self.next_image += 1;
-        let id = self.next_image;
+        let id = (1 << 31) + self.next_image;
         let (source, subject) = match query.source {
             romacs_vm::ImageSource::File(path) => {
                 let path = path.to_string_lossy().into_owned();
@@ -184,14 +196,15 @@ impl romacs_vm::DisplayHost for Display {
         let metadata = decoded.metadata();
         let (width, height) = metadata.reported.dimensions();
         let facts = romacs_vm::ImageFacts { id, width, height, mask: metadata.mask.has_clipping_mask(),
-                                            metadata: metadata.embedded.clone() };
-        self.decoded.insert(id, decoded);
+                                            metadata: metadata.embedded.clone(),
+                                            background: (!metadata.background_transparent).then_some(metadata.background) };
+        self.decoded.borrow_mut().hold(id as u32, decoded);
         Ok(facts)
     }
     fn release_image(&mut self, id: u64) {
         // A multi-frame decode keeps its frames in the decoder's sequence
         // cache under the image's id, animation off or not.
-        self.decoded.remove(&id);
+        self.decoded.borrow_mut().release(id as u32);
         if let Some(sequence) = romacs_display_protocol::ImageSequenceId::new(id) {
             self.images.retire(romacs_display_protocol::ImageSequenceRetirement::One(sequence));
         }

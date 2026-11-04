@@ -68,6 +68,7 @@ impl Spec {
 
 /// What a spec's look depends on besides its plist: the frame's and its
 /// default face's (GNU's `lookup_image' arguments).
+#[derive(Clone)]
 pub(crate) struct ImageEnv {
     /// The frame's stable id: a frame object moves in a collection.
     pub frame: u64,
@@ -77,6 +78,10 @@ pub(crate) struct ImageEnv {
     pub font_height: u32,
     pub font_width: u32,
     pub font_family: String,
+    /// The default face's font's ascent and descent (FONT_BASE,
+    /// FONT_DESCENT), for `:ascent center'.
+    pub font_ascent: i64,
+    pub font_descent: i64,
     pub column: u32,
     pub line: u32,
     pub frame_pixels: (u32, u32),
@@ -199,6 +204,18 @@ impl Leaf<'_> {
     pub(crate) fn image_env(&mut self, frame: Value) -> std::result::Result<ImageEnv, Fault> {
         if !self.vm.window_system_open() { return Err(Fault::Error("Window system frame should be used".into())) }
         let frame = self.face_frame(frame, true)?;
+        // The same frame, faces, display and cell, the same environment:
+        // a redisplay asks once for all the images it shows.
+        let ws = &self.vm.window_state;
+        let stamp = [self.vm.frame(frame).map_err(Fault::Error)?.id, self.vm.display_state.face_revision, self.vm.display_state.version,
+                     u64::from(ws.line), u64::from(ws.column), u64::from(ws.width), u64::from(ws.height)];
+        if let Some(env) = self.vm.images.env(&stamp) { return Ok(env); }
+        let env = self.image_env_fresh(frame)?;
+        self.vm.images.keep_env(stamp, env.clone());
+        Ok(env)
+    }
+
+    fn image_env_fresh(&mut self, frame: Value) -> std::result::Result<ImageEnv, Fault> {
         let default = self.intern("default");
         let face = self.face_lookup(default, frame)?;
         let attribute = |cx: &mut Self, name: &str| -> std::result::Result<Value, Fault> {
@@ -220,12 +237,13 @@ impl Leaf<'_> {
         // face's realized font's pixel size, height and average width.
         let font = self.default_font_request().ok()
             .and_then(|request| self.font_host()?.char_font(&request, ' ')).map(|(font, _)| font);
-        let (font_size, font_height, font_width) = font.map_or((line, line, column), |f| {
+        let (font_size, font_height, font_width) = font.as_ref().map_or((line, line, column), |f| {
             let width = if f.average_width > 0 { f.average_width } else { f.space_width };
             (f.pixel_size.max(1) as u32, (f.ascent + f.descent).max(1) as u32, width.max(1) as u32)
         });
+        let (font_ascent, font_descent) = font.map_or((i64::from(line), 0), |f| (f.ascent, f.descent));
         let frame = self.vm.frame(frame).map_err(Fault::Error)?.id;
-        Ok(ImageEnv { frame, foreground, background, font_size, font_height, font_width, font_family,
+        Ok(ImageEnv { frame, foreground, background, font_size, font_height, font_width, font_family, font_ascent, font_descent,
                       column, line, frame_pixels })
     }
 
@@ -312,7 +330,7 @@ impl Leaf<'_> {
             Err(message) => {
                 error = Some(message);
                 let dim = |key: &str| spec.get(key).and_then(|v| v.integer_value()).filter(|n| *n >= 0).map_or(30, |n| n as u32);
-                (ImageFacts { id: 0, width: dim(":width"), height: dim(":height"), mask: false, metadata: ImageEmbeddedMetadata::EMPTY }, true)
+                (ImageFacts { id: 0, width: dim(":width"), height: dim(":height"), mask: false, metadata: ImageEmbeddedMetadata::EMPTY, background: None }, true)
             }
         };
         let margins = if failed { (0, 0) } else { self.image_margins(spec) };
@@ -334,6 +352,58 @@ impl Leaf<'_> {
         };
         let index = spec.get(":index").and_then(|v| v.integer_value()).unwrap_or(0).max(0) as usize;
         Ok(gif_frame_extensions(&bytes, index))
+    }
+
+    /// GNU produce_image_glyph's glyph for SPEC on the selected frame,
+    /// SLICE (a `(slice X Y WIDTH HEIGHT)' spec's plist tail, else nil)
+    /// showing part of it: its slot, ascent and descent (image_ascent),
+    /// and where the slice's pixels sit in it.  None for an empty slice.
+    /// A load that fails is its placeholder's size and no image (0).
+    pub(crate) fn image_glyph(&mut self, spec: &Spec, slice: Value) -> std::result::Result<Option<romacs_layout_input::InlineImage>, Fault> {
+        let env = self.image_env(Value::NIL)?;
+        let (_, entry, _) = self.image_lookup(spec, &env)?;
+        let (width, height) = (i64::from(entry.facts.width), i64::from(entry.facts.height));
+        let (hmargin, vmargin) = (i64::from(entry.margins.0), i64::from(entry.margins.1));
+        // Each of the slice's X, Y, WIDTH, HEIGHT: pixels, or a fraction of the image's.
+        let mut part = [0, 0, width, height];
+        let mut tail = slice;
+        for (i, whole) in [width, height, width, height].into_iter().enumerate() {
+            let Some((value, rest)) = self.pair(tail) else { break };
+            if let Some(n) = value.integer_value() { part[i] = n; }
+            else if let Some(f) = self.vm.object_if(value).and_then(|o| match o { crate::data::Object::Float(f) => Some(*f), _ => None }) {
+                part[i] = (f * whole as f64) as i64;
+            }
+            tail = rest;
+        }
+        let [mut x, mut y, mut w, mut h] = part;
+        x = x.min(width);
+        y = y.min(height);
+        if x + w >= width { w = width - x; }
+        if y + h > height { h = height - y; }
+        if w <= 0 || h <= 0 { return Ok(None); }
+        // image_ascent: the slice's height with the margins it has.
+        let tall = if h == height { height + vmargin } else if y == 0 { h + vmargin } else { h };
+        let ascent_spec = spec.get(":ascent");
+        let ascent = if ascent_spec.is_some_and(|a| a == self.intern("center")) {
+            (tall + env.font_ascent - env.font_descent + 1) / 2
+        } else {
+            let percent = ascent_spec.and_then(|a| a.integer_value()).unwrap_or(50);
+            (tall as f64 * (percent as f64 / 100.0)) as i64
+        };
+        let mut descent = h - ascent;
+        if y == 0 { descent += vmargin; }
+        if y + h == height { descent += vmargin; }
+        let mut advance = w;
+        if x == 0 { advance += hmargin; }
+        if x + w == width { advance += hmargin; }
+        let image = if entry.failed { 0 } else { u32::try_from(entry.facts.id).unwrap_or(0) };
+        // `:relief', as image.c's lookup_image takes it into img->relief.
+        let relief = if entry.failed { 0 } else { spec.get(":relief").and_then(|r| r.integer_value()).unwrap_or(0).clamp(-0x7fff, 0x7fff) };
+        Ok(Some(romacs_layout_input::InlineImage {
+            byte: 0, image, width: advance, ascent, descent: descent.max(0),
+            body_x: if x == 0 { hmargin } else { 0 }, body_y: if y == 0 { vmargin } else { 0 },
+            source: (x, y, w, h), full: (width, height), relief, relief_background: entry.facts.background,
+        }))
     }
 
     /// Whether the selected frame is a window-system frame.

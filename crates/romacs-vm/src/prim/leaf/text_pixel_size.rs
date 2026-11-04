@@ -479,7 +479,7 @@ impl Leaf<'_> {
             let measured = leaf.hosted_posn(&area, top, v.x, v.y - area.header_line);
             // Where the host's layout refuses, the cell V's coordinates fall in.
             leaf.or_approximate(measured, |_| Ok(Posn { pos: charpos, col: v.x / area.column.max(1), row: v.vpos, dx: 0, dy: 0,
-                                                       width: area.column, height: area.line, string: None }))
+                                                       width: area.column, height: area.line, string: None, image: None }))
         })?;
         let int = |n: i64| Value::integer(n).map_err(Fault::Error);
         // At the text area's right edge, as past a truncated row's last
@@ -504,7 +504,7 @@ impl Leaf<'_> {
         // A string's glyph names the string and its position there.
         let object = match p.string { Some((string, at)) => { let at = int(at as i64)?; self.cons(string, at) } None => Value::NIL };
         let place = if area_name == Value::NIL { pos } else { area_name };
-        Ok(self.vm.list_value(&[w, place, xy, zero, object, pos, col_row, Value::NIL, offset, size]))
+        Ok(self.vm.list_value(&[w, place, xy, zero, object, pos, col_row, p.image.unwrap_or(Value::NIL), offset, size]))
     }
 
     /// hosted_pos_visible, or where the host's layout refuses, CHARPOS's
@@ -561,7 +561,7 @@ impl Leaf<'_> {
                 motion::move_to(src, &cx, &mut it, -1, -1, last_y - 1, -1, Op { y: true, ..Op::default() })?;
                 let mut rest = it;
                 motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
-                let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
+                let height = if rest.max_h.height() > 0 { rest.max_h.height() } else { src.default_height };
                 let bottom = it.current_y + height;
                 return Ok(Some(Visible { x: it.current_x - area.hscroll * area.column, y: area.header_line + it.current_y, rtop: 0,
                     rbot: (bottom - last_y).max(0), rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }));
@@ -577,7 +577,7 @@ impl Leaf<'_> {
             if it.current_y >= last_y { return Ok(None); }
             let mut rest = it;
             motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
-            let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
+            let height = if rest.max_h.height() > 0 { rest.max_h.height() } else { src.default_height };
             let bottom = it.current_y + height;
             let (mut x, mut y) = (it.current_x, it.current_y);
             // Stopped at CHARPOS before its row produced its line number.
@@ -607,6 +607,8 @@ impl Leaf<'_> {
             // (window_hscroll_limited); Y from the window's top: the text
             // starts below the header line (window_top_y).
             let x = x - area.hscroll * area.column;
+            // pos_visible_p: the glyph's top, the row's ascent so far less its own below the row's.
+            let y = y + it.max_h.drop(it.h);
             Ok(Some(Visible { x, y: area.header_line + y, rtop: 0, rbot: (bottom - last_y).max(0),
                 rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }))
         })
@@ -671,6 +673,7 @@ impl Leaf<'_> {
         let (width, height) = match glyph.map(|e| (e, e.shape)) {
             Some((_, motion::Shape::Pixel { c, .. })) if c != 0x0a => hosted.glyph(it.index)?,
             Some((_, motion::Shape::PixelTab { space, .. })) => (motion::pixel_tab(&cx, &it, space), hosted.glyph(it.index)?.1),
+            Some((_, motion::Shape::Image(image, _))) => (image.width, image.ascent + image.descent),
             Some((e, motion::Shape::PixelStretch { width, unnumbered, .. })) => {
                 let width = if it.lnum_x > 0 { width } else { unnumbered.unwrap_or(width) };
                 (motion::pixel_stretch(&cx, &it, &e, width), hosted.glyph(it.index)?.1)
@@ -678,7 +681,11 @@ impl Leaf<'_> {
             _ => hosted.default_advance(' ')?,
         };
         let string = glyph.filter(|e| e.object != Value::NIL).and_then(|e| Some((e.object, e.strpos?)));
-        Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y, width, height, string })
+        let image = glyph.and_then(|e| if let motion::Shape::Image(_, spec) = e.shape { Some(spec) } else { None });
+        // DY from the glyph's top, which sits the row's ascent less its own
+        // below the row's (pos_visible_p).
+        let rise = it.max_h.drop(it.h);
+        Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y - rise, width, height, string, image })
     }
 
     /// FROM: nil, t (the first non-blank line), a position, or
@@ -1010,7 +1017,9 @@ impl<'a> Leaf<'a> {
 struct Visible { x: i64, y: i64, rtop: i64, rbot: i64, rowh: i64, vpos: i64 }
 
 /// buffer_posn_from_coords's answer.
-struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64, string: Option<(Value, usize)> }
+struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64, string: Option<(Value, usize)>,
+    /// The image spec whose glyph is there.
+    image: Option<Value> }
 
 /// window_text_pixel_size's X-LIMIT and Y-LIMIT: the widest x (nil none,
 /// anything but a natural number INT_MAX) and the tallest y (nil INT_MAX,
@@ -1070,7 +1079,7 @@ fn display_start(src: &mut Hosted<'_, '_>, cx: &Ctx, top_it: It, top: i64, charp
 fn row_height<E: motion::Lines>(src: &mut E, cx: &Ctx, pos: i64) -> std::result::Result<i64, Fault> {
     let mut it = motion::lines_up(src, cx, pos, 0)?;
     motion::move_in_line(src, cx, &mut it, -1, -1, Op::default())?;
-    Ok(it.max_h)
+    Ok(it.max_h.height())
 }
 
 /// The start of the screen line window_text_pixel_size measures from,

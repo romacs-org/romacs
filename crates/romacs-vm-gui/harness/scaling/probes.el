@@ -1165,6 +1165,25 @@ thousandth a stack mark."
             specs))
     (nreverse specs)))
 
+(defun scaling--image-buffer (n)
+  "A buffer of N lines, each showing its own image beside text; return it."
+  (switch-to-buffer (get-buffer-create "scaling-images")) (erase-buffer)
+  (let ((i 0))
+    (dolist (spec (scaling--image-specs n))
+      (insert (format "line %d " i))
+      (insert-image spec)
+      (insert " text\n")
+      (setq i (1+ i))))
+  (goto-char (point-min))
+  (current-buffer))
+
+;; N lines each with its own image, shown a window at a time: a step's
+;; redisplay decodes and lays out the images it shows, so the work is in
+;; the window's lines, not the buffer's images.
+(scaling-probe images-in-buffer :gui t :n 200 :steps 10
+  :setup (progn (clear-image-cache t) (scaling--image-buffer n))
+  :body (with-current-buffer it (forward-line 15) (recenter)))
+
 (scaling-probe images :gui t :n 100 :steps 1
   :setup (progn (clear-image-cache t) (scaling--image-specs n))
   ;; The message is the step's visible change, so the host paints it.

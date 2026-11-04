@@ -62,6 +62,8 @@ pub(crate) enum ShownKind {
     Stretch(StretchWidth),
     /// A `:relative-width' FACTOR space, as wide as the host draws C.
     Relative { factor: f64, c: char },
+    /// An image a placeholder space stands for.
+    Image(romacs_layout_input::InlineImage),
 }
 
 /// How the host shows ELEM: None where it shows nothing of it (outside
@@ -75,7 +77,7 @@ fn host_char(source: &mut Source<'_, '_>, e: &Elem) -> R<Option<Option<char>>> {
         (Shape::Glyph { c, .. }, Method::Buffer | Method::String | Method::Vector { .. }) => char::from_u32(c),
         (Shape::Tab, Method::Buffer | Method::String | Method::Vector { .. }) => Some('\t'),
         // A glyphless character's box: a stretch of its width.
-        (Shape::Stretch { .. } | Shape::Align { .. } | Shape::Glyphless { .. }, _) => Some(' '),
+        (Shape::Stretch { .. } | Shape::Align { .. } | Shape::Glyphless { .. } | Shape::Image(..), _) => Some(' '),
         // Measured as the glyph it is relative to.
         (Shape::RelativeStretch { c, .. }, _) => char::from_u32(c),
         _ => None,
@@ -150,6 +152,7 @@ impl<'a> Leaf<'a> {
             // A space replaces when the buffer's display made it, not a string's.
             let (kind, replaces) = match stretch_width(e.shape) {
                 Some(width) => (ShownKind::Stretch(width), e.object == Value::NIL),
+                None if let Shape::Image(image, _) = e.shape => (ShownKind::Image(image), e.object == Value::NIL),
                 None if let Shape::Glyphless { .. } = e.shape => {
                     let width = glyphless_pixels(&mut source, &e)?;
                     (ShownKind::Stretch(StretchWidth::Width { width, zero_ok: false }), e.object == Value::NIL)
@@ -176,14 +179,16 @@ pub(super) struct Hosted<'l, 'a> {
     /// The host's advance and own row height for the elements from BASE
     /// on, by index since the last reset.
     base: usize,
-    glyphs: Vec<(i64, i64)>,
-    /// The default face's row height, which every host row reaches.
+    glyphs: Vec<(i64, i64, i64)>,
+    /// The default face's row height, which every host row reaches, and
+    /// its ascent.
     pub default_height: i64,
+    pub default_ascent: i64,
 }
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, base: 0, glyphs: vec![], default_height: 0 }
+        Hosted { source, base: 0, glyphs: vec![], default_height: 0, default_ascent: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
@@ -193,6 +198,10 @@ impl<'l, 'a> Hosted<'l, 'a> {
     }
     /// The host's advance and own height for element INDEX.
     pub(super) fn glyph(&mut self, index: usize) -> R<(i64, i64)> {
+        self.glyph_rise(index).map(|(w, h, _)| (w, h))
+    }
+    /// The host's advance, own height and ascent for element INDEX.
+    fn glyph_rise(&mut self, index: usize) -> R<(i64, i64, i64)> {
         if index < self.base || index >= self.base + self.glyphs.len() { self.measure(index)?; }
         self.glyphs.get(index - self.base).copied().ok_or_else(|| Fault::Error("host measurement misses an element".into()))
     }
@@ -215,8 +224,8 @@ impl<'l, 'a> Hosted<'l, 'a> {
         let window = self.source.window();
         let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
         self.base = index;
-        self.glyphs = measured.glyphs.into_iter().map(|(w, h)| (i64::from(w), i64::from(h))).collect();
-        self.default_height = i64::from(measured.face_heights[0]);
+        self.glyphs = measured.glyphs.iter().zip(&measured.ascents).map(|(&(w, h), &a)| (i64::from(w), i64::from(h), i64::from(a))).collect();
+        (self.default_height, self.default_ascent) = (i64::from(measured.face_heights[0]), i64::from(measured.face_ascents[0]));
         Ok(())
     }
     /// The default face's row height and the advance of C in it.
@@ -234,17 +243,21 @@ impl Elements for Hosted<'_, '_> {
         let Some(e) = slot.elem else { return Ok(slot) };
         let Some(c) = host_char(&mut self.source, &e)? else { return Ok(slot) };
         if c.is_none() { return Err(not_as_gnu()); }
-        let (width, height) = self.glyph(index)?;
-        let height = height.max(self.default_height);
+        let (width, height, ascent) = self.glyph_rise(index)?;
+        // Every host row reaches the default face's ascent and descent.
+        let (ascent, descent) = (ascent.max(self.default_ascent), (height - ascent).max(self.default_height - self.default_ascent));
+        let height = ascent + descent;
         let shape = match e.shape {
             Shape::Glyphless { .. } => Shape::PixelStretch {
-                width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height },
-            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height },
-            Shape::Tab => Shape::PixelTab { space: width, height },
+                width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height, ascent },
+            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent },
+            // Its own size, not the placeholder's.
+            Shape::Image(image, spec) => Shape::Image(image, spec),
+            Shape::Tab => Shape::PixelTab { space: width, height, ascent },
             // produce_stretch_glyph: NUMVAL (prop) * it2.pixel_width.
             Shape::RelativeStretch { factor, .. } => Shape::PixelStretch {
-                width: StretchWidth::Width { width: (factor * width as f64) as i64, zero_ok: false }, unnumbered: None, height },
-            shape => Shape::PixelStretch { width: stretch_width(shape).ok_or_else(not_as_gnu)?, unnumbered: e.unnumbered.and_then(stretch_width), height },
+                width: StretchWidth::Width { width: (factor * width as f64) as i64, zero_ok: false }, unnumbered: None, height, ascent },
+            shape => Shape::PixelStretch { width: stretch_width(shape).ok_or_else(not_as_gnu)?, unnumbered: e.unnumbered.and_then(stretch_width), height, ascent },
         };
         Ok(Slot { pre: slot.pre, elem: Some(Elem { shape, ..e }) })
     }

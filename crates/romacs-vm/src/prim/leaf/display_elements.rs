@@ -83,7 +83,10 @@ fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixe
 /// A replacing display specification (handle_single_display_spec).
 /// A margin's string or space shows outside the text area.
 #[derive(Clone, Copy)]
-enum Replacement { String(Value, bool), Space(Value, bool), Nothing }
+enum Replacement { String(Value, bool), Space(Value, bool), Nothing,
+    /// An image spec on a window-system frame, with the `(slice ...)' plist
+    /// tail beside it (else nil).
+    Image(Value, bool, Value) }
 
 /// One character of a buffer or string, before classification.
 #[derive(Clone, Copy)]
@@ -629,13 +632,16 @@ impl<'l, 'a> Source<'l, 'a> {
             _ => self.leaf.vector_values(spec).unwrap_or_else(|_| vec![spec]),
         };
         let mut found = None;
+        // `(slice X Y WIDTH HEIGHT)' beside an image picks its part (it->slice).
+        let mut slice = Value::NIL;
         for item in items {
+            if let Some((head, tail)) = self.leaf.pair(item) && head == s.slice { slice = tail; }
             if let Some(r) = self.single_display_spec(item, eval, nested)? {
                 if found.is_none() { found = Some(r); }
                 if in_string { break; }
             }
         }
-        Ok(found)
+        Ok(found.map(|r| match r { Replacement::Image(spec, text_area, _) => Replacement::Image(spec, text_area, slice), r => r }))
     }
 
     /// handle_single_display_spec. A nested string's spec matters only
@@ -677,6 +683,9 @@ impl<'l, 'a> Source<'l, 'a> {
         let text_area = location == Value::NIL;
         Ok(if self.leaf.vm.str_view(value).is_some() { Some(Replacement::String(value, text_area)) }
             else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.space) { Some(Replacement::Space(value, text_area)) }
+            // valid_image_p, on a window-system frame only: elsewhere the text shows.
+            else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.image) && self.leaf.vm.window_system_open()
+                && self.leaf.image_spec(value)?.is_some() { Some(Replacement::Image(value, text_area, Value::NIL)) }
             else { None })
     }
 
@@ -686,6 +695,13 @@ impl<'l, 'a> Source<'l, 'a> {
             Replacement::String(string, text_area) => {
                 if self.leaf.vm.str_view(string).is_some_and(|v| v.chars == 0) { return Ok(()); }
                 self.string(string, Origin { string, strpos: None, from_display: true, text_area, ..origin })
+            }
+            Replacement::Image(spec, text_area, slice) => {
+                let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
+                let Some(image) = self.leaf.image_glyph(&parsed, slice)? else { return Ok(()) };
+                self.emit(Elem { shape: Shape::Image(image, spec), method: Method::Stretch, charpos: origin.charpos, whitespace: origin.whitespace_under,
+                    text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
+                Ok(())
             }
             Replacement::Space(spec, text_area) => {
                 let origin = Origin { text_area, ..origin };
@@ -797,6 +813,12 @@ impl<'l, 'a> Source<'l, 'a> {
         };
         if let Some(n) = self.leaf.number_value(prop) { return Ok(Some(n * column + once(self, &anchor))); }
         let Some((mut car, cdr)) = self.leaf.pair(prop) else { return Ok(None) };
+        // An image spec: its own width, margins aside (img->width).
+        if car == s.image && self.view.pixels && self.leaf.vm.window_system_open() && let Some(spec) = self.leaf.image_spec(prop)? {
+            let env = self.leaf.image_env(Value::NIL)?;
+            let (_, entry, _) = self.leaf.image_lookup(&spec, &env)?;
+            return Ok(Some(f64::from(entry.facts.width)));
+        }
         if self.leaf.kind(car) == super::Kind::Symbol {
             if car == s.plus || car == s.minus {
                 let mut total = 0.0;
