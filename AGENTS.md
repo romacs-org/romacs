@@ -63,6 +63,17 @@ possible; say so where you do.
   `crates/romacs-vm-gui/harness/scaling/probes.el`. A probe over its exponent
   budget is fixed, or carries `:known` with a ticket. Raising its budget is
   not a fix.
+- Attack cost in this order: complexity (never worse than GNU's; pick the
+  textbook structure: interval trees, ropes, indexes, dependency graphs),
+  then incremental work (recompute only what a change dirties, in dependency
+  order), then laziness (visible region first), then parallelism.
+- Parallelize work that is independent and larger than its dispatch and
+  merge cost. Pure Rust work over independent data runs data-parallel inside
+  its primitive, touching no Lisp state. Lisp work that can leave the main VM
+  runs in worker VMs over buffer snapshots, its results applied at a batch
+  boundary; the main VM stays interruptible.
+- A parallel path proves itself twice: a scaling probe on large inputs, and
+  perkey on ordinary ones (no per-key regression from dispatch).
 
 ## Testing loop
 
