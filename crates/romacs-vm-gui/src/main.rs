@@ -31,6 +31,7 @@ mod batch;
 mod user_init;
 mod measure;
 mod fonts;
+mod defun_census;
 mod grammars;
 mod timers;
 mod world;
