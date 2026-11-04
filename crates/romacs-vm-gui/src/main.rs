@@ -934,9 +934,9 @@ fn paint(
     let glyphs: Vec<_> = std::iter::once(&frame).chain(&children).filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).flat_map(|frame| {
         let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
         frame.glyphs.iter().filter_map(move |glyph| {
-            if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
+            if let romacs_display_protocol::FrameGlyph::Char { char, composed, row_role, face_id, x, y, clip_rect, .. } = glyph {
                 let face = &frame.faces[face_id];
-                Some(json!({"char":char,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
+                Some(json!({"char":char,"composed":composed,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
                     "background":hex(face.background),"x":x + origin.x(),"y":y + origin.y(),"clip":clip_rect,"frame":id}))
             } else { None }
         })

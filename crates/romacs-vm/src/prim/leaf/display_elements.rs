@@ -537,6 +537,16 @@ impl<'l, 'a> Source<'l, 'a> {
                 return self.vector(&glyphs, origin, buffer, false);
             }
         }
+        // A joiner continuing an emoji or variation sequence is part of the
+        // one glyph GNU's composition makes of it (composite.el,
+        // emoji-zwj.el), not glyphless; the host draws the sequence.
+        if let Some(joiner) = char::from_u32(c).filter(|&j| romacs_layout_input::cluster::is_composition_joiner(j))
+            && self.previous_char(origin.string).is_some_and(|prev| romacs_layout_input::cluster::joins(prev, joiner))
+            && self.joins_next(joiner, origin)? {
+            self.emit(Elem { shape: Shape::Glyph { c, width: 0 }, method: plain, charpos: origin.charpos, whitespace: origin.whitespace_under,
+                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
+            return Ok(());
+        }
         if let Some((width, how)) = self.glyphless(c)? {
             if let Some(how) = how.filter(|_| width > 0) {
                 self.emit(Elem { shape: Shape::Glyphless { width, c, how }, method: plain, charpos: origin.charpos,
@@ -585,6 +595,23 @@ impl<'l, 'a> Source<'l, 'a> {
         self.emit(Elem { shape, method: plain, charpos: origin.charpos, whitespace: matches!(c, 0x20 | 0x09) || origin.whitespace_under,
             text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
         Ok(())
+    }
+
+    /// Whether a ZWJ at ORIGIN joins the buffer character after it, as a
+    /// sequence needs (a trailing ZWJ joins nothing and stays glyphless);
+    /// another joiner, or one in a string, needs nothing after it.
+    fn joins_next(&mut self, joiner: char, origin: Origin) -> R<bool> {
+        if joiner != '\u{200D}' || origin.string != Value::NIL { return Ok(true); }
+        if self.next >= self.view.zv { return Ok(false); }
+        Ok(char::from_u32(self.char_at(self.byte)).is_some_and(|next| romacs_layout_input::cluster::joins(joiner, next)))
+    }
+
+    /// The character the last element showed, when it is a character of
+    /// OBJECT (the buffer's text, or the same string).
+    fn previous_char(&self, object: Value) -> Option<char> {
+        let elem = self.slots.last()?.elem.as_ref()?;
+        let Shape::Glyph { c, .. } = elem.shape else { return None };
+        (elem.object == object && elem.ellipsis.is_none()).then(|| char::from_u32(c)).flatten()
     }
 
     /// lookup_glyphless_char_display and term.c produce_glyphless_glyph:

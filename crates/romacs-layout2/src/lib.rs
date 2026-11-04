@@ -708,6 +708,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     let mut rows: Vec<Row> = vec![];
     let mut marks: Vec<RowMarks> = vec![];
     let mut continuation = line_start != snapshot.start_byte;
+    // The end of the composed sequence being laid out, and its glyph's x
+    // and advance.
+    let (mut inside, mut composed) = (0, (0.0f32, 0.0f32));
     for (byte, ch) in text[line_start..].char_indices().map(|(at, ch)| (line_start + at, ch)) {
         // The window start begins a row: at a line start, or where the row
         // before it breaks, which the character there decides below, so
@@ -777,7 +780,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
         let (ascent, height, cell, space) = metrics[index];
-        let shown = match stretch { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
+        let shown = shown_at(&snapshot.text, byte, ch, stretch, &mut inside, frame, id, cell);
         // X on the row and from the line's start (`continued' before it);
         // a TAB stops as from after the line number (x_produce_glyphs).
         let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32|
@@ -785,7 +788,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         // A box run (xdisp.c start_of_box_run_p, end_of_box_run_p): its
         // text's first and last glyphs own its left and right edges; edges
         // outside the text are spacers of their width, the run's advance.
-        let step = if boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, matches!(shown, Shown::Glyphs(_)), box_open, false) } else { BoxStep::NONE };
+        let step = if boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, shows_glyphs(&shown), box_open, false) } else { BoxStep::NONE };
         // The run's state past this character, on every path below; a row
         // break alone opens no new run (the iterator's box state carries).
         let opening = !box_open;
@@ -795,8 +798,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         if measuring { x += advance_px; continue; }
         // A word-wrapped row breaks where `WordBreaks' finds; another, at
         // the glyph that would pass the text area.
+        // No row breaks inside a composed sequence.
         let breaking = if word { breaks.at(byte, snapshot, frame, &metrics, face_base, last_x, &|byte| gutter(byte).0) }
-                       else { !truncate && hpos > 0 && x + advance_px > last_x };
+                       else { !truncate && hpos > 0 && x + advance_px > last_x && !matches!(shown, Shown::Inside) };
         if breaking {
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
@@ -828,7 +832,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         }
         row_height = row_height.max(height);
         let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x - shift < snapshot.width as f32;
-        if truncate && x + advance_px > last_x + shift {
+        if truncate && x + advance_px > last_x + shift && !matches!(shown, Shown::Inside) {
             if visible && glyphs_mark { glyph(frame, special, ox + x - shift, oy + y, metrics[0], default_id)?; }
             (hidden, cut) = (true, x);
             if at_point {
@@ -909,8 +913,27 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                 // The cursor covers the glyph with its box's sides.
                 first.unwrap_or(cell) + lead
             }
+            Shown::Composed { end, advance } => {
+                // A sequence's glyph takes a box run's sides as a character's does.
+                if visible && x - shift < snapshot.width as f32 {
+                    if lead > 0.0 {
+                        frame.add_stretch(ox + x, oy + y, lead, height, color(snapshot.faces[index].background), id, false);
+                        set_box_edges(frame, Edges::Left);
+                    }
+                    publish_selected_glyph(frame, resolver, id, &text[byte..*end]);
+                    frame.add_composed_char(&text[byte..*end], ch, ox + x + lead, oy + y, *advance + trail, height, ascent, false);
+                    *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
+                    if step.boxed { set_box_edges(frame, edges(step.side == 0.0 && opening, step.ends)); }
+                    row_box_top = row_box_top.max(step.top);
+                }
+                composed = (x, *advance + lead);
+                *advance + lead
+            }
+            Shown::Inside => 0.0,
         };
         if at_point {
+            // Point inside a composed sequence shows on its glyph.
+            let (x, cursor) = if matches!(shown, Shown::Inside) { composed } else { (x, cursor) };
             let at = cursor_x(x, x0, shift, false, cut);
             point_rect = Some((at, y, if at == x - shift { cursor } else { metrics[0].2 }, row_height, ascent));
             place = Some(PointPlace { x: at, line_x: x + continued, gutter: x0, truncated_left: shift > 0.0, truncated_right: false, at_eol: false });
@@ -1202,7 +1225,11 @@ fn glyph_of(frame: &mut FrameGlyphBuffer, ch: char, x: f32, y: f32, width: f32, 
 /// stretch, another control character as GNU's escape (`^X`, or `\NNN`
 /// for one beyond ASCII), anything else as itself; a placeholder space
 /// the snapshot names a stretch, as that stretch.
-enum Shown { Tab, Stretch(StretchWidth), Glyphs(Glyphs) }
+///
+/// An emoji or variation sequence (`romacs_layout_input::cluster`) shows as
+/// one composed glyph at its first character, ADVANCE wide, through END;
+/// the characters after it are inside it and take no room.
+enum Shown { Tab, Stretch(StretchWidth), Glyphs(Glyphs), Composed { end: usize, advance: f32 }, Inside }
 
 /// At most four glyphs, the longest escape (`\NNN`), held without
 /// allocating.
@@ -1230,6 +1257,60 @@ fn shown(ch: char, raw: bool) -> Shown {
     }
 }
 
+/// What the character CH at BYTE of TEXT shows as, STRETCH the snapshot's
+/// stretch there, INSIDE the end of the composed sequence the characters
+/// before it began (updated when one begins here), in face ID of nominal
+/// advance CELL. A sequence is as wide as the glyph its representative
+/// character has (`representative_char_for_cluster').
+#[allow(clippy::too_many_arguments)]
+#[inline]
+fn shown_at(text: &TextSlice, byte: usize, ch: char, stretch: Option<StretchWidth>, inside: &mut usize,
+            frame: &FrameGlyphBuffer, id: FaceId, cell: f32) -> Shown {
+    if let Some(width) = stretch { return Shown::Stretch(width); }
+    // No sequence starts at, or holds, an ASCII character.
+    if ch.is_ascii() { return shown(ch, text.is_raw(byte)); }
+    sequence_at(text, byte, ch, inside, frame, id, cell)
+}
+
+/// `shown_at' for a character beyond ASCII, out of the ASCII text's way.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn sequence_at(text: &TextSlice, byte: usize, ch: char, inside: &mut usize, frame: &FrameGlyphBuffer, id: FaceId, cell: f32) -> Shown {
+    if byte < *inside { return Shown::Inside; }
+    let raw = text.is_raw(byte);
+    if !raw && let Some(end) = romacs_layout_input::cluster::cluster_end(&text.utf8, byte) {
+        *inside = end;
+        let representative = romacs_font::cluster::representative_char_for_cluster(&text.utf8[byte..end]);
+        return Shown::Composed { end, advance: representative.map_or(cell, |c| advance(frame, id, c, cell)) };
+    }
+    shown(ch, raw)
+}
+
+/// Whether SHOWN draws glyphs (a composed sequence's included), which a
+/// box run's edges belong to, rather than a stretch.
+fn shows_glyphs(shown: &Shown) -> bool {
+    matches!(shown, Shown::Glyphs(_) | Shown::Composed { .. } | Shown::Inside)
+}
+
+/// Publish the one glyph a sequence of a single character and its
+/// selectors (VS-16's `❤️') shows in face ID, when it has one: the
+/// character's glyph in the font its representative resolved to (the emoji
+/// font for VS-16), so the renderer draws that exact glyph rather than
+/// shaping the text in the text font. Other sequences (ZWJ ligatures) are
+/// shaped by the renderer.
+fn publish_selected_glyph(frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, id: FaceId, cluster: &str) {
+    let mut bases = cluster.chars().filter(|&c| !romacs_layout_input::cluster::is_composition_joiner(c));
+    let (Some(base), None) = (bases.next(), bases.next()) else { return };
+    if frame.shaped_clusters.get(&id).is_some_and(|published| published.contains_key(cluster)) { return; }
+    let Some(representative) = romacs_font::cluster::representative_char_for_cluster(cluster) else { return };
+    let Some(font) = frame.char_fonts.get(&id).and_then(|chars| chars.get(&representative))
+        .and_then(|binding| frame.fonts.get(&binding.resolved_font_id)) else { return };
+    let Some((glyph_id, x_advance)) = resolver.glyph_in_font(font, base) else { return };
+    let glyph = romacs_display_protocol::font::ResolvedGlyph { resolved_font_id: font.id, glyph_id, x: 0.0, y: 0.0, x_advance,
+        cluster_start: 0, cluster_end: cluster.len() as u32 };
+    frame.shaped_clusters.entry(id).or_default().insert(cluster.into(), vec![glyph]);
+}
+
 /// The advance of SHOWN in face ID (CELL wide, SPACE its space's width)
 /// at row X, line x LINE_X, on a row whose text starts at X0: a TAB to
 /// its next stop as from after the line number, a stretch as GNU's (up to
@@ -1241,6 +1322,8 @@ fn shown_advance(frame: &FrameGlyphBuffer, shown: &Shown, id: FaceId, cell: f32,
         Shown::Tab => tab_advance(f64::from(line_x - x0), f64::from(space), tab_width) as f32,
         Shown::Stretch(width) => stretch_advance(*width, f64::from(x), f64::from(line_x), last_x.map(f64::from)) as f32,
         Shown::Glyphs(glyphs) => glyphs.chars().map(|glyph| advance(frame, id, glyph, cell)).sum(),
+        Shown::Composed { advance, .. } => *advance,
+        Shown::Inside => 0.0,
     }
 }
 
@@ -1275,7 +1358,7 @@ impl WordBreaks {
         while self.row < text.len() {
             let (row, x0) = (self.row, gutter(self.row));
             let (mut x, mut hpos, mut may_wrap, mut wrap_at) = (x0, 0usize, false, None::<(usize, f32, bool)>);
-            let mut end = None;
+            let (mut end, mut inside) = (None, 0);
             for (byte, ch) in text[row..].char_indices().map(|(at, ch)| (row + at, ch)) {
                 if ch == '\n' { end = Some((byte + 1, None)); self.box_open = false; break; }
                 let whitespace = (ch == ' ' || ch == '\t') != snapshot.wrap_flips.binary_search(&(byte as u32)).is_ok();
@@ -1285,14 +1368,15 @@ impl WordBreaks {
                 may_wrap = whitespace;
                 let index = face_at(&snapshot.text, byte, 0);
                 let (_, _, cell, space) = metrics[index];
-                let shown = match stretch_at(byte) { Some(width) => Shown::Stretch(width), None => shown(ch, snapshot.text.is_raw(byte)) };
                 let id = FaceId::new(face_base + index as u32);
+                let shown = shown_at(&snapshot.text, byte, ch, stretch_at(byte), &mut inside, frame, id, cell);
                 // A box run's sides count as painting counts them.
-                let step = if self.boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, matches!(shown, Shown::Glyphs(_)), self.box_open, false) } else { BoxStep::NONE };
+                let step = if self.boxes { box_step(&snapshot.faces, &snapshot.text, (0, index), byte, ch, shows_glyphs(&shown), self.box_open, false) } else { BoxStep::NONE };
                 self.box_open = step.open;
                 let advance = shown_advance(frame, &shown, id, cell, space, snapshot.tab_width, x, x + self.continued, x0, Some(last_x))
                     + step.lead + step.trail;
-                if hpos > 0 && x + advance > last_x {
+                // No row breaks inside a composed sequence.
+                if hpos > 0 && x + advance > last_x && !matches!(shown, Shown::Inside) {
                     let (at, x, open) = wrap_at.unwrap_or((byte, if matches!(shown, Shown::Tab) { last_x } else { x }, before));
                     self.box_open = open;
                     end = Some((at, Some(x)));
@@ -1326,11 +1410,21 @@ fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     // The continuation and truncation glyphs, in the default face.
     text[0].push_str("\\$");
     for (slice, default) in slices {
+        // A composed sequence's characters are all its first one's face's,
+        // which draws it (and needs its representative's font).
+        let mut inside = 0;
         for (byte, ch) in slice.utf8.char_indices() {
+            if byte < inside { continue; }
             let face = &mut text[face_at(slice, byte, *default)];
+            if !ch.is_ascii() && !slice.is_raw(byte) && let Some(end) = romacs_layout_input::cluster::cluster_end(&slice.utf8, byte) {
+                face.push_str(&slice.utf8[byte..end]);
+                inside = end;
+                continue;
+            }
             match shown(ch, slice.is_raw(byte)) {
                 Shown::Tab | Shown::Stretch(_) => face.push(' '),
                 Shown::Glyphs(glyphs) => face.extend(glyphs.chars()),
+                Shown::Composed { .. } | Shown::Inside => face.push(ch),
             }
         }
     }
@@ -1364,7 +1458,7 @@ fn underline_placement(face: &Face, font: &romacs_display_protocol::font::Resolv
 #[allow(clippy::too_many_arguments)]
 fn realize_faces(faces: &[Face], face_text: &[String], keep: impl Fn(usize) -> bool, frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver,
                  face_base: u32, rules: romacs_layout_input::UnderlineRules, no_font: &NoFont) -> Result<(Vec<Metrics>, Glyphless), String> {
-    let policy = FontsetPolicy::new();
+    let policy = romacs_font::fontset_default();
     let mut metrics = Vec::new();
     let mut glyphless = Glyphless::default();
     let len = u32::try_from(faces.len()).map_err(|e| e.to_string())?;
@@ -1500,9 +1594,11 @@ fn realize_face(face: &Face, default: Option<&Face>, id: FaceId, text: &str, fra
         // Dual-width fonts such as Iosevka report per-glyph advances. The
         // nominal space is only the frame column metric; text uses the
         // resolver's exact cached advance, including ASCII.
-        let mut ascii: Vec<_> = text.chars().filter(|c| c.is_ascii() && !c.is_control()).collect();
-        ascii.sort_unstable(); ascii.dedup();
-        for ch in ascii {
+        // Each printable ASCII character once, in code order, without
+        // sorting the face's text.
+        let mut seen = [false; 128];
+        for byte in text.bytes().filter(|b| b.is_ascii() && !b.is_ascii_control()) { seen[usize::from(byte)] = true; }
+        for ch in (0u8..128).filter(|&b| seen[usize::from(b)]).map(char::from) {
             match resolver.resolve_char(&request, ch, policy) {
                 Ok(resolved) => {
                     frame.fonts.insert(resolved.font.id, resolved.font);
@@ -1557,6 +1653,7 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
         else { Err(format!("fractional or negative advance {value}")) };
     let face_heights = metrics.iter().map(|m| pixels(m.1)).collect::<Result<Vec<_>, _>>()?;
     let mut glyphs = Vec::with_capacity(input.text.utf8.len());
+    let mut inside = 0;
     // A box run's outside side edges add to its first and last glyphs'
     // advances, as append_window paints them.
     let (boxes, mut box_open) = (shows_box(&input.faces, &input.text), false);
@@ -1564,12 +1661,15 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
         if ch == '\n' { glyphs.push((0, face_heights[0])); box_open = false; continue; }
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
-        let shown = shown(ch, input.text.is_raw(byte));
-        let step = if boxes { box_step(&input.faces, &input.text, (0, index), byte, ch, matches!(shown, Shown::Glyphs(_)), box_open, false) } else { BoxStep::NONE };
+        let id = FaceId::new(index as u32);
+        let shown = shown_at(&input.text, byte, ch, None, &mut inside, &frame, id, cell);
+        let step = if boxes { box_step(&input.faces, &input.text, (0, index), byte, ch, shows_glyphs(&shown), box_open, false) } else { BoxStep::NONE };
         box_open = step.open;
         let width = step.lead + step.trail + match shown {
             Shown::Tab | Shown::Stretch(_) => space,
-            Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, FaceId::new(index as u32), glyph, cell)).sum::<f32>(),
+            Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, id, glyph, cell)).sum::<f32>(),
+            Shown::Composed { advance, .. } => advance,
+            Shown::Inside => 0.0,
         };
         glyphs.push((pixels(width)?, face_heights[index]));
     }

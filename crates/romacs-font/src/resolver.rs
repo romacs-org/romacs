@@ -512,6 +512,12 @@ impl FontResolver {
             .glyph(ch)
     }
 
+    /// CH's glyph in FONT and its advance, or None when FONT lacks it or
+    /// cannot be opened.
+    pub fn glyph_in_font(&mut self, font: &ResolvedFont, ch: char) -> Option<(ResolvedGlyphId, f32)> {
+        self.glyph_in(font, ch)
+    }
+
     /// TEXT's extents in FONT (font->driver->text_extents), or None when
     /// the font cannot be opened or lacks one of its glyphs.
     pub fn ink_extents(&mut self, font: &ResolvedFont, text: &str) -> Option<InkExtents> {
