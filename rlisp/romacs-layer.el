@@ -196,6 +196,9 @@ text size, in pixels."
          (list (+ inset (/ (- frame-width width) 2)) (+ inset (/ (- (frame-text-height root) outer-height) 2)) width height)))
       (`(at ,window ,pos)
        (romacs-layer--after window pos width height border))
+      (`(pixel ,left ,top)
+       ;; At LEFT TOP of the root frame, outer: a key-hint card's corner.
+       (list left top width height))
       (`(window-bottom ,window)
        ;; At the bottom left of WINDOW's text, a margin inside it.
        (pcase-let ((`(,left ,_ ,right ,bottom) (window-edges window t nil t)))
@@ -317,6 +320,10 @@ its pane, following the selection and the window's size.
 toast, each called with the text; one returning non-nil has shown it
 otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
 
+(defconst romacs-layer--toast-tab-width 8
+  "The tab stops of a toast's text: its buffer's `tab-width', and its
+shaping's, whatever the buffer the message came from.")
+
 (defvar romacs-layer--toasts nil
   "The toasts shown, newest first: each (BUFFER SHOWN TIMER TEXT COLUMNS),
 SHOWN the text as it fits (`romacs-layer--toast-text'), TEXT the
@@ -376,10 +383,6 @@ character at least)."
     (while (and (> i 0) (<= (+ used (char-width (aref string (1- i)))) columns))
       (setq used (+ used (char-width (aref string (1- i)))) i (1- i)))
     (substring string (min i (max 0 (1- (length string)))))))
-
-(defconst romacs-layer--toast-tab-width 8
-  "The tab stops of a toast's text: its buffer's `tab-width', and its
-shaping's, whatever the buffer the message came from.")
 
 (defun romacs-layer--untab (line)
   "LINE with each tab as the spaces to its next stop

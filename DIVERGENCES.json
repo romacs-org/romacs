@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "1f768e8308a63d2ebf2a71a3f4d1bf22953493b070788fde679c04d82855a881",
+  "input_hash": "f7d676a0ed30ffa277c4d7a659b2f06a4637121083b2f4e6a6c33e109b5ef454",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 355,
-  "symbols": 1073,
+  "symbols": 1077,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -2268,6 +2268,9 @@
   "pp-eval-last-sexp": [
    264
   ],
+  "prefix-help-command": [
+   266
+  ],
   "prefix-numeric-value": [
    93
   ],
@@ -2586,6 +2589,9 @@
   "romacs--host-minibuffer": [
    261
   ],
+  "romacs--key-read-functions": [
+   266
+  ],
   "romacs--minibuffer-host": [
    261
   ],
@@ -2597,6 +2603,9 @@
   ],
   "romacs--oclosure-type": [
    338
+  ],
+  "romacs--prefix-help-functions": [
+   266
   ],
   "romacs--read-host-event": [
    86
@@ -2765,6 +2774,9 @@
    266
   ],
   "romacs-popup-key-grid": [
+   266
+  ],
+  "romacs-popup-prefix-names": [
    266
   ],
   "romacs-popup-show": [
@@ -8521,14 +8533,18 @@
    "planned": false,
    "mechanism": "Romacs's floating menus",
    "gnu": "GNU shows key help, popup menus and transient-map hints in windows (which-key's side window), the echo area or toolkit menus, each in its own look",
-   "romacs": "With a window system Romacs presents them as layers of one family (`rlisp/romacs-popup.el`): a `panel` across the frame's bottom above the status bar (which-key's popup, `which-key-popup-type` `custom` with `romacs-popup-which-key-*`; keymap-popup's menus, whose default `keymap-popup-backend` is `keymap-popup-backend-layer` where Romacs's menus are present, the popup's mode-line text its first row and its window without a mode line, at most half the frame tall), a `cursor` chip or menu after a buffer position (eval and command-error chips, VM2-ECHO-LAYER), a `palette` (the completion panel) and `hints` (`romacs-popup-hints-mode`, on by default: after `romacs-popup-hints-delay` idle seconds, the keys of the innermost active `set-transient-map` map, such as repeat-mode's, at the selected window's bottom left, following the selection; none for keymap-popup's own maps, a map another (isearch's) replaced,, `romacs-popup-hints-ignore`'s, or while a panel shows; GNU's `set-transient-map` arguments, keep-pred, exit and timeout untouched; a MESSAGE it shows is retired as a toast and claimed while the hints show; `repeat-mode`, off by default as in GNU, takes `romacs-popup-repeat-echo` as its `repeat-echo-function` when it turns on with GNU's `repeat-echo-message` still there, so a pending repeat shows once, as hints, or with `romacs-popup-hints-mode` off in the status bar's repeat segment, not as a toast), sharing one look (`romacs-popup-look`: glass radius and padding per kind, the `romacs-popup` faces) and one motion: a panel or palette slides in from its edge, a cursor chip and hints only fade (`romacs-layer-motion` `fade`). A menu never takes focus or selects a window; keys reach the command loop through the map its caller activated. which-key's page width is the panel's usable text width (`romacs-popup-panel-columns`: padding and the continuation column excluded). The Lisp APIs packages call (which-key's hooks, `display-buffer`, `set-transient-map`, `x-popup-menu`) are GNU's. `tests/menus.rs`, `harness/popup_live.py --layer`, `--repeat`",
-   "why": "**User-observable:** an active repeat map's keys show as hints; which-key's keys and keymap-popup's menus show in a glass panel over the windows, not a side window that resizes them; a keymap-popup menu's title is its first row (the side-window and child-frame backends remain, chosen through `keymap-popup-backend`)",
+   "romacs": "With a window system Romacs presents them as layers of one family (`rlisp/romacs-popup.el`): a key-hint `card` for a pending prefix (which-key's automatic hints, `which-key-popup-type` `custom` with `romacs-popup-which-key-*`: after which-key's pause, the keys that can follow and what they do, content-sized at the selected pane's bottom right, 12 px in and above the status bar, or its bottom left or top where that would cover point or the minibuffer's layer, or the frame's corner where the pane is too small, else none; titled by the prefix; prefixes `+NAME` first, then commands, a mode's before global ones; the bindings resolved as `key-binding` resolves them over the active maps, labelled by a menu-item's name, else which-key's replacements (`which-key-add-key-based-replacements`, `which-key-replacement-alist`, a replacement to nil hiding the key), else `romacs-popup-prefix-names` for GNU's own prefix maps, else the command's name without `ctl-x-` and `-prefix`/`-command`/`-map`; one column up to 60% of the pane's lines, else up to three balanced ones, else pages ending in `… N more · C-h`; hidden by the next key read, a further prefix showing its own card; the prefix's help key pages it in place, the key sequence still pending, `romacs--read-key-sequence` offering an unbound help key after a prefix in a command read to `romacs--prefix-help-functions` before GNU's `prefix-help-command` fallback, which it now also runs as keyboard.c does; a keyboard macro recorded while paging holds no help key), a `panel` across the frame's bottom above the status bar (which-key's explicit `which-key-show-top-level` and the like; keymap-popup's menus, whose default `keymap-popup-backend` is `keymap-popup-backend-layer` where Romacs's menus are present, the popup's mode-line text its first row and its window without a mode line, at most half the frame tall), a `cursor` chip or menu after a buffer position (eval and command-error chips, VM2-ECHO-LAYER), a `palette` (the completion panel) and `hints` (`romacs-popup-hints-mode`, on by default: after `romacs-popup-hints-delay` idle seconds, the keys of the innermost active `set-transient-map` map, such as repeat-mode's, at the selected window's bottom left, following the selection; none for keymap-popup's own maps, a map another (isearch's) replaced,, `romacs-popup-hints-ignore`'s, or while a panel shows; GNU's `set-transient-map` arguments, keep-pred, exit and timeout untouched; a MESSAGE it shows is retired as a toast and claimed while the hints show; `repeat-mode`, off by default as in GNU, takes `romacs-popup-repeat-echo` as its `repeat-echo-function` when it turns on with GNU's `repeat-echo-message` still there, so a pending repeat shows once, as hints, or with `romacs-popup-hints-mode` off in the status bar's repeat segment, not as a toast), sharing one look (`romacs-popup-look`: glass radius and padding per kind, the `romacs-popup` faces) and one motion: a panel or palette slides in from its edge, a cursor chip and hints only fade (`romacs-layer-motion` `fade`). A menu never takes focus or selects a window; keys reach the command loop through the map its caller activated. which-key's page width is the panel's usable text width (`romacs-popup-panel-columns`: padding and the continuation column excluded). The Lisp APIs packages call (which-key's hooks, `display-buffer`, `set-transient-map`, `x-popup-menu`) are GNU's. `tests/menus.rs`, `harness/popup_live.py --layer`, `--repeat`",
+   "why": "**User-observable:** an active repeat map's keys show as hints; after a prefix, its keys show in a small card at the selected pane's corner, paged with C-h, not a side window that resizes the windows; which-key's browsing commands and keymap-popup's menus show in a glass panel over the windows; a keymap-popup menu's title is its first row (the side-window and child-frame backends remain, chosen through `keymap-popup-backend`)",
    "symbols": [
     "romacs-popup-show",
     "romacs-popup-hide",
     "romacs-popup-key-grid",
     "romacs-popup-which-key-show",
-    "which-key-custom-show-popup-function"
+    "which-key-custom-show-popup-function",
+    "romacs-popup-prefix-names",
+    "romacs--prefix-help-functions",
+    "romacs--key-read-functions",
+    "prefix-help-command"
    ],
    "symbols_derived": false
   },
