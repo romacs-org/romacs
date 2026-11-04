@@ -227,7 +227,7 @@ variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a fram
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 1 held  # a legacy primitive: its engine is not suspended
+variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended; the file-local defvar returns its symbol, which never moves
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
