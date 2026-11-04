@@ -1614,8 +1614,7 @@ impl Vm {
                 let pairs = params
                     .iter()
                     .map(|&(k, v)| {
-                        self.conses.push((k, v));
-                        Value::reference(self.conses.len() - 1, 3)
+                        self.alloc_cons(k, v)
                     })
                     .collect::<Vec<_>>();
                 self.list_value(&pairs)
@@ -1632,8 +1631,7 @@ impl Vm {
                 } else {
                     Value::integer(w.right_margin as i64)?
                 };
-                self.conses.push((l, r));
-                Value::reference(self.conses.len() - 1, 3)
+                self.alloc_cons(l, r)
             }
             SetWindowMargins => {
                 let dim = |v: Value| -> Result<u32> {
@@ -2440,6 +2438,18 @@ impl<'a> Windows<'a> {
         }
         // decode_terminal yields NULL for anything else: nil, not an error.
         Ok(if self.terminal(frame).is_some() && initial { Value::TRUE } else { Value::NIL })
+    }
+    /// decode_live_terminal, then the terminal's name: GNU's
+    /// "initial_terminal" until a display opens, then the display's name
+    /// (a window-system terminal is named for its display). The second
+    /// value is whether the terminal is still GNU's output_initial kind.
+    pub(crate) fn terminal_name(&mut self, object: Value) -> std::result::Result<(String, bool), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        Ok(match self.vm.window_system_host() {
+            Some(host) => (host.display_name(), false),
+            None => ("initial_terminal".into(), true),
+        })
     }
     /// terminal.c:443: a live terminal's type, as framep's.
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {

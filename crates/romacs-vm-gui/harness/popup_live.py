@@ -261,28 +261,45 @@ WHICH_KEY_INIT = '''(require 'which-key)
       which-key-custom-show-popup-function #'romacs-popup-which-key-show
       which-key-custom-hide-popup-function #'romacs-popup-which-key-hide
       which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions
-      which-key-idle-delay 0.3)
+      ;; Not 0.3: the busy indicator's check falls 300 ms after a key, and
+      ;; Lisp running then (the card's build) reads as busy since the key.
+      which-key-idle-delay 0.6 which-key-idle-secondary-delay 0.05)
 (which-key-mode 1)
 (defun popup-live--record (&rest _)
-  (let ((frame (romacs-layer--frame-of which-key--buffer)))
+  (let* ((frame (and (buffer-live-p which-key--buffer) (romacs-layer--frame-of which-key--buffer)))
+         (window (romacs-layer--toast-window)))
     (write-region
      (prin1-to-string
-      (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
-            :native (list (frame-native-width frame) (frame-native-height frame))
-            ;; Where the minibuffer begins: its line, its layer while that
-            ;; shows, else (its layer hidden) the frame's bottom edge.
-            :minibuffer-top (let ((host (romacs--minibuffer-host)))
-                              (cond ((null host) (window-pixel-top (minibuffer-window)))
-                                    ((frame-visible-p host) (cdr (frame-position host)))
-                                    (t (frame-text-height (frame-parent frame)))))
-            ;; Where a bottom layer ends: above the status bar.
-            :chrome-bottom (romacs-chrome-bottom (frame-parent frame) frame)
-            ;; Child frames are placed outside the root's internal border.
-            :inset (frame-internal-border-width (frame-parent frame))
-            :root-windows (mapcar (lambda (w) (list (window-pixel-top w) (window-pixel-height w)))
-                                  (window-list (frame-parent frame) 'nomini))))
+      (list :shown (and frame (frame-visible-p frame) t)
+            :kind (and frame (frame-parameter frame 'romacs-popup-kind))
+            :position (and frame (list (car (frame-position frame)) (cdr (frame-position frame))))
+            :size (and frame (list (frame-pixel-width frame) (frame-pixel-height frame)))
+            :title (and frame (with-current-buffer which-key--buffer
+                                (buffer-substring-no-properties (point-min) (save-excursion (goto-char (point-min)) (line-end-position)))))
+            :page (nth 1 romacs-popup--card)
+            :pane (window-edges window t nil t)
+            :chrome-bottom (romacs-chrome-bottom (romacs-layer--root-frame))
+            :command (and (symbolp last-command) (symbol-name last-command))))
      nil {state} nil (quote quiet))))
-(advice-add 'romacs-popup-which-key-show :after #'popup-live--record)
+(advice-add 'romacs-popup--card-render :after #'popup-live--record)
+(advice-add 'romacs-popup--card-hide :after #'popup-live--record)
+(add-hook 'post-command-hook (lambda () (run-at-time 0.2 nil #'popup-live--record)) 90)
+;; Scenes: an org buffer, a narrow pane, point at the bottom right.
+(defun popup-live-org () (interactive)
+  (delete-other-windows) (switch-to-buffer (get-buffer-create "notes.org")) (org-mode)
+  (erase-buffer) (insert "* Notes\nSome text.\n") (goto-char (point-min)))
+(defun popup-live-narrow () (interactive)
+  (popup-live-org) (switch-to-buffer "*scratch*") (split-window-right) (split-window-right) (balance-windows)
+  (select-window (frame-first-window)))
+(defun popup-live-flip () (interactive)
+  (delete-other-windows) (switch-to-buffer (get-buffer-create "flip.txt"))
+  ;; Lines that fit the window (a truncated line's posn is another matter).
+  (erase-buffer) (dotimes (_ 200) (insert (make-string (- (window-body-width) 6) ?x) "\n"))
+  (goto-char (point-min)) (forward-line (- (window-body-height) 3)) (end-of-line))
+(global-set-key (kbd "<f5>") #'popup-live-org)
+(global-set-key (kbd "<f6>") #'popup-live-narrow)
+(global-set-key (kbd "<f7>") #'popup-live-flip)
+(global-set-key (kbd "<f8>") (lambda () (interactive) (which-key-mode (if which-key-mode -1 1))))
 '''
 
 
@@ -421,52 +438,105 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
 
 
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
-    """C-x shows which-key's keys in a layer above the status bar and the
-    minibuffer (the bar sits on the minibuffer line, or the frame's bottom
-    while the minibuffer's layer is hidden); the root frame's windows do
-    not move."""
-    def root_bands():
-        return [y for y, _, _ in rows([g for g in glyphs() if g.get('frame', 1) == 1], 'StatusBar') + rows([g for g in glyphs() if g.get('frame', 1) == 1], 'ModeLine')]
+    """which-key's automatic hint is the key-hint card: after C-x, at the
+    selected pane's bottom right 12 px in and above the status bar, titled
+    by the prefix, prefixes first; C-h pages it in place and the command
+    still runs; a sub-prefix key hides it at once and a card for the longer
+    prefix follows; C-g ends it.  Then C-c in org, C-h as a prefix, a narrow
+    pane, and point at the bottom right (the card flips to the bottom left)."""
+    def card_rows():
+        return [text for _, text, _ in rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')]
 
-    def layer_rows():
-        return rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')
+    def read():
+        return read_plist(state.read_text()) if state.exists() else {}
 
-    # The frame takes the output's size after its first paint: wait for the
-    # bar to stay where it is before comparing.
-    def settled():
-        first = root_bands()
-        time.sleep(.3)
-        return bool(first) and first == root_bands()
-    fio.wait(settled, args.timeout, 'root bar settled', process)
-    before = root_bands()
-    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
-    fio.wait(state.exists, args.timeout, 'which-key layer', process)
-    fio.wait(lambda: layer_rows(), args.timeout, 'which-key painted', process)
+    def card(title):
+        fio.wait(lambda: read().get('shown') and read().get('kind') == 'card' and read().get('title') == title and card_rows(),
+                 args.timeout, f'card {title}', process)
+        time.sleep(.6)
+        return read()
+
+    def gone(what):
+        fio.wait(lambda: not card_rows(), args.timeout, f'card gone after {what}', process)
+
+    def placed(probe, corner='right'):
+        (x, y), (width, height) = probe['position'], probe['size']
+        left, top, right, bottom = probe['pane']
+        inside = left + 12 <= x and x + width <= right - 12 and top + 12 <= y and y + height <= min(bottom, probe['chrome-bottom']) - 12
+        at = (x + width == right - 12) if corner == 'right' else (x == left + 12)
+        if not (inside and at and y + height == bottom - 12):
+            raise AssertionError(f"card at {x},{y} {width}x{height} in pane {probe['pane']} (bar {probe['chrome-bottom']}), want bottom {corner}")
+
     time.sleep(1)
-    fio.shot(output / 'which-key.png', env, report)
-    probe = read_plist(state.read_text())
-    report['probe'] = probe
-    shown = [text for _, text, _ in layer_rows()]
-    report['captures'].append({'name': 'which-key', 'layer_rows': shown, 'root_bands': root_bands()})
-    if not any('b : switch-to-buffer' in row for row in shown):
-        raise AssertionError(f'which-key layer shows {shown}')
-    left, top = probe['position']
-    width, height = probe['native']
-    if (left, top + height) != (probe['inset'], probe['chrome-bottom']) or probe['chrome-bottom'] > probe['minibuffer-top']:
-        raise AssertionError(f"layer at {left},{top} {width}x{height}, chrome bottom {probe['chrome-bottom']}, minibuffer line at {probe['minibuffer-top']}")
-    if root_bands() != before:
-        raise AssertionError(f'root mode lines at {root_bands()} with the layer, {before} without')
-    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
-    fio.wait(lambda: not layer_rows(), args.timeout, 'which-key gone', process)
+    # A prefix pending with which-key off, for the busy indicator's sake.
+    keys('-k', 'F8')
     time.sleep(.5)
-    if root_bands() != before:
-        raise AssertionError(f'root mode lines at {root_bands()} after the layer, {before} before')
-    # The layer's frame is kept and shows again.
     keys('-M', 'ctrl', 'x', '-m', 'ctrl')
-    fio.wait(lambda: any('b : switch-to-buffer' in text for _, text, _ in layer_rows()), args.timeout, 'which-key again', process)
+    time.sleep(1.2)
+    fio.shot(output / 'pending-no-card.png', env, report)
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
-    fio.wait(lambda: not layer_rows(), args.timeout, 'which-key gone again', process)
-    report['checks'].append({'layer_rect': [left, top, width, height], 'rows': len(shown), 'root_bands': before, 'shown_twice': True})
+    keys('-k', 'F8')
+    time.sleep(.5)
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    cx = card('C-x')
+    fio.shot(output / 'card-cx.png', env, report)
+    shown = card_rows()
+    report['captures'].append({'name': 'C-x', 'rows': shown, 'state': cx})
+    placed(cx)
+    if not any('+' in row for row in shown[1:3]) or not any('find-file' in row for row in shown):
+        raise AssertionError(f'C-x card rows {shown}')
+    keys('-M', 'ctrl', 'h', '-m', 'ctrl')
+    fio.wait(lambda: read().get('page') == 1 and card_rows(), args.timeout, 'C-h pages the card', process)
+    time.sleep(.6)
+    fio.shot(output / 'card-cx-page.png', env, report)
+    report['captures'].append({'name': 'C-x page 2', 'rows': card_rows()})
+    keys('h')
+    fio.wait(lambda: read().get('command') == 'mark-whole-buffer', args.timeout, 'C-x C-h h runs C-x h', process)
+    gone('C-x C-h h')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    card('C-x')
+    keys('4')
+    gone('C-x 4')
+    card('C-x 4')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    gone('C-g')
+    for key, title, name in (('F5', 'C-c', 'card-org-cc'), (None, 'C-h', 'card-ch')):
+        if key:
+            keys('-k', key)
+            time.sleep(.5)
+        keys('-M', 'ctrl', title[-1], '-m', 'ctrl')
+        probe = card(title)
+        fio.shot(output / f'{name}.png', env, report)
+        report['captures'].append({'name': title, 'rows': card_rows(), 'state': probe})
+        placed(probe)
+        keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+        gone(title)
+    keys('-k', 'F6')
+    time.sleep(.5)
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    narrow = card('C-x')
+    fio.shot(output / 'card-narrow.png', env, report)
+    report['captures'].append({'name': 'narrow', 'rows': card_rows(), 'state': narrow})
+    (x, _), (width, _) = narrow['position'], narrow['size']
+    if x < 0 or width > narrow['pane'][2] - narrow['pane'][0] and x + width > 1280:
+        raise AssertionError(f'narrow card {narrow}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    gone('narrow C-g')
+    # C-x 4's card is narrow enough for a side: over point at the bottom
+    # right, it takes the bottom left.
+    keys('-k', 'F7')
+    time.sleep(.5)
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    card('C-x')
+    keys('4')
+    flip = card('C-x 4')
+    fio.shot(output / 'card-flip.png', env, report)
+    report['captures'].append({'name': 'flip', 'state': flip})
+    placed(flip, 'left')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    gone('flip C-g')
+    report['checks'].append({'cx': cx['position'], 'narrow': narrow['position'], 'flip': flip['position']})
 
 
 def scene_glyphs(text):

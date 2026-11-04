@@ -68,6 +68,7 @@ mod tests {
     #[test]
     fn reverse_result_actually_moves() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.install_lisp_prelude().unwrap();
         vm.set_collection_floor(1_000_000);
         vm.eval_source("(let ((i 0)) (while (< i 100) (cons i nil) (setq i (1+ i)))) (setq reverse-moving-result (reverse (list (list 11) (list 22))))").unwrap();

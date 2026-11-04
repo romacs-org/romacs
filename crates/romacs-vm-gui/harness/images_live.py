@@ -145,6 +145,8 @@ WORKFLOWS = {
 
 def launch(engine, base, args):
     root, home, env = private_tree(engine, base, args.tools, f'{engine}-'.ljust(len('romacs-'), '_'))
+    # The collector's checks (gc.rs), when the run asks for them.
+    env.update({k: v for k, v in parity_live.os.environ.items() if k in ('ROMACS_GC_STRESS', 'ROMACS_GC_VERIFY')})
     chrome = '(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n' if engine == 'gnu' else ''
     init = INIT.format(chrome=chrome, probe=lisp_string(str(parity_live.PROBE)), fixtures=lisp_string(str(FIXTURES) + '/'))
     if engine == 'gnu':

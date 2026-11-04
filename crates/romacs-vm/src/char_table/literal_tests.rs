@@ -109,6 +109,7 @@ fn literal_standalone_print_and_length() {
 #[test]
 fn literal_gc_forwards_standalone_and_shared_payload_once() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.eval_source_raw("(make-vector 100 nil)").unwrap();
     let payload = vm.eval_source_raw("(list (copy-sequence \"payload\"))").unwrap();
     let leaf = sub(&mut vm, 3, 0, payload);

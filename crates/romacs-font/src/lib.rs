@@ -22,6 +22,7 @@ pub mod font_match;
 #[cfg(target_os = "linux")]
 mod fontconfig_catalog;
 mod fontset;
+mod fontset_default;
 mod frame;
 pub mod instance;
 pub mod probe;
@@ -31,6 +32,7 @@ pub mod subpixel;
 pub mod system;
 
 pub use fontset::{FontsetEntry, FontsetFontSpec, FontsetMode, FontsetPolicy, FontsetTarget};
+pub use fontset_default::fontset_default;
 pub use frame::{PublishedFace, publish_face_text};
 pub use resolver::{CharResolution, CharResolutionSource, FontResolveError, FontResolver, InkExtents};
 pub use style::{FontRequest, StyleScore, style_score};

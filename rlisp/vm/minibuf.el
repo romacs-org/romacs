@@ -291,6 +291,15 @@ prompt's field; elsewhere `point-min'."
       (completing-read prompt #'internal-complete-buffer predicate require-match
                        nil 'buffer-name-history def nil)))))
 
+(defun romacs--read-coding-system (prompt default-coding-system)
+  "coding.c Fread_coding_system: complete a coding system name, case-blind."
+  (when (symbolp default-coding-system)
+    (setq default-coding-system (symbol-name default-coding-system)))
+  (let ((name (let ((completion-ignore-case t))
+                (completing-read prompt coding-system-alist nil t nil
+                                 'coding-system-history default-coding-system))))
+    (if (= (length name) 0) nil (intern name))))
+
 (defun romacs--internal-complete-buffer (string predicate flag)
   "minibuf.c Finternal_complete_buffer: complete STRING over the buffer names."
   (let ((alist (mapcar (lambda (buffer) (cons (buffer-name buffer) buffer)) (buffer-list))))

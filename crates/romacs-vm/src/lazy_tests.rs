@@ -23,6 +23,7 @@ fn load(vm: &mut Vm, name: &str, text: &str) {
 #[test]
 fn lazily_held_body_moves_with_compaction_and_is_dropped_on_expansion() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     // Garbage BEFORE the definition, so compaction must move the body.
     vm.eval_source_raw("(let ((i 0) (g nil)) (while (< i 500) (setq g (cons i g)) (setq i (1+ i))) nil)")
         .unwrap();

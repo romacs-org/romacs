@@ -68,3 +68,22 @@ fn slept(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 fn now() -> f64 {
     crate::host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
+
+/// emacs.c:658-666's Fcopy_sequence of the variable: a fresh string (or nil).
+fn copied_variable(cx: &mut Leaf<'_>, name: &str) -> Out {
+    let symbol = cx.intern(name);
+    let value = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
+    if value == Value::NIL { return Ok(value); }
+    let view = cx.string_view(value)?;
+    let (bytes, multibyte) = (view.bytes().to_vec(), view.is_multibyte());
+    Ok(cx.make_string(bytes, multibyte))
+}
+
+defsubr! { name = "invocation-name", gnu = "emacs.c:658", effect = Reads,
+fn invocation_name(cx) { copied_variable(cx, "invocation-name") }}
+
+defsubr! { name = "invocation-directory", gnu = "emacs.c:666", effect = Reads,
+fn invocation_directory(cx) { copied_variable(cx, "invocation-directory") }}
+
+defsubr! { name = "byteorder", gnu = "data.c:3695", effect = Pure,
+fn byteorder(_cx) { Ok(Value::integer(if cfg!(target_endian = "little") { 108 } else { 66 }).unwrap()) }}

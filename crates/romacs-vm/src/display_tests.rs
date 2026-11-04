@@ -2,6 +2,7 @@ use super::*;
 #[test]
 fn snapshot_survives_source_string_and_property_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1_000_000);
     vm.eval_source_raw("(progn (vector 9) (cons 8 nil))").unwrap();
     vm.eval_source_raw(

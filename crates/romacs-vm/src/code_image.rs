@@ -56,6 +56,12 @@ impl Vm {
         }
         let mut objects = Vec::new();
         for o in &self.objects {
+            // A free entry keeps its position, as garbage always has: the
+            // image's references are positional and none names it.
+            if matches!(o, data::Object::Free) {
+                objects.push(builder.string_raw(""));
+                continue;
+            }
             if matches!(o, data::Object::CharTable(_) | data::Object::SubCharTable(_)) {
                 return Err("code image cannot publish character tables; native graph serialization is not supported".into());
             }
@@ -163,6 +169,11 @@ impl Vm {
             .closures
             .iter()
             .map(|c| {
+                // A free entry (gc.rs `sweep_tables') keeps its position as a
+                // closure of the entry function, which captures nothing.
+                if c.function == usize::MAX {
+                    return Ok(json!([entry, [], [], Value::NIL.0]));
+                }
                 let captures: Result<Vec<_>> = c
                     .captures
                     .iter()
@@ -431,10 +442,9 @@ impl Vm {
         }
         self.validate_code_value(value)?;
         let private = if value.tag() == 3 {
-            let index = self.conses.len();
-            self.conses.push((Value::NIL, Value::NIL));
-            pending.push((value, index));
-            Value::reference(index, 3)
+            let private = self.alloc_cons(Value::NIL, Value::NIL);
+            pending.push((value, private.payload() as usize));
+            private
         } else {
             let bytes = self.string_value(value)?.as_bytes().to_vec();
             self.make_lisp_string(bytes, true)
@@ -682,6 +692,29 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
 #[cfg(test)]
 mod image_alias_tests {
     use super::*;
+    /// A code image published after a sweep: the free entries keep their
+    /// positions as unreachable placeholders and every reference holds.
+    #[test]
+    fn an_image_published_after_a_sweep_keeps_positions() {
+        let path = std::env::temp_dir().join(format!("image-holes-{}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        let mut source = Vm::new();
+        source.set_gc_stress(0);
+        source.set_gc_verify(false);
+        source.eval_source("(setq image-junk (list \"aa\" \"bbb\" (let ((y 1)) (lambda () y)))) (setq image-kept (list \"kkkk\" 7)) (defalias 'image-f (let ((x 3)) (lambda () x))) (setq image-junk nil)").unwrap();
+        source.clear_source_cache();
+        source.collect_garbage();
+        assert!(!source.free.objects.is_empty() && !source.free.closures.is_empty(), "the sweep left free entries below live ones");
+        let entry = source.compile(&Form::Sym("image-kept".into())).unwrap();
+        let key = source.publish_code_image(&path, entry, [64; 32]).unwrap();
+        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let (mut loaded, entry) = Vm::from_code_image(image, [64; 32]).unwrap();
+        let value = loaded.execute_raw(entry).unwrap();
+        assert_eq!(loaded.display(value).unwrap(), "(\"kkkk\" 7)");
+        let called = loaded.eval_source("(image-f)").unwrap();
+        assert_eq!(called.display().unwrap(), "3");
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn root_to_cold_constant_and_plist_identity_survives_restore() {
         let path = std::env::temp_dir().join(format!("image-alias-{}", std::process::id()));

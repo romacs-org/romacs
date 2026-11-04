@@ -176,6 +176,7 @@ mod tests {
     #[test]
     fn a_caught_thrown_no_catch_retires_its_mark() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.install_lisp_prelude().unwrap();
         let value = vm.eval_source("(condition-case nil (eval '(throw 'missing (make-vector 3 nil)) t) (no-catch 'caught))").unwrap();
         assert_eq!(value.display().unwrap(), "caught");

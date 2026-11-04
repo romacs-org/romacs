@@ -109,6 +109,7 @@ fn prin1_honors_escape_newlines_and_circle_mode() {
 #[test]
 fn data_results_survive_counted_moving_collection() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(usize::MAX);
     assert_eq!(
         answer(

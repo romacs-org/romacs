@@ -204,6 +204,14 @@ impl Vm {
     pub fn collect_garbage(&mut self) {
         self.collect(&mut []);
     }
+    /// Collect now and compact the tables: every live entry moves down and
+    /// no entry is left free. A capture takes this (`publish_world'); other
+    /// collections free in place and compact only on demand (gc.rs
+    /// `compacts').
+    pub fn collect_compacting(&mut self) {
+        self.free.compact = true;
+        self.collect(&mut []);
+    }
     /// The command loop's idle collection: as `collect_garbage', but
     /// abandoned, with nothing collected or counted, if the host has a key
     /// press queued while it is still marking, which changes nothing but
@@ -387,6 +395,7 @@ mod tests {
     #[test]
     fn form_object_constants_follow_compaction_and_release_roots() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         for _ in 0..64 {
             vm.make_lisp_string(b"garbage".to_vec(), true);
         }

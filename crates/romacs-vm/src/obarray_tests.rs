@@ -51,6 +51,7 @@ fn obarray_dead_symbol_reclaimed_with_fully_live_heap() {
 #[test]
 fn obarray_identity_moves_and_retention_is_flat() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     assert!(!vm.objects.iter().any(|o| matches!(o, Object::Obarray(_))), "no startup obarray allocation");
     run(&mut vm, "(make-vector 100 nil)");
     run(&mut vm, "(setq ob-root (obarray-make) ob-sym (intern \"custom-name\" ob-root)) (set ob-sym (list (copy-sequence \"payload\")))");

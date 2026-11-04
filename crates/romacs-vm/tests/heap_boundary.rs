@@ -48,6 +48,7 @@ fn collection_runs_inside_one_request_not_only_at_its_boundary() {
 fn rooted_handle_resolves_after_compaction_and_releases_on_drop() {
     let mut vm = Vm::new();
     vm.set_collection_floor(usize::MAX);
+    vm.set_gc_moving(true);
     let source = "(progn (let ((i 0)) (while (< i 64) (cons i nil) (setq i (1+ i)))) (list (copy-sequence \"rooted\") (vector 1 2)))";
     // Warm the source cache so the measured request adds only its own data.
     vm.eval_source(source).unwrap();
