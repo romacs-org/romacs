@@ -148,6 +148,41 @@ fn a_line_wider_than_the_window_takes_its_continuation_lines() {
     assert_eq!((height, &text[start..]), (5 * LINE, &long[2..]), "b, the three-line text line and c fit");
 }
 
+/// Under `word-wrap' the mini-window counts the rows its text breaks
+/// into at words, as layout paints them: a word that would pass a row's
+/// end starts the next.
+#[test]
+fn word_wrap_counts_the_rows_broken_at_words() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq resize-mini-windows t)");
+    let text = format!("{} {} {}", "x".repeat(70), "y".repeat(70), "z".repeat(15));
+    show(&mut vm, &text);
+    assert_eq!(mini(&mut vm).1, 2 * LINE, "157 columns continue in two rows of 79");
+    eval(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (set (make-local-variable 'word-wrap) t))");
+    show(&mut vm, "");
+    show(&mut vm, &text);
+    assert_eq!(mini(&mut vm).1, 3 * LINE, "each word starts the row it does not fit");
+    eval(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (kill-local-variable 'word-wrap))");
+}
+
+/// Without fringes a row keeps room for the continuation glyph its
+/// display table sets, as wide as that glyph: a two-column one leaves 78.
+#[test]
+fn a_rows_end_keeps_the_width_of_its_continuation_glyph() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq resize-mini-windows t)");
+    show(&mut vm, &"y".repeat(79));
+    assert_eq!(mini(&mut vm).1, LINE, "79 columns beside a one-column `\\'");
+    eval(&mut vm, "(put 'display-table 'char-table-extra-slots 18)
+                   (with-current-buffer (window-buffer (minibuffer-window))
+                     (set (make-local-variable 'buffer-display-table) (make-char-table 'display-table))
+                     (set-char-table-extra-slot buffer-display-table 1 ?界))");
+    show(&mut vm, "");
+    show(&mut vm, &"y".repeat(79));
+    assert_eq!(mini(&mut vm).1, 2 * LINE, "a two-column glyph leaves 78");
+    eval(&mut vm, "(with-current-buffer (window-buffer (minibuffer-window)) (kill-local-variable 'buffer-display-table))");
+}
+
 /// Ad hoc scrolling starts at the screen row that shows the last
 /// `max-mini-window-height' rows, a continuation row of a long text line
 /// too. Pinned GNU 32.0.50 in an 80x24 tty (-nw -Q, `read-string' with

@@ -878,7 +878,7 @@ impl Vm {
         drop(self.display_state.theme());
         std::mem::take(self.display_state.diagnostics.get_mut())
     }
-    fn display_symbol(&mut self, name: &str) -> Value {
+    pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
     }
     pub(super) fn display_buffer(&mut self, v: Value) -> Result<Value> {

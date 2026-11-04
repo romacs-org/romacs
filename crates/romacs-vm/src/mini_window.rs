@@ -6,7 +6,7 @@
 //! their point visibility and scrolling (redisplay.rs) count buffer lines,
 //! not display lines.
 use crate::{data::Object, overlay_order::OverlayEntry, *};
-use romacs_layout_input::FaceRun;
+use romacs_layout_input::{FaceRun, LineWrap};
 use std::ops::Range;
 
 /// A run of display text: `len` bytes of buffer text from buffer byte
@@ -88,26 +88,48 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
 }
 
 /// Where each display row of TEXT starts, a byte offset: every text line
-/// starts one, and when WRAPPED a glyph that does not fit in what is left
-/// of a row of WIDTH columns starts the next. A TAB goes to the next tab
-/// stop of its line, a control character takes two (^X), others their
-/// Unicode width.
-fn row_starts(text: &str, width: usize, wrapped: bool) -> Vec<usize> {
+/// starts one, and unless WRAP truncates, a glyph that does not fit in
+/// what is left of a row of WIDTH columns starts the next, or under
+/// `word-wrap' the row's last wrap point (the first glyph after spaces or
+/// TABs) does, as GNU's word wrap and romacs-layout2 break it. A TAB goes
+/// to the next stop of TAB_WIDTH columns from its line's start, counting
+/// the rows before it (continuation_lines_width; a TAB that does not fit
+/// counts its row as full); a control character takes two (^X), others
+/// their Unicode width.
+fn row_starts(text: &str, width: usize, wrap: LineWrap, tab_width: usize) -> Vec<usize> {
+    let tab_width = tab_width.max(1);
+    let advance = |c: char, line_x: usize| match c {
+        '\t' => tab_width - line_x % tab_width,
+        '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
+        _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
+    };
     let mut starts = vec![0];
-    let (mut at, mut column) = (0, 0);
+    // AT is the row's x, CONTINUED the line's rows before it; WRAP_AT the
+    // row's last wrap point and its x.
+    let (mut at, mut continued, mut space, mut wrap_at) = (0, 0, false, None::<(usize, usize)>);
     for (byte, c) in text.char_indices() {
         if c == '\n' {
             starts.push(byte + 1);
-            (at, column) = (0, 0);
+            (at, continued, space, wrap_at) = (0, 0, false, None);
             continue;
         }
-        let glyph = match c {
-            '\t' => 8 - column % 8,
-            '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
-            _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
-        };
-        if wrapped && at > 0 && at + glyph > width { starts.push(byte); at = 0; }
-        (at, column) = (at + glyph, column + glyph);
+        let white = c == ' ' || c == '\t';
+        if wrap == LineWrap::Word && space && !white { wrap_at = Some((byte, at)); }
+        space = white;
+        let mut glyph = advance(c, at + continued);
+        while wrap != LineWrap::Truncate && at > 0 && at + glyph > width {
+            match wrap_at.take().filter(|&(_, x)| x > 0) {
+                // The row's glyphs from its wrap point keep their line x.
+                Some((start, x)) => { starts.push(start); at -= x; continued += x; }
+                None => {
+                    starts.push(byte);
+                    continued += if c == '\t' { width } else { at };
+                    at = 0;
+                }
+            }
+            glyph = advance(c, at + continued);
+        }
+        at += glyph;
     }
     starts
 }
@@ -234,11 +256,25 @@ impl Vm {
             _ => limit.integer_value().map_or(i64::from(total / 4), |n| n.saturating_mul(i64::from(unit))),
         }.clamp(i64::from(unit), i64::from(total.max(unit)));
         let max_lines = (max / i64::from(unit)) as usize;
-        // A continued row ends a column short, for the `\\' glyph (layout2).
+        // The text area between its fringes, less the continuation glyph
+        // on a window without a right fringe, as GNU's init_iterator makes
+        // the last visible x: the host's advance for it where a host lays
+        // the frame out (romacs-layout2 reserves the same), else its columns.
         let column = self.window_state.column.max(1);
-        let row = (width.saturating_sub(column) / column).max(1) as usize;
-        let wrapped = self.window_line_wrap(mini, buffer)? != romacs_layout_input::LineWrap::Truncate;
-        let starts = row_starts(&spliced.text, row, wrapped);
+        let [left, right] = self.window_fringe_widths(mini)?;
+        let (wrap, tab_width) = (self.window_line_wrap(mini, buffer)?, self.buffer_tab_width(buffer)? as usize);
+        let area = width.saturating_sub(left + right);
+        let rows = |reserved: u32| row_starts(&spliced.text, (area.saturating_sub(reserved) / column).max(1) as usize, wrap, tab_width);
+        // Rows that no glyph up to half a row wide changes need no measure
+        // of it, as an empty or short echo area's at every redisplay.
+        let starts = if right > 0 { rows(0) } else {
+            let short = rows(area / 2);
+            if short == rows(0) { short } else {
+                let glyph = self.line_glyphs(buffer)?[1].unwrap_or('\\');
+                let cells = unicode_width::UnicodeWidthChar::width(glyph).unwrap_or(1) as u32 * column;
+                rows(if self.has_layout_host() { self.host_default_advance(glyph).map_or(cells, |(advance, _)| advance) } else { cells })
+            }
+        };
         let lines = starts.len();
         if lines > max_lines && adhoc {
             // Start at the screen row that shows the last MAX_LINES, a
@@ -271,5 +307,29 @@ impl Vm {
     fn minibuffer_active(&mut self) -> bool {
         let slot = self.slot("romacs--minibuf-level");
         self.variable_value(slot).ok().and_then(|v| v.integer_value()).is_some_and(|level| level > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rows of 10 columns: continuation breaks at the edge, word wrap after
+    /// the last run of spaces, or at the edge for a word that fills a row.
+    #[test]
+    fn rows_break_as_the_window_wraps_them() {
+        let text = "aaaa bbbb cccc\nxxxxxxxxxxxxyy z";
+        assert_eq!(row_starts(text, 10, LineWrap::Window, 8), vec![0, 10, 15, 25]);
+        assert_eq!(row_starts(text, 10, LineWrap::Word, 8), vec![0, 10, 15, 25]);
+        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Word, 8), vec![0, 5]);
+        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Window, 8), vec![0, 10]);
+        assert_eq!(row_starts("one  two three four", 10, LineWrap::Word, 8), vec![0, 9]);
+        assert_eq!(row_starts("aaaa bbbbbbbbbbbbbbb", 10, LineWrap::Word, 8), vec![0, 5, 15]);
+        assert_eq!(row_starts("aaaa bbbb cccc", 10, LineWrap::Truncate, 8), vec![0]);
+        // A TAB that does not fit continues from the row's end, its stop
+        // counted from the line's start; TAB_WIDTH sets the stops.
+        assert_eq!(row_starts("aaaaaaaaa\tbbbb", 10, LineWrap::Window, 8), vec![0, 9]);
+        assert_eq!(row_starts("ab\tc", 10, LineWrap::Window, 4), vec![0]);
+        assert_eq!(row_starts("abcdefghi\tc", 10, LineWrap::Window, 4), vec![0, 9]);
     }
 }

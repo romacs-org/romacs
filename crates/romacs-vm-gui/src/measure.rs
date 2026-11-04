@@ -95,14 +95,16 @@ mod tests {
         let text = h.eval(&format!("(progn (setq auto-hscroll-mode nil) (erase-buffer) {insert} (prog1 (buffer-string) (insert \"\\n#\") (goto-char 1) (set-window-start nil 1)))"));
         let text: String = h.vm.eval_source(&format!("(substring-no-properties {text})")).unwrap().display().unwrap();
         let text: String = serde_json::from_str(&text).unwrap();
-        assert!(!text.contains(['\\', '$']), "{text:?}");
+        assert!(!text.contains(['\\', '$', '»', '…']), "{text:?}");
         let end = text.chars().count() + 1;
         let paint = h.paint();
         let line = h.eval("(frame-char-height)").parse::<f32>().unwrap();
         let text_glyphs = || paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text);
         // The text area less the continuation or truncation glyph, if painted.
-        let special = text_glyphs().find(|g| g.0 == '\\' || g.0 == '$').map(|g| paint.window_width as f32 - g.3);
-        let mut painted = text_glyphs().filter(|g| g.0 != '\\' && g.0 != '$').peekable();
+        // (`»' and `…' where the case's display table sets them.)
+        let mark = |c: char| matches!(c, '\\' | '$' | '»' | '…');
+        let special = text_glyphs().find(|g| mark(g.0)).map(|g| paint.window_width as f32 - g.3);
+        let mut painted = text_glyphs().filter(|g| !mark(g.0)).peekable();
         // Each position's cursor, if the host shows it, and the painted
         // glyph of each character.
         let (mut at, mut previous) = (vec![], None);
@@ -165,6 +167,8 @@ mod tests {
     #[test]
     fn displayed_window_answers_agree_with_the_host_layout() {
         let mut h = hosted();
+        h.eval("(put 'display-table 'char-table-extra-slots 18)");
+        h.eval("(defun romacs-test-line-glyphs () (let ((table (make-char-table 'display-table))) (set-char-table-extra-slot table 0 ?…) (set-char-table-extra-slot table 1 ?») table))");
         for insert in [
             r#"(insert "abc\n\nde fgh\n  x")"#,
             r#"(insert "λx é → ü\n日本語テキスト\nmixed 日本 abc")"#,
@@ -194,7 +198,12 @@ mod tests {
             // `truncate-partial-width-windows' asks of this window.
             r#"(setq truncate-partial-width-windows 50) (insert (make-string 40 ?t) "\nnext\n" (make-string 25 ?u) "\t" (make-string 3 ?v))"#,
             r#"(setq truncate-partial-width-windows nil truncate-lines t) (insert (make-string 33 ?t) "\nend")"#,
-        ] { agree(&mut h, &format!("(kill-local-variable 'tab-width) (kill-local-variable 'truncate-lines) {insert}")); }
+            // A display table's continuation and truncation characters
+            // show in their place, word-wrapped or not.
+            r#"(setq buffer-display-table (romacs-test-line-glyphs) truncate-partial-width-windows nil) (insert (make-string 70 ?x) "\nshort\n" (make-string 29 ?z))"#,
+            r#"(setq buffer-display-table (romacs-test-line-glyphs) truncate-partial-width-windows nil word-wrap t) (insert "the quick brown fox jumps over the lazy dog and keeps running far away")"#,
+            r#"(setq buffer-display-table (romacs-test-line-glyphs) truncate-partial-width-windows nil truncate-lines t) (insert (make-string 33 ?t) "\nend")"#,
+        ] { agree(&mut h, &format!("(kill-local-variable 'tab-width) (kill-local-variable 'truncate-lines) (kill-local-variable 'buffer-display-table) (setq word-wrap nil) {insert}")); }
         // Not a cell grid: proportional advances differ per glyph, and a
         // taller face makes its row taller than the frame's line.
         h.eval(r#"(progn (erase-buffer) (insert (propertize "iW" 'face 'hosted-sans) "\n" (propertize "B" 'face 'hosted-big)))"#);
@@ -580,6 +589,24 @@ mod tests {
     /// logical line is one row, measured to its newline, and where the host
     /// shows the cursor for a position, pos-visible-in-window-p and
     /// posn-at-point answer its place and glyph.
+    /// The mini-window keeps room at a row's end for its continuation
+    /// glyph as the host advances it: `…' is one column by its Unicode
+    /// width but two by its font here, so 59 columns take two rows of 58.
+    #[test]
+    fn the_mini_window_reserves_its_continuation_glyphs_advance() {
+        let mut h = hosted();
+        h.eval("(progn (put 'display-table 'char-table-extra-slots 18) (setq resize-mini-windows t)
+          (with-current-buffer (window-buffer (minibuffer-window))
+            (erase-buffer) (insert (make-string 59 ?y))))");
+        h.paint();
+        let line = h.eval("(frame-char-height)").parse::<i64>().unwrap();
+        assert_eq!(h.eval("(window-pixel-height (minibuffer-window))"), line.to_string(), "59 columns beside `\\'");
+        h.eval("(with-current-buffer (window-buffer (minibuffer-window))
+          (setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?…))");
+        h.paint();
+        assert_eq!(h.eval("(window-pixel-height (minibuffer-window))"), (2 * line).to_string(), "a two-column `…' leaves 58");
+    }
+
     /// Under `word-wrap' an element is whitespace by the text under it
     /// (IT_DISPLAYING_WHITESPACE): a space over a letter is no wrap point,
     /// a letter over a space is one. The host breaks the rows where the
@@ -860,9 +887,11 @@ mod tests {
         for (refused, twin, what) in [
             ("(setq line-prefix \"> \") (insert \"abc\")".to_owned(), "(insert \"abc\")".to_owned(), "of a line or wrap prefix"),
             ("(insert \"a\" (propertize \" \" 'display '(space :width 2 :height 2)) \"c\")".into(), "(insert \"a\" (propertize \" \" 'display '(space :width 2)) \"c\")".into(), "of a space with its own height"),
-            // The host draws its own continuation and truncation glyphs.
-            ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(),
-             "(setq buffer-display-table (make-char-table 'display-table)) (insert \"abc\")".into(), "with a display table's truncation or continuation glyphs"),
+            // The host draws a display table's continuation and truncation
+            // glyphs that are characters, in the default face, not a
+            // glyph code's own face.
+            ("(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 (logior ?| (ash 1 22))) (insert \"abc\")".into(),
+             "(setq buffer-display-table (make-char-table 'display-table)) (set-char-table-extra-slot buffer-display-table 1 ?|) (insert \"abc\")".into(), "with a display table's faced truncation or continuation glyphs"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint.

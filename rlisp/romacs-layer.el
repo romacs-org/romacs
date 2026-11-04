@@ -96,6 +96,31 @@ and paints it in faces: its background FACE's (default
       (when (frame-live-p (cdr entry)) (delete-frame (cdr entry)))))
   (setq romacs-layer--frames (seq-filter (lambda (entry) (buffer-live-p (car entry))) romacs-layer--frames)))
 
+(defvar romacs-layer--display-table nil
+  "`romacs-layer-display-table', once made.")
+
+(defun romacs-layer-display-table ()
+  "The display table Romacs's own text surfaces show: a truncated line
+ends in an ellipsis and a continued row in a blank, where a window
+without fringes, as every layer is, shows GNU's `$' and `\\'."
+  (or romacs-layer--display-table
+      ;; Made as disp-table.el's `make-display-table' makes one, without
+      ;; loading that file, which gives `standard-display-table' a value
+      ;; and so every window a display table to look through.
+      (progn (unless (get 'display-table 'char-table-extra-slots)
+               (put 'display-table 'char-table-extra-slots 18))
+             (let ((table (make-char-table 'display-table nil)))
+               (set-char-table-extra-slot table 0 ?…)
+               (set-char-table-extra-slot table 1 ?\s)
+               (setq romacs-layer--display-table table)))))
+
+(defun romacs-layer-wrap-words (&optional buffer)
+  "Make BUFFER (the current buffer) wrap its lines at words, as prose,
+its continued rows unmarked (`romacs-layer-display-table')."
+  (with-current-buffer (or buffer (current-buffer))
+    (setq-local truncate-lines nil word-wrap t
+                buffer-display-table (romacs-layer-display-table))))
+
 (defun romacs-layer--frame (buffer)
   "A live child frame for BUFFER, made once and kept for reuse."
   (romacs-layer--prune)
@@ -107,6 +132,10 @@ and paints it in faces: its background FACE's (default
                                   (visibility . nil)
                                   ,@romacs-layer-frame-parameters))))
       (setf (alist-get buffer romacs-layer--frames) frame)
+      ;; A layer has no fringes: its line ends show Romacs's glyphs.
+      (with-current-buffer buffer
+        (unless buffer-display-table
+          (setq-local buffer-display-table (romacs-layer-display-table))))
       (let ((window (frame-root-window frame)))
         (set-window-buffer window buffer)
         (set-window-dedicated-p window t)
@@ -248,15 +277,23 @@ columns and lines."
     (while (memq (setq buffer (get-buffer-create (format " *romacs-toast-%d*" n))) used)
       (setq n (1+ n)))
     (with-current-buffer buffer
-      (setq-local mode-line-format nil header-line-format nil cursor-type nil
-                  truncate-lines nil word-wrap t))
+      (setq-local mode-line-format nil header-line-format nil cursor-type nil)
+      (romacs-layer-wrap-words))
     buffer))
 
-(defun romacs-layer--toast-size (text columns)
-  "TEXT's size in a toast at most COLUMNS wide: (COLUMNS . LINES)."
-  (let* ((lines (split-string text "\n"))
-         (width (min columns (max 1 (apply #'max (mapcar #'string-width lines))))))
-    (cons width (min 6 (apply #'+ (mapcar (lambda (l) (max 1 (ceiling (string-width l) (float width)))) lines))))))
+(defun romacs-layer--toast-columns (text columns)
+  "The columns a toast of TEXT takes, at most COLUMNS: its widest line's."
+  (min columns (max 1 (apply #'max (mapcar #'string-width (split-string text "\n"))))))
+
+(defun romacs-layer--toast-lines (frame text columns)
+  "The rows TEXT takes in toast FRAME as its window wraps it, at most 6;
+without a host's layout to measure, its lines in rows of COLUMNS."
+  (let* ((ch (frame-char-height frame))
+         (rows (condition-case nil
+                   (ceiling (cdr (window-text-pixel-size (frame-root-window frame))) (float ch))
+                 (error (apply #'+ (mapcar (lambda (line) (max 1 (ceiling (string-width line) (float columns))))
+                                           (split-string text "\n")))))))
+    (max 1 (min 6 rows))))
 
 (defun romacs-layer--toast-stack ()
   "Place the shown toasts at the top right below `romacs-chrome-top',
@@ -270,9 +307,12 @@ waits hidden."
     (dolist (toast romacs-layer--toasts)
       (let* ((frame (romacs-layer--frame (car toast)))
              (border (or (frame-parameter frame 'child-frame-border-width) 0))
-             (size (romacs-layer--toast-size (nth 1 toast) (max 20 (/ (frame-text-cols root) 3))))
+             (columns (romacs-layer--toast-columns (nth 1 toast) (max 20 (/ (frame-text-cols root) 3))))
              ;; One column more: a window's last holds its continuation glyph.
-             (width (* (1+ (car size)) cw)) (height (* (cdr size) ch)))
+             (width (* (1+ columns) cw)) height)
+        ;; Its rows as its width wraps them at words.
+        (set-frame-size frame width (frame-text-height frame) t)
+        (setq height (* (romacs-layer--toast-lines frame (nth 1 toast) columns) ch))
         (set-frame-size frame width height t)
         (set-frame-position frame (- (frame-native-width root) inset width (* 2 border) margin) top)
         (set-frame-parameter frame 'romacs-layer-edge 'top)
@@ -307,6 +347,19 @@ The same TEXT as the newest toast shows that one longer instead."
       (push (list buffer text (run-at-time romacs-layer-toast-timeout nil #'romacs-layer--toast-expire buffer))
             romacs-layer--toasts)
       (romacs-layer--toast-stack))))
+
+;; The minibuffer and the echo area wrap at words too: minibuffers as each
+;; is entered, the echo area at its first message (DIVERGENCES.md
+;; VM2-WRAP-WORDS).
+
+(defun romacs-layer--wrap-echo-area (&optional _text)
+  "Make the echo area's buffer wrap at words, once."
+  (let ((echo (get-buffer " *Minibuf-0*")))
+    (when (and echo (not (buffer-local-value 'word-wrap echo)))
+      (romacs-layer-wrap-words echo))))
+
+(add-hook 'minibuffer-setup-hook #'romacs-layer-wrap-words)
+(add-hook 'romacs-echo-area-functions #'romacs-layer--wrap-echo-area)
 
 (provide 'romacs-layer)
 ;;; romacs-layer.el ends here
