@@ -827,6 +827,31 @@ thousandth a stack mark."
           (clrhash romacs-agent-history--descriptions)
           (romacs-agent-history-list)))
 
+;; The endpoint sweep over N sessions, N routes of sessions gone, N ended
+;; editors' sockets and N earlier builds' directories: one pass each.
+(defvar romacs-mcp--socket)
+(scaling-probe agent-endpoint-sweep :n 200
+  :setup (let* ((runtime (make-temp-file "scaling-runtime-" t))
+                (agents (expand-file-name "romacs/agents/" runtime)))
+           (scaling--agent)
+           (setenv "XDG_RUNTIME_DIR" runtime)
+           (clrhash romacs-agent--sessions)
+           (dolist (directory '("route/" "editor/"))
+             (make-directory (expand-file-name directory agents) t)
+             (set-file-modes (expand-file-name directory agents) #o700))
+           (dotimes (i n)
+             (let* ((dir (make-temp-file "scaling-session-" t))
+                    (s (romacs-agent--make :id (format "%08d-sweep" i) :harness 'claude :dir dir)))
+               (with-temp-file (expand-file-name "mcp.json" dir) (insert "{}"))
+               (puthash (romacs-agent-id s) s romacs-agent--sessions))
+             (make-symbolic-link "/nonexistent" (format "%sroute/gone%d.sock" agents i))
+             (make-symbolic-link "/nonexistent" (format "%seditor/%d.sock" agents (+ 5000000 i)))
+             (let ((legacy (format "%s/romacs/session-%d" runtime (+ 6000000 i))))
+               (make-directory legacy t)
+               (set-file-modes legacy #o700)))
+           runtime)
+  :body (let ((romacs-mcp--socket nil)) (romacs-agent--sweep)))
+
 ;; The history's places over N provider instances.
 (defvar romacs-agent-providers)
 (scaling-probe agent-history-places :n 1000
