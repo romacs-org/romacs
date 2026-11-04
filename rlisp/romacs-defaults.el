@@ -6,8 +6,7 @@
 ;; The built-in modes and options an interactive Romacs session turns on
 ;; where GNU leaves them off, so that a new user needs no configuration
 ;; and no package for them: paired delimiters, minibuffer history, recent
-;; files and places kept across sessions, repeatable key sequences, key
-;; hints, buffers that follow their files, relative line numbers in
+;; files and places kept across sessions, key hints, buffers that follow their files, relative line numbers in
 ;; programming buffers, tree-sitter modes for the languages whose
 ;; grammars Romacs ships, and backups and auto-saves kept out of the
 ;; directories being edited.  `romacs-defaults-settings' lists
@@ -20,7 +19,7 @@
 ;; setting is its option's standard value, set through the option's :set
 ;; as `setopt' does, so the init overrides any one of them as it would a
 ;; GNU default and Custom shows it as the default.  Modes the first frame
-;; does not need (minibuffer history kept across sessions, repeat,
+;; does not need (minibuffer history kept across sessions,
 ;; auto-revert) turn on at the first idle moment or before
 ;; the first command, unless the init turned them on or off itself, so a
 ;; launch paints and answers first.  `(romacs-defaults-mode -1)' in the
@@ -39,7 +38,6 @@
 (require 'savehist)
 (require 'saveplace)
 (require 'recentf)
-(require 'repeat)
 (require 'autorevert)
 (require 'which-key)
 (require 'imenu)
@@ -63,10 +61,6 @@
     ;; check every listed file and say so in a message.
     (recentf-auto-cleanup 300)
     (recentf-mode t)
-    ;; A pending repeat shows in the mode line, not as a message, which
-    ;; would show as a toast after every repeatable command.
-    (repeat-echo-function #'repeat-echo-mode-line)
-    (repeat-mode t idle)
     (global-auto-revert-mode t idle)
     (column-number-mode t)
     ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
