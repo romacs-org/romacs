@@ -45,7 +45,7 @@ impl Leaf<'_> {
     pub(crate) fn window_text_pixel_size(&mut self, window: Value, args: TextSizeArgs) -> super::super::Out {
         let area = self.windows().text_area(window, "window-text-pixel-size")?;
         let buffer = area.buffer;
-        self.with_buffer(buffer, |leaf| leaf.text_pixel_size(&area, buffer, &args))
+        self.with_buffer(buffer, |leaf| leaf.approximate_text_pixel_size(&area, buffer, &args))
     }
 
     /// Fbuffer_text_pixel_size (xdisp.c:12158): BUFFER-OR-NAME's text as
@@ -54,7 +54,97 @@ impl Leaf<'_> {
         let area = self.windows().text_area(window, "buffer-text-pixel-size")?;
         let buffer = if buffer_or_name == Value::NIL { self.current_buffer_value()? } else { self.live_buffer_named(buffer_or_name)? };
         let args = TextSizeArgs { from, to, x_limit, y_limit, mode_lines: Value::NIL, ignore_line_at_end: Value::NIL };
-        self.with_buffer(buffer, |leaf| leaf.text_pixel_size(&area, buffer, &args))
+        self.with_buffer(buffer, |leaf| leaf.approximate_text_pixel_size(&area, buffer, &args))
+    }
+
+    /// Interactive use never signals a layout refusal (VM2-WTPS1): where a
+    /// displayed window's measurement refuses, the refusal is counted
+    /// (`count_refusal') and APPROXIMATE answers; batch signals it.
+    fn or_approximate<T>(&mut self, outcome: std::result::Result<T, Fault>,
+                         approximate: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
+        match outcome {
+            Err(fault) if refused(&fault) && self.vm.display_state.hosted => { self.count_refusal(&fault); approximate(self) }
+            other => other,
+        }
+    }
+
+    /// Count FAULT, a refusal, by its message and the current buffer's
+    /// major mode, for the usage log (`romacs--layout-refusals').
+    fn count_refusal(&mut self, fault: &Fault) {
+        let Fault::Error(class) = fault else { return };
+        let symbol = self.intern("major-mode");
+        let mode = self.variable_value(symbol).ok().flatten().and_then(|m| self.symbol_name(m).ok()).unwrap_or_default();
+        let refusals = &mut self.vm.display_state.refusals;
+        match refusals.iter_mut().find(|r| r.class == *class && r.mode == mode) {
+            Some(r) => r.n += 1,
+            None => refusals.push(crate::display::LayoutRefusal { class: class.clone(), mode, n: 1 }),
+        }
+    }
+
+    /// The refusals counted since the last call, as (CLASS MODE N) lists,
+    /// and none counted after.
+    pub(crate) fn take_layout_refusals(&mut self) -> super::super::Out {
+        let refusals = std::mem::take(&mut self.vm.display_state.refusals);
+        let mut items = Vec::with_capacity(refusals.len());
+        for r in refusals {
+            let class = self.string(&r.class);
+            let mode = self.string(&r.mode);
+            let n = Value::integer(r.n as i64).map_err(Fault::Error)?;
+            items.push(self.vm.list_value(&[class, mode, n]));
+        }
+        Ok(self.vm.list_value(&items))
+    }
+
+    /// window-text-pixel-size over AREA, or where the host's layout
+    /// refuses, the frame's character cells, else BUFFER's lines.
+    fn approximate_text_pixel_size(&mut self, area: &TextArea, buffer: Value, args: &TextSizeArgs) -> super::super::Out {
+        let outcome = self.text_pixel_size(area, buffer, args);
+        self.or_approximate(outcome, |leaf| {
+            let cells = TextArea { hosted: false, ..area.clone() };
+            match leaf.text_pixel_size(&cells, buffer, args) {
+                Err(fault) if refused(&fault) => leaf.line_text_size(area, buffer, args),
+                other => other,
+            }
+        })
+    }
+
+    /// BUFFER's text from FROM to TO measured by its lines, each line a
+    /// row and each character a column of AREA's frame, no wider than its
+    /// text area: what any layout shows at the least.
+    fn line_text_size(&mut self, area: &TextArea, buffer: Value, args: &TextSizeArgs) -> super::super::Out {
+        let (begv, zv, _) = self.text_between(buffer, 0, 0)?;
+        let start = self.measure_from(args.from, begv, zv)?.0;
+        let end = self.measure_to(args.to, start, zv)?;
+        let (_, _, text) = self.text_between(buffer, start, end)?;
+        let (max_x, max_y) = limits(args);
+        let widest = text.split('\n').map(|l| l.chars().count() as i64).max().unwrap_or(0);
+        let x = (widest * area.column).min(area.body_width).min(max_x.unwrap_or(INT_MAX));
+        let y = (text.split('\n').count() as i64 * area.line).min(max_y) + self.mode_line_heights(area, args.mode_lines)?;
+        let (x, y) = (Value::integer(x).map_err(Fault::Error)?, Value::integer(y).map_err(Fault::Error)?);
+        Ok(self.cons(x, y))
+    }
+
+    /// BUFFER's accessible positions and its text between positions A and
+    /// B, in either order and clamped to them; a unibyte buffer's bytes are
+    /// each a character.
+    fn text_between(&self, buffer: Value, a: i64, b: i64) -> std::result::Result<(i64, i64, String), Fault> {
+        let order = |begv: i64, zv: i64| (a.min(b).clamp(begv, zv), a.max(b).clamp(begv, zv));
+        match self.vm.object_if(buffer) {
+            Some(Object::Buffer(buf)) => {
+                let r = buf.accessible();
+                let pos = |byte| buf.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                let (begv, zv) = (pos(r.start)?, pos(r.end)?);
+                let (lo, hi) = order(begv, zv);
+                let byte = |p: i64| buf.byte_of_char(crate::coordinates::CharOffset((p - 1) as usize)).map(|o| o.0).map_err(Fault::Error);
+                Ok((begv, zv, buf.as_str()[byte(lo)?..byte(hi)?].to_owned()))
+            }
+            Some(Object::ByteBuffer(buf)) => {
+                let (begv, zv) = (buf.restriction.start.0 as i64 + 1, buf.restriction.end.0 as i64 + 1);
+                let (lo, hi) = order(begv, zv);
+                Ok((begv, zv, buf.bytes[(lo - 1) as usize..(hi - 1) as usize].iter().map(|&byte| char::from(byte)).collect()))
+            }
+            _ => Err(Fault::Wrong("bufferp", buffer)),
+        }
     }
 
     fn with_buffer<T>(&mut self, buffer: Value, body: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
@@ -90,10 +180,7 @@ impl Leaf<'_> {
         };
         let (start, vertical_offset) = self.measure_from(args.from, begv, zv)?;
         let end = self.measure_to(args.to, start, zv)?;
-        let max_x = if args.x_limit.integer_value().is_some_and(|n| (0..=INT_MAX).contains(&n)) { args.x_limit.integer_value() }
-            else if args.x_limit != Value::NIL { Some(INT_MAX) } else { None };
-        let max_y = if args.y_limit == Value::NIL { INT_MAX }
-            else { args.y_limit.integer_value().filter(|n| (0..=INT_MAX).contains(n)).unwrap_or(0) };
+        let (max_x, max_y) = limits(args);
         let cx = self.iterator_context(area, zv, start)?;
         let view = Self::view(area, buffer, begv, zv, cx.lnum);
         let (column, line) = if area.hosted { (1, 1) } else { (area.column, area.line) };
@@ -255,10 +342,13 @@ impl Leaf<'_> {
         // motion, and the scrolling and recentering built on it, never
         // fails for a measurement it lacks.
         let (at, vpos) = match motion(self, &area) {
-            Err(fault) if refused(&fault) && area.hosted => match motion(self, &TextArea { hosted: false, ..area.clone() }) {
-                Err(fault) if refused(&fault) => self.buffer_line_motion(pt, lines)?,
-                other => other?,
-            },
+            Err(fault) if refused(&fault) && area.hosted => {
+                self.count_refusal(&fault);
+                match motion(self, &TextArea { hosted: false, ..area.clone() }) {
+                    Err(fault) if refused(&fault) => self.buffer_line_motion(pt, lines)?,
+                    other => other?,
+                }
+            }
             Err(fault) if refused(&fault) => self.buffer_line_motion(pt, lines)?,
             other => other?,
         };
@@ -326,7 +416,10 @@ impl Leaf<'_> {
             // A row the iterator or the host's layout cannot measure is a
             // character row.
             match measured(leaf) {
-                Err(fault) if refused(&fault) => Ok(area.line),
+                Err(fault) if refused(&fault) => {
+                    if area.hosted { leaf.count_refusal(&fault); }
+                    Ok(area.line)
+                }
                 other => other,
             }
         })?;
@@ -338,7 +431,7 @@ impl Leaf<'_> {
     pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, partially: Value) -> super::super::Out {
         let caller = "pos-visible-in-window-p";
         let Some((w, charpos, top)) = self.windows().pos_visible(pos, window, caller)? else { return Ok(Value::NIL) };
-        let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
+        let Some(v) = self.visible_or_approximate(w, charpos, top, caller)? else { return Ok(Value::NIL) };
         let fully = v.rtop == 0 && v.rbot == 0;
         if partially == Value::NIL { return Ok(if fully { Value::TRUE } else { Value::NIL }); }
         let mut items = vec![v.x, v.y];
@@ -355,10 +448,16 @@ impl Leaf<'_> {
         let (w, recorded, top) = self.windows().window_end(window)?;
         if update == Value::NIL || !self.vm.display_state.hosted { return Value::integer(recorded).map_err(Fault::Error); }
         let area = self.windows().text_area(w, "window-end")?;
-        if area.vscroll != 0 { return Err(Fault::Error("VM2 window-end UPDATE of a vertically scrolled window is unsupported".into())); }
         let end = self.with_buffer(area.buffer, |leaf| {
-            let (mut hosted, cx, it) = leaf.hosted_from(&area, top)?;
-            motion::window_end(&mut hosted, &cx, it, area.body_height)
+            let measured = if area.vscroll != 0 { Err(unsupported("UPDATE of a vertically scrolled window's end")) } else {
+                leaf.hosted_from(&area, top).and_then(|(mut hosted, cx, it)| motion::window_end(&mut hosted, &cx, it, area.body_height))
+            };
+            // Where the host's layout refuses, the end the last layout
+            // recorded, within the window's text now.
+            leaf.or_approximate(measured, |leaf| {
+                let (_, zv, _) = leaf.text_between(area.buffer, 0, 0)?;
+                Ok(recorded.clamp(top.min(zv), zv))
+            })
         })?;
         Value::integer(end).map_err(Fault::Error)
     }
@@ -370,13 +469,18 @@ impl Leaf<'_> {
         let caller = "posn-at-point";
         let window = if window == Value::NIL { self.vm.selected_window_value().map_err(Fault::Error)? } else { window };
         let Some((w, charpos, top)) = self.windows().pos_visible(pos, window, caller)? else { return Ok(Value::NIL) };
-        let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
+        let Some(v) = self.visible_or_approximate(w, charpos, top, caller)? else { return Ok(Value::NIL) };
         // Point scrolled out on the left shows nowhere.
         if v.x < -1 { return Ok(Value::NIL); }
         let area = self.windows().text_area(w, caller)?;
         let buffer = area.buffer;
         // posn-at-x-y's Y counts from the window's top, above its header line.
-        let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y - area.header_line))?;
+        let p = self.with_buffer(buffer, |leaf| {
+            let measured = leaf.hosted_posn(&area, top, v.x, v.y - area.header_line);
+            // Where the host's layout refuses, the cell V's coordinates fall in.
+            leaf.or_approximate(measured, |_| Ok(Posn { pos: charpos, col: v.x / area.column.max(1), row: v.vpos, dx: 0, dy: 0,
+                                                       width: area.column, height: area.line, string: None }))
+        })?;
         let int = |n: i64| Value::integer(n).map_err(Fault::Error);
         // At the text area's right edge, as past a truncated row's last
         // glyph, X is on the right fringe (coordinates_in_window): its
@@ -401,6 +505,41 @@ impl Leaf<'_> {
         let object = match p.string { Some((string, at)) => { let at = int(at as i64)?; self.cons(string, at) } None => Value::NIL };
         let place = if area_name == Value::NIL { pos } else { area_name };
         Ok(self.vm.list_value(&[w, place, xy, zero, object, pos, col_row, Value::NIL, offset, size]))
+    }
+
+    /// hosted_pos_visible, or where the host's layout refuses, CHARPOS's
+    /// place counted in W's buffer lines and frame cells from TOP.
+    fn visible_or_approximate(&mut self, w: Value, charpos: i64, top: i64, caller: &str) -> std::result::Result<Option<Visible>, Fault> {
+        let measured = self.hosted_pos_visible(w, charpos, top, caller);
+        if measured.is_ok() { return measured; }
+        // Counted with W's buffer current, for its major mode.
+        let area = self.windows().text_area(w, caller)?;
+        self.with_buffer(area.buffer, |leaf| leaf.or_approximate(measured, |leaf| leaf.line_visible(&area, charpos, top)))
+    }
+
+    /// CHARPOS's place in AREA's window from its start TOP when every
+    /// character is a cell of the frame: each buffer line its rows, as
+    /// many as its cells fill when lines continue, from the window's
+    /// hscroll when they are truncated, and the rows less the window's
+    /// vscroll; nil before TOP, where its row is not wholly in the text
+    /// area, or left or right of it on a truncated line.
+    fn line_visible(&mut self, area: &TextArea, charpos: i64, top: i64) -> std::result::Result<Option<Visible>, Fault> {
+        let (_, zv, _) = self.text_between(area.buffer, 0, 0)?;
+        let charpos = if charpos < 0 { zv } else { charpos };
+        if charpos < top { return Ok(None); }
+        let (_, _, text) = self.text_between(area.buffer, top, charpos)?;
+        let continued = area.hscroll == 0
+            && self.vm.line_wrap(area.full_width, area.columns).map_err(Fault::Error)? != romacs_layout_input::LineWrap::Truncate;
+        let width = area.body_width.max(area.column);
+        let cells = |line: &str| line.chars().count() as i64 * area.column;
+        let mut lines = text.split('\n').collect::<Vec<_>>();
+        let last = cells(lines.pop().unwrap_or(""));
+        let rows = |px: i64| if continued { 1 + px.saturating_sub(1) / width } else { 1 };
+        let row = lines.iter().map(|line| rows(cells(line))).sum::<i64>() + if continued { last / width } else { 0 };
+        let x = if continued { last % width } else { last - area.first_visible * area.column };
+        let y = area.header_line + row * area.line - area.vscroll;
+        if y < area.header_line || y + area.line > area.header_line + area.body_height || !(0..area.body_width).contains(&x) { return Ok(None); }
+        Ok(Some(Visible { x, y, rtop: 0, rbot: 0, rowh: area.line, vpos: row }))
     }
 
     /// pos_visible_p (xdisp.c:1693) for CHARPOS in window W from its start
@@ -585,8 +724,14 @@ impl Leaf<'_> {
     /// It tests only ASCII blanks; a byte inside a character it passed
     /// becomes the end of that character, as fetch_char_advance leaves it.
     fn accessible_scan(&mut self, scan: impl FnOnce(&[u8]) -> usize) -> std::result::Result<i64, Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
-            return Err(unsupported("in a unibyte buffer"));
+        let b = match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
+            Some(Object::Buffer(b)) => b,
+            // A unibyte buffer's bytes are its characters.
+            Some(Object::ByteBuffer(b)) => {
+                let r = b.restriction.start.0..b.restriction.end.0;
+                return Ok((r.start + scan(&b.bytes[r]).min(b.restriction.end.0 - b.restriction.start.0)) as i64 + 1);
+            }
+            _ => return Err(unsupported("in a unibyte buffer")),
         };
         let r = b.accessible();
         let text = &b.as_str()[r.start.0..r.end.0];
@@ -866,6 +1011,19 @@ struct Visible { x: i64, y: i64, rtop: i64, rbot: i64, rowh: i64, vpos: i64 }
 
 /// buffer_posn_from_coords's answer.
 struct Posn { pos: i64, col: i64, row: i64, dx: i64, dy: i64, width: i64, height: i64, string: Option<(Value, usize)> }
+
+/// window_text_pixel_size's X-LIMIT and Y-LIMIT: the widest x (nil none,
+/// anything but a natural number INT_MAX) and the tallest y (nil INT_MAX,
+/// anything but a natural number 0).
+fn limits(args: &TextSizeArgs) -> (Option<i64>, i64) {
+    let max_x = match args.x_limit.integer_value() {
+        Some(n) if (0..=INT_MAX).contains(&n) => Some(n),
+        _ if args.x_limit != Value::NIL => Some(INT_MAX),
+        _ => None,
+    };
+    let max_y = if args.y_limit == Value::NIL { INT_MAX } else { args.y_limit.integer_value().filter(|n| (0..=INT_MAX).contains(n)).unwrap_or(0) };
+    (max_x, max_y)
+}
 
 /// init_iterator's last visible x on a window-system frame, in the
 /// host's pixels: the text area, less the truncation or continuation
