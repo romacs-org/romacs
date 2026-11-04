@@ -81,7 +81,6 @@ condition-wait	absent	no shipped Lisp calls it and it is no command
 controlling-tty-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 coordinates-in-window-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 current-cpu-time	absent	no shipped Lisp calls it and it is no command
-current-minor-mode-maps	elsewhere	help, in the in-Romacs session
 current-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 cygwin-convert-file-name-from-windows	absent	platform: Cygwin build only
 cygwin-convert-file-name-to-windows	absent	platform: Cygwin build only
@@ -100,8 +99,6 @@ default-printer-name	needed	lane builtins-b (fonts, coding, images, system, proc
 defconst-1	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 delete-terminal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 delete-xwidget-view	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-describe-buffer-bindings	elsewhere	help, in the in-Romacs session
-describe-vector	elsewhere	help, in the in-Romacs session
 display--line-is-continued-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 display--update-for-mouse-movement	needed	lane A (editing, windows, frames, minibuffer readers, display)
 downcase-word	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -197,7 +194,6 @@ haiku-set-mouse-absolute-pixel-position	absent	platform: Haiku build only
 haiku-write-node-attribute	absent	platform: Haiku build only
 handle-save-session	absent	no shipped Lisp calls it and it is no command
 handle-switch-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
-help--describe-vector	elsewhere	help, in the in-Romacs session
 image-cache-size	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 image-flush	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 image-mask-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -222,7 +218,6 @@ internal--set-buffer-modified-tick	absent	no shipped Lisp calls it and it is no 
 internal--track-mouse	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal-decode-string-utf-8	absent	no shipped Lisp calls it and it is no command
 internal-delete-indirect-variable	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-internal-describe-syntax-value	elsewhere	help, in the in-Romacs session
 internal-encode-string-utf-8	absent	no shipped Lisp calls it and it is no command
 internal-face-x-get-resource	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 internal-lisp-face-empty-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -374,7 +369,6 @@ sxhash-equal-including-properties	needed	lane builtins-b (fonts, coding, images,
 symbol-with-pos-pos	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 system-move-file-to-trash	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 terminal-name	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-text-char-description	elsewhere	help, in the in-Romacs session
 thread--blocker	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 thread-buffer-disposition	absent	no shipped Lisp calls it and it is no command
 thread-join	absent	no shipped Lisp calls it and it is no command
