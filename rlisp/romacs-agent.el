@@ -154,18 +154,23 @@ form, readable, and a digest of all of it, since ids made close together
           (random 65536) (random 65536) (random 65536) (random 4096)
           (logior #x8000 (random 16384)) (random 65536) (random 65536) (random 65536)))
 
+(defun romacs-agent--json (object)
+  "OBJECT as JSON text: `json-serialize' gives UTF-8 bytes, this the
+characters they encode, to put in a buffer, a string or more JSON."
+  (decode-coding-string (json-serialize object :false-object :false :null-object :null) 'utf-8))
+
 (defun romacs-agent--write-json (file object)
-  "Write OBJECT as JSON to FILE, atomically, readable only by the user."
-  (let ((temporary (concat file ".tmp")))
+  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user."
+  (let ((temporary (concat file ".tmp")) (coding-system-for-write 'utf-8-unix))
     (with-temp-file temporary
-      (insert (json-serialize object :false-object :false :null-object :null)))
+      (insert (romacs-agent--json object)))
     (set-file-modes temporary #o600)
     (rename-file temporary file t)))
 
 (defun romacs-agent--read-json (file)
   (when (file-readable-p file)
     (with-temp-buffer
-      (insert-file-contents file)
+      (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
       (ignore-errors (json-parse-buffer :object-type 'hash-table :null-object nil :false-object nil)))))
 
 ;; The endpoint harness relays reach.  A named server serves its own
@@ -234,7 +239,7 @@ earlier build."
       (let ((path (expand-file-name file (romacs-agent-dir session))))
         (when (file-readable-p path)
           (with-temp-buffer
-            (insert-file-contents path)
+            (let ((coding-system-for-read 'utf-8)) (insert-file-contents path))
             (while (re-search-forward "[^\"\\]*/session-[0-9]+/server\\.sock" nil t)
               (push (match-string 0) sockets))))))
     (delete-dups sockets)))
@@ -458,7 +463,8 @@ RESUME is non-nil."
 supervisor still runs is attached first; one whose supervisor ended says
 so: it resumes with `romacs-agent-resume'."
   (let ((connection (romacs-agent-connection session))
-        (line (concat (json-serialize (romacs-mcp--object "write" (json-serialize object :false-object :false :null-object :null)))
+        ;; The harness's line is text inside the envelope: serialized once.
+        (line (concat (json-serialize (romacs-mcp--object "write" (romacs-agent--json object)))
                       "\n")))
     (cond ((process-live-p connection) (process-send-string connection line))
           ;; A stopped supervisor leaves its socket: only a connection says it listens.
@@ -624,7 +630,7 @@ stdin; RESUME non-nil continues its thread."
   (let ((output (or (gethash "aggregated_output" item) (gethash "result" item) (gethash "error" item) "")))
     (cond ((stringp output) output)
           ((and (hash-table-p output) (gethash "content" output)) (romacs-agent--text-of (gethash "content" output)))
-          (t (json-serialize output :false-object :false :null-object :null)))))
+          (t (romacs-agent--json output)))))
 
 (defun romacs-agent--codex-item (session item completed)
   "The events of ITEM, started or COMPLETED, in SESSION's current turn."
@@ -736,7 +742,7 @@ goes on whatever becomes of this server."
          ;; Read with null and false kept: they are written back.
          (manifest (and (file-readable-p file)
                         (with-temp-buffer
-                          (insert-file-contents file)
+                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
                           (ignore-errors (json-parse-buffer :object-type 'hash-table
                                                             :null-object :null :false-object :false))))))
     (when (and manifest (not (equal (gethash "title" manifest) (romacs-agent-title session))))
@@ -763,7 +769,7 @@ goes on whatever becomes of this server."
                             ((hash-table-p in) (romacs-agent--input-events session in))
                             ;; A per-turn harness's prompt, written as text.
                             ((not (eq in :absent))
-                             (list (list :type 'input :text (if (stringp in) in (json-serialize in)))))
+                             (list (list :type 'input :text (if (stringp in) in (romacs-agent--json in)))))
                             ((not (eq exit :absent)) (list (list :type 'exit :status exit))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
@@ -778,7 +784,7 @@ byte FROM (a record's start) when given."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
-        (insert-file-contents journal nil from)
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from))
         (goto-char (point-min))
         (while (not (eobp))
           (let ((record (ignore-errors
@@ -931,15 +937,19 @@ harness as its whole stdin."
          (default-directory (file-name-as-directory (romacs-agent-cwd session))))
     (make-directory (file-name-directory (romacs-agent-host-socket session)) t)
     (set-file-modes (file-name-directory (romacs-agent-host-socket session)) #o700)
-    (if (zerop (apply #'call-process "systemd-run" nil nil nil
+    ;; Arguments (paths, a directory) go out as UTF-8, whatever the locale:
+    ;; the supervisor reads UTF-8.
+    (if (zerop (let ((coding-system-for-write 'utf-8-unix))
+                 (apply #'call-process "systemd-run" nil nil nil
                       (append (list "--user" "--quiet" "--collect" (concat "--unit=" unit)
                                     "--slice=romacs-agents.slice"
                                     (concat "--working-directory=" (expand-file-name default-directory)))
                               (mapcar (lambda (p) (concat "--property=" p)) romacs-agent-unit-properties)
                               (romacs-agent--environment-arguments)
-                              (cons "--" command))))
+                              (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
-      (apply #'call-process "setsid" nil 0 nil "--fork" command)
+      (let ((coding-system-for-write 'utf-8-unix))
+        (apply #'call-process "setsid" nil 0 nil "--fork" command))
       (setf (romacs-agent-unit session) nil))
     (romacs-agent--manifest session argv)))
 

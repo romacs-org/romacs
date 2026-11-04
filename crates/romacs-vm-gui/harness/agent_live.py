@@ -34,6 +34,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
+             through prompts, replies, the journal, titles, tools, Codex
+             and history.
   launcher   an editor started with no --server, restarted with its
              sessions detached: the next one serves the same agents'
              endpoint at once, sessions pinned to an ended editor's
@@ -1185,6 +1188,90 @@ def launcher(args, base):
         a.close()
 
 
+UNICODE = 'it’s café 中文 😀 é ok'
+
+
+def unicode(args, base):
+    """Non-ASCII through every boundary of a session: the prompt (’, é,
+    CJK, emoji, a combining mark) to the harness and its reply, the
+    journal, the chat and its title, the manifest after a restart, a tool's
+    input and output, a buffer read with a raw byte in it (its byte written
+    out, the rest intact, not the whole result refused), a Codex turn, and a
+    harness transcript imported from history."""
+    a = Agents(args, base, 'uc')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        sid = a.start(f'say {UNICODE}')
+        a.idle(sid)
+        chat = a.chat(sid)
+        journal = a.journal(sid)
+        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict)), {})
+        sent_text = (sent.get('message') or {}).get('content')
+        results = a.results(sid)
+        title = a.eval(f'(romacs-agent-title {a.s(sid)})')
+        buffer_name = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        # A tool's input and output.
+        a.send(sid, 'call romacs_eval ' + json.dumps({'instance': '?', 'code': f'(concat "{UNICODE}")'}))
+        a.idle(sid)
+        evaluated = a.tool_results()[-1]
+        # A raw byte in a buffer a tool reads.
+        a.eval('(with-current-buffer (get-buffer-create "raw") (erase-buffer) '
+               f'(insert "a" (unibyte-string 255) "b {UNICODE}") t)')
+        a.send(sid, 'call romacs_buffer_read ' + json.dumps({'instance': '?', 'name': 'raw', 'start': 1, 'maxChars': 100}))
+        a.idle(sid)
+        read = a.tool_results()[-1]
+        chat_after = a.chat(sid)
+        # A session in a non-ASCII directory, the editor's locale Latin-1:
+        # the harness starts there all the same.
+        odd = a.work / 'caf\u00e9-w\u00f6rk'
+        odd.mkdir()
+        other = a.eval(f'(let ((locale-coding-system (quote latin-1)) (default-process-coding-system (quote (latin-1 . latin-1)))) '
+                       f'(romacs-agent-id (romacs-agent-start {lisp_text(str(odd))} "say ok")))').strip('"')
+        a.idle(other)
+        started_in = next((e.get('cwd') for e in a.logged() if e.get('started') == other), None)
+        # A Codex turn.
+        a.codex_instance()
+        codex = a.start(f'say {UNICODE}', 'codex')
+        a.idle(codex)
+        codex_reply = a.eval(f'(romacs-agent-reply {a.s(codex)})')
+        # The manifest's title after a restart.
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        title_again = a.eval(f'(romacs-agent-title {a.s(sid)})')
+        # A transcript in the harness's history with non-ASCII.
+        claude_dir = a.home / '.config/claude/acct'
+        cid = '33333333-4444-4555-8666-777777777777'
+        project = claude_dir / 'projects' / str(a.work).replace('/', '-')
+        project.mkdir(parents=True)
+        (project / f'{cid}.jsonl').write_text(json.dumps(
+            {'type': 'user', 'isSidechain': False, 'cwd': str(a.work), 'timestamp': '2026-11-04T10:00:00Z',
+             'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
+            encoding='utf-8')
+        a.providers([('claude', claude_dir)])
+        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) '
+                                              '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
+                                            f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
+                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
+        result = {'chat': chat[:300], 'sent': sent_text, 'results': results, 'title': title, 'buffer': buffer_name,
+                  'evaluated': evaluated, 'read': read, 'codex_reply': codex_reply, 'title_again': title_again,
+                  'listed': listed, 'view': (view or '')[:200], 'started_in': started_in}
+        result['ok'] = (f'> say {UNICODE}' in chat and UNICODE in chat.split(f'> say {UNICODE}', 1)[1]
+                        and sent_text == f'say {UNICODE}' and results and results[0] == UNICODE
+                        and UNICODE in title and UNICODE in buffer_name
+                        and UNICODE in evaluated[1] and not evaluated[2]
+                        and json.loads(read[1])['text'] == 'a\ufffdb ' + UNICODE and not read[2]
+                        and started_in == str(odd)
+                        and UNICODE in chat_after.split('romacs_eval', 1)[1]
+                        and UNICODE in codex_reply and UNICODE in title_again
+                        and any(UNICODE in t for t in listed) and f'> {UNICODE}' in (view or ''))
+        return result
+    finally:
+        a.close()
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -1279,6 +1366,12 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
+        # Non-ASCII typed with real keys, then sent: the harness gets it whole.
+        good.append(cleared('composer cleared for unicode'))
+        good.append(typed('unicode_typed', f'say {UNICODE}'))
+        turn('unicode')
+        steps['unicode_sent'] = UNICODE in a.chat(sid).rsplit(f'> say {UNICODE}', 1)[-1]
+        good.append(steps['unicode_sent'])
         good.append(cleared('composer cleared for selection'))
         # With delete-selection-mode, a selection in the composer is
         # replaced by a typed key, as anywhere.
@@ -1654,7 +1747,7 @@ def history_real(args, base):
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
-             'composer-real': composer_real, 'launcher': launcher}
+             'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode}
 
 
 def main():
@@ -1676,7 +1769,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)

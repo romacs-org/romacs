@@ -827,6 +827,12 @@ thousandth a stack mark."
           (clrhash romacs-agent-history--descriptions)
           (romacs-agent-history-list)))
 
+;; A tool result of N characters, Unicode text: its check is native, so
+;; one character costs no Lisp call.
+(scaling-probe mcp-result-text :n 20000
+  :setup (progn (require 'romacs-mcp) (make-string n ?é))
+  :body (dotimes (_ 20) (romacs-mcp--result it nil t)))
+
 ;; The endpoint sweep over N sessions, N routes of sessions gone, N ended
 ;; editors' sockets and N earlier builds' directories: one pass each.
 (defvar romacs-mcp--socket)

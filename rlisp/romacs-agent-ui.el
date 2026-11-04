@@ -147,7 +147,7 @@ is always taken after its own text is in."
                     ((gethash "description" input))
                     ((gethash "code" input))
                     ((zerop (hash-table-count input)) "")
-                    (t (json-serialize input :false-object :false :null-object :null)))))
+                    (t (romacs-agent--json input)))))
     (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " (format "%s" text)) 100 nil nil "…")))
 
 (defun romacs-agent-ui--tool-name (name)

@@ -225,7 +225,8 @@ class Harness:
 
     def main(self):
         threading.Thread(target=self.read_stdin, daemon=True).start()
-        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'))
+        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
+            cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith('ROMACS_')})
         while True:
             text = self.inbox.get()
             if text is None:

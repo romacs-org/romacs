@@ -56,17 +56,11 @@ This lexical policy is not a sandbox and cannot identify renamed secret copies."
 
 (defun romacs-mcp--editor-result-bytes (value)
   "Return the encoded modern text tool-result byte size for VALUE.
-Match the core's nested JSON serialization, not just character or UTF-8 size."
+Match the core's nested JSON serialization, not just character or UTF-8
+size: the envelope `romacs-mcp--result' sends (its text Unicode, a raw
+byte written out)."
   (string-bytes
-   (json-serialize
-    (romacs-mcp--object
-     "resultType" "complete" "isError" :false
-     "content" (vector
-                (romacs-mcp--object
-                 "type" "text" "text"
-                 (decode-coding-string
-                  (json-serialize value :false-object :false :null-object :null) 'utf-8))))
-    :false-object :false :null-object :null)))
+   (json-serialize (romacs-mcp--result value nil t) :false-object :false :null-object :null)))
 
 (defun romacs-mcp--editor-entry (buffer)
   "Return bounded native metadata for BUFFER without line scans or hooks."
