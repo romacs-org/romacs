@@ -242,3 +242,183 @@ fn underlines_go_where_gnu_puts_them_and_a_band_s_face_fills_it() {
     assert_eq!(rest.0 + rest.1, 400.0);
     assert!(frame.faces[&rest.2].attributes.contains(romacs_display_protocol::FaceAttributes::OVERLINE));
 }
+
+/// A box run with edges outside its text (xdisp.c produce_glyphs): spacers
+/// of the left and right width own the side edges and add to the run's
+/// advance, and the top and bottom widths add to its row's height; with
+/// edges inside, the run's end glyphs own them and nothing moves.
+#[test]
+fn a_box_run_owns_its_edges_and_widens_its_row() {
+    use romacs_display_protocol::BoxVerticalEdges;
+    use romacs_layout_input::{BoxLine, Decor};
+    let mut snapshot = scene();
+    let boxed = |vertical, horizontal| Decor { boxed: Some(BoxLine { vertical, horizontal, color: None, style: 1 }), ..Default::default() };
+    snapshot.faces[1].decor = boxed(3, 2);
+    snapshot.faces.push(Face { decor: boxed(-1, -1), ..snapshot.faces[0].clone() });
+    snapshot.text = TextSlice { utf8: "xabcy\nxdey".into(), raw: vec![], extends: vec![],
+                                face_runs: vec![FaceRun { bytes: 1..4, face: FaceHandle(1) }, FaceRun { bytes: 7..9, face: FaceHandle(2) }] };
+    let plain = { let mut s = snapshot.clone(); s.faces[1].decor = Default::default(); s.faces[2].decor = Default::default();
+                  romacs_layout2::layout(&s, 1).unwrap() };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let chars = |frame: &romacs_display_protocol::FrameGlyphBuffer| frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, y, height, box_vertical_edges, .. } => Some((*char, *x, *y, *height, *box_vertical_edges)), _ => None }).collect::<Vec<_>>();
+    let (with, without) = (chars(&frame), chars(&plain));
+    let at = |list: &[(char, f32, f32, f32, BoxVerticalEdges)], c| *list.iter().find(|g| g.0 == c).unwrap();
+    // Outside edges: the text starts 3 pixels in, the next glyph after the
+    // run 6 pixels on; the run's glyphs are 4 pixels taller.
+    assert_eq!(at(&with, 'a').1, at(&without, 'a').1 + 3.0);
+    assert_eq!(at(&with, 'y').1, at(&without, 'y').1 + 6.0);
+    assert_eq!(at(&with, 'a').3, at(&without, 'a').3 + 4.0);
+    // The left side is a spacer; the right, the last glyph's own cell
+    // (so a cursor on it covers it), which owns that edge.
+    assert_eq!([at(&with, 'a').4, at(&with, 'b').4, at(&with, 'c').4], [BoxVerticalEdges::Neither, BoxVerticalEdges::Neither, BoxVerticalEdges::Right]);
+    let spacers: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Stretch { width, box_vertical_edges, .. } => Some((*width, *box_vertical_edges)), _ => None }).collect();
+    assert_eq!(spacers, [(3.0, BoxVerticalEdges::Left)]);
+    let width = |frame: &romacs_display_protocol::FrameGlyphBuffer, c| frame.glyphs.iter().find_map(|g| match g {
+        FrameGlyph::Char { char, width, .. } if *char == c => Some(*width), _ => None }).unwrap();
+    assert_eq!(width(&frame, 'c'), width(&plain, 'c') + 3.0);
+    // Inside edges: no glyph moves, the ends own the edges.
+    assert_eq!(at(&with, 'e').1 - at(&with, 'd').1, at(&without, 'e').1 - at(&without, 'd').1);
+    assert_eq!((at(&with, 'd').4, at(&with, 'e').4), (BoxVerticalEdges::Left, BoxVerticalEdges::Right));
+}
+
+/// Measuring counts a box run's outside side edges in its end glyphs'
+/// advances and its top and bottom in its face's height, as painting does.
+#[test]
+fn measuring_counts_a_box_run_s_edges() {
+    use romacs_layout_input::{BoxLine, Decor, MeasureInput};
+    let mut snapshot = scene();
+    let plain = snapshot.faces.clone();
+    snapshot.faces[1].decor = Decor { boxed: Some(BoxLine { vertical: 3, horizontal: 2, color: None, style: 1 }), ..Default::default() };
+    let text = TextSlice { utf8: "xaby".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut measure = |faces: Vec<Face>| engine.measure(&MeasureInput {
+        font_selection: Default::default(), font_alternatives: Default::default(), faces, text: text.clone() }).unwrap();
+    let (boxed, unboxed) = (measure(snapshot.faces.clone()), measure(plain));
+    let advance = |m: &romacs_layout_input::Measured, i: usize| m.glyphs[i].0;
+    assert_eq!((advance(&boxed, 0), advance(&boxed, 1), advance(&boxed, 2), advance(&boxed, 3)),
+               (advance(&unboxed, 0), advance(&unboxed, 1) + 3, advance(&unboxed, 2) + 3, advance(&unboxed, 3)));
+    assert_eq!(boxed.face_heights[1], unboxed.face_heights[1] + 4);
+}
+
+/// A boxed run and its row's other text share one baseline, the row as
+/// tall as the box (the row's ascent is its glyphs' largest, a box's top
+/// included); a run continued on the next row opens no new edge there;
+/// a boxed word wraps whole, sides included; the cursor on a run's first
+/// character covers its side.
+#[test]
+fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
+    use romacs_display_protocol::BoxVerticalEdges;
+    use romacs_layout_input::{BoxLine, Decor, LineWrap};
+    let mut snapshot = scene();
+    snapshot.faces[1].decor = Decor { boxed: Some(BoxLine { vertical: 4, horizontal: 2, color: None, style: 1 }), ..Default::default() };
+    snapshot.text = TextSlice { utf8: "xab".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, baseline, width, box_vertical_edges, .. } => Some((*char, *x, *baseline, *width, *box_vertical_edges)), _ => None }).collect();
+    assert_eq!(chars[0].2, chars[1].2, "one baseline: {chars:?}");
+    // The cursor at the run's start covers its left side and its glyph.
+    snapshot.point_byte = 1;
+    let placed = romacs_layout_input::FrameSnapshot {
+        font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 300,
+        windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snapshot.clone() }], background_alpha: 1.0,
+        children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
+    };
+    let (frame, _) = romacs_layout2::layout_frame_with_cursors(&placed, 1, snapshot.id, Color::from_pixel(0xffffff)).unwrap();
+    let cursor = frame.active_cursor().unwrap();
+    assert_eq!((cursor.x, cursor.width), (chars[1].1 - 4.0, chars[1].3 + 4.0));
+    // A run wider than the row: its continued part opens no left edge.
+    let cells = (400.0 / frame.char_width) as usize;
+    let long = "b".repeat(cells + 4);
+    snapshot.text = TextSlice { utf8: long.clone(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..long.len(), face: FaceHandle(1) }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let lefts = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { box_vertical_edges: BoxVerticalEdges::Left, .. })).count();
+    assert_eq!(lefts, 1);
+    // Word wrap: a boxed word that fits only without its sides goes whole
+    // to the next row.
+    let word = "c".repeat(cells - 2);
+    snapshot.wrap = LineWrap::Word;
+    snapshot.text = TextSlice { utf8: format!("a {word}"), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 2..2 + word.len(), face: FaceHandle(1) }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let rows: std::collections::BTreeSet<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char: 'c', y, .. } => Some(*y as i64), _ => None }).collect();
+    assert_eq!(rows.len(), 1, "the word stays on one row: {rows:?}");
+    let a = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'a', y, .. } => Some(*y as i64), _ => None }).unwrap();
+    assert!(rows.iter().all(|&y| y > a), "and leaves the first");
+}
+
+/// A boxed mode line is one run: its first character owns the left edge,
+/// the fill its face paints the band's rest with owns the right.
+#[test]
+fn a_boxed_mode_line_is_one_run_to_its_band_s_end() {
+    use romacs_display_protocol::BoxVerticalEdges;
+    use romacs_layout_input::{BoxLine, Decor};
+    let mut snapshot = scene();
+    snapshot.faces.push(Face { decor: Decor { boxed: Some(BoxLine { vertical: -1, horizontal: -1, color: None, style: 1 }), ..Default::default() }, ..snapshot.faces[0].clone() });
+    snapshot.mode_line = Some(TextSlice { utf8: "abc".into(), face_runs: vec![], raw: vec![], extends: vec![] });
+    snapshot.mode_line_face = FaceHandle(2);
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine))
+        .filter_map(|g| g.box_vertical_edges()).collect();
+    assert_eq!(band, [BoxVerticalEdges::Left, BoxVerticalEdges::Neither, BoxVerticalEdges::Neither, BoxVerticalEdges::Right]);
+}
+
+/// A TAB in a boxed run is in the run (its stretch carries the run's
+/// edges); a boxed mode line its text overflows closes at the band's edge
+/// on its last glyph shown; a boxed segment between plain mode-line text
+/// shares its baseline.
+#[test]
+fn tabs_and_bands_keep_their_box_runs_whole() {
+    use romacs_display_protocol::{BoxVerticalEdges, frame_glyphs::GlyphRowRole};
+    use romacs_layout_input::{BoxLine, Decor};
+    let mut snapshot = scene();
+    let boxed = |vertical, horizontal| Decor { boxed: Some(BoxLine { vertical, horizontal, color: None, style: 1 }), ..Default::default() };
+    snapshot.faces[1].decor = boxed(2, -1);
+    snapshot.text = TextSlice { utf8: "a\tb".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let lefts = frame.glyphs.iter().filter(|g| matches!(g.box_vertical_edges(), Some(BoxVerticalEdges::Left | BoxVerticalEdges::Both))).count();
+    assert_eq!(lefts, 1, "one run: {:?}", frame.glyphs.iter().filter_map(|g| g.box_vertical_edges()).collect::<Vec<_>>());
+    let tab = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Stretch { box_vertical_edges, .. } if *box_vertical_edges == BoxVerticalEdges::Neither => Some(()), _ => None });
+    assert!(tab.is_some(), "the TAB is inside the run");
+    // A TAB alone in a box keeps GNU's stop: no sides join its advance.
+    let unboxed = { let mut s = snapshot.clone(); s.faces[1].decor = Decor::default(); romacs_layout2::layout(&s, 1).unwrap() };
+    let x_of = |frame: &romacs_display_protocol::FrameGlyphBuffer, c| frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char, x, .. } if *char == c => Some(*x), _ => None }).unwrap();
+    snapshot.text.face_runs = vec![FaceRun { bytes: 1..2, face: FaceHandle(1) }];
+    let lone = romacs_layout2::layout(&snapshot, 1).unwrap();
+    assert_eq!(x_of(&lone, 'b'), x_of(&unboxed, 'b'));
+    let tab = lone.glyphs.iter().find_map(|g| match g { FrameGlyph::Stretch { box_vertical_edges, .. } => Some(*box_vertical_edges), _ => None });
+    assert_eq!(tab, Some(BoxVerticalEdges::Both));
+    // A display stretch in a box keeps its width: one of zero is no glyph.
+    {
+        use romacs_layout_input::{Stretch, StretchWidth};
+        let mut zero = snapshot.clone();
+        zero.text = TextSlice { utf8: "a b".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
+        zero.stretches = vec![Stretch { byte: 1, width: StretchWidth::Width { width: 0, zero_ok: true } }];
+        let frame = romacs_layout2::layout(&zero, 1).unwrap();
+        assert!(!frame.glyphs.iter().any(|g| matches!(g, FrameGlyph::Stretch { width, .. } if *width > 0.0 && *width < 2.0)));
+        let a = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'a', x, width, .. } => Some(*x + *width), _ => None }).unwrap();
+        let b = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'b', x, .. } => Some(*x), _ => None }).unwrap();
+        assert_eq!(a, b, "the zero stretch takes no room");
+    }
+    // A boxed mode line longer than its band.
+    snapshot.faces.push(Face { decor: boxed(-1, -1), ..snapshot.faces[0].clone() });
+    snapshot.mode_line = Some(TextSlice { utf8: "m".repeat(200), face_runs: vec![], raw: vec![], extends: vec![] });
+    snapshot.mode_line_face = FaceHandle(2);
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).filter_map(|g| g.box_vertical_edges()).collect();
+    assert_eq!((band.first(), band.last()), (Some(&BoxVerticalEdges::Left), Some(&BoxVerticalEdges::Right)));
+    // The closing glyph's cell ends at the band's edge, where its border shows.
+    let last = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).last().unwrap();
+    let (x, width) = match last { FrameGlyph::Char { x, width, .. } => (*x, *width), _ => panic!("{last:?}") };
+    assert_eq!(x + width, 400.0);
+    // A segment with a box outside its text between plain characters.
+    snapshot.faces[2].decor = Decor::default();
+    snapshot.faces[1].decor = boxed(2, 3);
+    snapshot.mode_line = Some(TextSlice { utf8: "xyz".into(), face_runs: vec![FaceRun { bytes: 1..2, face: FaceHandle(1) }], raw: vec![], extends: vec![] });
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let baselines: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).filter_map(|g| match g {
+        FrameGlyph::Char { baseline, .. } => Some(*baseline), _ => None }).collect();
+    assert_eq!(baselines.len(), 3);
+    assert!(baselines.iter().all(|&b| b == baselines[0]), "{baselines:?}");
+}

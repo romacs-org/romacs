@@ -267,7 +267,10 @@ pub(super) fn collect_frame_box_spans(
             let Some(face) = faces.get(&face_id) else {
                 continue;
             };
-            if matches!(face.box_type, BoxType::None) || !face.box_line_width.is_visible() {
+            // A box shows when either axis has edges (`:line-width (3 . 0)').
+            let visible = face.box_line_width.is_visible()
+                || face.box_vertical_line_width.is_some_and(|width| width.is_visible());
+            if matches!(face.box_type, BoxType::None) || !visible {
                 continue;
             }
             let policy = if face.box_corner_radius > 0 {
