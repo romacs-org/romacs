@@ -74,6 +74,22 @@
   :type 'integer
   :group 'jabber)
 
+(defcustom jabber-mam-catch-up-min-page-size 50
+  "Fewest results a catch-up page asks for, whatever `jabber-mam-page-size' is.
+A smaller page only adds round trips; servers clamp a page to their own
+maximum.  `jabber-mam-sync-buffer' still asks for its own count."
+  :type 'natnum
+  :group 'jabber)
+
+(defcustom jabber-mam-room-history 200
+  "Messages a room's catch-up fetches when the room has no cursor yet.
+Instead of the room's whole archive, which for a busy public room is
+years: the newest of them becomes the room's cursor and the oldest the
+start of its local coverage.  A room with a cursor catches up forward
+from it, completely."
+  :type 'natnum
+  :group 'jabber)
+
 (defcustom jabber-mam-catch-up-days 3
   "Legacy initial catch-up window, retained for configuration compatibility.
 Automatic catch-up now scans unbounded when durable coverage is unknown;
@@ -100,6 +116,23 @@ Each function receives one argument: a list of (ACCOUNT PEER TYPE) entries.")
 Each owns its connection/session predicate, archive target, page token,
 pagination timer and completion callbacks.")
 
+(defvar jabber-mam-committed-functions nil
+  "Abnormal hook run after an archived result's transaction commits.
+Each function receives the result's effects, a list of entries
+\(ACCOUNT PEER TYPE INSERTED): one for each peer whose history the result
+changed, and one with INSERTED t for each message row it added (see
+`jabber-mam--note-effect').  A result rolled back has none.")
+
+(defvar jabber-mam--effects nil
+  "While a result's transaction runs with `jabber-mam-committed-functions':
+a cons whose cdr collects the transaction's effects.")
+
+(defun jabber-mam--note-effect (account peer type &optional inserted)
+  "Record that the current result changed PEER's history on ACCOUNT.
+TYPE is the message type; INSERTED non-nil when it added a row."
+  (when jabber-mam--effects
+    (push (list account peer type inserted) (cdr jabber-mam--effects))))
+
 (defvar jabber-mam--dirty-peers nil
   "Peers awaiting refresh after their results, as (ACCOUNT PEER TYPE).")
 
@@ -111,6 +144,11 @@ pagination timer and completion callbacks.")
 
 (defvar jabber-mam--redraw-timer nil
   "Pending timer for `jabber-mam--redraw-committed', or nil.")
+
+(defvar jabber-mam--room-nicks nil
+  "Hash of ROOM to our nickname there, for rooms read without being joined.
+The background sync's worker reads room archives from a session that
+joined none; the live session tells it our nicknames.  Nil: none.")
 
 (defvar jabber-mam--peer-syncing nil
   "Alist of active automatic peer catch-ups.
@@ -422,6 +460,7 @@ Malformed or failing results fail the page instead of being skipped."
                       (string-empty-p (jabber-xml-get-attribute result 'id)))
                   (jabber-mam--page-failed query)
                 (plist-put query :received (1+ (or (plist-get query :received) 0)))
+                (plist-put query :total (1+ (or (plist-get query :total) 0)))
                 (jabber-mam--commit-result jc query (copy-tree xml-data)))
             ((error quit)
              (jabber-mam--page-failed query)
@@ -440,11 +479,13 @@ after COMMIT."
   (let ((db (jabber-db-ensure-open))
         (jabber-chat--decrypt-undo (list #'ignore))
         (jabber-chat--decrypt-commit nil)
+        (jabber-mam--effects (and jabber-mam-committed-functions (list nil)))
         (committed nil))
     (when db
-      (sqlite-execute db "BEGIN"))
+      ;; Immediate: see `jabber-db--with-savepoint'.
+      (sqlite-execute db "BEGIN IMMEDIATE"))
     (unwind-protect
-        (progn
+        (let ((jabber-db--in-transaction db))
           (jabber-mam--process-owned-message jc stanza)
           (when (jabber-xml-get-attribute stanza 'jabber-mam--origin)
             (jabber-process-input
@@ -453,8 +494,12 @@ after COMMIT."
             (when db
               (sqlite-execute db "COMMIT"))
             (setq committed t)
-            (dolist (effect (reverse jabber-chat--decrypt-commit))
-              (jabber-lifecycle--call-contained effect))))
+            (let ((jabber-db--in-transaction nil))
+              (when jabber-mam--effects
+                (jabber-lifecycle--dispatch-contained
+                 'jabber-mam-committed-functions (cdr jabber-mam--effects)))
+              (dolist (effect (reverse jabber-chat--decrypt-commit))
+                (jabber-lifecycle--call-contained effect)))))
       (unless committed
         (when db
           (ignore-error sqlite-error (sqlite-execute db "ROLLBACK")))
@@ -509,6 +554,9 @@ JC is the Jabber connection.  XML-DATA is the stanza."
            (action (jabber-mam--message-action jc inner-msg fields)))
       (when (jabber--decrypt-failure-body-p body)
         (jabber-mam--page-failed query))
+      (when (and timestamp (or (null (plist-get query :oldest))
+                               (< timestamp (plist-get query :oldest))))
+        (plist-put query :oldest timestamp))
       (when (and (eq page (plist-get query :page))
                  (jabber-mam--current-query-p jc query))
         (pcase action
@@ -542,6 +590,11 @@ JC is the Jabber connection.  XML-DATA is the stanza."
            (jabber-mam--mark-dirty jc peer (plist-get fields :type))
            (setcdr (cdr xml-data) nil))
           (:unwrap
+           ;; A bodyless action (reaction, retraction, marker) may change
+           ;; PEER's displayed history without adding a row.
+           (when peer
+             (jabber-mam--note-effect (jabber-connection-bare-jid jc) peer
+                                      (plist-get fields :type)))
            (jabber-mam--unwrap-into xml-data inner-msg archive-id)))))))
 
 (defun jabber-mam--our-muc-nick-p (room nick jc)
@@ -549,16 +602,32 @@ JC is the Jabber connection.  XML-DATA is the stanza."
 Checks the current room nickname first, then falls back to
 comparing with the account username to handle nick changes."
   (require 'jabber-muc)
-  (or (and-let* ((my-nick (jabber-muc-nickname room jc)))
+  (or (and-let* ((my-nick (or (and jabber-mam--room-nicks
+                                  (gethash room jabber-mam--room-nicks))
+                              (jabber-muc-nickname room jc))))
         (string= nick my-nick))
       (string= nick (plist-get (fsm-get-state-data jc) :username))))
 
+
+(defvar jabber-mam--dirty-index nil
+  "(LIST . HASH): the members of `jabber-mam--dirty-peers' while it is LIST.
+A list set from elsewhere (drained, or bound by a caller) is indexed
+again at the next mark, so marking a stored result costs no scan.")
 
 (defun jabber-mam--mark-dirty (jc peer type)
   "Record that PEER's buffer needs redisplay after sync.
 JC identifies the local account.  TYPE is the message type."
   (let ((entry (list (jabber-connection-bare-jid jc) peer type)))
-    (cl-pushnew entry jabber-mam--dirty-peers :test #'equal)))
+    (jabber-mam--note-effect (car entry) peer type)
+    (unless (and jabber-mam--dirty-index
+                 (eq (car jabber-mam--dirty-index) jabber-mam--dirty-peers))
+      (let ((index (make-hash-table :test #'equal)))
+        (dolist (member jabber-mam--dirty-peers) (puthash member t index))
+        (setq jabber-mam--dirty-index (cons jabber-mam--dirty-peers index))))
+    (unless (gethash entry (cdr jabber-mam--dirty-index))
+      (puthash entry t (cdr jabber-mam--dirty-index))
+      (push entry jabber-mam--dirty-peers)
+      (setcar jabber-mam--dirty-index jabber-mam--dirty-peers))))
 
 
 (defun jabber-mam--redraw-dirty ()
@@ -582,12 +651,23 @@ refresh covers those."
     (jabber-lifecycle--call-contained
      #'jabber-chat--handle-mam-sync-complete peers t)))
 
+(defvar jabber-mam--redraw-index nil
+  "(LIST . HASH): the members of `jabber-mam--redraw-peers' while it is LIST.")
+
 (defun jabber-mam--schedule-redraw (peers)
   "Refresh committed PEERS' buffers after `jabber-mam--redraw-delay'.
 Pages committed while the timer is pending share its redraw, so a long
 catch-up shows its progress without rebuilding buffers for every page."
+  (unless (and jabber-mam--redraw-index
+               (eq (car jabber-mam--redraw-index) jabber-mam--redraw-peers))
+    (let ((index (make-hash-table :test #'equal)))
+      (dolist (member jabber-mam--redraw-peers) (puthash member t index))
+      (setq jabber-mam--redraw-index (cons jabber-mam--redraw-peers index))))
   (dolist (entry peers)
-    (cl-pushnew entry jabber-mam--redraw-peers :test #'equal))
+    (unless (gethash entry (cdr jabber-mam--redraw-index))
+      (puthash entry t (cdr jabber-mam--redraw-index))
+      (push entry jabber-mam--redraw-peers)))
+  (setcar jabber-mam--redraw-index jabber-mam--redraw-peers)
   (unless jabber-mam--redraw-timer
     (setq jabber-mam--redraw-timer
           (run-with-timer jabber-mam--redraw-delay nil
@@ -613,14 +693,22 @@ one autocommitted write; then schedule a redraw of committed peers."
 
 ;;; Query and pagination
 
+(defun jabber-mam--catch-up-page-size (&optional limit)
+  "Results a catch-up page asks for, at most LIMIT when it is non-nil."
+  (let ((size (max 1 jabber-mam-page-size jabber-mam-catch-up-min-page-size)))
+    (if limit (max 1 (min size limit)) size)))
+
 (defun jabber-mam--query (jc &optional after-id queryid with start to
-                             before-id max callback result-callback)
+                             before-id max callback result-callback limit)
   "Start a MAM query on JC, paginating from AFTER-ID.
 QUERYID correlates results; generate it if nil.  WITH and START are filters.
 TO is nil for the personal archive, or a room bare JID.
 BEFORE-ID requests one backward page of MAX messages.
 Call CALLBACK without arguments once on settlement, including failure.
 Then call RESULT-CALLBACK once with `success', `failed' or `cancelled'.
+With LIMIT and BEFORE-ID t, page back from the archive's newest message
+until LIMIT results arrived or the archive's start; the query records
+the newest UID as :newest and the oldest message time as :oldest.
 Success means accepted query completion, including a bounded backward page,
 not complete archive coverage.  Each result commits on arrival in its own
 transaction; a page's fin then advances the forward cursor.
@@ -642,7 +730,8 @@ Return the owned query record."
          (query (list :id (or queryid (jabber-mam--make-queryid)) :jc jc
                      :current-p (jabber-mam--session-predicate jc)
                      :with with :start start :to to :before before-id
-                     :max (or max jabber-mam-page-size) :after after-id
+                     :max (or max (jabber-mam--catch-up-page-size limit))
+                     :after after-id :limit limit :total 0 :newest nil :oldest nil
                      :callback callback :result-callback result-callback
                      :page nil :timer nil :iq-id nil
                      :retried nil :failed nil :received 0
@@ -714,12 +803,25 @@ Return the owned query record."
             (jabber-mam--complete-query query 'failed))
            (t
             (jabber-mam--accept-page query last-id)
-            (if (or (plist-get fin :complete) (plist-get query :before))
-                (jabber-mam--complete-query query 'success)
-              (jabber-mam--release-page query)
-              (plist-put query :after last-id)
-              (plist-put query :timer
-                         (run-with-timer 0.1 nil #'jabber-mam--send-page query))))))
+            (let ((before (plist-get query :before))
+                  (limit (plist-get query :limit))
+                  (total (or (plist-get query :total) 0)))
+              (when (and before last-id (not (plist-get query :newest)))
+                (plist-put query :newest last-id))
+              (cond
+               ((or (plist-get fin :complete)
+                    (and before (or (not limit) (>= total limit)
+                                    (null (plist-get fin :first)))))
+                (jabber-mam--complete-query query 'success))
+               (t
+                (jabber-mam--release-page query)
+                (if before
+                    (progn
+                      (plist-put query :before (plist-get fin :first))
+                      (plist-put query :max (jabber-mam--catch-up-page-size (- limit total))))
+                  (plist-put query :after last-id))
+                (plist-put query :timer
+                           (run-with-timer 0.1 nil #'jabber-mam--send-page query))))))))
       ((error quit)
        (jabber-mam--page-failed query)
        (jabber-mam--complete-query query 'failed)
@@ -751,16 +853,26 @@ Retry a stale forward cursor once without that cursor, preserving filters."
      "%Y-%m-%dT%H:%M:%SZ"
      (time-subtract (current-time) (* jabber-mam-catch-up-days 86400)) t)))
 
-(defun jabber-mam--catch-up (jc)
-  "Sync missed messages for JC via MAM."
+(defun jabber-mam--catch-up (jc &optional done)
+  "Sync missed messages for JC via MAM; call DONE with the outcome."
   (let* ((account (jabber-connection-bare-jid jc))
          (progress (jabber-db-mam-progress account account nil)))
-    (jabber-mam--query jc (car progress) nil nil (cadr progress))))
+    (jabber-mam--query jc (car progress) nil nil (cadr progress)
+                       nil nil nil nil done)))
+
+(defun jabber-mam--background-p ()
+  "Non-nil when catch-ups run in a worker VM (jabber-mam-sync.el)."
+  (and (fboundp 'jabber-mam-sync-available-p) (jabber-mam-sync-available-p)))
+
+(declare-function jabber-mam-sync-request "jabber-mam-sync" (jc &optional room with))
 
 (defun jabber-mam-maybe-catchup (jc)
   "Post-connect hook on JC: sync messages via MAM if enabled.
 Added to `jabber-post-connect-hooks'."
-  (when jabber-mam-enable
+  (cond
+   ((not jabber-mam-enable))
+   ((jabber-mam--background-p) (jabber-mam-sync-request jc))
+   (t
     (jabber-disco-get-info
      jc (jabber-connection-bare-jid jc) nil
      (lambda (jc _closure-data result)
@@ -768,7 +880,7 @@ Added to `jabber-post-connect-hooks'."
                   (not (eq (car result) 'error))
                   (member jabber-mam-xmlns (cadr result)))
          (jabber-mam--catch-up jc)))
-     nil)))
+     nil))))
 
 ;;; 1:1 chat MAM catch-up
 
@@ -804,6 +916,12 @@ the disco response."
 JC is the Jabber connection.  Called from `jabber-chat-with'.
 Sets the syncing indicator immediately; clears it when the catch-up
 query completes (or when disco reveals MAM is not supported)."
+  (if (and jabber-mam-enable (jabber-mam--background-p))
+      (jabber-mam-sync-request jc nil peer)
+    (jabber-mam--chat-opened-in-session jc peer)))
+
+(defun jabber-mam--chat-opened-in-session (jc peer)
+  "Catch up JC's history with PEER in the session, with an indicator."
   (when-let* ((token (and jabber-mam-enable
                           (jabber-mam--begin-peer-sync jc peer))))
     (jabber-mam--signal-peer-syncing jc peer "chat" t)
@@ -817,23 +935,51 @@ query completes (or when disco reveals MAM is not supported)."
 
 ;;; MUC MAM catch-up
 
-(defun jabber-mam--muc-catch-up (jc group)
-  "Sync GROUP's archive on JC, then clear its syncing indicator."
+(defun jabber-mam--room-history (jc group done)
+  "Fetch GROUP's last `jabber-mam-room-history' messages on JC.
+Then start GROUP's cursor at the newest of them and its coverage at the
+oldest, unless a cursor appeared meanwhile; call DONE with the outcome.
+An interrupted fetch records no cursor: the next catch-up fetches the
+same newest messages again, which the archive identities deduplicate."
+  (let (query)
+    (setq query
+          (jabber-mam--query
+           jc nil nil nil nil group t nil nil
+           (lambda (outcome)
+             (when (and (eq outcome 'success) query (plist-get query :newest))
+               (jabber-db-seed-mam-progress
+                (jabber-connection-bare-jid jc) group nil
+                (plist-get query :newest)
+                (and (plist-get query :oldest)
+                     (format-time-string "%Y-%m-%dT%H:%M:%SZ"
+                                         (plist-get query :oldest) t))))
+             (funcall done outcome))
+           (max 1 jabber-mam-room-history)))))
+
+(defun jabber-mam--muc-catch-up (jc group &optional done)
+  "Sync GROUP's archive on JC, then clear its syncing indicator.
+A room with no cursor gets only its last `jabber-mam-room-history'
+messages and a cursor there; one with a cursor catches up forward from
+it, completely.  Call DONE with the outcome."
   (let* ((account (jabber-connection-bare-jid jc))
          (progress (jabber-db-mam-progress account group nil))
-         (last-id (car progress))
-         (start (cadr progress)))
-    (jabber-mam--query
-     jc last-id nil nil start group nil nil
-     (lambda ()
-       (jabber-mam--signal-peer-syncing jc group "groupchat" nil)))))
+         (finish (lambda (outcome)
+                   (jabber-mam--signal-peer-syncing jc group "groupchat" nil)
+                   (when done (funcall done outcome)))))
+    (if (null (car progress))
+        (jabber-mam--room-history jc group finish)
+      (jabber-mam--query
+       jc (car progress) nil nil (cadr progress) group nil nil nil finish))))
 
 (defun jabber-mam-muc-joined (jc group)
   "Trigger MUC MAM catch-up after joining GROUP.
 JC is the Jabber connection.  Called from MUC self-presence handler.
 Sets the syncing indicator immediately; clears it when the catch-up
 query completes (or when disco reveals MAM is not supported)."
-  (when jabber-mam-enable
+  (cond
+   ((not jabber-mam-enable))
+   ((jabber-mam--background-p) (jabber-mam-sync-request jc group))
+   (t
     (jabber-mam--signal-peer-syncing jc group "groupchat" t)
     (jabber-disco-get-info
      jc group nil
@@ -844,7 +990,7 @@ query completes (or when disco reveals MAM is not supported)."
                   (member jabber-mam-xmlns (cadr result)))
              (jabber-mam--muc-catch-up jc group)
            (jabber-mam--signal-peer-syncing jc group "groupchat" nil))))
-     (list group))))
+     (list group)))))
 
 (defun jabber-mam-sync-buffer ()
   "Sync recent messages from this buffer's server archive.

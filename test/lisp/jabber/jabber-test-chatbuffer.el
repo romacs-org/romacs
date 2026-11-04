@@ -385,6 +385,41 @@
         (let ((last-command 'undo)) (undo-only 1))
         (should (= jabber-point-insert (point-max)))))))
 
+(ert-deftest jabber-test-chatbuffer-clearing-ticks-unindex-nodes ()
+  "Between a refresh's clearing ticks no update can reach a deleted node.
+Each tick clears the message index before deleting, so a correction or a
+reaction arriving meanwhile finds nothing and leaves it to the reload."
+  (jabber-test-chatbuffer-with-render-boundaries
+    (dolist (id '("second" "third"))
+      (jabber-chat-ewoc-enter (list :local (list :id id :body (concat id "\n")))))
+    (should (jabber-chat-ewoc-find-by-id "second"))
+    (let ((jabber-chat-backlog-chunk-budget 0)
+          (jabber-chat--backlog-generation 0)
+          continuation)
+      (cl-letf (((symbol-function 'jabber-chat-buffer-msg-count) (lambda () 3))
+                ((symbol-function 'jabber-chat--peer-jid) (lambda () "peer"))
+                ((symbol-function 'jabber-connection-bare-jid) (lambda (_) "me"))
+                ((symbol-function 'jabber-db-backlog) (lambda (&rest _) nil))
+                ((symbol-function 'run-with-timer)
+                 (lambda (_secs _repeat fn &rest args)
+                   (setq continuation (lambda () (apply fn args))))))
+        (jabber-chat-buffer-refresh)
+        ;; One node went in the first tick; two remain for later ticks.
+        (should continuation)
+        (should (= 2 (length (ewoc-collect jabber-chat-ewoc #'always))))
+        ;; The deleted node is gone; a remaining one, found, is live.
+        (should-not (jabber-chat-ewoc-find-by-id "first"))
+        (let ((node (jabber-chat-ewoc-find-by-id "third")))
+          (should (or (null node)
+                      (eq (current-buffer) (marker-buffer (ewoc-location node))))))
+        (let ((next continuation))
+          (setq continuation nil)
+          (funcall next))
+        (should (= 1 (length (ewoc-collect jabber-chat-ewoc #'always))))
+        (funcall continuation)
+        (should-not (ewoc-collect jabber-chat-ewoc #'always))
+        (should (equal "draft λ" (buffer-substring jabber-point-insert (point-max))))))))
+
 (ert-deftest jabber-test-chatbuffer-redraw-preserves-window-draft-offsets ()
   "Redrawing the footer preserves both windows' independent draft points."
   (save-window-excursion
@@ -1483,7 +1518,9 @@ forced to the bottom (the only path that overwrites point)."
             (with-current-buffer (car entry)
               (setq-local major-mode 'jabber-chat-mode)
               (setq-local jabber-buffer-connection (cadr entry))
-              (setq-local jabber-chatting-with "friend@example.com")))
+              (setq-local jabber-chatting-with "friend@example.com")
+              ;; As `jabber-chat-create-buffer' registers a chat buffer.
+              (jabber-buffer-registry-register 'chat "friend@example.com")))
           (cl-letf (((symbol-function 'jabber-connection-bare-jid)
                      (lambda (jc)
                        (if (eq jc 'account-a) "me-a@example.com"
@@ -1495,6 +1532,52 @@ forced to the bottom (the only path that overwrites point)."
           (should (equal (list first) refreshed)))
       (kill-buffer first)
       (kill-buffer second))))
+
+(ert-deftest jabber-test-chatbuffer-mam-refresh-reaches-every-room-buffer ()
+  "Every live buffer showing a room's history is refreshed, a renamed one too."
+  (let ((first (generate-new-buffer " *jabber-mam-room*"))
+        (second (generate-new-buffer " *jabber-mam-room-2*"))
+        refreshed)
+    (unwind-protect
+        (progn
+          (dolist (buffer (list first second))
+            (with-current-buffer buffer
+              (setq-local major-mode 'jabber-chat-mode)
+              (setq-local jabber-buffer-connection 'account-a)
+              (setq-local jabber-group "room@muc.example.com")))
+          (with-current-buffer first (rename-buffer " *jabber-mam-room-renamed*"))
+          (cl-letf (((symbol-function 'jabber-connection-bare-jid) (lambda (_) "me@example.com"))
+                    ((symbol-function 'jabber-chat-buffer-refresh)
+                     (lambda () (push (current-buffer) refreshed))))
+            (jabber-chat--handle-mam-sync-complete
+             '(("me@example.com" "room@muc.example.com" "groupchat"))))
+          (should (= 2 (length refreshed)))
+          (should (memq first refreshed))
+          (should (memq second refreshed)))
+      (kill-buffer first)
+      (kill-buffer second))))
+
+(ert-deftest jabber-test-chatbuffer-backlog-ticks-progress-while-typing ()
+  "Backlog ticks wait for a pause, but not forever: after the patience
+they work between keys, never while a key is pending."
+  (with-temp-buffer
+    (let ((buffer (current-buffer))
+          (jabber-chat-backlog-idle 0.25)
+          (jabber-chat-backlog-patience 0.2)
+          (idle 0.1) (pending nil))
+      (cl-letf (((symbol-function 'current-idle-time) (lambda () (seconds-to-time idle)))
+                ((symbol-function 'input-pending-p) (lambda (&rest _) pending)))
+        ;; Typing, no pause yet: wait.
+        (should (jabber-chat--backlog-wait-p buffer))
+        (sleep-for 0.25)
+        ;; Waited the patience: work between keys...
+        (should-not (jabber-chat--backlog-wait-p buffer))
+        ;; ...but never while a key is pending.
+        (setq pending t)
+        (should (jabber-chat--backlog-wait-p buffer))
+        ;; A pause: work.
+        (setq pending nil idle 1.0)
+        (should-not (jabber-chat--backlog-wait-p buffer))))))
 
 (provide 'jabber-test-chatbuffer)
 

@@ -1729,6 +1729,8 @@ ROOM is the archive JID.  COMPLETE marks the last page."
             (with-current-buffer buffer
               (goto-char (point-max))
               (insert "unsent draft"))
+            ;; A room with a cursor catches up forward, page by page.
+            (jabber-test-mam--seed-cursor jc room "archive-000000")
             (jabber-mam-muc-joined jc room)
             (should (buffer-local-value 'jabber-chat-mam-syncing buffer))
             (should-not (buffer-local-value 'jabber-chat-mam-syncing foreign))
@@ -1764,6 +1766,170 @@ ROOM is the archive JID.  COMPLETE marks the last page."
         (kill-buffer buffer)
         (kill-buffer foreign)))))
 
+;;; Catch-up policy: page floor, room history, busy rooms
+
+(defun jabber-test-mam--room-fin (jc request room first last complete)
+  "Deliver REQUEST's fin from ROOM through JC with FIRST and LAST UIDs.
+COMPLETE marks the archive's end in the paging direction."
+  (fsm-send-sync
+   jc `(:stanza
+        (iq ((type . "result") (from . ,room)
+             (id . ,(jabber-xml-get-attribute request 'id)))
+            (fin ((xmlns . ,jabber-mam-xmlns)
+                  (complete . ,(if complete "true" "false")))
+                 (set ((xmlns . ,jabber-mam-rsm-xmlns))
+                      (first () ,first) (last () ,last)))))))
+
+(defun jabber-test-mam--rsm (request)
+  "REQUEST's RSM paging as (MAX AFTER BEFORE); BEFORE is t for <before/>."
+  (let* ((query (car (jabber-xml-get-children request 'query)))
+         (set (car (jabber-xml-get-children query 'set)))
+         (text (lambda (name)
+                 (car (jabber-xml-node-children
+                       (car (jabber-xml-get-children set name)))))))
+    (list (funcall text 'max) (funcall text 'after)
+          (and (jabber-xml-get-children set 'before)
+               (or (funcall text 'before) t)))))
+
+(defmacro jabber-test-mam--with-room-disco (&rest body)
+  "Run BODY with every disco#info answering that MAM is supported."
+  (declare (indent 0) (debug t))
+  `(cl-letf (((symbol-function 'jabber-disco-get-info)
+              (lambda (jc _to _node callback closure)
+                (funcall callback jc closure
+                         (list nil (list jabber-mam-xmlns))))))
+     ,@body))
+
+(defun jabber-test-mam--seed-cursor (jc room uid)
+  "Record UID as ROOM's cursor on JC, with full coverage."
+  (jabber-db--advance-mam-progress (jabber-db-ensure-open)
+                                   (jabber-connection-bare-jid jc) room nil nil uid nil))
+
+(defun jabber-test-mam--stamp (index)
+  "The ISO 8601 stamp of fake archive message INDEX."
+  (format-time-string "%Y-%m-%dT%H:%M:%SZ" (+ 1700000000 (* index 86400)) t))
+
+(ert-deftest jabber-test-mam-catch-up-page-floor ()
+  "A tiny `jabber-mam-page-size' does not shrink catch-up pages."
+  (jabber-test-mam--with-native
+    (let ((jabber-mam-page-size 1)
+          (jabber-mam-catch-up-min-page-size 50))
+      (jabber-mam--catch-up jc)
+      (should (equal "50" (car (jabber-test-mam--rsm (car sent))))))))
+
+(ert-deftest jabber-test-mam-room-without-cursor-fetches-last-messages ()
+  "A room with no cursor pages back over its newest messages only.
+Its cursor then starts at the newest and its coverage at the oldest."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (jabber-mam-page-size 1)
+          (jabber-mam-catch-up-min-page-size 2)
+          (jabber-mam-room-history 3))
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (should (equal '("2" nil t) (jabber-test-mam--rsm (car sent))))
+        (jabber-test-mam--room-message jc (car sent) room 8)
+        (jabber-test-mam--room-message jc (car sent) room 9)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000008" "archive-000009" nil)
+        (should (jabber-test-mam--wait-for (lambda () (= 2 (length sent)))))
+        (should (equal '("1" nil "archive-000008")
+                       (jabber-test-mam--rsm (car sent))))
+        (jabber-test-mam--room-message jc (car sent) room 7)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000007" "archive-000007" nil)
+        (should-not (jabber-mam-syncing-p))
+        (should (= 2 (length sent)))
+        (should (equal (list "archive-000009" (jabber-test-mam--stamp 7))
+                       (jabber-db-mam-progress
+                        (jabber-connection-bare-jid jc) room nil)))))))
+
+(ert-deftest jabber-test-mam-room-with-null-cursor-fetches-history ()
+  "A progress row with no UID is no cursor: the room gets its history.
+Its seed fills the UID and the coverage start."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (account (jabber-connection-bare-jid jc))
+          (jabber-mam-room-history 1))
+      (sqlite-execute (jabber-db-ensure-open)
+                      "INSERT INTO mam_progress VALUES (?, ?, '', NULL, NULL)"
+                      (list account room))
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (should (equal '("1" nil t) (jabber-test-mam--rsm (car sent))))
+        (jabber-test-mam--room-message jc (car sent) room 5)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000005" "archive-000005" nil)
+        (should-not (jabber-mam-syncing-p))
+        (should (equal (list "archive-000005" (jabber-test-mam--stamp 5))
+                       (jabber-db-mam-progress account room nil)))))))
+
+(ert-deftest jabber-test-mam-room-history-stops-at-archive-start ()
+  "Paging back ends at the archive's start, short of the history size."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (jabber-mam-room-history 200))
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (jabber-test-mam--room-message jc (car sent) room 1)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000001" "archive-000001" t)
+        (should-not (jabber-mam-syncing-p))
+        (should (= 1 (length sent)))
+        (should (equal (list "archive-000001" (jabber-test-mam--stamp 1))
+                       (jabber-db-mam-progress
+                        (jabber-connection-bare-jid jc) room nil)))))))
+
+(ert-deftest jabber-test-mam-room-history-interrupted-records-no-cursor ()
+  "A history fetch cut short leaves the room without a cursor."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (jabber-mam-catch-up-min-page-size 2)
+          (jabber-mam-room-history 4))
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (jabber-test-mam--room-message jc (car sent) room 8)
+        (jabber-test-mam--room-message jc (car sent) room 9)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000008" "archive-000009" nil)
+        (jabber-mam--cancel-muc-query room jc)
+        (should-not (jabber-mam-syncing-p))
+        (should-not (jabber-db-mam-progress
+                     (jabber-connection-bare-jid jc) room nil))))))
+
+(ert-deftest jabber-test-mam-room-history-keeps-a-newer-cursor ()
+  "The history's cursor never replaces one recorded while it ran."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (jabber-mam-room-history 1))
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (jabber-test-mam--seed-cursor jc room "archive-000099")
+        (jabber-test-mam--room-message jc (car sent) room 9)
+        (jabber-test-mam--room-fin
+         jc (car sent) room "archive-000009" "archive-000009" nil)
+        (should-not (jabber-mam-syncing-p))
+        (should (equal '("archive-000099" nil)
+                       (jabber-db-mam-progress
+                        (jabber-connection-bare-jid jc) room nil)))))))
+
+(ert-deftest jabber-test-mam-room-with-cursor-catches-up-forward ()
+  "A room with a cursor is caught up forward from it, completely."
+  (jabber-test-mam--with-native
+    (let ((room "room@example.com")
+          (account (jabber-connection-bare-jid jc)))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-test-mam--with-room-disco
+        (jabber-mam-muc-joined jc room)
+        (jabber-test-mam--room-page jc (car sent) room 2 nil)
+        (should (jabber-test-mam--wait-for (lambda () (= 2 (length sent)))))
+        (should (equal '("50" "archive-000002" nil)
+                       (jabber-test-mam--rsm (car sent))))
+        (jabber-test-mam--room-page jc (car sent) room 3 t)
+        (should-not (jabber-mam-syncing-p))
+        (should (equal '("archive-000003" nil)
+                       (jabber-db-mam-progress account room nil)))))))
+
 (ert-deftest jabber-test-mam-progressive-redraw-keeps-history-reader ()
   "A progressive redraw leaves a buffer alone while its reader reads history.
 The refresh reloads only the newest backlog window, which can evict the
@@ -1793,8 +1959,13 @@ display and so is not asserted to keep the anchor."
                 (jabber-test-mam--room-page jc request room 14 t))
               (should (jabber-test-mam--wait-for
                        (lambda () (null jabber-mam--redraw-timer))))
+              ;; The refresh inserts its backlog in budgeted ticks.
+              (should (jabber-test-mam--wait-for
+                       (lambda ()
+                         (with-current-buffer buffer
+                           (jabber-chat-ewoc-find-by-id "archive-000001")))))
               (with-current-buffer buffer
-                (should (string-search "Message 1" (buffer-string)))
+                (should (string-search "Message 1\n" (buffer-string)))
                 (goto-char (point-max))
                 (insert "draft survives"))
               (switch-to-buffer buffer)
