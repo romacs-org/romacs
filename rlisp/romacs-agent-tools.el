@@ -441,7 +441,8 @@ started with the same clientRequestId."
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
-    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil)
+    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil
+          (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
     (romacs-agent-stop child)

@@ -1402,6 +1402,79 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
+        # emacs-hermes's chat keys and its actions menu, with real keys.
+        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
+        popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
+        good.append(cleared('composer cleared for keys'))
+        a.keys('a'); a.keys(*ctrl('j')); a.keys('b')
+        good.append(typed('newline', '', 'a\nb'))
+        a.keys(*ctrl('c'), *ctrl('o'))
+        try:
+            until(popup, 10, 'the actions menu')
+            steps['menu_opened'] = True
+        except RuntimeError:
+            steps['menu_opened'] = False
+        a.keys('R')
+        until(lambda: a.eval('(and (active-minibuffer-window) t)') == 't', 10, 'the rename prompt')
+        a.keys(*ctrl('a'), *ctrl('k'))
+        a.keys('menu title')
+        a.keys('-k', 'Return')
+        until(lambda: a.eval(f'(romacs-agent-title {a.s(sid)})') == '"menu title"', 10, 'renamed from the menu')
+        steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        good.append(steps['menu_opened'] and 'menu title' in steps['renamed'])
+        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-ui--end (point-max)))')
+        # A message queued while a turn runs is sent when it ends.
+        a.keys('slow 30'); a.keys('-k', 'Return')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
+        a.keys('say queued one'); a.keys(*ctrl('c'), *ctrl('q'))
+        steps['queued_composer'] = look()[0]
+        until(lambda: 'queued one' in a.chat(sid).split('> say queued one', 1)[-1] and '> say queued one' in a.chat(sid),
+              40, 'the queued message sent after the turn')
+        a.idle(sid)
+        good.append(steps['queued_composer'] == '')
+        # Interrupt and send: the turn ends, then the composer's text is sent.
+        a.keys('slow 200'); a.keys('-k', 'Return')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the long turn')
+        a.keys('say after interrupt'); a.keys(*ctrl('c'), *ctrl('k'))
+        until(lambda: '> say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
+        a.idle(sid)
+        steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('> say after interrupt', 1)[-1]
+        good.append(steps['interrupted_then_sent'])
+        # M-p / M-n walk the composer's history; ? in the transcript opens the
+        # menu, C-g closes it; w copies the turn at point.
+        a.keys('-M', 'alt', '-k', 'p', '-m', 'alt')
+        good.append(typed('history_previous', '', 'say after interrupt'))
+        good.append(cleared('composer cleared for transcript keys'))
+        a.keys('-M', 'alt', '<', '-m', 'alt')
+        a.keys('?')
+        try:
+            until(popup, 10, 'the menu from the transcript')
+            steps['menu_from_transcript'] = True
+        except RuntimeError:
+            steps['menu_from_transcript'] = False
+        a.keys(*ctrl('g'))
+        until(lambda: not popup(), 10, 'the menu closed')
+        a.keys('w')
+        steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+        good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
+        a.keys('-M', 'alt', '>', '-m', 'alt')
+        # The queue is the session's: sent though the chat buffer is gone, and
+        # after a Codex turn an interrupt ended (its run exits, no result).
+        a.send(sid, 'slow 30')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
+        a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
+               f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-buffer {a.s(sid)}))) t)')
+        until(lambda: 'queued unseen' in (a.results(sid) or [''])[-1], 40, 'the queued message sent with no chat')
+        a.idle(sid)
+        a.eval(f'(progn (save-window-excursion (romacs-agent-show {a.s(sid)})) '
+               f'(delete-other-windows) (switch-to-buffer (romacs-agent-buffer {a.s(sid)})) (goto-char (point-max)) t)')
+        a.codex_instance()
+        codex = a.start('slow 30', 'codex')
+        until(lambda: a.state(codex) in ('running', 'starting'), 15, 'a Codex turn')
+        a.eval(f'(progn (romacs-agent-send-later {a.s(codex)} "say queued codex") (romacs-agent-interrupt {a.s(codex)}) t)')
+        until(lambda: 'queued codex' in str(a.eval(f'(romacs-agent-reply {a.s(codex)})')), 40, 'the Codex queue after an interrupt')
+        steps['queue_survives'] = True
+        a.providers([('claude', '~/.claude')])
         # Non-ASCII typed with real keys, then sent: the harness gets it whole.
         good.append(cleared('composer cleared for unicode'))
         good.append(typed('unicode_typed', f'say {UNICODE}'))
@@ -1448,12 +1521,13 @@ def composer(args, base, real=False):
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
         # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer; M-> from there reaches it too.
+        # there goes to the composer (SPC there scrolls, as in hermes's
+        # chat); M-> from there reaches it too.
         a.keys('-M', 'alt', '<', '-m', 'alt')
-        good.append(typed('typed_in_transcript', ' sixth', 'third fourth fifth sixth'))
+        good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
         a.keys('-M', 'alt', '<', '-m', 'alt')
         a.keys('-M', 'alt', '>', '-m', 'alt')
-        good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth sixth seventh'))
+        good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
         # A session started from the home page with c, its prompt typed in
         # the minibuffer: its chat is shown, and its composer takes keys.

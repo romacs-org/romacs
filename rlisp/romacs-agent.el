@@ -103,7 +103,12 @@ not started, `outcome unknown' when it had)."
   ;; The last reply, the turns done, and messages waiting for a turn to
   ;; end: (TEXT DELIVERED VALID), DELIVERED called once TEXT reaches the
   ;; harness, and VALID, when given, asked first (nil drops the message).
-  reply (turns 0) queue queue-tail cancelled
+  reply (turns 0) queue queue-tail (queue-length 0) dispatch cancelled
+  ;; The seq of its last prompt, and whether its harness ended in the
+  ;; middle of a turn (a resume then takes that turn up again).
+  input-seq interrupted
+  ;; The seq of its last turn's real end (a done; an exit mid-turn is none).
+  (completed-seq 0)
   ;; A delegated session's turn ends its parent has not had, newest
   ;; first: (SEQ RESULT FAILED).
   ends
@@ -703,7 +708,8 @@ goes on whatever becomes of this server."
                 (setf (romacs-agent-permission-mode session) (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
     ('input (setf (romacs-agent-state session) 'running
-                  (romacs-agent-turn-start session) (plist-get event :time))
+                  (romacs-agent-turn-start session) (plist-get event :time)
+                  (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
     ('approval (setf (romacs-agent-state session) 'waiting-approval))
     ('answered (setf (romacs-agent-state session) 'running))
@@ -711,14 +717,26 @@ goes on whatever becomes of this server."
                  (romacs-agent-reply session) (plist-get event :text)
                  (romacs-agent-failed session) (plist-get event :error))
            (cl-incf (romacs-agent-turns session))
-           (setf (romacs-agent-done-seq session) (or (plist-get event :seq) 0))
+           (setf (romacs-agent-done-seq session) (or (plist-get event :seq) 0)
+                 (romacs-agent-completed-seq session) (or (plist-get event :seq) 0)
+                 (romacs-agent-interrupted session) nil)
            (romacs-agent--note-end session)
            (when (plist-get event :context-window)
              (setf (romacs-agent-context-window session) (plist-get event :context-window)))
            ;; Claude's cost is the session's so far, for queries; no view shows it.
            (when (numberp (plist-get event :cost))
-             (setf (romacs-agent-cost session) (plist-get event :cost))))
+             (setf (romacs-agent-cost session) (plist-get event :cost)))
+           ;; A long-lived harness's turn ended: the first message queued
+           ;; for it is next (a per-turn one's run ends with it).
+           (when (and (romacs-agent-queue session) (not (romacs-agent--per-turn-p session))
+                      (process-live-p (romacs-agent-connection session)))
+             (run-at-time 0 nil #'romacs-agent--send-next session)))
     ('exit
+     ;; Ended with its last prompt's turn never done: cut, however many
+     ;; runs (a resumed one journals no prompt) it took.
+     (setf (romacs-agent-interrupted session)
+           (and (not (romacs-agent--per-turn-p session))
+                (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
      (unless (eq (romacs-agent-state session) 'idle)
        ;; It ended mid-turn: that turn failed.
        (setf (romacs-agent-failed session) t
@@ -745,7 +763,8 @@ goes on whatever becomes of this server."
                           (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
                           (ignore-errors (json-parse-buffer :object-type 'hash-table
                                                             :null-object :null :false-object :false))))))
-    (when (and manifest (not (equal (gethash "title" manifest) (romacs-agent-title session))))
+    (when (and manifest (not (and (equal (gethash "title" manifest) (romacs-agent-title session))
+                                  (eq (gethash "titleAuto" manifest) :false))))
       (puthash "title" (romacs-agent-title session) manifest)
       (puthash "titleAuto" :false manifest)
       (romacs-agent--write-json file manifest))))
@@ -871,12 +890,51 @@ here; non-nil when that ends with the harness's exit."
 (defun romacs-agent--run-ended (session)
   "A per-turn harness's run ended: the next waiting message starts a turn."
   (when (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle))
-    (let ((next (pop (romacs-agent-queue session))))
-      (while (and next (nth 2 next) (not (funcall (nth 2 next))))
-        (setq next (pop (romacs-agent-queue session))))
-      (when next
-        (romacs-agent--turn session (car next))
-        (when (nth 1 next) (funcall (nth 1 next)))))))
+    (romacs-agent--send-next session)))
+
+(defun romacs-agent--send-next (session &optional force)
+  "Send the first message waiting for SESSION's turn to end, unless a
+turn runs again (FORCE: none can, the harness just resumed): a per-turn
+harness's starts a turn.  One dispatch at a time: a turn that ends while
+its message is being sent (a run that ends before it is attached) asks
+for the next, sent once this one is off the queue."
+  (if (romacs-agent-dispatch session)
+      (setf (romacs-agent-dispatch session) 'again)
+    (setf (romacs-agent-dispatch session) 'busy)
+    (unwind-protect
+        (let ((force force) (more t))
+          (while more
+            (setq more nil)
+            (unless (and (not force) (memq (romacs-agent-state session) '(starting running waiting-approval)))
+              (cl-flet ((drop () (pop (romacs-agent-queue session))
+                          (cl-decf (romacs-agent-queue-length session))
+                          (unless (romacs-agent-queue session) (setf (romacs-agent-queue-tail session) nil))))
+                (let ((next (car (romacs-agent-queue session))))
+                  (while (and next (nth 2 next) (not (funcall (nth 2 next))))
+                    (drop)
+                    (setq next (car (romacs-agent-queue session))))
+                  (when next
+                    ;; Taken off the queue once sent: a send that fails (the
+                    ;; harness gone meanwhile) keeps it for the next turn end
+                    ;; or resume.
+                    (if (romacs-agent--per-turn-p session)
+                        (romacs-agent--turn session (car next))
+                      (romacs-agent--line session (romacs-agent--claude-user (car next))))
+                    (drop)
+                    (when (nth 1 next) (funcall (nth 1 next)))
+                    (setq more (eq (romacs-agent-dispatch session) 'again) force nil)
+                    (setf (romacs-agent-dispatch session) 'busy)))))))
+      (setf (romacs-agent-dispatch session) nil))))
+
+(defun romacs-agent-send-later (session text &optional first)
+  "Send TEXT to SESSION once its running turn ends, now when none runs;
+FIRST puts it ahead of the messages already waiting."
+  (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
+      (romacs-agent-send session text)
+    (if (and first (romacs-agent-queue session))
+        (progn (push (list text nil nil) (romacs-agent-queue session))
+               (cl-incf (romacs-agent-queue-length session)))
+      (romacs-agent--enqueue session (list text nil nil)))))
 
 ;;; Lifecycle
 
@@ -1087,6 +1145,7 @@ given, then says it is no longer wanted."
            (when delivered (funcall delivered)))))
 
 (defun romacs-agent--enqueue (session item)
+  (cl-incf (romacs-agent-queue-length session))
   (let ((cell (list item)))
     (if (romacs-agent-queue session)
         (setcdr (romacs-agent-queue-tail session) cell)
@@ -1159,7 +1218,13 @@ keeps the conversation there."
   (let ((process-environment (cons "CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1" process-environment)))
     (romacs-agent--launch session (romacs-agent--claude-argv session t)))
   (setf (romacs-agent-state session) 'starting)
-  (romacs-agent--attach session 50))
+  (romacs-agent--attach session 50)
+  ;; What waited for its turn's end when the harness went goes now, unless
+  ;; the harness ended in the middle of a turn: the resumed harness takes
+  ;; that turn up again, and the queue goes at its end (a done), as known
+  ;; from how the last run ended, not from when attaching completes.
+  (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
+    (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t)))))
 
 ;;; One question
 
