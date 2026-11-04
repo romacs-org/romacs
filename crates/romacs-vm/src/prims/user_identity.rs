@@ -107,6 +107,19 @@ fn group_gid(cx) { Ok(cx.bigint(user_db::effective_gid().into())) }}
 defsubr! { name = "group-real-gid", gnu = "editfns.c:1201", effect = Reads,
 fn group_real_gid(cx) { Ok(cx.bigint(user_db::real_gid().into())) }}
 
+// CONS_TO_INTEGER into gid_t takes uid_argument's forms (GNU's
+// cons_to_unsigned); anything but a number or a cons is refused first.
+defsubr! { name = "group-name", gnu = "editfns.c:1175", effect = Reads,
+fn group_name(cx, gid: Value) {
+    let number = cx.bigint_value(gid).is_some() || cx.kind(gid) == leaf::Kind::Float;
+    if !number && cx.pair(gid).is_none() { return Err(Fault::Error("Invalid GID specification".into())); }
+    let gid = uid_argument(cx, gid)?;
+    Ok(crate::host::group_by_gid(gid, 16 * 1024).map_or(Value::NIL, |name| {
+        let multibyte = crate::environment::multibyte(&name);
+        cx.make_string(name, multibyte)
+    }))
+}}
+
 defsubr! { name = "user-full-name", gnu = "editfns.c:1209", effect = Reads,
 fn user_full_name(cx; optional uid: Value) {
     if uid == Value::NIL {

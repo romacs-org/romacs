@@ -294,6 +294,12 @@ mod leaf {
             let slot = self.symbol_slot(symbol)?;
             Ok(self.vm.variable_trapped(self.vm.indirect_variable(slot)))
         }
+        /// xfaces.c clear_face_cache with face_change: realize every face
+        /// afresh and republish every window.
+        pub(crate) fn clear_face_cache(&mut self) {
+            self.vm.display_state.faces_changed();
+            self.vm.display_state.free_realized_faces();
+        }
         pub(crate) fn request_redisplay(&mut self) {
             self.vm.display_state.free_realized_faces();
         }
@@ -521,7 +527,9 @@ mod leaf {
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
         }
-        pub(crate) fn casing_multibyte(&mut self) -> std::result::Result<bool, Fault> {
+        /// Whether the current buffer's text is multibyte (a unibyte buffer
+        /// is a byte buffer), as `enable-multibyte-characters' says.
+        pub(crate) fn buffer_multibyte(&mut self) -> std::result::Result<bool, Fault> {
             let i = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(matches!(self.vm.objects[i], data::Object::Buffer(_)))
         }

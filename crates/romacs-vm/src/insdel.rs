@@ -583,11 +583,20 @@ impl Vm {
     }
 
     /// make_buffer_string_both with properties: FROM..TO of BUFFER.
+    /// insdel.c modify_text's bookkeeping once its before hooks ran: the
+    /// first change's undo entry when the buffer was unmodified, then the
+    /// modification counts advanced for FROM..TO, even when no text changes.
+    pub(crate) fn modify_text(&mut self, from: i64, to: i64) -> Faulty<()> {
+        let buffer = self.current_buffer_value()?;
+        if !self.buffer_state(buffer).map_err(Fault::Error)?.modified() { self.record_first_change().map_err(Fault::Error)?; }
+        self.buffer_state_mut(buffer).map_err(Fault::Error)?.modification.changed((to - from).max(0) as usize, true);
+        Ok(())
+    }
     pub(crate) fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
             Some(Object::Buffer(t)) => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
-            Some(Object::ByteBuffer(t)) => Object::Bytes(t.bytes[a.0..b.0].to_vec()),
+            Some(Object::ByteBuffer(t)) => Object::Bytes(t.bytes.get(a.0..b.0).ok_or_else(|| Fault::Error("position out of range".into()))?.to_vec()),
             _ => return Err(Fault::Error("buffer required".into())),
         };
         Ok(self.allocate_object(object))

@@ -254,7 +254,7 @@ impl DisplayState {
     }
     /// The theme changed, or will at its next read: what faces realize
     /// may differ.
-    fn faces_changed(&mut self) {
+    pub(super) fn faces_changed(&mut self) {
         self.face_table = None;
         self.face_revision += 1;
     }

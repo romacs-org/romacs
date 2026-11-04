@@ -81,6 +81,9 @@ impl Leaf<'_> {
     pub(crate) fn replace_change(&mut self, from: i64, to: i64, text: Value) -> std::result::Result<Option<(i64, i64, i64)>, Fault> {
         self.vm.replace_change(from, to, text)
     }
+    pub(crate) fn modify_text(&mut self, from: i64, to: i64) -> std::result::Result<(), Fault> {
+        self.vm.modify_text(from, to)
+    }
     pub(crate) fn update_search_regs(&mut self, oldstart: i64, oldend: i64, newend: i64) {
         self.vm.regexp_update_search_regs(oldstart, oldend, newend)
     }

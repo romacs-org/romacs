@@ -194,3 +194,52 @@ fn overridden_function(cx: &mut Leaf<'_>, overrides: Value) -> std::result::Resu
     }
     Ok(function)
 }
+
+// print.c:927 printchar_to_stream on stderr: CHARACTER, or the characters
+// of its `standard-display-table' glyph vector; ASCII as bytes, the rest
+// encoded by `coding-system-for-write' or `locale-coding-system' (as
+// internal bytes when both are nil).
+defsubr! { name = "external-debugging-output", gnu = "print.c:927", effect = Global,
+fn external_debugging_output(cx, character: Value) -> Step {
+    let code = character.integer_value().ok_or(Fault::Wrong("fixnump", character))?;
+    let code = u32::try_from(code).ok().filter(|&c| c <= crate::lstring::MAX_CHAR)
+        .ok_or_else(|| Fault::Error("external-debugging-output outside the supported character range".into()))?;
+    let mut chars = vec![code];
+    let table_symbol = cx.intern("standard-display-table");
+    let table = cx.variable_value(table_symbol)?.unwrap_or(Value::NIL);
+    if cx.kind(table) == leaf::Kind::CharTable && cx.char_table_subtype(table)? == cx.intern("display-table") {
+        let glyphs = cx.char_table_element(table, code as usize)?;
+        if cx.kind(glyphs) == leaf::Kind::Vector {
+            chars.clear();
+            for i in 0..cx.vector_len(glyphs)? {
+                let glyph = cx.vector_get(glyphs, Value::integer(i as i64).unwrap())?;
+                if let Some(c) = glyph.integer_value().filter(|&c| (0..=i64::from(crate::lstring::MAX_CHAR)).contains(&c)) { chars.push(c as u32); }
+            }
+        }
+    }
+    let mut coding = Value::NIL;
+    for name in ["locale-coding-system", "coding-system-for-write"] {
+        let symbol = cx.intern(name);
+        let value = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
+        if value != Value::NIL { coding = value; }
+    }
+    let mut bytes = Vec::new();
+    for &c in &chars {
+        let mut unit = [0; 5];
+        let n = crate::lstring::char_string(c, &mut unit);
+        bytes.extend_from_slice(&unit[..n]);
+    }
+    if coding == Value::NIL || chars.iter().all(|&c| c < 0x80) {
+        std::io::stderr().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
+        return Ok(Step::Done(character));
+    }
+    let text = cx.make_string(bytes, true);
+    let f = cx.intern("encode-coding-string");
+    Ok(Step::Call { f, args: vec![text, coding, Value::TRUE], then: debugging_encoded, saved: vec![character] })
+}}
+
+fn debugging_encoded(cx: &mut Leaf<'_>, encoded: Value, saved: &[Value]) -> Next {
+    let bytes = cx.string_view(encoded)?.bytes().to_vec();
+    std::io::stderr().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
+    Ok(Step::Done(saved[0]))
+}
