@@ -34,6 +34,8 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  logging    a server keeps its own session record: errors with their
+             functions, slow commands, its end.
   environment  a harness sees none of the editor's own launch variables.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
@@ -1308,6 +1310,58 @@ def environment(args, base):
         a.close()
 
 
+def logging(args, base):
+    """A server whose environment names no usage log keeps its own session
+    record, as the launcher keeps a session's: STATE/romacs/sessions/
+    START-PID/ with usage.jsonl and session.json.  An error a real key
+    causes is logged with the functions its signal went through (first of
+    its kind), a command slow in its command loop has its slow record, a
+    stop writes the record's end, and the unit's end (`--server-exited',
+    as systemd runs it for this invocation) fills how it exited in."""
+    a = Agents(args, base, 'lg', env_extra={'INVOCATION_ID': 'live-logging-1'})
+    try:
+        a.up()
+        sessions = a.home / '.local/state/romacs/sessions'
+        until(lambda: any(sessions.glob('*/session.json')), 20, 'the session record')
+        directory = next(sessions.glob('*/session.json')).parent
+        a.keyboard_ready()
+        time.sleep(1.5)
+
+        # A command that fails and one that is slow, on keys (M-: would
+        # enter the debugger, as `eval-expression-debug-on-error' asks).
+        a.eval('(progn (defun logging-live-fail () (interactive) (car 1)) '
+               '(defun logging-live-slow () (interactive) (sleep-for 0.15)) '
+               '(global-set-key (kbd "<f9>") (function logging-live-fail)) '
+               '(global-set-key (kbd "<f8>") (function logging-live-slow)) t)')
+        for key in ('F9', 'F9', 'F8'):
+            a.keys('-k', key)
+            time.sleep(1)
+        a.eval('(progn (romacs-usage-log-flush) t)')
+        lines = [json.loads(line) for line in (directory / 'usage.jsonl').read_text().splitlines()]
+        errors = [l for l in lines if l.get('kind') == 'error' and l.get('command') == 'logging-live-fail']
+        slow = [l for l in lines if l.get('kind') == 'slow' and l.get('command') == 'logging-live-slow']
+        started = json.loads((directory / 'session.json').read_text())
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        own_end = json.loads((directory / 'session.json').read_text())
+        subprocess.run([args.romacs, '--server-exited', a.name], check=True, timeout=30,
+                       env={**a.env, 'INVOCATION_ID': 'live-logging-1', 'SERVICE_RESULT': 'success',
+                            'EXIT_CODE': 'exited', 'EXIT_STATUS': '0'})
+        ended = json.loads((directory / 'session.json').read_text())
+        result = {'directory': directory.name, 'errors': errors, 'slow': slow,
+                  'started': {k: started.get(k) for k in ('pid', 'server', 'start', 'end')},
+                  'ended': {k: ended.get(k) for k in ('end', 'seconds', 'status')}}
+        result['ok'] = (len(errors) == 2 and isinstance(errors[0].get('backtrace'), list)
+                        and 'logging-live-fail' in errors[0]['backtrace'] and 'backtrace' not in errors[1]
+                        and slow and slow[0]['max'] >= 150 and started.get('server') == a.name and 'end' not in started
+                        and isinstance(own_end.get('end'), (int, float)) and 'status' not in own_end
+                        and ended.get('end') == own_end['end'] and ended.get('status') == 0
+                        and ended.get('service', {}).get('result') == 'success')
+        return result
+    finally:
+        a.close()
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -1858,7 +1912,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment}
+             'environment': environment, 'logging': logging}
 
 
 def main():
@@ -1880,7 +1934,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
