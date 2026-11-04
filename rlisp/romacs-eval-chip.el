@@ -6,7 +6,8 @@
 ;; `romacs-eval-chip-mode' shows the value an evaluation command prints in
 ;; the echo area as a small glass layer right after the evaluated sexp,
 ;; in the manner of CIDER's inline results, and not also as a toast.  The
-;; chip is a layer (romacs-layer.el), so the buffer's text never shifts.
+;; chip is a `cursor' menu (romacs-popup.el), a layer, so the buffer's text
+;; never shifts.
 ;; What GNU prints, `current-message' and *Messages* are unchanged: the
 ;; chip takes the printed text at the command's return, and its echo
 ;; display is claimed once (`romacs-layer-echo-claim-functions').  An error
@@ -18,7 +19,7 @@
 
 (eval-when-compile (require 'cl-lib))
 (require 'subr-x)
-(require 'romacs-layer)
+(require 'romacs-popup)
 
 (defgroup romacs-eval-chip nil
   "Evaluation results shown after the evaluated sexp."
@@ -31,6 +32,11 @@
 (defcustom romacs-eval-chip-max-width 60
   "Most columns an eval chip's text takes; a longer value is cut with …."
   :type 'natnum)
+
+(defcustom romacs-eval-chip-command-errors t
+  "Whether the error a command run in a buffer window signals shows in
+a chip at point, rather than as a toast."
+  :type 'boolean)
 
 (defface romacs-eval-chip '((t :inherit romacs-layer-glass))
   "An eval chip's text and background.")
@@ -80,9 +86,30 @@ branch, not its buffer's."
   (and (null arg) (eq romacs-eval-chip--pp-echo 'echo)))
 
 (defvar romacs-eval-chip--claim nil
-  "The echo text a chip claims once: (TEXT DEPTH KIND ANCHOR).  KIND
+  "The echo text a chip claims once: (TEXT DEPTH KIND ANCHOR KEYS).  KIND
 `value': the chip shows already; `error': the command loop's report of
-an evaluation's error, ending with TEXT, shows the chip after ANCHOR.")
+an error, ending with TEXT, shows the chip after ANCHOR.  It holds while
+`recursion-depth' is DEPTH and `num-input-keys' KEYS: the next key
+sequence ends it, with no hook run for each key.")
+
+(defun romacs-eval-chip--release (anchor)
+  "Let ANCHOR's marker point nowhere."
+  (when (markerp (cdr anchor)) (set-marker (cdr anchor) nil)))
+
+(defun romacs-eval-chip--arm (text kind &optional anchor)
+  "Claim TEXT's echo display once, as KIND, from ANCHOR for an error."
+  (when romacs-eval-chip--claim (romacs-eval-chip--release (nth 3 romacs-eval-chip--claim)))
+  (setq romacs-eval-chip--claim (list (romacs-eval-chip--printable text) (recursion-depth) kind anchor num-input-keys)))
+
+(defun romacs-eval-chip--live-claim ()
+  "The claim if it still holds, else nil, forgetting a stale one."
+  (pcase romacs-eval-chip--claim
+    (`(,_ ,depth ,_ ,anchor ,keys)
+     (if (and (= depth (recursion-depth)) (= keys num-input-keys))
+         romacs-eval-chip--claim
+       (setq romacs-eval-chip--claim nil)
+       (romacs-eval-chip--release anchor)
+       nil))))
 
 (defvar romacs-eval-chip--shown nil
   "The shown chip's watch: (BUFFER POINT TICK WINDOW START TIMER).")
@@ -119,9 +146,7 @@ inserts before it."
                          (or (ignore-errors (save-excursion (end-of-defun) (skip-chars-backward " \t\n") (point))) (point))
                        (point)))))
 
-(defun romacs-eval-chip--release (anchor)
-  "Let ANCHOR's marker point nowhere."
-  (when (markerp (cdr anchor)) (set-marker (cdr anchor) nil)))
+
 
 (defun romacs-eval-chip-hide ()
   "Hide the eval chip, which fades."
@@ -129,7 +154,7 @@ inserts before it."
     (cancel-timer (nth 5 romacs-eval-chip--shown))
     (setq romacs-eval-chip--shown nil)
     (remove-hook 'post-command-hook #'romacs-eval-chip--watch)
-    (romacs-layer-hide (romacs-eval-chip--buffer))))
+    (romacs-popup-hide (romacs-eval-chip--buffer))))
 
 (defun romacs-eval-chip--printable (text)
   "TEXT as the echo area hands it to layers (echo.rs `romacs--echo-printable')."
@@ -146,11 +171,8 @@ ERROR.  Non-nil when shown; nothing when the position is not shown."
             (face (if error 'romacs-eval-chip-error 'romacs-eval-chip)))
         (with-current-buffer buffer
           (let ((inhibit-read-only t)) (erase-buffer) (insert (propertize chip 'face face)) (goto-char (point-min))))
-        (modify-frame-parameters (romacs-layer--frame buffer)
-                                 (romacs-layer-glass-parameters romacs-layer-glass face 4 6))
-        (set-window-hscroll (frame-root-window (romacs-layer--frame buffer)) 0)
-        (when (romacs-layer-show buffer :position (list 'at window (marker-position (cdr anchor)))
-                                 :columns (romacs-eval-chip--columns chip window) :lines 1)
+        (when (romacs-popup-show 'cursor buffer :anchor (cons window (marker-position (cdr anchor)))
+                                :columns (romacs-eval-chip--columns chip window) :lines 1 :face face)
           (setq romacs-eval-chip--shown
                 (list (window-buffer window) (window-point window)
                       (buffer-modified-tick (window-buffer window)) window (window-start window)
@@ -171,22 +193,11 @@ another window."
 (defun romacs-eval-chip--claim-echo (text)
   "Claim TEXT, the echo area's new message, when it is a chip's: the
 shown value's, or the report of a pending error, which shows its chip."
-  (pcase romacs-eval-chip--claim
-    (`(,want ,depth ,kind ,anchor)
-     (when (and (= depth (recursion-depth))
-                (if (eq kind 'error) (string-suffix-p want text) (equal want text)))
-       (romacs-eval-chip--disarm t)
-       (or (eq kind 'value) (romacs-eval-chip--try want anchor t))))))
-
-(defun romacs-eval-chip--disarm (&optional always)
-  "Forget the chip's claim, ALWAYS or as a command starts at its depth or
-out, and release a pending error's anchor."
-  (pcase romacs-eval-chip--claim
-    (`(,_ ,depth ,_ ,anchor)
-     (when (or always (<= (recursion-depth) depth))
+  (pcase (romacs-eval-chip--live-claim)
+    (`(,want ,_ ,kind ,anchor ,_)
+     (when (if (eq kind 'error) (string-suffix-p want text) (equal want text))
        (setq romacs-eval-chip--claim nil)
-       ;; A claimed error shows its chip first, from the anchor's position.
-       (unless always (romacs-eval-chip--release anchor))))))
+       (or (eq kind 'value) (romacs-eval-chip--try want anchor t))))))
 
 (defun romacs-eval-chip--try (text anchor error)
   "Show TEXT's chip after ANCHOR, tinted when ERROR; non-nil when shown.
@@ -213,11 +224,9 @@ reports it."
             (when (apply (cdr (assq command romacs-eval-chip-commands)) args)
               (let ((text (current-message)))
                 (when (romacs-eval-chip--try text anchor nil)
-                  (setq romacs-eval-chip--claim
-                        (list (romacs-eval-chip--printable text) (recursion-depth) 'value nil))))))
+                  (romacs-eval-chip--arm text 'value)))))
         (if error
-            (setq romacs-eval-chip--claim
-                  (list (romacs-eval-chip--printable error) (recursion-depth) 'error anchor))
+            (romacs-eval-chip--arm error 'error anchor)
           ;; The chip is placed once; its watch is point's, not the marker's.
           (romacs-eval-chip--release anchor))))))
 
@@ -235,13 +244,31 @@ showed its value.  Its echo branch messages its output buffer's one line
                           (with-current-buffer out (string-trim-right (buffer-substring-no-properties (point-min) (point-max)))))
                    'echo))))))
 
+(defun romacs-eval-chip--command-error (data &rest _)
+  "Arm a chip at point for the command loop's report of DATA, the error
+of the command just run in a buffer window: not a quit, not in a prompt,
+not where an evaluation armed its own.  Runs before `romacs--cmd-error'
+\(rlisp/vm/keyboard.el) reports it, so a process filter's or sentinel's
+error, which `command-error-function' also reports, stays a toast."
+  (when (and romacs-eval-chip-command-errors
+             (not (memq 'quit (get (car data) 'error-conditions)))
+             (not (memq 'minibuffer-quit (get (car data) 'error-conditions)))
+             (= (minibuffer-depth) 0) (not (window-minibuffer-p))
+             (not (romacs-eval-chip--live-claim)))
+    ;; Formatted as the reporter formats it (keyboard.el
+    ;; `romacs--cmd-error' binds these around `command-error-function').
+    (romacs-eval-chip--arm (let ((print-level 10) (print-length 10)) (error-message-string data))
+                           'error (cons (selected-window) (copy-marker (window-point))))))
+
 ;;;###autoload
 (define-minor-mode romacs-eval-chip-mode
   "Show evaluation results in a chip after the evaluated sexp.
 `eval-last-sexp', `eval-defun', `pp-eval-last-sexp' and
 `eval-expression' then show the value they print in the echo area, or
-their error, in a small layer after the sexp, not as a toast; the value
-is still the echo area's message and logged in *Messages*."
+their error, in a small layer after the sexp, not as a toast, and the
+error a command run in a buffer window signals shows in one at point
+\(`romacs-eval-chip-command-errors'); the text is still the echo area's
+message and logged in *Messages*."
   :global t :group 'romacs-eval-chip
   (dolist (entry romacs-eval-chip-commands)
     (let ((command (car entry)))
@@ -252,10 +279,10 @@ is still the echo area's message and logged in *Messages*."
   (if romacs-eval-chip-mode
       (progn (advice-add 'pp-display-expression :around #'romacs-eval-chip--pp-around)
              (add-hook 'romacs-layer-echo-claim-functions #'romacs-eval-chip--claim-echo)
-             (add-hook 'pre-command-hook #'romacs-eval-chip--disarm))
+             (advice-add 'romacs--cmd-error :before #'romacs-eval-chip--command-error))
     (advice-remove 'pp-display-expression #'romacs-eval-chip--pp-around)
     (remove-hook 'romacs-layer-echo-claim-functions #'romacs-eval-chip--claim-echo)
-    (remove-hook 'pre-command-hook #'romacs-eval-chip--disarm)
+    (advice-remove 'romacs--cmd-error #'romacs-eval-chip--command-error)
     (romacs-eval-chip-hide)))
 
 (provide 'romacs-eval-chip)

@@ -138,9 +138,9 @@ CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
 
 WHICH_KEY_INIT = '''(require 'which-key)
 (setq which-key-popup-type 'custom
-      which-key-custom-show-popup-function #'romacs-layer-which-key-show
-      which-key-custom-hide-popup-function #'romacs-layer-which-key-hide
-      which-key-custom-popup-max-dimensions-function #'romacs-layer-which-key-max-dimensions
+      which-key-custom-show-popup-function #'romacs-popup-which-key-show
+      which-key-custom-hide-popup-function #'romacs-popup-which-key-hide
+      which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions
       which-key-idle-delay 0.3)
 (which-key-mode 1)
 (defun popup-live--record (&rest _)
@@ -162,7 +162,7 @@ WHICH_KEY_INIT = '''(require 'which-key)
             :root-windows (mapcar (lambda (w) (list (window-pixel-top w) (window-pixel-height w)))
                                   (window-list (frame-parent frame) 'nomini))))
      nil {state} nil (quote quiet))))
-(advice-add 'romacs-layer-which-key-show :after #'popup-live--record)
+(advice-add 'romacs-popup-which-key-show :after #'popup-live--record)
 '''
 
 

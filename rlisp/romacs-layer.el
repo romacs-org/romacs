@@ -11,9 +11,8 @@
 ;; its own layer) by default, a centred box, or below point.  A
 ;; layer's frame is kept for its buffer's next show and deleted once the
 ;; buffer is killed.
-;; `romacs-layers' lists what is shown, for agents and tests.  The
-;; which-key functions at the end let `which-key-popup-type' `custom' show
-;; its popup in a layer.
+;; `romacs-layers' lists what is shown, for agents and tests.  Romacs's
+;; menus over layers are romacs-popup.el's.
 
 ;;; Code:
 
@@ -238,27 +237,9 @@ columns and lines."
                          :size (cons (frame-text-cols frame) (frame-text-lines frame))
                          :minibuffer (eq frame (romacs--minibuffer-host)))))
 
-;; which-key's `custom' popup type (which-key.el `which-key-custom-*').
-
-(defvar which-key--buffer)
-
-(defun romacs-layer-which-key-show (dimensions)
-  "Show which-key's buffer in a bottom layer; DIMENSIONS is (LINES . COLUMNS)."
-  (romacs-layer-show which-key--buffer :position 'bottom :lines (car dimensions)))
-
-(defun romacs-layer-which-key-hide ()
-  "Hide which-key's layer."
-  (when (buffer-live-p which-key--buffer)
-    (romacs-layer-hide which-key--buffer)))
-
-(defun romacs-layer-which-key-max-dimensions (_selected-window-width)
-  "The most which-key's layer shows, as (LINES . COLUMNS)."
-  (let ((root (romacs-layer--root-frame)))
-    (cons romacs-layer-max-lines
-          (- (/ (frame-text-width root) (frame-char-width root)) 2))))
-
-;; Messages as toasts: a stack in the frame's top-right corner, which
-;; covers no mode line and no minibuffer.  The echo area's semantics are
+;; Messages as toasts: a stack from the top-right corner of the selected
+;; window's text (or the frame's, `romacs-layer-toast-position'), which
+;; covers no status bar and no minibuffer.  The echo area's semantics are
 ;; GNU's (`message', `current-message', *Messages*); only where a message
 ;; shows is ours (DIVERGENCES.md VM2-ECHO-LAYER).
 
@@ -270,6 +251,13 @@ clears the echo area first."
 (defcustom romacs-layer-toast-max 3
   "Most message toasts shown at once; the oldest goes first."
   :type 'natnum)
+
+(defcustom romacs-layer-toast-position 'window
+  "Where message toasts stack.
+`window': from the top-right corner of the selected window's text, inside
+its pane, following the selection and the window's size.
+`frame': from the frame's top-right corner, below `romacs-chrome-top'."
+  :type '(choice (const window) (const frame)))
 
 (defvar romacs-layer-echo-claim-functions nil
   "Functions offered the echo area's new message before it shows as a
@@ -295,23 +283,77 @@ otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
          (width (min columns (max 1 (apply #'max (mapcar #'string-width lines))))))
     (cons width (min 6 (apply #'+ (mapcar (lambda (l) (max 1 (ceiling (string-width l) (float width)))) lines))))))
 
-(defun romacs-layer--toast-stack ()
-  "Place the shown toasts at the top right below `romacs-chrome-top',
-newest on top; a toast that would reach below `romacs-chrome-bottom'
-waits hidden."
+(defun romacs-layer--toast-window ()
+  "The window toasts show in: the root frame's selected window, or the
+window a prompt was entered from while the minibuffer is selected."
+  (let ((window (frame-selected-window (romacs-layer--root-frame))))
+    (if (window-minibuffer-p window)
+        (or (minibuffer-selected-window) (get-mru-window (romacs-layer--root-frame) nil t))
+      window)))
+
+(defcustom romacs-layer-toast-min-columns 16
+  "Fewest text columns a toast in the selected window has; a narrower
+window's toasts stack in the frame's corner."
+  :type 'natnum)
+
+(defconst romacs-layer--toast-padding 10
+  "A glass toast's padding: its `child-frame-border-width'.")
+
+(defvar romacs-layer--toast-placed nil
+  "What the toasts were last stacked for: the area and the toasts.")
+
+(defun romacs-layer--toast-area ()
+  "Where toasts stack, in the root frame's native pixels: (LEFT TOP RIGHT
+BOTTOM COLUMNS), COLUMNS the most a toast's text is wide.  The selected
+window's text area for `window' (`romacs-layer-toast-position'), else
+the frame's, below the chrome above it and above the chrome below it.
+A window too narrow for a toast of `romacs-layer-toast-min-columns' with
+its padding and margin inside it takes the frame's area instead."
   (let* ((root (romacs-layer--root-frame))
-         (cw (frame-char-width root)) (ch (frame-char-height root))
-         (inset (frame-internal-border-width root))
-         (bottom (romacs-chrome-bottom root))
-         (margin 12) (gap 8) (top (+ (romacs-chrome-top root) margin)))
+         (cw (frame-char-width root))
+         (window (and (eq romacs-layer-toast-position 'window) (romacs-layer--toast-window)))
+         (third (max 20 (/ (frame-text-cols root) 3)))
+         ;; The columns an area of PIXELS holds for a toast's text: less
+         ;; the margin, the glass padding either side and the column a
+         ;; window's last keeps for its continuation glyph.
+         (columns (lambda (pixels) (1- (/ (- pixels 12 (* 2 romacs-layer--toast-padding)) cw)))))
+    (or (and (window-live-p window)
+             (pcase-let ((`(,left ,top ,right ,bottom) (window-edges window t nil t)))
+               (let ((room (funcall columns (- right left))))
+                 (and (>= room romacs-layer-toast-min-columns)
+                      (list left top right (min bottom (romacs-chrome-bottom root)) (min third room))))))
+        (list 0 (romacs-chrome-top root) (- (frame-native-width root) (frame-internal-border-width root))
+              (romacs-chrome-bottom root) third))))
+
+(defun romacs-layer--toast-follow (frame)
+  "Restack the toasts after a change to FRAME's windows (the selection, a
+size), when FRAME is the root frame and where they go moved."
+  (when (and romacs-layer--toasts (eq frame (romacs-layer--root-frame))
+             (not (equal romacs-layer--toast-placed (cons (romacs-layer--toast-area) romacs-layer--toasts))))
+    (romacs-layer--toast-stack)))
+
+(defun romacs-layer--toast-hooks (on)
+  "Follow window changes while toasts show (ON), else not."
+  (dolist (hook '(window-selection-change-functions window-size-change-functions))
+    (if on (add-hook hook #'romacs-layer--toast-follow) (remove-hook hook #'romacs-layer--toast-follow))))
+
+(defun romacs-layer--toast-stack ()
+  "Place the shown toasts from the top right of `romacs-layer--toast-area'
+downward, newest on top; a toast that would pass its bottom waits hidden."
+  (pcase-let* ((root (romacs-layer--root-frame))
+               (cw (frame-char-width root)) (ch (frame-char-height root))
+               (`(,_ ,area-top ,right ,bottom ,columns) (romacs-layer--toast-area))
+               (margin 12) (gap 8) (top (+ area-top margin)))
+    (romacs-layer--toast-hooks romacs-layer--toasts)
+    (setq romacs-layer--toast-placed (cons (romacs-layer--toast-area) romacs-layer--toasts))
     (dolist (toast romacs-layer--toasts)
       (let* ((frame (romacs-layer--frame (car toast)))
              (border (or (frame-parameter frame 'child-frame-border-width) 0))
-             (size (romacs-layer--toast-size (nth 1 toast) (max 20 (/ (frame-text-cols root) 3))))
+             (size (romacs-layer--toast-size (nth 1 toast) columns))
              ;; One column more: a window's last holds its continuation glyph.
              (width (* (1+ (car size)) cw)) (height (* (cdr size) ch)))
         (set-frame-size frame width height t)
-        (set-frame-position frame (- (frame-native-width root) inset width (* 2 border) margin) top)
+        (set-frame-position frame (- right width (* 2 border) margin) top)
         (set-frame-parameter frame 'romacs-layer-edge 'top)
         (if (> (+ top height (* 2 border)) bottom)
             (when (frame-visible-p frame) (make-frame-invisible frame))
@@ -326,12 +368,15 @@ waits hidden."
   (romacs-layer--toast-stack))
 
 (defun romacs-layer-toast-clear ()
-  "Hide every toast, which fades, as the echo area clears."
-  (let ((toasts romacs-layer--toasts))
-    (setq romacs-layer--toasts nil)
-    (dolist (toast toasts)
-      (cancel-timer (nth 2 toast))
-      (romacs-layer-hide (car toast)))))
+  "Hide every toast, which fades, as the echo area clears.  Nothing to do
+when none shows: the echo area clears as every command starts."
+  (when romacs-layer--toasts
+    (let ((toasts romacs-layer--toasts))
+      (setq romacs-layer--toasts nil romacs-layer--toast-placed nil)
+      (romacs-layer--toast-hooks nil)
+      (dolist (toast toasts)
+        (cancel-timer (nth 2 toast))
+        (romacs-layer-hide (car toast))))))
 
 (defun romacs-layer-toast (text)
   "Show TEXT as a toast for `romacs-layer-toast-timeout' seconds.

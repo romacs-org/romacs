@@ -281,9 +281,11 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report.push(printed(&mut vm, "(prog1 (list rc-pick-result (car rc-pick-seen) (length rc-pick-seen)
                                                   (seq-every-p (lambda (r) (<= (nth 3 r) (- (nth 4 r) 20))) rc-pick-seen))
                                           (delete-other-windows) (setq romacs-complete-position 'top))"));
-        // Messages stack as toasts in the top-right corner, newest on top, at
-        // most three; the same message again extends the newest.
-        report.push(printed(&mut vm, "(progn (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
+        // Messages stack as toasts, newest on top, at most three; the same
+        // message again extends the newest. In the frame's top-right corner
+        // with `romacs-layer-toast-position' `frame' (the selected window's
+        // corner, the default, is tests/menus.rs's).
+        report.push(printed(&mut vm, "(let ((romacs-layer-toast-position 'frame)) (dolist (m '(\"one\" \"two\" \"three\" \"four\" \"four\")) (romacs-layer-toast m))
             (list (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts)
                   (let ((tops (mapcar (lambda (toast) (cdr (frame-position (romacs-layer--frame (car toast))))) romacs-layer--toasts)))
                     (equal tops (sort (copy-sequence tops) #'<)))

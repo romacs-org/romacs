@@ -182,8 +182,10 @@ or call the function `romacs-eval-chip-mode'.")
 
 `eval-last-sexp', `eval-defun', `pp-eval-last-sexp' and
 `eval-expression' then show the value they print in the echo area, or
-their error, in a small layer after the sexp, not as a toast; the value
-is still the echo area's message and logged in *Messages*.
+their error, in a small layer after the sexp, not as a toast, and the
+error a command run in a buffer window signals shows in one at point
+(`romacs-eval-chip-command-errors'); the text is still the echo area's
+message and logged in *Messages*.
 
 This is a global minor mode.  If called interactively, toggle the
 `Romacs-Eval-Chip mode' mode.  If the prefix argument is positive,
@@ -404,6 +406,11 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-pgtk.el
 
 (register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-g"))
+
+
+;;; Generated autoloads from romacs-popup.el
+
+(register-definition-prefixes "romacs-popup" '("romacs-popup-"))
 
 
 ;;; Generated autoloads from romacs-precompile.el

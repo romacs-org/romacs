@@ -430,6 +430,17 @@ thousandth a stack mark."
           (unless (get-text-property 0 'local-map s) (error "The shared keymap is not projected"))
           s))
 
+;; A key grid of N entries: one tall group of N/2 and N/2 more in groups
+;; of four, laid out in bands; linear, each row one `aref' per block.
+(scaling-probe menu-key-grid :gui t :n 400 :steps 1
+  :setup (let ((entry (lambda (i) (cons (format "k%d" i) (format "command %d" i)))))
+           (cons (switch-to-buffer (get-buffer-create "scaling-grid"))
+                 (cons (cons "Tall" (mapcar entry (number-sequence 1 (/ n 2))))
+                       (seq-map-indexed (lambda (_ g) (cons (format "G%d" g) (mapcar entry (number-sequence 1 4))))
+                                        (make-list (/ n 8) nil)))))
+  :body (progn (romacs-popup-key-grid (cdr it) 160)
+               (with-current-buffer (car it) (insert "x"))))
+
 ;; Clearing N toasts (the echo area's clearing at the next command) with N
 ;; more layers kept hidden: each toast hidden once, no restacking per
 ;; toast, its layer found without a walk over the kept ones.
@@ -439,6 +450,17 @@ thousandth a stack mark."
                 (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
                 n)
   :body (romacs-layer-toast-clear))
+
+;; N toasts following the selection between two windows, with N more
+;; layers kept hidden: one restack of N toasts per change, for the root
+;; frame only, never one per child frame's own window change.
+(scaling-probe toasts-follow :gui t :n 10 :steps 10
+  :setup (progn (dotimes (i n) (romacs-layer--frame (get-buffer-create (format " scaling-layer-%d" i))))
+                (delete-other-windows) (split-window-right)
+                (setq romacs-layer-toast-max n romacs-layer-toast-timeout 600 romacs-layer-toast-position 'window)
+                (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
+                n)
+  :body (select-window (next-window)))
 
 ;;;; Redisplay (GUI: the host lays out each step's change)
 

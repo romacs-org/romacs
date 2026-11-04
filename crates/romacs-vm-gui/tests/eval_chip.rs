@@ -198,7 +198,7 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         // one synced during the evaluation) is a toast, and the value's
         // display after it is still claimed; a second display is a toast.
         report.push(printed(&mut vm, "(progn (romacs-eval-chip--show \"7\" (cons (selected-window) (copy-marker (point))) nil)
-            (setq romacs-eval-chip--claim (list \"7\" (recursion-depth) 'value nil))
+            (romacs-eval-chip--arm \"7\" 'value)
             (dolist (m '(\"other\" \"7\" \"7\")) (romacs-complete--message m))
             (prog1 (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts) (romacs-complete--message nil) (romacs-eval-chip-hide)))"));
         // The error reaches `command-error-function' and *Messages* as without
@@ -221,7 +221,7 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         keys(&mut vm, &engine, &[24, 5]);
         report.push(printed(&mut vm, &format!("(list {STATE} (and romacs-eval-chip--claim (nth 2 romacs-eval-chip--claim)))")));
         keys(&mut vm, &engine, &[2]);
-        report.push(printed(&mut vm, "(prog1 (list romacs-eval-chip--claim nil) (setq command-error-function chip-saved-cef))"));
+        report.push(printed(&mut vm, "(prog1 (list (romacs-eval-chip--live-claim) nil) (setq command-error-function chip-saved-cef))"));
         keys(&mut vm, &engine, &[6]);
         // An error an outer handler catches: GNU reports nothing; neither
         // does the chip, and the debugger is not entered.

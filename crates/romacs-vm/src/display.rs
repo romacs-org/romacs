@@ -691,9 +691,17 @@ impl Vm {
             let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
                 .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
             let shadow = self.frame_parameter_of(frame, "romacs-layer-shadow")?.is_some_and(|v| v != Value::NIL);
+            // A layer whose `romacs-layer-motion' is `fade' (a chip, hints)
+            // only fades: the slide and tweens are off for it.
+            let fade = self.intern("fade");
+            let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
+            let animation = match self.layer_animation() {
+                romacs_layout_input::LayerAnimation::Full if fades => romacs_layout_input::LayerAnimation::Reduced,
+                animation => animation,
+            };
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, background_alpha, windows,
-                                                                     animation: self.layer_animation(), edge, selection,
+                                                                     animation, edge, selection,
                                                                      radius, glow, shadow });
         }
         Ok(children)
