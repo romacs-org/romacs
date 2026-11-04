@@ -540,6 +540,19 @@ impl Vm {
                 let value = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).map(|(_,v,_,_)| *v).unwrap_or(self.slots[slot].value);
                 Ok(truth(value != Value::UNBOUND))
             }
+            // GNU Fdefvar without a value at a loading file's own level: the
+            // name is special for the rest of the file, and macroexp.el's
+            // `macroexp--dynvars' records it as macroexpand--all-toplevel does.
+            DefvarFileLocal => {
+                let name = self.symbol_names[original].clone();
+                if self.file_specials.insert(name) {
+                    let dynvars = self.slot("macroexp--dynvars");
+                    let declared = self.variable_value(dynvars)?;
+                    let declared = self.keymap_cons(symbol, declared);
+                    self.set_variable_value(dynvars, declared)?;
+                }
+                Ok(symbol)
+            }
             // GNU defvar: Fset_default, or a let-shadowed toplevel binding's
             // saved value written in place, without notification.
             DefvarSetDefault => {

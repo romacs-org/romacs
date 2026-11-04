@@ -71,6 +71,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeVariableBufferLocal
         | CustomVariableP
         | DefvarBoundp
+        | DefvarFileLocal
         | GetBuffer
         | Fboundp
         | Makunbound
