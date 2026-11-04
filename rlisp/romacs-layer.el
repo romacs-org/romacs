@@ -235,9 +235,9 @@ bottom.  As (LEFT TOP WIDTH HEIGHT), or nil when POS is not shown."
   "Show BUFFER in a layer over the frame and return the layer's frame.
 POSITION is `bottom', `center', `point' or (at WINDOW POS),
 `romacs-layer-position' by default; nil, showing nothing, when POS is
-not shown in WINDOW.  COLUMNS and LINES size it, by default to BUFFER's text, at
-most MAX-LINES lines, by default `romacs-layer-max-lines'; a `bottom' layer is as wide as the
-frame."
+not shown in WINDOW.  COLUMNS and LINES size it, by default to BUFFER's
+text, at most MAX-LINES lines, by default `romacs-layer-max-lines'; a
+`bottom' layer is as wide as the frame."
   (let* ((buffer (window-normalize-buffer buffer))
          (frame (romacs-layer--frame buffer))
          (text (romacs-layer--text-size buffer))

@@ -426,6 +426,20 @@ segment; MAP nil, the repeat over, clears that."
       (setq romacs-mode-line-repeat text)
       (force-mode-line-update t))))
 
+(defvar repeat-mode)
+(defvar repeat-echo-function)
+(declare-function repeat-echo-message "repeat" (map))
+
+(defun romacs-popup--repeat-echo-install ()
+  "As `repeat-mode' turns on, show its pending repeats through
+`romacs-popup-repeat-echo' where `repeat-echo-function' is still GNU's
+`repeat-echo-message' (a message, a toast after every repeat); a user's
+own choice stays."
+  (when (and repeat-mode (eq repeat-echo-function #'repeat-echo-message))
+    (setq repeat-echo-function #'romacs-popup-repeat-echo)))
+
+(add-hook 'repeat-mode-hook #'romacs-popup--repeat-echo-install)
+
 (define-minor-mode romacs-popup-hints-mode
   "Show the keys of an active transient map (repeat-mode's and the like)
 as hints at the bottom of the selected window, after a pause."

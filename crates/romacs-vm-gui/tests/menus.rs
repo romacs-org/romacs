@@ -321,6 +321,15 @@ fn menus_share_one_look_and_motion() {
             (setq romacs-popup--hints-scheduled nil)
             (dotimes (_ 5) (let ((overriding-terminal-local-map (make-sparse-keymap))) (ignore)))
             (list (and (gethash map romacs-popup--hint-maps) t) romacs-popup--hints-shown romacs-popup--hints-pending romacs-popup--hints-scheduled))"));
+        // repeat-mode turned on takes Romacs's echo over GNU's message, and
+        // leaves a user's own.
+        report.push(printed(&mut vm, "(let (r)
+            (setq repeat-echo-function #'repeat-echo-message) (repeat-mode 1)
+            (push repeat-echo-function r) (repeat-mode -1)
+            (setq repeat-echo-function #'ignore) (repeat-mode 1)
+            (push repeat-echo-function r) (repeat-mode -1)
+            (setq repeat-echo-function #'repeat-echo-message)
+            (nreverse r))"));
         report
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
@@ -367,5 +376,6 @@ fn menus_share_one_look_and_motion() {
         "(t (nil nil nil nil) t t nil t (t nil) (t t t) (nil nil))",
         "(t nil)",
         "(t nil nil nil)",
+        "(romacs-popup-repeat-echo ignore)",
     ]);
 }
