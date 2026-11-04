@@ -259,6 +259,16 @@ class BuildAndRun(unittest.TestCase):
         self.assertEqual(effective['ROMACS_FORCE_ORACLE_PATH'], gate.ORACLE)
         self.assertEqual(effective['CARGO_WORKSPACE_DIR'], str(root))
 
+    def test_run_environment_drops_a_running_editors_launch_variables(self):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/gnu-lisp',
+                      ROMACS_USAGE_LOG='/sessions/ended/usage.jsonl', ROMACS_GUI_FONT='Iosevka',
+                      ROMACS_GUI_FONT_SIZE='15')
+        with mock.patch.dict(os.environ, editor):
+            effective = gate.run_env(root, root / 'private')
+        for name in editor:
+            self.assertNotIn(name, effective)
+
     def test_font_cache_survives_private_home_normalization(self):
         for override in (None, '/persistent/fonts'):
             with mock.patch.dict(os.environ, {}, clear=True):

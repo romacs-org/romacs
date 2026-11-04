@@ -253,7 +253,10 @@ call stays running until its answer is ready."
         (generation (cl-incf romacs-agent-tools--generation)))
     (when (> budget 0) (romacs--call-deadline generation budget))
     (unwind-protect
-        (romacs-mcp-eval-string (gethash "code" arguments))
+        ;; A command the agent's code starts gets no editor launch variable
+        ;; either (`romacs-agent--editor-variables').
+        (let ((process-environment (romacs-agent--harness-environment)))
+          (romacs-mcp-eval-string (gethash "code" arguments)))
       (romacs--call-deadline nil))))
 
 ;;; Delegation (T3 Code's delegate_task, task_status, task_cancel)

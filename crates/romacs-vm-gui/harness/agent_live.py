@@ -34,6 +34,7 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  environment  a harness sees none of the editor's own launch variables.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
              and history.
@@ -1272,6 +1273,41 @@ def unicode(args, base):
         a.close()
 
 
+def environment(args, base):
+    """A harness gets the editor's environment but for the editor's own
+    launch variables (its build, its usage log, its font): a session's
+    harness, after they are set in the editor, sees none of them, and
+    sees the editor's other variables."""
+    a = Agents(args, base, 'ev')
+    try:
+        a.up()
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/gnu-lisp',
+                  'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
+                  'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
+        a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in launch.items()) + ' t)')
+        sid = a.start('say ready')
+        a.idle(sid)
+        seen = next(e.get('env', {}) for e in a.logged() if e.get('started') == sid)
+        # A command the agent's own evaluation starts in the editor.
+        a.send(sid, 'call romacs_eval ' + json.dumps(
+            {'instance': '?', 'code': '(shell-command-to-string "env | grep ^ROMACS_ | sort")'}))
+        a.idle(sid)
+        from_eval = a.tool_results()[-1][1]
+        # The unit unsets them even from the user manager's environment.
+        unit = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
+        unset = subprocess.run(['systemctl', '--user', 'show', '-p', 'UnsetEnvironment', unit],
+                               capture_output=True, text=True).stdout.strip() if unit != 'nil' else 'no unit'
+        result = {'harness_romacs_env': seen, 'eval_env': from_eval, 'unit_unset': unset}
+        result['ok'] = (not any(k in seen for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
+                        and seen.get('ROMACS_AGENT_TEST_KEPT') == 'kept'
+                        and not any(k in from_eval for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
+                        and 'ROMACS_AGENT_TEST_KEPT' in from_eval
+                        and (unset == 'no unit' or all(k in unset for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')))
+        return result
+    finally:
+        a.close()
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -1747,7 +1783,8 @@ def history_real(args, base):
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
-             'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode}
+             'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
+             'environment': environment}
 
 
 def main():
@@ -1769,7 +1806,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)

@@ -914,6 +914,20 @@ here; non-nil when that ends with the harness's exit."
        (cl-loop for (key . name) in romacs-agent--option-keys
                 when (gethash name object) append (list key (gethash name object)))))
 
+(defconst romacs-agent--editor-variables
+  '("ROMACS_RUNTIME_ROOT" "ROMACS_LISP_DIR" "ROMACS_USAGE_LOG" "ROMACS_GUI_FONT" "ROMACS_GUI_FONT_SIZE")
+  "The editor's own launch variables: they describe this editor's run (its
+build, its usage log, its font), so no harness or command it runs
+inherits them.")
+
+(defun romacs-agent--harness-environment ()
+  "The editor's environment without its own launch variables: a list of
+its own, so a `setenv' under it never changes the editor's."
+  (copy-sequence
+   (cl-remove-if (lambda (entry)
+                   (cl-some (lambda (name) (string-prefix-p (concat name "=") entry)) romacs-agent--editor-variables))
+                 process-environment)))
+
 (defun romacs-agent--environment-arguments ()
   "systemd-run arguments giving a unit this session's environment, by
 name: systemd-run takes each value from its own environment, so none
@@ -938,17 +952,23 @@ harness as its whole stdin."
     (make-directory (file-name-directory (romacs-agent-host-socket session)) t)
     (set-file-modes (file-name-directory (romacs-agent-host-socket session)) #o700)
     ;; Arguments (paths, a directory) go out as UTF-8, whatever the locale:
-    ;; the supervisor reads UTF-8.
-    (if (zerop (let ((coding-system-for-write 'utf-8-unix))
+    ;; the supervisor reads UTF-8.  The harness gets the editor's
+    ;; environment but for the editor's own launch variables.
+    (if (zerop (let ((coding-system-for-write 'utf-8-unix)
+                     (process-environment (romacs-agent--harness-environment)))
                  (apply #'call-process "systemd-run" nil nil nil
                       (append (list "--user" "--quiet" "--collect" (concat "--unit=" unit)
                                     "--slice=romacs-agents.slice"
                                     (concat "--working-directory=" (expand-file-name default-directory)))
                               (mapcar (lambda (p) (concat "--property=" p)) romacs-agent-unit-properties)
+                              ;; Nor from the user manager's own environment.
+                              (list (concat "--property=UnsetEnvironment="
+                                            (string-join romacs-agent--editor-variables " ")))
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
-      (let ((coding-system-for-write 'utf-8-unix))
+      (let ((coding-system-for-write 'utf-8-unix)
+            (process-environment (romacs-agent--harness-environment)))
         (apply #'call-process "setsid" nil 0 nil "--fork" command))
       (setf (romacs-agent-unit session) nil))
     (romacs-agent--manifest session argv)))
