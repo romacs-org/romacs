@@ -882,6 +882,56 @@ thousandth a stack mark."
            (list :path file :id "scaling-view" :harness 'claude :provider "claude" :cwd "/tmp" :title "view"))
   :body (kill-buffer (romacs-agent-history-open it)))
 
+;; A chat of N characters over a fixed 100 turns.
+(defun scaling--big-chat (n)
+  (scaling--agent)
+  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :title "big"
+                                     :dir temporary-file-directory))
+        (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
+    (romacs-agent-show session)
+    (dotimes (i 100)
+      (let ((seq (* 10 i)) (id (format "m%d" i)))
+        (romacs-agent-ui--render session (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
+        (romacs-agent-ui--render session (list :type 'delta :text reply :message id :seq (+ seq 2) :last t))
+        (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
+    (romacs-agent-buffer session)))
+
+;; A resize of that chat refits its 100 rules: flat in the transcript's size.
+(scaling-probe agent-chat-refit :n 100000 :k 10
+  :setup (scaling--big-chat n)
+  :body (with-current-buffer it
+          (dolist (width '(61 62 63 64 65))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; A resize of a chat of N turns refits its N rules once each: linear.
+(scaling-probe agent-chat-refit-rules :n 200
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-rules-chat" :harness 'claude :title "rules"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  (dotimes (i n)
+                    (romacs-agent-ui--render session (list :type 'input :text "p" :seq (+ (* 10 i) 1) :last t))
+                    (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ (* 10 i) 2) :last t)))
+                  (romacs-agent-buffer session)))
+  :body (with-current-buffer it
+          (dolist (width '(61 62 60 63 59))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; Keys typed into that chat's composer (with the post-command hook): flat.
+(scaling-probe agent-chat-typing :n 100000 :k 10
+  :setup (with-current-buffer (scaling--big-chat n) (goto-char (point-max)) (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (_ 50)
+            (let ((last-command-event ?a) (this-command 'romacs-agent-chat-self-insert))
+              (call-interactively #'romacs-agent-chat-self-insert)
+              (run-hooks 'post-command-hook)))
+          (dotimes (_ 10)
+            (let ((this-command 'romacs-agent-chat-backward-kill-word))
+              (call-interactively #'romacs-agent-chat-backward-kill-word)
+              (run-hooks 'post-command-hook)))))
+
 ;; A chat of N whole turns: the prompt, a streamed reply, its Markdown, the footer.
 (scaling-probe agent-chat-turns :n 100
   :setup (progn (scaling--agent)

@@ -81,6 +81,10 @@ much of it its deltas wrote.")
 (defvar-local romacs-agent-ui--history nil)
 (defvar-local romacs-agent-ui--composer nil
   "The overlay at the composer's start: the live rule and the empty hint.")
+(defvar-local romacs-agent-ui--fills nil
+  "A marker at the start of each turn rule's fill, as they are drawn.")
+(defvar-local romacs-agent-ui--fitted nil
+  "The width the rules' fills last fitted.")
 (defvar-local romacs-agent-ui--tool nil
   "The running tool's name, for the live rule.")
 
@@ -111,9 +115,15 @@ the end marker and every marker there (the composer, a window's point at
 the composer, follow the transcript); a row's mark or a message's start
 is always taken after its own text is in."
   (save-excursion
-    (let ((inhibit-read-only t) (text (romacs-agent-ui--sealed text)))
-      (goto-char position)
-      (if (= position romacs-agent-ui--end) (insert-before-markers text) (insert text)))))
+    ;; A number: the end marker moves past what is inserted at it.
+    (let ((inhibit-read-only t) (text (romacs-agent-ui--sealed text)) (start (+ 0 position)))
+      (goto-char start)
+      (if (= start romacs-agent-ui--end) (insert-before-markers text) (insert text))
+      ;; A rule's fill, remembered: a resize refits the rules alone.
+      (when-let* ((offset (text-property-any 0 (length text) 'romacs-agent-rule-fill t text)))
+        (push (copy-marker (+ start offset)) romacs-agent-ui--fills)
+        ;; Drawn at the width of its day: the next refit visits every rule.
+        (setq romacs-agent-ui--fitted nil)))))
 
 (defun romacs-agent-ui--insert (text &rest properties)
   "Insert TEXT at the transcript's end with PROPERTIES, sealed."
@@ -226,26 +236,35 @@ characters to the window's width: Romacs's display does not yet paint
 a face's strike-through on hermes's stretch glyphs."
   (let* ((lead (propertize "──" 'face 'romacs-agent-rule))
          (head (if text (concat lead " " text " ") lead)))
-    (concat head (propertize (make-string (max 0 (- (romacs-agent-ui--rule-width) (string-width head))) ?─)
+    (concat head (propertize (make-string (max 1 (- (romacs-agent-ui--rule-width) (string-width head))) ?─)
                              'face 'romacs-agent-rule 'romacs-agent-rule-fill t))))
 
 (defun romacs-agent-ui--refit-rules (&rest _)
-  "The window's width changed: each turn's rule fills it again (once per
-resize, over the turns' rules)."
+  "The window's width changed: each turn's rule fills it again.  Only the
+rules are visited (their fills' markers), never the transcript, and a fill
+already that wide is left alone."
   (when (and (derived-mode-p 'romacs-agent-chat-mode) (markerp romacs-agent-ui--end))
-    (let ((width (romacs-agent-ui--rule-width)) (inhibit-read-only t) (position (point-min)))
-      (save-excursion
-        (while (setq position (text-property-any position romacs-agent-ui--end 'romacs-agent-rule-fill t))
-          (goto-char position)
-          (let ((end (or (next-single-property-change position 'romacs-agent-rule-fill nil romacs-agent-ui--end)
-                         romacs-agent-ui--end))
-                (fill (max 0 (- width (string-width (buffer-substring (line-beginning-position) position))))))
-            (delete-region position end)
-            (goto-char position)
-            (insert (romacs-agent-ui--sealed
-                     (propertize (make-string fill ?─) 'face 'romacs-agent-rule 'romacs-agent-rule-fill t)))
-            (setq position (point))))))
-    (romacs-agent-ui--composer-update)))
+    (let ((width (romacs-agent-ui--rule-width)))
+      (unless (eql width romacs-agent-ui--fitted)
+        (setq romacs-agent-ui--fitted width)
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (dolist (marker romacs-agent-ui--fills)
+              (let* ((start (marker-position marker))
+                     (end (next-single-property-change start 'romacs-agent-rule-fill nil (point-max)))
+                     (fill (progn (goto-char start)
+                                  (max 1 (- width (string-width (buffer-substring (line-beginning-position) start)))))))
+                ;; Its tail alone changes: the first character, where its
+                ;; marker is, stays (an edit there costs every marker's
+                ;; record in the undo list).
+                (cond ((> fill (- end start))
+                       (goto-char end)
+                       (insert (romacs-agent-ui--sealed
+                                (propertize (make-string (- fill (- end start)) ?─)
+                                            'face 'romacs-agent-rule 'romacs-agent-rule-fill t))))
+                      ((< fill (- end start))
+                       (delete-region (+ start fill) end)))))))
+        (romacs-agent-ui--composer-update)))))
 
 (defun romacs-agent-ui--render (session event)
   "Show SESSION's EVENT in its chat buffer, when it has one and has not
@@ -456,6 +475,7 @@ or a repeat."
     (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
     (define-key map (kbd "DEL") #'romacs-agent-chat-delete-backward)
     (define-key map [remap self-insert-command] #'romacs-agent-chat-self-insert)
+    (define-key map [remap backward-kill-word] #'romacs-agent-chat-backward-kill-word)
     (define-key map (kbd "C-c C-c") #'romacs-agent-chat-interrupt)
     (define-key map (kbd "C-c C-k") #'romacs-agent-chat-stop)
     (define-key map (kbd "C-c C-r") #'romacs-agent-chat-resume)
@@ -485,11 +505,15 @@ or a repeat."
   ;; Shown again while its turn runs: the live rule ticks again.
   (add-hook 'window-buffer-change-functions #'romacs-agent-ui--shown-again nil t))
 
-(defun romacs-agent-ui--shown-again (&rest _)
-  (when (and romacs-agent-ui--session
-             (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
-    (romacs-agent-ui--composer-update)
-    (romacs-agent-ui--tick-start)))
+(defun romacs-agent-ui--shown-again (&optional window)
+  "WINDOW shows this chat again: rules drawn while it was hidden fit it,
+and a running turn's live rule ticks."
+  (with-current-buffer (if (window-live-p window) (window-buffer window) (current-buffer))
+    (romacs-agent-ui--refit-rules)
+    (when (and romacs-agent-ui--session
+               (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
+      (romacs-agent-ui--composer-update)
+      (romacs-agent-ui--tick-start))))
 
 (defun romacs-agent-show (session)
   "Show SESSION's chat buffer, made from its journal when new."
@@ -602,6 +626,15 @@ transcript, it goes to the composer's end."
 ;; A selection in the composer is replaced by what is typed, as with
 ;; `self-insert-command'.
 (put 'romacs-agent-chat-self-insert 'delete-selection 'delete-selection-uses-region-p)
+
+(defun romacs-agent-chat-backward-kill-word (n)
+  "Kill N words backward, in the composer no further than its start: the
+transcript above it is not the composer's to kill."
+  (interactive "p")
+  (if (not (romacs-agent-ui--in-composer-p))
+      (backward-kill-word n)
+    ;; Point first: consecutive kills join in the buffer's order.
+    (kill-region (point) (max romacs-agent-ui--end (save-excursion (backward-word n) (point))))))
 
 (defun romacs-agent-chat-delete-backward (n)
   "Delete N characters backward in the composer; at its start, nothing:
