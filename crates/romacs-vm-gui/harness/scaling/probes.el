@@ -563,6 +563,36 @@ thousandth a stack mark."
   :body (progn (romacs-popup--hint-target)
                (with-current-buffer it (insert "x"))))
 
+;; A key-hint card for a prefix of N bindings over M active minor-mode
+;; maps that bind under it and R which-key replacements: one traversal of
+;; each map, one replacement pass per entry, one layout; linear in each.
+(scaling-probe key-card-bindings :gui t :n 100 :steps 1
+  :setup (let ((map (make-sparse-keymap)))
+           (dotimes (i n) (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char))
+           (use-local-map map)
+           (switch-to-buffer (get-buffer-create "scaling-card")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
+(scaling-probe key-card-maps :gui t :n 20 :steps 1
+  :setup (progn
+           (dotimes (i n)
+             (let ((map (make-sparse-keymap)) (mode (intern (format "scaling-card-mode-%d" i))))
+               (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char)
+               (set mode t)
+               (push (cons mode map) minor-mode-map-alist)))
+           (switch-to-buffer (get-buffer-create "scaling-card-maps")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
+(scaling-probe key-card-replacements :gui t :n 50 :steps 1
+  :setup (progn
+           (require 'which-key)
+           (let ((map (make-sparse-keymap)))
+             (dotimes (i 40) (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char))
+             (use-local-map map))
+           (dotimes (i n) (which-key-add-key-based-replacements (format "<f11> %d" i) "scaling"))
+           (switch-to-buffer (get-buffer-create "scaling-card-repl")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
 ;; One more package entry written to a `mode-line-modes' of N: the
 ;; watcher rebuilds the extras once per write, linear in the entries,
 ;; and nothing per key or redisplay.

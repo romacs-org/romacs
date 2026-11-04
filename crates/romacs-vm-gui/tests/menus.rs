@@ -380,3 +380,202 @@ fn menus_share_one_look_and_motion() {
         "(romacs-popup-repeat-echo ignore)",
     ]);
 }
+
+/// A host keyboard holding these keys, then nothing.
+struct HostKeys(std::collections::VecDeque<CommandEvent>);
+impl romacs_vm::HostInput for HostKeys {
+    fn input_pending(&mut self) -> bool { !self.0.is_empty() }
+    fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<romacs_vm::HostEvent, String> {
+        self.0.pop_front().map(romacs_vm::HostEvent::Key).ok_or_else(|| "keys exhausted".into())
+    }
+}
+
+/// The key-hint card (popup-layers.md §19.2): which-key's automatic hints
+/// for a pending prefix as a content-sized card at the selected pane's
+/// bottom right, its bindings resolved as `key-binding' resolves them,
+/// labelled through which-key's replacements, paged with the prefix's
+/// help key inside the read.
+#[test]
+fn key_hint_cards() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
+        vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
+        vm.set_echo_area_host(true);
+        vm.eval_source("(progn (require 'which-key)
+            (setq which-key-popup-type 'custom which-key-custom-show-popup-function #'romacs-popup-which-key-show
+                  which-key-custom-hide-popup-function #'romacs-popup-which-key-hide
+                  which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions)
+            (which-key-mode 1) (switch-to-buffer (get-buffer-create \"card.txt\")) (insert \"text\\n\"))").unwrap();
+        let mut report = vec![];
+        // Precedence: within the local map a child's nil hides its parent's
+        // binding, which falls through to the global one; `ignore' wins and
+        // hides; prefixes first, then a mode's commands, then global ones.
+        report.push(printed(&mut vm, "(let ((global (make-sparse-keymap)) (parent (make-sparse-keymap)) (local (make-sparse-keymap))
+                  (sub (make-sparse-keymap)) (old (current-global-map)))
+            (define-key global [f12 ?a] #'forward-char) (define-key global [f12 ?b] #'backward-char)
+            (define-key global [f12 ?c] #'next-line) (define-key sub \"x\" #'forward-word) (define-key global [f12 ?p] sub)
+            (define-key parent [f12 ?b] #'kill-line) (define-key parent [f12 ?d] #'undo)
+            (set-keymap-parent local parent) (define-key local [f12 ?b] nil) (define-key local [f12 ?c] #'ignore)
+            (unwind-protect
+                (with-temp-buffer
+                  (use-global-map global) (use-local-map local)
+                  (mapcar (lambda (e) (list (string-to-multibyte (car e)) (string-to-multibyte (substring-no-properties (nth 1 e))) (nth 2 e) (nth 3 e)))
+                          (romacs-popup--card-entries [f12])))
+              (use-global-map old)))"));
+        // Labels: a menu-item's name, a which-key replacement verbatim, one
+        // that hides, GNU's own prefix map by name, a name humanised.
+        report.push(printed(&mut vm, "(let ((map (make-sparse-keymap)) (old (current-global-map))
+                  (which-key-replacement-alist (cons '((nil . \"\\\\`yank\\\\'\") . (lambda (_) nil)) which-key-replacement-alist)))
+            (define-key map [f11 ?m] '(menu-item \"Do the menu thing\" forward-word))
+            (define-key map [f11 ?r] #'kill-ring-save) (define-key map [f11 ?s] #'yank)
+            (define-key map [f11 ?4] ctl-x-4-map) (define-key map [f11 ?w] 'card-thing-command)
+            (which-key-add-key-based-replacements \"<f11> r\" \"copy\")
+            (unwind-protect
+                (with-temp-buffer
+                  (use-local-map map)
+                  (mapcar (lambda (e) (cons (string-to-multibyte (car e)) (string-to-multibyte (substring-no-properties (nth 1 e))))) (romacs-popup--card-entries [f11])))
+              (use-global-map old)))"));
+        // Pages: one when they fit; else pages whose last row says how many
+        // more and the help key; none when a page holds no entry.
+        report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) (format \"command-%d\" i) nil 'global i)) (number-sequence 0 29))))
+            (list (length (romacs-popup--card-pages (seq-take entries 4) 5 40))
+                  (let ((pages (romacs-popup--card-pages entries 5 40)))
+                    (list (length pages) (substring-no-properties (car (last (split-string (car pages) \"\\n\"))))))
+                  (romacs-popup--card-pages entries 1 10)))"));
+        // GNU's prefixes named: an ESC map `meta', the anonymous C-x 8 map by
+        // its key, a map by its variable, GNU's own by name.
+        report.push(printed(&mut vm, "(let ((entries (romacs-popup--card-entries [24])))
+            (mapcar (lambda (k) (cons k (string-to-multibyte (substring-no-properties (nth 1 (assoc k entries)))))) '(\"ESC\" \"8\" \"v\" \"4\" \"r\")))"));
+        // The card's window is wider than its widest row, so no row meets
+        // the truncation glyph; no label is cut where the columns fit.
+        report.push(printed(&mut vm, "(progn (setq which-key--automatic-display t) (romacs-popup--card-record [24] nil) (romacs-popup--card-render [24] 0)
+            (let* ((w (frame-root-window (romacs-layer--frame-of which-key--buffer)))
+                   (lines (with-current-buffer which-key--buffer (split-string (buffer-substring-no-properties (point-min) (point-max)) \"\\n\"))))
+              (prog1 (list (> (window-max-chars-per-line w) (seq-max (mapcar #'string-width lines)))
+                           (seq-some (lambda (l) (and (string-search \"…\" l) (not (string-search \"more\" l)))) lines))
+                (romacs-popup-which-key-hide))))"));
+        // which-key's automatic hint for C-x: the card, titled C-x, at the
+        // selected pane's bottom right 12 px in, which-key told the prefix
+        // shows; hidden by the next key's read, its state kept.
+        report.push(printed(&mut vm, "(progn (setq which-key--automatic-display t)
+            (which-key--create-buffer-and-show (kbd \"C-x\"))
+            (let* ((f (romacs-layer--frame-of which-key--buffer)) (e (window-edges (selected-window) t nil t)) (pos (frame-position f)))
+              (list (frame-parameter f 'romacs-popup-kind) (frame-visible-p f)
+                    (string-to-multibyte (with-current-buffer which-key--buffer (buffer-substring-no-properties (point-min) (line-end-position))))
+                    (equal (which-key--pages-prefix which-key--pages-obj) (kbd \"C-x\"))
+                    (and (memq #'romacs-popup--card-hide romacs--key-read-functions) t)
+                    (= (+ (car pos) (frame-pixel-width f)) (- (nth 2 e) 12)) (>= (car pos) (+ (nth 0 e) 12))
+                    (<= (+ (cdr pos) (frame-pixel-height f)) (- (nth 3 e) 12))
+                    (> (length (nth 2 romacs-popup--card)) 1))))"));
+        report.push(printed(&mut vm, "(progn (run-hook-with-args 'romacs--key-read-functions ?a)
+            (list (frame-visible-p (romacs-layer--frame-of which-key--buffer)) (car romacs-popup--card)
+                  (memq #'romacs-popup--card-hide romacs--key-read-functions)))"));
+        // The help key pages it, wrapping; which-key's hide ends it.
+        report.push(printed(&mut vm, "(let (pages)
+            (dotimes (_ (1+ (length (nth 2 romacs-popup--card))))
+              (romacs-popup--card-help [24] ?\\C-h) (push (nth 1 romacs-popup--card) pages))
+            (prog1 (list (nreverse pages) (frame-visible-p (romacs-layer--frame-of which-key--buffer)))
+              (romacs-popup-which-key-hide)))"));
+        report.push(printed(&mut vm, "(list romacs-popup--card (frame-visible-p (romacs-layer--frame-of which-key--buffer)))"));
+        // Over point at the bottom right, the card goes bottom left.
+        report.push(printed(&mut vm, "(let* ((w (selected-window)) (bounds (romacs-popup--card-bounds w)) (e (window-edges w t nil t)))
+            (cl-letf (((symbol-function 'posn-at-point)
+                       (lambda (&rest _) (list w 1 (cons (- (nth 2 e) (nth 0 e) 30) (- (nth 3 e) (nth 1 e) 30)) 0))))
+              (list (= (car (romacs-popup--card-place w bounds 200 100)) (nth 0 bounds))
+                    (= (car (cl-letf (((symbol-function 'posn-at-point) (lambda (&rest _) nil)))
+                              (romacs-popup--card-place w bounds 200 100)))
+                       (- (nth 2 bounds) 200)))))"));
+        // The reader: an unbound help key after a prefix runs
+        // `prefix-help-command' with the whole sequence (GNU's fallback) when
+        // the card is not the display; with the card, the read goes on and a
+        // macro recorded while paging holds no help key.
+        // Host keys, read by the command loop as the GUI's are.
+        let host = |vm: &mut Vm, codes: &[i64]| {
+            vm.set_host_input(Some(Box::new(HostKeys(codes.iter().map(|&c| CommandEvent::Character(c)).collect()))));
+            paint(vm, &engine);
+            command::run(vm).unwrap();
+            paint(vm, &engine);
+        };
+        vm.eval_source("(progn (defvar card-help-keys nil) (defvar card-took nil) (which-key-mode -1)
+            (setq prefix-help-command (lambda () (interactive) (setq card-help-keys (this-command-keys-vector))))
+            (advice-add 'romacs-popup--card-help :after (lambda (&rest _) (setq card-took (car romacs-popup--card)))))").unwrap();
+        host(&mut vm, &[24, 8]);
+        report.push(printed(&mut vm, "(list card-help-keys card-took)"));
+        vm.eval_source("(which-key-mode 1)").unwrap();
+        host(&mut vm, &[24, '(' as i64]);
+        host(&mut vm, &[24, 8, 'h' as i64]);
+        report.push(printed(&mut vm, "(list last-command card-took (frame-visible-p (romacs-layer--frame-of which-key--buffer)))"));
+        host(&mut vm, &[24, ')' as i64]);
+        report.push(printed(&mut vm, "(key-description last-kbd-macro)"));
+        // A help key a translation produced is not the card's: GNU's
+        // fallback (F6 -> C-h); a help key part-way into a translation ends
+        // the sequence as GNU's does ([C-h x] -> [h]: x is the next command);
+        // a shifted help key comes back shifted (C-x S-C-h).
+        let named = |vm: &mut Vm, events: Vec<CommandEvent>| {
+            vm.set_host_input(Some(Box::new(HostKeys(events.into()))));
+            paint(vm, &engine);
+            command::run(vm).unwrap();
+            paint(vm, &engine);
+        };
+        vm.eval_source("(progn (setq card-took nil card-help-keys nil)
+            (setq prefix-help-command (lambda () (interactive) (setq card-help-keys (list (this-command-keys-vector) last-command-event))))
+            (define-key key-translation-map [f6] [8]))").unwrap();
+        named(&mut vm, vec![CommandEvent::Character(24), CommandEvent::Named("f6".into())]);
+        report.push(printed(&mut vm, "(prog1 (list card-help-keys card-took) (define-key key-translation-map [f6] nil) (setq card-took nil card-help-keys nil))"));
+        vm.eval_source("(progn (define-key key-translation-map [8 ?x] [?h]) (erase-buffer))").unwrap();
+        // Two commands from one keyboard: C-x C-h, then the x it left unread.
+        vm.set_host_input(Some(Box::new(HostKeys(vec![CommandEvent::Character(24), CommandEvent::Character(8), CommandEvent::Character('x' as i64)].into()))));
+        for _ in 0..2 { paint(&mut vm, &engine); command::run(&mut vm).unwrap(); }
+        report.push(printed(&mut vm, "(prog1 (list card-help-keys card-took (buffer-string)) (define-key key-translation-map [8 ?x] nil) (setq card-took nil card-help-keys nil))"));
+        // No card fits: the help key is not taken, GNU's fallback runs.
+        vm.eval_source("(progn (advice-add 'romacs-popup--card-layout :override #'ignore '((name . card-no-fit)))
+            (setq prefix-help-command (lambda () (interactive) (setq card-help-keys (list (this-command-keys-vector) last-command-event)))))").unwrap();
+        named(&mut vm, vec![CommandEvent::Character(24), CommandEvent::Character(8)]);
+        report.push(printed(&mut vm, "(prog1 (list card-help-keys card-took (car romacs-popup--card))
+            (advice-remove 'romacs-popup--card-layout 'card-no-fit) (setq card-took nil card-help-keys nil))"));
+        vm.eval_source("(which-key-mode -1)").unwrap();
+        vm.eval_source("(setq prefix-help-command (lambda () (interactive) (setq card-help-keys (list (this-command-keys-vector) last-command-event))))").unwrap();
+        named(&mut vm, vec![CommandEvent::Character(24), CommandEvent::Character(8 | (1 << 25))]);
+        report.push(printed(&mut vm, "(list card-help-keys card-took
+            (let ((unread-command-events (list 24 (+ 8 (ash 1 25))))) (read-key-sequence nil)))"));
+        // Geometry: a page's footer is inside its rows; a key wider than the
+        // room gives no layout (the frame's corner, then no card).
+        report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) \"cmd\" nil 'global i)) (number-sequence 0 9))))
+            (list (romacs-popup--card-pages (seq-take entries 4) 1 70)
+                  (seq-max (mapcar (lambda (p) (length (split-string p \"\\n\"))) (romacs-popup--card-pages entries 2 70)))
+                  (romacs-popup--card-pages (list (list \"<XF86AudioLowerVolume>\" \"lower\" nil 'global 0) (list \"a\" \"b\" nil 'global 1)) 1 10)))"));
+        report
+    }).unwrap().join().unwrap();
+    for line in &report { println!("{line}"); }
+    assert_eq!(report, [
+        "((\"p\" \"prefix\" t global) (\"d\" \"undo\" nil mode) (\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global))",
+        "((\"4\" . \"other-window\") (\"m\" . \"Do the menu thing\") (\"r\" . \"copy\") (\"w\" . \"card-thing\"))",
+        "(1 (4 \"… 22 more · C-h\") nil)",
+        "((\"ESC\" . \"meta\") (\"8\" . \"char\") (\"v\" . \"vc\") (\"4\" . \"other-window\") (\"r\" . \"register\"))",
+        "(t nil)",
+        "(card t \"C-x\" t t t t t t)",
+        "(nil [24] nil)",
+        "((1 2 0 1) t)",
+        "(nil nil)",
+        "(t t)",
+        // which-key off: GNU's fallback runs `prefix-help-command' with the
+        // whole sequence; the card takes nothing.
+        "([24 8] nil)",
+        // The card takes the help key: the read goes on for C-x, C-x h runs,
+        // the card is gone, and the macro holds no help key.
+        "(mark-whole-buffer [24] nil)",
+        "\"C-x h\"",
+        "(([24 8] 8) nil)",
+        "(([24 8] 8) nil \"x\")",
+        "(([24 8] 8) nil nil)",
+        // GNU 32 (a keyboard macro, then `read-key-sequence'): the
+        // command's keys [24 8], its event and the sequence shifted.
+        "(([24 8] 33554440) nil [24 33554440])",
+        "(nil 2 nil)",
+    ]);
+}
