@@ -105,6 +105,9 @@ const MIN_CONS_THRESHOLD: i64 = 80_000;
 /// before use, making GNU's 0.1 collect after about eleven traced heaps
 /// (DIVERGENCES.md VM2-GC-PACING has the measured candidates).
 const PERCENTAGE_SCALE: f64 = 17.0;
+/// Values an idle collection marks between its looks for a key press
+/// (`Vm::collect_marked'): a millisecond or two of marking.
+const KEY_POLL: usize = 16_384;
 /// The scaled percentage's ceiling. GNU's formula never collects at 2 (it
 /// counts half the allocation since as live); 1.8 holds a large setting at
 /// 18 traced heaps, about 1.6 times the default's deferral.
@@ -439,17 +442,17 @@ impl Vm {
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
-    /// finalizers marking has not reached move to the doomed queue and are
-    /// marked, with their functions, to survive until they run. True when
-    /// any was doomed.
-    fn doom_finalizers(&mut self, marks: &[Vec<bool>; 4], pending: &mut Vec<Value>) -> bool {
-        let (live, doomed): (Vec<Value>, Vec<Value>) = std::mem::take(&mut self.finalizers)
-            .into_iter()
-            .partition(|&f| Self::image_value(f) || marks[3][f.payload() as usize - 1]);
-        self.finalizers = live;
-        pending.extend_from_slice(&doomed);
-        self.doomed_finalizers.extend_from_slice(&doomed);
-        !doomed.is_empty()
+    /// finalizers marking has not reached are marked, with their functions,
+    /// to survive until they run, and go to DOOMED, which the collection
+    /// moves to the doomed queue once it can no longer give way to a key
+    /// (`collect_marked'). True when any was doomed.
+    fn doom_finalizers(&self, marks: &[Vec<bool>; 4], pending: &mut Vec<Value>, doomed: &mut Vec<Value>) -> bool {
+        let found: Vec<Value> = self.finalizers.iter().copied()
+            .filter(|&f| !(Self::image_value(f) || marks[3][f.payload() as usize - 1]))
+            .collect();
+        pending.extend_from_slice(&found);
+        doomed.extend_from_slice(&found);
+        !found.is_empty()
     }
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
@@ -604,10 +607,17 @@ impl Vm {
                 .sum::<usize>();
         s
     }
+    /// Whether the host has a key press queued (`HostInput::key_pending').
+    fn host_key_pending(&mut self) -> bool {
+        self.host_input.as_mut().is_some_and(|host| host.key_pending())
+    }
     /// Collect at a strand wait point. All externally retained Values must be in
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
-    pub(super) fn collect_marked(&mut self, roots: &mut [Value]) {
+    /// With UNTIL_KEY, a key press queued while it marks ends it: nothing is
+    /// collected, and the heap is as it was (marking writes only caches and
+    /// local marks). Whether it collected.
+    pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
@@ -616,7 +626,6 @@ impl Vm {
         self.lambda_lists.clear();
         let before = self.heap_objects();
         let private_before = self.private_objects();
-        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         // Frozen regions reached by marking (`frozen.rs`); region 0 is the
         // executable image, always live.
         let mut region_marks = vec![false; self.regions.len()];
@@ -632,7 +641,6 @@ impl Vm {
         for program in &mut self.spare_programs {
             program.forget_code();
         }
-        let pads = self.gc_stress.take_pads();
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
         pending.extend(self.suspended_stacks.iter().flatten().copied());
@@ -714,9 +722,11 @@ impl Vm {
         // GNU dooms finalizers once, after the roots and before the weak
         // tables' contents are marked.
         let mut finalizers_doomed = false;
+        let mut doomed = Vec::new();
+        let mut polled = 0usize;
         while !pending.is_empty()
             || !code_pending.is_empty()
-            || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending))
+            || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending, &mut doomed))
             || self.weak_round(&marks, &weak_tables, &obarray_symbols_live, &region_marks, &mut pending, &mut local_live)
         {
             while let Some(id) = code_pending.pop() {
@@ -775,6 +785,10 @@ impl Vm {
                 }
             }
             let Some(mut v) = pending.pop() else { continue };
+            polled += 1;
+            if until_key && polled % KEY_POLL == 0 && self.host_key_pending() {
+                return false;
+            }
             // Walk the cdr spine directly: a list is the common editor graph,
             // not two worklist pushes and a generic type dispatch per cons.
             while v.tag() == 3 && !Self::image_value(v) {
@@ -878,6 +892,18 @@ impl Vm {
                 }
             }
         }
+        // From here the collection changes the heap: the last point a key
+        // press ends it.
+        if until_key && self.host_key_pending() {
+            return false;
+        }
+        if !doomed.is_empty() {
+            let gone: HashSet<u64> = doomed.iter().map(|f| f.0).collect();
+            self.finalizers.retain(|f| !gone.contains(&f.0));
+            self.doomed_finalizers.extend_from_slice(&doomed);
+        }
+        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
+        let pads = self.gc_stress.take_pads();
         // A throw's no-catch mark is weak: an error object nothing else
         // reaches is carried by no escape, so its mark goes.
         let thrown = std::mem::take(&mut self.thrown_no_catch);
@@ -943,7 +969,7 @@ impl Vm {
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if !active {
-            self.request_code.since_collection = 0;
+            self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
         // entry into one is left (swept above), so their ids can be reused.
@@ -953,7 +979,7 @@ impl Vm {
             self.gc_retained = self.heap_objects();
             self.settle_payload();
             self.gc_stats.collections += 1;
-            return;
+            return true;
         }
         // Stress fillers go only where live objects would move past them.
         let fill: Vec<usize> = marks.iter().map(|m| if m.contains(&true) { pads } else { 0 }).collect();
@@ -1177,6 +1203,7 @@ impl Vm {
         self.settle_payload();
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
+        true
     }
 }
 

@@ -204,6 +204,14 @@ impl Vm {
     pub fn collect_garbage(&mut self) {
         self.collect(&mut []);
     }
+    /// The command loop's idle collection: as `collect_garbage', but
+    /// abandoned, with nothing collected or counted, if the host has a key
+    /// press queued while it is still marking, which changes nothing but
+    /// caches: the key waits for no collection that has not begun moving
+    /// the heap. Whether it collected.
+    pub fn collect_garbage_until_key(&mut self) -> bool {
+        self.collect_until_key(&mut [], true)
+    }
     /// Evaluate a UTF-8 source file sequentially in this persistent strand.
     /// This call may mark and compact; the result borrows the VM.
     pub fn eval_source(&mut self, source: &str) -> Result<Local<'_>> {
@@ -332,31 +340,42 @@ impl Vm {
     /// Every collection, automatic or explicit, enters here. Live `Rooted`
     /// slots are appended to the caller's roots and written back forwarded.
     pub(crate) fn collect(&mut self, roots: &mut [Value]) {
+        self.collect_until_key(roots, false);
+    }
+    /// Collect, or with UNTIL_KEY stop while marking once the host has a key
+    /// press queued, leaving the heap as it was: whether it collected.
+    pub(crate) fn collect_until_key(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
-        self.collect_rooted(roots);
-        // What the collection and the work before it freed goes back.
-        crate::world::arena::trim();
-        let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
-        self.count_collection(elapsed);
+        let collected = self.collect_rooted(roots, until_key);
+        if collected {
+            // What the collection and the work before it freed goes back.
+            crate::world::arena::trim();
+            let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
+            self.count_collection(elapsed);
+        }
         self.profile_collection_end();
+        collected
     }
-    fn collect_rooted(&mut self, roots: &mut [Value]) {
+    fn collect_rooted(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         let live: Vec<Arc<AtomicU64>> = {
             let slots = self.rooted.slots.get_mut();
             slots.retain(|w| w.strong_count() > 0);
             slots.iter().filter_map(Weak::upgrade).collect()
         };
         if live.is_empty() {
-            return self.collect_marked(roots);
+            return self.collect_marked(roots, until_key);
         }
         let mut all = roots.to_vec();
         all.extend(live.iter().map(|s| Value(s.load(Ordering::Relaxed))));
-        self.collect_marked(&mut all);
+        if !self.collect_marked(&mut all, until_key) {
+            return false;
+        }
         roots.copy_from_slice(&all[..roots.len()]);
         for (slot, value) in live.iter().zip(&all[roots.len()..]) {
             slot.store(value.0, Ordering::Relaxed);
         }
+        true
     }
 }
 
@@ -384,6 +403,90 @@ mod tests {
         drop(clone);
         vm.collect_garbage();
         assert!(vm.rooted.slots.borrow().is_empty());
+    }
+
+    /// A host whose key press shows from the Nth look on.
+    struct KeyAfter(usize);
+    impl crate::HostInput for KeyAfter {
+        fn input_pending(&mut self) -> bool { false }
+        fn key_pending(&mut self) -> bool {
+            self.0 = self.0.saturating_sub(1);
+            self.0 == 0
+        }
+        fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
+            Err("no events".into())
+        }
+    }
+
+    /// An idle collection gives way to a key press that arrives while it
+    /// marks, in a small heap and a large one: nothing is collected, counted
+    /// or moved, and a later collection collects as ever.
+    #[test]
+    fn an_idle_collection_gives_way_to_a_key_press() {
+        let abandoned = |vm: &mut Vm, looks| {
+            vm.set_host_input(Some(Box::new(KeyAfter(looks))));
+            let (objects, collections) = (vm.heap_objects(), vm.heap_stats().collections);
+            assert!(!vm.collect_garbage_until_key(), "collected with a key press queued");
+            assert_eq!((vm.heap_objects(), vm.heap_stats().collections), (objects, collections), "an abandoned collection changed the heap");
+            vm.set_host_input(None);
+        };
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.eval_source_raw("(dotimes (_ 2000) (cons 1 2))").unwrap();
+        abandoned(&mut vm, 1);
+        // Live values a collection must keep through an abandoned one.
+        let kept = vm.eval_source("(setq kept (make-list 100000 (list 1 2)))").unwrap().root();
+        vm.eval_source_raw("(dotimes (_ 20000) (cons 1 2))").unwrap();
+        abandoned(&mut vm, 1);
+        let objects = vm.heap_objects();
+        assert!(vm.collect_garbage_until_key(), "no key, no collection");
+        assert!(vm.heap_objects() < objects, "garbage stayed");
+        assert_eq!(kept.get(&vm).unwrap().display().unwrap().len(), "(".len() + 100_000 * "(1 2) ".len());
+        assert_eq!(vm.eval_source("(list (romacs--collect-idle) (length kept))").unwrap().display().unwrap(), "(t 100000)");
+    }
+
+    /// A host that counts its looks for a key press and never has one.
+    struct Looks(std::rc::Rc<std::cell::Cell<usize>>);
+    impl crate::HostInput for Looks {
+        fn input_pending(&mut self) -> bool { false }
+        fn key_pending(&mut self) -> bool {
+            self.0.set(self.0.get() + 1);
+            false
+        }
+        fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
+            Err("no events".into())
+        }
+    }
+
+    /// A key press at an idle collection's last look, after its mark found
+    /// a finalizer unreachable, leaves the finalizer where it was: only a
+    /// collection that finishes queues it to run.
+    #[test]
+    fn an_abandoned_collection_dooms_no_finalizer() {
+        let made = || {
+            let mut vm = Vm::new();
+            vm.set_gc_stress(0);
+            vm.eval_source_raw("(progn (make-finalizer (lambda () nil)) nil)").unwrap();
+            vm
+        };
+        // The looks a collection of this heap takes; its last follows the mark.
+        let looks = {
+            let mut vm = made();
+            let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+            vm.set_host_input(Some(Box::new(Looks(seen.clone()))));
+            assert!(vm.collect_garbage_until_key());
+            assert_eq!(vm.doomed_finalizers.len(), 1, "the fixture's finalizer is unreachable");
+            seen.get()
+        };
+        let mut vm = made();
+        vm.set_host_input(Some(Box::new(KeyAfter(looks))));
+        assert!(!vm.collect_garbage_until_key());
+        assert_eq!((vm.finalizers.len(), vm.doomed_finalizers.len()), (1, 0), "an abandoned collection doomed a finalizer");
+        vm.set_host_input(None);
+        assert!(vm.collect_garbage_until_key());
+        assert_eq!((vm.finalizers.len(), vm.doomed_finalizers.len()), (0, 1));
     }
 
     #[test]

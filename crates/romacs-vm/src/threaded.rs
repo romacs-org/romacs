@@ -1312,36 +1312,63 @@ pub(super) fn assert_opaque_rest_compaction() {
     );
 }
 
+/// Arguments a native call into Lisp passes in registers; more go to
+/// `apply' as one list (`Vm::reader_trampoline`).
+const TRAMPOLINE_ARITY: usize = 8;
+
 impl Vm {
     /// Call FUNCTION with ARGS from native code, the caller's register stack
     /// set aside (traced, its allocation unmoved for suspended engines' raw
-    /// pointers). FUNCTION and ARGS are rooted as quoted objects; the caller
-    /// keeps nothing else across the call unless it is rooted.
+    /// pointers). FUNCTION and ARGS are rooted in the trampoline's registers;
+    /// the caller keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
         let _unwind = self.unwind_mark();
+        // Compiling a trampoline allocates nothing that can collect.
+        let trampoline = self.reader_trampoline(args.len())?;
+        let registers: Vec<Value> = if args.len() <= TRAMPOLINE_ARITY {
+            std::iter::once(function).chain(args.iter().copied()).collect()
+        } else {
+            vec![function, self.list_value(args)]
+        };
         self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
         self.propagated_eval_depth = None;
-        let result = (|| {
-            let quote = |value| {
-                Form::List(vec![
-                    Form::Sym("quote".into()),
-                    Form::Object(crate::handle::FormObject::new(self, value)),
-                ])
-            };
-            let mut call = vec![Form::Sym("funcall".into()), quote(function)];
-            call.extend(args.iter().copied().map(quote));
-            let (entry, _) = self.compile_request(&Form::List(call))?;
-            self.propagate_next = true;
-            let result = execute_args(self, entry, &[]);
-            self.release_request_entry(entry);
-            result
-        })();
+        self.propagate_next = true;
+        let result = execute_args(self, trampoline, &registers);
         self.propagate_next = false;
         self.resume_stack();
         self.end_nested_execution();
         result
+    }
+    /// The permanent function a native call of N arguments enters:
+    /// `(lambda (f a1 .. aN) (funcall f a1 .. aN))`, or for more than
+    /// TRAMPOLINE_ARITY `(lambda (f args) (apply f args))`. Its own `Call`
+    /// does what any Lisp call does (captures, arity, `&rest`, autoload,
+    /// escapes), so no native call compiles a request form. Lexical and
+    /// eager whatever is being compiled or evaluated now, its parameters
+    /// uninterned: the callee sees no binding of its own.
+    fn reader_trampoline(&mut self, n: usize) -> Result<usize> {
+        let index = n.min(TRAMPOLINE_ARITY + 1);
+        if let Some(&Some(id)) = self.reader_trampolines.get(index) {
+            return Ok(id);
+        }
+        let spread = index > TRAMPOLINE_ARITY;
+        let parameter = || Form::Generated(crate::expand::generated_id());
+        let params: Vec<Form> = (0..if spread { 2 } else { index + 1 }).map(|_| parameter()).collect();
+        let head = if spread { "apply" } else { "funcall" };
+        let body = Form::List(std::iter::once(Form::Sym(head.into())).chain(params.iter().cloned()).collect());
+        let scope = std::mem::replace(&mut self.dynamic_scope, false);
+        let regime = std::mem::replace(&mut self.lazy_regime, false);
+        let compiled = self.compile_permanent(|vm| vm.function(&params, &[body], &NameMap::default(), &NameSet::default()));
+        self.lazy_regime = regime;
+        self.dynamic_scope = scope;
+        let (id, _) = compiled?;
+        if self.reader_trampolines.len() <= index {
+            self.reader_trampolines.resize(index + 1, None);
+        }
+        self.reader_trampolines[index] = Some(id);
+        Ok(id)
     }
 
     /// After a nested engine run, whose program the suspended engine does not
@@ -1925,12 +1952,18 @@ fn isolate_quit(e: &mut Engine<'_>) -> bool {
 #[cold]
 #[inline(never)]
 fn poll_collect(e: &mut Engine<'_>) {
+    poll_collect_unless_key(e, false);
+}
+/// Collect, or with UNTIL_KEY stop while marking once a key press is queued
+/// (`Vm::collect_until_key'): whether it collected.
+fn poll_collect_unless_key(e: &mut Engine<'_>, until_key: bool) -> bool {
     // Forward in place without moving instruction buffers: suspended PCs and
     // entry pointers stay valid.
     let roots = e.suspend_code();
     debug_assert!(e.vm.may_collect(0), "collecting while a frame holds untraced Values");
-    e.vm.collect(&mut []);
+    let collected = e.vm.collect_until_key(&mut [], until_key);
     e.resume_code(roots);
+    collected
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need
@@ -2844,6 +2877,12 @@ unsafe fn take_step(
                     *r.add((*pc).a) = Value::NIL;
                     return Continue::At(r, pc.add(1));
                 }
+            }
+            Ok(prim::Step::CollectIdle) => {
+                leave_native(e);
+                let collected = e.vm.may_collect(1) && poll_collect_unless_key(e, true);
+                *r.add((*pc).a) = if collected { Value::TRUE } else { Value::NIL };
+                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);

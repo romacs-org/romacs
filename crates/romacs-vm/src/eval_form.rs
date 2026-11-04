@@ -183,7 +183,7 @@ mod tests {
         // An error a Rust caller dropped: its mark goes with it.
         let object = vm.list_value(&[Value::NIL]);
         vm.thrown_no_catch.push(object);
-        vm.collect_marked(&mut []);
+        vm.collect_marked(&mut [], false);
         assert!(vm.thrown_no_catch.is_empty());
         // Garbage first, so the kept error moves when the cons space compacts.
         for i in 0..64 {
@@ -192,7 +192,7 @@ mod tests {
         let mut kept = [vm.list_value(&[Value::NIL])];
         let before = kept[0];
         vm.thrown_no_catch.push(kept[0]);
-        vm.collect_marked(&mut kept);
+        vm.collect_marked(&mut kept, false);
         assert_ne!(kept[0], before, "the kept error moved");
         assert_eq!(vm.thrown_no_catch, kept.to_vec(), "a live error keeps its mark, moved with it");
     }

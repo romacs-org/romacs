@@ -94,6 +94,40 @@ fn collecting_read_callback_propagates_throw_and_signal() {
     }
 }
 
+/// A native call into Lisp calls as `funcall' does: optional and rest
+/// parameters, a captured closure, primitives, more arguments than the
+/// trampolines pass in registers, an arity error and an autoload, with a
+/// moving collection at every Lisp entry.
+#[test]
+fn native_calls_keep_funcall_semantics_under_stress() {
+    let dir = std::env::temp_dir().join(format!("romacs-native-call-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("nc-auto.el"), "(defun nc-auto (x) (list 'loaded (* x 2)))\n").unwrap();
+    let mut vm = Vm::new();
+    vm.set_load_path(std::slice::from_ref(&dir)).unwrap();
+    vm.eval_source_raw("(defun nc-opt (a &optional b) (list a b)) (defun nc-rest (a &rest r) (cons a r)) \
+                        (setq nc-cap (let ((x (list 40))) (lambda (y) (+ (car x) y)))) (autoload 'nc-auto \"nc-auto\")").unwrap();
+    vm.set_gc_stress(1);
+    let ints = |ns: std::ops::Range<i64>| ns.map(|n| Value::integer(n).unwrap()).collect::<Vec<_>>();
+    let call = |vm: &mut Vm, function: &str, args: Vec<Value>| {
+        let function = if function == "nc-cap" { vm.eval_source_raw("nc-cap").unwrap() } else { vm.intern(function) };
+        vm.reader_call(function, &args).map(|value| vm.display(value).unwrap())
+    };
+    assert_eq!(call(&mut vm, "nc-opt", ints(1..2)).unwrap(), "(1 nil)");
+    assert_eq!(call(&mut vm, "nc-opt", ints(1..3)).unwrap(), "(1 2)");
+    assert!(call(&mut vm, "nc-opt", ints(1..4)).is_err(), "three arguments to a two-parameter function");
+    assert_eq!(call(&mut vm, "nc-rest", ints(1..13)).unwrap(), "(1 2 3 4 5 6 7 8 9 10 11 12)");
+    assert_eq!(call(&mut vm, "nc-cap", ints(2..3)).unwrap(), "42");
+    assert_eq!(call(&mut vm, "+", ints(0..10)).unwrap(), "45");
+    assert_eq!(call(&mut vm, "list", vec![]).unwrap(), "nil");
+    let strings: Vec<Value> = (0..10).map(|n| vm.make_lisp_string(format!("s{n}").into_bytes(), true)).collect();
+    let concat = vm.intern("concat");
+    let joined = vm.reader_call(concat, &strings).unwrap();
+    assert_eq!(vm.bytes_value(joined).unwrap(), b"s0s1s2s3s4s5s6s7s8s9");
+    assert_eq!(call(&mut vm, "nc-auto", ints(21..22)).unwrap(), "(loaded 42)");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn callback_preserves_an_open_builders_collection_hold() {
     let mut vm = Vm::new();

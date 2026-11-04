@@ -10,16 +10,22 @@ pub(super) struct RequestCode {
     free_caches: Vec<usize>,
     compiling: bool,
     compiled: Vec<usize>,
-    /// Request functions installed since the last collection that only a
-    /// collection can retire: an entry released when its request returns
-    /// (`release_request_entry') is not one.
+    /// Request functions that may have become garbage since the last
+    /// collection, which only a collection can retire (`counted').
     pub(super) since_collection: usize,
+    /// By function, whether it counts in `since_collection'. An install
+    /// counts until its entry is released as its request returns
+    /// (`release_request_entry') or it becomes a definition (with the
+    /// closures its code makes), which its symbol keeps live; a lazily held
+    /// body never counts, being live with its function. A definition
+    /// another one replaces counts again (`charge_definition').
+    counted: Vec<bool>,
     /// Cache slots a builder took that no installed function's code owns
     /// yet: at a collection, where no builder is open, those of a failed or
     /// discarded build.
     unclaimed_caches: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(RequestCode { permanent, image_caches, live, free, free_caches, compiling, compiled, since_collection, unclaimed_caches });
+romacs_snapshot::snapshot_struct!(RequestCode { permanent, image_caches, live, free, free_caches, compiling, compiled, since_collection, counted, unclaimed_caches });
 
 impl RequestCode {
     /// Whether every cache slot a builder took is owned: no build is open
@@ -57,6 +63,8 @@ impl Vm {
     }
     /// Install FUNCTION, request-owned when REQUEST, claiming no cache slot.
     fn install_slot(&mut self, function: Function, request: bool) -> usize {
+        #[cfg(test)]
+        INSTALLS.set(INSTALLS.get() + 1);
         self.register_width = self.register_width.max(function.regs);
         let code = &mut self.request_code;
         let id = if request
@@ -70,6 +78,7 @@ impl Vm {
             self.functions.push(Arc::new(function));
             code.permanent.push(!request);
             code.live.push(true);
+            code.counted.push(false);
             id
         };
         if request {
@@ -77,9 +86,100 @@ impl Vm {
             if code.compiling {
                 code.compiled.push(id);
             }
-            code.since_collection += 1;
+            self.count_code(id);
         }
         id
+    }
+    /// Request function ID may be garbage at the next collection: it counts
+    /// toward the one `finish_request' makes for code.
+    fn count_code(&mut self, id: usize) {
+        let code = &mut self.request_code;
+        if code.live[id] && !code.permanent[id] && !std::mem::replace(&mut code.counted[id], true) {
+            code.since_collection += 1;
+        }
+    }
+    /// Request function ID is live by construction, or gone: it no longer
+    /// counts toward a collection.
+    fn uncount_code(&mut self, id: usize) {
+        let code = &mut self.request_code;
+        if std::mem::replace(&mut code.counted[id], false) {
+            code.since_collection -= 1;
+        }
+    }
+    /// A collection with no request running retired the code that was
+    /// garbage: what is left counts toward no collection.
+    pub(super) fn reset_code_count(&mut self) {
+        let code = &mut self.request_code;
+        code.counted.fill(false);
+        code.since_collection = 0;
+    }
+    /// FUNCTION and the functions its code makes closures of, transitively:
+    /// a definition's code, live while its closure is.
+    fn code_tree(&self, function: usize) -> Vec<usize> {
+        let mut tree = vec![function];
+        let mut seen = HashSet::default();
+        seen.insert(function);
+        let mut next = 0;
+        while let Some(&id) = tree.get(next) {
+            next += 1;
+            let f = &self.functions[id];
+            let children = f.code.iter().filter_map(|op| match *op {
+                Op::Closure(_, child, _) => Some(child),
+                _ => None,
+            });
+            let pending = f.pending.iter().flat_map(|body| body.children.iter().copied());
+            for child in children.chain(pending).collect::<Vec<_>>() {
+                if child < self.functions.len() && seen.insert(child) {
+                    tree.push(child);
+                }
+            }
+        }
+        tree
+    }
+    /// A function cell went from OLD to NEW (`define_function'). NEW's
+    /// request code is a definition now, which the symbol keeps live, so it
+    /// counts toward no collection; OLD's, superseded, may be garbage and
+    /// counts again: redefining a function again and again (an
+    /// `eval-buffer' of an init, a test rerun) still brings a collection,
+    /// which object pacing, counting heap objects only, would not.
+    pub(super) fn charge_definition(&mut self, old: Value, new: Value) {
+        let (old, new) = (self.cell_code(old), self.cell_code(new));
+        if old == new {
+            return;
+        }
+        if let Some(function) = new {
+            for id in self.code_tree(function) {
+                self.uncount_code(id);
+            }
+        }
+        if let Some(function) = old {
+            for id in self.code_tree(function) {
+                self.count_code(id);
+            }
+        }
+    }
+    /// The request function a function cell's VALUE runs: a private closure's,
+    /// also as a macro's `(macro . CLOSURE)'.
+    fn cell_code(&self, value: Value) -> Option<usize> {
+        let value = match self.cons_pair(value) {
+            Ok((head, tail)) if head == Value::reference(self.names.get("macro").copied()? + 1, 7) => tail,
+            _ => value,
+        };
+        if Self::image_value(value) {
+            return None;
+        }
+        let closure = value.index_if(4)?;
+        let function = self.closures.get(closure)?.function;
+        (!self.request_code.permanent.get(function).copied().unwrap_or(true)).then_some(function)
+    }
+
+    /// Run BUILD outside any request's compilation: what it installs is
+    /// permanent, owned by no request.
+    pub(super) fn compile_permanent<T>(&mut self, build: impl FnOnce(&mut Self) -> T) -> T {
+        let compiling = std::mem::replace(&mut self.request_code.compiling, false);
+        let result = build(self);
+        self.request_code.compiling = compiling;
+        result
     }
 
     pub(super) fn install_cache(&mut self) -> usize {
@@ -132,10 +232,15 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let previous = self.request_code.compiling;
+        let start = self.request_code.compiled.len();
         self.request_code.compiling = true;
         let result = self.function(args, body, outer, local_specials);
         if result.is_err() {
             self.request_code.since_collection += 1;
+        }
+        // The body is live with the function that held it.
+        for id in self.request_code.compiled[start..].to_vec() {
+            self.uncount_code(id);
         }
         self.request_code.compiling = previous;
         if !previous {
@@ -166,6 +271,7 @@ impl Vm {
             },
         );
         if self.request_code.live[id] && !self.request_code.permanent[id] {
+            self.uncount_code(id);
             self.request_code.live[id] = false;
             self.request_code.free.push(id);
         }
@@ -247,9 +353,9 @@ impl Vm {
         f.sites = Vec::new();
         f.capture_mutations = Vec::new();
         f.pending = None;
+        self.uncount_code(id);
         self.request_code.live[id] = false;
         self.request_code.free.push(id);
-        self.request_code.since_collection = self.request_code.since_collection.saturating_sub(1);
         for program in self.programs_mut() {
             program.release_entry(id);
         }
@@ -355,6 +461,8 @@ pub(super) enum ArtifactFault {
 #[cfg(test)]
 thread_local! {
     pub(super) static ARTIFACT_FAULT: std::cell::Cell<Option<ArtifactFault>> = const { std::cell::Cell::new(None) };
+    /// Functions installed on this thread, request-owned or not.
+    pub(super) static INSTALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -587,6 +695,77 @@ mod tests {
             assert!(owned.iter().all(|c| !vm.request_code.free_caches.contains(c)), "live slots stay claimed");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// A loaded file's top-level entries go as they return and its
+    /// definitions are live: the load leaves no code a collection must
+    /// retire, and its function slots grow by the definitions only.
+    #[test]
+    fn a_load_counts_no_code_toward_a_collection() {
+        let path = std::env::temp_dir().join(format!("romacs-load-count-{}.el", std::process::id()));
+        let mut text = String::new();
+        for i in 0..400 {
+            text.push_str(&format!("(defvar load-count-v{i} (list {i}))\n(put 'load-count-v{i} 'probe (list {i} {i}))\n"));
+            text.push_str(&format!("(defun load-count-f{i} (x) (funcall (lambda (y) (+ x y {i})) x))\n"));
+        }
+        std::fs::write(&path, text).unwrap();
+        let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
+        let live = |vm: &Vm| vm.request_code.live.iter().filter(|&&live| live).count();
+        let (before, collections) = (live(&vm), vm.heap_stats().collections);
+        vm.load_file(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(vm.request_code.since_collection, 0, "the load left code counted toward a collection");
+        assert_eq!(vm.heap_stats().collections, collections);
+        let grown = live(&vm) - before;
+        assert!(grown <= 800, "{grown} functions live after loading 400 definitions");
+        let value = vm.eval_source_raw("(load-count-f399 1)").unwrap();
+        assert_eq!(value.as_integer().unwrap(), 401);
+    }
+    /// A definition another replaces may be garbage: redefining a function
+    /// again and again brings code collections, so the old bodies do not
+    /// pile up, and a closure still holding an old body runs it.
+    #[test]
+    fn superseded_definitions_count_toward_a_collection() {
+        let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
+        let define = |n: i64| form(&format!(r#"["defalias",["quote","redef-probe"],["function",["lambda",[],{n}]]]"#));
+        vm.eval_form_raw(&define(0)).unwrap();
+        vm.eval_form_raw(&form(r#"["setq","redef-keeper",["symbol-function",["quote","redef-probe"]]]"#)).unwrap();
+        let collections = vm.heap_stats().collections;
+        for n in 1..5000 {
+            vm.eval_form_raw(&define(n)).unwrap();
+        }
+        assert!(vm.heap_stats().collections > collections, "5000 redefinitions brought no collection");
+        assert!(vm.functions.len() < 2500, "{} function slots after 5000 redefinitions", vm.functions.len());
+        assert_eq!(vm.eval_form_raw(&form(r#"["funcall","redef-keeper"]"#)).unwrap().as_integer().unwrap(), 0);
+        assert_eq!(vm.eval_form_raw(&form(r#"["redef-probe"]"#)).unwrap().as_integer().unwrap(), 4999);
+    }
+    /// A native call into Lisp (a macro expander, a reader hook, a watcher)
+    /// enters a permanent trampoline: no call installs a function, and a
+    /// macro call's expansion installs only its own request's code.
+    #[test]
+    fn native_calls_into_lisp_install_no_function() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun native-probe (&rest args) (length args)) (defmacro native-twice (x) (list 'progn x x))").unwrap();
+        let probe = vm.intern("native-probe");
+        for n in [0, 3, 8, 9, 12] {
+            let args: Vec<Value> = (0..n).map(|i| Value::integer(i).unwrap()).collect();
+            vm.reader_call(probe, &args).unwrap();
+            let installs = INSTALLS.get();
+            for _ in 0..50 {
+                assert_eq!(vm.reader_call(probe, &args).unwrap().as_integer().unwrap(), n);
+            }
+            assert_eq!(INSTALLS.get(), installs, "a native call with {n} arguments installed a function");
+        }
+        vm.eval_form_raw(&form(r#"["native-twice",1]"#)).unwrap();
+        let installs = INSTALLS.get();
+        for n in 0..20 {
+            let value = vm.eval_form_raw(&form(&format!(r#"["native-twice",{n}]"#))).unwrap();
+            assert_eq!(value.as_integer().unwrap(), n);
+        }
+        assert_eq!(INSTALLS.get(), installs + 20, "an expansion installed more than its request's entry");
     }
     #[test]
     fn short_distinct_requests_reuse_code_slots_without_collecting() {
