@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "d0d30a8fd1f12da0edbcacf60db97784372f519993bd3f2ca61979048d37679d",
+  "input_hash": "ca8d26184f55f56eeac68892239482246720a21d83bb3483d50066637526d909",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -350,6 +350,7 @@
    94
   ],
   "char-width-table": [
+   3,
    270
   ],
   "characterp": [
@@ -476,6 +477,7 @@
    66
   ],
   "ctl-arrow": [
+   3,
    270
   ],
   "ctl-x-map": [
@@ -3632,14 +3634,16 @@
    "planned": false,
    "mechanism": "`current-column`, `current-indentation`, `move-to-column`, `indent-to`",
    "gnu": "GNU accounts for display tables, invisibility and composition, and `current-column` caches its last answer by point and modification count (so a `tab-width` change alone can leave it stale).",
-   "romacs": "Native Unicode text width, tab stops and caret controls are counted without moving point; display-property overrides are not projected, and non-UTF-8 byte text refuses.",
+   "romacs": "Each character counts as GNU's CHARACTER_WIDTH counts it, by `char-width-table` (characters.el's) and `ctl-arrow`, with tab stops, without moving point: every code point's column matches pinned GNU (`tests/char_width_sweep.rs`). Display tables, invisibility, composition and display-property overrides are not projected, and non-UTF-8 byte text refuses.",
    "why": "Plain-text command-motion slice, not a complete display-table implementation.",
    "symbols": [
     "current-column",
     "current-indentation",
     "move-to-column",
     "indent-to",
-    "tab-width"
+    "tab-width",
+    "char-width-table",
+    "ctl-arrow"
    ],
    "symbols_derived": true
   },
