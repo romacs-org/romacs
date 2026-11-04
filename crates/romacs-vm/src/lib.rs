@@ -1417,6 +1417,8 @@ pub struct Vm {
     rooted_write: bool,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
+    /// The tables' free entries and allocation meter (gc.rs).
+    free: gc::FreeEntries,
     names: NameMap<String, usize>,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
@@ -1591,6 +1593,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     running_engines,
     rooted_write,
     gc_stress,
+    free,
     suspended_stacks,
     gc_floor,
     names,
@@ -1684,7 +1687,7 @@ impl Vm {
         self.private_objects() + self.region_weight()
     }
     pub(crate) fn private_objects(&self) -> usize {
-        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
+        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len() - self.free.len()
     }
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
@@ -1791,6 +1794,7 @@ impl Vm {
             running_engines: 0,
             rooted_write: false,
             gc_stress: gc::Stress::from_env(),
+            free: gc::FreeEntries::default(),
             names: NameMap::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
@@ -3504,10 +3508,7 @@ impl Vm {
         }
         match p {
             Cons => {
-                let pair = (a[0], a[1]);
-                let i = self.conses.len();
-                self.conses.push(pair);
-                Ok(Value::reference(i, 3))
+                Ok(self.alloc_cons(a[0], a[1]))
             }
             Length => {
                 if a[0].tag() == 4 && !self.closures[a[0].index(4)?].metadata.is_empty() { return Value::integer(self.closures[a[0].index(4)?].metadata.len() as i64); }
@@ -3535,6 +3536,7 @@ impl Vm {
                             | data::Object::SyntaxTable(_)
                             | data::Object::Window(_)
                             | data::Object::Obarray(_)
+                            | data::Object::Free
                             | data::Object::Frame(_)
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
@@ -3593,6 +3595,7 @@ impl Vm {
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(t) => self.display_table(t, depth),
                 data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", t.len())),
+                data::Object::Free => Err("invalid object reference".into()),
                 data::Object::Bytes(v) => Ok(format!(
                     "#u8({})",
                     v.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
@@ -3856,7 +3859,7 @@ mod capture_tests {
         let mut roots = [value];
         vm.collect(&mut roots);
         assert_eq!(
-            vm.conses.len(),
+            vm.conses.len() - vm.free.of(0),
             1,
             "closure must not retain the unused cons"
         );

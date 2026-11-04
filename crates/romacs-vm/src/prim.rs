@@ -448,9 +448,7 @@ mod leaf {
         }
         #[inline(always)]
         pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
-            let i = self.vm.conses.len();
-            self.vm.conses.push((car, cdr));
-            Value::reference(i, 3)
+            self.vm.alloc_cons(car, cdr)
         }
         /// ENCODE_FILE: the host bytes of the file name VALUE.
         pub fn file_name_bytes(&self, value: Value) -> std::result::Result<Vec<u8>, Fault> {
@@ -1485,6 +1483,7 @@ mod leaf {
                     Some(data::Object::ByteBuffer(_)) => Kind::ByteBuffer,
                     Some(data::Object::HashTable(_)) => Kind::HashTable,
                     Some(data::Object::Obarray(_)) => Kind::Obarray,
+                    Some(data::Object::Free) => Kind::Invalid,
                     Some(data::Object::SyntaxTable(_)) => Kind::SyntaxTable,
                     Some(data::Object::CharTable(_)) => Kind::CharTable,
                     Some(data::Object::SubCharTable(_)) => Kind::SubCharTable,

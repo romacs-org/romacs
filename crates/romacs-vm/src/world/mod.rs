@@ -202,8 +202,7 @@ impl Vm {
             let entry = self.list_value(&[kind, symbol, form, cut]);
             let list = self.slot("romacs--world-reseed-forms");
             let old = self.variable_value(list).unwrap_or(Value::NIL);
-            self.conses.push((entry, old));
-            self.slots[list].value = Value::reference(self.conses.len() - 1, 3);
+            self.slots[list].value = self.alloc_cons(entry, old);
             Ok(())
         })();
         host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut}));

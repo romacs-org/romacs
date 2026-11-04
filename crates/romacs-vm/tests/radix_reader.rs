@@ -83,6 +83,7 @@ fn radix_bignum_constant_is_traced_through_compaction() {
         .as_str()
         .unwrap();
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1_000_000);
     // Dead objects before the constant guarantee a real index relocation.
     vm.eval_source("(vector (make-string 1000 65))").unwrap();

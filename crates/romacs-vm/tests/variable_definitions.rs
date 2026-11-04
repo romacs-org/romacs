@@ -51,6 +51,7 @@ fn defvar_keymap_parses_key_descriptions_and_preserves_existing_value() {
 #[test]
 fn variable_definition_values_survive_counted_moving_collection() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(usize::MAX);
     assert_eq!(answer(&mut vm, "(dotimes (i 80) (copy-sequence \"dead\")) (defvar-keymap s123-root-map \"a\" 's123-root-command) (defcustom s123-root-option (list (copy-sequence \"retained\")) \"root\" :type '(repeat string)) (defvar-local s123-root-local nil) (setq s123-root-local (list (copy-sequence \"local-retained\"))) (list (keymapp s123-root-map) s123-root-option)"), "(t (\"retained\"))");
     let old = format!("{:?}", vm.eval_source("s123-root-map").unwrap());

@@ -13,9 +13,7 @@ impl Vm {
         Value::reference(self.slot(name) + 1, 7)
     }
     pub(super) fn keymap_cons(&mut self, car: Value, cdr: Value) -> Value {
-        let index = self.conses.len();
-        self.conses.push((car, cdr));
-        Value::reference(index, 3)
+        self.alloc_cons(car, cdr)
     }
     fn sparse_keymap(&mut self, prompt: Value) -> Value {
         let head = self.keymap_symbol("keymap");

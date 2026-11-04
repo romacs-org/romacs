@@ -237,7 +237,8 @@ impl<'a> Walk<'a> {
                 && !matches!(t.test, hash::Test::User(..)),
             Object::SyntaxTable(_) | Object::Window(_) | Object::Frame(_) | Object::Terminal(_) | Object::WindowConfiguration(_)
             | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
-            | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::ByteBuffer(_) | Object::Obarray(_) => false,
+            | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::ByteBuffer(_) | Object::Obarray(_)
+            | Object::Free => false,
         }
     }
 
@@ -706,6 +707,8 @@ impl Vm {
         let place = Place::Private { conses: self.conses.len(), objects: self.objects.len() };
         let (conses, objects) = self.place(&decoded, place, &symbols).map_err(FreezeError::Failed)?;
         let tables: Vec<usize> = objects.iter().enumerate().filter(|(_, o)| matches!(o, Object::HashTable(_))).map(|(i, _)| i).collect();
+        let profiled: usize = objects.iter().map(crate::data::profiled_bytes).sum();
+        self.free.allocated += (conses.len() * size_of::<(Value, Value)>() + profiled) as u64;
         self.conses.extend(conses);
         self.charge_payload(objects.iter().map(crate::data::payload_bytes).sum());
         self.objects.extend(objects);
@@ -714,6 +717,9 @@ impl Vm {
             let DecodedObject::HashTable { test, entries } = &decoded.objects[i] else { unreachable!() };
             let entries: Vec<(Value, Value)> = entries.iter().map(|&(k, v)| (place.value(k, &symbols), place.value(v, &symbols))).collect();
             let table = self.table_from_entries(*test, &entries);
+            // Its placeholder was charged empty (above).
+            let empty = match &self.objects[base + i] { Object::HashTable(t) => t.storage_bytes(false), _ => 0 };
+            self.free.allocated += table.storage_bytes(false).saturating_sub(empty) as u64;
             self.objects[base + i] = Object::HashTable(Box::new(table));
         }
         Ok(place.value(decoded.root, &symbols))

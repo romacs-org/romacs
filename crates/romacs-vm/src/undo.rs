@@ -28,8 +28,7 @@ impl Vm {
                         .map_err(|_| "VM2 undo timestamps requiring bignum ticks are unsupported")?;
                     let ticks = Value::integer(ticks)?;
                     let hz = Value::integer(1_000_000_000)?;
-                    self.conses.push((ticks, hz));
-                    Value::reference(self.conses.len() - 1, 3)
+                    self.alloc_cons(ticks, hz)
                 } else {
                     let parts = [seconds.div_euclid(65536), seconds.rem_euclid(65536), nanos / 1000, nanos % 1000 * 1000];
                     let parts = parts.into_iter().map(Value::integer).collect::<Result<Vec<_>>>()?;
@@ -41,8 +40,8 @@ impl Vm {
 
     fn push_undo(&mut self, buffer: usize, entry: Value) {
         let list = self.undo_list_of(buffer);
-        self.conses.push((entry, list));
-        self.set_undo_list_of(buffer, Value::reference(self.conses.len() - 1, 3));
+        let cons = self.alloc_cons(entry, list);
+        self.set_undo_list_of(buffer, cons);
     }
 
     /// record_first_change: (t . VISITED-MODTIME), unless undo is off.
@@ -53,8 +52,7 @@ impl Vm {
     fn record_first_change_in(&mut self, buffer: usize) -> Result<()> {
         if self.undo_list_of(buffer) == Value::TRUE { return Ok(()); }
         let modtime = self.visited_modtime_value(buffer)?;
-        self.conses.push((Value::TRUE, modtime));
-        let entry = Value::reference(self.conses.len() - 1, 3);
+        let entry = self.alloc_cons(Value::TRUE, modtime);
         self.push_undo(buffer, entry);
         Ok(())
     }
@@ -96,8 +94,7 @@ impl Vm {
             self.conses[elt.index(3)?].1 = Value::integer(beg + length)?;
             return Ok(());
         }
-        self.conses.push((Value::integer(beg)?, Value::integer(beg + length)?));
-        let entry = Value::reference(self.conses.len() - 1, 3);
+        let entry = self.alloc_cons(Value::integer(beg)?, Value::integer(beg + length)?);
         self.push_undo(buffer, entry);
         Ok(())
     }
@@ -120,14 +117,12 @@ impl Vm {
             for (marker, at, advances) in self.markers_between(buffer, beg, beg + length)? {
                 let adjustment = if advances { beg + length } else { beg } - at;
                 if adjustment != 0 {
-                    self.conses.push((marker, Value::integer(adjustment)?));
-                    let entry = Value::reference(self.conses.len() - 1, 3);
+                    let entry = self.alloc_cons(marker, Value::integer(adjustment)?);
                     self.push_undo(buffer, entry);
                 }
             }
         }
-        self.conses.push((text, Value::integer(position)?));
-        let entry = Value::reference(self.conses.len() - 1, 3);
+        let entry = self.alloc_cons(text, Value::integer(position)?);
         self.push_undo(buffer, entry);
         Ok(())
     }
@@ -140,11 +135,9 @@ impl Vm {
         if self.undo_list_of(buffer) == Value::TRUE { return Ok(()); }
         if !self.buffer_state(self.slots[self.buffer_slot].value)?.modified() { self.record_first_change()?; }
         let (beg, end) = (Value::integer(beg)?, Value::integer(end)?);
-        self.conses.push((beg, end));
-        let mut entry = Value::reference(self.conses.len() - 1, 3);
+        let mut entry = self.alloc_cons(beg, end);
         for item in [value, prop, Value::NIL] {
-            self.conses.push((item, entry));
-            entry = Value::reference(self.conses.len() - 1, 3);
+            entry = self.alloc_cons(item, entry);
         }
         self.push_undo(buffer, entry);
         Ok(())

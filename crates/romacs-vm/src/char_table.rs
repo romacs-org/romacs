@@ -134,6 +134,7 @@ mod tests {
     #[test]
     fn retained_leaf_payload_is_forwarded_by_existing_collector() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         run(&mut vm, "(make-vector 100 nil)");
         run(&mut vm, "(setq ct-leaf (make-char-table nil)) (aset ct-leaf 65537 (list (copy-sequence \"leaf-payload\")))");
         let table_value = vm.slots[vm.names["ct-leaf"]].value;
@@ -192,6 +193,7 @@ mod tests {
     #[test]
     fn parent_and_range_referents_survive_moving_collection() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         assert_eq!(vm.heap_stats().live_objects, 0, "character tables must not allocate at startup");
         run(&mut vm, "(make-vector 100 nil)");
         run(&mut vm, "(setq ct-chain (make-char-table nil)) (set-char-table-parent ct-chain (make-char-table nil)) (set-char-table-range (char-table-parent ct-chain) '(128 . 4194303) (list (copy-sequence \"range-payload\")))");
@@ -240,6 +242,7 @@ mod tests {
     #[test]
     fn extra_slots_move_and_reclaim_without_retention() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         // Startup allocation counts are guarded by the existing GC suites.
         run(&mut vm, "(put 'ct-purpose 'char-table-extra-slots 3)");
         // Dead prefix ensures both the table and its sole-owned referent move.
@@ -308,10 +311,8 @@ impl Vm {
         }) else { return; };
         // Realize GNU's predefined plist on first symbol access, not Vm::new.
         let property = self.intern("char-table-extra-slots");
-        let tail = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(count).unwrap(), Value::NIL));
-        let plist = Value::reference(self.conses.len(), 3);
-        self.conses.push((property, tail));
+        let tail = self.alloc_cons(Value::integer(count).unwrap(), Value::NIL);
+        let plist = self.alloc_cons(property, tail);
         self.slots[slot].plist = plist;
     }
 
