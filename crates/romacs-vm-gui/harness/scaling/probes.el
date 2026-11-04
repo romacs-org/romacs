@@ -1042,6 +1042,171 @@ thousandth a stack mark."
   :setup (scaling--wrapped-line n nil)
   :body (with-current-buffer it (scaling--wrapped-step i)))
 
+;;;; Jabber: the archive catch-up's collections (rlisp/jabber/jabber-mam.el,
+;;;; jabber-mam-sync.el).  A connection here is an FSM symbol with state
+;;;; data and no transport: the probes count bookkeeping, not traffic.
+
+(defvar jabber-connections)
+(defvar jabber-buffer-connection)
+(defvar jabber-group)
+(defvar jabber-mam--dirty-peers)
+(defvar jabber-mam--room-nicks)
+(defvar jabber-mam-sync--accounts)
+(defvar jabber-mam-sync--stored)
+(defvar jabber-mam-sync--merge-queue)
+(defvar jabber-mam-sync--merge-tail)
+(defvar jabber-mam-sync--merge-queued)
+(defvar jabber-mam-sync--live-jobs)
+
+(defun scaling--jabber ()
+  "Jabber loaded, and a connection for romeo@montague.net, made current."
+  (require 'jabber)
+  (let ((jc (make-symbol "scaling-jc")))
+    (put jc :state :session-established)
+    (put jc :state-data (list :username "romeo" :server "montague.net" :resource "scaling"
+                              :password "pw" :connection-type 'network))
+    (setq jabber-connections (list jc))
+    jc))
+
+;; N rooms requested for one account's background catch-up.
+(scaling-probe jabber-sync-requests :n 400
+  :setup (let ((jc (scaling--jabber))) (clrhash jabber-mam-sync--accounts) (cons jc (scaling--names "room" n)))
+  :body (dolist (room (cdr it)) (jabber-mam-sync-request (car it) room)))
+
+;; N accounts, each requesting its personal archive.
+(scaling-probe jabber-sync-accounts :n 400
+  :setup (progn
+           (scaling--jabber)
+           (clrhash jabber-mam-sync--accounts)
+           (mapcar (lambda (name)
+                     (let ((jc (make-symbol name)))
+                       (put jc :state :session-established)
+                       (put jc :state-data (list :username name :server "montague.net" :resource "r"))
+                       jc))
+                   (scaling--names "user" n)))
+  :body (dolist (jc it) (jabber-mam-sync-request jc)))
+
+;; N accounts, each through a whole job: requested, started, finished
+;; (no worker: the isolate functions answer at once), all retained.
+(scaling-probe jabber-sync-lifecycle :n 300
+  :setup (progn
+           (scaling--jabber)
+           (clrhash jabber-mam-sync--accounts)
+           (setq jabber-mam-sync--live-jobs 0)
+           (mapcar (lambda (name)
+                     (let ((jc (make-symbol name)))
+                       (put jc :state :session-established)
+                       (put jc :state-data (list :username name :server "montague.net"
+                                                 :resource "r" :password "pw"))
+                       jc))
+                   (scaling--names "user" n)))
+  :body (let (callbacks)
+          (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) 'future))
+                    ((symbol-function 'isolate-on-done) (lambda (_f callback) (push callback callbacks)))
+                    ((symbol-function 'isolate-await) (lambda (&rest _) '(:archives nil :peers nil)))
+                    ((symbol-function 'isolate-future-isolate) (lambda (_) 'worker))
+                    ((symbol-function 'isolate-live-p) #'ignore)
+                    ((symbol-function 'thaw) #'identity)
+                    ((symbol-function 'jabber-mam-sync--toast) #'ignore)
+                    ((symbol-function 'jabber-db-share-writes) #'ignore))
+            (dolist (jc it)
+              (jabber-mam-sync-request jc)
+              (jabber-mam-sync--start (jabber-connection-bare-jid jc)))
+            (dolist (callback callbacks) (funcall callback 'future)))))
+
+;; N finished jobs' merges, one changed peer and its open buffer each.
+(scaling-probe jabber-sync-merge-repeat :n 400
+  :setup (let ((jc (scaling--jabber)) summaries)
+           (setq jabber-mam-sync--merge-queue nil jabber-mam-sync--merge-tail nil)
+           (clrhash jabber-mam-sync--merge-queued)
+           (dolist (room (scaling--names "room" n))
+             (with-current-buffer (get-buffer-create (concat " *scaling-merge-" room "*"))
+               (setq major-mode 'jabber-chat-mode)
+               (setq-local jabber-buffer-connection jc)
+               (setq-local jabber-group room)
+               (jabber-buffer-registry-register 'muc (list "romeo@montague.net" room)))
+             (push (list :peers (list (list "romeo@montague.net" room "groupchat" 1 1))) summaries))
+           summaries)
+  :body (dolist (summary it) (jabber-mam-sync--merge summary)))
+
+;; A finished job's N changed peers against N open (hidden) chat buffers:
+;; the histories are marked changed; no buffer is looked for.
+(scaling-probe jabber-sync-merge :n 400
+  :setup (let ((jc (scaling--jabber)) peers)
+           (setq jabber-mam-sync--merge-queue nil)
+           (dolist (room (scaling--names "room" n))
+             (with-current-buffer (get-buffer-create (concat " *scaling-" room "*"))
+               (setq major-mode 'jabber-chat-mode)
+               (setq-local jabber-buffer-connection jc)
+               (setq-local jabber-group room)
+               (jabber-buffer-registry-register 'muc (list "romeo@montague.net" room)))
+             (push (list "romeo@montague.net" room "groupchat" 1 1) peers))
+           (list :peers peers))
+  :body (jabber-mam-sync--merge it))
+
+;; N archived results marking N/2 peers dirty, twice each, and their page's redraw.
+(defvar jabber-mam--redraw-peers)
+(defvar jabber-mam--redraw-timer)
+
+;; Pages of a catch-up over N peers: each page marks them dirty and
+;; schedules their redraw, as `jabber-mam--accept-page' does.
+(scaling-probe jabber-mam-redraw-schedule :n 2000
+  :setup (progn (setq jabber-mam--dirty-peers nil jabber-mam--redraw-peers nil)
+                (cons (scaling--jabber) (scaling--names "peer" n)))
+  :body (dotimes (_ 3)
+          (dolist (peer (cdr it)) (jabber-mam--mark-dirty (car it) peer "chat"))
+          (jabber-mam--schedule-redraw jabber-mam--dirty-peers)
+          (when jabber-mam--redraw-timer (cancel-timer jabber-mam--redraw-timer)
+                (setq jabber-mam--redraw-timer nil))))
+
+(scaling-probe jabber-mam-dirty-peers :n 4000
+  :setup (progn (setq jabber-mam--dirty-peers nil)
+                (cons (scaling--jabber) (scaling--names "peer" (/ n 2))))
+  :body (progn
+          (dotimes (_ 2)
+            (dolist (peer (cdr it)) (jabber-mam--mark-dirty (car it) peer "chat")))))
+
+;; Our nickname looked up once per archived result, over N rooms read unjoined.
+(scaling-probe jabber-mam-room-nicks :n 4000
+  :setup (let ((nicks (make-hash-table :test #'equal)) (rooms (scaling--names "room" n)))
+           (scaling--jabber)
+           (dolist (room rooms) (puthash room "romeo" nicks))
+           (setq jabber-mam--room-nicks nicks)
+           (cons (car jabber-connections) rooms))
+  :body (dolist (room (cdr it)) (jabber-mam--our-muc-nick-p room "romeo" (car it))))
+
+;; A room buffer refreshed over N stored messages (`jabber-backlog-number'
+;; N): what runs before the first idle tick, the database's materialization
+;; of the backlog among it.  The clearing and insertion ticks run later.
+(scaling-probe jabber-chat-refresh :n 300
+  :setup (let* ((jc (scaling--jabber))
+                (room "room@conference.montague.net"))
+           (setq jabber-db-path (make-temp-file "scaling-jabber" nil ".db")
+                 jabber-db--connection nil
+                 jabber-backlog-number n)
+           (dotimes (i n)
+             (jabber-db-store-message "romeo@montague.net" room "in" "groupchat"
+                                      (format "message %d %s" i (make-string 60 ?x))
+                                      (+ 1700000000 i) "nick" (format "s%d" i)))
+           (let ((buffer (jabber-muc-create-buffer jc room)))
+             ;; The creation's own backlog load: let it finish first.
+             (with-current-buffer buffer
+               (cl-incf jabber-chat--backlog-generation))
+             buffer))
+  :body (with-current-buffer it (jabber-chat-buffer-refresh)))
+
+;; A worker's summary of N archives and N changed peers.
+(scaling-probe jabber-sync-summary :n 2000
+  :setup (let ((archives nil))
+           (scaling--jabber)
+           (setq jabber-mam-sync--stored (make-hash-table :test #'equal))
+           (dolist (room (scaling--names "room" n))
+             (push (list :room room :with nil :nick "romeo") archives)
+             (puthash (list "romeo@montague.net" room "groupchat") (cons 3 3) jabber-mam-sync--stored))
+           (cons (list :username "romeo" :server "montague.net")
+                 (cons (list :room nil :with nil :nick nil) archives)))
+  :body (jabber-mam-sync--summary (car it) (cdr it) (mapcar (lambda (a) (cons a 'success)) (cdr it)) t 1.0))
+
 ;;;; Running
 
 (defun scaling--probe (name)

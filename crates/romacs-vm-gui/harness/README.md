@@ -365,6 +365,40 @@ python3 -B crates/romacs-vm-gui/harness/gc_typing_live.py --binary BIN --output 
   [--prompt] [--seed N] [--tools LABWC-DIR:WLR-RANDR-DIR]   # about 3 minutes
 ```
 
+## Typing while jabber catches up its archives (`jabber_live.py`, `xmpp_fixture.py`)
+
+`xmpp_fixture.py` is a private XMPP server on 127.0.0.1 (standard library
+Python): SCRAM-SHA-1, bind, roster, disco, private storage, MUC joins with
+every occupant's presence and live traffic in busy rooms, and MAM with
+RSM paging (`start`, `after`, `before`, `with`; pages clamped to 50) over
+generated archives in Prosody's result format, from a seed and an anchor
+time. Live room messages enter their room's archive. It logs every MAM
+request and counts the client's presences and messages.
+
+`jabber_live.py` runs one isolated `--loadup` session with a notmuch
+search (notmuch_fixture.py) above a text file, connects jabber to the
+fixture, and types bursts of C-n/C-p and letters (F5/F6 select the two
+dedicated windows) while the archives catch up, then waits until every
+expected archive settled, no job runs or waits and every buffer refresh
+finished. Per key it records latency (wtype to `post-command-hook`) and
+the spans of jabber's main-VM work (FSM events, jabber timers, isolate
+deliveries, the background sync's steps, buffer refreshes, the session's
+SQLite statements): a slow key is *associated* with jabber when a span
+overlaps it and *attributable* when the spans' union within the key covers
+its excess over `--slow` (16 ms). Variants: `session` (in-session
+catch-up, `--page`), `worker` (`jabber-mam-background`), `none` (noise
+floor). `--restricted` makes the live connection read-only (no presence,
+no joins, a send gate); `--push-bookmark` has the fixture push an autojoin
+bookmark, which must not lead to a join. The run fails on an unfinished
+catch-up, a failed archive, no worker, unpaired keys, a refresh error or,
+in the worker variant, a key during the catch-up attributable to the
+sync's work.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/jabber_live.py --binary BIN --output DIR \
+  --variant worker [--backlog 300] [--resync-after 25] [--duration 60]   # about 3 minutes
+```
+
 # Driving Romacs through its MCP tools (`romacs_mcp_client.py`)
 
 A live harness can drive a Romacs session the way an agent does, through
