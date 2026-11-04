@@ -40,12 +40,15 @@ import tempfile
 import time
 
 import fileio_live as fio
+
+HERE = Path(__file__).resolve().parent
 import find_file_live as ff
 import live_oracle as live
 
 INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
       hermes-dashboard-transport-start-mode 'remote
       hermes-dashboard-transport-command "/nonexistent/hermes")
+(setq keymap-popup-backend #'keymap-popup-backend-side-window)
 (defun popup-live--posn (window pos)
   (let ((posn (posn-at-point pos window)))
     (and posn (list (posn-point posn) (posn-x-y posn) (posn-actual-col-row posn)
@@ -134,6 +137,64 @@ CHILD_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
        nil {state} nil (quote quiet)))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--show-child-frame :after #'popup-live--record))
+'''
+
+
+LAYER_INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
+      hermes-dashboard-transport-start-mode 'remote
+      hermes-dashboard-transport-command "/nonexistent/hermes")
+(setq keymap-popup-backend #'keymap-popup-backend-layer)
+(defun popup-live--root-windows ()
+  (mapcar (lambda (w) (list (buffer-name (window-buffer w)) (window-pixel-top w) (window-pixel-height w)))
+          (window-list (frame-parent (selected-frame)) 'nomini)))
+(defun popup-live--record (buffer)
+  (let* ((frame (keymap-popup--session-get buffer :frame))
+         (window (frame-root-window frame)))
+    (with-current-buffer buffer
+      (write-region
+       (prin1-to-string
+        (list :position (list (car (frame-position frame)) (cdr (frame-position frame)))
+              :native (list (frame-native-width frame) (frame-native-height frame))
+              :border (frame-parameter frame 'child-frame-border-width)
+              :visible (frame-visible-p frame)
+              :window-pixel-top (window-pixel-top window)
+              :window-pixel-left (window-pixel-left window)
+              :text-left (car (window-inside-pixel-edges window))
+              :frame-char-height (frame-char-height)
+              :mode-line (and (buffer-local-value 'mode-line-format buffer) t)
+              :lines (save-excursion
+                       (goto-char (point-min))
+                       (let (out)
+                         (while (not (eobp))
+                           (push (buffer-substring-no-properties (point) (line-end-position)) out)
+                           (forward-line 1))
+                         (nreverse out)))
+              :root-windows (popup-live--root-windows)
+              :frames (length (frame-list))
+              :chrome-bottom (romacs-chrome-bottom (frame-parent frame))
+              :inset (frame-internal-border-width (frame-parent frame))
+              :parent-text-width (frame-text-width (frame-parent frame))
+              :kind (frame-parameter frame 'romacs-popup-kind)))
+       nil {state} nil (quote quiet)))))
+(with-eval-after-load 'keymap-popup
+  (advice-add 'keymap-popup--fit-layer :after
+            ;; Its first fit runs as the popup renders, before :show made the panel.
+            (lambda (buffer) (when (keymap-popup--session-get buffer :frame) (popup-live--record buffer))))
+(load {fixture} nil t)
+(defun popup-live--fixture ()
+  (interactive)
+  (keymap-popup keymap-popup-fixture-map)
+  (let* ((buffer (keymap-popup--popup-buffer)) (frame (keymap-popup--session-get buffer :frame))
+         (window (frame-root-window frame)))
+    (redisplay t)
+    (write-region
+     (prin1-to-string
+      (list :runs (keymap-popup-fixture-placed-runs buffer)
+            :position (list (car (frame-position frame)) (cdr (frame-position frame)))
+            :text-left (car (window-inside-pixel-edges window)) :text-top (cadr (window-inside-pixel-edges window))
+            :column (frame-char-width frame) :line (frame-char-height frame)))
+     nil {faces} nil 'quiet)))
+(global-set-key (kbd "C-c k") #'popup-live--fixture))
 '''
 
 
@@ -273,6 +334,51 @@ def read_plist(text):
     return {key.lstrip(':'): item for key, item in zip(value[::2], value[1::2])}
 
 
+def lisp_string(text):
+    """A printed Lisp string's value (prin1 of an ASCII string)."""
+    return json.loads(text)
+
+
+def multiset(runs):
+    return sorted((text, tuple(faces or ())) for text, faces in runs)
+
+
+def check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs):
+    """keymap_popup_fixture.el's menu in Romacs's panel shows every key,
+    heading, entry, exit row and title in the faces pinned GNU X11 shows
+    them in (keymap_popup_faces.gnu): the same runs, as multisets (the
+    panel's width may lay columns out differently), the title its first
+    row; and each run is painted in its face's colour."""
+    gnu = json.loads(lisp_string([l for l in (HERE / 'keymap_popup_faces.gnu').read_text().splitlines() if l and not l.startswith(';')][-1]))
+    keys('-M', 'ctrl', 'c', '-m', 'ctrl', 'k')
+    fio.wait(faces_state.exists, args.timeout, 'fixture popup', process)
+    time.sleep(1.5)
+    fio.shot(output / 'fixture.png', env, report)
+    probe = read_plist(faces_state.read_text())
+    runs = [tuple(run) for run in probe['runs']]
+    title = [(t, f) for t, f, line, _, _ in runs if line == 0]
+    body = [(t, f) for t, f, line, _, _ in runs if line > 0]
+    report['checks'].append({'fixture_title': title, 'fixture_runs': len(body)})
+    if multiset(title) != multiset(gnu['title']):
+        raise AssertionError(f"title runs {title}, GNU's {gnu['title']}")
+    if multiset(body) != multiset(gnu['body']):
+        missing = set(multiset(gnu['body'])) - set(multiset(body))
+        extra = set(multiset(body)) - set(multiset(gnu['body']))
+        raise AssertionError(f'panel runs differ from GNU: missing {sorted(missing)}, extra {sorted(extra)}')
+    # Painted: the glyph at each run's first cell draws in its face's colour.
+    left, top = probe['position']
+    painted = {(round(g['x']), round(g['y'])): g for g in glyphs() if g.get('frame', 1) != 1 and g['role'] == 'Text'}
+    wrong = []
+    for text, faces, line, column, color in runs:
+        x, y = left + probe['text-left'] + column * probe['column'], top + probe['text-top'] + line * probe['line']
+        glyph = painted.get((x, y))
+        if glyph is None or glyph.get('char') != text[0] or glyph.get('foreground', '').lower() != color:
+            wrong.append((text, faces, color, glyph and (glyph.get('char'), glyph.get('foreground'))))
+    if wrong:
+        raise AssertionError(f'runs painted in other colours: {wrong[:6]}')
+    keys('q')
+
+
 def check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path):
     """The popup is a child frame: its rows are its buffer's lines in its
     rect, painted over the root frame, whose windows never move."""
@@ -323,6 +429,20 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
         raise AssertionError(f'popup glyphs span {min(xs)}..{max(xs)}, frame at {left} width {width}')
     if ys[-1] + line > top + height:
         raise AssertionError(f'last popup row {ys[-1]} below the frame bottom {top + height}')
+    if args.layer:
+        # Romacs's panel: across the frame's bottom above the status bar,
+        # its title (the popup's mode-line text) its first row, no mode
+        # line of its own, and no context segment in the status bar.
+        if probe['kind'] != 'panel' or probe['mode-line']:
+            raise AssertionError(f"panel kind {probe['kind']}, mode line {probe['mode-line']}")
+        if (left, top + height) != (probe['inset'], probe['chrome-bottom']):
+            raise AssertionError(f"panel at {left},{top} {width}x{height}, chrome bottom {probe['chrome-bottom']}")
+        if not lines or not lines[0].lstrip().startswith('q'):
+            raise AssertionError(f'title row {lines[:1]}')
+        bar = ' '.join(t for _, t in shown['root_mode_lines'])
+        if 'Dismiss' in bar or lines[0].strip() in bar:
+            raise AssertionError(f'status bar shows the popup: {bar!r}')
+        report['checks'].append({'panel_title': lines[0], 'panel_rows': len(lines)})
     # The root frame's windows are as they were with the popup gone.
     keys('q')
     fio.wait(lambda: not popup_rows(), args.timeout, 'popup gone', process)
@@ -345,6 +465,8 @@ def main():
     parser.add_argument('--font-size', default='14')
     parser.add_argument('--child-frame', action='store_true', help="keymap-popup's child-frame backend")
     parser.add_argument('--which-key', action='store_true', help="which-key's popup in a layer")
+    parser.add_argument('--layer', action='store_true', help="keymap-popup's Romacs panel backend")
+    parser.add_argument('--width', type=int, default=1280, help='the output width: a narrow one reflows the menu')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -361,8 +483,10 @@ def main():
                 directory.mkdir()
             state = work / 'popup-state.el'
             (home / 'config/romacs').mkdir(parents=True)
-            init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else INIT
-            (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state))))
+            init = WHICH_KEY_INIT if args.which_key else CHILD_INIT if args.child_frame else LAYER_INIT if args.layer else INIT
+            faces_state = work / 'popup-faces.el'
+            (home / 'config/romacs/init.el').write_text(init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el')),
+                                                                   faces=json.dumps(str(faces_state))) if args.layer else init.format(state=json.dumps(str(state))))
             (config / 'rc.xml').write_text(live.RC_XML)
             env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
                    'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / 'config'),
@@ -388,7 +512,7 @@ def main():
                 assert socket.is_socket() and socket.parent == root, socket
                 assert 'DISPLAY' not in env
                 report['wayland_socket'] = str(socket)
-                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
+                subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', f'{args.width}x800'],
                                env=env, check=True, timeout=15)
                 keyboard = subprocess.Popen(['wtype', '-s', '120000', '-k', 'Shift_L'], env=env, stdout=log, stderr=log)
                 time.sleep(.3)
@@ -423,8 +547,10 @@ def main():
                 time.sleep(1)
                 fio.shot(output / 'dashboard.png', env, report)
                 report['captures'].append({'name': 'dashboard', 'rows': text_rows(), 'mode_lines': mode_lines()})
-                if args.child_frame:
+                if args.child_frame or args.layer:
                     check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path)
+                    if args.layer:
+                        check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs)
                     report['status'] = 'PASS'
                     return
                 # The dashboard opens its popup itself; the popup key shows

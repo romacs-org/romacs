@@ -679,7 +679,8 @@ Activates KEYMAP as a transient map.  Switch keys execute and re-render
 without closing.  Inapt keys are refused with \"Command unavailable\"
 and keep the popup open; outside a popup, `:inapt-if' does not block
 dispatch.  Sub-menu keys push a navigation stack.
-The exit key and \\[universal-argument] are popup controls; source actions
+The exit key, \\[universal-argument], and C-M-v and C-M-S-v (a popup taller
+than its window pages, its source keeping focus) are popup controls; source actions
 shadowed by those controls are omitted from the displayed entries.
 \\[universal-argument] toggles prefix mode.
 

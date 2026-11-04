@@ -235,7 +235,14 @@ mode line would be."
       (emacs-lisp-mode)
       (romacs-mode-line-refresh-mode-icon)
       (romacs-should (string-prefix-p (string #xFE015 ?\s)
-                                      (romacs-mode-line-test--format '("" romacs-mode-line-mode-icon)))))))
+                                      (romacs-mode-line-test--format '("" romacs-mode-line-mode-icon)))))
+    ;; A mode no icon names (fundamental, special) shows Romacs's R.
+    (dolist (mode '(fundamental-mode special-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (romacs-mode-line-refresh-mode-icon)
+        (romacs-should (string-prefix-p (string #xFE038 ?\s)
+                                        (romacs-mode-line-test--format '("" romacs-mode-line-mode-icon))))))))
 
 (provide 'romacs-mode-line-test)
 ;;; romacs-mode-line-test.el ends here

@@ -27,6 +27,8 @@ fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layo
     vm.frame_snapshot(width, height)
 }
 
+const META: i64 = 1 << 27;
+
 type Engine = std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
@@ -172,6 +174,55 @@ fn menus_share_one_look_and_motion() {
             (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts))"));
         keys(&mut vm, &engine, &[7]);
         report.push(printed(&mut vm, "(list (frame-visible-p (romacs-layer--frame (romacs-eval-chip--buffer))) (romacs-eval-chip--live-claim))"));
+        // keymap-popup's menus are `panel's by default here: one taller than
+        // the panel pages with C-M-v, keeps its viewport when it refreshes,
+        // and leaves no layer behind once its buffer dies, a mode change first.
+        vm.eval_source("(progn (delete-other-windows) (switch-to-buffer \"menu.el\")
+            (keymap-popup-define chip-small-map \"Small\" :group \"Few\" \"a\" (\"One\" ignore) \"b\" (\"Two\" ignore))
+            (eval `(keymap-popup-define chip-big-map \"Big\" :group \"All\"
+                     \"0\" (\"Submenu\" :keymap chip-small-map)
+                     \"C-M-v\" (\"Shadowed by paging\" ignore)
+                     ,@(apply #'append (mapcar (lambda (c) (list (string c) (list (format \"Entry %c\" c) 'ignore)))
+                                               (string-to-list \"abcdefgijklmnoprstuvwxyzABCDEFGIJKLMNOPRSTUVWXYZ\"))))
+                  t)
+            (defvar chip-layers (hash-table-count romacs-layer--frames))
+            (local-set-key (kbd \"C-c k\") (lambda () (interactive) (keymap-popup chip-big-map))))").unwrap();
+        keys(&mut vm, &engine, &[3, 'k' as i64]);
+        let popup = "(let* ((buf (keymap-popup--popup-buffer)) (f (and buf (romacs-layer--frame-of buf))))
+            (list (and f (frame-visible-p f) t) (and f (frame-parameter f 'romacs-popup-kind))
+                  (and buf (with-current-buffer buf (line-number-at-pos (window-start (frame-root-window f)))))
+                  (and f (< (frame-text-lines f) (with-current-buffer buf (count-lines (point-min) (point-max)))))))";
+        report.push(printed(&mut vm, "(eq keymap-popup-backend 'keymap-popup-backend-layer)"));
+        report.push(printed(&mut vm, popup));
+        keys(&mut vm, &engine, &[META | 22]);
+        report.push(printed(&mut vm, popup));
+        report.push(printed(&mut vm, &format!("(progn (keymap-popup--refresh (keymap-popup--popup-buffer)) {popup})")));
+        keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25)]);
+        report.push(printed(&mut vm, popup));
+        // A source action under a paging control is not advertised.
+        report.push(printed(&mut vm, "(with-current-buffer (keymap-popup--popup-buffer) (and (string-search \"Shadowed\" (buffer-string)) t))"));
+        // Paging stops at the last full page and at the top.
+        let page_bounds = "(let* ((buf (keymap-popup--popup-buffer)) (w (frame-root-window (romacs-layer--frame-of buf))))
+            (with-current-buffer buf (list (line-number-at-pos (window-start w))
+                                           (= (line-number-at-pos (window-start w)) (max 1 (- (count-lines (point-min) (point-max)) (window-body-height w) -1))))))";
+        keys(&mut vm, &engine, &[META | 22, META | 22, META | 22, META | 22, META | 22]);
+        report.push(printed(&mut vm, page_bounds));
+        keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25); 5]);
+        report.push(printed(&mut vm, page_bounds));
+        // A submenu opened from a paged menu starts at its top, and so does
+        // its parent again on Back; paging a menu that fits does nothing.
+        keys(&mut vm, &engine, &[META | 22, '0' as i64]);
+        report.push(printed(&mut vm, popup));
+        keys(&mut vm, &engine, &[META | 22]);
+        report.push(printed(&mut vm, page_bounds));
+        keys(&mut vm, &engine, &['q' as i64]);
+        report.push(printed(&mut vm, popup));
+        keys(&mut vm, &engine, &['q' as i64]);
+        report.push(printed(&mut vm, "(list (keymap-popup--popup-buffer) (= (hash-table-count romacs-layer--frames) chip-layers))"));
+        keys(&mut vm, &engine, &[3, 'k' as i64]);
+        report.push(printed(&mut vm, "(let ((buf (keymap-popup--popup-buffer)))
+            (with-current-buffer buf (text-mode)) (kill-buffer buf)
+            (= (hash-table-count romacs-layer--frames) chip-layers))"));
         report
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
@@ -195,5 +246,18 @@ fn menus_share_one_look_and_motion() {
         "(t nil)",
         "(nil (\"error in process filter: Filter boom\"))",
         "(nil nil)",
+        "t",
+        "(t panel 1 t)",
+        "(t panel 20 t)",
+        "(t panel 20 t)",
+        "(t panel 1 t)",
+        "nil",
+        "(20 t)",
+        "(1 nil)",
+        "(t panel 1 nil)",
+        "(1 t)",
+        "(t panel 1 t)",
+        "(nil t)",
+        "t",
     ]);
 }

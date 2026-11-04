@@ -98,6 +98,9 @@ buffer's `kill-buffer-hook' deletes its layer and its entry.")
     (remhash (current-buffer) romacs-layer--frames)
     (when (frame-live-p frame) (delete-frame frame))))
 
+;; A major mode change keeps it: the layer is the buffer's until it dies.
+(put 'romacs-layer--forget 'permanent-local-hook t)
+
 (defun romacs-layer--frame-of (buffer)
   "The live child frame showing BUFFER's layer, if it has one."
   (let ((frame (gethash buffer romacs-layer--frames)))
@@ -194,12 +197,12 @@ bottom.  As (LEFT TOP WIDTH HEIGHT), or nil when POS is not shown."
        (t (setq x (max left (- right outer)) y (max top (- y height)))))
       (list x (- y border) width height))))
 
-(cl-defun romacs-layer-show (buffer &key position columns lines)
+(cl-defun romacs-layer-show (buffer &key position columns lines max-lines)
   "Show BUFFER in a layer over the frame and return the layer's frame.
 POSITION is `bottom', `center', `point' or (at WINDOW POS),
 `romacs-layer-position' by default; nil, showing nothing, when POS is
 not shown in WINDOW.  COLUMNS and LINES size it, by default to BUFFER's text, at
-most `romacs-layer-max-lines' lines; a `bottom' layer is as wide as the
+most MAX-LINES lines, by default `romacs-layer-max-lines'; a `bottom' layer is as wide as the
 frame."
   (let* ((buffer (window-normalize-buffer buffer))
          (frame (romacs-layer--frame buffer))
@@ -207,7 +210,7 @@ frame."
          (border (or (frame-parameter frame 'child-frame-border-width) 0)))
     (pcase (romacs-layer--placement (or position romacs-layer-position)
                                     (or columns (car text))
-                                    (min (or lines (cdr text)) romacs-layer-max-lines)
+                                    (min (or lines (cdr text)) (or max-lines romacs-layer-max-lines))
                                     border)
       (`(,left ,top ,width ,height)
        (set-frame-size frame width height t)
@@ -215,7 +218,10 @@ frame."
        ;; The edge it slides in from and grows away from.
        (set-frame-parameter frame 'romacs-layer-edge
                             (if (eq (or position romacs-layer-position) 'bottom) 'bottom 'top))
-       (set-window-start (frame-root-window frame) (with-current-buffer buffer (point-min)))
+       ;; A layer shown anew starts at its text's top; one re-placed while
+       ;; shown keeps its viewport (a scrolled popup refitting).
+       (unless (frame-visible-p frame)
+         (set-window-start (frame-root-window frame) (with-current-buffer buffer (point-min))))
        (make-frame-visible frame)
        frame)
       (_ (romacs-layer-hide buffer) nil))))

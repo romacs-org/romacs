@@ -155,6 +155,15 @@ SCENES = r'''
   (insert "(+ 1 2)\n(car 1)")
   (goto-char (point-min)) (end-of-line)
   (chrome-live--note "eval")))
+(run-at-time 43 nil (lambda ()
+  ;; Gnosis's dashboard menu (harness/keymap_popup_fixture.el, submenus
+  ;; and all) as keymap-popup's Romacs panel.
+  (load @FIXTURE@ nil t)
+  (delete-other-windows)
+  (switch-to-buffer (get-buffer-create "*Gnosis Dashboard*"))
+  (special-mode)
+  (keymap-popup keymap-popup-fixture-map)
+  (chrome-live--note "keymap")))
 '''
 LOAD = r'''
 (blink-cursor-mode -1)
@@ -236,6 +245,7 @@ def main():
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--gpu-frames', type=int, default=0)
     ap.add_argument('--light', action='store_true')
+    ap.add_argument('--theme', help='a theme to load in the init (a real light theme: modus-operandi)')
     ap.add_argument('--themes', default='', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--scenes', action='store_true')
     ap.add_argument('--top', action='store_true', help="the status bar at the top (`romacs-status-bar-position')")
@@ -268,6 +278,8 @@ def main():
             init = INIT
             if args.light:
                 init += '(set-face-attribute \'default nil :foreground "#202020" :background "#f0f0f0")\n'
+            if args.theme:
+                init += f"(load-theme '{args.theme} t)\n"
             if args.classic:
                 init += '(romacs-classic-chrome 1)\n'
             if args.top:
@@ -280,7 +292,7 @@ def main():
             end = (LOAD.replace('{frames}', str(args.gpu_frames)).replace('{at}', at) if args.gpu_frames
                    else f'(run-at-time {at} nil (lambda () (kill-emacs 0)))\n')
             if args.scenes:
-                end = SCENES + '(run-at-time 47 nil (lambda () (kill-emacs 0)))\n'
+                end = SCENES.replace('@FIXTURE@', json.dumps(str(Path(__file__).resolve().parent / 'keymap_popup_fixture.el'))) + '(run-at-time 52 nil (lambda () (kill-emacs 0)))\n'
                 repo = home / 'repo'
                 repo.mkdir()
                 (repo / 'a.el').write_text(';;; a.el --- a file  -*- lexical-binding: t -*-\n(defun a () 1)\n')
@@ -405,6 +417,11 @@ def main():
                     ctrl('x', 'e')
                     time.sleep(1)
                     shot('scene-eval-error')
+                    # keymap-popup's menu as Romacs's bottom panel.
+                    keymap = notes / 'keymap.json'
+                    wait(keymap.exists, args.timeout, 'keymap', proc)
+                    time.sleep(1.5)
+                    shot('scene-keymap')
                 wait(lambda: proc.poll() is not None, 30 + args.gpu_frames * .1, 'exit', None)
             if args.gpu_frames:
                 report['gpu'] = gpu_times(log_path.read_text(errors='replace'), out / 'trace.jsonl', MEASURED)

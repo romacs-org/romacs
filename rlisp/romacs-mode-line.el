@@ -514,9 +514,11 @@ then `vc-mode''s text without the backend's name, with its help and map."
     (image-mode . image) (help-mode . help) (helpful-mode . help) (Info-mode . info) (Man-mode . info)
     (message-mode . mail) (notmuch-search-mode . mail) (notmuch-show-mode . mail) (notmuch-tree-mode . mail)
     (jabber-chat-mode . chat) (erc-mode . chat) (rcirc-mode . chat)
-    (lisp-interaction-mode . scratch) (text-mode . text) (prog-mode . default) (special-mode . default))
-  "Each major mode's icon, found for a mode through its parents; a mode
-whose nearest icon is `default' also shows its name."
+    (lisp-interaction-mode . scratch) (text-mode . text))
+  "Each major mode's icon, found for a mode through its parents.  A mode
+with none (fundamental, special and dashboard buffers, a language with
+no icon of its own) shows Romacs's R, which says only that this is
+Romacs, so its name shows too: an icon earns its place by naming the mode."
   :type '(alist :key-type symbol :value-type symbol))
 
 (defvar-local romacs-mode-line--iconic nil
@@ -534,13 +536,14 @@ of them does not also show its name."
   (let ((mode major-mode) icon)
     (while (and mode (not (setq icon (alist-get mode romacs-mode-line-mode-icons))))
       (setq mode (get mode 'derived-mode-parent)))
-    (or icon 'default)))
+    (or icon 'romacs)))
 
 (romacs-mode-line-define-segment mode-icon
   "The major mode's icon."
   :hooks (window-buffer-change-functions)
   :compute (lambda () (let* ((name (romacs-mode-line--mode-icon-name))
-                             (icon (romacs-mode-line--icon name)))
+                             ;; Romacs's R in the mark's colour where it shows.
+                             (icon (romacs-mode-line--icon name (and (eq name 'romacs) 'romacs-mode-line-mark))))
                         (setq romacs-mode-line--iconic (and icon (memq name romacs-mode-line-telling-icons) t))
                         icon)))
 

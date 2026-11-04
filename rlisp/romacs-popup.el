@@ -81,7 +81,12 @@ text; FACE paints its background."
                                           ('palette 'center)
                                           ('cursor `(at ,(car anchor) ,(cdr anchor)))
                                           (_ (error "Unknown menu kind %S" kind)))
-                              :columns columns :lines lines)
+                              :columns columns :lines lines
+                              ;; A key menu is modal and may be taller than a
+                              ;; list: the frame less a few lines of its windows.
+                              :max-lines (and (eq kind 'panel)
+                                              (max romacs-layer-max-lines
+                                                   (- (frame-text-lines (romacs-layer--root-frame)) 4))))
       (when (eq kind 'panel) (run-hooks 'romacs-popup-panel-functions)))))
 
 (defun romacs-popup-hide (buffer)
