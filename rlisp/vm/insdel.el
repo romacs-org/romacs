@@ -194,6 +194,18 @@ each (UNCHANGED-AT-BEGINNING UNCHANGED-AT-END GROWTH) in characters.")
 (defvar romacs--combined-changes-buffer nil
   "insdel.c combine_after_change_buffer: the buffer of the deferred changes.")
 
+(defun romacs--decompressed (beg end text result)
+  "decompress.c's edit of BEG..END by `zlib-decompress-region': TEXT in
+place of the region, or the region kept when TEXT is nil, one change for
+the hooks (`romacs--decompress-prepare', `romacs--decompress-change').
+Point returns where the before hooks left it, clipped to the end, however
+the after hooks exit.  The value is RESULT."
+  (let* ((prepared (romacs--decompress-prepare beg end))
+         (opoint (point)))
+    (unwind-protect (romacs--decompress-change beg end text prepared)
+      (goto-char (min opoint (point-max))))
+    result))
+
 (defun romacs--after-change-deferred-p ()
   "Whether signal_after_change defers the current buffer's change:
 `combine-after-change-calls' is on, `before-change-functions' is nil or

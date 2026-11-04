@@ -37,7 +37,10 @@ eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environ
 forwarded.rs notify_unbind_forwarded notify_watchers 1 rooted  # OLD and OWNER are read from the caller's frame before each call
 forwarded.rs notify_unbind_forwarded notify_watchers_at 2 rooted  # OLD and OWNER are read from the caller's frame before each call
 gc.rs assert_no_retention_growth collect 1 collector  # a test helper collecting with no engine running
+handle.rs collect collect_until_key 1 collector  # every collection: the caller's roots are traced and forwarded
+handle.rs collect_compacting collect 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs collect_garbage collect 1 collector  # embedder API: no engine runs and handles are rooted
+handle.rs collect_garbage_until_key collect_until_key 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs eval_form eval_form_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 handle.rs eval_source eval_source_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
@@ -64,7 +67,6 @@ lib.rs unbind_one unbind 1 clean  # backtrace bookkeeping, runs no Lisp
 lib.rs unwind unbind_one 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 loader.rs bind_named bind_variable 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 loader.rs build_load_history set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-loader.rs eval_load_toplevel cached_source_form 1 held  # an open compiler builder holds collection
 loader.rs eval_load_toplevel compile_request 1 held  # an open compiler builder holds collection
 loader.rs eval_load_toplevel eval_load_toplevel 3 clean  # FORM's objects are rooted; only the last child's value is returned
 loader.rs eval_load_toplevel execute_raw 1 clean  # FORM's objects are rooted
@@ -199,12 +201,12 @@ threaded.rs lambda_list_raise bind_special 1 rooted  # each parameter and argume
 threaded.rs lambda_list_then lambda_list_closure 1 suspended  # inside nested_then; LIST is an argument read before any Lisp
 threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased from the result
 threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
-threaded.rs poll_collect collect 1 collector  # the engine is suspended first
+threaded.rs poll_collect poll_collect_unless_key 1 collector  # the engine is suspended first
+threaded.rs poll_collect_unless_key collect_until_key 1 collector  # the engine is suspended first
 threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
 threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
-threaded.rs reader_call compile_request 1 held  # an open compiler builder holds collection
-threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are quoted objects; the caller's registers are set aside
+threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are the trampoline's registers; the caller's registers are set aside
 threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
 threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
 threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
@@ -217,6 +219,7 @@ threaded.rs t2_dispatch lambda_list_raise 1 rooted  # the walk's bindings and da
 threaded.rs t2_dispatch lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
 threaded.rs t2_enter_closure force_lazy 1 suspended  # registers are rebased from the result
 threaded.rs take_step poll_collect 1 collector  # garbage-collect, when may_collect(1)
+threaded.rs take_step poll_collect_unless_key 1 collector  # romacs--collect-idle, when may_collect(1)
 threaded_signal.rs handler_callback reader_call 1 suspended  # the engine is suspended; OBJECT and FUNCTION are the call's own
 threaded_signal.rs prepare_signal call_debugger 1 suspended  # the error stays the engine's pending escape; its replacement is read from the result
 threaded_signal.rs prepare_signal signal_hook 1 suspended  # the condition stays the engine's pending escape
@@ -227,7 +230,7 @@ variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a fram
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 1 held  # a legacy primitive: its engine is not suspended
+variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended; the file-local defvar returns its symbol, which never moves
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
@@ -235,4 +238,4 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
 world/layer.rs timer_count eval_source_raw 1 clean  # no Values before the call; its value is a fixnum, read at once
 world/layer.rs world_layer_load eval_source_raw 3 boundary  # a layer build's top-level requests: the builder holds no Values, and each result is dropped or only matched
-world/store.rs publish_world collect_garbage 1 collector  # a build's end: no engine runs, and the VM is all the image holds
+world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds

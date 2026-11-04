@@ -202,6 +202,7 @@ mod control_tests {
     #[test]
     fn suspended_caller_regions_are_exclusive_forwarded_roots() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         for _ in 0..20 {
             vm.conses.push((Value::NIL, Value::NIL));
         }
@@ -1149,8 +1150,7 @@ impl RestStack {
         // Arena pushes do not collect; collection is only at explicit strand
         // wait points. No Value copy survives a safepoint in this routine.
         for i in (rest.start..rest.end).rev() {
-            vm.conses.push((self.values[i], tail));
-            tail = Value::reference(vm.conses.len() - 1, 3);
+            tail = vm.alloc_cons(self.values[i], tail);
         }
         tail
     }
@@ -1246,6 +1246,7 @@ impl Engine<'_> {
 #[cfg(test)]
 pub(super) fn assert_opaque_rest_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     // The opaque stack is the ONLY owner of these payloads; stale caller
     // registers must not accidentally make an omitted root traversal pass.
     for _ in 0..20 {
@@ -1312,36 +1313,63 @@ pub(super) fn assert_opaque_rest_compaction() {
     );
 }
 
+/// Arguments a native call into Lisp passes in registers; more go to
+/// `apply' as one list (`Vm::reader_trampoline`).
+const TRAMPOLINE_ARITY: usize = 8;
+
 impl Vm {
     /// Call FUNCTION with ARGS from native code, the caller's register stack
     /// set aside (traced, its allocation unmoved for suspended engines' raw
-    /// pointers). FUNCTION and ARGS are rooted as quoted objects; the caller
-    /// keeps nothing else across the call unless it is rooted.
+    /// pointers). FUNCTION and ARGS are rooted in the trampoline's registers;
+    /// the caller keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
         let _unwind = self.unwind_mark();
+        // Compiling a trampoline allocates nothing that can collect.
+        let trampoline = self.reader_trampoline(args.len())?;
+        let registers: Vec<Value> = if args.len() <= TRAMPOLINE_ARITY {
+            std::iter::once(function).chain(args.iter().copied()).collect()
+        } else {
+            vec![function, self.list_value(args)]
+        };
         self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
         self.propagated_eval_depth = None;
-        let result = (|| {
-            let quote = |value| {
-                Form::List(vec![
-                    Form::Sym("quote".into()),
-                    Form::Object(crate::handle::FormObject::new(self, value)),
-                ])
-            };
-            let mut call = vec![Form::Sym("funcall".into()), quote(function)];
-            call.extend(args.iter().copied().map(quote));
-            let (entry, _) = self.compile_request(&Form::List(call))?;
-            self.propagate_next = true;
-            let result = execute_args(self, entry, &[]);
-            self.release_request_entry(entry);
-            result
-        })();
+        self.propagate_next = true;
+        let result = execute_args(self, trampoline, &registers);
         self.propagate_next = false;
         self.resume_stack();
         self.end_nested_execution();
         result
+    }
+    /// The permanent function a native call of N arguments enters:
+    /// `(lambda (f a1 .. aN) (funcall f a1 .. aN))`, or for more than
+    /// TRAMPOLINE_ARITY `(lambda (f args) (apply f args))`. Its own `Call`
+    /// does what any Lisp call does (captures, arity, `&rest`, autoload,
+    /// escapes), so no native call compiles a request form. Lexical and
+    /// eager whatever is being compiled or evaluated now, its parameters
+    /// uninterned: the callee sees no binding of its own.
+    fn reader_trampoline(&mut self, n: usize) -> Result<usize> {
+        let index = n.min(TRAMPOLINE_ARITY + 1);
+        if let Some(&Some(id)) = self.reader_trampolines.get(index) {
+            return Ok(id);
+        }
+        let spread = index > TRAMPOLINE_ARITY;
+        let parameter = || Form::Generated(crate::expand::generated_id());
+        let params: Vec<Form> = (0..if spread { 2 } else { index + 1 }).map(|_| parameter()).collect();
+        let head = if spread { "apply" } else { "funcall" };
+        let body = Form::List(std::iter::once(Form::Sym(head.into())).chain(params.iter().cloned()).collect());
+        let scope = std::mem::replace(&mut self.dynamic_scope, false);
+        let regime = std::mem::replace(&mut self.lazy_regime, false);
+        let compiled = self.compile_permanent(|vm| vm.function(&params, &[body], &NameMap::default(), &NameSet::default()));
+        self.lazy_regime = regime;
+        self.dynamic_scope = scope;
+        let (id, _) = compiled?;
+        if self.reader_trampolines.len() <= index {
+            self.reader_trampolines.resize(index + 1, None);
+        }
+        self.reader_trampolines[index] = Some(id);
+        Ok(id)
     }
 
     /// After a nested engine run, whose program the suspended engine does not
@@ -1845,8 +1873,7 @@ fn closure_arity_error(e: &mut Engine<'_>, function: usize, argc: usize) -> Valu
     let f = &e.vm.functions[function];
     let min = Value::integer(f.required as i64).unwrap();
     let max = Value::integer(f.arity as i64).unwrap();
-    e.vm.conses.push((min, max));
-    let arity = Value::reference(e.vm.conses.len() - 1, 3);
+    let arity = e.vm.alloc_cons(min, max);
     raise(e, "wrong-number-of-arguments", &[arity, Value::integer(argc as i64).unwrap()])
 }
 /// GNU eval.c funcall_general: a function cell that resolves to nothing is
@@ -1925,12 +1952,18 @@ fn isolate_quit(e: &mut Engine<'_>) -> bool {
 #[cold]
 #[inline(never)]
 fn poll_collect(e: &mut Engine<'_>) {
+    poll_collect_unless_key(e, false);
+}
+/// Collect, or with UNTIL_KEY stop while marking once a key press is queued
+/// (`Vm::collect_until_key'): whether it collected.
+fn poll_collect_unless_key(e: &mut Engine<'_>, until_key: bool) -> bool {
     // Forward in place without moving instruction buffers: suspended PCs and
     // entry pointers stay valid.
     let roots = e.suspend_code();
     debug_assert!(e.vm.may_collect(0), "collecting while a frame holds untraced Values");
-    e.vm.collect(&mut []);
+    let collected = e.vm.collect_until_key(&mut [], until_key);
     e.resume_code(roots);
+    collected
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need
@@ -2844,6 +2877,12 @@ unsafe fn take_step(
                     *r.add((*pc).a) = Value::NIL;
                     return Continue::At(r, pc.add(1));
                 }
+            }
+            Ok(prim::Step::CollectIdle) => {
+                leave_native(e);
+                let collected = e.vm.may_collect(1) && poll_collect_unless_key(e, true);
+                *r.add((*pc).a) = if collected { Value::TRUE } else { Value::NIL };
+                return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);
@@ -4078,27 +4117,7 @@ unsafe fn nconc2(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        let index = e.vm.conses.len();
-        if index == e.vm.conses.capacity() {
-            return grow_cons(e, r, pc);
-        }
-        e.vm.conses
-            .as_mut_ptr()
-            .add(index)
-            .write((*r.add(i.d), *r.add(i.d + 1)));
-        e.vm.conses.set_len(index + 1);
-        *r.add(i.a) = Value::reference(index, 3);
-        advance(e, r, pc)
-    }
-}
-#[cold]
-#[inline(never)]
-unsafe fn grow_cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let i = &*pc;
-        let index = e.vm.conses.len();
-        e.vm.conses.push((*r.add(i.d), *r.add(i.d + 1)));
-        *r.add(i.a) = Value::reference(index, 3);
+        *r.add(i.a) = e.vm.alloc_cons(*r.add(i.d), *r.add(i.d + 1));
         advance(e, r, pc)
     }
 }
@@ -4122,8 +4141,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
         let outcome = (|| -> Result<()> {
             match (*pc).op {
                 Op::Cell(reg) => {
-                    let index = e.vm.cells.len();
-                    e.vm.cells.push(*r.add(reg));
+                    let index = e.vm.alloc_cell(*r.add(reg));
                     *r.add(reg) = Value::reference(index, 5);
                 }
                 Op::Global(reg, slot) => {
@@ -4251,9 +4269,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         .iter()
                         .map(|&reg| *r.add(reg))
                         .collect();
-                    let index = e.vm.closures.len();
-                    e.vm.closures.push(Closure { function, captures, metadata: vec![], document: Value::NIL });
-                    *r.add(reg) = Value::reference(index, 4);
+                    *r.add(reg) = e.vm.alloc_closure(Closure { function, captures, metadata: vec![], document: Value::NIL });
                 }
                 Op::DeclareSpecial(slot) => {
                     e.vm.specials.insert(e.vm.symbol_names[slot].clone());

@@ -242,6 +242,7 @@ fn t2_unbounded_callback_recursion_fails_cleanly() {
 #[test]
 fn run_hooks_walk_state_is_forwarded_by_collections_inside_hooks() {
     let mut vm = collecting_vm();
+    vm.set_gc_moving(true);
     let setup = format!(
         "{GARBAGE}
          (progn

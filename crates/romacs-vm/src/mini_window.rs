@@ -6,6 +6,7 @@
 //! their point visibility and scrolling (redisplay.rs) count buffer lines,
 //! not display lines.
 use crate::{data::Object, overlay_order::OverlayEntry, *};
+use crate::width_rule::WidthRule;
 use romacs_layout_input::{FaceRun, LineWrap};
 use std::ops::Range;
 
@@ -94,15 +95,10 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
 /// TABs) does, as GNU's word wrap and romacs-layout2 break it. A TAB goes
 /// to the next stop of TAB_WIDTH columns from its line's start, counting
 /// the rows before it (continuation_lines_width; a TAB that does not fit
-/// counts its row as full); a control character takes two (^X), others
-/// their Unicode width.
-fn row_starts(text: &str, width: usize, wrap: LineWrap, tab_width: usize) -> Vec<usize> {
-    let tab_width = tab_width.max(1);
-    let advance = |c: char, line_x: usize| match c {
-        '\t' => tab_width - line_x % tab_width,
-        '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
-        _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
-    };
+/// counts its row as full); any other character its width by RULE
+/// (width_rule.rs).
+fn row_starts(text: &str, width: usize, wrap: LineWrap, rule: &WidthRule) -> Vec<usize> {
+    let advance = |c: char, line_x: usize| rule.columns(c as u32, line_x);
     let mut starts = vec![0];
     // AT is the row's x, CONTINUED the line's rows before it; WRAP_AT the
     // row's last wrap point and its x.
@@ -262,16 +258,16 @@ impl Vm {
         // the frame out (romacs-layout2 reserves the same), else its columns.
         let column = self.window_state.column.max(1);
         let [left, right] = self.window_fringe_widths(mini)?;
-        let (wrap, tab_width) = (self.window_line_wrap(mini, buffer)?, self.buffer_tab_width(buffer)? as usize);
+        let (wrap, rule) = (self.window_line_wrap(mini, buffer)?, self.buffer_width_rule(buffer)?);
         let area = width.saturating_sub(left + right);
-        let rows = |reserved: u32| row_starts(&spliced.text, (area.saturating_sub(reserved) / column).max(1) as usize, wrap, tab_width);
+        let rows = |reserved: u32| row_starts(&spliced.text, (area.saturating_sub(reserved) / column).max(1) as usize, wrap, &rule);
         // Rows that no glyph up to half a row wide changes need no measure
         // of it, as an empty or short echo area's at every redisplay.
         let starts = if right > 0 { rows(0) } else {
             let short = rows(area / 2);
             if short == rows(0) { short } else {
                 let glyph = self.line_glyphs(buffer)?[1].unwrap_or('\\');
-                let cells = unicode_width::UnicodeWidthChar::width(glyph).unwrap_or(1) as u32 * column;
+                let cells = rule.width(glyph as u32) as u32 * column;
                 rows(if self.has_layout_host() { self.host_default_advance(glyph).map_or(cells, |(advance, _)| advance) } else { cells })
             }
         };
@@ -319,17 +315,17 @@ mod tests {
     #[test]
     fn rows_break_as_the_window_wraps_them() {
         let text = "aaaa bbbb cccc\nxxxxxxxxxxxxyy z";
-        assert_eq!(row_starts(text, 10, LineWrap::Window, 8), vec![0, 10, 15, 25]);
-        assert_eq!(row_starts(text, 10, LineWrap::Word, 8), vec![0, 10, 15, 25]);
-        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Word, 8), vec![0, 5]);
-        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Window, 8), vec![0, 10]);
-        assert_eq!(row_starts("one  two three four", 10, LineWrap::Word, 8), vec![0, 9]);
-        assert_eq!(row_starts("aaaa bbbbbbbbbbbbbbb", 10, LineWrap::Word, 8), vec![0, 5, 15]);
-        assert_eq!(row_starts("aaaa bbbb cccc", 10, LineWrap::Truncate, 8), vec![0]);
+        assert_eq!(row_starts(text, 10, LineWrap::Window, &WidthRule::plain(8)), vec![0, 10, 15, 25]);
+        assert_eq!(row_starts(text, 10, LineWrap::Word, &WidthRule::plain(8)), vec![0, 10, 15, 25]);
+        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Word, &WidthRule::plain(8)), vec![0, 5]);
+        assert_eq!(row_starts("aaaa bbbbbb cc", 10, LineWrap::Window, &WidthRule::plain(8)), vec![0, 10]);
+        assert_eq!(row_starts("one  two three four", 10, LineWrap::Word, &WidthRule::plain(8)), vec![0, 9]);
+        assert_eq!(row_starts("aaaa bbbbbbbbbbbbbbb", 10, LineWrap::Word, &WidthRule::plain(8)), vec![0, 5, 15]);
+        assert_eq!(row_starts("aaaa bbbb cccc", 10, LineWrap::Truncate, &WidthRule::plain(8)), vec![0]);
         // A TAB that does not fit continues from the row's end, its stop
         // counted from the line's start; TAB_WIDTH sets the stops.
-        assert_eq!(row_starts("aaaaaaaaa\tbbbb", 10, LineWrap::Window, 8), vec![0, 9]);
-        assert_eq!(row_starts("ab\tc", 10, LineWrap::Window, 4), vec![0]);
-        assert_eq!(row_starts("abcdefghi\tc", 10, LineWrap::Window, 4), vec![0, 9]);
+        assert_eq!(row_starts("aaaaaaaaa\tbbbb", 10, LineWrap::Window, &WidthRule::plain(8)), vec![0, 9]);
+        assert_eq!(row_starts("ab\tc", 10, LineWrap::Window, &WidthRule::plain(4)), vec![0]);
+        assert_eq!(row_starts("abcdefghi\tc", 10, LineWrap::Window, &WidthRule::plain(4)), vec![0, 9]);
     }
 }

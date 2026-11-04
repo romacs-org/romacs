@@ -901,8 +901,7 @@ impl Reader<'_, '_> {
                 } else {
                     for index in values.into_iter().rev() {
                         let value = self.vm.external_roots[index];
-                        self.vm.conses.push((value, tail));
-                        tail = Value::reference(self.vm.conses.len() - 1, 3);
+                        tail = self.vm.alloc_cons(value, tail);
                     }
                     Ok(tail)
                 }

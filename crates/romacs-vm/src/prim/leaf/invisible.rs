@@ -59,13 +59,6 @@ impl Leaf<'_> {
         }
         Ok(())
     }
-    /// Columns C occupies at COLUMN (as current-column counts them).
-    fn char_columns(c: char, column: usize, tab: usize) -> usize {
-        if c == '\t' { tab - column % tab }
-        else if ('\u{80}'..='\u{9f}').contains(&c) { 4 }
-        else if c.is_control() { 2 }
-        else { unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) }
-    }
     /// indent.c position_indentation from the start of point's line:
     /// spaces and tabs, and characters of category `\s'.
     pub fn current_indentation(&mut self) -> super::super::Out {
@@ -88,14 +81,14 @@ impl Leaf<'_> {
     /// column reached and the absolute byte position and column before the
     /// last character, with that character.
     pub fn scan_to_column(&mut self, goal: usize) -> std::result::Result<(usize, usize, usize, Option<char>), Fault> {
-        let tab = self.tab_width()?;
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let (line, _, low) = self.line_text()?;
         let (mut column, mut at) = (0, 0);
         let (mut prev_at, mut prev_column, mut prev_char) = (0, 0, None);
         for c in line.chars() {
             if column >= goal { break; }
             (prev_at, prev_column, prev_char) = (at, column, Some(c));
-            column += Self::char_columns(c, column, tab);
+            column += rule.columns(c as u32, column);
             at += c.len_utf8();
         }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -107,9 +100,9 @@ impl Leaf<'_> {
         Ok((column, low + prev_at, prev_column, prev_char))
     }
     pub fn native_current_column(&mut self) -> super::super::Out {
-        let tab = self.tab_width()?;
+        let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let (line, point, _) = self.line_text()?;
-        let column = line[..point].chars().fold(0, |column, c| column + Self::char_columns(c, column, tab));
+        let column = line[..point].chars().fold(0, |column, c| column + rule.columns(c as u32, column));
         Value::integer(column as i64).map_err(Fault::Error)
     }
 

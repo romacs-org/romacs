@@ -118,6 +118,7 @@ fn widened_weak_keys_survive_real_compaction() {
     for test in ["eq", "eql", "equal"] {
         for n in [-(1i64 << 61), -(1 << 60) - 1, 1 << 60, (1 << 61) - 1] {
             let mut vm = Vm::new();
+            vm.set_gc_moving(true);
             vm.read_source("(\"dead\")").unwrap();
             let source = format!(
                 "(setq s109-table (make-hash-table :test '{test} :weakness 'key)) (puthash (+ {n} 0) (cons 42 nil) s109-table) s109-table"

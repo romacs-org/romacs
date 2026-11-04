@@ -684,15 +684,18 @@ impl WgpuRenderer {
                 }
             }
 
-            // A glowing layer is lit, not outlined.
-            if bw > 0.0 || (corner_radius > 0.0 && child.layer.glow.is_none()) {
+            // A glowing layer is lit, not outlined, unless it asks for a
+            // hairline (an error toast's).
+            if bw > 0.0 || child.layer.outline.is_some() || (corner_radius > 0.0 && child.layer.glow.is_none()) {
                 let mut border_verts: Vec<RoundedRectVertex> = Vec::new();
-                let bc = if bw > 0.0 {
+                let bc = if let Some(outline) = child.layer.outline {
+                    Color::new(outline.r, outline.g, outline.b, alpha)
+                } else if bw > 0.0 {
                     child.border_color
                 } else {
                     Color::new(0.5, 0.5, 0.5, 0.3).srgb_to_linear()
                 };
-                let effective_bw = (if bw > 0.0 { bw } else { 1.0 }) * scale;
+                let effective_bw = (if bw > 0.0 && child.layer.outline.is_none() { bw } else { 1.0 }) * scale;
                 self.add_rounded_rect(
                     &mut border_verts,
                     offset_x,

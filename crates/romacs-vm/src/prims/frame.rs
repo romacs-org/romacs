@@ -759,3 +759,38 @@ fn frame_fringe_width(cx; optional frame: Value) {
     let shown = cx.windows().window_system(frame)? != Value::NIL;
     Ok(Value::integer(if shown { i64::from(left + right) } else { 0 }).unwrap())
 }}
+
+defsubr! { name = "terminal-name", gnu = "terminal.c:517", effect = Reads,
+fn terminal_name(cx; optional terminal: Value) {
+    let (name, _) = cx.windows().terminal_name(terminal)?;
+    Ok(cx.string(&name))
+}}
+// term.c:2465-2625: decode_tty_terminal is NULL for every VM2 terminal,
+// so none is the controlling tty and none suspends or resumes.
+defsubr! { name = "controlling-tty-p", gnu = "term.c:2465", effect = Reads,
+fn controlling_tty_p(cx; optional terminal: Value) {
+    cx.windows().terminal_params(terminal)?;
+    Ok(Value::NIL)
+}}
+defsubr! { name = "suspend-tty", gnu = "term.c:2534", effect = Global,
+fn suspend_tty(cx; optional tty: Value) {
+    cx.windows().terminal_params(tty)?;
+    Err(Fault::Error("Attempt to suspend a non-text terminal device".into()))
+}}
+defsubr! { name = "resume-tty", gnu = "term.c:2603", effect = Global,
+fn resume_tty(cx; optional tty: Value) {
+    cx.windows().terminal_params(tty)?;
+    Err(Fault::Error("Attempt to resume a non-text terminal device".into()))
+}}
+// dispnew.c:6807: the initial terminal writes STRING's bytes to stdout;
+// a window-system terminal is not a termcap device.
+defsubr! { name = "send-string-to-terminal", gnu = "dispnew.c:6807", effect = Global,
+fn send_string_to_terminal(cx, string: Value; optional terminal: Value) {
+    let (_, initial) = cx.windows().terminal_name(terminal)?;
+    let bytes = cx.string_view(string)?.bytes().to_vec();
+    if !initial { return Err(Fault::Error("Device 0 is not a termcap terminal device".into())); }
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    out.write_all(&bytes).and_then(|()| out.flush()).map_err(|e| Fault::Error(e.to_string()))?;
+    Ok(Value::NIL)
+}}

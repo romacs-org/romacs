@@ -1370,6 +1370,7 @@ mod tests {
     #[test]
     fn casetab_four_disconnected_roots_survive_conversion_and_gc() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.eval_source_raw("(set-buffer-multibyte t)").unwrap();
         let index = vm.buffer_index().unwrap();
         vm.allocate_object(Object::Bytes(vec![0; 37]));
@@ -1579,6 +1580,7 @@ mod tests {
     #[test]
     fn string_property_identity_edges_move_with_compaction_and_width_changes() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.allocate_object(Object::Bytes(vec![0]));
         let f = vm.compile(&form(serde_json::json!(["let", [["s", {"string":"aλz"}]], ["put-text-property",1,2,["quote","x"],["vector",7],"s"], ["aset","s",1,128578], "s"]))).unwrap();
         let string = vm.execute_raw(f).unwrap();
@@ -2048,7 +2050,7 @@ impl Vm {
     /// face, which starts with a keyword) gains FACE in front or, copied, at
     /// the end; a single face becomes a two-element list.
     fn combined_face(&mut self, old: Value, face: Value, append: bool) -> Value {
-        let cons = |vm: &mut Self, car, cdr| { vm.conses.push((car, cdr)); Value::reference(vm.conses.len() - 1, 3) };
+        let cons = |vm: &mut Self, car, cdr| vm.alloc_cons(car, cdr);
         let anonymous = self.cons_pair(old).ok().is_some_and(|(head, _)| {
             head.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).is_some_and(|n| n.starts_with(':'))
         });

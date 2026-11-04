@@ -852,8 +852,7 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
     for node in nodes {
         values.push(match node {
             Node::Cons(..) => {
-                vm.conses.push((Value::NIL, Value::NIL));
-                Value::reference(vm.conses.len() - 1, 3)
+                vm.alloc_cons(Value::NIL, Value::NIL)
             }
             Node::Float(f) => vm.allocate_object(Object::Float(*f)),
             Node::Bignum(bytes) => vm.allocate_object(Object::Bignum(Box::new(num_bigint::BigInt::from_signed_bytes_le(bytes)))),
@@ -872,14 +871,8 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                 }
                 vm.allocate_object(Object::BoolVector(Box::new(data::BoolVector { len: *len, bytes: bytes.clone() })))
             }
-            Node::Cell(_) => {
-                vm.cells.push(Value::NIL);
-                Value::reference(vm.cells.len() - 1, 5)
-            }
-            Node::Closure(f, ..) => {
-                vm.closures.push(Closure { function: ids[*f], captures: vec![], metadata: vec![], document: Value::NIL });
-                Value::reference(vm.closures.len() - 1, 4)
-            }
+            Node::Cell(_) => Value::reference(vm.alloc_cell(Value::NIL), 5),
+            Node::Closure(f, ..) => vm.alloc_closure(Closure { function: ids[*f], captures: vec![], metadata: vec![], document: Value::NIL }),
         });
     }
     let resolve = |r: &Ref| resolve_ref(*r, &values, names, uninterned);
@@ -897,6 +890,12 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                 }
             }
             Node::String(_, bytes, runs) => {
+                // The funnel charged the string plain; its runs are charged here.
+                let properties = |vm: &Vm| match vm.object(v) {
+                    Ok(Object::String(s) | Object::RawString(s)) => s.properties.storage_bytes(),
+                    _ => 0,
+                };
+                let plain = properties(vm);
                 for (start, end, props) in runs {
                     if start >= end || *end > bytes.len() {
                         return Err("compiled Lisp artifact: bad text property run".into());
@@ -910,6 +909,7 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                         }
                     }
                 }
+                vm.free.allocated += properties(vm).saturating_sub(plain) as u64;
             }
             Node::Cell(content) => {
                 let content = resolve(content)?;
@@ -917,6 +917,8 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
             }
             Node::Closure(_, captures, metadata, document) => {
                 let (captures, metadata, document) = (all(captures)?, all(metadata)?, resolve(document)?);
+                // The funnel charged the closure empty (data.rs `alloc_closure').
+                vm.free.allocated += ((captures.len() + metadata.len()) * size_of::<Value>()) as u64;
                 let closure = &mut vm.closures[v.index(4)?];
                 closure.captures = captures;
                 closure.metadata = metadata;

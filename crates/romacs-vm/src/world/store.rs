@@ -877,7 +877,10 @@ impl World {
         let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
-        vm.collect_garbage();
+        vm.collect_compacting();
+        if vm.free.len() != 0 {
+            return Err("world image: the tables did not compact".into());
+        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let len = image::capture(vm, carry, &file, self.key)?;
         file.sync_all().map_err(|e| e.to_string())?;

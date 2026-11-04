@@ -5,7 +5,6 @@ use crate::{Result, Value, coordinates::*, indirect::Shared};
 use std::borrow::Cow;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 #[path = "text_gap.rs"]
 mod gap;
 
@@ -1217,10 +1216,6 @@ impl TextBody {
         Ok(GraphemeOffset(
             self.as_str()[..at.0].graphemes(true).count(),
         ))
-    }
-    /// Width of a single line's text. Tabs/control layout belongs to the renderer.
-    pub fn display_width(&self, r: Range<ByteOffset>) -> Result<DisplayColumn> {
-        Ok(DisplayColumn(UnicodeWidthStr::width(&*self.slice(r)?)))
     }
     pub(crate) fn storage_bytes(&self, capacity: bool) -> usize {
         let properties = self.properties.storage_bytes();

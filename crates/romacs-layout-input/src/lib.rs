@@ -1,5 +1,6 @@
 //! Seam L: owned layout input. No evaluator, heap reference or glyph matrix.
 use std::ops::Range;
+pub mod cluster;
 
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +98,23 @@ pub struct FrameSnapshot {
     /// The status bar between the windows and the mini-window, while
     /// `romacs-status-bar-lines' shows one.
     pub status_bar: Option<StatusBarSnapshot>,
+    /// How a character no font has a glyph for shows.
+    pub no_font: NoFont,
 }
+
+/// How a window-system frame shows a character no installed font has a
+/// glyph for: `glyphless-char-display''s `no-font' extra slot, as
+/// lookup_glyphless_char_display reads it for C -1 (the graphical half of
+/// a cons; nil, `zero-width' or an unknown method is `empty-box').
+/// `hex-code' is GNU's default (`glyphless-char-display-control').
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum NoFont { ThinSpace, EmptyBox, #[default] HexCode, Acronym(String) }
+romacs_snapshot::snapshot_enum!(NoFont {
+    NoFont::ThinSpace => (),
+    NoFont::EmptyBox => (),
+    NoFont::HexCode => (),
+    NoFont::Acronym(text) => (text),
+});
 
 /// The paint-only pane chrome of the root frame's windows but the
 /// mini-window MINIBUFFER (`romacs-pane-*' frame parameters): corners of
@@ -134,6 +151,7 @@ impl FrameSnapshot {
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
             && self.status_bar == other.status_bar
+            && self.no_font == other.no_font
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -174,6 +192,10 @@ pub struct ChildFrameSnapshot {
     pub radius: u32,
     pub glow: Option<[u8; 3]>,
     pub shadow: bool,
+    /// A 1px hairline round it in this colour, drawn even on a glowing
+    /// layer: the foreground of the face its `romacs-layer-outline-face'
+    /// parameter names (an error toast's).
+    pub outline: Option<[u8; 3]>,
 }
 
 /// `romacs-layer-animation': no layer animation, fades only, or fades,
@@ -220,8 +242,24 @@ pub struct Decor {
     pub underline: Option<Line>,
     pub overline: Option<Line>,
     pub strike: Option<Line>,
+    /// GNU's `:box'.
+    pub boxed: Option<BoxLine>,
 }
-romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike });
+romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike, boxed });
+
+/// A face's box (xfaces.c realize_gui_face): VERTICAL the left and right
+/// edges' width, HORIZONTAL the top and bottom edges', in device pixels,
+/// each drawn outside the text when positive (widening the run and the
+/// row) and inside it when negative; COLOR, else the foreground; STYLE 1 a
+/// line, 2 a released button, 3 a pressed one (protocol `BoxType' codes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoxLine {
+    pub vertical: i16,
+    pub horizontal: i16,
+    pub color: Option<[u8; 3]>,
+    pub style: u8,
+}
+romacs_snapshot::snapshot_struct!(BoxLine { vertical, horizontal, color, style });
 
 /// One line a face draws: STYLE is romacs-display-protocol's
 /// `UnderlineStyle' code (1 line, 2 double, 3 wave, 4 dotted, 5 dashed;
@@ -731,6 +769,8 @@ pub struct MeasureInput {
     pub font_alternatives: FontAlternativeState,
     pub faces: Vec<Face>,
     pub text: TextSlice,
+    /// How a character no font has a glyph for shows, as the frame's.
+    pub no_font: NoFont,
 }
 
 /// The host's geometry for a `MeasureInput`, in whole pixels: each

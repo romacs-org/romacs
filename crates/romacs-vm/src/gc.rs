@@ -48,8 +48,93 @@ pub(crate) struct Stress {
     pads: usize,
     /// The collection about to run is a forced one.
     shift: bool,
+    /// `ROMACS_GC_VERIFY': a freed entry is poisoned and never reused
+    /// (`sweep_tables'), so a stale reference to it is seen, not hidden by
+    /// the entry's next tenant.
+    verify: bool,
+    /// Every collection compacts ([`Vm::set_gc_moving`]): the fixtures that
+    /// prove rooting under the moving collector.
+    moving: bool,
 }
-romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift });
+romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving });
+
+/// The tables' free entries (design note §4.4, S3.1): collections leave
+/// every live entry where it is and list the others here, one stack per
+/// table with the lowest index on top, which the allocation funnels pop
+/// (`Vm::alloc_cons' and its siblings, data.rs). A compacting collection
+/// empties them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FreeEntries {
+    pub(crate) conses: Vec<u32>,
+    pub(crate) closures: Vec<u32>,
+    pub(crate) cells: Vec<u32>,
+    pub(crate) objects: Vec<u32>,
+    /// Entries `ROMACS_GC_VERIFY' freed, per table (conses, closures,
+    /// cells, objects): poisoned and listed nowhere, but free all the same.
+    quarantined: [usize; 4],
+    /// Bytes the funnels have handed out, ever: the memory profiler's
+    /// meter (profiler.rs), which table growth no longer measures.
+    pub(crate) allocated: u64,
+    /// The next collection compacts (`Vm::collect_compacting').
+    pub(crate) compact: bool,
+    /// Collections a due compaction has waited for an idle one.
+    deferred: u8,
+}
+romacs_snapshot::snapshot_struct!(FreeEntries { conses, closures, cells, objects, quarantined, allocated, compact, deferred });
+
+impl FreeEntries {
+    /// Free entries, in all four tables.
+    pub(crate) fn len(&self) -> usize {
+        (0..4).map(|table| self.of(table)).sum()
+    }
+    /// Free entries of TABLE: 0 conses, 1 closures, 2 cells, 3 objects.
+    pub(crate) fn of(&self, table: usize) -> usize {
+        let listed = [&self.conses, &self.closures, &self.cells, &self.objects][table].len();
+        listed + self.quarantined[table]
+    }
+    /// Empty, as a compaction leaves them (`shrink' then releases storage).
+    fn clear(&mut self) {
+        for list in [&mut self.conses, &mut self.closures, &mut self.cells, &mut self.objects] {
+            list.clear();
+        }
+        self.quarantined = [0; 4];
+    }
+    /// Release grossly oversized lists: an empty one keeps no storage.
+    fn shrink(&mut self) {
+        for list in [&mut self.conses, &mut self.closures, &mut self.cells, &mut self.objects] {
+            list.shrink_to(list.len().saturating_mul(2));
+        }
+    }
+    /// The lists' storage, in bytes.
+    fn capacity_bytes(&self) -> usize {
+        [&self.conses, &self.closures, &self.cells, &self.objects].iter().map(|list| list.capacity() * size_of::<u32>()).sum()
+    }
+}
+
+/// One table's part of `Vm::sweep_tables': cut TABLE after its last entry
+/// MARKS keeps (unless VERIFY), visit each remaining entry with whether it
+/// is live, and rebuild LIST, the table's free entries, in descending order
+/// (unless VERIFY, which quarantines them). The entries quarantined.
+fn sweep_table<T>(table: &mut Vec<T>, marks: &[bool], list: &mut Vec<u32>, verify: bool, mut visit: impl FnMut(&mut T, bool)) -> usize {
+    list.clear();
+    let end = if verify { marks.len() } else { marks.iter().rposition(|&live| live).map_or(0, |last| last + 1) };
+    table.truncate(end);
+    let mut quarantined = 0;
+    for i in (0..end).rev() {
+        let live = marks[i];
+        visit(&mut table[i], live);
+        match (live, verify) {
+            (true, _) => {}
+            (false, false) => list.push(i as u32),
+            (false, true) => quarantined += 1,
+        }
+    }
+    quarantined
+}
+
+/// What a freed cons or cell holds under `ROMACS_GC_VERIFY': a primitive
+/// index no table has, which no operation accepts.
+const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
 /// The state nested Lisp runs push and pop on the VM: suspended engines and
 /// their register stacks, root frames, collection holds, the running-engine
@@ -100,11 +185,29 @@ impl Drop for UnwindMark {
 const CONS_BYTES: i64 = 16;
 /// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
 const MIN_CONS_THRESHOLD: i64 = 80_000;
-/// A Romacs collection moves objects and walks compiled code, so it costs
+/// A Romacs collection walks compiled code, and some compact, so it costs
 /// more per traced unit than GNU's: `gc-cons-percentage' is scaled by this
 /// before use, making GNU's 0.1 collect after about eleven traced heaps
 /// (DIVERGENCES.md VM2-GC-PACING has the measured candidates).
 const PERCENTAGE_SCALE: f64 = 17.0;
+/// Unused free entries' bytes below which no table compacts for size: a
+/// table of small entries (cells) is not worth moving the heap for.
+const OUTGROWN_BYTES: usize = 8 << 20;
+/// Whether the mark must visit V: a heap reference, or a symbol interned in
+/// an obarray of its own, the only symbols a collection reclaims. Anything
+/// else the mark would pop and discard.
+#[inline(always)]
+fn traced(v: Value, in_obarray: &[bool]) -> bool {
+    match v.tag() {
+        0 => v != Value::NIL,
+        3..=5 => true,
+        7 => v.payload() >= 1 && in_obarray.get(v.payload() as usize - 1).copied().unwrap_or(false),
+        _ => false,
+    }
+}
+/// Values an idle collection marks between its looks for a key press
+/// (`Vm::collect_marked'): a millisecond or two of marking.
+const KEY_POLL: usize = 16_384;
 /// The scaled percentage's ceiling. GNU's formula never collects at 2 (it
 /// counts half the allocation since as live); 1.8 holds a large setting at
 /// 18 traced heaps, about 1.6 times the default's deferral.
@@ -120,13 +223,14 @@ pub(crate) fn scaled_percentage(p: f64) -> f64 {
 impl Stress {
     pub(crate) fn from_env() -> Self {
         let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-        Self { every, ..Self::default() }
+        let verify = std::env::var_os("ROMACS_GC_VERIFY").is_some_and(|v| !v.is_empty() && v != "0");
+        Self { every, verify, ..Self::default() }
     }
     /// This process's test mode, from its environment, for a VM a world
     /// carried here: the fillers the last collection left stay counted.
     pub(crate) fn rearm(&mut self) {
         let fresh = Self::from_env();
-        (self.every, self.entries) = (fresh.every, fresh.entries);
+        (self.every, self.entries, self.verify) = (fresh.every, fresh.entries, fresh.verify);
     }
     /// Count one Lisp entry; true when this one must collect.
     pub(crate) fn due(&mut self) -> bool {
@@ -299,9 +403,22 @@ impl Vm {
         }
         set
     }
-    /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off.
+    /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off. The
+    /// verify and moving modes stay as they are.
     pub fn set_gc_stress(&mut self, every: u32) {
-        self.gc_stress = Stress { every, ..Stress::default() };
+        let Stress { verify, moving, .. } = self.gc_stress;
+        self.gc_stress = Stress { every, verify, moving, ..Stress::default() };
+    }
+    /// Turn `ROMACS_GC_VERIFY' on or off, for a fixture that needs free
+    /// entries reused (or quarantined).
+    #[cfg(test)]
+    pub(crate) fn set_gc_verify(&mut self, verify: bool) {
+        self.gc_stress.verify = verify;
+    }
+    /// Make every collection compact, as stress collections do, or return
+    /// to compacting on demand (`compacts').
+    pub fn set_gc_moving(&mut self, moving: bool) {
+        self.gc_stress.moving = moving;
     }
     /// GNU `maybe_garbage_collect' (alloc.c:5740-5809): collect once the
     /// allocation since the last collection reaches `gc-cons-threshold'
@@ -390,7 +507,7 @@ impl Vm {
             }
         }
         let rows: [(&str, usize, usize, Option<usize>); 8] = [
-            ("conses", size_of::<(Value, Value)>(), self.conses.len(), Some(self.conses.capacity() - self.conses.len())),
+            ("conses", size_of::<(Value, Value)>(), self.conses.len() - self.free.of(0), Some(self.conses.capacity() - self.conses.len() + self.free.of(0))),
             ("symbols", size_of::<Slot>(), self.slots.len() - self.obarray_free_slots.len() - self.local_binding_slots.len(), Some(self.obarray_free_slots.len())),
             ("strings", size_of::<data::Object>() + size_of::<data::LispString>(), strings, Some(0)),
             ("string-bytes", 1, string_bytes, None),
@@ -439,17 +556,17 @@ impl Vm {
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
-    /// finalizers marking has not reached move to the doomed queue and are
-    /// marked, with their functions, to survive until they run. True when
-    /// any was doomed.
-    fn doom_finalizers(&mut self, marks: &[Vec<bool>; 4], pending: &mut Vec<Value>) -> bool {
-        let (live, doomed): (Vec<Value>, Vec<Value>) = std::mem::take(&mut self.finalizers)
-            .into_iter()
-            .partition(|&f| Self::image_value(f) || marks[3][f.payload() as usize - 1]);
-        self.finalizers = live;
-        pending.extend_from_slice(&doomed);
-        self.doomed_finalizers.extend_from_slice(&doomed);
-        !doomed.is_empty()
+    /// finalizers marking has not reached are marked, with their functions,
+    /// to survive until they run, and go to DOOMED, which the collection
+    /// moves to the doomed queue once it can no longer give way to a key
+    /// (`collect_marked'). True when any was doomed.
+    fn doom_finalizers(&self, marks: &[Vec<bool>; 4], pending: &mut Vec<Value>, doomed: &mut Vec<Value>) -> bool {
+        let found: Vec<Value> = self.finalizers.iter().copied()
+            .filter(|&f| !(Self::image_value(f) || marks[3][f.payload() as usize - 1]))
+            .collect();
+        pending.extend_from_slice(&found);
+        doomed.extend_from_slice(&found);
+        !found.is_empty()
     }
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
@@ -498,9 +615,9 @@ impl Vm {
         let mut s = self.gc_stats;
         s.allocations += (self.heap_objects() - self.gc_retained) as u64;
         s.live_objects = self.heap_objects();
-        s.live_bytes = self.conses.len() * std::mem::size_of::<(Value, Value)>()
-            + self.cells.len() * std::mem::size_of::<Value>()
-            + self.closures.len() * std::mem::size_of::<Closure>()
+        s.live_bytes = (self.conses.len() - self.free.of(0)) * std::mem::size_of::<(Value, Value)>()
+            + (self.cells.len() - self.free.of(2)) * std::mem::size_of::<Value>()
+            + (self.closures.len() - self.free.of(1)) * std::mem::size_of::<Closure>()
             + self
                 .closures
                 .iter()
@@ -509,7 +626,7 @@ impl Vm {
         // Native nodes may be retained by both tables and suspended cursors.
         // Keep this accounting separate from the moving arena object counts.
         let mut native_nodes = HashSet::default();
-        s.live_bytes += self.objects.len() * std::mem::size_of::<data::Object>()
+        s.live_bytes += (self.objects.len() - self.free.of(3)) * std::mem::size_of::<data::Object>()
             + self
                 .objects
                 .iter()
@@ -523,7 +640,7 @@ impl Vm {
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) => 0,
+                    data::Object::Finalizer(_) | data::Object::Free => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                     data::Object::Bytes(v) => v.len(),
@@ -551,7 +668,8 @@ impl Vm {
                     data::Object::Obarray(t) => t.storage_bytes(false),
                 })
                 .sum::<usize>();
-        s.capacity_bytes = self.conses.capacity() * 16
+        s.capacity_bytes = self.free.capacity_bytes()
+            + self.conses.capacity() * 16
             + self.cells.capacity() * 8
             + self.closures.capacity() * std::mem::size_of::<Closure>()
             + self
@@ -574,7 +692,7 @@ impl Vm {
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) => 0,
+                    data::Object::Finalizer(_) | data::Object::Free => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
@@ -604,10 +722,89 @@ impl Vm {
                 .sum::<usize>();
         s
     }
+    /// Whether this collection compacts the tables, moving their entries
+    /// and rewriting every reference: when asked (`collect_compacting'),
+    /// always under the stress and moving modes, and once a table is
+    /// oversized, at an idle collection (IDLE) or after two collections
+    /// waiting for one. Every other collection frees in place
+    /// (`sweep_tables'). Oversized: the free entries the last sweep left
+    /// that allocation has not taken since, more than four times the
+    /// table's live entries (COUNTS) and OUTGROWN_BYTES. Garbage a steady
+    /// allocator makes between collections takes its entries back each
+    /// time; a collapsed burst leaves them idle.
+    fn compacts(&mut self, counts: &[usize; 4], idle: bool) -> bool {
+        let entries = [size_of::<(Value, Value)>(), size_of::<Closure>(), size_of::<Value>(), size_of::<data::Object>()];
+        let outgrown = (0..4).any(|table| {
+            let unused = self.free.of(table);
+            unused > counts[table].saturating_mul(4) && unused.saturating_mul(entries[table]) > OUTGROWN_BYTES
+        });
+        let due = outgrown && (idle || self.free.deferred >= 2);
+        self.free.deferred = if outgrown && !due { self.free.deferred.saturating_add(1) } else { 0 };
+        std::mem::take(&mut self.free.compact) || self.gc_stress.every > 0 || self.gc_stress.moving || due
+    }
+    /// Free every entry MARKS leaves unmarked, in place: a cons becomes
+    /// (nil . nil), a cell nil, a closure one naming no function, an object
+    /// `Object::Free', its payload dropped. Each table is first cut after
+    /// its last marked entry, then its free list is rebuilt from the marks,
+    /// lowest index on top. Under `ROMACS_GC_VERIFY' freed entries are
+    /// poisoned instead and quarantined: never cut, never reused. A live
+    /// obarray drops the dead symbols LIVE_SYMBOLS leaves out.
+    fn sweep_tables(&mut self, marks: &[Vec<bool>; 4], live_symbols: &HashSet<usize>) {
+        let verify = self.gc_stress.verify;
+        let dead = if verify { POISON } else { Value::NIL };
+        let free = &mut self.free;
+        free.quarantined = [
+            sweep_table(&mut self.conses, &marks[0], &mut free.conses, verify, |pair, live| if !live { *pair = (dead, dead) }),
+            sweep_table(&mut self.closures, &marks[1], &mut free.closures, verify, |closure, live| {
+                if !live {
+                    *closure = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead };
+                }
+            }),
+            sweep_table(&mut self.cells, &marks[2], &mut free.cells, verify, |cell, live| if !live { *cell = dead }),
+            sweep_table(&mut self.objects, &marks[3], &mut free.objects, verify, |object, live| match object {
+                _ if !live => *object = data::Object::Free,
+                data::Object::Obarray(t) => t.reclaim_removed(live_symbols),
+                _ => {}
+            }),
+        ];
+    }
+    /// Reset the slots of the obarray symbols LIVE leaves out and free them.
+    fn reclaim_obarray_symbols(&mut self, live: &HashSet<usize>) {
+        let dead: Vec<usize> = self.obarray_symbol_names.keys().copied().filter(|slot| !live.contains(slot)).collect();
+        for slot in dead {
+            let version = self.slots[slot].version.checked_add(1).expect("symbol version exhausted");
+            self.slots[slot] = Slot::new();
+            self.slots[slot].version = version;
+            self.symbol_names[slot].clear();
+            self.symbol_names[slot].shrink_to_fit();
+            if let Some(redirect) = self.variable_redirects.get_mut(slot) { *redirect = None; }
+            self.macros.remove(&slot);
+            self.conditions.entries.remove(&conditions::SymbolId::new(Value::reference(slot + 1, 7)).unwrap());
+            if let Some(id) = self.generated_slots.remove(&slot) { self.generated_symbols.remove(&id); }
+            self.obarray_free_slots.push(slot);
+        }
+        self.obarray_symbol_names.retain(|slot, _| live.contains(slot));
+    }
+    /// Release grossly oversized tables and free lists, but retain modest
+    /// slack for allocation.
+    fn shrink_tables(&mut self) {
+        self.objects.shrink_to(self.objects.len().saturating_mul(2).max(1024));
+        self.conses.shrink_to(self.conses.len().saturating_mul(2).max(16384));
+        self.cells.shrink_to(self.cells.len().saturating_mul(2).max(1024));
+        self.closures.shrink_to(self.closures.len().saturating_mul(2).max(1024));
+        self.free.shrink();
+    }
+    /// Whether the host has a key press queued (`HostInput::key_pending').
+    fn host_key_pending(&mut self) -> bool {
+        self.host_input.as_mut().is_some_and(|host| host.key_pending())
+    }
     /// Collect at a strand wait point. All externally retained Values must be in
     /// `roots`; compaction rewrites them. Never share private Values across VMs.
     /// Runtime register, global, binding and inline-cache roots are added here.
-    pub(super) fn collect_marked(&mut self, roots: &mut [Value]) {
+    /// With UNTIL_KEY, a key press queued while it marks ends it: nothing is
+    /// collected, and the heap is as it was (marking writes only caches and
+    /// local marks). Whether it collected.
+    pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
@@ -616,7 +813,6 @@ impl Vm {
         self.lambda_lists.clear();
         let before = self.heap_objects();
         let private_before = self.private_objects();
-        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         // Frozen regions reached by marking (`frozen.rs`); region 0 is the
         // executable image, always live.
         let mut region_marks = vec![false; self.regions.len()];
@@ -632,50 +828,50 @@ impl Vm {
         for program in &mut self.spare_programs {
             program.forget_code();
         }
-        let pads = self.gc_stress.take_pads();
-        let mut pending = roots.to_vec();
-        pending.extend_from_slice(&self.stack);
-        pending.extend(self.suspended_stacks.iter().flatten().copied());
+        // Membership by slot, tested for every symbol and slot visited below.
+        let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
+        let keep = |v: &Value| traced(*v, &in_obarray);
+        let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
+        pending.extend(self.stack.iter().copied().filter(keep));
+        pending.extend(self.suspended_stacks.iter().flatten().copied().filter(keep));
         pending.extend_from_slice(&self.external_roots);
         pending.extend_from_slice(&self.doomed_finalizers);
         for code in &self.suspended_code {
             // SAFETY: each entry's engine is suspended in a nested call.
-            unsafe { code.visit_values(&mut |v| pending.push(*v)) };
+            unsafe { code.visit_values(&mut |v| if keep(v) { pending.push(*v) }) };
         }
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
         if let Some(escape) = &mut self.propagated_escape {
-            escape.visit_values(&mut |v| pending.push(*v));
+            escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
         for handler in &mut self.signal_handlers {
-            handler.visit_values(&mut |v| pending.push(*v));
+            handler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }
-        self.backtrace.visit_values(&mut |v| pending.push(*v));
-        self.profiler.visit_values(&mut |v| pending.push(*v));
+        self.backtrace.visit_values(&mut |v| if keep(v) { pending.push(*v) });
+        self.profiler.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         let mut local_live = HashSet::default();
         let mut obarray_symbols_live = HashSet::default();
-        // Membership by slot, tested for every symbol and slot visited below.
-        let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
         let local_binding = self.slot_set(self.local_binding_slots.iter());
         for (slot, s) in self.slots.iter().enumerate() {
             if in_obarray[slot] { continue; }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
                 pending.push(Value::reference(target + 1, 7));
             }
-            pending.push(s.function);
+            if keep(&s.function) { pending.push(s.function); }
             // GNU alloc.c:6673 marks `u.s.plist` with the symbol. VM2 symbols
             // are never reclaimed (DIVERGENCES VM2-BOOT4), so a plist and a
             // buffer-local table are roots for every slot, interned or not.
-            pending.push(s.plist);
-            pending.push(s.local);
-            if !local_binding[slot] {
+            if keep(&s.plist) { pending.push(s.plist); }
+            if keep(&s.local) { pending.push(s.local); }
+            if !local_binding[slot] && keep(&s.value) {
                 pending.push(s.value);
             }
         }
         // GNU's C globals and `buffer_defaults`: roots outside every value
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.
-        self.forwarded.visit_values(&mut |v| pending.push(*v));
+        self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);
@@ -706,7 +902,8 @@ impl Vm {
                 for &(key, value) in &entry.properties { pending.extend([key, value]); }
             }
         }
-        let mut marked = 0;
+        // Entries marked, per table: conses, closures, cells, objects.
+        let mut counts = [0usize; 4];
         let mut native_nodes = HashSet::default();
         // Weak hash tables reached by marking; their entries are not traced
         // until `weak_round` (the ephemeron fixpoint) decides which survive.
@@ -714,9 +911,11 @@ impl Vm {
         // GNU dooms finalizers once, after the roots and before the weak
         // tables' contents are marked.
         let mut finalizers_doomed = false;
+        let mut doomed = Vec::new();
+        let mut polled = 0usize;
         while !pending.is_empty()
             || !code_pending.is_empty()
-            || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending))
+            || (!std::mem::replace(&mut finalizers_doomed, true) && self.doom_finalizers(&marks, &mut pending, &mut doomed))
             || self.weak_round(&marks, &weak_tables, &obarray_symbols_live, &region_marks, &mut pending, &mut local_live)
         {
             while let Some(id) = code_pending.pop() {
@@ -755,7 +954,7 @@ impl Vm {
                 }
                 for op in &self.functions[id].code {
                     let mut op = *op;
-                    op.visit_values(&mut |v| pending.push(*v));
+                    op.visit_values(&mut |v| if keep(v) { pending.push(*v) });
                     // Only a symbol interned in an obarray of its own can die.
                     let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
@@ -775,6 +974,10 @@ impl Vm {
                 }
             }
             let Some(mut v) = pending.pop() else { continue };
+            polled += 1;
+            if until_key && polled % KEY_POLL == 0 && self.host_key_pending() {
+                return false;
+            }
             // Walk the cdr spine directly: a list is the common editor graph,
             // not two worklist pushes and a generic type dispatch per cons.
             while v.tag() == 3 && !Self::image_value(v) {
@@ -782,9 +985,9 @@ impl Vm {
                 if std::mem::replace(&mut marks[0][i], true) {
                     break;
                 }
-                marked += 1;
+                counts[0] += 1;
                 let (a, b) = self.conses[i];
-                if (3..=5).contains(&(a.tag())) || a.tag() == 7 || a.tag() == 0 && a != Value::NIL {
+                if keep(&a) {
                     pending.push(a);
                 }
                 v = b;
@@ -831,31 +1034,31 @@ impl Vm {
             if std::mem::replace(mark, true) {
                 continue;
             }
-            marked += 1;
+            counts[arena] += 1;
             if tag == 0 {
                 match &mut self.objects[i] {
-                    data::Object::Window(w) => w.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Obarray(t) => t.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Frame(f) => f.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Terminal(t) => t.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Sqlite(_) => {}
-                    data::Object::Treesit(t) => t.visit_values(&mut |v| pending.push(*v)),
+                    data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Obarray(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Frame(f) => f.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Terminal(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Sqlite(_) | data::Object::Free => {}
+                    data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
                     data::Object::Finalizer(function) => pending.push(*function),
-                    data::Object::Process(p) => p.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Vector(values) | data::Object::Record(values) => pending.extend_from_slice(values),
-                    data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| pending.push(*v)),
-                    data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, &mut native_nodes, &mut |v| pending.push(*v)),
-                    data::Object::MapKeymapCursor(c) => c.visit_values(&mut native_nodes, &mut |v| pending.push(*v)),
-                    data::Object::Buffer(t) => t.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::ByteBuffer(t) => t.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Marker(m) => m.visit_values(&mut |v| pending.push(*v)),
-                    data::Object::Overlay(o) => o.visit_values(&mut |v| pending.push(*v)),
+                    data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Vector(values) | data::Object::Record(values) => pending.extend(values.iter().copied().filter(keep)),
+                    data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, &mut native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::MapKeymapCursor(c) => c.visit_values(&mut native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Buffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::ByteBuffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+                    data::Object::Overlay(o) => o.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
                     data::Object::String(s) | data::Object::RawString(s) => {
-                        s.properties.visit_values(&mut |v| pending.push(*v))
+                        s.properties.visit_values(&mut |v| if keep(v) { pending.push(*v) })
                     }
                     data::Object::HashTable(t) if t.weakness == hash::Weakness::None => {
-                        t.visit_values(&mut |v| pending.push(*v))
+                        t.visit_values(&mut |v| if keep(v) { pending.push(*v) })
                     }
                     data::Object::HashTable(_) => weak_tables.push(i),
                     data::Object::Float(_)
@@ -865,7 +1068,7 @@ impl Vm {
                     | data::Object::SyntaxTable(_) => {}
                 }
             } else if tag == 4 {
-                pending.extend_from_slice(&self.closures[i].captures);
+                pending.extend(self.closures[i].captures.iter().copied().filter(keep));
                 pending.extend_from_slice(&self.closures[i].metadata);
                 pending.push(self.closures[i].document);
                 code_pending.push(self.closures[i].function);
@@ -878,6 +1081,18 @@ impl Vm {
                 }
             }
         }
+        // From here the collection changes the heap: the last point a key
+        // press ends it.
+        if until_key && self.host_key_pending() {
+            return false;
+        }
+        if !doomed.is_empty() {
+            let gone: HashSet<u64> = doomed.iter().map(|f| f.0).collect();
+            self.finalizers.retain(|f| !gone.contains(&f.0));
+            self.doomed_finalizers.extend_from_slice(&doomed);
+        }
+        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
+        let pads = self.gc_stress.take_pads();
         // A throw's no-catch mark is weak: an error object nothing else
         // reaches is carried by no escape, so its mark goes.
         let thrown = std::mem::take(&mut self.thrown_no_catch);
@@ -943,18 +1158,39 @@ impl Vm {
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if !active {
-            self.request_code.since_collection = 0;
+            self.reset_code_count();
         }
         // Unmarked regions go now: no surviving value names one, and no weak
         // entry into one is left (swept above), so their ids can be reused.
         self.sweep_regions(&region_marks);
-        // A completely live arena needs no forwarding table or rewrite pass.
-        if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
+        let compacting = self.compacts(&counts, until_key);
+        // A completely live heap frees nothing; a compaction still closes
+        // the free entries it has.
+        let marked: usize = counts.iter().sum();
+        if pads == 0 && marked == private_before && obarray_symbols_live.len() == self.obarray_symbol_names.len()
+            && !(compacting && self.free.len() > 0)
+        {
             self.gc_retained = self.heap_objects();
             self.settle_payload();
             self.gc_stats.collections += 1;
-            return;
+            return true;
         }
+        if !compacting {
+            self.reclaim_obarray_symbols(&obarray_symbols_live);
+            self.sweep_tables(&marks, &obarray_symbols_live);
+            self.cell_pairs.retain(|&i, _| marks[2][i]);
+            self.referrers = None;
+            self.local_owners = None;
+            self.shrink_tables();
+            self.gc_retained = self.heap_objects();
+            self.settle_payload();
+            self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
+            self.gc_stats.collections += 1;
+            return true;
+        }
+        // Compaction: every live entry moves down, every reference is
+        // rewritten, and no entry is left free.
+        self.free.clear();
         // Stress fillers go only where live objects would move past them.
         let fill: Vec<usize> = marks.iter().map(|m| if m.contains(&true) { pads } else { 0 }).collect();
         let maps: Vec<Vec<usize>> = marks
@@ -1049,23 +1285,11 @@ impl Vm {
         }
         self.backtrace.visit_values(&mut |v| rewrite(v));
         self.profiler.visit_values(&mut |v| rewrite(v));
-        for (&slot, name) in &mut self.obarray_symbol_names {
-            if obarray_symbols_live.contains(&slot) { rewrite(name); }
-            else {
-                let version = self.slots[slot].version.checked_add(1).expect("symbol version exhausted");
-                self.slots[slot] = Slot::new();
-                self.slots[slot].version = version;
-                self.symbol_names[slot].clear();
-                self.symbol_names[slot].shrink_to_fit();
-                if let Some(redirect) = self.variable_redirects.get_mut(slot) { *redirect = None; }
-                self.macros.remove(&slot);
-                self.conditions.entries.remove(&conditions::SymbolId::new(Value::reference(slot + 1, 7)).unwrap());
-                if let Some(id) = self.generated_slots.remove(&slot) { self.generated_symbols.remove(&id); }
-                self.obarray_free_slots.push(slot);
-            }
+        for (slot, name) in &mut self.obarray_symbol_names {
+            if obarray_symbols_live.contains(slot) { rewrite(name); }
         }
+        self.reclaim_obarray_symbols(&obarray_symbols_live);
         for name in self.permanent_symbol_names.values_mut() { rewrite(name); }
-        self.obarray_symbol_names.retain(|slot, _| obarray_symbols_live.contains(slot));
         for s in &mut self.slots {
             rewrite(&mut s.value);
             rewrite(&mut s.function);
@@ -1102,7 +1326,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| rewrite(v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
-                    data::Object::Sqlite(_) => {}
+                    data::Object::Sqlite(_) | data::Object::Free => {}
                     data::Object::Treesit(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Finalizer(function) => rewrite(function),
                     data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),
@@ -1164,19 +1388,12 @@ impl Vm {
         self.objects.splice(0..0, std::iter::repeat_with(|| {
             data::Object::String(Box::new(data::LispString::from_bytes(vec![], true)))
         }).take(fill[3]));
-        self.objects
-            .shrink_to(self.objects.len().saturating_mul(2).max(1024));
-        // Release grossly oversized arenas, but retain modest slack for allocation.
-        self.conses
-            .shrink_to(self.conses.len().saturating_mul(2).max(16384));
-        self.cells
-            .shrink_to(self.cells.len().saturating_mul(2).max(1024));
-        self.closures
-            .shrink_to(self.closures.len().saturating_mul(2).max(1024));
+        self.shrink_tables();
         self.gc_retained = self.heap_objects();
         self.settle_payload();
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
+        true
     }
 }
 
@@ -1208,6 +1425,7 @@ mod tests {
     #[test]
     fn shared_native_nodes_count_once_and_forward_once() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.conses.extend([(Value::NIL, Value::NIL); 2]);
         let payload = Value::reference(vm.conses.len(), 3);
         vm.conses.push((Value::TRUE, Value::NIL));
@@ -1264,6 +1482,7 @@ mod tests {
         use data::Object;
         for vector in [false, true] {
             let mut vm = Vm::new();
+            vm.set_gc_moving(true);
             // Dead prefix plus two live strings or vectors; vector edges include
             // a cons-car object, a cell and a closure, and a self cycle.
             vm.objects
@@ -1355,6 +1574,7 @@ mod tests {
     #[test]
     fn private_cycles_survive_compaction_and_are_reclaimed_when_unrooted() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.conses.push((Value::integer(99).unwrap(), Value::NIL));
         vm.cells.push(Value::reference(0, 4));
         vm.closures.push(Closure {
@@ -1375,5 +1595,187 @@ mod tests {
         assert_eq!(vm.heap_stats().allocations, 4);
         assert_eq!(vm.heap_stats().reclaimed, 4);
         assert_eq!(vm.heap_objects(), 0);
+    }
+
+    fn conses(vm: &mut Vm, n: i64) -> Vec<Value> {
+        (0..n).map(|i| vm.alloc_cons(Value::integer(i).unwrap(), Value::NIL)).collect()
+    }
+
+    /// S3.1: a collection leaves live entries where they are, frees the
+    /// others in place, cuts the dead tail, and allocation takes the lowest
+    /// free entry first, counting what it hands out.
+    #[test]
+    fn collections_free_in_place_and_allocation_reuses_the_lowest_entry() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let list = conses(&mut vm, 6);
+        let string = vm.allocate_object(data::Object::String(Box::new(data::LispString::new("dead"))));
+        let kept = vm.allocate_object(data::Object::Vector(vec![list[1]]));
+        let mut roots = [list[3], list[4], kept];
+        vm.collect(&mut roots);
+        assert_eq!(roots, [list[3], list[4], kept], "nothing moves");
+        assert_eq!(vm.conses.len(), 5, "the dead tail is cut");
+        assert_eq!(vm.free.conses, [2, 0], "the free entries, lowest on top");
+        assert_eq!(vm.conses[0], (Value::NIL, Value::NIL));
+        assert_eq!(vm.free.objects, [0]);
+        assert!(vm.object(string).is_err(), "a free entry is no object");
+        assert_eq!(vm.heap_objects(), 4);
+        let before = vm.free.allocated;
+        let fresh = conses(&mut vm, 3);
+        assert_eq!(fresh, [list[0], list[2], list[5]]);
+        assert_eq!(vm.free.allocated - before, 3 * 16, "reused entries count as allocation");
+        assert_eq!(vm.allocate_object(data::Object::Float(2.0)), string);
+        assert_eq!(vm.free.len(), 0);
+        assert_eq!(vm.heap_objects(), 8);
+        assert_eq!(vm.cons_pair(list[1]).unwrap().0, Value::integer(1).unwrap());
+    }
+
+    /// Each sweep rebuilds the free lists from its marks: an entry is listed
+    /// once however many collections it stays free, and a table nothing
+    /// survives in is cut to nothing.
+    #[test]
+    fn repeated_sweeps_list_each_free_entry_once() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let list = conses(&mut vm, 8);
+        let mut roots = [list[7]];
+        for round in 0..4 {
+            if round > 1 {
+                conses(&mut vm, 2);
+            }
+            vm.collect(&mut roots);
+            assert_eq!(vm.free.conses, [6, 5, 4, 3, 2, 1, 0], "round {round}");
+            assert_eq!(roots[0], list[7]);
+        }
+        roots[0] = Value::NIL;
+        vm.collect(&mut roots);
+        assert!(vm.conses.is_empty() && vm.free.conses.is_empty(), "a dead table is cut to nothing");
+    }
+
+    /// A dead cell's lexical pair goes with it, before its entry is reused.
+    #[test]
+    fn a_reused_cell_inherits_no_lexical_pair() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let first = vm.alloc_cell(Value::TRUE);
+        let pair = vm.alloc_cons(Value::NIL, Value::integer(5).unwrap());
+        let dead = vm.alloc_cell(Value::NIL);
+        vm.cell_pairs.insert(dead, pair);
+        let last = vm.alloc_cell(Value::TRUE);
+        let mut roots = [Value::reference(first, 5), Value::reference(last, 5)];
+        vm.collect(&mut roots);
+        assert!(!vm.cell_pairs.contains_key(&dead), "the dead cell's pair is pruned");
+        assert_eq!(vm.alloc_cell(Value::NIL), dead);
+        assert!(!vm.cell_pairs.contains_key(&dead));
+    }
+
+    /// A compaction after sweeps moves every live entry down and leaves no
+    /// free entry, even when everything left is live.
+    #[test]
+    fn a_compaction_after_sweeps_leaves_dense_tables() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let list = conses(&mut vm, 6);
+        let mut roots = [list[1], list[5]];
+        vm.collect(&mut roots);
+        assert_eq!(vm.free.conses, [4, 3, 2, 0]);
+        vm.free.compact = true;
+        vm.collect(&mut roots);
+        assert_eq!(roots, [Value::reference(0, 3), Value::reference(1, 3)]);
+        assert_eq!((vm.conses.len(), vm.free.len()), (2, 0));
+        assert_eq!(vm.cons_pair(roots[1]).unwrap().0, Value::integer(5).unwrap());
+        assert!(!vm.free.compact, "a request compacts once");
+        conses(&mut vm, 2);
+        vm.collect(&mut roots);
+        assert_eq!(roots, [Value::reference(0, 3), Value::reference(1, 3)], "back to freeing in place");
+        assert_eq!((vm.conses.len(), vm.free.len()), (2, 0));
+    }
+
+    /// A table oversized by a collapsed burst, its free entries unused
+    /// since the sweep that freed them, compacts at the next idle
+    /// collection or after waiting two collections for one. Garbage a
+    /// steady allocator takes back each cycle, and small idle tables (a
+    /// few MB of cells), do not compact it.
+    #[test]
+    fn an_oversized_table_compacts_at_idle_or_after_two_collections() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let n = (OUTGROWN_BYTES / 16 + 1000) as i64;
+        let list = conses(&mut vm, n);
+        let mut roots = [list[n as usize - 1]];
+        vm.collect(&mut roots);
+        for _ in 0..3 {
+            conses(&mut vm, n - 1);
+            vm.collect(&mut roots);
+            assert_eq!(roots[0], list[n as usize - 1], "a steady allocator reuses the entries");
+        }
+        for wait in 0..2 {
+            vm.collect(&mut roots);
+            assert_eq!(roots[0], list[n as usize - 1], "collection {wait} waits for an idle one");
+        }
+        vm.collect(&mut roots);
+        assert_eq!(roots[0], Value::reference(0, 3), "the third compacts");
+        assert!(vm.conses.capacity() <= 16384, "and releases the table");
+        let list = conses(&mut vm, n);
+        roots[0] = list[n as usize - 1];
+        vm.collect(&mut roots);
+        assert!(vm.collect_until_key(&mut roots, true));
+        assert_eq!(roots[0], Value::reference(0, 3), "an idle collection compacts at once");
+        let cells: Vec<usize> = (0..200_000).map(|_| vm.alloc_cell(Value::NIL)).collect();
+        let mut roots = [roots[0], Value::reference(cells[199_999], 5)];
+        vm.collect(&mut roots);
+        assert!(vm.collect_until_key(&mut roots, true));
+        assert_eq!(roots[1], Value::reference(cells[199_999], 5), "1.6 MB of idle cells is not worth a compaction");
+    }
+
+    /// A burst swept while its last entry survives, then released: tables
+    /// and free lists shrink back whatever the burst's size.
+    #[test]
+    fn a_collapsed_burst_leaves_no_capacity_behind() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        let mut after = vec![];
+        for n in [40_000, 80_000, 160_000] {
+            let list = conses(&mut vm, n);
+            let mut roots = [list[n as usize - 1]];
+            vm.collect(&mut roots);
+            // The third burst compacts instead: its table waited two collections.
+            let lists = vm.free.conses.capacity() * 4;
+            assert!(lists == 0 || vm.heap_stats().capacity_bytes >= lists + vm.conses.capacity() * 16, "the lists count as capacity");
+            roots[0] = Value::NIL;
+            vm.collect(&mut roots);
+            assert!(vm.free.conses.capacity() <= 1024, "burst {n}: the free list kept {}", vm.free.conses.capacity());
+            after.push(vm.heap_stats().capacity_bytes);
+        }
+        assert!(after.iter().all(|&c| c == after[0]), "capacity grew with the burst: {after:?}");
+    }
+
+    /// `ROMACS_GC_VERIFY': freed entries are poisoned and quarantined, so a
+    /// stale reference finds poison, never a new tenant.
+    #[test]
+    fn verify_mode_poisons_and_quarantines_freed_entries() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(true);
+        vm.alloc_cons(Value::TRUE, Value::NIL);
+        let cell = vm.alloc_cell(Value::TRUE);
+        let closure = vm.alloc_closure(Closure { function: 0, captures: vec![], metadata: vec![], document: Value::NIL });
+        let object = vm.allocate_object(data::Object::Float(1.0));
+        let mut roots = [vm.alloc_cons(Value::NIL, Value::NIL)];
+        vm.collect(&mut roots);
+        assert_eq!(vm.conses[0], (POISON, POISON));
+        assert_eq!(vm.cells[cell], POISON);
+        assert_eq!(vm.closures[closure.payload() as usize].function, usize::MAX);
+        assert!(vm.object(object).is_err());
+        assert!(vm.free.conses.is_empty() && vm.free.cells.is_empty(), "quarantined, not listed");
+        assert_eq!((vm.free.len(), vm.heap_objects()), (4, 1), "but counted free");
+        assert_eq!((vm.conses.len(), vm.cells.len(), vm.objects.len()), (2, 1, 1), "never cut");
+        assert_eq!(vm.alloc_cons(Value::NIL, Value::NIL), Value::reference(2, 3), "never reused");
     }
 }

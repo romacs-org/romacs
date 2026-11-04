@@ -40,6 +40,7 @@ mod tests {
     fn map_keymap_cursor_only_detached_subtree_moves_and_deduplicates() {
         for detached in [false, true] {
             let mut vm = Vm::new();
+            vm.set_gc_moving(true);
             for _ in 0..3 {
                 vm.allocate_object(data::Object::String(Box::new(data::LispString::new(
                     "dead",

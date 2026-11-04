@@ -196,28 +196,10 @@ fn parse_position_number(value: &str) -> Option<u64> {
     value.parse().ok()
 }
 
+/// startup.el's `(move-to-column (1- column))' for `+LINE:COLUMN', whose
+/// columns count as current-column's do (width_rule.rs).
 fn visit_column(vm: &mut Vm, target: u64) -> Result<(), String> {
-    use romacs_vm::coordinates::ByteOffset;
-    vm.eval_source("(beginning-of-line)")?;
-    let value = vm.eval_source("(let ((start (point))) (end-of-line) (prog1 (buffer-substring start (point)) (goto-char start)))")?.typed_value()?;
-    let line = value["value"].as_str().ok_or("startup column requires Unicode text")?;
-    let tab = vm.eval_source("(if (boundp 'tab-width) tab-width 8)")?.as_integer()?.max(1) as u64;
-    let mut column = 0;
-    let mut characters = 0;
-    for character in line.chars() {
-        if column >= target { break; }
-        let width = if character == '\t' { tab - column % tab }
-        else if character.is_ascii_control() { 2 }
-        else {
-            let mut encoded = [0; 4];
-            let scalar = character.encode_utf8(&mut encoded);
-            let text = romacs_vm::text::Text::new(scalar.as_bytes())?;
-            text.display_width(ByteOffset(0)..ByteOffset(scalar.len()))?.0 as u64
-        };
-        column += width;
-        characters += 1;
-    }
-    vm.eval_source(&format!("(forward-char {characters})"))?;
+    vm.eval_source(&format!("(move-to-column {target})"))?;
     Ok(())
 }
 
@@ -650,6 +632,8 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // display (romacs-gui-loadup.el), and the chrome colours layers use.
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
+        // Romacs's menus over layers: one look, motion and keyboard model.
+        vm.eval_source(include_str!("../../../rlisp/romacs-popup.el"))?;
         // Its icons and its mode line, off until `romacs-mode-line-mode'
         // is enabled.
         vm.eval_source(include_str!("../../../rlisp/romacs-icons.el"))?;
@@ -658,6 +642,9 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // `romacs-complete-mode' is enabled.
         if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
             vm.eval_source(include_str!("../../../rlisp/romacs-complete.el"))?;
+            // Evaluation results in a chip after the sexp, off until
+            // `romacs-eval-chip-mode' is enabled.
+            vm.eval_source(include_str!("../../../rlisp/romacs-eval-chip.el"))?;
         }
     }
     // The scheduler for animations drawn in buffer text, and the startup

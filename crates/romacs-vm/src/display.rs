@@ -254,7 +254,7 @@ impl DisplayState {
     }
     /// The theme changed, or will at its next read: what faces realize
     /// may differ.
-    fn faces_changed(&mut self) {
+    pub(super) fn faces_changed(&mut self) {
         self.face_table = None;
         self.face_revision += 1;
     }
@@ -650,7 +650,8 @@ impl Vm {
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
         let chrome = self.pane_chrome()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar })
+        let no_font = self.no_font_display();
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
@@ -713,13 +714,18 @@ impl Vm {
             // A glass layer (one with rounded corners) takes its colours
             // from faces: its background from `romacs-layer-glass', or the
             // face its `romacs-layer-face' parameter names (a toast's), and
-            // its glow from `romacs-layer-glow'.
+            // its glow from `romacs-layer-glow', or the face its
+            // `romacs-layer-glow-face' parameter names (an error toast's).
             let (background, glow) = if radius > 0 {
-                let face = match self.frame_parameter_of(frame, "romacs-layer-face")? {
-                    Some(v) => self.symbol_name_of(v).unwrap_or_else(|| "romacs-layer-glass".into()),
-                    None => "romacs-layer-glass".into(),
+                let named = |vm: &mut Self, parameter: &str, default: &str| -> Result<String> {
+                    Ok(match vm.frame_parameter_of(frame, parameter)? {
+                        Some(v) => vm.symbol_name_of(v).filter(|name| name != "nil").unwrap_or_else(|| default.into()),
+                        None => default.into(),
+                    })
                 };
-                (self.display_face(&face)?.background, Some(self.display_face("romacs-layer-glow")?.foreground))
+                let face = named(self, "romacs-layer-face", "romacs-layer-glass")?;
+                let glow = named(self, "romacs-layer-glow-face", "romacs-layer-glow")?;
+                (self.display_face(&face)?.background, Some(self.display_face(&glow)?.foreground))
             } else {
                 (self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background), None)
             };
@@ -745,10 +751,23 @@ impl Vm {
             let selection = self.frame_parameter_of(frame, "romacs-layer-selection")?
                 .and_then(|v| v.integer_value()).and_then(|row| u32::try_from(row).ok());
             let shadow = self.frame_parameter_of(frame, "romacs-layer-shadow")?.is_some_and(|v| v != Value::NIL);
+            // A hairline in a face's foreground, glass or not: an error toast's.
+            let outline = match self.frame_parameter_of(frame, "romacs-layer-outline-face")?.and_then(|v| self.symbol_name_of(v)) {
+                Some(face) if face != "nil" => Some(self.display_face(&face)?.foreground),
+                _ => None,
+            };
+            // A layer whose `romacs-layer-motion' is `fade' (a chip, hints)
+            // only fades: the slide and tweens are off for it.
+            let fade = self.intern("fade");
+            let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
+            let animation = match self.layer_animation() {
+                romacs_layout_input::LayerAnimation::Full if fades => romacs_layout_input::LayerAnimation::Reduced,
+                animation => animation,
+            };
             children.push(romacs_layout_input::ChildFrameSnapshot { id, x, y, width, height, border, border_color,
                                                                      background, background_alpha, windows,
-                                                                     animation: self.layer_animation(), edge, selection,
-                                                                     radius, glow, shadow });
+                                                                     animation, edge, selection,
+                                                                     radius, glow, shadow, outline });
         }
         Ok(children)
     }
@@ -888,6 +907,21 @@ impl Vm {
     pub fn take_display_diagnostics(&mut self) -> Vec<String> {
         drop(self.display_state.theme());
         std::mem::take(self.display_state.diagnostics.get_mut())
+    }
+    /// How a window-system frame shows a character no font has a glyph for:
+    /// `glyphless-char-display''s `no-font' extra slot, as
+    /// lookup_glyphless_char_display reads it for C -1, the graphical half
+    /// of a cons, nil or any other method being `empty-box'.
+    pub(crate) fn no_font_display(&mut self) -> romacs_layout_input::NoFont {
+        use romacs_layout_input::NoFont;
+        let slot = self.slot("glyphless-char-display");
+        let table = self.variable_value(slot).unwrap_or(Value::NIL);
+        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras.first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
+        let method = self.cons_pair(method).map_or(method, |(graphical, _)| graphical);
+        if method == self.display_symbol("hex-code") { NoFont::HexCode }
+        else if method == self.display_symbol("thin-space") { NoFont::ThinSpace }
+        else if let Some(text) = self.str_view(method).and_then(|view| view.as_str().map(str::to_owned)) { NoFont::Acronym(text) }
+        else { NoFont::EmptyBox }
     }
     pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
@@ -1526,7 +1560,8 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }],
+            no_font: self.no_font_display() };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
@@ -1799,6 +1834,7 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                no_font: self.no_font_display(),
                 faces: faces.clone(),
                 text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
             };
@@ -2413,14 +2449,7 @@ impl Vm {
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
-        let tab_width = {
-            let slot = self.slot("tab-width");
-            self.variable_value(slot)?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as usize
-        };
-        let ctl_arrow = {
-            let slot = self.slot("ctl-arrow");
-            self.variable_value(slot)? != Value::NIL
-        };
+        let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
         // keyboard.el's Frecursive_edit keeps it.
@@ -2449,16 +2478,8 @@ impl Vm {
             }
         }
         let line_start = text[begv_byte..point_byte].rfind('\n').map_or(begv_byte, |n| begv_byte + n + 1);
-        // GNU current_column: tab stops, ^X control characters, wide characters.
-        let mut column = 0;
-        for c in text[line_start..point_byte].chars() {
-            column += match c {
-                '\t' => tab_width - column % tab_width,
-                '\u{0}'..='\u{1f}' | '\u{7f}' => if ctl_arrow { 2 } else { 4 },
-                '\u{80}'..='\u{9f}' => 4,
-                _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
-            };
-        }
+        // GNU current_column, by the width rule (width_rule.rs).
+        let column = rule.string_columns(&text[line_start..point_byte]);
         Ok(mode_line::SpecState {
             buffer_name,
             start: char_at(start_byte)?,
@@ -2547,6 +2568,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
         };
@@ -2690,6 +2712,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces: vec![face],
             text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
@@ -2727,6 +2750,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };
@@ -2744,6 +2768,63 @@ impl Vm {
 }
 
 /// The display's face for realized ATTRS of the face NAME.
+/// The box a face's `:box' value draws, as xfaces.c realize_gui_face reads
+/// it: N (t is 1), N pixels high above and below and |N| wide at the
+/// sides; (VWIDTH . HWIDTH), the sides' and the top and bottom's own; a
+/// colour, 1 pixel in it; a plist of `:line-width' (either form), `:color'
+/// and `:style' (`released-button', `pressed-button', or `flat-button', a
+/// line in the face's BACKGROUND unless `:color' gives one).  Widths are
+/// GNU's, limited to 1000.
+fn face_box(slot: &FaceSlot, background: [u8; 3]) -> Option<romacs_layout_input::BoxLine> {
+    use romacs_face::Datum;
+    use romacs_layout_input::BoxLine;
+    let named = |name: &str| romacs_display_protocol::x11_color_value(name).map(|(r, g, b)| [r, g, b]);
+    let width = |n: i64| n.clamp(-1000, 1000) as i16;
+    // A scalar width: |N| at the sides, N above and below.
+    let scalar = |n: i64| (width(n).saturating_abs(), width(n));
+    let pair = |head: &[Datum], tail: &Datum| match (head, tail) {
+        ([Datum::Int(v)], Datum::Int(h)) => Some((width(*v), width(*h))),
+        _ => None,
+    };
+    let line = |(vertical, horizontal): (i16, i16)| BoxLine { vertical, horizontal, color: None, style: 1 };
+    let boxed = match slot {
+        FaceSlot::Set(FaceValue::Int(n)) if *n != 0 => line(scalar(*n)),
+        FaceSlot::Set(FaceValue::Str(name)) => BoxLine { color: named(name), ..line((1, 1)) },
+        FaceSlot::Set(FaceValue::Structured(datum)) => match &**datum {
+            Datum::Dotted(head, tail) => line(pair(head, tail)?),
+            Datum::List(items) => {
+                let mut boxed = line((1, 1));
+                let mut flat = false;
+                for item in items.chunks(2) {
+                    match item {
+                        [Datum::Symbol(key), Datum::Int(n)] if &**key == ":line-width" => {
+                            (boxed.vertical, boxed.horizontal) = scalar(*n);
+                        }
+                        [Datum::Symbol(key), Datum::Dotted(head, tail)] if &**key == ":line-width" => {
+                            if let Some(widths) = pair(head, tail) { (boxed.vertical, boxed.horizontal) = widths; }
+                        }
+                        [Datum::Symbol(key), Datum::Str(name)] if &**key == ":color" => boxed.color = named(name),
+                        [Datum::Symbol(key), Datum::Symbol(style)] if &**key == ":style" => match &**style {
+                            "released-button" => boxed.style = 2,
+                            "pressed-button" => boxed.style = 3,
+                            "flat-button" => flat = true,
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+                // A flat button is a plain line, in the background unless
+                // its colour is given.
+                if flat { boxed.style = 1; boxed.color = boxed.color.or(Some(background)); }
+                boxed
+            }
+            _ => line((1, 1)),
+        },
+        _ => return None,
+    };
+    (boxed.vertical != 0 || boxed.horizontal != 0).then_some(boxed)
+}
+
 /// Whether FACE draws a line: what extending the default face paints, its
 /// background being the frame's.
 fn decorated(face: &Face) -> bool {
@@ -2812,6 +2893,7 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
         underline: face_line(attrs.get(Attribute::Underline), true),
         overline: face_line(attrs.get(Attribute::Overline), false),
         strike: face_line(attrs.get(Attribute::StrikeThrough), false),
+        boxed: face_box(attrs.get(Attribute::Box), background),
     };
     Ok(Face {
         decor,

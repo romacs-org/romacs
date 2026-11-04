@@ -47,6 +47,7 @@ fn fwd(vm: &mut Vm, name: &str) -> Fwd {
 #[test]
 fn forwarded_object_index_moves_and_reads_back() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     garbage(&mut vm);
     vm.eval_source_raw("(setq minibuffer-local-map (list 'moved (copy-sequence \"qqq\") 42))").unwrap();
     let f = fwd(&mut vm, "minibuffer-local-map");
@@ -70,6 +71,7 @@ fn forwarded_object_index_moves_and_reads_back() {
 #[test]
 fn per_buffer_default_and_buffer_value_indices_move() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     garbage(&mut vm);
     vm.eval_source_raw("(set-default 'fill-column (list 'dflt (copy-sequence \"dd\")))").unwrap();
     let f = fwd(&mut vm, "fill-column");

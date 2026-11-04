@@ -124,8 +124,7 @@ impl Vm {
             let mut entries = vec![];
             for key in ["composition", "syntax-table", "display"] {
                 let key = Value::reference(self.slot(key) + 1, 7);
-                let value = Value::reference(self.conses.len(), 3);
-                self.conses.push((key, Value::TRUE));
+                let value = self.alloc_cons(key, Value::TRUE);
                 entries.push(value);
             }
             self.slots[slot].value = self.list_value(&entries);
@@ -144,8 +143,8 @@ impl Vm {
             ] {
                 let key = Value::reference(self.slot(key) + 1, 7);
                 let function = Value::reference(self.slot(function) + 1, 7);
-                entries.push(Value::reference(self.conses.len(), 3));
-                self.conses.push((key, function));
+                let entry = self.alloc_cons(key, function);
+                entries.push(entry);
             }
             self.slots[slot].value = self.list_value(&entries);
         }
@@ -164,8 +163,7 @@ impl Vm {
             );
             self.macros = macros;
             let (function, _) = compiled.expect("valid built-in annotation function");
-            let value = Value::reference(self.closures.len(), 4);
-            self.closures.push(Closure {
+            let value = self.alloc_closure(Closure {
                 function,
                 captures: vec![],
                 metadata: vec![], document: Value::NIL,
@@ -205,8 +203,7 @@ impl Vm {
                     if max == 0 {
                         return Err("positive kill-ring-max required".into());
                     }
-                    let ring = Value::reference(self.conses.len(), 3);
-                    self.conses.push((string, old));
+                    let ring = self.alloc_cons(string, old);
                     if values.len() >= max {
                         let mut tail = ring;
                         for _ in 1..max {
@@ -865,8 +862,7 @@ impl Vm {
         }
         let mut out = tail;
         for car in cars.into_iter().rev() {
-            let cell = Value::reference(self.conses.len(), 3);
-            self.conses.push((car, out));
+            let cell = self.alloc_cons(car, out);
             out = cell;
         }
         out
@@ -1140,6 +1136,7 @@ mod tests {
     #[test]
     fn category_plist_values_are_compacted_roots_and_keep_identity() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.allocate_object(Object::Bytes(vec![0]));
         let before = run(
             &mut vm,

@@ -250,6 +250,9 @@ pub struct Layer {
     pub glow: Option<crate::Color>,
     /// Whether it casts a soft shadow onto what lies beneath.
     pub shadow: bool,
+    /// A 1px hairline round its edge in this colour, glowing or not (an
+    /// error toast's, which must read apart from an ordinary one).
+    pub outline: Option<crate::Color>,
 }
 
 /// `romacs-layer-animation': whether a layer animates. `Full` leaves every

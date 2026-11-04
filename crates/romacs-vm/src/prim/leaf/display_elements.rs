@@ -64,6 +64,8 @@ pub(super) struct Source<'l, 'a> {
     /// A byte and the lines of the accessible text before it, from which
     /// `line_at' counts on.
     lines: (usize, i64),
+    /// How many columns a character takes (width_rule.rs), read once.
+    rule: crate::width_rule::WidthRule,
 }
 
 #[derive(Clone, Copy)]
@@ -94,14 +96,17 @@ impl<'l, 'a> Source<'l, 'a> {
         let syms = Syms::new(leaf);
         let look = Look::new(leaf)?;
         let byte = leaf.buffer_byte(view.buffer, start)?;
+        let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1) })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
     pub(super) fn window(&self) -> Value { self.view.window }
     /// The leaf the elements come from, for a host layout to measure them.
     pub(super) fn leaf(&mut self) -> &mut Leaf<'a> { self.leaf }
+    /// C's columns (CHARACTER_WIDTH).
+    pub(super) fn width(&self, c: u32) -> i64 { self.rule.width(c) as i64 }
 
     /// Deliver from START again, a line start.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
@@ -520,7 +525,7 @@ impl<'l, 'a> Source<'l, 'a> {
             0x0a => Shape::Glyph { c, width: 0 },
             0x20..0x7f => Shape::Glyph { c, width: 1 },
             _ if romacs_regex_engine::emacs_char::char_byte8_p(c) => Shape::Glyph { c, width: 1 },
-            _ => Shape::Glyph { c, width: self.leaf.character_width(c)? },
+            _ => Shape::Glyph { c, width: self.width(c) },
         })
     }
 
@@ -536,6 +541,16 @@ impl<'l, 'a> Source<'l, 'a> {
                 let glyphs: Vec<(u32, Option<Value>)> = items.into_iter().map(|g| (self.glyph_char(g), self.glyph_face(g))).collect();
                 return self.vector(&glyphs, origin, buffer, false);
             }
+        }
+        // A joiner continuing an emoji or variation sequence is part of the
+        // one glyph GNU's composition makes of it (composite.el,
+        // emoji-zwj.el), not glyphless; the host draws the sequence.
+        if let Some(joiner) = char::from_u32(c).filter(|&j| romacs_layout_input::cluster::is_composition_joiner(j))
+            && self.previous_char(origin.string).is_some_and(|prev| romacs_layout_input::cluster::joins(prev, joiner))
+            && self.joins_next(joiner, origin)? {
+            self.emit(Elem { shape: Shape::Glyph { c, width: 0 }, method: plain, charpos: origin.charpos, whitespace: origin.whitespace_under,
+                text_area: origin.text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
+            return Ok(());
         }
         if let Some((width, how)) = self.glyphless(c)? {
             if let Some(how) = how.filter(|_| width > 0) {
@@ -587,6 +602,23 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(())
     }
 
+    /// Whether a ZWJ at ORIGIN joins the buffer character after it, as a
+    /// sequence needs (a trailing ZWJ joins nothing and stays glyphless);
+    /// another joiner, or one in a string, needs nothing after it.
+    fn joins_next(&mut self, joiner: char, origin: Origin) -> R<bool> {
+        if joiner != '\u{200D}' || origin.string != Value::NIL { return Ok(true); }
+        if self.next >= self.view.zv { return Ok(false); }
+        Ok(char::from_u32(self.char_at(self.byte)).is_some_and(|next| romacs_layout_input::cluster::joins(joiner, next)))
+    }
+
+    /// The character the last element showed, when it is a character of
+    /// OBJECT (the buffer's text, or the same string).
+    fn previous_char(&self, object: Value) -> Option<char> {
+        let elem = self.slots.last()?.elem.as_ref()?;
+        let Shape::Glyph { c, .. } = elem.shape else { return None };
+        (elem.object == object && elem.ellipsis.is_none()).then(|| char::from_u32(c)).flatten()
+    }
+
     /// lookup_glyphless_char_display and term.c produce_glyphless_glyph:
     /// the columns a glyphless character takes and how it shows, 0 (and
     /// no look) for `zero-width', or None when C displays normally.
@@ -601,7 +633,7 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(if method == Value::NIL { None }
             else if method == s.zero_width { Some((0, None)) }
             else if method == s.thin_space { Some((1, Some(Glyphless::ThinSpace))) }
-            else if method == s.empty_box { Some((self.leaf.character_width(c)?.clamp(1, 4) + 2, Some(Glyphless::EmptyBox))) }
+            else if method == s.empty_box { Some((self.width(c).clamp(1, 4) + 2, Some(Glyphless::EmptyBox))) }
             else if method == s.hex_code { Some((if c < 0x10000 { 6 } else { 8 }, Some(Glyphless::HexCode))) }
             else if let Some(view) = self.leaf.vm.str_view(method) {
                 let width = if view.chars == 1 { 1 } else { view.bytes().iter().take_while(|b| b.is_ascii()).take(6).count() as i64 + 2 };
