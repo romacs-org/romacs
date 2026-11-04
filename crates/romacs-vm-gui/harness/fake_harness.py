@@ -12,6 +12,10 @@ its tools as a real harness does, and answers control requests.  Its
                      is filled from romacs_identity); on `outcome unknown' ask
                      romacs_call_outcome and repeat the call only when it says
                      `not executed'
+  hold FILE TOOL JSON
+                     call TOOL as `call' does, then wait until FILE exists
+                     (60 s at most) before replying: its result is the
+                     transcript's last text until the test releases it
   ask COMMAND        ask the host to approve Bash COMMAND (can_use_tool) and
                      report its answer
   later SECONDS CMD  run CMD after SECONDS
@@ -148,6 +152,15 @@ class Harness:
             name, _, raw = rest.partition(' ')
             reply = self.call(name, json.loads(raw or '{}'))
             self.stream(f'called {name}')
+            return self.result(reply)
+        if verb == 'hold':
+            release, _, rest = rest.partition(' ')
+            name, _, raw = rest.partition(' ')
+            reply = self.call(name, json.loads(raw or '{}'))
+            deadline = time.time() + 60
+            while not os.path.exists(release) and time.time() < deadline:
+                time.sleep(.05)
+            self.stream(f'held {name}')
             return self.result(reply)
         if verb == 'ask':
             request_id = f'req-{time.time_ns()}'

@@ -738,7 +738,7 @@ fn gui_supports(cx: &mut Leaf<'_>, attrs: &[Value], default: Value) -> std::resu
         merged.push(if value == unspecified || value == reset || index == 0 { default_of(cx, index)? } else { value });
     }
     let defaults = (0..LFACE_VECTOR_SIZE).map(|i| default_of(cx, i)).collect::<std::result::Result<Vec<_>, _>>()?;
-    let Ok((family, _)) = cx.face_font_request("default") else { return Ok(false) };
+    let Ok(crate::FaceFont { family, .. }) = cx.face_font_request("default") else { return Ok(false) };
     let wanted = match cx.string_view(merged[lface_slot(":family")]) {
         Ok(name) => String::from_utf8_lossy(name.bytes()).into_owned(),
         Err(_) => family.clone(),

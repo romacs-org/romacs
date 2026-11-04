@@ -32,7 +32,7 @@ pub struct Display {
     /// family, pixel size and character: `frame-parameters' asks for the
     /// frame's font each time.
     opened: HashMap<(String, u32, i64), Option<OpenedFont>>,
-    chars: HashMap<(String, u32, char), Option<(OpenedFont, u32)>>,
+    chars: HashMap<((String, u32, u16, bool, u16), char), Option<(OpenedFont, u32)>>,
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
@@ -61,8 +61,11 @@ impl Display {
                 .map_or_else(Default::default, |otf| (otf_table(otf.gsub), otf_table(otf.gpos))),
         })
     }
-    fn char_font_uncached(&mut self, family: &str, pixel_size: f32, ch: char) -> Option<(OpenedFont, u32)> {
-        let resolved = self.resolver.resolve_char(&FontRequest::new(family, pixel_size), ch, &self.policy).ok()?;
+    fn char_font_uncached(&mut self, face: &romacs_vm::FaceFont, ch: char) -> Option<(OpenedFont, u32)> {
+        // The request painting makes (romacs-layout2 `font_request').
+        let slant = if face.italic { romacs_display_protocol::font::FontSlantKind::Italic } else { romacs_display_protocol::font::FontSlantKind::Normal };
+        let request = FontRequest { weight: face.weight, slant, width: face.width, ..FontRequest::new(&face.family, face.pixel_size) };
+        let resolved = self.resolver.resolve_char(&request, ch, &self.policy).ok()?;
         let file = resolved.font.identity.file_path.clone()?;
         let index = resolved.font.identity.freetype_selector()?;
         let entity = entity::find(&resolved.font.family, &file, index).map(font_entity)?;
@@ -119,10 +122,10 @@ impl romacs_vm::DisplayHost for Display {
             .clone()
             .map(|opened| OpenedFont { entity: entity.clone(), ..opened })
     }
-    fn char_font(&mut self, family: &str, pixel_size: f32, ch: char) -> Option<(OpenedFont, u32)> {
-        let key = (family.to_owned(), pixel_size.to_bits(), ch);
+    fn char_font(&mut self, face: &romacs_vm::FaceFont, ch: char) -> Option<(OpenedFont, u32)> {
+        let key = (face.key(), ch);
         if let Some(found) = self.chars.get(&key) { return found.clone(); }
-        let found = self.char_font_uncached(family, pixel_size, ch);
+        let found = self.char_font_uncached(face, ch);
         self.chars.insert(key, found.clone());
         found
     }

@@ -64,6 +64,7 @@ INIT = '''(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
               :lines (count-lines (point-min) (point-max))
               :window-pixel-height (window-pixel-height window)
               :window-body-pixel-height (window-body-height window t)
+              :mode-line-height (window-mode-line-height window)
               ;; Its top as painted: past the frame's internal border.
               :window-pixel-top (nth 1 (window-edges window nil nil t))
               :text-left (car (window-inside-pixel-edges window))
@@ -177,6 +178,13 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     def layer_rows():
         return rows([g for g in glyphs() if g.get('frame', 1) != 1], 'Text')
 
+    # The frame takes the output's size after its first paint: wait for the
+    # bar to stay where it is before comparing.
+    def settled():
+        first = root_bands()
+        time.sleep(.3)
+        return bool(first) and first == root_bands()
+    fio.wait(settled, args.timeout, 'root bar settled', process)
     before = root_bands()
     keys('-M', 'ctrl', 'x', '-m', 'ctrl')
     fio.wait(state.exists, args.timeout, 'which-key layer', process)
@@ -444,8 +452,10 @@ def main():
                 text = rows(painted, 'Text')
                 line = probe['frame-char-height']
                 top = probe['window-pixel-top']
-                band = probe['window-pixel-height'] - probe['window-body-pixel-height']
-                edge = top + probe['window-pixel-height'] - band
+                # The text-size counts the window's mode line (none under
+                # the status bar); the body excludes it and the divider.
+                band = probe['mode-line-height']
+                edge = top + probe['window-body-pixel-height']
                 popup_rows = [r for r in text if top <= r[0] < edge]
                 report['checks'].append({'popup_rows': [t for _, t, _ in popup_rows], 'edge': edge, 'top': top})
                 # Each line's painted row is where posn-at-point puts it,
@@ -463,9 +473,12 @@ def main():
                 text_bottom = top + height - band
                 if text_bottom > edge:
                     raise AssertionError(f'text ends at {text_bottom}, below the body edge at {edge}')
-                # fit-window-to-buffer rounds to whole lines (pixelwise nil).
-                if probe['window-pixel-height'] != -(-height // line) * line:
-                    raise AssertionError(f"window {probe['window-pixel-height']}px for {height}px of text and band")
+                # fit-window-to-buffer rounds to whole lines (pixelwise nil),
+                # fitting the text and what the window has besides its body
+                # (its bottom divider under the pane chrome), as GNU's does.
+                needed = height - band + probe['window-pixel-height'] - probe['window-body-pixel-height']
+                if probe['window-pixel-height'] != -(-needed // line) * line:
+                    raise AssertionError(f"window {probe['window-pixel-height']}px for {height}px of text and {needed - height}px besides")
                 if edge - text_bottom >= line:
                     raise AssertionError(f'{edge - text_bottom}px of blank rows above the body edge')
                 widest = max(x for _, _, row in popup_rows for x, _ in row)

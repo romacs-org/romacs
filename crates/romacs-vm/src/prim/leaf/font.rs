@@ -25,21 +25,21 @@ impl Leaf<'_> {
     }
     /// The open display's cached ASCII font name for KEY (a face's family
     /// and pixel-size bits), and its recording.
-    pub(crate) fn cached_face_font(&self, key: &(String, u32)) -> Option<String> {
+    pub(crate) fn cached_face_font(&self, key: &(String, u32, u16, bool, u16)) -> Option<String> {
         self.vm.display.as_ref().filter(|d| d.open).and_then(|d| d.face_fonts.get(key).cloned())
     }
-    pub(crate) fn cache_face_font(&mut self, key: (String, u32), name: String) {
+    pub(crate) fn cache_face_font(&mut self, key: (String, u32, u16, bool, u16), name: String) {
         if let Some(display) = self.vm.display.as_mut() { display.face_fonts.insert(key, name); }
     }
-    /// The frame's default face's family and pixel size, as painting
-    /// realizes it.
-    pub(crate) fn default_font_request(&self) -> std::result::Result<(String, f32), Fault> {
+    /// The frame's default face's font request, as painting realizes it.
+    pub(crate) fn default_font_request(&self) -> std::result::Result<crate::FaceFont, Fault> {
         self.face_font_request("default")
     }
-    /// FACE's family and pixel size, as painting realizes it.
-    pub(crate) fn face_font_request(&self, face: &str) -> std::result::Result<(String, f32), Fault> {
+    /// FACE's font request (family, pixel size, weight, slant, width), as
+    /// painting realizes it.
+    pub(crate) fn face_font_request(&self, face: &str) -> std::result::Result<crate::FaceFont, Fault> {
         let face = self.vm.display_face(face).map_err(Fault::Error)?;
-        Ok((face.family, face.pixel_size))
+        Ok(crate::FaceFont { family: face.family, pixel_size: face.pixel_size, weight: face.weight, italic: face.italic, width: face.width })
     }
 }
 

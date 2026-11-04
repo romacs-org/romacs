@@ -403,26 +403,21 @@ buffer, for SESSION: its end, from a prompt on."
                       (funcall (romacs-agent-history--get harness :events)
                                (romacs-agent-history--read path beg end (romacs-agent-history--get harness :keep)))))
          (started (make-hash-table :test #'equal))
-         (facts nil)
-         (cost (romacs-agent-turn-cost session)))
+         (facts nil))
     ;; Cut: from the first prompt on.
     (when (> beg 0)
       (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events))
       (romacs-agent-ui--insert (format "· earlier turns are in %s\n" (abbreviate-file-name path)) 'face 'romacs-agent-dim))
     (unless (file-readable-p path)
       (romacs-agent-ui--insert (format "! %s is gone\n" (abbreviate-file-name path)) 'face 'romacs-agent-error))
-    ;; Its turns cost what the harness's record does not say.
-    (setf (romacs-agent-turn-cost session) nil)
-    (unwind-protect
-        (dolist (event events)
-          (pcase-dolist (`(,key . ,_) romacs-agent-history--facts)
-            (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key)))))
-          (when (eq (plist-get event :type) 'tool)
-            (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
-              ;; A result whose call the cut left out shows nothing.
-              (unless (gethash (plist-get event :id) started) (setq event nil))))
-          (when event (romacs-agent-ui--draw session event (current-buffer))))
-      (setf (romacs-agent-turn-cost session) cost))
+    (dolist (event events)
+      (pcase-dolist (`(,key . ,_) romacs-agent-history--facts)
+        (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key)))))
+      (when (eq (plist-get event :type) 'tool)
+        (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
+          ;; A result whose call the cut left out shows nothing.
+          (unless (gethash (plist-get event :id) started) (setq event nil))))
+      (when event (romacs-agent-ui--draw session event (current-buffer))))
     (romacs-agent-history--keep-facts session facts)))
 
 (defvar-local romacs-agent-history--item nil "The transcript this view shows.")

@@ -799,7 +799,7 @@ fn pixel_size(cx: &Leaf<'_>, font: Value, default: i64) -> i64 {
 }
 /// The default face's pixel size, as GNU's frame font's.
 fn frame_pixel_size(cx: &Leaf<'_>) -> std::result::Result<i64, Fault> {
-    Ok(cx.default_font_request()?.1.round() as i64)
+    Ok(cx.default_font_request()?.pixel_size.round() as i64)
 }
 /// font_open_entity and friends: FONT (spec, entity or object) opened on
 /// the display, a spec filled from the default face as font_load_for_lface
@@ -811,7 +811,7 @@ fn open(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<Option<Value>, Fa
     let size = pixel_size(cx, font, default);
     let entity = if kind == Kind3::Entity { entity_of(cx, font) } else {
         let mut query = query_of(cx, font);
-        if query.family.is_none() { query.family = Some(cx.default_font_request()?.0); }
+        if query.family.is_none() { query.family = Some(cx.default_font_request()?.family); }
         cx.font_host().and_then(|host| host.list_fonts(&query).into_iter().next())
     };
     let Some(entity) = entity else { return Ok(None) };
@@ -833,10 +833,10 @@ pub(crate) fn frame_font(cx: &mut Leaf<'_>) -> std::result::Result<Option<String
 /// realize.
 pub(crate) fn face_font(cx: &mut Leaf<'_>, face: &str, ch: char) -> std::result::Result<Option<String>, Fault> {
     if cx.font_host().is_none() { return Ok(None); }
-    let Ok((family, pixels)) = cx.face_font_request(face) else { return Ok(None) };
-    let key = (family, pixels.to_bits());
+    let Ok(request) = cx.face_font_request(face) else { return Ok(None) };
+    let key = request.key();
     if ch == ' ' && let Some(name) = cx.cached_face_font(&key) { return Ok(Some(name)); }
-    let Some((opened, _)) = cx.font_host().and_then(|host| host.char_font(&key.0, pixels, ch)) else { return Ok(None) };
+    let Some((opened, _)) = cx.font_host().and_then(|host| host.char_font(&request, ch)) else { return Ok(None) };
     // font_build_object's name: the entity's XLFD at the opened size.
     let entity = make_entity(cx, &opened.entity)?;
     let name = unparse_xlfd(cx, entity, opened.pixel_size);
@@ -1013,8 +1013,8 @@ fn font_info(cx, name: Value; optional frame: Value) {
 /// The font and glyph code the frame draws CH with: (FONT-OBJECT . CODE).
 fn char_font(cx: &mut Leaf<'_>, ch: i64) -> Out {
     let Some(ch) = u32::try_from(ch).ok().and_then(char::from_u32) else { return Ok(Value::NIL) };
-    let (family, pixels) = cx.default_font_request()?;
-    let Some((opened, code)) = cx.font_host().and_then(|host| host.char_font(&family, pixels, ch)) else { return Ok(Value::NIL) };
+    let request = cx.default_font_request()?;
+    let Some((opened, code)) = cx.font_host().and_then(|host| host.char_font(&request, ch)) else { return Ok(Value::NIL) };
     let object = make_object(cx, &opened)?;
     Ok(cx.cons(object, Value::integer(i64::from(code)).unwrap()))
 }
