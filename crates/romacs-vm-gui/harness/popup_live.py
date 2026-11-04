@@ -456,6 +456,17 @@ def check_prompts(args, output, report, env, process, state, keys, glyphs):
         raise AssertionError(f'tall prompt {tall}')
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
     time.sleep(.6)
+    # A prompt in a small face, more characters than the room's columns: the
+    # layer takes the room rather than wrap what fits it.
+    keys('-M', 'ctrl', 'c', '-m', 'ctrl', '9')
+    time.sleep(1)
+    small = probe_now('small')
+    fio.shot(output / 'prompt-small.png', env, report)
+    report['captures'].append({'name': 'small', 'state': small})
+    if small['layer-text'] + 4 * 10 < small['room'] * 10 and small['rows'] > 1:
+        raise AssertionError(f'small-face prompt {small}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    time.sleep(.6)
     # Turned off in a prompt, the mode makes no layer as the user types: the
     # input shows in the frame's own minibuffer line.
     keys('-k', 'F8')

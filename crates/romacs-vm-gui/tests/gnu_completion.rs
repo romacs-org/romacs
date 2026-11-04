@@ -395,7 +395,14 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         report.push(printed(&mut vm, "(with-temp-buffer
             (insert (make-string 16000 ?x))
             (list (romacs-complete--measure-prompt (current-buffer) 10 900)
-                  (progn (erase-buffer) (insert \"short\") (romacs-complete--measure-prompt (current-buffer) 10 900))))"));
+                  (progn (erase-buffer) (insert \"short\") (romacs-complete--measure-prompt (current-buffer) 10 900))
+                  ;; Characters past the room's columns in a small face: the
+                  ;; room, not the measure of the first of them.
+                  (progn (erase-buffer) (insert (propertize (make-string 160 ?s) 'face '(:height 0.5)))
+                         (romacs-complete--measure-prompt (current-buffer) 10 900))
+                  ;; Lines each measured: the widest of three, then the rest.
+                  (progn (erase-buffer) (insert \"ab\\nabcdef\\nabc\")
+                         (romacs-complete--measure-prompt (current-buffer) 10 900))))"));
         vm.set_frame_geometry(500, 800, LINE, 10).unwrap();
         report.push(printed(&mut vm, "(let ((f romacs-complete--layer))
             (pcase-let ((`(,l ,_ ,w ,_) (romacs-complete--placement f 3)))
@@ -429,7 +436,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal
                         // border (VM2-PANE-CHROME), centred on the native 500.
-                        "(8 (nil 1))", "(600 840 480 1260)", "(920 t 600 t 600)", "(900 50)", "(14 486 472)", "(140 200 348 t)"]);
+                        "(8 (nil 1))", "(600 840 480 1260)", "(920 t 600 t 600)", "(900 50 900 60)", "(14 486 472)", "(140 200 348 t)"]);
 }
 
 /// Every chrome colour follows the theme (romacs-chrome.el

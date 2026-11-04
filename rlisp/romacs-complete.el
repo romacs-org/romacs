@@ -1000,25 +1000,35 @@ pixels, COLUMN-pixel characters, at most ROOM: each line with its own
 faces and display properties through `string-pixel-width', in BUFFER,
 so a glyph the font draws wider than a cell and a face's height count;
 its columns times COLUMN where the display cannot measure.  Only what
-can matter is read: a line no further than ROOM's columns, and no line
-once one has filled ROOM, so an edit of a long input costs no more."
+can matter is read, so an edit of a long input costs no more: a line is
+read no further than ROOM's columns of characters, its end searched
+for no further, and one longer than that counts as filling ROOM (a
+small face's characters might still fit it: the layer then takes the
+room rather than wrap them); no line is read once one has filled ROOM."
   (with-current-buffer buffer
     (save-excursion
       (goto-char (point-min))
-      ;; A line's end past the prompt's field: the input is on it too.
-      (let ((widest 0) (inhibit-field-text-motion t) (most (1+ (/ room (max 1 column)))))
+      (let ((widest 0) (most (1+ (/ room (max 1 column)))))
         (while (and (not (eobp)) (< widest room))
-          ;; The line with its faces, without the prompt's read-only and
-          ;; field properties, which refuse its copy into the measuring
-          ;; buffer.
-          (let ((line (buffer-substring (point) (min (line-end-position) (+ (point) most)))))
-            (remove-text-properties 0 (length line) '(read-only nil field nil front-sticky nil rear-nonsticky nil
-                                                       inhibit-read-only nil cursor-intangible nil)
-                                    line)
-            (setq widest (max widest (or (and (fboundp 'string-pixel-width)
-                                              (ignore-errors (string-pixel-width line buffer)))
-                                         (* column (string-width line))))))
-          (forward-line 1))
+          (let* ((start (point))
+                 (limit (min (point-max) (+ start most)))
+                 ;; The line's end, searched no further than LIMIT (past the
+                 ;; prompt's field: the input is on the line too).
+                 (end (if (search-forward "\n" limit t) (1- (point)) limit))
+                 (cut (and (= end limit) (< limit (point-max)) (/= (char-after limit) ?\n))))
+            (if cut
+                (setq widest room)
+              ;; The line with its faces, without the prompt's read-only and
+              ;; field properties, which refuse its copy into the measuring
+              ;; buffer.
+              (let ((line (buffer-substring start end)))
+                (remove-text-properties 0 (length line) '(read-only nil field nil front-sticky nil rear-nonsticky nil
+                                                           inhibit-read-only nil cursor-intangible nil)
+                                        line)
+                (setq widest (max widest (or (and (fboundp 'string-pixel-width)
+                                                  (ignore-errors (string-pixel-width line buffer)))
+                                             (* column (string-width line))))))
+              (goto-char (min (point-max) (1+ end))))))
         (min widest room)))))
 
 (defun romacs-complete--prompt-only-p (buffer)

@@ -53,6 +53,11 @@
   (interactive)
   (read-from-minibuffer (propertize (concat (make-string 47 ?s) ": ") 'face '(:height 2.0))))
 
+(defun prompt-scene-small ()
+  (interactive)
+  (read-from-minibuffer (propertize (concat (make-string 160 ?s) ": ") 'face '(:height 0.5))))
+
+(global-set-key (kbd "C-c 9") #'prompt-scene-small)
 (global-set-key (kbd "<f8>") #'prompt-scene-type)
 (global-set-key (kbd "<f9>") #'prompt-scene-nested)
 (global-set-key (kbd "<f10>") #'prompt-scene-tall)
