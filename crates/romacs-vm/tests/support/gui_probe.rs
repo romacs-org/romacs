@@ -14,7 +14,7 @@ impl romacs_vm::DisplayHost for Pgtk {
     fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
     fn font_families(&mut self) -> Vec<String> { vec![] }
     fn open_font(&mut self, _: &romacs_vm::FontEntity, _: i64) -> Option<romacs_vm::OpenedFont> { None }
-    fn char_font(&mut self, _: &str, _: f32, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
+    fn char_font(&mut self, _: &romacs_vm::FaceFont, _: char) -> Option<(romacs_vm::OpenedFont, u32)> { None }
 }
 
 /// A window-system frame of 1216x876 pixels and 10x25 cells, with GNU's Lisp.
