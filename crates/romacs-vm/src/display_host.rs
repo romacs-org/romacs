@@ -54,6 +54,24 @@ pub struct FontQuery {
     pub registry: Option<String>,
 }
 
+/// A face's font as painting requests it: its family and pixel size, and
+/// its weight (CSS, 400 normal), slant and width (OS/2 class, 5 normal).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceFont {
+    pub family: String,
+    pub pixel_size: f32,
+    pub weight: u16,
+    pub italic: bool,
+    pub width: u16,
+}
+
+impl FaceFont {
+    /// The request as a hashable key.
+    pub fn key(&self) -> (String, u32, u16, bool, u16) {
+        (self.family.clone(), self.pixel_size.to_bits(), self.weight, self.italic, self.width)
+    }
+}
+
 /// The embedder's window system, asked synchronously.
 pub trait DisplayHost {
     /// The `window-system' symbol's name for frames on this display.
@@ -66,9 +84,10 @@ pub trait DisplayHost {
     fn font_families(&mut self) -> Vec<String>;
     /// ENTITY opened at PIXEL_SIZE, if it opens.
     fn open_font(&mut self, entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont>;
-    /// The font and glyph code the frame draws CH with in a face of FAMILY
-    /// at PIXEL_SIZE, as painting resolves it; None when no font has CH.
-    fn char_font(&mut self, family: &str, pixel_size: f32, ch: char) -> Option<(OpenedFont, u32)>;
+    /// The font and glyph code the frame draws CH with in a face asking for
+    /// FACE's font, as painting resolves it, its weight, slant and width
+    /// included; None when no font has CH.
+    fn char_font(&mut self, face: &FaceFont, ch: char) -> Option<(OpenedFont, u32)>;
     /// Apply an `alpha' setter of the frame the display knows as FRAME
     /// (pgtkterm.c:4663 pgtk_set_frame_alpha): ALPHA while it is active and
     /// inactive, negative leaving its opacity alone, raised to LIMIT,
@@ -83,7 +102,7 @@ pub(crate) struct Display {
     /// The ASCII font's name for each family and pixel size (its bits) a
     /// face realized to: `frame-parameters' and `face-font' name them on
     /// every call.
-    pub face_fonts: rustc_hash::FxHashMap<(String, u32), String>,
+    pub face_fonts: rustc_hash::FxHashMap<(String, u32, u16, bool, u16), String>,
 }
 
 impl Vm {

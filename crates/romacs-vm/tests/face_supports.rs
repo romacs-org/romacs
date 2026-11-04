@@ -22,7 +22,7 @@ impl DisplayHost for Fonts {
     }
     fn font_families(&mut self) -> Vec<String> { vec!["Mono".into(), "Plain".into()] }
     fn open_font(&mut self, _: &FontEntity, _: i64) -> Option<OpenedFont> { None }
-    fn char_font(&mut self, _: &str, _: f32, _: char) -> Option<(OpenedFont, u32)> { None }
+    fn char_font(&mut self, _: &romacs_vm::FaceFont, _: char) -> Option<(OpenedFont, u32)> { None }
 }
 
 fn graphic_vm(family: &str) -> Vm {
