@@ -1032,11 +1032,18 @@ activity first, and a table from a session's id to its children."
     (cons (sort roots (lambda (a b) (> (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0))))
           children)))
 
+(defun romacs-agent-ui--newer (a b)
+  "Whichever of sessions A and B (either nil) was active last."
+  (if (and b (or (null a) (> (or (romacs-agent-last-time b) 0) (or (romacs-agent-last-time a) 0)))) b a))
+
 (defun romacs-agent-ui--insert-subtree (session children depth root-cwd width)
+  "Insert SESSION's row and its descendants'; return the one active last."
   (insert (romacs-agent-ui--row session depth root-cwd width))
-  (dolist (child (sort (copy-sequence (gethash (romacs-agent-id session) children))
-                       (lambda (a b) (< (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0)))))
-    (romacs-agent-ui--insert-subtree child children (1+ depth) root-cwd width)))
+  (let ((newest session))
+    (dolist (child (sort (copy-sequence (gethash (romacs-agent-id session) children))
+                         (lambda (a b) (< (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0)))))
+      (setq newest (romacs-agent-ui--newer newest (romacs-agent-ui--insert-subtree child children (1+ depth) root-cwd width))))
+    newest))
 
 (defun romacs-agent-ui--history-row (item width)
   "A harness transcript ITEM's row, dimmed, in the session rows' columns."
@@ -1087,15 +1094,23 @@ row point was on stays under point."
       (if (null projects)
           (insert (propertize "No agent sessions yet: c starts one.\n" 'face 'romacs-agent-dim))
         (dolist (cwd projects)
-          (insert (propertize (file-name-nondirectory (directory-file-name cwd)) 'face 'romacs-agent-section)
-                  "  " (propertize (abbreviate-file-name cwd) 'face 'romacs-agent-dim) "\n")
-          (dolist (root (nreverse (gethash cwd sessions))) (romacs-agent-ui--insert-subtree root children 0 cwd width))
-          (let* ((items (nreverse (gethash cwd history)))
-                 (shown (if romacs-agents--all-history items (seq-take items romacs-agent-history-per-project))))
+          (let* ((roots (nreverse (gethash cwd sessions)))
+                 (items (nreverse (gethash cwd history)))
+                 (shown (if romacs-agents--all-history items (seq-take items romacs-agent-history-per-project)))
+                 (header (point)) (newest nil))
+            (insert (propertize (file-name-nondirectory (directory-file-name cwd)) 'face 'romacs-agent-section)
+                    "  " (propertize (abbreviate-file-name cwd) 'face 'romacs-agent-dim) "\n")
+            (dolist (root roots)
+              (setq newest (romacs-agent-ui--newer newest (romacs-agent-ui--insert-subtree root children 0 cwd width))))
+            ;; RET on the project opens its newest: a session (a delegated
+            ;; one too), else its newest transcript.
+            (when-let* ((target (if newest (romacs-agent-id newest) (car items))))
+              (put-text-property header (save-excursion (goto-char header) (line-beginning-position 2))
+                                 'romacs-agents-newest target))
             (dolist (item shown) (insert (romacs-agent-ui--history-row item width)))
             (when (> (length items) (length shown))
               (insert (propertize (format "  ◇ %d more  (h shows all)\n" (- (length items) (length shown)))
-                                  'face 'romacs-agent-dim))))
+                                  'face 'romacs-agent-dim 'romacs-agents-more t))))
           (insert "\n")))
       (insert (propertize "RET open  c new  i interrupt  k stop  r resume  h history  g refresh  n/p move\n"
                           'face 'romacs-agent-dim))
@@ -1193,7 +1208,7 @@ shown; hidden, it is rebuilt when shown."
 
 (defun romacs-agents--at-point ()
   (or (romacs-agent-get (get-text-property (line-beginning-position) 'romacs-agent-session))
-      (user-error "No session here")))
+      (user-error "No session on this line: n and p move to one")))
 
 (defun romacs-agents--history-at-point ()
   (get-text-property (line-beginning-position) 'romacs-agent-history))
@@ -1214,11 +1229,19 @@ shown; hidden, it is rebuilt when shown."
   (while (and (not (bobp)) (not (romacs-agents--row-p))) (forward-line -1)))
 
 (defun romacs-agents-open ()
-  "Open this session's chat, or this transcript read-only."
+  "Open this session's chat, or this transcript read-only; on a project,
+its newest; on \"more\", every transcript."
   (interactive)
-  (if-let* ((item (romacs-agents--history-at-point)))
-      (romacs-agent-history-open item)
-    (romacs-agent-show (romacs-agents--at-point))))
+  (let ((start (line-beginning-position)))
+    (cond ((romacs-agents--history-at-point) (romacs-agent-history-open (romacs-agents--history-at-point)))
+          ((get-text-property start 'romacs-agent-session) (romacs-agent-show (romacs-agents--at-point)))
+          ((get-text-property start 'romacs-agents-more) (romacs-agents-toggle-history))
+          ((get-text-property start 'romacs-agents-newest)
+           (let ((newest (get-text-property start 'romacs-agents-newest)))
+             (cond ((not (stringp newest)) (romacs-agent-history-open newest))
+                   ((romacs-agent-get newest) (romacs-agent-show (romacs-agent-get newest)))
+                   (t (romacs-agent-ui--home) (user-error "That session is gone; the page is redrawn")))))
+          (t (romacs-agents--at-point)))))
 (defun romacs-agents-interrupt () "Interrupt this session." (interactive) (romacs-agent-interrupt (romacs-agents--at-point)))
 (defun romacs-agents-stop ()
   "Stop this session."

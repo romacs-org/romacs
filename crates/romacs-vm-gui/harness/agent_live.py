@@ -36,6 +36,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `not executed', and never runs.
   logging    a server keeps its own session record: errors with their
              functions, slow commands, its end.
+  home_keys  RET on the home page's other lines, real keys: a project
+             opens its newest, "more" shows every transcript, the help
+             line says how to reach a row.
   environment  a harness sees none of the editor's own launch variables.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
@@ -1855,6 +1858,89 @@ def real(args, base):
         a.close()
 
 
+def home_keys(args, base):
+    """RET on the home page's lines that are no row, as real keys: on a
+    project, its newest session (by last activity, not by start, a
+    delegated one too) or, with
+    none, its newest transcript opens; on "◇ N more", every transcript is
+    shown; elsewhere a hint says n and p reach a row, and nothing opens; a
+    project whose newest session is gone since the page was drawn says so
+    and draws it again."""
+    a = Agents(args, base, 'hk')
+    try:
+        a.up()
+        claude_dir, codex_home = a.home / '.config/claude/acct', a.home / '.config/codex-acct'
+        a.work.mkdir(parents=True, exist_ok=True)
+        transcripts = a.root / 'transcripts'
+        transcripts.mkdir()
+        cid, tid = history_fixtures(claude_dir, codex_home, transcripts)
+        claude_file = next((claude_dir / 'projects').rglob(f'{cid}.jsonl'))
+        codex_file = next(codex_home.rglob(f'*{tid}.jsonl'))
+        now = time.time()
+        os.utime(claude_file, (now - 100, now - 100))
+        os.utime(codex_file, (now - 50, now - 50))
+        a.providers([('claude', claude_dir), ('codex', codex_home, CODEX, [])])
+        sids = []
+        for prompt in ('say one', 'say two', 'say three'):
+            sid = a.start(prompt)
+            until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 30, f'{prompt} answered')
+            a.idle(sid)
+            sids.append(sid)
+        # The third, delegated by the first (its row under the first's), is
+        # the most recently active; then the second.
+        a.eval(f'(progn (setf (romacs-agent-options {a.s(sids[2])}) '
+               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) t)')
+        for sid, at in zip(sids, (now - 30, now - 20, now - 10)):
+            a.eval(f'(progn (setf (romacs-agent-last-time {a.s(sid)}) {at}) t)')
+        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) (romacs-agents) '
+               '(delete-other-windows) t)')
+        a.keyboard_ready()
+        shown = lambda: a.eval('(buffer-name (window-buffer (selected-window)))').strip('"')
+        # The session whose chat the selected window shows, if any.
+        showing = lambda: parity_live.read_sexp(a.eval(
+            '(with-current-buffer (window-buffer (selected-window)) '
+            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
+
+        def ret_on(regexp):
+            """Point to the home page's line REGEXP matches; RET there."""
+            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+                   f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
+            a.keys('-k', 'Return')
+            time.sleep(1)
+
+        steps = {}
+        ret_on('^transcripts  ')
+        steps['project_without_session'] = parity_live.read_sexp(a.eval(
+            '(with-current-buffer (window-buffer (selected-window)) '
+            '(list buffer-read-only (plist-get romacs-agent-history--item :path)))'))
+        ret_on('^work  ')
+        steps['project_with_session'] = showing()
+        steps['nested'] = parity_live.read_sexp(a.eval(
+            f'(mapcar (function romacs-agent-id) (gethash {lisp_text(sids[0])} (cdr (romacs-agent-ui--tree))))'))
+        ret_on('◇ [0-9]+ more')
+        steps['more'] = [shown(), a.eval('romacs-agents--all-history'),
+                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search "more  (h shows all)" (buffer-string)) t))')]
+        ret_on('^RET open')
+        steps['help_line'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
+        # The newest session forgotten after the page was drawn.
+        a.eval(f'(progn (remhash {lisp_text(sids[2])} romacs-agent--sessions) t)')
+        ret_on('^work  ')
+        steps['gone'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
+        ret_on('^work  ')
+        steps['after_gone'] = showing()
+        result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
+        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file)]
+                        and steps['project_with_session'] == sids[2] and steps['nested'] == [sids[2]]
+                        and steps['more'] == ['*romacs-agents*', 't', 'nil']
+                        and steps['help_line'][0] == '*romacs-agents*'
+                        and 'n and p' in (steps['help_line'][1] or '')
+                        and steps['gone'][0] == '*romacs-agents*' and 'gone' in (steps['gone'][1] or '')
+                        and steps['after_gone'] == sids[1])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -1912,7 +1998,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging}
+             'environment': environment, 'logging': logging, 'home_keys': home_keys}
 
 
 def main():
@@ -1934,7 +2020,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
