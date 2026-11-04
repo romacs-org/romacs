@@ -1614,8 +1614,7 @@ impl Vm {
                 let pairs = params
                     .iter()
                     .map(|&(k, v)| {
-                        self.conses.push((k, v));
-                        Value::reference(self.conses.len() - 1, 3)
+                        self.alloc_cons(k, v)
                     })
                     .collect::<Vec<_>>();
                 self.list_value(&pairs)
@@ -1632,8 +1631,7 @@ impl Vm {
                 } else {
                     Value::integer(w.right_margin as i64)?
                 };
-                self.conses.push((l, r));
-                Value::reference(self.conses.len() - 1, 3)
+                self.alloc_cons(l, r)
             }
             SetWindowMargins => {
                 let dim = |v: Value| -> Result<u32> {

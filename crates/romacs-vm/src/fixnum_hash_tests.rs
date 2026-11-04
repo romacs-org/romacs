@@ -5,6 +5,7 @@ use data::Object;
 fn immediate_hashes_and_position_hashes_remain_distinct_after_compaction() {
     for test in ["eq", "eql", "equal"] {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.read_source_raw("[\"garbage\"]").unwrap();
         let source = format!(
             "(setq s109-key (make-hash-table)) (setq s109-h (make-hash-table :test '{test})) (puthash s109-key 99 s109-h) (puthash 1152921504606846976 1 s109-h) (puthash 2305843009213693951 2 s109-h) (puthash -2305843009213693952 3 s109-h) s109-h"
@@ -42,6 +43,7 @@ fn immediate_hashes_and_position_hashes_remain_distinct_after_compaction() {
         assert!(!after.stale, "S109 lookup rebuilds stale index");
     }
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     let wide = Value::integer(Value::MAX_FIXNUM).unwrap();
     vm.cells.extend([Value::NIL, wide]);
     vm.conses.push((Value::integer(1).unwrap(), wide));

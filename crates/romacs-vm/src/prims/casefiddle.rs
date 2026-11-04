@@ -181,6 +181,7 @@ mod tests {
     #[test]
     fn native_case_survives_moving_gc() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.eval_source_raw("(setq waste (make-string 1000 97)) (setq waste nil) (setq saved-prop (list 8)) (setq saved-case-string (propertize (unibyte-string 97 233) 'p saved-prop)) (let ((u (char-table-extra-slot (current-case-table) 0))) (aset u 223 223)) (setq saved-case-result (upcase saved-case-string))").unwrap();
         let before = vm.standard_case_tables;
         vm.collect(&mut []);

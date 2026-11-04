@@ -281,8 +281,8 @@ impl Vm {
             let value = self
                 .backtrace_binding_value(at)
                 .map_err(prim::Fault::Error)?;
-            self.conses.push((symbol, value));
-            values.push(Value::reference(self.conses.len() - 1, 3));
+            let cons = self.alloc_cons(symbol, value);
+            values.push(cons);
         }
         Ok(self.list_value(&values))
     }

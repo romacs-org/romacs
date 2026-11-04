@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn callback_collects_and_forwards_suspended_stack_in_place() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.eval_source_raw("(defun collecting-reader (x) (garbage-collect) (setcar x 42) x)")
         .unwrap();
     for _ in 0..32 {
@@ -66,16 +67,16 @@ fn callback_wrappers_reuse_request_slots_without_retaining_dead_callbacks() {
         .compile_source("(let ((payload (cons 1 2))) (lambda () payload))")
         .unwrap();
     vm.collect(&mut []);
-    let conses = vm.conses.len();
-    let closures = vm.closures.len();
+    let conses = vm.conses.len() - vm.free.of(0);
+    let closures = vm.closures.len() - vm.free.of(1);
     for _ in 0..128 {
         let callback = vm.execute_raw(maker).unwrap();
         let result = vm.reader_call(callback, &[]).unwrap();
         assert_eq!(vm.display(result).unwrap(), "(1 . 2)");
     }
     vm.collect(&mut []);
-    assert_eq!(vm.conses.len(), conses, "callback captures were retained");
-    assert_eq!(vm.closures.len(), closures, "callbacks were retained");
+    assert_eq!(vm.conses.len() - vm.free.of(0), conses, "callback captures were retained");
+    assert_eq!(vm.closures.len() - vm.free.of(1), closures, "callbacks were retained");
 }
 
 #[test]

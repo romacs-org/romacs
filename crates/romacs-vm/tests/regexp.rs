@@ -73,6 +73,7 @@ fn cyclic_match_data_reuse_is_bounded() {
 #[test]
 fn match_string_after_actual_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(usize::MAX);
     vm.eval_source("(dotimes (i 80) (copy-sequence \"dead\")) (setq subject (copy-sequence \"αabcβ\")) (string-match \"\\\\(ab\\\\)c\" subject)").unwrap();
     let old = format!("{:?}", vm.eval_source("subject").unwrap());

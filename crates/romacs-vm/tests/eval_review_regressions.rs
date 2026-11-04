@@ -14,6 +14,7 @@ fn temporary_local_values_follow_owner_lifetime_not_global_slots() {
     let small=retained(10); let large=retained(100);
     assert!(large<=small+2,"temporary local graphs grow with iterations: {small} -> {large}");
     let mut vm=Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(usize::MAX);
     // The retained-owner half needs a live buffer. with-temp-buffer now kills
     // its buffer on exit, as GNU does; retain a generated buffer instead.

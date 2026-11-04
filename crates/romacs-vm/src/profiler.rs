@@ -90,14 +90,10 @@ impl Log {
     }
 }
 
-/// Lengths of the heap's arenas, where the memory meter last read them.
+/// The allocation funnels' byte count where the memory meter last read it
+/// (gc.rs `FreeEntries::allocated').
 #[derive(Clone, Copy)]
-struct HeapMark {
-    conses: usize,
-    cells: usize,
-    closures: usize,
-    objects: usize,
-}
+struct HeapMark(u64);
 
 struct Cpu {
     /// The `profiler-cpu-start' argument, for `profiler-cpu-log''s restart.
@@ -215,27 +211,12 @@ impl Vm {
         log.record(scratch, count, || trace().collect(), identity);
     }
     fn heap_mark(&self) -> HeapMark {
-        HeapMark { conses: self.conses.len(), cells: self.cells.len(), closures: self.closures.len(), objects: self.objects.len() }
+        HeapMark(self.free.allocated)
     }
-    /// Bytes the heap's arenas grew by since MARK: GNU's malloc_probe sizes,
-    /// measured as `heap_stats' measures live bytes.
+    /// Bytes allocated since MARK: GNU's malloc_probe sizes, an entry and
+    /// its payload as the allocation funnels count them (data.rs).
     fn allocated_since(&self, mark: HeapMark) -> i64 {
-        let value = std::mem::size_of::<Value>();
-        let conses = self.conses.len().saturating_sub(mark.conses) * 2 * value;
-        let cells = self.cells.len().saturating_sub(mark.cells) * value;
-        let closures: usize = self.closures.get(mark.closures..).unwrap_or_default().iter()
-            .map(|c| std::mem::size_of::<Closure>() + (c.captures.len() + c.metadata.len()) * value)
-            .sum();
-        let objects: usize = self.objects.get(mark.objects..).unwrap_or_default().iter()
-            .map(|object| std::mem::size_of::<data::Object>() + match object {
-                data::Object::String(s) | data::Object::RawString(s) => s.storage_bytes(false),
-                data::Object::Bytes(b) => b.len(),
-                data::Object::Vector(v) | data::Object::Record(v) => v.len() * value,
-                data::Object::HashTable(t) => t.storage_bytes(false),
-                _ => 0,
-            })
-            .sum();
-        (conses + cells + closures + objects).min(i64::MAX as usize) as i64
+        self.free.allocated.saturating_sub(mark.0).min(i64::MAX as u64) as i64
     }
     fn profiler_log(&self) -> Log {
         let depth = self.forwarded.integer("profiler-max-stack-depth").clamp(0, i32::MAX as i64) as usize;

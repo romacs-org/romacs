@@ -15,6 +15,7 @@ fn file_identity_native_aliases_and_replacement() {
     std::os::unix::fs::symlink(&file, &sym).unwrap();
     let quote = |p: &std::path::Path| serde_json::to_string(p.to_str().unwrap()).unwrap();
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1_000_000);
     eval(&mut vm, "(let ((i 0)) (while (< i 2000) (copy-sequence \"garbage\") (setq i (1+ i))))");
     assert_eq!(eval(&mut vm, &format!("(progn (setq identity-buffer (get-buffer-create (generate-new-buffer-name \"identity\"))) (set-buffer identity-buffer) (insert-file-contents {} t) (goto-char 1) (insert \"live\") t)", quote(&file))), "t");

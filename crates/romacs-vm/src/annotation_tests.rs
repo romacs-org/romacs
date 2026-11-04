@@ -66,6 +66,7 @@ fn mixed_buffer_anchor_coordinates_across_directory_boundaries() {
 #[test]
 fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     assert_eq!(
         size_of::<Object>(),
         32,
@@ -317,6 +318,7 @@ fn hermes_shape_reuses_three_overlay_slots_for_9276_moves() {
 #[test]
 fn identical_overlay_property_ties_keep_the_newest_identity_after_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     let buffer = vm.allocate_object(Object::Buffer(Box::new(
         text::Text::new(b"abc").unwrap().into(),
     )));

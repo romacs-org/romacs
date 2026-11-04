@@ -22,6 +22,7 @@ fn frame_identity_is_lazy_heap_owned() {
 #[test]
 fn frame_graph_edges_move_and_retain_constant_storage() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     assert_eq!(vm.heap_objects(), 0);
     run(&mut vm, "(vector 0)"); // garbage forces real relocation
     run(&mut vm, SPLIT);
@@ -172,6 +173,7 @@ fn g3a_set_window_buffer_takes_the_buffers_point() {
 #[test]
 fn g3a_parameters_eq_dead_and_gc() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     run(&mut vm, "(vector 99)");
     run(&mut vm, SPLIT);
     yes(
