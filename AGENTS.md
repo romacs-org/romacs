@@ -100,7 +100,10 @@ possible; say so where you do.
 ## Existing commands
 
 Run commands directly from the repository root in the prepared project
-environment. Keep your HOME and Cargo environment. The acceptance gate
+environment. Keep your HOME and Cargo environment. Never enter `nix develop`
+for a toolchain: the flake's dev shell builds WPE WebKit from source, which
+takes every core for hours and starves running sessions. If `cargo` is not on
+PATH, ask the maintainer for the prepared environment. The acceptance gate
 owns its isolated test homes and heavy-job scheduling. Use worktrees when parallel
 writers need isolation; ordinary development does not need a lane registry.
 
