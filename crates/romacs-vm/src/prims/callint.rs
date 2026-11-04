@@ -234,6 +234,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "make-local-variable" => "vMake Local Variable: ",
         "kill-local-variable" => "vKill Local Variable: ",
         "forward-word" => "^p",
+        "upcase-word" | "downcase-word" | "capitalize-word" => "p",
         "search-backward" => "MSearch backward: ",
         "posix-search-forward" => "sPosix search: ",
         "posix-search-backward" => "sPosix search backward: ",

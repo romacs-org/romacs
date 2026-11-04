@@ -2099,31 +2099,43 @@ impl<'a> Windows<'a> {
                 return Err(Fault::Error("VM2 window body sizes in remapped face characters are unsupported".into()));
             }
         }
+        let px = self.text_area_pixels(w, width, true)?;
         let chars = pixelwise == Value::NIL || remap;
-        let size = if width {
+        Self::int((if chars { px / if width { column } else { line } } else { px }).max(0))
+    }
+    /// Fwindow_text_width and Fwindow_text_height (window.c:7459, 7481):
+    /// WINDOW's text area (window_box_width, window_box_height) in pixels
+    /// with PIXELWISE, else in whole columns or lines of its frame.
+    pub(crate) fn window_text_size(&mut self, window: Value, pixelwise: Value, width: bool) -> Out {
+        let w = self.live(window)?;
+        let unit = i64::from(if width { self.vm.window_state.column } else { self.vm.window_state.line }).max(1);
+        let px = self.text_area_pixels(w, width, false)?;
+        Self::int((if pixelwise == Value::NIL { px / unit } else { px }).max(0))
+    }
+    /// W's text area in pixels: its width less its margins, fringes and
+    /// right divider, and with BORDER, on a frame without a window system,
+    /// the column of the bar right of a window that is not rightmost
+    /// (window_body_width, window.c:1095; window_box_width keeps it); or
+    /// its height less its mode and header lines and bottom divider.
+    fn text_area_pixels(&mut self, w: Value, width: bool, border: bool) -> std::result::Result<i64, Fault> {
+        let column = i64::from(self.vm.window_state.column);
+        Ok(if width {
             let (right, margins, pixels) = {
                 let x = self.get(w)?;
                 (i64::from(x.x) + i64::from(x.width), i64::from(x.left_margin + x.right_margin) * column, i64::from(x.width))
             };
             let root = self.vm.root_of(w).map_err(internal)?;
             let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
-            // A frame without a window system draws a one-column bar right
-            // of a window that is not rightmost; a window system's draws
-            // the border in the fringe (window_body_width, window.c:1095).
-            let window_system = self.vm.window_system_open();
-            let bar = if !rightmost && !window_system { column } else { 0 };
+            let bar = if border && !rightmost && !self.vm.window_system_open() { column } else { 0 };
             let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
             let [divider, _] = self.vm.window_dividers(w).map_err(internal)?;
-            let px = pixels - bar - margins - i64::from(fringes[0] + fringes[1] + divider);
-            if chars { px / column } else { px }
+            pixels - bar - margins - i64::from(fringes[0] + fringes[1] + divider)
         } else {
-            let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
-            let header_line = self.window_header_line_height(window)?.integer_value().unwrap_or(0);
+            let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
+            let header_line = self.window_header_line_height(w)?.integer_value().unwrap_or(0);
             let [_, divider] = self.vm.window_dividers(w).map_err(internal)?;
-            let px = i64::from(self.get(w)?.height) - mode_line - header_line - i64::from(divider);
-            if chars { px / line } else { px }
-        };
-        Self::int(size.max(0))
+            i64::from(self.get(w)?.height) - mode_line - header_line - i64::from(divider)
+        })
     }
     /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT), the widths
     /// the window draws.

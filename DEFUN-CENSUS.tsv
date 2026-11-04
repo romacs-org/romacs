@@ -41,7 +41,6 @@ buffer-line-statistics	needed	lane A (editing, windows, frames, minibuffer reade
 byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 byteorder	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 canvas-refresh	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-capitalize-word	needed	lane A (editing, windows, frames, minibuffer readers, display)
 ccl-execute	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 ccl-execute-on-string	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 ccl-program-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -101,7 +100,6 @@ delete-terminal	needed	lane builtins-b (fonts, coding, images, system, processes
 delete-xwidget-view	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 display--line-is-continued-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 display--update-for-mouse-movement	needed	lane A (editing, windows, frames, minibuffer readers, display)
-downcase-word	needed	lane A (editing, windows, frames, minibuffer readers, display)
 draw-string	absent	no shipped Lisp calls it and it is no command
 dump-colors	absent	portable dumper: Romacs starts from its own world image
 dump-emacs-portable	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -399,7 +397,6 @@ tty-no-underline	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-suppress-bold-inverse-default-colors	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-type	absent	terminal frames: Romacs has none (GUI and batch only)
 uncombine-window	absent	no shipped Lisp calls it and it is no command
-upcase-word	needed	lane A (editing, windows, frames, minibuffer readers, display)
 user-ptrp	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 w16-get-clipboard-data	absent	platform: MS-Windows build only
 w16-selection-exists-p	absent	platform: MS-Windows build only
@@ -476,8 +473,6 @@ window-configuration-equal-p	needed	lane A (editing, windows, frames, minibuffer
 window-cursor-info	absent	no shipped Lisp calls it and it is no command
 window-cursor-type	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-lines-pixel-dimensions	needed	lane A (editing, windows, frames, minibuffer readers, display)
-window-text-height	needed	lane A (editing, windows, frames, minibuffer readers, display)
-window-text-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
 x-backspace-delete-keys-p	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-begin-drag	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-change-window-property	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)

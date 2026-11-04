@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "bfd0fa935f43bf242b39ad2662829e28062b0ddf89667a725b26a2e35987d049",
+    "input_hash": "adde17b49a6e3aeef6aeda0bbc99b0574f239a8b5c400305d4f3a3ce5c30737a",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 7990
+    "vm2_universe": 8000
   },
   "schema": 2,
   "vm2": {
-    "count": 1300,
+    "count": 1305,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -137,6 +137,7 @@
       "cancel-kbd-macro-events",
       "capitalize",
       "capitalize-region",
+      "capitalize-word",
       "car",
       "car-less-than-car",
       "car-safe",
@@ -281,6 +282,7 @@
       "documentation-stringp",
       "downcase",
       "downcase-region",
+      "downcase-word",
       "elt",
       "emacs-lisp-mode",
       "emacs-pid",
@@ -1230,6 +1232,7 @@
       "upcase-initials",
       "upcase-initials-region",
       "upcase-region",
+      "upcase-word",
       "use-global-map",
       "use-local-map",
       "user-full-name",
@@ -1301,7 +1304,9 @@
       "window-start",
       "window-system",
       "window-tab-line-height",
+      "window-text-height",
       "window-text-pixel-size",
+      "window-text-width",
       "window-top-child",
       "window-top-line",
       "window-total-height",
