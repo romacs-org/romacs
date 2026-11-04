@@ -1,5 +1,6 @@
 //! Seam L: owned layout input. No evaluator, heap reference or glyph matrix.
 use std::ops::Range;
+pub mod cluster;
 
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
