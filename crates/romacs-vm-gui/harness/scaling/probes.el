@@ -21,7 +21,8 @@
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
-;;   :gap    a GUI probe's seconds between steps (default 0.1).
+;;   :gap    how often, in seconds, a GUI probe looks for its step's
+;;           redisplay (default 0.1).
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -405,7 +406,7 @@ thousandth a stack mark."
 ;; remapped face table is realized once and found again per redisplay
 ;; (`display_faces_for'), for the window's text and bands and for the
 ;; bar's cache key (VM2-FACE-REMAP).
-(scaling-probe face-remap-bands :gui t :n 32 :steps 20 :gap 0.3
+(scaling-probe face-remap-bands :gui t :n 32 :steps 20
   :setup (progn
            (require 'romacs-mode-line)
            (romacs-mode-line-mode 1)
@@ -425,7 +426,7 @@ thousandth a stack mark."
 ;; keys go to a buffer in the other: the bar's line is unchanged, so each
 ;; request finds its last expansion by its key, which reads the remapping
 ;; again (`bar_key').
-(scaling-probe face-remap-bar-unchanged :gui t :n 256 :steps 20 :gap 0.3
+(scaling-probe face-remap-bar-unchanged :gui t :n 256 :steps 20
   :setup (progn
            (require 'romacs-mode-line)
            (romacs-mode-line-mode 1)
@@ -1913,8 +1914,9 @@ scaling_live.py --record profiles a probe's body alone this way."
 (defun scaling-gui-start (name n out)
   "Run GUI probe NAME at size N in this session, then exit.
 Once the session is idle, set the probe up; then run its steps from a chain
-of timers, the host laying out each step's change as the command loop
-returns; count the instructions from before the first step to after the
+of timers, each after the host's redisplay of the step before: a paint still
+being drawn holds the next one back, so no fixed time means the step was
+laid out.  Count the instructions from before the first step to after the
 last step's layout; write (:name :n :instructions) to OUT as JSON and kill
 Emacs.  Stderr marks the start, each step and the end among the paint
 diagnostics, so the harness can check a paint was submitted after each
@@ -1935,11 +1937,15 @@ step, before the next step or the count's end."
         (lambda ()
           (scaling--mark (list :scaling "start"))
           (setq start (romacs-instructions))
-          (let ((step nil) (i 0))
+          (let ((step nil) (laid-out nil) (i 0))
+            (setq laid-out (lambda ()
+                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))
-                                    (funcall body n it i) (setq i (1+ i)) (run-with-timer gap nil step))
+                                    (funcall body n it i) (setq i (1+ i))
+                                    (romacs--redisplay-since-mark t)
+                                    (run-with-timer gap nil laid-out))
                            (let ((end (romacs-instructions)))
                              (scaling--mark (list :scaling "end"))
                              (with-temp-file out
