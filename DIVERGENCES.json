@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "89aff90c7342a9fa509c95adcdf27c79f587e2d04e3256d08f7a5d5f21d5491b",
+  "input_hash": "eb5ff7edc273d4b9359d2ca69aac349948e95a60d2346a33f1f3c6f8bf587a04",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 359,
-  "symbols": 1088,
+  "rows": 360,
+  "symbols": 1090,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   358
+   359
   ],
   "\\": [
    277
@@ -91,7 +91,7 @@
   ],
   "add-text-properties": [
    301,
-   344
+   345
   ],
   "add-variable-watcher": [
    314,
@@ -108,7 +108,7 @@
    209
   ],
   "after-insert-file-set-coding": [
-   345
+   346
   ],
   "after-load-alist": [
    330
@@ -162,7 +162,7 @@
   ],
   "autoload": [
    318,
-   348
+   349
   ],
   "autoload-do-load": [
    318,
@@ -174,8 +174,14 @@
   "b->last_window_start": [
    238
   ],
+  "backtrace--frames-and-locals": [
+   344
+  ],
   "backtrace--locals": [
    343
+  ],
+  "backtrace-get-frames": [
+   344
   ],
   "backward-char": [
    180
@@ -234,7 +240,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   345
+   346
   ],
   "buffer-file-name": [
    125
@@ -556,7 +562,7 @@
    244
   ],
   "custom-reevaluate-setting": [
-   348
+   349
   ],
   "custom-set": [
    174
@@ -620,7 +626,7 @@
    117
   ],
   "default-file-name-coding-system": [
-   345
+   346
   ],
   "default-value": [
    325,
@@ -637,8 +643,8 @@
    164,
    192,
    225,
-   350,
-   354
+   351,
+   355
   ],
   "define-category": [
    307
@@ -651,7 +657,7 @@
    304
   ],
   "define-coding-system": [
-   345
+   346
   ],
   "define-coding-system-alias": [
    305
@@ -826,7 +832,7 @@
    341
   ],
   "downcase_char_code_emacs_compat": [
-   357
+   358
   ],
   "elt": [
    35,
@@ -835,13 +841,13 @@
    66
   ],
   "emacs-build-time": [
-   346
+   347
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   357
+   358
   ],
   "emoji": [
    29
@@ -972,17 +978,17 @@
    161,
    162,
    163,
-   350,
    351,
-   354
+   352,
+   355
   ],
   "face-family": [
    159,
-   353
+   354
   ],
   "face-font": [
    158,
-   352
+   353
   ],
   "face-remap-add-relative": [
    253
@@ -992,7 +998,7 @@
    162,
    163,
    253,
-   356
+   357
   ],
   "face-spec-recalc": [
    255
@@ -1045,7 +1051,7 @@
    124
   ],
   "find-auto-coding": [
-   345
+   346
   ],
   "find-composition": [
    279
@@ -1682,7 +1688,7 @@
   ],
   "last-coding-system-used": [
    125,
-   345
+   346
   ],
   "last-command": [
    94
@@ -1695,7 +1701,7 @@
    254
   ],
   "latin-extra-code-table": [
-   345
+   346
   ],
   "length": [
    66,
@@ -1788,7 +1794,7 @@
    110,
    111,
    121,
-   348
+   349
   ],
   "load-prefer-newer": [
    140
@@ -2115,10 +2121,10 @@
    165
   ],
   "next-property-change": [
-   344
+   345
   ],
   "next-single-char-property-change": [
-   344
+   345
   ],
   "no-byte-compile": [
    144
@@ -2576,11 +2582,11 @@
    330,
    331,
    332,
-   348
+   349
   ],
   "reset": [
    161,
-   349
+   350
   ],
   "resize-mini-windows": [
    339
@@ -2901,7 +2907,7 @@
    213
   ],
   "romacs-unsafe-coding": [
-   345
+   346
   ],
   "round": [
    281
@@ -2962,13 +2968,13 @@
    255
   ],
   "select-safe-coding-system": [
-   345
+   346
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   345
+   346
   ],
   "selected-frame": [
    192,
@@ -3010,7 +3016,7 @@
    326
   ],
   "set-auto-coding": [
-   345
+   346
   ],
   "set-buffer": [
    66
@@ -3039,7 +3045,7 @@
   ],
   "set-coding-system-priority": [
    305,
-   345
+   346
   ],
   "set-default": [
    326
@@ -3049,10 +3055,10 @@
    157,
    158,
    159,
-   351,
    352,
    353,
-   355
+   354,
+   356
   ],
   "set-file-acl": [
    11
@@ -3162,10 +3168,10 @@
    33
   ],
   "skip-chars-backward": [
-   358
+   359
   ],
   "skip-chars-forward": [
-   358
+   359
   ],
   "sleep-for": [
    220,
@@ -9952,13 +9958,29 @@
    "planned": false,
    "mechanism": "Explicit batch adapter and compiled backtrace metadata",
    "gnu": "ERT isolates each test with a temporary buffer and a window excursion; GNU backtraces can describe interpreter/source frames and lexical locals.",
-   "romacs": "The named `romacs-batch` adapter retains the temporary buffer, assertions, error handling, cleanup, expectedness and GNU batch runner, and replaces the precautionary window excursion. Condition objects use `prin1` plus a newline instead of editor indentation; their data and expectedness are unchanged. Automatic window-layout restoration and GUI fixtures are unsupported. Backtraces report real compiled calls, original evaluated argument snapshots and dynamic locals; lexical/source locals, pre-argument named-autoload frames and debugger mutation are unavailable. GNU apply optimizations can produce different frame/argument shapes. Ordinary closures print opaquely through an owned `cl-print-object` method.",
+   "romacs": "The named `romacs-batch` adapter retains the temporary buffer, assertions, error handling, cleanup, expectedness and GNU batch runner, and replaces the precautionary window excursion. Condition objects use `prin1` plus a newline instead of editor indentation; their data and expectedness are unchanged. Automatic window-layout restoration and GUI fixtures are unsupported. Backtraces report real compiled calls, original evaluated argument snapshots and dynamic locals; lexical/source locals and pre-argument named-autoload frames are unavailable; `backtrace-eval` and `backtrace-debug` act on these frames as on GNU byte-code's (eval.c unrewind of bindings, current buffer and excursions; debug-on-exit flags). GNU apply optimizations can produce different frame/argument shapes. Ordinary closures print opaquely through an owned `cl-print-object` method.",
    "why": "Keep the batch regime explicit and preserve private closure representation.",
    "symbols": [
     "ert--run-test-internal",
     "mapbacktrace",
     "backtrace--locals",
     "cl-print-object"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-GET-FRAMES",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`backtrace-get-frames` takes every frame and its locals from one walk",
+   "gnu": "backtrace.el collects frames with `mapbacktrace`, then calls `backtrace--locals` per frame and indexes the list with `nth`: quadratic in the stack's depth, as `backtrace--locals` unrewinds the whole distance per call (eval.c)",
+   "romacs": "`rlisp/romacs-backtrace.el` (loaded after backtrace.el by `romacs-loadup-bootstrap.el`) builds the same `backtrace-frame` objects, constructor protocol and eval-buffer positions from `backtrace--frames-and-locals`, one sweep of the frames and bindings; `tests/backtrace.rs` checks it equals the per-frame primitives, and the `backtrace-frames` scaling probe is linear. To a package: `symbol-function` of `backtrace-get-frames` is Romacs's, and `backtrace--frames-and-locals` exists",
+   "why": "Every *Backtrace* buffer, ERT failure record and debugger entry is built through it",
+   "symbols": [
+    "backtrace-get-frames",
+    "backtrace--frames-and-locals"
    ],
    "symbols_derived": false
   },

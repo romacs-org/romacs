@@ -93,6 +93,8 @@
 ;; cl-print's closure method walks body slots VM2 closures do not expose
 ;; (VM2-CLOSEQ1).
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
+;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+(with-eval-after-load 'backtrace (require 'romacs-backtrace))
 (load "simple.el" nil t t)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
@@ -104,6 +106,8 @@
 ;; closures keep private (VM2-ERT-BATCH1): whenever cl-print loads (debug.el's
 ;; *Backtrace*, ERT), they print through the owned method instead.
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
+;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+(with-eval-after-load 'backtrace (require 'romacs-backtrace))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of

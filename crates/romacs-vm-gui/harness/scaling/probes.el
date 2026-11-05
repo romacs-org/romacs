@@ -1491,6 +1491,71 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+;; The debugger's frame model: `backtrace-get-frames' (every frame with
+;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
+;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
+;; GNU's per-frame `backtrace--locals' would be quadratic.
+(defvar scaling--bt-depth nil)
+(defun scaling--bt-frames (n)
+  (let ((scaling--bt-depth n))
+    (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+(scaling-probe backtrace-frames :n 200 :k 4
+  :setup (progn (require 'backtrace) (require 'romacs-backtrace)
+                (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))
+  :body (dotimes (_ 4) (scaling--bt-frames n)))
+
+;; `save-excursion' records nested N deep, then `backtrace-eval' at the
+;; outermost frame, whose unrewind swaps all N excursions and bindings and
+;; back: linear in N.
+(defun scaling--bt-excursions (n top)
+  (let ((scaling--bt-depth n))
+    (save-excursion
+      (if (> n 0) (scaling--bt-excursions (1- n) top)
+        (backtrace-eval '(list scaling--bt-depth (point)) top 'scaling--bt-excursions)))))
+(scaling-probe backtrace-excursions :n 200 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 4) (scaling--bt-excursions n n)))
+
+;; `backtrace-debug' flags: every frame of a stack N deep flags itself and
+;; clears the flag before it returns, then N calls each leave theirs set
+;; (whose tokens go stale once they return): O(log N) amortized a flag.
+(defun scaling--bt-flag-deep (n)
+  (backtrace-debug 0 t 'scaling--bt-flag-deep)
+  (prog1 (if (> n 0) (scaling--bt-flag-deep (1- n)) 0)
+    (backtrace-debug 0 nil 'scaling--bt-flag-deep)))
+(defun scaling--bt-flag-leave () (backtrace-debug 0 t 'scaling--bt-flag-leave) nil)
+(defun scaling--bt-flag-any (n)
+  ;; Flags the N frames below the leaf newest to oldest, then clears them
+  ;; oldest first: insertion and removal away from the end of the set.
+  (if (> n 0) (scaling--bt-flag-any (1- n))
+    (let ((depth (length (backtrace-frames 'scaling--bt-flag-any))))
+      (dotimes (i depth) (backtrace-debug i t 'scaling--bt-flag-any))
+      (dotimes (i depth) (backtrace-debug (- depth 1 i) nil 'scaling--bt-flag-any)))))
+(scaling-probe backtrace-debug-flags :n 400 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (let ((debugger (lambda (&rest args) (cadr args))))
+          (scaling--bt-flag-deep n)
+          (scaling--bt-flag-any n)
+          (dotimes (_ n) (scaling--bt-flag-leave))))
+
+;; `backtrace-eval' over N buffer-local bindings whose locals are gone (each
+;; becomes inert in place) below N live bindings: one unrewind, linear.
+(defun scaling--bt-dead-inner () (backtrace-eval nil 1 'scaling--bt-dead-inner))
+(defun scaling--bt-dead-outer (locals globals)
+  (cl-progv locals (make-list (length locals) 1)
+    (kill-all-local-variables)
+    (cl-progv globals (make-list (length globals) 2)
+      (scaling--bt-dead-inner))))
+(scaling-probe backtrace-eval-dead-locals :n 500 :k 4
+  :setup (let ((locals (mapcar #'intern (scaling--names "scaling--bt-local" n)))
+               (globals (mapcar #'intern (scaling--names "scaling--bt-global" n))))
+           (dolist (g globals) (set g 0))
+           (list locals globals))
+  :body (with-temp-buffer
+          (dotimes (_ 4)
+            (dolist (l (car it)) (set (make-local-variable l) 0))
+            (scaling--bt-dead-outer (car it) (cadr it)))))
+
 ;;;; Running
 
 (defun scaling--probe (name)
