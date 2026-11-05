@@ -32,6 +32,8 @@ members = [
     "crates/romacs-gui-tests",
     "crates/romacs-parity-reference",
     "crates/romacs-perf",
+    "crates/romacs-attach",
+    "crates/romacs-imaging",
     "crates/romacs-renderer-wgpu",
     "crates/romacs-scene",
     "crates/romacs-test-fonts",
@@ -98,6 +100,8 @@ romacs-test-fonts = { path = "crates/romacs-test-fonts" }
 romacs-video = { path = "crates/romacs-video", default-features = false }
 romacs-video-model = { path = "crates/romacs-video-model" }
 romacs-webview = { path = "crates/romacs-webview", default-features = false }
+romacs-attach = { path = "crates/romacs-attach" }
+romacs-imaging = { path = "crates/romacs-imaging" }
 romacs-renderer-wgpu = { path = "crates/romacs-renderer-wgpu", default-features = false }
 romacs-scene = { path = "crates/romacs-scene" }
 romacs-diagnostics = { path = "crates/romacs-diagnostics", default-features = false }

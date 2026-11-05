@@ -436,10 +436,23 @@ mod leaf {
         pub(crate) fn kill_buffer(&mut self, buffer: Value) -> std::result::Result<(), Fault> {
             self.vm.kill_buffer_model(buffer).map_err(Fault::Error)
         }
+        /// `save-excursion` begins: its marker, recorded where it is made
+        /// for `backtrace-eval`'s unrewind (`Backtrace::excursions`).
         pub(crate) fn save_excursion_data(&mut self) -> std::result::Result<Value, Fault> {
-            self.vm.save_excursion_data().map_err(Fault::Error)
+            let marker = self.vm.save_excursion_data().map_err(Fault::Error)?;
+            // The excursion is its caller's: not this primitive's own
+            // activation, when the call recorded one.
+            let frames = &self.vm.backtrace.frames;
+            let own = frames.last().is_some_and(|frame| crate::prim::name(frame.function) == Some("romacs--save-excursion"));
+            let frames = frames.len() - usize::from(own);
+            let dynamic = self.vm.dynamic.len();
+            // Only `backtrace-eval` reads it: a frame without windows records none.
+            let window = self.vm.excursion_window().unwrap_or(Value::NIL);
+            self.vm.backtrace.excursion_begin(marker, window, frames, dynamic);
+            Ok(marker)
         }
         pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
+            self.vm.backtrace.excursion_end(data);
             self.vm.restore_excursion_data(data).map_err(Fault::Error)
         }
         pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
@@ -1913,6 +1926,7 @@ pub(crate) use defsubr;
 pub(crate) mod prims;
 
 include!(concat!(env!("OUT_DIR"), "/generated_prims.rs"));
+include!(concat!(env!("OUT_DIR"), "/variable_sites.rs"));
 
 /// The single ordinal lookup boundary for legacy and generated subrs.
 #[derive(Clone, Copy)]

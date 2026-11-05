@@ -1,8 +1,10 @@
-//! The census of GNU's DEFUNs a Romacs session leaves undefined
-//! (DEFUN-CENSUS.tsv at the repository root): every DEFUN in GNU's
-//! src/*.c at the Lisp pin (crates/romacs-vm/tests/fixtures/
-//! gnu_defun_arity.json) is either fboundp in the session's world, as the
-//! GUI's loadup makes it, or has one line in the census:
+//! The censuses of GNU's DEFUNs a Romacs session leaves undefined
+//! (DEFUN-CENSUS.tsv at the repository root) and of its DEFVARs left
+//! unbound (DEFVAR-CENSUS.tsv): every DEFUN in GNU's src/*.c at the Lisp
+//! pin (crates/romacs-vm/tests/fixtures/gnu_defun_arity.json) is either
+//! fboundp in the session's world, as the GUI's loadup makes it, or has
+//! one line in its census, and every DEFVAR there (fixtures/
+//! gnu_defvars.json) is boundp or has one line in its:
 //!
 //!   NAME<TAB>STATUS<TAB>NOTE
 //!
@@ -11,7 +13,7 @@
 //! which) or `absent' (deliberately left out; NOTE is the reason, which it
 //! must give). Lines are sorted by name and `#' starts a comment.
 //!
-//! The census is a ratchet: a listed name the world defines fails until
+//! Each census is a ratchet: a listed name the world defines fails until
 //! its line is removed, and an undefined DEFUN with no line fails until it
 //! is classified. ROMACS_CENSUS_BLESS=1 rewrites the file to the world's
 //! undefined names, keeping each kept name's line and adding new ones as
@@ -30,11 +32,11 @@ mod tests {
 
     fn root() -> PathBuf { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")) }
 
-    /// Every DEFUN name at the pin.
-    fn gnu_defuns() -> Vec<String> {
-        let text = std::fs::read_to_string(root().join("crates/romacs-vm/tests/fixtures/gnu_defun_arity.json")).unwrap();
+    /// Every name in fixtures/FIXTURE's KEY object: the DEFUNs or DEFVARs at the pin.
+    fn gnu_names(fixture: &str, key: &str) -> Vec<String> {
+        let text = std::fs::read_to_string(root().join("crates/romacs-vm/tests/fixtures").join(fixture)).unwrap();
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        json["arity"].as_object().unwrap().keys().cloned().collect()
+        json[key].as_object().unwrap().keys().cloned().collect()
     }
 
     /// The census's lines, by name: (STATUS, NOTE).
@@ -46,13 +48,14 @@ mod tests {
         }).collect()
     }
 
-    /// NAMES the GUI's loadup world leaves undefined.
-    fn undefined(names: Vec<String>) -> Vec<String> {
+    /// NAMES the GUI's loadup world leaves undefined: those PREDICATE
+    /// (fboundp, boundp) refuses.
+    fn undefined(names: Vec<String>, predicate: &'static str) -> Vec<String> {
         std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 24, 10).unwrap();
             vm.set_display_host(Some(Box::new(Display::new().unwrap())));
-            let home = std::env::temp_dir().join(format!("romacs-defun-census-{}", std::process::id()));
+            let home = std::env::temp_dir().join(format!("romacs-census-{predicate}-{}", std::process::id()));
             std::fs::create_dir_all(&home).unwrap();
             vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
                                     home.display())).unwrap();
@@ -68,7 +71,7 @@ mod tests {
             // Written one name a line to a file, read back as UTF-8.
             let out = home.join("undefined.txt");
             vm.eval_source(&format!(
-                "(with-temp-file {} (dolist (n (list {})) (unless (fboundp (intern n)) (insert n \"\\n\"))))",
+                "(with-temp-file {} (dolist (n (list {})) (unless ({predicate} (intern n)) (insert n \"\\n\"))))",
                 serde_json::to_string(&out.display().to_string()).unwrap(), quoted.join(" "))).unwrap();
             let missing = std::fs::read_to_string(&out).unwrap();
             let _ = std::fs::remove_dir_all(&home);
@@ -78,10 +81,19 @@ mod tests {
 
     #[test]
     fn every_gnu_defun_is_defined_or_in_the_census() {
-        let path = root().join("DEFUN-CENSUS.tsv");
+        check_census("DEFUN-CENSUS.tsv", undefined(gnu_names("gnu_defun_arity.json", "arity"), "fboundp"));
+    }
+
+    #[test]
+    fn every_gnu_defvar_is_bound_or_in_the_census() {
+        check_census("DEFVAR-CENSUS.tsv", undefined(gnu_names("gnu_defvars.json", "defvars"), "boundp"));
+    }
+
+    /// The census at FILE against the MISSING names: blessed, or checked.
+    fn check_census(file: &str, missing: Vec<String>) {
+        let path = root().join(file);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let listed = census(&text);
-        let missing = undefined(gnu_defuns());
         if std::env::var("ROMACS_CENSUS_BLESS").is_ok_and(|v| v == "1") {
             let header: String = text.lines().take_while(|l| l.starts_with('#')).map(|l| format!("{l}\n")).collect();
             let body: String = missing.iter().map(|name| match listed.get(name) {
@@ -103,6 +115,6 @@ mod tests {
         }
         let names: Vec<&String> = text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')).map(|l| l.split('\t').next().unwrap()).map(|n| listed.get_key_value(n).unwrap().0).collect();
         if names.windows(2).any(|w| w[0] >= w[1]) { problems.push("lines are not sorted by name, once each".into()); }
-        assert!(problems.is_empty(), "DEFUN-CENSUS.tsv (ROMACS_CENSUS_BLESS=1 rewrites it):\n{}", problems.join("\n"));
+        assert!(problems.is_empty(), "{file} (ROMACS_CENSUS_BLESS=1 rewrites it):\n{}", problems.join("\n"));
     }
 }

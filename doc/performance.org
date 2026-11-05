@@ -1,0 +1,119 @@
+#+title: Latency and worker VMs
+
+How to keep Romacs responsive: what runs on the main VM, what moves to
+worker VMs, and how to measure the difference. AGENTS.md sets the rules;
+this file collects the practices that made them hold in real subsystems.
+Jabber (network, parsing, a database, large rooms and a live stream into
+open buffers) is the main proving ground, so its numbers appear as
+examples.
+
+* The target
+
+- A key is handled within one frame of budget, and never more than 50 ms
+  of the main VM's time, while background work runs.
+- The main VM stays interruptible: =C-g= and typing reach it during any
+  load, sync or search.
+- Behaviour observable from Lisp stays GNU's. Where a scheduling choice
+  departs from GNU (for example a timer pass that yields to input), it is
+  recorded in DIVERGENCES.md and gated by perkey.
+
+* Measure before changing anything
+
+1. Reproduce the slow key in a GUI journey that types through the load,
+   not only in batch. Batch timings hide rendering and display geometry.
+2. Measure the floor: the same journey with the feature disabled. A slow
+   first key with no feature work in it is the editor's own cost, and is
+   routed separately.
+3. Attribute per event: log every event over 5 ms with the stanza,
+   command or timer that caused it. Profiles alone blur many small events
+   into one slow key.
+4. Read the profile with callers. A cost that looks like display geometry
+   may belong to the keys being typed, not to the feature.
+5. Keep perkey (=romacs-check=) and the scaling probes as the gate. A
+   change that moves work around must show no per-key regression, and a
+   new collection must have a probe in
+   =crates/romacs-vm-gui/harness/scaling/probes.el=.
+
+* Attack cost in order
+
+AGENTS.md's order applies: complexity, then incremental work, then
+laziness, then parallelism. In practice:
+
+- Remove quadratic paths first. A flood of N items each inserting into a
+  sorted list, or each rendering and scrolling a buffer, is O(N^2) before
+  any parallelism helps.
+- Cache what is recomputed per item, keyed by every input of the result
+  (a nickname's colour depends on the background, not only on the name),
+  and bound the cache.
+- Turn debug tracing off by default in hot paths. A package that writes
+  every event into a trace buffer pays for it in every session.
+- Fold per-item display work into one update per tick: insert and
+  recenter once per buffer per batch, not once per item.
+
+* What runs where
+
+- *Main VM:* input, commands, redisplay, and applying ready results to
+  buffers at batch boundaries. Nothing here waits on the network, the
+  disk or a subprocess.
+- *Worker VMs:* network sessions, parsing, decoding, database work, large
+  scans and searches, library preparation. Workers adopt the shared world
+  image; they should load compiled Lisp from the session's store rather
+  than source, so preparing one costs milliseconds, not seconds.
+- Values cross between VMs as messages (=isolate-send=,
+  =isolate-receive=) and buffers cross as snapshots. A worker never edits
+  a live buffer; it hands the main VM something ready to insert.
+
+* Handing results to the main VM
+
+- *Usable first, complete later.* Fetch what the user sees first (the
+  newest ~30 messages of each chat, the visible region), make it usable,
+  then backfill the rest in the background. Jabber: every chat usable
+  ~3–5 s after connecting; full history (~3 minutes) syncs behind it.
+- *Hand over committed state only.* Post results at each batch commit,
+  rate-limited, carrying only rows already stored, so a crash or retry
+  never shows something that was not kept.
+- *Make handover idempotent.* Deduplicate by a stable key (stanza id,
+  archive id) so a page fetched twice, or a live message that also
+  arrives in the backfill, appears once.
+- *Refresh without moving the user.* Reload a changed buffer from the
+  source of truth in one idle tick, bounded in size, and restore each
+  window's start and point to the same item at the same offset. Leave
+  very large shown buffers to refresh when next displayed.
+- *Deliver worker messages on every pass.* A busy process (a live
+  stream) must not starve worker reports; the idle loop and the command
+  loop pump both.
+
+* Keeping the main VM's own work bounded
+
+- *Yield in the timer pass.* When input is pending, stop running ripe
+  timers after a small budget (8 ms) and continue them in order on the
+  next pass. A flood queued as one timer per item then waits behind a key
+  instead of in front of it.
+- *Bound process filters.* Parse at most a few milliseconds of output per
+  filter call. While a continuation is pending, new output is only
+  appended; the continuation parses and yields between timers.
+- *Never pace work with a timer per page.* A lost timer stalls the whole
+  job silently. Let the worker drive its own loop, and give every
+  request a deadline with a watchdog that re-requests once and then fails
+  by name.
+
+* Starting workers and subprocesses
+
+- Prepare a worker once per feature set and fork a child per job (a
+  zygote with a spare forked ahead): job start in a few milliseconds and
+  a few MB of private memory, instead of a fresh process per job.
+- A pooled job worker runs one job and exits, so no state leaks between
+  jobs. Long-lived workers are for sessions (a chat connection, a
+  fontification stream).
+- Start subprocesses with =posix_spawn=, not =fork=: forking a VM with a
+  large heap copies its page tables, so =call-process= gets slower as the
+  heap grows. Only terminal (pty) children keep fork.
+
+* Proving a change
+
+- Typing journey with the feature active, against the floor without it:
+  worst key, keys over 50 ms, and how many of those the feature caused.
+- Correctness of the handover on real-shaped data: no duplicates, nothing
+  missing, compared with the plain path on the same copy.
+- Perkey and scaling through =romacs-check=, Sol review, and DIVERGENCES
+  entries for any intended departure from GNU.

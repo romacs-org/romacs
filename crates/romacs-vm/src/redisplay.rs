@@ -184,18 +184,30 @@ impl Vm {
             // the window down, as point above it does (try_scrolling).
             let bounds = self.margin_bounds(window)?;
             let below = point_byte >= start_byte && bounds.is_none_or(|(top, _)| point_byte >= top);
-            let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
-            let text = b.as_str();
-            let distance = if !below {
-                text.as_bytes()[point_line.min(start_byte)..start_byte].iter().filter(|&&c| c == b'\n').count()
-            } else {
-                text.as_bytes()[start_byte..point_byte].iter().filter(|&&c| c == b'\n').count().saturating_sub(rows - 1)
-            };
             let margin = self.window_layout(window)?.map_or(Ok(0.0), |laid| self.scroll_margin_px(window, laid.body_height))?;
+            // Within a threshold the scroll is measured in the screen
+            // lines painting lays out, which invisible text and continued
+            // lines make differ from buffer lines; the rows that measure
+            // it below the start choose the new start too.
+            let (distance, measured) = match (1..=100).contains(&conservative) {
+                true => self.scroll_distance(window, (start_byte, point_byte), rows, conservative, below)?,
+                false => (Some(0), None),
+            };
+            let distance = match distance {
+                Some(distance) => distance,
+                None => {
+                    let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+                    let text = b.as_str().as_bytes();
+                    match below {
+                        false => text[point_line.min(start_byte)..start_byte].iter().filter(|&&c| c == b'\n').count(),
+                        true => text[start_byte..point_byte].iter().filter(|&&c| c == b'\n').count().saturating_sub(rows - 1),
+                    }
+                }
+            };
             let distance = distance + (margin / line as f32) as usize;
             let minimal = conservative > 100 || (conservative > 0 && distance <= conservative);
             let back = recenter_rows(text_height, line);
-            if let Some(chosen) = self.start_from_rows(window, point_byte, (minimal, below))? {
+            if let Some(chosen) = self.start_from_rows(window, point_byte, measured, (minimal, below, conservative > 100))? {
                 let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
                 let position = Value::integer((b.char_of_byte(ByteOffset(chosen))?.0 + 1) as i64)?;
                 return self.set_marker_object(start_marker, position, buffer).map(drop);
@@ -356,29 +368,95 @@ impl Vm {
     /// outside its scroll margins, from the rows painting lays out around
     /// it: with MINIMAL, point just below the top margin, else, BELOW,
     /// just above the bottom one (GNU's try_scrolling); otherwise point
-    /// recentred (`recenter_row'). None where `rows_between' answers none.
-    fn start_from_rows(&mut self, window: Value, point_byte: usize, (minimal, below): (bool, bool)) -> Result<Option<usize>> {
+    /// recentred (`recenter_row'). MEASURED, rows `rows_above' laid out
+    /// already, serve when they fill the text area above point. Scrolling
+    /// down moves the start by pixels, to a row's first shown byte, unless
+    /// BY_LINES (`scroll-conservatively' over 100); other motions go back
+    /// by lines. None where `rows_between' answers none.
+    fn start_from_rows(&mut self, window: Value, point_byte: usize, measured: Option<Vec<(usize, f32, usize)>>, (minimal, below, by_lines): (bool, bool, bool)) -> Result<Option<usize>> {
         if self.window(window)?.vscroll_px != 0 { return Ok(None); }
         let Some(laid) = self.window_layout(window)? else { return Ok(None) };
-        // Every row is at least a frame line tall: this many lines above
-        // point's fill the text area.
-        let floor = { let table = self.window_faces(window)?; self.row_floor_of(&table) };
-        let lines = (laid.body_height / floor as f32).ceil() as i64 + 1;
         let margin = self.scroll_margin_px(window, laid.body_height)?;
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
-        let accessible = b.accessible();
-        let from = crate::prim::line_beginning(b.body(), accessible.start.0, accessible.end.0, point_byte, -lines);
-        let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
+        let begv = { let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) }; b.accessible().start.0 };
+        let rows = match measured.filter(|rows| rows.first().is_some_and(|r| r.0 <= begv) || above_point(rows, point_byte).0 >= laid.body_height) {
+            Some(rows) => rows,
+            None => match self.rows_above(window, point_byte, (laid.body_height, 0), begv)? { Some(rows) => rows, None => return Ok(None) },
+        };
         if !minimal {
             // Each row and whether it starts a line, as the recentring's
             // motion back by lines needs.
             let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
-            let (text, begv) = (b.as_str().as_bytes(), accessible.start.0);
-            let rows: Vec<_> = rows.iter().map(|&(start, height)| (start, height, start <= begv || text[start - 1] == b'\n')).collect();
+            let text = b.as_str().as_bytes();
+            let rows: Vec<_> = rows.iter().map(|&(start, height, _)| (start, height, start <= begv || text[start - 1] == b'\n')).collect();
             let line = self.window_state.line.max(1) as f32;
             return Ok(rows.iter().rposition(|r| r.0 <= point_byte).map(|at| rows[recenter_row(&rows, at, point_byte, laid.body_height, line)].0));
         }
-        Ok(Some(start_for_point(&rows, point_byte, (laid.body_height, margin), below)))
+        Ok(Some(match start_for_point(&rows, point_byte, (laid.body_height, margin), below).map(|top| rows[top]) {
+            Some((start, _, shown)) => if below && !by_lines { shown } else { start },
+            None => point_byte,
+        }))
+    }
+
+    /// The rows painting lays out in WINDOW from a line above POINT_BYTE's
+    /// through point's: from as few lines back as give the rows above
+    /// point's REACH pixels and COUNT rows, else from STOP's line. A row
+    /// can show many buffer lines (invisible text, a display property) or
+    /// a line many rows, so the lines double until the rows suffice: one
+    /// layout when the first guess, a row a line, holds. None as for
+    /// `rows_between'.
+    fn rows_above(&mut self, window: Value, point_byte: usize, (reach, count): (f32, usize), stop: usize) -> Result<Option<Vec<(usize, f32, usize)>>> {
+        // Every row is at least a frame line tall: this many lines above
+        // point's fill REACH when each shows on one row.
+        let floor = { let table = self.window_faces(window)?; self.row_floor_of(&table) };
+        let mut lines = ((reach / floor as f32).ceil() as i64).max(count as i64) + 1;
+        loop {
+            let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+            let accessible = b.accessible();
+            let (begv, zv) = (accessible.start.0, accessible.end.0);
+            let stop = crate::prim::line_beginning(b.body(), begv, zv, stop.clamp(begv, point_byte), 0);
+            let from = crate::prim::line_beginning(b.body(), begv, zv, point_byte, -lines).max(stop);
+            let Some(rows) = self.rows_between(window, from, point_byte)? else { return Ok(None) };
+            let (height, above) = above_point(&rows, point_byte);
+            if from == stop || (height >= reach && above >= count) { return Ok(Some(rows)); }
+            lines = lines.saturating_mul(2);
+        }
+    }
+
+    /// The screen lines WINDOW, showing its buffer from START_BYTE in
+    /// ROWS whole rows, scrolls to show POINT_BYTE (try_scrolling's
+    /// distance): BELOW, from its last whole row to point's; else from
+    /// point's row to the start's, none from the top margin. Any distance past LIMIT is LIMIT + 1.
+    /// Below, the rows that measured it, from the start's line or LIMIT
+    /// rows above the window. None without a layout.
+    fn scroll_distance(&mut self, window: Value, (start_byte, point_byte): (usize, usize), rows: usize, limit: usize, below: bool)
+        -> Result<(Option<usize>, Option<Vec<(usize, f32, usize)>>)> {
+        if below {
+            let Some(laid) = self.rows_above(window, point_byte, (0.0, rows + limit + 1), start_byte)? else { return Ok((None, None)) };
+            let at = above_point(&laid, point_byte).1;
+            let distance = match laid.first().is_some_and(|r| r.0 <= start_byte) {
+                true => (at - laid.iter().rposition(|r| r.0 <= start_byte).unwrap_or(0)).saturating_sub(rows - 1),
+                false => limit + 1,
+            };
+            return Ok((Some(distance.min(limit + 1)), Some(laid)));
+        }
+        // Point in the top margin, below the start.
+        if point_byte >= start_byte { return Ok((Some(0), None)); }
+        let mut lines = limit as i64 + 1;
+        loop {
+            let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok((None, None)) };
+            let accessible = b.accessible();
+            let (begv, zv) = (accessible.start.0, accessible.end.0);
+            let (line, start_line) = (crate::prim::line_beginning(b.body(), begv, zv, point_byte, 0), crate::prim::line_beginning(b.body(), begv, zv, start_byte, 0));
+            let to = crate::prim::line_beginning(b.body(), begv, zv, point_byte, lines).min(start_line);
+            let Some(laid) = self.rows_between(window, line, to)? else { return Ok((None, None)) };
+            let at = above_point(&laid, point_byte).1;
+            if to == start_line {
+                let start = laid.iter().rposition(|r| r.0 <= start_byte).unwrap_or(0);
+                return Ok((Some(start.saturating_sub(at).min(limit + 1)), None));
+            }
+            if laid.len() - at > limit { return Ok((Some(limit + 1), None)); }
+            lines = lines.saturating_mul(2);
+        }
     }
 
     fn set_window_point_position(&mut self, window: Value, position: Value) -> Result<()> {
@@ -391,13 +469,20 @@ impl Vm {
     }
 }
 
-/// The start of the row of ROWS (each a start byte and height, top to
-/// bottom) that shows POINT where try_scrolling scrolls just enough: when
+/// The height of the rows of ROWS (start byte, height, first shown byte;
+/// top to bottom) above POINT's, and how many there are.
+fn above_point(rows: &[(usize, f32, usize)], point: usize) -> (f32, usize) {
+    let at = rows.iter().rposition(|r| r.0 <= point).unwrap_or(0);
+    (rows[..at].iter().map(|r| r.1).sum(), at)
+}
+
+/// The row of ROWS (each a start byte, height and first shown byte, top
+/// to bottom) that shows POINT where try_scrolling scrolls just enough: when
 /// BELOW, on the last whole row above the bottom MARGIN of a BODY-pixel
 /// text area, as many rows above it as fit; else on the first row below
-/// the top margin.
-fn start_for_point(rows: &[(usize, f32)], point: usize, (body, margin): (f32, f32), below: bool) -> usize {
-    let Some(at) = rows.iter().rposition(|&(start, _)| start <= point) else { return point };
+/// the top margin. None when no row shows POINT.
+fn start_for_point(rows: &[(usize, f32, usize)], point: usize, (body, margin): (f32, f32), below: bool) -> Option<usize> {
+    let at = rows.iter().rposition(|&(start, ..)| start <= point)?;
     let top = match below {
         true => {
             let (mut top, mut height) = (at, rows[at].1 + margin);
@@ -416,7 +501,7 @@ fn start_for_point(rows: &[(usize, f32)], point: usize, (body, margin): (f32, f3
             top
         }
     };
-    rows[top].0
+    Some(top)
 }
 
 /// The row of ROWS (start byte, height, whether it starts a line; top to

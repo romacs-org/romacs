@@ -1,0 +1,27 @@
+[package]
+name = "romacs-attach"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Attachments' outgoing copies for Romacs: prepare, blobs and sweep"
+
+[[bin]]
+name = "romacs-attach-tool"
+path = "src/bin/romacs-attach-tool.rs"
+
+[dependencies]
+base64.workspace = true
+image.workspace = true
+libc.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+romacs-display-protocol.workspace = true
+romacs-imaging.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

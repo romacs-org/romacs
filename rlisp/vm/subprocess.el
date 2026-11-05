@@ -88,34 +88,27 @@
           (if (and (not (stringp value)) (consp initial-environment))
               (setq value (getenv-internal "DISPLAY" initial-environment)))
           (if (stringp value) (setq display value) (setq display nil))))
-    (if (getenv-internal "PWD") (setq env (romacs--add-env env pwd)))
-    (if (stringp display) (setq env (romacs--add-env env (concat "DISPLAY=" display))))
+    (if (getenv-internal "PWD") (setq env (cons pwd env)))
+    (if (stringp display) (setq env (cons (concat "DISPLAY=" display) env)))
     (setq tem process-environment)
     (while (and (consp tem) (stringp (car tem)))
-      (setq env (romacs--add-env env (car tem)))
+      (setq env (cons (car tem) env))
       (setq tem (cdr tem)))
-    ;; Lone names were placeholders that hid later definitions.
-    (let ((result nil))
-      (dolist (entry env)
-        (if (string-search "=" entry) (setq result (cons entry result))))
-      result)))
+    (romacs--environment-entries (nreverse env))))
 
-(defun romacs--add-env (env string)
-  "add_env: push STRING on the reversed ENV unless an earlier entry names it."
-  (let ((name (if (string-search "=" string)
-                  (substring string 0 (string-search "=" string))
-                string))
-        (ok t)
-        (tail env))
-    (while (and ok tail)
-      (let* ((entry (car tail))
-             (entry-name (if (string-search "=" entry)
-                             (substring entry 0 (string-search "=" entry))
-                           entry)))
-        (if (and (string-search "=" string) (string= entry-name name))
-            (setq ok nil)))
-      (setq tail (cdr tail)))
-    (if ok (cons string env) env)))
+(defun romacs--environment-entries (strings)
+  "add_env over STRINGS in order: each name's first entry, with a value.
+A lone name is a placeholder that hides the later definitions of its name,
+and is left out itself."
+  (let ((seen (make-hash-table :test #'equal))
+        (result nil))
+    (dolist (string strings)
+      (let* ((eq (string-search "=" string))
+             (name (if eq (substring string 0 eq) string)))
+        (unless (gethash name seen)
+          (puthash name t seen)
+          (if eq (setq result (cons string result))))))
+    (nreverse result)))
 
 (defun romacs--encode-file (name)
   "ENCODE_FILE: NAME as bytes for the operating system."
@@ -969,14 +962,27 @@ counts from the start of idleness."
         (setq romacs--timers-run (1+ romacs--timers-run)))
       0)))
 
+(defvar romacs-timer-pass-budget 0.008
+  "Seconds of timers one pass runs before it lets pending input go first.
+GNU's timer_check runs every ripe timer at once; a burst of them (a
+network stream queues one per stanza) then holds the key behind it.  Past
+this budget, with input pending, the ripe timers left run on the next pass,
+in order, after the key.  Nil runs them all, as GNU does.")
+
 (defun romacs--timer-check ()
   "keyboard.c timer_check: run every ripe timer, idle timers only while
 Emacs is idle; the seconds until the next one, or nil.  Copies of the lists
-let a timer add itself again without running twice."
+let a timer add itself again without running twice.  Once the pass has run
+`romacs-timer-pass-budget' and input is pending, it stops and answers 0: the
+ripe timers left stay in the lists for the next pass."
   (let ((timers (copy-sequence timer-list))
         (idle-timers (and (current-idle-time) (copy-sequence timer-idle-list)))
+        (start (float-time))
         (next 0))
-    (while (eql next 0)
+    (while (and (eql next 0)
+                (not (and romacs-timer-pass-budget
+                          (> (- (float-time) start) romacs-timer-pass-budget)
+                          (input-pending-p))))
       (setq next (romacs--timer-check-2 timers idle-timers)))
     next))
 

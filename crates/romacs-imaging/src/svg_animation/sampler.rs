@@ -23,16 +23,16 @@ use super::patch;
 use super::plan;
 
 /// One sampled animation, in the shape the sequence cache publishes.
-pub(crate) struct SampledAnimation {
-    pub(crate) frames: Vec<SampledFrame>,
-    pub(crate) loop_start: Option<ImageFrameIndex>,
+pub struct SampledAnimation {
+    pub frames: Vec<SampledFrame>,
+    pub loop_start: Option<ImageFrameIndex>,
 }
 
-pub(crate) struct SampledFrame {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) rgba: Vec<u8>,
-    pub(crate) delay: ImageFrameDelay,
+pub struct SampledFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub delay: ImageFrameDelay,
 }
 
 /// Sample `data`'s animation on a grid under `policy`.
@@ -49,7 +49,7 @@ pub(crate) struct SampledFrame {
 /// realization the sequence key does not carry). Face colors *are* baked
 /// (`currentColor`, the background rect), which is why the cache entry
 /// records them and a color change replaces the entry.
-pub(crate) fn sample(
+pub fn sample(
     data: &[u8],
     colors: ImageColorContext,
     resources: &crate::svg::SvgResourceContext,
@@ -213,7 +213,7 @@ const MAX_COMPUTED_SEQUENCE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Sample and box frames as shared buffers, in the shape the sequence cache
 /// publishes.
-pub(crate) fn sample_shared(
+pub fn sample_shared(
     data: &[u8],
     colors: ImageColorContext,
     resources: &crate::svg::SvgResourceContext,

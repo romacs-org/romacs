@@ -662,6 +662,21 @@ pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
+/// The Romacs source tree this build came from, `source-directory':
+/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
+/// build's own root while it is a git checkout of one, else none.  A gate's
+/// build slot mirrors a checkout without `.git`, so a build made there
+/// names no tree it would not find again.
+pub fn source_directory() -> Option<PathBuf> {
+    let tree = |dir: &Path| metadata(dir.join("crates/romacs-vm/src/prims")).is_ok_and(|m| m.is_dir());
+    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
+        // Absolute, so a buffer's own directory never resolves it.
+        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
+    }
+    let root = build_root();
+    (tree(&root) && symlink_metadata(root.join(".git")).is_ok()).then_some(root)
+}
+
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -1821,6 +1836,60 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     Ok(Command::new(program))
 }
 
+/// A child process, as GNU's emacs_spawn starts one (callproc.c): ARGV[0],
+/// a file name with a slash, run with ARGV and ENV (each `NAME=VALUE') in
+/// DIR, FDS as its standard input, output and error, in a session of its
+/// own, with SIGINT, SIGQUIT, SIGPROF and SIGPIPE at their defaults and no
+/// signal blocked. posix_spawn: the child shares this process's memory
+/// until it execs, where a fork would copy page tables whose size grows
+/// with the heap. Each of FDS must be above 2, so no descriptor is
+/// replaced before it is copied.
+pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os::fd::RawFd; 3]) -> io::Result<i32> {
+    use std::ffi::CString;
+    effect(|| format!("run {}", String::from_utf8_lossy(argv.first().map_or(&[][..], Vec::as_slice))))?;
+    let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
+    let strings = |list: &[Vec<u8>]| list.iter().map(|b| CString::new(b.as_slice())).collect::<Result<Vec<_>, _>>().map_err(|_| invalid());
+    let (argv, env, dir) = (strings(argv)?, strings(env)?, CString::new(dir).map_err(|_| invalid())?);
+    let program = argv.first().ok_or_else(invalid)?;
+    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect::<Vec<_>>();
+    let (argp, envp) = (pointers(&argv), pointers(&env));
+    let ok = |r: libc::c_int| if r == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(r)) };
+    // SAFETY: the actions and attributes are initialized before use and
+    // destroyed after; every pointer passed outlives the call.
+    unsafe {
+        let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+        ok(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
+        let mut attr = std::mem::MaybeUninit::<libc::posix_spawnattr_t>::uninit();
+        if let Err(error) = ok(libc::posix_spawnattr_init(attr.as_mut_ptr())) {
+            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
+            return Err(error);
+        }
+        let (actions, attr) = (actions.as_mut_ptr(), attr.as_mut_ptr());
+        let prepared = (|| -> io::Result<()> {
+            for (target, fd) in fds.into_iter().enumerate() {
+                ok(libc::posix_spawn_file_actions_adddup2(actions, fd, target as libc::c_int))?;
+            }
+            ok(libc::posix_spawn_file_actions_addchdir_np(actions, dir.as_ptr()))?;
+            let mut defaults: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut defaults);
+            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF, libc::SIGPIPE] {
+                libc::sigaddset(&mut defaults, signal);
+            }
+            ok(libc::posix_spawnattr_setsigdefault(attr, &defaults))?;
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            ok(libc::posix_spawnattr_setsigmask(attr, &mask))?;
+            let flags = libc::POSIX_SPAWN_SETSID as libc::c_int | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+            ok(libc::posix_spawnattr_setflags(attr, flags as libc::c_short))
+        })();
+        let mut pid: libc::pid_t = 0;
+        let spawned = prepared.and_then(|()| ok(libc::posix_spawn(&mut pid, program.as_ptr(), actions, attr, argp.as_ptr(), envp.as_ptr())));
+        libc::posix_spawnattr_destroy(attr);
+        libc::posix_spawn_file_actions_destroy(actions);
+        spawned.map(|()| pid)
+    }
+}
+
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
@@ -1837,6 +1906,9 @@ pub enum StoreOpen {
     Write { create: bool, truncate: bool },
     /// To make it where none is (O_CREAT|O_EXCL), and write it.
     New,
+    /// To append to it (O_APPEND), made if missing: concurrent writers'
+    /// lines never overwrite each other.
+    Append,
 }
 
 /// A world store's file at PATH, opened as HOW: never through a symlink,
@@ -1851,6 +1923,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
         StoreOpen::Read => { options.read(true); }
         StoreOpen::Write { create, .. } => { options.write(true).create(create); }
         StoreOpen::New => { options.write(true).create_new(true); }
+        StoreOpen::Append => { options.append(true).create(true); }
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
@@ -1966,6 +2039,7 @@ pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Sto
         StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
         StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
         StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
@@ -2640,6 +2714,53 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
     effect(|| format!("resolve {host}:{port}"))?;
     use std::net::ToSocketAddrs;
     (host, port).to_socket_addrs().map(Iterator::collect)
+}
+
+/// NAME's IP addresses as the C library's resolver gives them, one for each
+/// datagram socket address (GNU's `network-lookup-address-info'): FAMILY
+/// is `AF_UNSPEC', `AF_INET' or `AF_INET6'; NUMERIC treats NAME as a
+/// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
+/// resolver's reason (`gai_strerror'), or the refusal in build mode.
+pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
+    // SAFETY: an all-zero addrinfo is the documented "no hints" value.
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_family = family;
+    hints.ai_socktype = libc::SOCK_DGRAM;
+    if numeric {
+        hints.ai_flags = libc::AI_NUMERICHOST;
+    }
+    let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+    // SAFETY: c_name and hints outlive the call; res is freed below.
+    let ret = unsafe { libc::getaddrinfo(c_name.as_ptr(), std::ptr::null(), &hints, &mut res) };
+    if ret != 0 {
+        // SAFETY: gai_strerror returns a static string for any code.
+        return Err(unsafe { std::ffi::CStr::from_ptr(libc::gai_strerror(ret)) }.to_string_lossy().into_owned());
+    }
+    let mut addresses = Vec::new();
+    let mut entry = res;
+    while !entry.is_null() {
+        // SAFETY: entry is a node of the list getaddrinfo returned; its
+        // address is a sockaddr of its family.
+        let ai = unsafe { &*entry };
+        match ai.ai_family {
+            libc::AF_INET => {
+                let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
+                addresses.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
+            }
+            libc::AF_INET6 => {
+                let sin6 = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in6) };
+                addresses.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
+            }
+            _ => {}
+        }
+        entry = ai.ai_next;
+    }
+    // SAFETY: res came from a successful getaddrinfo and is freed once.
+    unsafe { libc::freeaddrinfo(res) };
+    Ok(addresses)
 }
 
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {

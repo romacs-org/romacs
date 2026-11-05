@@ -39,6 +39,7 @@ mod subprocess;
 mod tls;
 mod html;
 mod html_entities;
+mod xml_read;
 pub mod host;
 pub mod world;
 pub mod compiled_lisp;
@@ -50,7 +51,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
@@ -581,6 +582,8 @@ enum Primitive {
     MakeInterpretedClosure,
     SearchBackward,
 }
+/// The file declaring [`PRIMITIVES`], relative to the source tree.
+pub(crate) const PRIMITIVES_FILE: &str = file!();
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
     ("/", Primitive::Div),

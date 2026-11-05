@@ -24,13 +24,16 @@ pub struct Idle {
 }
 
 /// One idle pass: file notification events (read_char's special events),
-/// process output, ripe timers, the idle auto-save (SAVE),
+/// process output and worker (isolate) messages, each every pass so a
+/// busy connection never starves the workers, ripe timers, the idle
+/// auto-save (SAVE),
 /// then, on a pass where none of those ran and no message waits to be
 /// shown, whether to collect (`romacs--idle-collect', rlisp/vm/keyboard.el).
 macro_rules! idle_form {
     ($save:literal) => {
         concat!("(let* ((notified (romacs--file-notify-idle))
-                  (output (or (romacs--process-idle) (romacs--isolate-idle) notified)) (check (romacs--timer-check-idle))
+                  (processes (romacs--process-idle)) (isolates (romacs--isolate-idle))
+                  (output (or processes isolates notified)) (check (romacs--timer-check-idle))
                   (save ", $save, ")
                   (ran (or output (car check) (eq save t)))
                   (message (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown))))

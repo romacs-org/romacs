@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 const DEFAULT_SEQUENCE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone)]
-pub(crate) struct DecodedImageSequence {
+pub struct DecodedImageSequence {
     frames: Vec<DecodedSequenceFrame>,
     memory_size: usize,
     loop_start: Option<ImageFrameIndex>,
@@ -29,7 +29,7 @@ impl DecodedImageSequence {
     ///
     /// Uniform-delay sequences have no introductory interval. Producers that
     /// carry a timed introduction use `from_timed_frames` instead.
-    pub(crate) fn from_frames(
+    pub fn from_frames(
         frames: Vec<(u32, u32, Vec<u8>)>,
         delay: ImageFrameDelay,
     ) -> Arc<Self> {
@@ -55,7 +55,7 @@ impl DecodedImageSequence {
     }
 
     /// Preserve individual delays and a validated repeatable tail.
-    pub(crate) fn from_timed_frames(
+    pub fn from_timed_frames(
         frames: Vec<(u32, u32, Vec<u8>, ImageFrameDelay)>,
         loop_start: Option<ImageFrameIndex>,
     ) -> Option<Arc<Self>> {
@@ -121,7 +121,7 @@ impl DecodedImageSequence {
     }
 }
 
-pub(crate) struct ImageSequenceFrame {
+pub struct ImageSequenceFrame {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
@@ -129,11 +129,11 @@ pub(crate) struct ImageSequenceFrame {
 }
 
 impl ImageSequenceFrame {
-    pub(crate) const fn dimensions(&self) -> (u32, u32) {
+    pub const fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub(crate) fn into_parts(self) -> (Vec<u8>, ImageEmbeddedMetadata) {
+    pub fn into_parts(self) -> (Vec<u8>, ImageEmbeddedMetadata) {
         (self.rgba, self.embedded)
     }
 
@@ -143,7 +143,7 @@ impl ImageSequenceFrame {
     }
 }
 
-pub(crate) enum ImageSequenceResolution {
+pub enum ImageSequenceResolution {
     NotAnimated,
     Frame(ImageSequenceFrame),
     MissingFrame,
@@ -306,7 +306,7 @@ impl ImageSequenceCacheState {
 /// every `:index` mutation. Concurrent misses may decode redundantly rather
 /// than holding the mutex across decoder work; publication coalesces them into
 /// one resident entry and retirement fences every late result.
-pub(crate) struct ImageSequenceCache {
+pub struct ImageSequenceCache {
     max_bytes: usize,
     state: Mutex<ImageSequenceCacheState>,
 }
@@ -314,7 +314,7 @@ pub(crate) struct ImageSequenceCache {
 /// Holds sequence retirement validity across queueing and source I/O, before
 /// the decoder's own lease exists. A queued retired job may finish its private
 /// pixels, but can never repopulate the sequence cache.
-pub(crate) struct ImageSequenceReservation {
+pub struct ImageSequenceReservation {
     cache: Arc<ImageSequenceCache>,
     sequence: ImageSequenceId,
 }
@@ -330,7 +330,7 @@ impl Drop for ImageSequenceReservation {
 }
 
 impl ImageSequenceCache {
-    pub(crate) fn reserve(self: &Arc<Self>, sequence: ImageSequenceId) -> ImageSequenceReservation {
+    pub fn reserve(self: &Arc<Self>, sequence: ImageSequenceId) -> ImageSequenceReservation {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -341,7 +341,7 @@ impl ImageSequenceCache {
         }
     }
 
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::with_max_bytes(DEFAULT_SEQUENCE_CACHE_BYTES)
     }
 
@@ -352,7 +352,7 @@ impl ImageSequenceCache {
         }
     }
 
-    pub(crate) fn resolve(
+    pub fn resolve(
         &self,
         sequence: ImageSequenceId,
         data: &[u8],
@@ -374,7 +374,7 @@ impl ImageSequenceCache {
     /// budget/retirement path, and concurrent misses may sample redundantly
     /// rather than holding the mutex across decoder work.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn resolve_svg(
+    pub fn resolve_svg(
         &self,
         sequence: ImageSequenceId,
         data: &[u8],
@@ -482,7 +482,7 @@ impl ImageSequenceCache {
         decoded
     }
 
-    pub(crate) fn retire(&self, retirement: ImageSequenceRetirement) {
+    pub fn retire(&self, retirement: ImageSequenceRetirement) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         match retirement {
             ImageSequenceRetirement::One(sequence) => {
@@ -530,7 +530,7 @@ impl ImageSequenceCache {
         }
     }
 
-    pub(crate) fn publish_size_snapshot(&self, snapshot: &std::sync::atomic::AtomicU64) {
+    pub fn publish_size_snapshot(&self, snapshot: &std::sync::atomic::AtomicU64) {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         snapshot.store(
             state.total_bytes as u64,
@@ -538,7 +538,7 @@ impl ImageSequenceCache {
         );
     }
 
-    pub(crate) fn resident_bytes(&self) -> usize {
+    pub fn resident_bytes(&self) -> usize {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -581,7 +581,7 @@ struct ImageSequenceCacheStats {
     misses: u64,
 }
 
-pub(crate) fn decode_sequence(data: &[u8]) -> Option<Arc<DecodedImageSequence>> {
+pub fn decode_sequence(data: &[u8]) -> Option<Arc<DecodedImageSequence>> {
     let frames = match image::guess_format(data).ok()? {
         image::ImageFormat::Gif => {
             let decoder = image::codecs::gif::GifDecoder::new(Cursor::new(data)).ok()?;

@@ -738,6 +738,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "invocation-directory", gnu: "emacs.c:3560", kind: Kind::Lisp(Init::Invocation(false)) },
     CVariable { name: "doc-directory", gnu: "callproc.c:2123", kind: Kind::Lisp(Init::RuntimeFile("etc", true)) },
     CVariable { name: "internal-doc-file-name", gnu: "doc.c:691", kind: Kind::Lisp(Init::Str("DOC")) },
+    // The C files the DOC file lists, by which help-fns.el's
+    // `help-C-file-name' knows a DEFUN's file: Romacs builds none.
+    CVariable { name: "build-files", gnu: "doc.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "eol-mnemonic-undecided", gnu: "coding.c:12106", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "eol-mnemonic-unix", gnu: "coding.c:12091", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "overlay-arrow-string", gnu: "xdisp.c:38711", kind: Kind::Lisp(Init::Str("=>")) },
@@ -1123,15 +1126,10 @@ impl Vm {
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
-            Init::SourceDirectory => {
-                // CARGO_MANIFEST_DIR is captured while building this crate.
-                // Like GNU's expansion, this is lexical: do not canonicalize
-                // or require that the build tree still exists at runtime.
-                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .parent().unwrap().parent().unwrap();
-                let text = format!("{}/", root.to_str().expect("build source path is UTF-8"));
-                self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
-            }
+            Init::SourceDirectory => match crate::host::source_directory().and_then(|dir| dir.to_str().map(|d| format!("{}/", d.trim_end_matches('/')))) {
+                Some(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
+                None => Value::NIL,
+            },
             Init::List(items) => {
                 let values: Vec<Value> = items.iter().map(|&i| self.materialize(i)).collect();
                 self.list_value(&values)

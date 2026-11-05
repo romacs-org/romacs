@@ -79,8 +79,23 @@ fn forms(text: &str) -> impl Iterator<Item = &str> {
 
 #[test]
 fn point_stays_visible_and_scrolls_as_pinned_gnu() {
-    let (probe, answers) = (include_str!("point_visibility.el"), include_str!("point_visibility.gnu"));
-    assert_eq!(forms(probe).count(), forms(answers).count(), "the .gnu answers are stale: rerun child_frames_oracle.py --probe point_visibility.el");
+    replay(include_str!("point_visibility.el"), include_str!("point_visibility.gnu"), 500);
+}
+
+/// scroll_invisible.el: C-n past the window's end and C-p past its start
+/// over invisible lines (text properties, overlays, an invisibility spec;
+/// whole lines and a heading's folded subtree) scroll as GNU's
+/// try_scrolling does, or recentre where it does, for `scroll-conservatively'
+/// 0, 5 and 101 and `scroll-margin' 0 and 3.
+#[test]
+fn scrolling_past_invisible_text_as_pinned_gnu() {
+    replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
+}
+
+/// Replay PROBE's forms, painting at each `pv-step', against GNU's
+/// ANSWERS; at least LEAST steps run.
+fn replay(probe: &str, answers: &str, least: usize) {
+    assert_eq!(forms(probe).count(), forms(answers).count(), "the .gnu answers are stale: rerun child_frames_oracle.py --probe");
     let mut s = session();
     let (mut sequence, mut mismatches, mut invariant, mut steps) = ("", vec![], vec![], 0);
     let mut gnu = forms(answers);
@@ -107,7 +122,7 @@ fn point_stays_visible_and_scrolls_as_pinned_gnu() {
         // Wide characters' widths are the fonts': no comparison there.
         if actual != expected && !sequence.starts_with("wide-") { mismatches.push(format!("{sequence} {line}\n  GNU    {expected}\n  Romacs {actual}")); }
     }
-    assert!(steps > 500, "{steps} steps");
+    assert!(steps > least, "{steps} steps");
     assert!(invariant.is_empty() && mismatches.is_empty(), "{} cursors outside their text area:\n{}\n{} of {steps} steps differ from GNU:\n{}",
         invariant.len(), invariant.join("\n"), mismatches.len(), mismatches.join("\n"));
 }

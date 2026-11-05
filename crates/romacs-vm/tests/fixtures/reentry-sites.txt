@@ -111,6 +111,7 @@ prim/leaf/coding.rs coding_convert variable_set 2 held  # a leaf or T2 continuat
 prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/coding.rs set_coding_category_order variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/graphics.rs land_images call_prepared_source_raw 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
 prim/leaf/process.rs decode_output variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/autosave.rs auto_save_done variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/autosave.rs write_auto_save variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended

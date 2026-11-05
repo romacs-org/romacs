@@ -47,6 +47,16 @@ fn image_size(cx, spec: Value; optional pixels: Value, frame: Value) -> Step {
     logged(cx, size, error)
 }}
 
+// The size in pixels `image-size' reports at scale 1 for the image in FILE
+// (found as an image spec's `:file' is), read from its header, or from an
+// SVG root's `viewBox', `width' and `height', without decoding it: (WIDTH .
+// HEIGHT), or nil when no window system can read it so (a type its
+// signature does not tell, XBM, XPM, PBM, an SVG without dimensions, a
+// file not found).  It never waits for a decode (rlisp/romacs-attach.el
+// sizes attachments with it).
+defsubr! { name = "romacs-image-header-size", gnu = "romacs:images", effect = Reads,
+fn romacs_image_header_size(cx, file: Value) { cx.image_header_size(file) }}
+
 defsubr! { name = "image-mask-p", gnu = "image.c:1710", effect = Global,
 fn image_mask_p(cx, spec: Value; optional frame: Value) -> Step {
     let parsed = cx.image_spec(spec)?.ok_or_else(invalid)?;
@@ -90,7 +100,7 @@ fn image_flush(cx, spec: Value; optional frame: Value) {
     // FRAME t flushes SPEC on every frame.
     let all = frame == Value::TRUE;
     let env = cx.image_env(if all { Value::NIL } else { frame })?;
-    let (key, _, _) = cx.image_lookup(&parsed, &env)?;
+    let (key, _, _) = cx.image_lookup_display(&parsed, &env)?;
     cx.image_uncache(|k, _| k.plist == key.plist && (all || k.frame == key.frame));
     Ok(Value::NIL)
 }}
