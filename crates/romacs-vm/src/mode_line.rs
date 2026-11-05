@@ -625,7 +625,11 @@ impl Vm {
             }
             depth += 1;
             if let Some(s) = self.ml_string(&elt)? {
-                if band.element_starts.last() != Some(&band.text.len()) { band.element_starts.push(band.text.len()); }
+                // A start stays only if the element renders text: an empty
+                // one (a `%M' of "") seats nothing, so it splits no stretch.
+                let start = band.text.len();
+                let seated = band.element_starts.last() != Some(&start);
+                if seated { band.element_starts.push(start); }
                 let tab = self.ml_tab_width()?;
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
@@ -642,6 +646,7 @@ impl Vm {
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
                     n += chars(shown);
                     match &own { Some(own) => band.push_own(shown, own, 0, props.as_deref()), None => band.push_piece(shown, props.as_deref(), None) }
+                    if seated && band.text.len() == start { band.element_starts.pop(); }
                     break;
                 }
                 let mut rest = s.split('\0').next().unwrap_or_default();
@@ -695,6 +700,7 @@ impl Vm {
                     }
                     n += written;
                 }
+                if seated && band.text.len() == start { band.element_starts.pop(); }
                 break;
             }
             // ELT is taken, not copied: each arm moves its parts on.

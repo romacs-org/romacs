@@ -27,3 +27,6 @@
 (progn (switch-to-buffer (get-buffer-create "w4")) (erase-buffer) (setq header-line-format (list "x" (propertize " " 'display '(space :relative-width 2)) "y")) (probe-header (selected-window)))
 ;; One display value in two adjacent strings, and one string twice: a stretch each, as each element seats its display again.
 (let* ((d '(space :width (30))) (s (propertize " " 'display d))) (switch-to-buffer (get-buffer-create "r2")) (setq header-line-format (list "x" (propertize " " 'display d) (propertize " " 'display d) "y" s s "z")) (probe-header (selected-window)))
+;; A `%M' of an empty string inside a stretch's string renders nothing, so the string's two pieces stay one stretch; and of a list holding one.
+(progn (setq global-mode-string "") (switch-to-buffer (get-buffer-create "m1")) (setq header-line-format (list "x" (propertize "a%Mb" 'display '(space :width (30))) "y")) (probe-header (selected-window)))
+(progn (setq global-mode-string '("")) (probe-header (selected-window)))
