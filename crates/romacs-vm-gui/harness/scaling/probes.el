@@ -968,6 +968,70 @@ thousandth a stack mark."
                 (cl-loop for i below n collect (cons (format "claude-%d" i) (format "/tmp/claude-config-%d" i))))
   :body (let ((romacs-agent-providers it)) (romacs-agent-history--places)))
 
+;; The instances of N Lisp entries and T3's settings of N instances: one
+;; read of the file, one name table, linear; read again (as after the file
+;; changed) or kept from the last read.
+(defun scaling--t3-instances (n)
+  (scaling--agent)
+  (require 'romacs-agent-t3)
+  (let ((file (make-temp-file "scaling-t3-" nil ".json"))
+        (instances (make-hash-table :test #'equal)))
+    (dotimes (i n)
+      (puthash (format "claudeAgent_%d" i)
+               (romacs-mcp--object "driver" "claudeAgent" "displayName" (format "Claude %d" i)
+                                   "config" (romacs-mcp--object "homePath" (format "/tmp/t3-claude-%d" i)
+                                                                "launchArgs" "--chrome --x 'a b'"))
+               instances))
+    (with-temp-file file (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+    (cons (list 't3 :settings file)
+          (cl-loop for i below n collect (cons (format "claude-lisp-%d" i) (format "/tmp/claude-config-%d" i))))))
+
+(scaling-probe agent-instances :n 1000
+  :setup (scaling--t3-instances n)
+  :body (let ((romacs-agent-providers it))
+          (setq romacs-agent-t3--read nil)
+          (romacs-agent-instances t)))
+
+;; N drivers, each a T3 driver name, and T3's settings of N instances of
+;; them, read anew: each instance's harness by an index built once.
+(scaling-probe agent-instances-drivers :n 500
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-t3)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-tdriver-%d" i)) :lifetime 'persistent
+                                               :t3-driver (format "tdriver%d" i)
+                                               :config-variable (format "SCALING_TDRIVER_%d_HOME" i)
+                                               :config-default (format "/tmp/tdriver-%d" i)))
+                (let ((file (make-temp-file "scaling-t3d-" nil ".json"))
+                      (instances (make-hash-table :test #'equal)))
+                  ;; The first defined is the farthest from the registry's head.
+                  (dotimes (i n)
+                    (puthash (format "t%d" i) (romacs-mcp--object "driver" (format "tdriver%d" (- n 1 i))
+                                                                  "displayName" (format "T %d" i))
+                             instances))
+                  (with-temp-file file (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+                  (list (list 't3 :settings file))))
+  :body (let ((romacs-agent-providers it))
+          (setq romacs-agent-t3--read nil)
+          (romacs-agent-instances t)))
+
+(scaling-probe agent-instances-kept :n 1000
+  ;; Read once here: the body resolves with the file's read kept.
+  :setup (let ((providers (scaling--t3-instances n)))
+           (let ((romacs-agent-providers providers)) (romacs-agent-instances t))
+           providers)
+  :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
+
+;; N entries naming no harness Romacs runs, with N drivers defined: each a
+;; short reason; the harnesses there are listed once.
+(scaling-probe agent-instances-invalid :n 500
+  :setup (progn (scaling--agent)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-idriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_IDRIVER_%d_HOME" i)))
+                (cl-loop for i below n collect (list (format "nosuch-%d" i) :harness (intern (format "nosuch-%d" i)))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
+
 ;; The home page over N transcripts beside a session per project.
 (scaling-probe agent-home-history :n 200
   :setup (let ((dir (scaling--history n)))

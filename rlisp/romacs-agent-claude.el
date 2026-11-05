@@ -164,7 +164,7 @@ when ALLOW, else denied with MESSAGE."
                                                   "message" (or message "Denied by the user")))))))
 
 (romacs-agent-define-harness 'claude
-  :display "Claude Code" :icon "✳"
+  :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"
   :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
   :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
   ;; What Claude Code sets for the commands it runs (a parent session's).

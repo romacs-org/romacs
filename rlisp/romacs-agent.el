@@ -54,22 +54,31 @@ decides, and these arguments may say otherwise."
   :type '(repeat string) :group 'romacs-agent)
 
 (defcustom romacs-agent-providers '(("claude" . "~/.claude"))
-  "The harness instances sessions run under, the first being the default.
-Each entry is (NAME . CONFIG-DIR), or (NAME :harness HARNESS :config-dir
-CONFIG-DIR :program PROGRAM :arguments ARGUMENTS) for more.  HARNESS, when
-omitted, is NAME's leading word (\"claude2\" and \"claude-work\" are
-Claude Code, \"codex\" is Codex); PROGRAM and ARGUMENTS default to the
-harness's own options (`romacs-agent-claude-program',
-`romacs-agent-codex-arguments', ...).
+  "The harness instances sessions run under, the first enabled being the
+default.  Each entry is (NAME . CONFIG-DIR), or (NAME . PLIST) of
+  :harness HARNESS   default NAME's leading word (\"claude2\" and
+                     \"claude-work\" are Claude Code, \"codex\" is Codex)
+  :display NAME      default NAME capitalised
+  :config-dir DIR    the harness's configuration directory
+  :enabled BOOLEAN   nil: not offered, not started; its sessions still resume
+  :program PROGRAM, :arguments ARGUMENTS
+                     default the harness's own options
+                     (`romacs-agent-claude-program', ...)
+  :model MODEL, :effort EFFORT
+                     what its new sessions run, unless their start says
+or the symbol `t3', or (t3 :settings FILE): T3 Code's instances, read
+from its settings (`romacs-agent-t3-settings').  The first entry of a
+name wins, so entries after `t3' are what runs without T3.
 
-CONFIG-DIR is the harness's configuration directory, where it keeps its
-account, settings and conversations (Claude Code's CLAUDE_CONFIG_DIR,
-Codex's CODEX_HOME).  It
+CONFIG-DIR is where the harness keeps its account, settings and
+conversations (Claude Code's CLAUDE_CONFIG_DIR, Codex's CODEX_HOME).  It
 is given to the harness alone; the harness's default directory, or none,
 runs it with that variable unset, as the harness runs by default.  A
 session records its instance's directory, and resumes there."
-  :type '(repeat (choice (cons :tag "Name and directory" string directory)
-                         (cons :tag "Name and options" string plist)))
+  :type '(repeat (choice (const :tag "T3 Code's instances" t3)
+                         (cons :tag "Name and directory" string directory)
+                         (cons :tag "Name and options" string plist)
+                         (cons :tag "T3 Code's, from a file" (const t3) plist)))
   :group 'romacs-agent)
 
 (defcustom romacs-agent-default-provider nil
@@ -365,6 +374,10 @@ defined first.")
 (defvar romacs-agent--driver-table (make-hash-table :test #'eq)
   "Harness to its cell of `romacs-agent--drivers', the lookup by name.")
 
+(defvar romacs-agent--driver-generation 0
+  "Counts the drivers' definitions: what was derived from them (T3's
+instances) is derived again when it changes.")
+
 (defun romacs-agent-define-harness (harness &rest driver)
   "Define how Romacs runs HARNESS, by DRIVER's keys:
 
@@ -404,6 +417,7 @@ Defining it again replaces it."
       (setq cell (cons harness driver))
       (push cell romacs-agent--drivers)
       (puthash harness cell romacs-agent--driver-table)))
+  (cl-incf romacs-agent--driver-generation)
   harness)
 
 (defun romacs-agent--driver-of (harness)
@@ -430,24 +444,81 @@ Defining it again replaces it."
   (and (string-match "\\`[[:alpha:]]+" name) (intern (downcase (match-string 0 name)))))
 
 (defun romacs-agent--provider (entry)
-  "ENTRY of `romacs-agent-providers' as a plist: :name :harness :config-dir
-:program :arguments."
+  "ENTRY of `romacs-agent-providers', (NAME . DIRECTORY) or (NAME . PLIST),
+as an instance: a plist of :name :display :harness :config-dir :key
+:enabled :program :arguments :model :effort :options :source (and :t3-id
+for one of T3's)."
   (let* ((name (car entry))
          (options (if (listp (cdr entry)) (cdr entry) (list :config-dir (cdr entry))))
          (harness (or (plist-get options :harness) (romacs-agent--harness-of name)))
          (known (cdr (gethash harness romacs-agent--driver-table))))
     (unless known
-      (user-error "Agent provider %s: no harness %s (Romacs runs: %s)" name harness
-                  (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
-    (list :name name :harness harness :config-dir (plist-get options :config-dir)
+      (user-error "Agent provider %s: no harness %s" name harness))
+    (list :name name :harness harness
+          :display (or (plist-get options :display) (capitalize name))
+          :config-dir (plist-get options :config-dir)
+          ;; Its continuation key (T3's): what a switch keeps or changes.
+          :key (cons harness (romacs-agent--home harness (plist-get options :config-dir)))
+          :enabled (if (plist-member options :enabled) (plist-get options :enabled) t)
           :program (if (plist-member options :program) (plist-get options :program)
                      (symbol-value (plist-get known :program-option)))
           :arguments (if (plist-member options :arguments) (plist-get options :arguments)
-                       (symbol-value (plist-get known :arguments-option))))))
+                       (symbol-value (plist-get known :arguments-option)))
+          :model (plist-get options :model) :effort (plist-get options :effort)
+          :options (plist-get options :options)
+          :source (or (plist-get options :source) 'lisp) :t3-id (plist-get options :t3-id))))
+
+(defvar romacs-agent-t3-settings)
+(declare-function romacs-agent-t3-read "romacs-agent-t3" (file harness-of generation))
+
+(defun romacs-agent--t3-harnesses ()
+  "A function from T3 Code's driver name to the harness running it, or
+nil: its index built once, when first asked."
+  (let ((index nil))
+    (lambda (driver)
+      (unless index
+        (setq index (make-hash-table :test #'equal))
+        (dolist (cell romacs-agent--drivers)
+          (when-let* ((name (plist-get (cdr cell) :t3-driver))) (puthash name (car cell) index))))
+      (gethash driver index))))
+
+(defun romacs-agent-instances (&optional constraints)
+  "The instances `romacs-agent-providers' names, in its order, each a plist
+\=(`romacs-agent--provider'): the first entry of a name wins; the `t3'
+entry, or (t3 :settings FILE), stands for T3 Code's instances there
+\=(`romacs-agent-t3-settings').  Disabled ones are kept: they are not
+offered, but their sessions still resume.  With CONSTRAINTS non-nil,
+return (INSTANCES . CONSTRAINTS), the second saying, for each instance
+Romacs cannot run, why."
+  (let ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil))
+    (dolist (entry romacs-agent-providers)
+      (if (or (eq entry 't3) (eq (car-safe entry) 't3))
+          (pcase-let ((`(,t3 . ,why)
+                       (progn (require 'romacs-agent-t3)
+                              (romacs-agent-t3-read (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings)
+                                                    (romacs-agent--t3-harnesses) romacs-agent--driver-generation))))
+            (setq problems (append (reverse why) problems))
+            (dolist (row t3)
+              (unless (gethash (car row) taken)
+                (puthash (car row) t taken)
+                (push (romacs-agent--provider row) instances))))
+        (unless (gethash (car entry) taken)
+          (puthash (car entry) t taken)
+          (condition-case err (push (romacs-agent--provider entry) instances)
+            (user-error (push (list :source 'lisp :id (car entry) :reason (error-message-string err)) problems)
+                        (setq unknown t))))))
+    ;; The harnesses there are, once.
+    (when unknown
+      (push (list :source 'lisp :id nil
+                  :reason (format "Romacs runs: %s" (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
+            problems))
+    (if constraints (cons (nreverse instances) (nreverse problems)) (nreverse instances))))
 
 (defun romacs-agent--configured (name)
-  "The configured instance NAME, or nil."
-  (when-let* ((entry (assoc name romacs-agent-providers))) (romacs-agent--provider entry)))
+  "The instance NAME, or whose T3 id is NAME, or nil."
+  (let ((instances (romacs-agent-instances)))
+    (or (cl-find name instances :key (lambda (i) (plist-get i :name)) :test #'equal)
+        (cl-find name instances :key (lambda (i) (plist-get i :t3-id)) :test #'equal))))
 
 (defun romacs-agent--instance (name harness)
   "The instance NAME as configured now, else HARNESS's defaults: what a
@@ -481,12 +552,13 @@ whatever the editor's own environment and the user manager's say."
       (list "env" "-u" variable))))
 
 (defun romacs-agent--default-provider ()
-  (or romacs-agent-default-provider (car (car romacs-agent-providers))
-      (user-error "No agent provider: `romacs-agent-providers' is empty")))
+  (or romacs-agent-default-provider
+      (plist-get (cl-find-if (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)) :name)
+      (user-error "No agent provider: `romacs-agent-providers' names no enabled instance")))
 
 (defun romacs-agent--read-provider ()
-  "An instance's name: asked for when there is more than one."
-  (let ((names (mapcar #'car romacs-agent-providers)))
+  "An instance's name: asked for when more than one is enabled."
+  (let ((names (cl-loop for i in (romacs-agent-instances) when (plist-get i :enabled) collect (plist-get i :name))))
     (if (cdr names)
         (completing-read (format-prompt "Provider" (romacs-agent--default-provider))
                          names nil t nil nil (romacs-agent--default-provider))
@@ -1022,11 +1094,21 @@ with the session before its harness starts.  Return the session."
   (let* ((name (or provider (romacs-agent--default-provider)))
          (instance (or (romacs-agent--configured name)
                        (user-error "No agent provider %s in `romacs-agent-providers'" name)))
+         (name (progn (unless (plist-get instance :enabled)
+                        (user-error "Agent provider %s is disabled" (plist-get instance :name)))
+                      ;; A T3 id names its instance.
+                      (plist-get instance :name)))
          (session (progn
                     ;; The directory as configured: the harness's default too, when named.
                     (romacs-agent--check-config-dir name (plist-get instance :config-dir))
                     (romacs-agent--create
-                     :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name :options options
+                     :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
+                     ;; What the start asks for, else the instance's defaults.
+                     :options (append (and (not (plist-get options :model)) (plist-get instance :model)
+                                           (list :model (plist-get instance :model)))
+                                      (and (not (plist-get options :effort)) (plist-get instance :effort)
+                                           (list :effort (plist-get instance :effort)))
+                                      options)
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                      ;; The project's name until the first prompt names it.
                      :title (or title (file-name-nondirectory (directory-file-name (expand-file-name cwd))))

@@ -94,7 +94,7 @@ stdin; RESUME non-nil continues its thread."
     (_ (list (list :type 'unknown :raw line)))))
 
 (romacs-agent-define-harness 'codex
-  :display "Codex" :icon "◎"
+  :display "Codex" :icon "◎" :t3-driver "codex"
   :config-variable "CODEX_HOME" :config-default "~/.codex"
   :program-option 'romacs-agent-codex-program :arguments-option 'romacs-agent-codex-arguments
   ;; What Codex sets for the commands it runs (codex-cli 0.164, read from

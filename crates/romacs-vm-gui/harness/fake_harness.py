@@ -111,7 +111,7 @@ class Harness:
                                                   'input': arguments}]}})
         started = time.time()
         ident, text, error = self.mcp.tool(name, arguments)
-        log(tool=name, id=ident, text=text[:400], error=error, seconds=time.time() - started)
+        log(tool=name, id=ident, text=text[:16000], error=error, seconds=time.time() - started)
         if 'outcome unknown' in text:
             # Ask until a Romacs answers: while none listens the question
             # itself is `not executed'.
@@ -132,7 +132,7 @@ class Harness:
         elif 'not executed: Romacs is not running' in text:
             time.sleep(1)
             ident, text, error = self.mcp.tool(name, arguments)
-            log(tool=name, id=ident, text=text[:400], error=error, repeated=True)
+            log(tool=name, id=ident, text=text[:16000], error=error, repeated=True)
         emit({'type': 'user', 'parent_tool_use_id': None,
               'message': {'content': [{'type': 'tool_result', 'tool_use_id': use, 'content': text, 'is_error': error}]}})
         return text

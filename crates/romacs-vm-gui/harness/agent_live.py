@@ -34,6 +34,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  instances  T3 Code's provider instances as a source (`t3' in the providers
+             list): capabilities list them with their sources, a T3 account
+             overlay is disabled with why, a T3 id starts its instance.
   rpc        a harness added by its driver alone (fakerpc.el, fake_rpc.py):
              a persistent JSON-RPC harness with startup steps (initialize,
              session/new or session/load), approvals, a server restart in
@@ -1355,6 +1358,54 @@ def environment(args, base):
         a.close()
 
 
+def instances(args, base):
+    """T3 Code's instances through the `t3' entry, as an init recommends:
+`(t3 ("claude" . "~/.claude") ("claude2" . DIR) ("codex" . "~/.codex"))'.
+    A fixture of T3's settings (its two defaults implicit, a second Claude
+    Code account as T3 stores it, a Codex account overlay) gives claude,
+    codex and claude2 from T3 (the Lisp fallbacks unused), the overlay
+    disabled with why; the harness's own capabilities call lists them; a
+    session started by the T3 id runs that instance's directory."""
+    a = Agents(args, base, 'in')
+    try:
+        second = a.home / '.config/claude/second'
+        second.mkdir(parents=True)
+        (a.home / '.codex').mkdir()
+        t3 = a.home / '.t3/userdata/settings.json'
+        t3.parent.mkdir(parents=True)
+        t3.write_text(json.dumps({'providerInstances': {
+            'claudeAgent_claude2': {'driver': 'claudeAgent', 'displayName': 'Claude2', 'enabled': True,
+                                    'config': {'homePath': '~/.config/claude/second'}},
+            'codex_personal': {'driver': 'codex', 'displayName': 'Codex Personal',
+                               'config': {'shadowHomePath': '~/.codex-t3/personal'}}}}))
+        a.up()
+        a.eval('(setq romacs-agent-providers (quote (t3 ("claude" . "~/.claude") ("claude2" . "~/.config/claude/other") '
+               '("codex" . "~/.codex"))))')
+        sid = a.start('say ready')
+        a.idle(sid)
+        a.send(sid, 'call romacs_orchestrator_capabilities ' + json.dumps({'instance': '?'}))
+        a.idle(sid)
+        capabilities = json.loads(a.tool_results()[-1][1])
+        providers = {p['providerInstanceId']: p for p in capabilities.get('providers', [])}
+        # A T3 id starts its instance.
+        aliased = a.eval('(romacs-agent-provider (romacs-agent-start default-directory "say hi" nil "claudeAgent_claude2"))').strip('"')
+        until(lambda: any(e.get('config_dir') == str(second) for e in a.logged()), 20, 'claude2 started')
+        result = {'providers': {k: {f: v.get(f) for f in ('source', 'enabled', 't3InstanceId', 'configDir')}
+                                for k, v in providers.items()},
+                  'constraints': capabilities.get('constraints'), 'default': capabilities.get('default'), 'aliased': aliased}
+        result['ok'] = (list(providers) == ['claude', 'codex', 'claude2', 'codex-personal']
+                        and all(providers[n]['source'] == 't3' and providers[n]['enabled'] for n in ('claude', 'codex', 'claude2'))
+                        and providers['claude2']['configDir'] == str(second)
+                        and providers['claude2']['t3InstanceId'] == 'claudeAgent_claude2'
+                        and providers['codex-personal']['enabled'] is False
+                        and any('T3 auth overlay' in c['reason'] and c['id'] == 'codex_personal'
+                                for c in capabilities.get('constraints', []))
+                        and capabilities.get('default') == 'claude' and aliased == 'claude2')
+        return result
+    finally:
+        a.close()
+
+
 def rpc(args, base):
     """A harness Romacs learns of by its driver and nothing else: fakerpc
     (harness/fakerpc.el, defined by this test) runs fake_rpc.py, which takes
@@ -2206,7 +2257,8 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'rpc': rpc}
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'rpc': rpc,
+             'instances': instances}
 
 
 def main():
@@ -2228,7 +2280,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
