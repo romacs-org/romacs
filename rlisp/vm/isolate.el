@@ -33,6 +33,11 @@ The launcher sets it; a VM made by `Vm::new' is bare.")
   "The world this VM restored from, as (STORE . KEY), or nil.
 A worker of a `world' VM adopts exactly this world.")
 
+(defvar isolate-compiled-store nil
+  "The compiled-Lisp store this VM loads from, or nil.
+A worker of a `world' VM loads its libraries from it too, never compiling
+into it.  The launcher sets it.")
+
 (defvar isolate-worker-program nil
   "The program a worker runs, or nil for this executable.")
 
@@ -146,7 +151,8 @@ spawner to run on a worker with the features they were queued for.")
   (cond ((eq isolate-boot 'world)
          (unless isolate-world
            (signal 'isolate-world-unavailable (list "This VM has no world a worker could adopt")))
-         (list "--world" (car isolate-world) (cdr isolate-world)))
+         (append (list "--world" (car isolate-world) (cdr isolate-world))
+                 (and isolate-compiled-store (list "--compiled-store" isolate-compiled-store))))
         ((eq isolate-boot 'source)
          (unless allow-source-boot
            (signal 'isolate-world-unavailable (list "This VM booted from source; pass :allow-source-boot t")))

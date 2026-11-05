@@ -1131,7 +1131,10 @@ fn evaluate(
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
-            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}))", startup::lisp_string(&store.display().to_string()), key))?;
+            let compiled = romacs_vm::compiled_lisp::store_dir()
+                .map_or("nil".to_owned(), |dir| startup::lisp_string(&dir.display().to_string()));
+            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}) isolate-compiled-store {compiled})",
+                                    startup::lisp_string(&store.display().to_string()), key))?;
         }
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }

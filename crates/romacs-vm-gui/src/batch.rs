@@ -138,6 +138,22 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
+    configure_store(store, compiles, interactive);
+}
+
+/// Load compiled Lisp in a worker isolate from STORE, the store its
+/// spawner, an interactive session, loads from (`isolate-compiled-store`),
+/// without ever compiling into it. A miss reads source; the spawner's
+/// background compiles reach every file of the installation's trees in
+/// time.
+pub fn configure_worker_compiled_lisp(store: PathBuf) {
+    if !romacs_vm::compiled_lisp::requested(true) || romacs_vm::world::store::disabled() { return; }
+    configure_store(store, false, true);
+}
+
+/// Load compiled Lisp from STORE; COMPILES when this process may compile
+/// into it; DEFER_MISSES when no load may wait for a compile.
+fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
@@ -156,7 +172,7 @@ pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
         compiler,
         environment,
         inherited: &COMPILE_INHERITS,
-        defer_misses: interactive,
+        defer_misses,
         store,
         // The world is made once (its key hashes the executable and
         // libraries); only whether its build was published is asked again.
