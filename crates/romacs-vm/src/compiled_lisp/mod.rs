@@ -167,6 +167,15 @@ const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
 /// (PROGRAM ARGS ENVIRONMENT): None when this process compiles nothing, or
 /// PATH is being compiled already up the chain (its compile-time loads
 /// read source, as GNU's would with no `.elc`).
+/// Whether PATH is in the installation's Lisp trees: the configured ones,
+/// else the runtime root's gnu-lisp/ and rlisp/.
+fn installed_lisp(path: &Path) -> bool {
+    match config() {
+        Some(config) => config.runtime.iter().any(|root| path.starts_with(root)),
+        None => { let root = host::runtime_root(); ["gnu-lisp", "rlisp"].iter().any(|tree| path.starts_with(root.join(tree))) }
+    }
+}
+
 fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
     -> Option<(OsString, Vec<OsString>, Vec<(OsString, OsString)>)> {
     let name = path.to_string_lossy();
@@ -326,9 +335,28 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// a file of the installation's Lisp trees, or one beside an `.elc`
     /// that is not older than it when `load-prefer-newer` asks.
     fn has_compiled_form(&self, config: &Config, path: &Path) -> bool {
-        if config.runtime.iter().any(|root| path.starts_with(root)) {
-            return true;
-        }
+        config.runtime.iter().any(|root| path.starts_with(root)) || self.current_elc(path)
+    }
+
+    /// Whether GNU would load the source file PATH compiled: a file of the
+    /// installation's Lisp trees (the configured ones, else the runtime
+    /// root's gnu-lisp/ and rlisp/), or one beside a current `.elc`.  When
+    /// not, GNU's readevalloop interprets it.
+    pub(crate) fn gnu_loads_compiled(&self, path: &Path) -> bool {
+        installed_lisp(path) || self.current_elc(path)
+    }
+
+    /// Whether a load of PATH, a source file, is interpreted as GNU's
+    /// readevalloop would: one GNU would not load compiled, or one a Lisp
+    /// `load' named with its `.el' (EXPLICIT) outside the installation's
+    /// Lisp trees, which GNU reads as source even beside an `.elc'.
+    pub(crate) fn gnu_interprets(&self, path: &Path, explicit: bool) -> bool {
+        !self.gnu_loads_compiled(path) || (explicit && !installed_lisp(path))
+    }
+
+    /// Whether an `.elc` beside PATH is one GNU's suffix rules would pick:
+    /// any, or one not older than PATH when `load-prefer-newer` asks.
+    fn current_elc(&self, path: &Path) -> bool {
         let elc = path.with_extension("elc");
         let Ok(compiled) = host::metadata(&elc) else { return false };
         let prefer_newer = self.names.get("load-prefer-newer").is_some_and(|&s| self.slots[s].value != Value::NIL);

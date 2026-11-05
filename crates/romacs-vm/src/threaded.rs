@@ -1680,6 +1680,32 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.a = a;
             i.b = b;
         }
+        Op::BindLate(a, b) => {
+            i.handler = bind_late;
+            i.a = a;
+            i.b = b;
+        }
+        Op::UnbindLate(a) => {
+            i.handler = unbind_late;
+            i.a = a;
+        }
+        Op::ReadLate(a, b, c) => {
+            i.handler = read_late;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
+        Op::LateForwarded(a, b) => {
+            i.handler = late_forwarded;
+            i.a = a;
+            i.b = b;
+        }
+        Op::WriteLate(a, b, c) => {
+            i.handler = write_late;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
         Op::Jump(a) => {
             i.handler = jump;
             i.a = a;
@@ -1983,6 +2009,41 @@ unsafe fn global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             return cold(e, r, pc);
         }
         *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+// Late bindings (Op::BindLate): the common case, a binding made lexically,
+// stays on the hot path; a dynamic one goes cold.
+unsafe fn bind_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if e.vm.slot_is_special_now((*pc).a) { return cold(e, r, pc); }
+        advance(e, r, pc)
+    }
+}
+unsafe fn unbind_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if late_get(e, r, (*pc).a) == Value::UNBOUND { return cold(e, r, pc); }
+        advance(e, r, pc)
+    }
+}
+unsafe fn read_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let v = late_get(e, r, (*pc).b);
+        if v == Value::UNBOUND { return cold(e, r, pc); }
+        *r.add((*pc).a) = v;
+        advance(e, r, pc)
+    }
+}
+unsafe fn late_forwarded(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        *r.add((*pc).a) = if late_get(e, r, (*pc).b) == Value::UNBOUND { Value::TRUE } else { Value::NIL };
+        advance(e, r, pc)
+    }
+}
+unsafe fn write_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if late_get(e, r, (*pc).a) == Value::UNBOUND { return cold(e, r, pc); }
+        late_set(e, r, (*pc).a, *r.add((*pc).b));
         advance(e, r, pc)
     }
 }
@@ -3572,6 +3633,69 @@ unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Op
 /// signal or a forwarded store fault is left pending. A trapped variable's
 /// watchers may collect (`watched_write`), so VALUE is rooted across them
 /// for the fault's data.
+/// The value of SLOT's variable, void signalling as GNU's eval_sub does.
+fn global_value(e: &mut Engine<'_>, slot: usize) -> Result<Value> {
+    let v = if slot == e.vm.multibyte_slot {
+        if e.vm.buffer_text_p() { Value::TRUE } else { Value::NIL }
+    } else {
+        e.vm.variable_value(slot)?
+    };
+    if v == Value::UNBOUND {
+        raise(e, "void-variable", &[Value::reference(slot + 1, 7)]);
+        return Err("unbound variable".into());
+    }
+    Ok(v)
+}
+
+/// Set SLOT's variable to register REG of R, read again after a write whose
+/// watchers may have collected.
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+unsafe fn set_global(e: &mut Engine<'_>, slot: usize, r: *mut Value, reg: usize) -> Result<()> {
+    unsafe {
+        if e.vm.protected_variable_slot(slot) {
+            raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
+            return Err("setting constant".into());
+        }
+        let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+        if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
+            // A variable watcher's own signal, else a forwarded store fault.
+            if let Some(escape) = e.vm.propagated_escape.take() {
+                e.escape = Some(escape);
+            } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
+                e.escape = Some(Escape::Signal(condition, data));
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+/// A late binding's value: its cell's, or its register's where the
+/// binding was unboxed (no closure shares it).
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+#[inline(always)]
+unsafe fn late_get(e: &Engine<'_>, r: *mut Value, reg: usize) -> Value {
+    unsafe {
+        let v = *r.add(reg);
+        if v.tag() == 5 { e.vm.read_capture_cell(v.payload() as usize) } else { v }
+    }
+}
+/// Set a late binding's cell, or its register where it was unboxed.
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+#[inline(always)]
+unsafe fn late_set(e: &mut Engine<'_>, r: *mut Value, reg: usize, value: Value) {
+    unsafe {
+        let v = *r.add(reg);
+        if v.tag() == 5 { e.vm.write_capture_cell(v.payload() as usize, value) } else { *r.add(reg) = value }
+    }
+}
+
 fn bind_special(e: &mut Engine<'_>, slot: usize, value: Value) -> Result<()> {
     if e.vm.protected_variable_slot(slot) {
         raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
@@ -4144,43 +4268,39 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     let index = e.vm.alloc_cell(*r.add(reg));
                     *r.add(reg) = Value::reference(index, 5);
                 }
-                Op::Global(reg, slot) => {
-                    let v = if slot == e.vm.multibyte_slot {
-                        if e.vm.buffer_text_p() {
-                            Value::TRUE
-                        } else {
-                            Value::NIL
-                        }
-                    } else {
-                        e.vm.variable_value(slot)?
-                    };
-                    if v == Value::UNBOUND {
-                        raise(e, "void-variable", &[Value::reference(slot + 1, 7)]);
-                        return Err("unbound variable".into());
-                    }
-                    *r.add(reg) = v;
-                }
-                Op::SetGlobal(slot, _)
-                    if e.vm.protected_variable_slot(slot) =>
-                {
-                    raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
-                    return Err("setting constant".into());
-                }
-                // The value is read again from its register after a write
-                // whose watchers may have collected.
-                Op::SetGlobal(slot, reg) => {
-                    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
-                    if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
-                        // A variable watcher's own signal, else a forwarded store fault.
-                        if let Some(escape) = e.vm.propagated_escape.take() {
-                            e.escape = Some(escape);
-                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
-                            e.escape = Some(Escape::Signal(condition, data));
-                        }
-                        return Err(error);
-                    }
-                }
+                Op::Global(reg, slot) => *r.add(reg) = global_value(e, slot)?,
+                Op::SetGlobal(slot, reg) => set_global(e, slot, r, reg)?,
                 Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
+                // A late binding (Op::BindLate): dynamic when its symbol is
+                // special now, its cell then forwarding to the dynamic value.
+                Op::BindLate(slot, cell) => {
+                    if e.vm.slot_is_special_now(slot) {
+                        bind_special(e, slot, late_get(e, r, cell))?;
+                        late_set(e, r, cell, Value::UNBOUND);
+                    }
+                }
+                Op::UnbindLate(cell) => {
+                    if late_get(e, r, cell) == Value::UNBOUND {
+                        if e.vm.dynamic.len() <= e.dynamic {
+                            return Err("invalid late dynamic binding depth".into());
+                        }
+                        if let Some(signal) = checked_unbind(e, 1) {
+                            e.escape = Some(signal);
+                            return Ok(());
+                        }
+                    }
+                }
+                Op::ReadLate(reg, cell, slot) => {
+                    let v = late_get(e, r, cell);
+                    *r.add(reg) = if v == Value::UNBOUND { global_value(e, slot)? } else { v };
+                }
+                Op::WriteLate(cell, reg, slot) => {
+                    if late_get(e, r, cell) == Value::UNBOUND {
+                        set_global(e, slot, r, reg)?;
+                    } else {
+                        late_set(e, r, cell, *r.add(reg));
+                    }
+                }
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
                         return Err("invalid image dynamic binding depth".into());
@@ -4287,6 +4407,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 | Op::Move(..)
                 | Op::ReadCell(..)
                 | Op::WriteCell(..)
+                | Op::LateForwarded(..)
                 | Op::Jump(..)
                 | Op::Unless(..)
                 | Op::Return(..)

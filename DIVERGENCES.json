@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "cb64e7766402580e47f1b1e3377b7c53bdbb6be20a58f3bdb38d2750382d3ca4",
+  "input_hash": "fa65901fb728608a4609b6bd9b55ef754d89d8a6620be8fa46c0747d4e3c0014",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5862,9 +5862,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "A `let` compiled before its variable is special",
-   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now), so a function that let-binds a package's variable binds it dynamically once the package's `defvar` has run, however early the function was defined",
-   "romacs": "Romacs compiles a top-level form whole and decides then. A lambda inside another lambda's body that sees no lexical binding (a `defun` that `with-eval-after-load` or `use-package :config` wraps) now compiles at its first call (`Vm::lambda`, `lambda_depth`), after the package loaded, so it binds as GNU's does (`tests/late_special.rs`); a top-level function compiled before the `defvar` still binds lexically, as a byte-compiled one would in GNU",
-   "why": "An init `defun` at top level that let-binds a not yet loaded package's variable (for example `smtpmail-smtp-server`) must sit in that package's `with-eval-after-load`/`:config`, or `defvar` the name first",
+   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now): `eval`'d forms and files read as source (readevalloop), so `(progn (require 'org) (let ((org-yank-dnd-method 'attach)) ...))` and a function let-binding a variable its file declares later bind dynamically. Bytecomp takes a top-level `progn`'s children in order, evaluating `require` and declaring `defvar` as it goes (`byte-compile-file-form-progn`), so the `progn` idiom binds dynamically in an `.elc` too, while a function compiled before the `defvar` binds lexically",
+   "romacs": "Romacs compiles every form. Code `eval` compiles (`eval`, `--eval`, `eval-expression`, `eval-buffer` and the closures it makes) and code of a file GNU would read as source (no `.elc`, outside the installation's Lisp trees: `Vm::gnu_loads_compiled`, `interpreting_source`) bind late: a `let` of a symbol not special when it compiled is checked as it binds (`Op::BindLate`), made dynamically if the symbol is special then, its reads, writes and the closures sharing it then going to the dynamic value, except that a lexical binding of the name it hides (one a closure captured) is still what its body's references and `setq` reach, as GNU's lexical environment lookup finds it first. A file GNU would load compiled (the installation's Lisp, or one beside a current `.elc`), read as source or through the compiled-Lisp store's compile process (rlisp/romacs-compile.el walks it by bytecomp's rules), binds as bytecomp would. `tests/late_special_eval.rs` compares every path with GNU's `.el` and `.elc` loads. A late `let` loop costs about 2.8x a lexical one, still some 30x faster than GNU's interpreter; compiled-load code pays nothing. A lambda's parameters decide when it compiles. GNU's cconv drops a captured variable its closure's body never uses freely, so there a late `let` that turns dynamic hides nothing; Romacs still finds the captured binding",
+   "why": "**Package-observable** only for a lambda parameter named as a variable made special after the lambda compiled, and for a closure that rebinds, without otherwise using, a name it captured lexically that became special since",
    "symbols": [
     "let",
     "let*"

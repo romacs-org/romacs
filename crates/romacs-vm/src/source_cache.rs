@@ -185,7 +185,8 @@ impl Vm {
         names.extend(self.expanded_symbols.iter().cloned());
         for f in compiled.iter().map(|&id| &self.functions[id]) {
             for op in &f.code {
-                if let Op::Global(_, s) | Op::Bind(s, _) | Op::SetGlobal(s, _) = *op {
+                if let Op::Global(_, s) | Op::Bind(s, _) | Op::SetGlobal(s, _)
+                    | Op::BindLate(s, _) | Op::ReadLate(_, _, s) | Op::WriteLate(_, _, s) = *op {
                     names.insert(self.symbol_names[s].clone());
                 }
             }
