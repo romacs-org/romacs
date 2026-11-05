@@ -220,6 +220,8 @@ class Session:
         for directory in (home, work, config):
             directory.mkdir()
         shutil.copy(self.file, work / self.file.name)
+        # Typing needs a writable visit, whatever the corpus file's mode.
+        (work / self.file.name).chmod(0o644)
         (config / 'rc.xml').write_text(live.RC_XML)
         measure = self.root / 'ofl-measure.el'
         measure.write_text(MEASURE)
