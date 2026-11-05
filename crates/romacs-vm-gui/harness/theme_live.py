@@ -26,16 +26,17 @@ measure, which divides it among all its switches, is judged.
 The run fails when
   * a switch signals, or a theme is not the one enabled after it;
   * a cycled switch of the first round costs more than --budget
-    instructions: 1.2 times pinned GNU's, 43.2 M.  GNU switching the same
-    shape (its Rum on modus-themes 5.3.0, modus-vivendi, tango-dark; four
-    cycled rounds and a redisplay in one command, net of a command that
-    switches nothing, its whole process counted, 205 faces) costs 36.0 M
-    per switch.  Romacs, with its stock theme as large as Modus's, costs
-    about 22 times that: red until incremental face recalculation
-    (romacs#6);
+    instructions.  Pinned GNU, cycling the same shape (its Rum on
+    modus-themes 5.3.0, modus-vivendi, tango-dark; four cycled rounds and a
+    redisplay in one command, net of a command that switches nothing, its
+    whole process counted, 203 faces), costs 46.0 M per switch, and 78.0 M
+    when the no-theme state between themes flips the background mode as
+    it does here.  The budget, 43.2 M, stayed from a run in which
+    modus-vivendi was never loaded (36.0 M), and is held to;
   * a round's cycled switch grows faster than its face count: its ratio
     to the first round's exceeds --slack times the ratio of the face
-    counts (cost linear in the faces passes; quadratic does not).
+    counts (cost linear in the faces passes; quadratic does not);
+  * `C-g' during a long cycle takes more than --quit-limit to end it.
 
 usage: theme_live.py --binary PATH --output DIR [--themes default,modus-vivendi,tango-dark]
                      [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 4]
@@ -128,6 +129,29 @@ def switch(session, theme, load):
             'problems': [str(p) for p in problems]}
 
 
+def quit_seconds(session, themes):
+    """Seconds from `C-g' to the end of a cycle far longer than the test:
+    the switch's own loops must take the quit, not its end."""
+    names = ' '.join(themes)
+    before = len(perkey.records(session.stdout))
+    session.type(['-M', 'alt', ':', '-m', 'alt'])
+    time.sleep(.2)
+    session.type([f"(theme-live-cycle '({names}) 1000000)"])
+    session.type(['-k', 'Return'])
+    time.sleep(1)
+    done = lambda: [r for r in perkey.records(session.stdout)[before:] if r.get('native_command') == 'eval-expression']
+    if done():
+        raise perkey.Invalid(f'the cycle ended before C-g: {done()}')
+    pressed = time.monotonic()
+    session.type(['-M', 'ctrl', 'g', '-m', 'ctrl'])
+    session.wait(done, session.args.timeout, 'the cycle to quit')
+    seconds = time.monotonic() - pressed
+    if not any('quit' in str(r.get('signal')) for r in done()):
+        raise perkey.Invalid(f'the cycle ended without a quit: {done()}')
+    session.quiesce()
+    return seconds
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
@@ -137,13 +161,14 @@ def main():
     ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)
     ap.add_argument('--rounds', type=int, default=4, help='passes through --themes in the cycled measure')
+    ap.add_argument('--quit-limit', type=float, default=.25, help='seconds from C-g to the end of a long cycle, key delivery included')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)
     ap.add_argument('--mode', default='1600x1000')
     ap.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     args = ap.parse_args()
     args.binary, args.output = args.binary.resolve(), args.output.resolve()
-    args.regime, args.lines, args.classic, args.state, args.gap, args.populate = 'loadup', 20, False, False, .25, False
+    args.regime, args.lines, args.classic, args.state, args.gap, args.populate, args.split = 'loadup', 20, False, False, .25, False, 1
     args.output.mkdir(parents=True, exist_ok=True)
     themes = [t for t in args.themes.split(',') if t]
     report = {'binary': str(args.binary), 'themes': themes, 'budget': args.budget, 'slack': args.slack, 'rounds': []}
@@ -172,6 +197,10 @@ def main():
                                   'load': [(s['theme'], s['instructions'], s['lisp_seconds']) for s in passes[0]],
                                   'apply': [(s['theme'], s['net_instructions'], s['lisp_seconds']) for s in kept]}), flush=True)
                 failures += [f"{s['theme']}: {s['problems']}" for p in passes for s in p if s['problems']]
+            report['quit_seconds'] = quit_seconds(session, themes)
+            print(json.dumps({'quit_seconds': report['quit_seconds']}), flush=True)
+            if report['quit_seconds'] > args.quit_limit:
+                failures.append(f"C-g took {report['quit_seconds']:.3f} s to end a cycle, more than {args.quit_limit}")
         except (perkey.Invalid, AssertionError, OSError) as error:
             failures.append(repr(error))
         finally:
