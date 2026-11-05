@@ -280,7 +280,7 @@ Rooms carry our nickname there."
 The catch-up does not fall back to the session: that is what the
 background sync keeps the editor from."
   (let ((summary (list :error reason :archives nil :peers nil)))
-    (jabber-mam-sync--toast (jabber-mam-sync--toast-text summary t))
+    (jabber-mam-sync--toast (jabber-mam-sync--toast-text summary t) 'error)
     (jabber-lifecycle--dispatch-contained
      'jabber-mam-sync-finished-functions account summary)))
 
@@ -346,7 +346,7 @@ Then start the account's follow-up job, if anything is pending."
          (jobs (1+ (or (jabber-mam-sync--get account :jobs) 0))))
     (jabber-mam-sync--put account :jobs jobs)
     (when-let* ((text (jabber-mam-sync--toast-text summary (= jobs 1))))
-      (jabber-mam-sync--toast text))
+      (jabber-mam-sync--toast text (jabber-mam-sync--toast-kind summary)))
     (jabber-mam-sync--merge summary)
     (jabber-lifecycle--dispatch-contained
      'jabber-mam-sync-finished-functions account summary)))
@@ -408,10 +408,17 @@ FIRST is non-nil for the account's first job since it connected."
                    (and incomplete (format "; %s continues next sync" still))))
           ((or first (> messages 0)) (format "Jabber: %s" done)))))
 
-(defun jabber-mam-sync--toast (text)
-  "Show TEXT once, as a toast where Romacs has them."
+(defun jabber-mam-sync--toast-kind (summary)
+  "`error' when SUMMARY reports a failure, else nil."
+  (and (or (plist-get summary :error)
+           (cl-some (lambda (a) (eq (nth 2 a) 'failed)) (plist-get summary :archives)))
+       'error))
+
+(defun jabber-mam-sync--toast (text &optional kind)
+  "Show TEXT once, as a toast of KIND where Romacs has them.
+KIND `error' marks a failure, as `romacs-layer-toast' draws one."
   (if (fboundp 'romacs-layer-toast)
-      (romacs-layer-toast text)
+      (romacs-layer-toast text kind)
     (let ((message-log-max nil)) (message "%s" text))))
 
 (defvar jabber-mam-sync--changed (make-hash-table :test #'equal)

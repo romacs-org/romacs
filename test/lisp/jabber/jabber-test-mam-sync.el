@@ -97,7 +97,14 @@
                     nil)))
     (should (equal "Jabber: sync failed: the sync session did not connect"
                    (jabber-mam-sync--toast-text
-                    '(:error "the sync session did not connect" :archives nil) t)))))
+                    '(:error "the sync session did not connect" :archives nil) t)))
+    ;; A failed archive draws the toast as an error; an archive without
+    ;; MAM, or one that continues next sync, does not.
+    (should (eq 'error (jabber-mam-sync--toast-kind partial)))
+    (should (eq 'error (jabber-mam-sync--toast-kind failed)))
+    (should (eq 'error (jabber-mam-sync--toast-kind '(:error "cancelled" :archives nil))))
+    (should-not (jabber-mam-sync--toast-kind done))
+    (should-not (jabber-mam-sync--toast-kind no-archive))))
 
 (defun jabber-test-mam-sync--connection (&optional resource)
   "A connection whose state names romeo@montague.net/RESOURCE."
@@ -141,7 +148,7 @@ the merged peers; `done' calls the job's completion callback."
                ((symbol-function 'thaw) #'identity)
                ((symbol-function 'jabber-muc-nickname)
                 (lambda (room _jc) (and (equal room "room@muc.example") "romeo")))
-               ((symbol-function 'jabber-mam-sync--toast) (lambda (text) (push text toasts)))
+               ((symbol-function 'jabber-mam-sync--toast) (lambda (text &optional _kind) (push text toasts)))
                ((symbol-function 'jabber-mam-sync--refresh)
                 (lambda (buffer) (setq refreshed (append refreshed (list buffer))))))
        (unwind-protect (progn ,@body)
