@@ -189,7 +189,12 @@ it with each error or quit condition; it may signal to stop dispatch."
            (when (eq (car err) 'quit)
              (signal (car err) (cdr err)))
            (fsm-debug-output "Error %S while processing %S with function %s"
-                             err xml-data handler)))))))
+                             err xml-data handler)
+           ;; Logged whether or not fsm.el traces (`fsm-debug').
+           (let ((inhibit-message t))
+             (message "jabber: error %S in %s on <%s> from %s"
+                      err handler (jabber-xml-node-name xml-data)
+                      (jabber-xml-get-attribute xml-data 'from)))))))))
 
 (provide 'jabber-stanza)
 
