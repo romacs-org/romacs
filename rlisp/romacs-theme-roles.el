@@ -144,24 +144,50 @@ over the light mappings when MODE is `light', over the core's mappings."
 (defvar romacs-theme-roles--indexes nil
   "`romacs-theme-roles--index''s value per mode, (MODE . INDEX).")
 
+(defun romacs-theme-roles--hex (value)
+  "VALUE if it is a colour the floors can read."
+  (and (stringp value) (= (length value) 7) (eq (aref value 0) ?#) value))
+
+(defconst romacs-theme-roles--text-slots
+  '((fg . 4.5) (keyword . 4.5) (function . 4.5) (variable . 4.5) (type . 4.5) (constant . 4.5)
+    (string . 4.5) (builtin . 4.5) (doc . 4.5) (preprocessor . 4.5) (link . 4.5)
+    (comment . 3.0) (fg-dim . 3.0))
+  "The slots that are text on `bg', with the contrast each must reach.
+They are floored in the palette itself, so every face and reader sees one
+colour.")
+
+(defun romacs-theme-roles--read (rows index)
+  "ROWS with every slot and role, by INDEX's rules, as (NAME . VALUE)."
+  (let ((get (romacs-theme--reader rows (lambda (name) (gethash name index))))
+        (names (make-hash-table :test 'eq))
+        (resolved nil))
+    (dolist (name (append romacs-theme-slots romacs-theme-roles--names (mapcar #'car rows)))
+      (unless (gethash name names)
+        (puthash name t names)
+        (push (cons name (funcall get name)) resolved)))
+    (nreverse resolved)))
+
+(defun romacs-theme-roles--floored-text (resolved)
+  "Rows for the text slots RESOLVED leaves under their floors on `bg'."
+  (let ((bg (cdr (assq 'bg resolved))) (rows nil))
+    (dolist (slot romacs-theme-roles--text-slots rows)
+      (let ((colour (cdr (assq (car slot) resolved))))
+        (when (and (romacs-theme-roles--hex colour) (< (romacs-color-contrast colour bg) (cdr slot)))
+          (push (list (car slot) (romacs-color-floor colour bg (cdr slot))) rows))))))
+
 (defun romacs-theme-roles-resolve (palette)
   "PALETTE with every slot and role, as an alist (NAME . VALUE): the one
-effective palette a theme's faces and readers share.  Common overrides
-are PALETTE's rows too, ahead of its own."
+effective palette a theme's faces and readers share, its text slots at
+their floors.  Common overrides are PALETTE's rows too, ahead of its own."
   (let* ((mode (romacs-theme--second (assq 'mode palette)))
          (index (or (cdr (assq mode romacs-theme-roles--indexes))
                     (let ((built (romacs-theme-roles--index mode)))
                       (push (cons mode built) romacs-theme-roles--indexes)
                       built)))
          (rows (append romacs-theme-common-palette-overrides romacs-theme-common-palette-user palette))
-         (get (romacs-theme--reader rows (lambda (name) (gethash name index))))
-         (names (make-hash-table :test 'eq))
-         (resolved nil))
-    (dolist (name (append romacs-theme-slots romacs-theme-roles--names (mapcar #'car rows)))
-      (unless (gethash name names)
-        (puthash name t names)
-        (push (cons name (funcall get name)) resolved)))
-    (nreverse resolved)))
+         (resolved (romacs-theme-roles--read rows index))
+         (floored (romacs-theme-roles--floored-text resolved)))
+    (if floored (romacs-theme-roles--read (append floored rows) index) resolved)))
 
 ;;;; Floors
 
@@ -180,10 +206,6 @@ are PALETTE's rows too, ahead of its own."
 
 (defconst romacs-theme-roles--carrier "\\`\\(?:ansi-color-\\|term-color-\\|eat-term-color-\\|vterm-color-\\)"
   "Faces that carry a terminal's colours, which a program picks.")
-
-(defun romacs-theme-roles--hex (value)
-  "VALUE if it is a colour the floors can read."
-  (and (stringp value) (= (length value) 7) (eq (aref value 0) ?#) value))
 
 (defun romacs-theme-roles--attributes (spec)
   "The attributes face SPEC gives a graphic display: its first clause for a

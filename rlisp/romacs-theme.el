@@ -580,6 +580,24 @@ spec replaces the face's own."
 (defconst romacs-theme-bundled
   '((default dark default)
     (rum dark rum)
+    (catppuccin-latte light catppuccin)
+    (catppuccin-mocha dark catppuccin)
+    (dracula dark dracula)
+    (everforest-dark dark everforest)
+    (everforest-light light everforest)
+    (gruvbox-dark dark gruvbox)
+    (gruvbox-light light gruvbox)
+    (kanagawa-lotus light kanagawa)
+    (kanagawa-wave dark kanagawa)
+    (nord dark nord)
+    (one-dark dark one)
+    (one-light light one)
+    (rose-pine-dawn light rose-pine)
+    (rose-pine-main dark rose-pine)
+    (solarized-dark dark solarized)
+    (solarized-light light solarized)
+    (tokyonight-day light tokyonight)
+    (tokyonight-night dark tokyonight)
     (omarchy-catppuccin dark omarchy-catppuccin)
     (omarchy-catppuccin-latte light omarchy-catppuccin)
     (omarchy-ethereal dark omarchy-ethereal)
@@ -608,9 +626,14 @@ spec replaces the face's own."
 
 ;; GNU's `theme-list-variants' reads a theme's family from its symbol, which
 ;; a theme not loaded yet would not have.
-(dolist (entry romacs-theme-bundled)
-  (put (car entry) 'theme-properties
-       (list :kind 'color-scheme :background-mode (nth 1 entry) :family (nth 2 entry))))
+(defun romacs-theme--register (rows)
+  "Give each theme of ROWS, (NAME MODE FAMILY), the properties GNU's
+variant lookup reads."
+  (dolist (entry rows)
+    (put (car entry) 'theme-properties
+         (list :kind 'color-scheme :background-mode (nth 1 entry) :family (nth 2 entry)))))
+
+(romacs-theme--register romacs-theme-bundled)
 
 (defun romacs-theme--modus-palette (modus)
   "The palette MODUS describes, Modus's every entry (overrides first, as

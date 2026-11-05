@@ -232,6 +232,105 @@
 (romacs-deftest romacs-theme-author-coverage-is-the-same-for-every-theme ()
   (romacs-should (equal (romacs-theme-uncovered 'romacs-author-dark) (romacs-theme-uncovered 'romacs-author-light))))
 
+(romacs-deftest romacs-theme-author-a-floored-slot-is-one-colour ()
+  ;; A text slot under its floor moves in the palette, so the reader and
+  ;; every face that shows it agree.
+  (let* ((rows (romacs-theme-roles-rows '((mode light) (bg "#fdf6e3") (fg "#657b83") (red "#dc322f") (green "#859900")
+                                          (yellow "#b58900") (blue "#268bd2") (magenta "#d33682") (cyan "#2aa198"))
+                                        nil nil))
+         (palette (plist-get rows :palette))
+         (read (lambda (face) (plist-get (romacs-theme-roles--attributes (nth 1 (assq face (plist-get rows :faces))))
+                                         :foreground))))
+    (romacs-should (>= (romacs-color-contrast (cdr (assq 'fg palette)) "#fdf6e3") 4.5))
+    (romacs-should (equal (funcall read 'default) (cdr (assq 'fg palette))))
+    (romacs-should (equal (cdr (assq 'fg-main palette)) (cdr (assq 'fg palette))))))
+
+;;;; The ported schemes
+
+(defconst romacs-theme-author-test--ported
+  '(tokyonight-night tokyonight-day catppuccin-mocha catppuccin-latte gruvbox-dark gruvbox-light nord
+    everforest-dark everforest-light kanagawa-wave kanagawa-lotus rose-pine-main rose-pine-dawn dracula
+    one-dark one-light solarized-dark solarized-light)
+  "The schemes ported as Romacs's own.")
+
+(defconst romacs-theme-author-test--variants
+  '((tokyonight tokyonight-night tokyonight-day) (catppuccin catppuccin-mocha catppuccin-latte)
+    (gruvbox gruvbox-dark gruvbox-light) (everforest everforest-dark everforest-light)
+    (kanagawa kanagawa-wave kanagawa-lotus) (rose-pine rose-pine-main rose-pine-dawn)
+    (one one-dark one-light) (solarized solarized-dark solarized-light))
+  "Each family with an upstream light variant, dark first.")
+
+(defun romacs-theme-author-test--load-ported ()
+  "Load every ported theme, without enabling it."
+  (dolist (theme romacs-theme-author-test--ported)
+    (unless (custom-theme-p theme) (load-theme theme t t))))
+
+(romacs-deftest romacs-theme-ported-the-table-agrees-with-the-files ()
+  (romacs-theme-author-test--load-ported)
+  (dolist (theme romacs-theme-author-test--ported)
+    (let ((row (assq theme romacs-theme-bundled)) (properties (get theme 'theme-properties)))
+      (romacs-should row)
+      (romacs-should (eq (plist-get properties :kind) 'color-scheme))
+      (romacs-should (eq (plist-get properties :background-mode) (nth 1 row)))
+      (romacs-should (eq (plist-get properties :family) (nth 2 row))))))
+
+(romacs-deftest romacs-theme-ported-a-family-has-its-light-variant ()
+  (romacs-theme-author-test--load-ported)
+  (dolist (family romacs-theme-author-test--variants)
+    (romacs-should (eq (plist-get (get (nth 1 family) 'theme-properties) :background-mode) 'dark))
+    (romacs-should (eq (plist-get (get (nth 2 family) 'theme-properties) :background-mode) 'light))
+    (romacs-should (eq (plist-get (get (nth 1 family) 'theme-properties) :family) (car family)))
+    (romacs-should (eq (plist-get (get (nth 2 family) 'theme-properties) :family) (car family)))))
+
+(romacs-deftest romacs-theme-ported-text-reads-at-its-floor ()
+  (romacs-theme-author-test--load-ported)
+  (dolist (theme romacs-theme-author-test--ported)
+    (let* ((rows (romacs-theme-rows theme)) (resolved (plist-get rows :palette)))
+      ;; A text slot is at its floor in the palette itself.
+      (dolist (slot romacs-theme-roles--text-slots)
+        (romacs-should (>= (romacs-color-contrast (cdr (assq (car slot) resolved)) (cdr (assq 'bg resolved)))
+                           (cdr slot))))
+      ;; What another pass would still move is de-emphasised text that a
+      ;; move took off its slot's colour, at 3:1 on its own background.
+      (dolist (move (romacs-theme-roles-floors (plist-get rows :faces) resolved))
+        (romacs-should (>= (romacs-color-contrast (nth 1 move) (nth 3 move)) 3.0))))))
+
+(romacs-deftest romacs-theme-ported-shows-no-modus-colour ()
+  ;; Colours the upstream palette itself has are its own; the core's show
+  ;; only by coincidence, listed: Nord's diff tint, its own Oklab mix, is
+  ;; the core's `bg-mode-line-active'.
+  (romacs-theme-author-test--load-ported)
+  (let ((core (delq nil (mapcar (lambda (row) (and (stringp (nth 1 row)) (nth 1 row)))
+                                romacs-theme-modus-vivendi-palette))))
+    (dolist (theme romacs-theme-author-test--ported)
+      (let* ((rows (romacs-theme-rows theme))
+             (own (romacs-theme-author-test--strings (get theme 'romacs-palette)))
+             (shown (romacs-theme-author-test--strings (list (plist-get rows :faces) (plist-get rows :variables))))
+             (leaks (seq-remove (lambda (colour)
+                                  (or (gethash colour own) (member colour '("#000000" "#ffffff"))
+                                      (and (eq theme 'nord) (equal colour "#505050"))))
+                                (seq-filter (lambda (colour) (gethash colour shown)) core))))
+        (romacs-should (equal (list theme leaks) (list theme nil)))
+        (romacs-should (not (gethash "gray50" shown)))))))
+
+(romacs-deftest romacs-theme-ported-the-whole-table-is-themed ()
+  (romacs-theme-author-test--load-ported)
+  (let ((faces (mapcar #'car (plist-get (romacs-theme-rows 'nord) :faces))))
+    (dolist (face '(default region mode-line font-lock-keyword-face font-lock-comment-face org-level-1
+                    diff-added magit-section-heading notmuch-tag-face message-header-name
+                    completions-common-part line-number romacs-comment ansi-color-red))
+      (romacs-should (memq face faces)))
+    (dolist (theme romacs-theme-author-test--ported)
+      (romacs-should (equal (list theme (length (plist-get (romacs-theme-rows theme) :faces)))
+                            (list theme (length faces)))))))
+
+(romacs-deftest romacs-theme-ported-a-file-names-its-source ()
+  (dolist (theme romacs-theme-author-test--ported)
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name (format "etc/themes/%s-theme.el" theme) romacs-theme-author-test--root))
+      (romacs-should (re-search-forward "^;; Palette: .+, \\(MIT\\|Apache-2\\.0\\), https://github\\.com/" nil t))
+      (romacs-should (re-search-forward "^;; ([0-9a-f]\\{12\\}, " nil t)))))
+
 (romacs-deftest romacs-theme-author-the-doc-s-blocks-run ()
   (with-temp-buffer
     (insert-file-contents (expand-file-name "doc/themes.org" romacs-theme-author-test--root))
