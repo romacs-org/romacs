@@ -111,6 +111,31 @@ fn rows_continue_and_truncate_as_gnu_without_fringes() {
     let truncated = shown(&s);
     assert_eq!(&truncated[8..], &[('i', 96.0, 0.0), ('$', 108.0, 0.0), ('x', 0.0, 23.0), ('y', 12.0, 23.0)]);
 }
+/// A truncated row exactly as wide as the window less the `$' column
+/// shows whole, with no `$': only a glyph past the edge truncates it.
+#[test]
+fn a_row_that_fits_exactly_is_not_truncated() {
+    let mut s = scene();
+    s.width = 120; // ten 12px columns: nine before the `$' column
+    s.wrap = romacs_layout_input::LineWrap::Truncate;
+    s.text = TextSlice { extends: vec![], utf8: "abcdefghi\nabcdefghij\nabcdefghi".into(), face_runs: vec![], raw: vec![] };
+    let rows: Vec<String> = {
+        let glyphs = romacs_layout2::layout(&s, 1).unwrap().glyphs;
+        let mut rows = vec![String::new(); 3];
+        for g in &glyphs { if let FrameGlyph::Char { char, y, .. } = g { rows[(*y / 23.0) as usize].push(*char); } }
+        rows
+    };
+    assert_eq!(rows, ["abcdefghi", "abcdefghi$", "abcdefghi"]);
+    // A display table's glyph in place of `$' reserves the same column.
+    s.chrome.line_glyphs = [Some('…'), Some(' ')];
+    let rows: Vec<String> = {
+        let glyphs = romacs_layout2::layout(&s, 1).unwrap().glyphs;
+        let mut rows = vec![String::new(); 3];
+        for g in &glyphs { if let FrameGlyph::Char { char, y, .. } = g { rows[(*y / 23.0) as usize].push(*char); } }
+        rows
+    };
+    assert_eq!(rows, ["abcdefghi", "abcdefghi…", "abcdefghi"]);
+}
 /// A window starting on a continuation row lays it out as from the line's
 /// start: the rows above count toward a TAB's stop.
 #[test]

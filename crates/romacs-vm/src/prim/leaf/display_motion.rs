@@ -143,6 +143,9 @@ pub(super) struct It {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Ctx {
+    /// The x the hscroll hides each line's text before (first_visible_x):
+    /// a glyph counts in a row's hpos only when it ends past it.
+    pub first_visible_x: i64,
     pub last_visible_x: i64,
     pub wrap: Wrap,
     pub tab_width: i64,
@@ -360,13 +363,20 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
     let mut may_wrap = false;
     let mut subject = 0u8;
     let reached = |e: &Elem| op.pos && e.reaches() && e.charpos >= to;
+    // A line number for a row whose text starts left of the window's first
+    // visible x (hscrolled) waits for the first glyph that shows.
+    let mut lnum_pending = false;
     if it.hpos == 0 {
-        // maybe_produce_line_number, unless moving to x 0 (GNU tests
-        // `op && MOVE_TO_X').
+        // maybe_produce_line_number, unless moving to the first visible x
+        // (GNU tests `op && MOVE_TO_X').
         let moving = op.pos || op.x || op.y || op.vpos;
-        if let Some(lnum) = cx.lnum && !(moving && to_x == 0) && it.current_x == 0 {
-            let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
-            (it.current_x, it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (x, glyphs, x, x, glyphs);
+        if let Some(lnum) = cx.lnum && !(moving && to_x == cx.first_visible_x) {
+            if it.current_x == cx.first_visible_x {
+                let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
+                (it.current_x, it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (it.current_x + x, glyphs, x, x, glyphs);
+            } else {
+                lnum_pending = it.current_x < cx.first_visible_x;
+            }
         }
         if it.prefix.is_none() { handle_line_prefix(src, it)?; }
         subject = u8::from(it.prefix.is_some());
@@ -440,7 +450,17 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
                     }
                     if atpos_it.is_none() { let mut a = *it; (a.current_x, a.max_h) = (x, max_h); atpos_it = Some(a); }
                 }
-                if new_x > 0 { it.hpos += 1; }
+                if new_x > cx.first_visible_x {
+                    if lnum_pending && let Some(lnum) = cx.lnum {
+                        // The row's first visible glyph: its number shows
+                        // at the first visible x, the text after it.
+                        lnum_pending = false;
+                        let (glyphs, width) = lnum.prefix(src.line_at(it.index)?);
+                        it.current_x = cx.first_visible_x + width + new_x - cx.first_visible_x;
+                        (it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (it.hpos + glyphs, width, width, it.hpos + glyphs);
+                    }
+                    it.hpos += 1;
+                }
                 x = new_x;
             }
             if result != Move::Undefined { break; }
