@@ -137,6 +137,42 @@ fn a_memory_log_does_not_count_its_own_export() {
     assert_eq!(eval(&mut vm, source), "0");
 }
 
+/// Allocation into the entries a collection freed is allocation: after a
+/// sweep leaves a dead list's conses free below a live one, a function
+/// that conses into them is charged (gc.rs `FreeEntries::allocated').
+#[test]
+fn allocation_into_freed_entries_is_charged() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let source = "(progn (setq pt-junk (make-list 5000 nil) pt-keep (list 1)) (setq pt-junk nil) (garbage-collect)
+                   (defalias 'pt-cons (lambda () (make-list 2000 nil)))
+                   (profiler-memory-start) (pt-cons) (profiler-memory-stop)
+                   (let ((n 0))
+                     (maphash (lambda (k v) (when (memq 'pt-cons (append k nil)) (setq n (+ n v)))) (profiler-memory-log))
+                     (>= n 32000)))";
+    assert_eq!(eval(&mut vm, source), "t");
+}
+
+/// The profiler charges an object's storage, not only its entry: copying
+/// a populated hash table or a string with properties is charged for the
+/// copy's table and property runs.
+#[test]
+fn copies_are_charged_their_storage() {
+    let mut vm = Vm::new();
+    let source = "(progn (setq pt-h (make-hash-table) pt-s (propertize (make-string 64 ?x) 'face 'bold))
+                   (dotimes (i 1000) (puthash i i pt-h))
+                   (defalias 'pt-copy-table (lambda () (copy-hash-table pt-h)))
+                   (defalias 'pt-copy-string (lambda () (copy-sequence pt-s)))
+                   (profiler-memory-start) (pt-copy-table) (pt-copy-string) (profiler-memory-stop)
+                   (let ((table 0) (string 0))
+                     (maphash (lambda (k v) (cond ((memq 'pt-copy-table (append k nil)) (setq table (+ table v)))
+                                                  ((memq 'pt-copy-string (append k nil)) (setq string (+ string v)))))
+                              (profiler-memory-log))
+                     (list (>= table 24000) (> string 64) table string)))";
+    let result = eval(&mut vm, source);
+    assert!(result.starts_with("(t t "), "{result}");
+}
+
 /// An explicit closure keyed in a function-equal table is found after a
 /// collection moves its body and not the closure.
 #[test]

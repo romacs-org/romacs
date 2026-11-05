@@ -67,12 +67,32 @@ struct Session {
     dirty: bool,
     #[cfg(target_os = "linux")]
     child: Option<std::os::fd::OwnedFd>,
+    /// A duplicate of the PTY's master, and the shell's pid: the shell's
+    /// process group is the terminal's foreground one while
+    /// `tcgetpgrp(master)' is that pid.
+    #[cfg(unix)]
+    foreground: Option<(std::fs::File, i32)>,
 }
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
     fn pidfd_open(pid: i32, flags: u32) -> i32;
     fn pidfd_send_signal(fd: i32, signal: i32, info: *const std::ffi::c_void, flags: u32) -> i32;
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn tcgetpgrp(fd: i32) -> i32;
+}
+
+/// Whether the shell PID's process group is the foreground one of the
+/// terminal MASTER (one ioctl); false where it cannot be read.
+#[cfg(unix)]
+fn shell_has_foreground(master: &std::fs::File, pid: i32) -> bool {
+    use std::os::fd::AsRawFd;
+    // SAFETY: tcgetpgrp takes a descriptor this file owns and no pointers.
+    let group = unsafe { tcgetpgrp(master.as_raw_fd()) };
+    group > 0 && group == pid
 }
 
 impl Session {
@@ -391,6 +411,8 @@ impl TerminalHost for Service {
             escape_args: true,
         };
         let pty = tty::new(&options, size.window(), 0).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        let foreground = pty.file().try_clone().ok().map(|master| (master, pty.child().id() as i32));
         #[cfg(target_os = "linux")]
         let child = {
             use std::os::fd::FromRawFd;
@@ -426,6 +448,8 @@ impl TerminalHost for Service {
                 dirty: true,
                 #[cfg(target_os = "linux")]
                 child: Some(child),
+                #[cfg(unix)]
+                foreground,
             },
         );
         self.next_id = id;
@@ -469,7 +493,11 @@ impl TerminalHost for Service {
         session.events();
         let terminal = session.terminal.lock();
         let mode = terminal.mode();
-        Ok(TerminalInputState { running: session.running, application_cursor: mode.contains(TermMode::APP_CURSOR), bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE), alternate_screen: mode.contains(TermMode::ALT_SCREEN) })
+        #[cfg(unix)]
+        let shell_foreground = session.running && session.foreground.as_ref().is_some_and(|(master, pid)| shell_has_foreground(master, *pid));
+        #[cfg(not(unix))]
+        let shell_foreground = false;
+        Ok(TerminalInputState { running: session.running, application_cursor: mode.contains(TermMode::APP_CURSOR), bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE), alternate_screen: mode.contains(TermMode::ALT_SCREEN), shell_foreground })
     }
 
     fn changed_sessions(&mut self) -> Vec<u64> { self.mailbox.take() }

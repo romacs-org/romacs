@@ -525,3 +525,11 @@ fn wait_status(_cx, status: Integer) {
     let kind = _cx.intern(kind);
     Ok(_cx.cons(kind, Value::integer(n.into()).map_err(Fault::Error)?))
 }}
+
+// process.c:8628: sig2str's name for each number up to SIGNUM_BOUND,
+// consed in ascending order, so the highest first.
+defsubr! { name = "signal-names", gnu = "process.c:8628", effect = Pure,
+fn signal_names(cx) {
+    Ok((0..=crate::subprocess::signal_bound()).filter_map(crate::subprocess::signal_name)
+        .fold(Value::NIL, |list, name| { let name = cx.string(&name); cx.cons(name, list) }))
+}}

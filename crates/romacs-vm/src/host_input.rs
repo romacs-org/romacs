@@ -60,6 +60,12 @@ pub trait HostInput {
     /// True when an event is already queued. GNU's `read_char' does not
     /// redisplay while input is pending (keyboard.c, `detect_input_pending').
     fn input_pending(&mut self) -> bool;
+    /// True when a key press is queued: what ends an idle collection while
+    /// it is still marking (`Vm::collect_garbage_until_key'). A host that
+    /// cannot tell keys from other events answers whether any is queued.
+    fn key_pending(&mut self) -> bool {
+        self.input_pending()
+    }
     /// Paint `frame`; return the layout's window ends to commit
     /// (`Vm::display_apply_layout').
     fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String>;
@@ -239,6 +245,14 @@ impl Vm {
         Ok(out)
     }
 
+    /// A redisplay took TOOK: the first after `romacs--redisplay-since-mark's
+    /// mark is what the command that marked it cost the display.
+    pub fn redisplay_done(&mut self, took: std::time::Duration) {
+        if self.redisplay_since_mark == Some(None) {
+            self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
+        }
+    }
+
     /// keyboard.c timer_stop_idle: the host read a key for a command.
     pub fn timer_stop_idle(&mut self) {
         self.idle_since = None;
@@ -289,6 +303,7 @@ impl Vm {
                     let text_animations = self.text_animations()?;
                     let ends = host.redisplay(HostFrame { frame, selected, minibuffer, snapshot, text_animations })?;
                     self.display_apply_layout(&ends)?;
+                    self.redisplay_done(crate::host::monotonic().saturating_duration_since(started));
                     redraw = false;
                 }
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
@@ -344,6 +359,38 @@ mod tests {
         fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
             Ok(HostEvent::Key(CommandEvent::Character(self.0.remove(0))))
         }
+    }
+
+    /// Keys whose every redisplay takes the next of its durations.
+    struct SlowPaint(Vec<i64>, Vec<u64>);
+    impl HostInput for SlowPaint {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> {
+            std::thread::sleep(std::time::Duration::from_millis(self.1.remove(0)));
+            Ok(Vec::new())
+        }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<HostEvent, String> {
+            Ok(HostEvent::Key(CommandEvent::Character(self.0.remove(0))))
+        }
+    }
+
+    /// `romacs--redisplay-since-mark' answers the first redisplay after its
+    /// mark, not a later one, and nil after a new mark until one runs.
+    #[test]
+    fn the_first_redisplay_after_a_mark_is_timed() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120, 121], vec![5, 40]))));
+        let got = vm
+            .eval_source("(list (romacs--redisplay-since-mark t) (romacs--redisplay-since-mark)
+                                (progn (romacs--read-host-event) (romacs--read-host-event) (romacs--redisplay-since-mark t))
+                                (romacs--redisplay-since-mark))")
+            .map(|v| v.display().unwrap())
+            .unwrap_or_else(|e| format!("VM-ERROR {e}"));
+        let words: Vec<&str> = got.trim_matches(|c| c == '(' || c == ')').split(' ').collect();
+        assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
+        let first: u64 = words[2].parse().expect(&got);
+        assert!((5_000..40_000).contains(&first), "{got}");
     }
 
     /// The T2 continuation path (`t2_dispatch`) also routes the read to engine

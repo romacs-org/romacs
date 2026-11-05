@@ -146,8 +146,7 @@ impl Vm {
         if !present {
             let slot = self.slot("features");
             let old = self.slots[slot].value;
-            self.conses.push((feature, old));
-            self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+            self.slots[slot].value = self.alloc_cons(feature, old);
         }
         if subfeature != Value::NIL {
             let key = self.intern("subfeatures");
@@ -277,8 +276,7 @@ impl Vm {
                 if !present {
                     let slot = self.slot("features");
                     let old = self.slots[slot].value;
-                    self.conses.push((args[0], old));
-                    self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+                    self.slots[slot].value = self.alloc_cons(args[0], old);
                 }
                 if subfeature != Value::NIL {
                     let key = self.intern("subfeatures");
@@ -367,7 +365,7 @@ impl Vm {
     /// GNU lread.c readevalloop_eager_expand_eval: expand the head only,
     /// then recurse into a resulting progn before expanding its next child.
     /// A prog2 macro can produce a progn too; prog1 itself is not split.
-    fn eval_load_toplevel(&mut self, form: &Form, source: Option<&str>, lazy: bool, depth: usize) -> Result<Value> {
+    fn eval_load_toplevel(&mut self, form: &Form, depth: usize) -> Result<Value> {
         if depth >= 128 || !eval_depth::native_stack_room() {
             return Err("top-level macro expansion limit exceeded".into());
         }
@@ -381,21 +379,21 @@ impl Vm {
             Err(error) => return Err(self.eager_expansion_failure(error)),
         };
         if let Some(expanded) = expanded {
-            return self.eval_load_toplevel(&expanded, None, lazy, depth + 1);
+            return self.eval_load_toplevel(&expanded, depth + 1);
         }
         // Before GNU subr.el has installed prog2, its bootstrap surface
         // expansion must expose the same top-level progn boundary.
         if matches!(form, Form::List(items) if matches!(items.first(), Some(Form::Sym(head)) if head == "prog2"))
             && let Some(expanded) = expand::expand(form)?
         {
-            return self.eval_load_toplevel(&expanded, None, lazy, depth + 1);
+            return self.eval_load_toplevel(&expanded, depth + 1);
         }
         if let Form::List(items) = form
             && matches!(items.first(), Some(Form::Sym(head)) if head == "progn")
         {
             let mut result = Value::NIL;
             for child in &items[1..] {
-                result = self.eval_load_toplevel(child, None, lazy, depth + 1)?;
+                result = self.eval_load_toplevel(child, depth + 1)?;
             }
             return Ok(result);
         }
@@ -404,20 +402,21 @@ impl Vm {
         } else {
             self.seed_file_specials = true;
             self.file_level_request = true;
-            let compiled = self.expanding_for_load(|vm| if !lazy && let Some(source) = source {
-                vm.cached_source_form(source, form)
-            } else {
-                vm.compile_request(form).map(|(function, _)| function)
-            });
+            let compiled = self.expanding_for_load(|vm| vm.compile_request(form).map(|(function, _)| function));
             self.seed_file_specials = false;
             self.file_level_request = false;
             let compiled = match compiled {
                 Ok(function) => Ok(function),
                 Err(error) => Err(self.eager_expansion_failure(error)),
             };
+            // The form's entry has a single owner, as `eval''s does: its code
+            // goes as it returns. The definitions and closures it made stay
+            // while reachable; only those count toward a code collection.
             compiled.and_then(|function| {
                 self.propagate_next |= self.loader.propagate != 0;
-                self.execute_raw(function)
+                let outcome = self.execute_raw(function);
+                self.release_request_entry(function);
+                outcome
             })
         };
         if result.is_ok()
@@ -460,8 +459,8 @@ impl Vm {
     fn eager_expansion_failure(&mut self, error: String) -> String {
         let (condition, object) = match self.propagated_escape {
             Some(threaded::Escape::Signal(condition, data)) => {
-                self.conses.push((condition, data));
-                (condition, Value::reference(self.conses.len() - 1, 3))
+                let cons = self.alloc_cons(condition, data);
+                (condition, cons)
             }
             Some(threaded::Escape::Error { condition, object, .. }) => (condition, object),
             _ => return error,
@@ -540,9 +539,6 @@ impl Vm {
         // bindings of the reading buffer (standard-input, eval-buffer-list)
         // have no counterpart: VM2 reads the file's bytes.
         let shorthands = self.file_shorthands(&source)?;
-        // The source cache keys a form by its text; shorthands read that
-        // text to other symbols, so such a file's forms are compiled afresh.
-        let cacheable = shorthands == Value::NIL;
         let file = self.literal(&Form::String(named.clone()))?;
         let history_slot = self.slot("current-load-list");
         let outer = self.dynamic.len();
@@ -611,9 +607,6 @@ impl Vm {
                     break;
                 };
                 ordinal += 1;
-                // A form holding characters outside Unicode has no exact
-                // &str text: it is reported lossily and not compile-cached.
-                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok().filter(|_| cacheable);
                 let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
                 line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();
@@ -624,7 +617,7 @@ impl Vm {
                     file: path.to_string_lossy().into_owned(), line,
                     head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
                 });
-                let mut evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
+                let mut evaluated = self.eval_load_toplevel(&form, 0);
                 if crate::host::mode() == crate::host::Mode::Build {
                     // A layer's definition cut short by a refused effect
                     // defines nil here and is kept whole for restore.
@@ -686,7 +679,7 @@ impl Vm {
             }
             let call = Form::List(vec![Form::Sym("do-after-load-evaluation".into()), Form::String(named)]);
             let rooted = handle::FormObject::new(self, result);
-            self.eval_load_toplevel(&call, None, false, 0)?;
+            self.eval_load_toplevel(&call, 0)?;
             rooted.value(self)
         });
         let result = self.unbind_after(self.dynamic.len() - outer, result);
@@ -786,7 +779,7 @@ impl Vm {
             }
             let call = Form::List(vec![Form::Sym("do-after-load-evaluation".into()), Form::String(named)]);
             let rooted = handle::FormObject::new(self, result);
-            self.eval_load_toplevel(&call, None, false, 0)?;
+            self.eval_load_toplevel(&call, 0)?;
             rooted.value(self)
         })
     }

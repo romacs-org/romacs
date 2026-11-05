@@ -80,6 +80,10 @@ buffer's local map is the fallback."
             (when map (push (cons (car entry) map) maps))))))
     (nreverse maps)))
 
+(defun current-minor-mode-maps ()
+  "Return a list of keymaps for the minor modes of the current buffer."
+  (romacs-keymap--minor-maps))
+
 (defun minor-mode-key-binding (key &optional accept-default)
   "Find the visible minor mode bindings of KEY.
 Return an alist of pairs (MODENAME . BINDING), where MODENAME is

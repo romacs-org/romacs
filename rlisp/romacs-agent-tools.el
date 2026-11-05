@@ -60,7 +60,7 @@ by C-g, at its next safepoint.  0 means no budget."
         (file (romacs-agent-tools--log-file session-id)))
     (when (file-readable-p file)
       (with-temp-buffer
-        (insert-file-contents file)
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
         (goto-char (point-min))
         (while (not (eobp))
           (when-let* ((line (ignore-errors (json-parse-string (buffer-substring (point) (line-end-position))
@@ -77,10 +77,11 @@ by C-g, at its next safepoint.  0 means no budget."
         ;; A private file renamed over the log: an interrupted compaction
         ;; leaves the log as it was.
         (let ((temporary (concat file ".tmp")))
-          (with-temp-file temporary
-            (insert (json-serialize (romacs-mcp--object "key" "forgotten")) "\n")
-            (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
-              (insert (json-serialize (gethash key table)) "\n")))
+          (let ((coding-system-for-write 'utf-8-unix))
+            (with-temp-file temporary
+              (insert (romacs-agent--json (romacs-mcp--object "key" "forgotten")) "\n")
+              (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
+                (insert (romacs-agent--json (gethash key table)) "\n"))))
           (set-file-modes temporary #o600)
           (rename-file temporary file t))))
     table))
@@ -104,10 +105,11 @@ appended to its log."
 (defun romacs-agent-tools--key (peer id)
   "A call's key: the relay that sent it (its incarnation) and its request
 ID, so a resumed harness reusing ids never reads another's record."
-  (concat (or (process-get peer 'romacs-agent-relay) "") ":" (json-serialize id)))
+  (concat (or (process-get peer 'romacs-agent-relay) "") ":" (romacs-agent--json id)))
 
 (defun romacs-agent-tools--text (value)
-  (truncate-string-to-width (if (stringp value) value (format "%S" value)) 1024))
+  "VALUE as the log keeps it: Unicode text (a raw byte U+FFFD), cut short."
+  (romacs-mcp--unicode (truncate-string-to-width (if (stringp value) value (format "%S" value)) 1024)))
 
 (defun romacs-agent-tools--finish (session key name start value failed)
   (romacs-agent-tools--note session key (romacs-mcp--object
@@ -251,7 +253,10 @@ call stays running until its answer is ready."
         (generation (cl-incf romacs-agent-tools--generation)))
     (when (> budget 0) (romacs--call-deadline generation budget))
     (unwind-protect
-        (romacs-mcp-eval-string (gethash "code" arguments))
+        ;; A command the agent's code starts gets no editor launch variable
+        ;; either (`romacs-agent--editor-variables').
+        (let ((process-environment (romacs-agent--harness-environment)))
+          (romacs-mcp-eval-string (gethash "code" arguments)))
       (romacs--call-deadline nil))))
 
 ;;; Delegation (T3 Code's delegate_task, task_status, task_cancel)
@@ -436,30 +441,41 @@ started with the same clientRequestId."
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
-    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil)
+    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil
+          (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
     (romacs-agent-stop child)
     (romacs-agent-tools--task child)))
 
 (defun romacs-agent-tools--capabilities (arguments)
-  "Each provider instance: its harness, directory and program."
+  "Each provider instance (`romacs-agent-instances'): its harness,
+directory, program, whether it is enabled and where it comes from; and
+each one Romacs cannot run, with why."
   (romacs-mcp--instance arguments)
-  (romacs-mcp--object
-   "default" (romacs-agent--default-provider)
-   "providers"
-   (vconcat
-    (mapcar (lambda (entry)
-              (let* ((instance (romacs-agent--provider entry))
-                     (dir (or (plist-get instance :config-dir)
-                              (plist-get (alist-get (plist-get instance :harness) romacs-agent--harnesses) :default))))
-                (romacs-mcp--object
-                 "providerInstanceId" (plist-get instance :name) "harness" (symbol-name (plist-get instance :harness))
-                 "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)
-                 "program" (plist-get instance :program)
-                 "programFound" (if (executable-find (plist-get instance :program)) t :false)
-                 "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
-            romacs-agent-providers))))
+  (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
+    (romacs-mcp--object
+     "default" (or (ignore-errors (romacs-agent--default-provider)) :null)
+     "providers"
+     (vconcat
+      (mapcar (lambda (instance)
+                (let ((dir (or (plist-get instance :config-dir)
+                               (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-default))))
+                  (romacs-mcp--object
+                   "providerInstanceId" (plist-get instance :name) "displayName" (plist-get instance :display)
+                   "harness" (symbol-name (plist-get instance :harness))
+                   "enabled" (if (plist-get instance :enabled) t :false)
+                   "source" (symbol-name (plist-get instance :source))
+                   "t3InstanceId" (or (plist-get instance :t3-id) :null)
+                   "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)
+                   "program" (plist-get instance :program)
+                   "programFound" (if (executable-find (plist-get instance :program)) t :false)
+                   "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
+              instances))
+     "constraints"
+     (vconcat (mapcar (lambda (c) (romacs-mcp--object "source" (symbol-name (plist-get c :source))
+                                                      "id" (or (plist-get c :id) :null) "reason" (plist-get c :reason)))
+                      constraints)))))
 
 ;;; Restart requests (the agents-develop-Romacs-live loop)
 

@@ -42,6 +42,7 @@ fn mixed_comparisons_do_not_round_integers_before_comparing() {
 #[test]
 fn boxed_floats_move_and_survive_executor_collection() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.read_source("[0.1 0.2]").unwrap();
     let v = vm.read_source("[1.25 (2.5 . 3.75)]").unwrap().unwrap().0;
     let before = format!("{v:?}");

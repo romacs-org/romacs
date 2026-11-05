@@ -11,7 +11,7 @@ defsubr! { name = "json-insert", gnu = "json.c:627", effect = Global,
 fn json_insert(cx, object: Value; rest args) -> Step {
     let bytes = cx.json_serialize_bytes(object, args)?;
     // Characters into a multibyte buffer, UTF-8 bytes into a unibyte one.
-    let multibyte = cx.casing_multibyte()?;
+    let multibyte = cx.buffer_multibyte()?;
     let text = cx.make_string(bytes, multibyte);
     Ok(Step::Call { f: cx.intern("insert"), args: vec![text], then: inserted, saved: vec![] })
 }}

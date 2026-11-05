@@ -42,6 +42,16 @@ with the session before its harness starts.  Return the session.
 (register-definition-prefixes "romacs-agent" '("romacs-agent-"))
 
 
+;;; Generated autoloads from romacs-agent-claude.el
+
+(register-definition-prefixes "romacs-agent-claude" '("romacs-agent--claude-"))
+
+
+;;; Generated autoloads from romacs-agent-codex.el
+
+(register-definition-prefixes "romacs-agent-codex" '("romacs-agent--codex-"))
+
+
 ;;; Generated autoloads from romacs-agent-gnosis.el
 
 (register-definition-prefixes "romacs-agent-gnosis" '("romacs-agent-gnosis--"))
@@ -54,6 +64,11 @@ with the session before its harness starts.  Return the session.
 
 (fn ITEM)")
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
+
+
+;;; Generated autoloads from romacs-agent-t3.el
+
+(register-definition-prefixes "romacs-agent-t3" '("romacs-agent-t3-"))
 
 
 ;;; Generated autoloads from romacs-agent-tools.el
@@ -263,14 +278,14 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-gui-loadup" '("romacs-gui-"))
 
 
+;;; Generated autoloads from romacs-help.el
+
+(register-definition-prefixes "romacs-help" '("describe-" "help--describe-vector" "internal-describe-syntax-value" "romacs-help--" "text-char-description"))
+
+
 ;;; Generated autoloads from romacs-icons.el
 
 (register-definition-prefixes "romacs-icons" '("romacs-icon"))
-
-
-;;; Generated autoloads from romacs-image.el
-
-(register-definition-prefixes "romacs-image" '("romacs-"))
 
 
 ;;; Generated autoloads from romacs-install-command.el
@@ -280,7 +295,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("current-active-maps" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
+(register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-landing.el

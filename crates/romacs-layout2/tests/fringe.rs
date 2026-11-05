@@ -24,7 +24,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None,
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap, cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None,
         faces: vec![face([255; 3], [0; 3]), face([1, 2, 3], [200, 0, 0]), face([0, 255, 0], [0; 3])],
         chrome: WindowChrome { left_fringe: 8, right_fringe: 8, fringe_face: FaceHandle(1), indicators, ..WindowChrome::default() },
     }
@@ -33,7 +33,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
 fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnapshot {
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width: 116, height: 200 + y,
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
         windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(), status_bar: None,
     }
 }
@@ -88,6 +88,22 @@ fn a_right_fringe_takes_the_truncation_glyph_and_shows_an_arrow() {
     assert!(!chars(&painted, GlyphRowRole::Text).contains('$'));
     let marks = bitmaps(&painted);
     assert_eq!(marks.iter().map(|m| (m.0, m.1)).collect::<Vec<_>>(), vec![(4, FringeSide::Right)]);
+}
+
+#[test]
+fn a_row_as_wide_as_the_window_shows_no_truncation_arrow() {
+    // window()'s text area holds a whole number of columns: a row of
+    // exactly that many characters fits, a longer one is truncated.
+    let fits = (0..200).map(|n| n.to_string()).collect::<String>();
+    let probe = lay_out(frame(window(&fits, LineWrap::Truncate), None));
+    let shown = chars(&probe, GlyphRowRole::Text).len();
+    let exact: String = fits.chars().take(shown).collect();
+    let painted = lay_out(frame(window(&format!("{exact}\nx"), LineWrap::Truncate), None));
+    assert_eq!(chars(&painted, GlyphRowRole::Text), format!("{exact}x"));
+    assert!(bitmaps(&painted).iter().all(|m| m.1 != FringeSide::Right), "{:?}", bitmaps(&painted));
+    let longer: String = fits.chars().take(shown + 1).collect();
+    let painted = lay_out(frame(window(&format!("{longer}\nx"), LineWrap::Truncate), None));
+    assert_eq!(bitmaps(&painted).iter().map(|m| (m.0, m.1)).collect::<Vec<_>>(), vec![(4, FringeSide::Right)]);
 }
 
 #[test]
@@ -262,7 +278,7 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
     assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
     let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(),
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(),
         faces: snapshot.faces.clone(), text: snapshot.text.clone(),
     }).unwrap();
     let advances: Vec<u32> = measured.glyphs.iter().map(|g| g.0).collect();

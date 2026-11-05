@@ -615,6 +615,23 @@ pub(crate) fn signal_description(signal: i32) -> Option<String> {
     Some(unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned())
 }
 
+/// gnulib sig2str's name for SIGNUM on GNU/Linux: the first name its table
+/// gives the number, or RTMIN+N / RTMAX-N in the real-time range.
+pub(crate) fn signal_name(signum: i32) -> Option<String> {
+    const NAMES: [&str; 32] = ["EXIT", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV",
+        "USR2", "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU", "XFSZ",
+        "VTALRM", "PROF", "WINCH", "POLL", "PWR", "SYS"];
+    if let Some(name) = usize::try_from(signum).ok().and_then(|i| NAMES.get(i)) { return Some((*name).into()); }
+    let (min, max) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+    if !(min..=max).contains(&signum) { return None; }
+    Some(if signum <= min + (max - min) / 2 {
+        if signum == min { "RTMIN".into() } else { format!("RTMIN+{}", signum - min) }
+    } else if signum == max { "RTMAX".into() } else { format!("RTMAX-{}", max - signum) })
+}
+
+/// SIGNUM_BOUND: the largest signal number.
+pub(crate) fn signal_bound() -> i32 { libc::SIGRTMAX() }
+
 /// Signal names GNU's `signal-process' accepts (sysdep.c sys_siglist order).
 pub(crate) fn signal_number(name: &str) -> Option<i32> {
     let name = name.strip_prefix("SIG").or_else(|| name.strip_prefix("sig")).unwrap_or(name);

@@ -13,9 +13,7 @@ impl Vm {
         Value::reference(self.slot(name) + 1, 7)
     }
     pub(super) fn keymap_cons(&mut self, car: Value, cdr: Value) -> Value {
-        let index = self.conses.len();
-        self.conses.push((car, cdr));
-        Value::reference(index, 3)
+        self.alloc_cons(car, cdr)
     }
     fn sparse_keymap(&mut self, prompt: Value) -> Value {
         let head = self.keymap_symbol("keymap");
@@ -138,6 +136,39 @@ impl Vm {
         }
         None
     }
+    /// keymap.c Fdefine_key: a definition vector whose first event is a
+    /// list is an XEmacs-style keyboard macro, stored with each modifier
+    /// list converted (`event-convert-list'), as bindings.el's keypad
+    /// translations `[(48)]' and `[(control 48)]' are `[48]' and `[C-0]'.
+    fn keyboard_macro_definition(&mut self, value: Value) -> Result<Value> {
+        let Some(Object::Vector(events)) = self.object_if(value) else { return Ok(value) };
+        if events.first().is_none_or(|event| event.tag() != 3) { return Ok(value); }
+        let mut events = events.clone();
+        for event in events.iter_mut() {
+            if event.tag() == 3 && self.lucid_event_type_list_p(*event) { *event = self.key_event_from_list(*event)?; }
+        }
+        Ok(self.allocate_object(Object::Vector(events)))
+    }
+    /// keymap.c get_keymap without AUTOLOAD, for `keymapp': a symbol whose
+    /// function is a keymap's autoload, `(autoload FILE DOC INTERACTIVE
+    /// keymap)', is a keymap before its file loads.
+    fn autoloaded_keymap(&self, object: Value) -> bool {
+        let (Some(&autoload), Some(&keymap)) = (self.names.get("autoload"), self.names.get("keymap")) else { return false };
+        if object == Value::NIL || object.index_if(7).is_none() { return false; }
+        let mut value = object;
+        for _ in 0..=self.slots.len() {
+            let Some(slot) = value.index_if(7).and_then(|i| i.checked_sub(1)) else { break };
+            match self.slots.get(slot) { Some(s) if s.function != Value::NIL => value = s.function, _ => return false }
+        }
+        let Ok((head, mut rest)) = self.cons_pair(value) else { return false };
+        if head != Value::reference(autoload + 1, 7) { return false; }
+        // Past FILE, DOC and INTERACTIVE to TYPE.
+        for _ in 0..3 {
+            let Ok((_, tail)) = self.cons_pair(rest) else { return false };
+            rest = tail;
+        }
+        self.cons_pair(rest).is_ok_and(|(kind, _)| kind == Value::reference(keymap + 1, 7))
+    }
     /// keymap.c get_keyelt with AUTOLOAD: a menu item's `:filter' result
     /// comes from `keymap_filters'; one not computed yet is left pending
     /// for the caller to run (KEYMAP_FILTER_PENDING).
@@ -217,7 +248,11 @@ impl Vm {
             } else if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
                 event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64)
                     .map(|c| self.char_table_get(entry, c as usize)).transpose()?.filter(|&v| v != Value::NIL)
-            } else if matches!(self.object_if(entry), Some(Object::Vector(_) | Object::SyntaxTable(_))) {
+            } else if let Some(Object::Vector(slots)) = self.object_if(entry) {
+                // access_keymap_1: a vector binds each character below its
+                // length, a nil slot an explicit nil that shadows a parent.
+                event.integer_value().and_then(|c| usize::try_from(c).ok()).and_then(|c| slots.get(c).copied())
+            } else if matches!(self.object_if(entry), Some(Object::SyntaxTable(_))) {
                 return Err("dense keymaps are not supported".into());
             } else { None };
             if let Some(value) = binding {
@@ -251,6 +286,22 @@ impl Vm {
             if tail == Value::NIL { break; }
             let (entry, next) = self.cons_pair(tail)?;
             if entry == keymap_symbol { break; }
+            if let Some(Object::Vector(slots)) = self.object_if(entry) {
+                // store_in_keymap: a vector takes a character below its
+                // length, and the part of a range below it; the rest of the
+                // range, and a key past it, go after it.
+                let len = slots.len();
+                if let Some(c) = event.integer_value().and_then(|c| usize::try_from(c).ok()).filter(|&c| c < len) {
+                    self.keymap_vector_fill(entry, c, c, value)?;
+                    return Ok(());
+                }
+                if let Some((from, to)) = range.filter(|_| len > 0) {
+                    let last = to.min(len - 1);
+                    if from <= last { self.keymap_vector_fill(entry, from, last, value)?; }
+                    if last == to { return Ok(()); }
+                }
+                insertion = tail;
+            }
             if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
                 let single = event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64).map(|c| (c as usize, c as usize));
                 if let Some((from, to)) = single.or(range) {
@@ -307,6 +358,12 @@ impl Vm {
             let new = self.keymap_cons(binding, old);
             self.traversal(Primitive::Setcdr, insertion, new)?;
         }
+        Ok(())
+    }
+    /// A dense keymap's VECTOR binds FROM through TO to VALUE, as given.
+    fn keymap_vector_fill(&mut self, vector: Value, from: usize, to: usize, value: Value) -> Result<()> {
+        let Object::Vector(slots) = self.object_mut(vector)? else { return Err("vector required".into()) };
+        slots[from..=to].fill(value);
         Ok(())
     }
     fn set_keymap_table_range(&mut self, table: Value, from: usize, to: usize, value: Value) -> Result<()> {
@@ -561,12 +618,13 @@ impl Vm {
         let args = self.stack[start..start + n].to_vec();
         match p {
             MakeSparseKeymap => Ok(self.sparse_keymap(args.first().copied().unwrap_or(Value::NIL))),
-            Keymapp => Ok(if self.resolve_keymap(args[0]).is_some() { Value::TRUE } else { Value::NIL }),
+            Keymapp => Ok(if self.resolve_keymap(args[0]).is_some() || self.autoloaded_keymap(args[0]) { Value::TRUE } else { Value::NIL }),
             Kbd => self.parse_kbd(args[0]),
             CurrentGlobalMap => Ok(self.slots[self.names["#:vm2-global-keymap"]].value),
             DefineKey | GlobalSetKey => {
                 let (map, sequence, value, remove) = if p == DefineKey { (args[0], args[1], args[2], n == 4 && args[3] != Value::NIL) }
                 else { (self.slots[self.names["#:vm2-global-keymap"]].value, args[0], args[1], false) };
+                let value = self.keyboard_macro_definition(value)?;
                 let events = self.key_events(sequence)?;
                 let result = self.define_keymap_key(map, &events, value, remove)?;
                 Ok(if p == GlobalSetKey { Value::NIL } else { result })

@@ -23,7 +23,7 @@ impl Vm {
     pub(crate) fn host_layout(&mut self, input: &MeasureInput) -> crate::Result<Measured> {
         let host = self.layout_host.as_mut().ok_or("no layout host")?;
         let measured = host.measure(input)?;
-        if measured.glyphs.len() != input.text.utf8.chars().count() || measured.face_heights.len() != input.faces.len() {
+        if measured.glyphs.len() != input.text.utf8.chars().count() || measured.ascents.len() != measured.glyphs.len() || measured.face_ascents.len() != measured.face_heights.len() || measured.face_heights.len() != input.faces.len() {
             return Err("layout host answered for other input".into());
         }
         Ok(measured)

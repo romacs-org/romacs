@@ -61,6 +61,8 @@ pub(crate) struct ShownText {
     /// BASE is then 0 and the segments hold buffer bytes.
     segments: Option<Vec<mini_window::Segment>>,
     stretches: Vec<romacs_layout_input::Stretch>,
+    /// The characters shown as images, in byte order.
+    images: Vec<romacs_layout_input::InlineImage>,
     wrap_flips: Vec<u32>,
     line_numbers: Option<romacs_layout_input::LineNumbers>,
 }
@@ -208,8 +210,18 @@ pub(super) struct DisplayState {
     diagnostics: std::cell::RefCell<Vec<String>>,
     /// Every evaluator entry a mode-line expansion made (`Vm::mode_line_evals').
     pub(super) mode_line_evals: u64,
+    /// The layout questions displayed windows answered by approximation
+    /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
+    pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, row_floor, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+
+/// A refusal of the hosted measurement a displayed window answered by
+/// approximation instead: its CLASS (the refusal's message), the major
+/// MODE of the buffer asked about, and how many times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LayoutRefusal { pub class: String, pub mode: String, pub n: u64 }
+romacs_snapshot::snapshot_struct!(LayoutRefusal { class, mode, n });
 impl DisplayState {
     /// The theme with every pending face edit applied: built once for them
     /// all, or, when that fails, one edit at a time, so an edit the theme
@@ -244,7 +256,7 @@ impl DisplayState {
     }
     /// The theme changed, or will at its next read: what faces realize
     /// may differ.
-    fn faces_changed(&mut self) {
+    pub(super) fn faces_changed(&mut self) {
         self.face_table = None;
         self.face_revision += 1;
     }
@@ -361,6 +373,7 @@ impl DisplayState {
             building_band: false,
             diagnostics: Default::default(),
             mode_line_evals: 0,
+            refusals: vec![],
         }
     }
 }
@@ -653,7 +666,8 @@ impl Vm {
         let background_alpha = self.frame_background_alpha()?;
         let tab_bar = self.tab_bar_snapshot()?;
         let chrome = self.pane_chrome()?;
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar })
+        let no_font = self.no_font_display();
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
@@ -909,6 +923,21 @@ impl Vm {
     pub fn take_display_diagnostics(&mut self) -> Vec<String> {
         drop(self.display_state.theme());
         std::mem::take(self.display_state.diagnostics.get_mut())
+    }
+    /// How a window-system frame shows a character no font has a glyph for:
+    /// `glyphless-char-display''s `no-font' extra slot, as
+    /// lookup_glyphless_char_display reads it for C -1, the graphical half
+    /// of a cons, nil or any other method being `empty-box'.
+    pub(crate) fn no_font_display(&mut self) -> romacs_layout_input::NoFont {
+        use romacs_layout_input::NoFont;
+        let slot = self.slot("glyphless-char-display");
+        let table = self.variable_value(slot).unwrap_or(Value::NIL);
+        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras.first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
+        let method = self.cons_pair(method).map_or(method, |(graphical, _)| graphical);
+        if method == self.display_symbol("hex-code") { NoFont::HexCode }
+        else if method == self.display_symbol("thin-space") { NoFont::ThinSpace }
+        else if let Some(text) = self.str_view(method).and_then(|view| view.as_str().map(str::to_owned)) { NoFont::Acronym(text) }
+        else { NoFont::EmptyBox }
     }
     pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
@@ -1230,7 +1259,7 @@ impl Vm {
         }
         let (id, buffer, mini) = (w.id, w.buffer, w.mini);
         self.slots[slot].value = buffer;
-        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, wrap_flips, line_numbers }
+        let ShownText { text: TextSlice { utf8, face_runs, raw, extends }, start_byte, point_byte, mut faces, base, at_zv, table, mut merged, segments, stretches, images, wrap_flips, line_numbers }
             = self.window_text(window, height, None)?;
         self.display_state.bases.insert(id, base);
         match segments {
@@ -1314,6 +1343,7 @@ impl Vm {
             wrap: self.window_line_wrap(window, buffer)?,
             cursor_off: self.window(window)?.cursor_off,
             stretches,
+            images,
             wrap_flips,
             line_numbers,
             chrome: self.text_chrome(window, &table, base, at_zv)?,
@@ -1396,7 +1426,7 @@ impl Vm {
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
             hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
-            stretches: shown.stretches.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
+            stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         Ok(Some((self.lay_out_alone(snapshot)?, shown)))
     }
     /// GNU's Fwindow_line_height (window.c:2048) for live WINDOW over the
@@ -1541,7 +1571,7 @@ impl Vm {
         let chrome = self.window_chrome(window, &table, false)?;
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(),
+            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         let end = self.lay_out_alone(snapshot)?;
         Ok(Some((end, shown)))
@@ -1551,7 +1581,8 @@ impl Vm {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?, width, height,
-            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }] };
+            background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }],
+            no_font: self.no_font_display() };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
     }
     /// The least height a painted row can have: the default face's row
@@ -1638,10 +1669,10 @@ impl Vm {
                 let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
                 let pos = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 as i64 + 1);
                 let (from, to) = (pos(shown.start)?, pos(shown.end)?);
-                let Ok(elements) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
+                let Ok((elements, element_images)) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
                 // Hidden and replaced newlines end no row: publish lines
                 // until as many show as the window has rows.
-                let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some(elements) };
+                let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some((elements, element_images)) };
                 lines *= 2;
                 let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
                 let accessible = b.accessible();
@@ -1721,7 +1752,7 @@ impl Vm {
                 _ => face_runs.push(FaceRun { bytes: offset..utf8.len(), face }),
             }
         };
-        let Some(elements) = elements else {
+        let Some((elements, element_images)) = elements else {
             let base = shown.start;
             utf8.push_str(&b.as_str()[shown.clone()]);
             // The raw bytes shown, as offsets into the published text; an
@@ -1759,12 +1790,13 @@ impl Vm {
                 line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
             return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
-                segments: None, stretches: vec![], wrap_flips: vec![], line_numbers });
+                segments: None, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers });
         };
         // Each element's character, its face, and the buffer byte it shows:
         // its own for the buffer's character, its position's for the rest.
         let mut segments: Vec<mini_window::Segment> = vec![];
         let mut stretches = vec![];
+        let mut images = vec![];
         let mut wrap_flips = vec![];
         let mut relative = vec![];
         let (mut start_at, mut point_at, mut cursor_at) = (None, None, None);
@@ -1791,6 +1823,7 @@ impl Vm {
                 if e.c.is_control() && e.c != '\n' && e.c != '\t' && let Some(escape) = escape { escape } else { face }
             };
             if let crate::prim::ShownKind::Stretch(width) = e.kind { stretches.push(romacs_layout_input::Stretch { byte: display, width }); }
+            if let crate::prim::ShownKind::Image(k) = e.kind { images.push(romacs_layout_input::InlineImage { byte: display, ..element_images[k as usize] }); }
             // A relative space's width waits for the host's glyph of C.
             let shown = if let crate::prim::ShownKind::Relative { factor, c } = e.kind {
                 relative.push((display, face, c, factor));
@@ -1824,6 +1857,7 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                no_font: self.no_font_display(),
                 faces: faces.clone(),
                 text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
             };
@@ -1833,7 +1867,7 @@ impl Vm {
             stretches.insert(at, romacs_layout_input::Stretch { byte, width });
         }
         Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw: vec![] }, start_byte: start_at.unwrap_or(len), point_byte: cursor_at.or(point_at).unwrap_or(len),
-            faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, wrap_flips, line_numbers })
+            faces, base: 0, at_zv, table: table.clone(), merged, segments: Some(segments), stretches, images, wrap_flips, line_numbers })
     }
     /// Whether WINDOW shows BUFFER's bytes SHOWN as more than its
     /// characters: text there has a `display' or `invisible' property, maybe
@@ -2494,14 +2528,7 @@ impl Vm {
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
         let point = self.window_point_value(window)?.as_integer()? as usize;
-        let tab_width = {
-            let slot = self.slot("tab-width");
-            self.variable_value(slot)?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as usize
-        };
-        let ctl_arrow = {
-            let slot = self.slot("ctl-arrow");
-            self.variable_value(slot)? != Value::NIL
-        };
+        let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
         // keyboard.el's Frecursive_edit keeps it.
@@ -2530,16 +2557,8 @@ impl Vm {
             }
         }
         let line_start = text[begv_byte..point_byte].rfind('\n').map_or(begv_byte, |n| begv_byte + n + 1);
-        // GNU current_column: tab stops, ^X control characters, wide characters.
-        let mut column = 0;
-        for c in text[line_start..point_byte].chars() {
-            column += match c {
-                '\t' => tab_width - column % tab_width,
-                '\u{0}'..='\u{1f}' | '\u{7f}' => if ctl_arrow { 2 } else { 4 },
-                '\u{80}'..='\u{9f}' => 4,
-                _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(0),
-            };
-        }
+        // GNU current_column, by the width rule (width_rule.rs).
+        let column = rule.string_columns(&text[line_start..point_byte]);
         Ok(mode_line::SpecState {
             buffer_name,
             start: char_at(start_byte)?,
@@ -2628,6 +2647,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
         };
@@ -2771,6 +2791,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces: vec![face],
             text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![], raw: vec![] },
         };
@@ -2808,6 +2829,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },
         };
@@ -2825,6 +2847,63 @@ impl Vm {
 }
 
 /// The display's face for realized ATTRS of the face NAME.
+/// The box a face's `:box' value draws, as xfaces.c realize_gui_face reads
+/// it: N (t is 1), N pixels high above and below and |N| wide at the
+/// sides; (VWIDTH . HWIDTH), the sides' and the top and bottom's own; a
+/// colour, 1 pixel in it; a plist of `:line-width' (either form), `:color'
+/// and `:style' (`released-button', `pressed-button', or `flat-button', a
+/// line in the face's BACKGROUND unless `:color' gives one).  Widths are
+/// GNU's, limited to 1000.
+fn face_box(slot: &FaceSlot, background: [u8; 3]) -> Option<romacs_layout_input::BoxLine> {
+    use romacs_face::Datum;
+    use romacs_layout_input::BoxLine;
+    let named = |name: &str| romacs_display_protocol::x11_color_value(name).map(|(r, g, b)| [r, g, b]);
+    let width = |n: i64| n.clamp(-1000, 1000) as i16;
+    // A scalar width: |N| at the sides, N above and below.
+    let scalar = |n: i64| (width(n).saturating_abs(), width(n));
+    let pair = |head: &[Datum], tail: &Datum| match (head, tail) {
+        ([Datum::Int(v)], Datum::Int(h)) => Some((width(*v), width(*h))),
+        _ => None,
+    };
+    let line = |(vertical, horizontal): (i16, i16)| BoxLine { vertical, horizontal, color: None, style: 1 };
+    let boxed = match slot {
+        FaceSlot::Set(FaceValue::Int(n)) if *n != 0 => line(scalar(*n)),
+        FaceSlot::Set(FaceValue::Str(name)) => BoxLine { color: named(name), ..line((1, 1)) },
+        FaceSlot::Set(FaceValue::Structured(datum)) => match &**datum {
+            Datum::Dotted(head, tail) => line(pair(head, tail)?),
+            Datum::List(items) => {
+                let mut boxed = line((1, 1));
+                let mut flat = false;
+                for item in items.chunks(2) {
+                    match item {
+                        [Datum::Symbol(key), Datum::Int(n)] if &**key == ":line-width" => {
+                            (boxed.vertical, boxed.horizontal) = scalar(*n);
+                        }
+                        [Datum::Symbol(key), Datum::Dotted(head, tail)] if &**key == ":line-width" => {
+                            if let Some(widths) = pair(head, tail) { (boxed.vertical, boxed.horizontal) = widths; }
+                        }
+                        [Datum::Symbol(key), Datum::Str(name)] if &**key == ":color" => boxed.color = named(name),
+                        [Datum::Symbol(key), Datum::Symbol(style)] if &**key == ":style" => match &**style {
+                            "released-button" => boxed.style = 2,
+                            "pressed-button" => boxed.style = 3,
+                            "flat-button" => flat = true,
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+                // A flat button is a plain line, in the background unless
+                // its colour is given.
+                if flat { boxed.style = 1; boxed.color = boxed.color.or(Some(background)); }
+                boxed
+            }
+            _ => line((1, 1)),
+        },
+        _ => return None,
+    };
+    (boxed.vertical != 0 || boxed.horizontal != 0).then_some(boxed)
+}
+
 /// Whether FACE draws a line: what extending the default face paints, its
 /// background being the frame's.
 fn decorated(face: &Face) -> bool {
@@ -2893,6 +2972,7 @@ fn face_of_attrs(attrs: &romacs_face::Attrs, name: &str) -> Result<Face> {
         underline: face_line(attrs.get(Attribute::Underline), true),
         overline: face_line(attrs.get(Attribute::Overline), false),
         strike: face_line(attrs.get(Attribute::StrikeThrough), false),
+        boxed: face_box(attrs.get(Attribute::Box), background),
     };
     Ok(Face {
         decor,

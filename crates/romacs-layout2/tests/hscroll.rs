@@ -24,7 +24,7 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: Hscroll { rows: px(hscroll), point_row: px(point_row) }, tab_width: 8, wrap: LineWrap::Truncate,
-        cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, faces: vec![face()],
+        cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, faces: vec![face()],
         chrome: if fringes { WindowChrome { left_fringe: 8, right_fringe: 8, indicators, ..WindowChrome::default() } } else { WindowChrome::default() },
     }
 }
@@ -35,7 +35,7 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
 fn lay_out(snapshot: WindowSnapshot) -> (Vec<String>, Option<(f32, f32)>, Vec<(u16, FringeSide)>, WindowEnd) {
     let width = snapshot.width + snapshot.chrome.left_fringe + snapshot.chrome.right_fringe;
     let x = snapshot.chrome.left_fringe;
-    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), width, height: 200,
+    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width, height: 200,
         windows: vec![PlacedWindowSnapshot { x, y: 0, snapshot }], background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None };
     let color = romacs_display_protocol::Color::from_pixel(0xffffff);
     let (painted, mut ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame, 1, Some((1, color))).unwrap();

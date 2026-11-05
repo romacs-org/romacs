@@ -93,3 +93,6 @@ defsubr! { name = "make-char", gnu = "charset.c:1876", effect = Reads,
 fn make_char(cx, charset: Value; optional code1: Value, code2: Value, code3: Value, code4: Value) {
     cx.make_char(charset, [code1, code2, code3, code4])
 }}
+
+defsubr! { name = "split-char", gnu = "charset.c:1993", effect = Reads,
+fn split_char(cx, ch: Value) { cx.split_char(ch) }}

@@ -15,6 +15,8 @@ mod lazy_tests;
 mod plist_tests;
 mod keymap;
 mod char_table;
+mod graphics;
+mod width_rule;
 mod map_keymap;
 #[cfg(test)]
 mod map_keymap_tests;
@@ -49,6 +51,7 @@ pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{DEFAULT_ANSI, TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -143,6 +146,7 @@ mod numbers;
 mod metadata;
 mod variable_definitions;
 mod variable_runtime;
+mod char_widths;
 mod forwarded;
 mod eval_depth;
 mod eval_data;
@@ -1255,6 +1259,9 @@ pub struct Vm {
     /// the expander's forms, by variable slot, while the value is the same
     /// object: cleared by every collection, which can move it.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
+    /// GNU's image caches (graphics.rs): facts of the images frames have
+    /// loaded, their pixels the display host's.
+    images: graphics::ImageCache,
     /// The closures `(lambda ...)' lists called as functions compiled to,
     /// by the list object (`Vm::lambda_list_closure'): cleared by every
     /// collection, which can move the lists and what their snapshots hold.
@@ -1296,6 +1303,9 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// `romacs--redisplay-since-mark': None unmarked; marked, the first
+    /// redisplay's microseconds after the mark, None until it runs.
+    redisplay_since_mark: Option<Option<u64>>,
     /// The host's `C-g', shared with its input thread (quit.rs).
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
@@ -1428,6 +1438,8 @@ pub struct Vm {
     rooted_write: bool,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
+    /// The tables' free entries and allocation meter (gc.rs).
+    free: gc::FreeEntries,
     names: NameMap<String, usize>,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
@@ -1453,6 +1465,9 @@ pub struct Vm {
     /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
     /// collector reach them as they reach `execution`.
     spare_programs: Vec<threaded::Program>,
+    /// By argument count, the permanent function through which native code
+    /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
+    reader_trampolines: Vec<Option<usize>>,
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
@@ -1600,6 +1615,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     running_engines,
     rooted_write,
     gc_stress,
+    free,
     suspended_stacks,
     gc_floor,
     names,
@@ -1642,13 +1658,16 @@ romacs_snapshot::snapshot_fields!(Vm {
     conditions,
     rooted,
     spread_reserve,
+    reader_trampolines,
     quit,
     force_quit_count,
+    redisplay_since_mark,
     quit_slots,
     debug_event_slots,
 } at_rest {
     regexp_cache,
     mode_line_forms,
+    images,
     lambda_lists,
     status_bar_line,
     suspended_code,
@@ -1692,7 +1711,7 @@ impl Vm {
         self.private_objects() + self.region_weight()
     }
     pub(crate) fn private_objects(&self) -> usize {
-        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
+        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len() - self.free.len()
     }
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
@@ -1723,6 +1742,7 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
+            images: Default::default(),
             lambda_lists: Default::default(),
             status_bar_line: None,
             execution_fatal: false,
@@ -1744,6 +1764,7 @@ impl Vm {
             display: None,
             session_host: None,
             idle_since: None,
+            redisplay_since_mark: None,
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
@@ -1800,6 +1821,7 @@ impl Vm {
             running_engines: 0,
             rooted_write: false,
             gc_stress: gc::Stress::from_env(),
+            free: gc::FreeEntries::default(),
             names: NameMap::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
@@ -1817,6 +1839,7 @@ impl Vm {
             spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
+            reader_trampolines: Vec::new(),
             closures: vec![],
             cells: vec![],
             cell_pairs: HashMap::default(),
@@ -1989,7 +2012,8 @@ impl Vm {
             .version
             .checked_add(1)
             .ok_or("function version overflow")?;
-        self.slots[slot].function = value;
+        let old = std::mem::replace(&mut self.slots[slot].function, value);
+        self.charge_definition(old, value);
         self.slots[slot].version = version;
         if is_macro {
             self.macros.insert(slot);
@@ -3525,10 +3549,7 @@ impl Vm {
         }
         match p {
             Cons => {
-                let pair = (a[0], a[1]);
-                let i = self.conses.len();
-                self.conses.push(pair);
-                Ok(Value::reference(i, 3))
+                Ok(self.alloc_cons(a[0], a[1]))
             }
             Length => {
                 if a[0].tag() == 4 && !self.closures[a[0].index(4)?].metadata.is_empty() { return Value::integer(self.closures[a[0].index(4)?].metadata.len() as i64); }
@@ -3556,6 +3577,7 @@ impl Vm {
                             | data::Object::SyntaxTable(_)
                             | data::Object::Window(_)
                             | data::Object::Obarray(_)
+                            | data::Object::Free
                             | data::Object::Frame(_)
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
@@ -3614,6 +3636,7 @@ impl Vm {
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(t) => self.display_table(t, depth),
                 data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", t.len())),
+                data::Object::Free => Err("invalid object reference".into()),
                 data::Object::Bytes(v) => Ok(format!(
                     "#u8({})",
                     v.iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
@@ -3877,7 +3900,7 @@ mod capture_tests {
         let mut roots = [value];
         vm.collect(&mut roots);
         assert_eq!(
-            vm.conses.len(),
+            vm.conses.len() - vm.free.of(0),
             1,
             "closure must not retain the unused cons"
         );

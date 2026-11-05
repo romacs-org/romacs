@@ -220,7 +220,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
     Some(Some(match crate::prim::name(subr)? {
         "forward-char" | "backward-char" | "beginning-of-line" | "end-of-line" | "forward-line" => "^p",
         "delete-char" | "delete-backward-char" => "p\nP",
-        "self-insert-command" => "(list (prefix-numeric-value current-prefix-arg) last-command-event)",
+        "self-insert-command" => "(list (prefix-numeric-value current-prefix-arg) last-command-event)", "transpose-regions" => "(if (< (length mark-ring) 2) (error \"Other region must be marked before transposing two regions\") (let* ((num (if current-prefix-arg (prefix-numeric-value current-prefix-arg) 0)) (ring-length (length mark-ring)) (eltnum (mod num ring-length)) (eltnum2 (mod (1+ num) ring-length))) (list (point) (mark) (elt mark-ring eltnum) (elt mark-ring eltnum2))))",
         "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")", "replace-region-contents" => "(list (if (use-region-p) (region-beginning) (point-min)) (if (use-region-p) (region-end) (point-max)) (get-buffer (read-buffer-to-switch \"Source buffer: \")))",
         "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "upcase-region" | "downcase-region" | "capitalize-region" | "upcase-initials-region" => "(list (region-beginning) (region-end) (region-noncontiguous-p))",
@@ -234,6 +234,7 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "make-local-variable" => "vMake Local Variable: ",
         "kill-local-variable" => "vKill Local Variable: ",
         "forward-word" => "^p",
+        "upcase-word" | "downcase-word" | "capitalize-word" => "p",
         "search-backward" => "MSearch backward: ",
         "posix-search-forward" => "sPosix search: ",
         "posix-search-backward" => "sPosix search backward: ",

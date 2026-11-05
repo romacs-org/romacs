@@ -212,7 +212,7 @@ impl Leaf<'_> {
         }
         self.fileio_check_insertion(inhibit)?;
         let hooks = self.intern("inhibit-modification-hooks");
-        let multibyte = self.casing_multibyte()?;
+        let multibyte = self.buffer_multibyte()?;
         let bytes = if !multibyte && view.is_multibyte() {
             view.chars().map(|code| u8::try_from(code).map_err(|_| Fault::NotUnicode(text))).collect::<std::result::Result<Vec<_>, _>>()?
         } else { view.bytes().to_vec() };

@@ -60,6 +60,7 @@ fn logior_result_survives_moving_collection() {
         .unwrap();
     let expected = row["gnu"].as_str().unwrap();
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1_000_000);
     vm.eval_source("(vector (make-string 1000 65))").unwrap();
     let local = vm.eval_source(row["expression"].as_str().unwrap()).unwrap();

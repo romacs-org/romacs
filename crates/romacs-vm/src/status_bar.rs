@@ -211,7 +211,8 @@ impl Vm {
         if band.segments.is_empty() && band.props.is_empty() { return Ok(None); }
         // Each character's byte and columns, once; a dropped flag each and
         // the running width, so every drop costs its own characters only.
-        let cells = |c: char| if ('\u{FE000}'..='\u{FE0FF}').contains(&c) { 1 } else { unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) };
+        let rule = band.rule.clone();
+        let cells = |c: char| if ('\u{FE000}'..='\u{FE0FF}').contains(&c) { 1 } else { rule.width(c as u32) };
         let chars: Vec<(usize, usize)> = band.text.char_indices().map(|(at, c)| (at, cells(c))).collect();
         let index = |byte: usize| chars.partition_point(|(at, _)| *at < byte);
         let mut dropped = vec![false; chars.len()];
@@ -289,12 +290,14 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                no_font: self.no_font_display(),
                 faces: bar.faces.iter().map(|f| romacs_layout_input::Face { background, ..f.clone() }).collect(),
                 text: TextSlice { extends: vec![], utf8: shown, face_runs, raw: vec![] },
             };
             self.host_layout(&input)?.glyphs.iter().map(|(advance, _)| *advance as f32).collect()
         } else {
-            bar.text.utf8.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as f32 * column).collect()
+            let rule = self.width_rule()?;
+            bar.text.utf8.chars().map(|c| rule.width(c as u32) as f32 * column).collect()
         };
         let places = bar.places(&advances);
         Ok(Some(bar.shown_text(&places, column)))

@@ -22,6 +22,19 @@ pub(super) fn traced_slots(object: &Object) -> usize {
     }
 }
 
+/// What the memory profiler charges for OBJECT when it is made: the entry
+/// and the storage `heap_stats' counts as live (GNU's malloc_probe sizes).
+pub(super) fn profiled_bytes(object: &Object) -> usize {
+    size_of::<Object>()
+        + match object {
+            Object::String(s) | Object::RawString(s) => s.storage_bytes(false),
+            Object::Bytes(bytes) => bytes.len(),
+            Object::Vector(slots) | Object::Record(slots) => slots.len() * size_of::<Value>(),
+            Object::HashTable(table) => table.storage_bytes(false),
+            _ => 0,
+        }
+}
+
 pub(super) fn payload_bytes(object: &Object) -> usize {
     match object {
         Object::String(s) | Object::RawString(s) => s.bytes.len(),
@@ -60,6 +73,9 @@ pub(super) enum Object {
     ByteBuffer(Box<bytes::ByteBuffer>),
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
+    /// A free table entry (gc.rs `sweep_tables`): no Value names it but a
+    /// stale one, which finds no object here.
+    Free,
 }
 romacs_snapshot::snapshot_enum!(Object {
     Object::SyntaxTable(f0) => (f0),
@@ -91,6 +107,8 @@ romacs_snapshot::snapshot_enum!(Object {
     Object::ByteBuffer(f0) => (f0),
     Object::HashTable(f0) => (f0),
     Object::Obarray(f0) => (f0),
+    // Never captured: an image's tables are dense (gc.rs `collect_compacting`).
+    Object::Free => (),
 });
 const _: [(); 32] = [(); size_of::<Object>()];
 impl Object {
@@ -111,7 +129,7 @@ impl Object {
             | Object::WindowConfiguration(_) | Object::String(_) | Object::RawString(_) | Object::Vector(_)
             | Object::BoolVector(_) | Object::Record(_) | Object::CharTable(_) | Object::SubCharTable(_)
             | Object::MapKeymapCursor(_) | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::Bytes(_)
-            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) | Object::Finalizer(_) => None,
+            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) | Object::Finalizer(_) | Object::Free => None,
         }
     }
 }
@@ -426,11 +444,70 @@ impl Vm {
         self.gc_payload_bytes = before.saturating_add(bytes);
         self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
     }
+    /// A new object: the lowest free entry of the table, else a new one
+    /// (gc.rs `FreeEntries'). Every object enters here.
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
-        if let Some(referrers) = &mut self.referrers { referrers.list(self.objects.len(), &object); }
         self.charge_payload(payload_bytes(&object));
-        self.objects.push(object);
-        Value::reference(self.objects.len(), 0)
+        self.free.allocated += profiled_bytes(&object) as u64;
+        let index = match self.free.objects.pop() {
+            Some(index) => {
+                self.objects[index as usize] = object;
+                index as usize
+            }
+            None => {
+                self.objects.push(object);
+                self.objects.len() - 1
+            }
+        };
+        if let Some(referrers) = &mut self.referrers { referrers.list(index, &self.objects[index]); }
+        Value::reference(index + 1, 0)
+    }
+    /// A new cons (CAR . CDR), as `allocate_object' makes an object.
+    #[inline]
+    pub(super) fn alloc_cons(&mut self, car: Value, cdr: Value) -> Value {
+        self.free.allocated += size_of::<(Value, Value)>() as u64;
+        let index = match self.free.conses.pop() {
+            Some(index) => {
+                self.conses[index as usize] = (car, cdr);
+                index as usize
+            }
+            None => {
+                self.conses.push((car, cdr));
+                self.conses.len() - 1
+            }
+        };
+        Value::reference(index, 3)
+    }
+    /// A new cell holding VALUE: its index (a cell Value is tag 5).
+    #[inline]
+    pub(super) fn alloc_cell(&mut self, value: Value) -> usize {
+        self.free.allocated += size_of::<Value>() as u64;
+        match self.free.cells.pop() {
+            Some(index) => {
+                self.cells[index as usize] = value;
+                index as usize
+            }
+            None => {
+                self.cells.push(value);
+                self.cells.len() - 1
+            }
+        }
+    }
+    /// A new closure.
+    #[inline]
+    pub(super) fn alloc_closure(&mut self, closure: Closure) -> Value {
+        self.free.allocated += (size_of::<Closure>() + (closure.captures.len() + closure.metadata.len()) * size_of::<Value>()) as u64;
+        let index = match self.free.closures.pop() {
+            Some(index) => {
+                self.closures[index as usize] = closure;
+                index as usize
+            }
+            None => {
+                self.closures.push(closure);
+                self.closures.len() - 1
+            }
+        };
+        Value::reference(index, 4)
     }
     /// The object V names, private or frozen (`frozen.rs`); never an
     /// executable-image string, which `string_value` reads.
@@ -441,6 +518,7 @@ impl Vm {
         }
         self.objects
             .get(index.checked_sub(1).ok_or("sequence required")?)
+            .filter(|object| !matches!(object, Object::Free))
             .ok_or_else(|| "invalid object reference".into())
     }
     // Non-diagnostic type discrimination, total over private and frozen
@@ -450,7 +528,7 @@ impl Vm {
         if index & crate::image::IMAGE != 0 {
             return self.frozen_object(index);
         }
-        self.objects.get(index.checked_sub(1)?)
+        self.objects.get(index.checked_sub(1)?).filter(|object| !matches!(object, Object::Free))
     }
     /// The private object V names, for writing: a frozen or image value
     /// refuses with GNU's read-only error, left pending (`refuse_read_only`).
@@ -461,6 +539,7 @@ impl Vm {
         }
         self.objects
             .get_mut(index.checked_sub(1).ok_or("sequence required")?)
+            .filter(|object| !matches!(object, Object::Free))
             .ok_or_else(|| "invalid object reference".into())
     }
     /// The private cons V names, for writing; frozen and image conses refuse
@@ -497,8 +576,7 @@ impl Vm {
                 let mut tail = self.literal(tail)?;
                 for item in a.iter().rev() {
                     let value = self.literal(item)?;
-                    self.conses.push((value, tail));
-                    tail = Value::reference(self.conses.len() - 1, 3);
+                    tail = self.alloc_cons(value, tail);
                 }
                 Ok(tail)
             }
@@ -514,8 +592,7 @@ impl Vm {
     pub(super) fn list_value(&mut self, values: &[Value]) -> Value {
         let mut tail = Value::NIL;
         for &value in values.iter().rev() {
-            self.conses.push((value, tail));
-            tail = Value::reference(self.conses.len() - 1, 3);
+            tail = self.alloc_cons(value, tail);
         }
         tail
     }
@@ -848,6 +925,7 @@ impl Vm {
                         | Object::Overlay(_)
                         | Object::Window(_)
                         | Object::Obarray(_)
+                        | Object::Free
                             | Object::Frame(_)
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
@@ -898,6 +976,7 @@ impl Vm {
                     | Object::Overlay(_)
                     | Object::Window(_)
                         | Object::Obarray(_)
+                        | Object::Free
                         | Object::Frame(_)
                         | Object::Terminal(_)
                         | Object::WindowConfiguration(_)
@@ -950,6 +1029,7 @@ impl Vm {
                         | Object::Overlay(_)
                         | Object::Window(_)
                         | Object::Obarray(_)
+                        | Object::Free
                             | Object::Frame(_)
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)

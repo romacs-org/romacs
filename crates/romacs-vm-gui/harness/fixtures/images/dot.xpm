@@ -1,0 +1,9 @@
+/* XPM */
+static char *dot[] = {
+"6 4 2 1",
+"  c None",
+"x c #ff0000",
+" xxxx ",
+"xxxxxx",
+"xxxxxx",
+" xxxx "};

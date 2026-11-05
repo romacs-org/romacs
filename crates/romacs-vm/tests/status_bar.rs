@@ -359,7 +359,7 @@ struct Rows;
 impl romacs_vm::LayoutHost for Rows {
     fn measure(&mut self, input: &romacs_layout_input::MeasureInput) -> Result<romacs_layout_input::Measured, String> {
         let heights: Vec<u32> = input.faces.iter().map(|f| if f.pixel_size <= 20.0 { 25 } else { (f.pixel_size * 5.0 / 3.0).round() as u32 }).collect();
-        Ok(romacs_layout_input::Measured { glyphs: input.text.utf8.chars().map(|_| (10, heights[0])).collect(), face_heights: heights })
+        Ok(romacs_layout_input::Measured { glyphs: input.text.utf8.chars().map(|_| (10, heights[0])).collect(), ascents: input.text.utf8.chars().map(|_| heights[0] * 4 / 5).collect(), face_ascents: heights.iter().map(|h| h * 4 / 5).collect(), face_heights: heights })
     }
     fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         Ok(frame.windows.iter().map(|w| {

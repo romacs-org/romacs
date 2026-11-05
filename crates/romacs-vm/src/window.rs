@@ -1614,8 +1614,7 @@ impl Vm {
                 let pairs = params
                     .iter()
                     .map(|&(k, v)| {
-                        self.conses.push((k, v));
-                        Value::reference(self.conses.len() - 1, 3)
+                        self.alloc_cons(k, v)
                     })
                     .collect::<Vec<_>>();
                 self.list_value(&pairs)
@@ -1632,8 +1631,7 @@ impl Vm {
                 } else {
                     Value::integer(w.right_margin as i64)?
                 };
-                self.conses.push((l, r));
-                Value::reference(self.conses.len() - 1, 3)
+                self.alloc_cons(l, r)
             }
             SetWindowMargins => {
                 let dim = |v: Value| -> Result<u32> {
@@ -1989,12 +1987,16 @@ impl<'a> Windows<'a> {
         };
         let (start, buffer) = { let x = self.get(w)?; (x.start, x.buffer) };
         let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
-        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
-            return Err(internal("buffer required".into()));
+        // A unibyte buffer's positions are its bytes'.
+        let (begv, zv) = match self.vm.object(buffer).map_err(internal)? {
+            Object::Buffer(b) => {
+                let accessible = b.accessible();
+                let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+                (char_at(accessible.start)?, char_at(accessible.end)?)
+            }
+            Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            _ => return Err(internal("buffer required".into())),
         };
-        let accessible = b.accessible();
-        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
-        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
         if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
             return Ok(None);
         }
@@ -2095,31 +2097,43 @@ impl<'a> Windows<'a> {
                 return Err(Fault::Error("VM2 window body sizes in remapped face characters are unsupported".into()));
             }
         }
+        let px = self.text_area_pixels(w, width, true)?;
         let chars = pixelwise == Value::NIL || remap;
-        let size = if width {
+        Self::int((if chars { px / if width { column } else { line } } else { px }).max(0))
+    }
+    /// Fwindow_text_width and Fwindow_text_height (window.c:7459, 7481):
+    /// WINDOW's text area (window_box_width, window_box_height) in pixels
+    /// with PIXELWISE, else in whole columns or lines of its frame.
+    pub(crate) fn window_text_size(&mut self, window: Value, pixelwise: Value, width: bool) -> Out {
+        let w = self.live(window)?;
+        let unit = i64::from(if width { self.vm.window_state.column } else { self.vm.window_state.line }).max(1);
+        let px = self.text_area_pixels(w, width, false)?;
+        Self::int((if pixelwise == Value::NIL { px / unit } else { px }).max(0))
+    }
+    /// W's text area in pixels: its width less its margins, fringes and
+    /// right divider, and with BORDER, on a frame without a window system,
+    /// the column of the bar right of a window that is not rightmost
+    /// (window_body_width, window.c:1095; window_box_width keeps it); or
+    /// its height less its mode and header lines and bottom divider.
+    fn text_area_pixels(&mut self, w: Value, width: bool, border: bool) -> std::result::Result<i64, Fault> {
+        let column = i64::from(self.vm.window_state.column);
+        Ok(if width {
             let (right, margins, pixels) = {
                 let x = self.get(w)?;
                 (i64::from(x.x) + i64::from(x.width), i64::from(x.left_margin + x.right_margin) * column, i64::from(x.width))
             };
             let root = self.vm.root_of(w).map_err(internal)?;
             let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
-            // A frame without a window system draws a one-column bar right
-            // of a window that is not rightmost; a window system's draws
-            // the border in the fringe (window_body_width, window.c:1095).
-            let window_system = self.vm.window_system_open();
-            let bar = if !rightmost && !window_system { column } else { 0 };
+            let bar = if border && !rightmost && !self.vm.window_system_open() { column } else { 0 };
             let fringes = self.vm.window_fringe_widths(w).map_err(internal)?;
             let [divider, _] = self.vm.window_dividers(w).map_err(internal)?;
-            let px = pixels - bar - margins - i64::from(fringes[0] + fringes[1] + divider);
-            if chars { px / column } else { px }
+            pixels - bar - margins - i64::from(fringes[0] + fringes[1] + divider)
         } else {
-            let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
-            let header_line = self.window_header_line_height(window)?.integer_value().unwrap_or(0);
+            let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
+            let header_line = self.window_header_line_height(w)?.integer_value().unwrap_or(0);
             let [_, divider] = self.vm.window_dividers(w).map_err(internal)?;
-            let px = i64::from(self.get(w)?.height) - mode_line - header_line - i64::from(divider);
-            if chars { px / line } else { px }
-        };
-        Self::int(size.max(0))
+            i64::from(self.get(w)?.height) - mode_line - header_line - i64::from(divider)
+        })
     }
     /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT), the widths
     /// the window draws.
@@ -2436,6 +2450,18 @@ impl<'a> Windows<'a> {
         }
         // decode_terminal yields NULL for anything else: nil, not an error.
         Ok(if self.terminal(frame).is_some() && initial { Value::TRUE } else { Value::NIL })
+    }
+    /// decode_live_terminal, then the terminal's name: GNU's
+    /// "initial_terminal" until a display opens, then the display's name
+    /// (a window-system terminal is named for its display). The second
+    /// value is whether the terminal is still GNU's output_initial kind.
+    pub(crate) fn terminal_name(&mut self, object: Value) -> std::result::Result<(String, bool), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        Ok(match self.vm.window_system_host() {
+            Some(host) => (host.display_name(), false),
+            None => ("initial_terminal".into(), true),
+        })
     }
     /// terminal.c:443: a live terminal's type, as framep's.
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {

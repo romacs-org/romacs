@@ -103,13 +103,14 @@ timer) ends the wait, so the deadline is computed again (host_input.rs)."
 host event, running timers as they fall due, or nil once SECONDS pass or a
 timer queues input in `unread-command-events' (which read_char reads next).
 Without SECONDS Emacs is idle meanwhile, so idle timers run too (read_char's
-timer_start_idle and timer_stop_idle).  After AUTO-SAVE idle seconds with no
-input, it auto-saves once and waits on.  A VM without the process prelude
-runs no timers."
+timer_start_idle and timer_stop_idle), and it collects garbage as the host's
+idle pass does (`romacs--idle-collect'), once what it ran is on screen.
+After AUTO-SAVE idle seconds with no input, it auto-saves once and waits
+on.  A VM without the process prelude runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
         (save-at (and auto-save (+ (float-time) auto-save)))
         (timers (fboundp 'romacs--timer-check))
-        (c nil) (waiting t) (shown nil))
+        (c nil) (waiting t) (shown nil) (collect-ok t))
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
         (while waiting
@@ -141,14 +142,25 @@ runs no timers."
                 (setq waiting nil)
               ;; A VM without the process prelude runs no timers.
               (let* ((ran (if timers romacs--timers-run 0))
+                     (current (and shown (not dispatched) (= shown ran)))
+                     ;; read_char's idle collection: a wait with no limit
+                     ;; collects as the top level's does, once its screen is
+                     ;; current; one held or abandoned for a key is not
+                     ;; tried again in this wait.
+                     (collect (and (null end) collect-ok (romacs--idle-collect t)))
                      (delay (and timers (romacs--timer-delay)))
-                     (delay (if save-at (min (or delay save-at) (max 0 (- save-at (float-time)))) delay)))
+                     (delay (if save-at (min (or delay save-at) (max 0 (- save-at (float-time)))) delay))
+                     (delay (cond ((numberp collect) (min (or delay collect) collect))
+                                  ((and collect (not current)) 0)
+                                  (t delay))))
+                (when (and (eq collect t) current (not (romacs--collect-idle)))
+                  (setq collect-ok nil))
                 ;; A user signal (SIGUSR1, SIGUSR2) is an event before the
                 ;; host's (kbd_buffer_get_event).
                 (setq c (or (romacs--take-user-signal)
                             (romacs--host-event
                              (if (and delay left) (min delay left) (or delay left))
-                             (and shown (not dispatched) (= shown ran))))
+                             current))
                       shown ran)
                 ;; read_char: an event `special-event-map' binds (focus, a
                 ;; user signal) runs its binding at once and is never input;
@@ -246,17 +258,19 @@ collection while commands run.")
   "The idle collection waits for more than 1/FACTOR of what makes an
 automatic collection due, as `garbage-collect-maybe' with FACTOR does.")
 
-(defun romacs--idle-collect ()
+(defun romacs--idle-collect (&optional in-lisp)
   "When the command loop's host, waiting for keys itself (the GUI), should
 collect: once idle for `romacs-gc-idle-delay' seconds with no input
 pending, and more than 1/`romacs-gc-idle-factor' of the way to an
 automatic collection (`romacs--collection-share').  Value: t to collect
 now, the seconds until then, or nil: a quiet session never waits for it.
-The host collects outside any Lisp, where request code retires."
+The host collects outside any Lisp, where request code retires; IN-LISP,
+for a wait inside Lisp (a prompt's), counts only the objects allocated,
+all a collection there reclaims."
   (let ((idle (current-idle-time)))
     (when (and (numberp romacs-gc-idle-delay) (natnump romacs-gc-idle-factor) idle
                (not (romacs--unread-p)) (not (input-pending-p))
-               (> (* romacs-gc-idle-factor (romacs--collection-share)) 1))
+               (> (* romacs-gc-idle-factor (romacs--collection-share in-lisp)) 1))
       (let ((left (- romacs-gc-idle-delay (float-time idle))))
         (if (> left 0) left t)))))
 

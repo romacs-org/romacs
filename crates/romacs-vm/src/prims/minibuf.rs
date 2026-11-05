@@ -197,6 +197,12 @@ fn read_buffer(cx, prompt: Value; optional def: Value, require_match: Value, pre
     enter(cx, "romacs--read-buffer", vec![prompt, def, require_match, predicate], DONE)
 }}
 
+// Fread_coding_system binds `completion-ignore-case' around the reader.
+defsubr! { name = "read-coding-system", gnu = "coding.c:8625", effect = Global,
+fn read_coding_system(cx, prompt: Value; optional default_coding_system: Value) -> Step {
+    enter(cx, "romacs--read-coding-system", vec![prompt, default_coding_system], DONE)
+}}
+
 defsubr! { name = "internal-complete-buffer", gnu = "minibuf.c:2156", effect = Global,
 fn internal_complete_buffer(cx, string: Value, predicate: Value, flag: Value) -> Step {
     enter(cx, "romacs--internal-complete-buffer", vec![string, predicate, flag], DONE)

@@ -56,8 +56,7 @@ impl Vm {
                 }
                 let mut tail = self.stack[start + n - 1];
                 for value in prefix.into_iter().rev() {
-                    self.conses.push((value, tail));
-                    tail = Value::reference(self.conses.len() - 1, 3);
+                    tail = self.alloc_cons(value, tail);
                 }
                 Ok(tail)
             }

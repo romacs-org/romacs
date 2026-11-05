@@ -47,10 +47,13 @@ fn delete_field(cx; optional pos: Value) -> Step { over_field(cx, "delete-region
 
 #[cfg(test)]
 mod tests {
+    /// Columns count by `char-width-table', which characters.el makes two
+    /// for CJK; a bare VM has only character.c's defaults, so the case
+    /// sets that range itself.
     #[test]
     fn native_column_preserves_point_and_handles_unicode_tabs() {
         let mut vm = crate::Vm::new();
-        let got = vm.eval_source_raw(r#"(with-temp-buffer (insert "aα界\tZ") (list (current-column) (progn (goto-char 4) (current-column)) (progn (setq tab-width 4) (goto-char (point-max)) (current-column))))"#).unwrap();
+        let got = vm.eval_source_raw(r#"(with-temp-buffer (set-char-table-range char-width-table '(#x4E00 . #x9FFF) 2) (insert "aα界\tZ") (list (current-column) (progn (goto-char 4) (current-column)) (progn (setq tab-width 4) (goto-char (point-max)) (current-column))))"#).unwrap();
         assert_eq!(vm.display(got).unwrap(), "(9 4 9)");
     }
 

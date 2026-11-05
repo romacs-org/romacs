@@ -191,6 +191,7 @@ fn inline_and_generic_agree() {
 #[test]
 fn inline_survives_forced_moving_collection() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1);
     text(
         &mut vm,

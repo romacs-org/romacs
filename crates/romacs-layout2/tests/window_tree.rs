@@ -53,7 +53,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             id, width: w, height: h, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: romacs_layout_input::TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] },
             mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-            vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+            vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
         }
     }
     let mut vm = Vm::new();
@@ -62,7 +62,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // Two windows sharing one id: `ends` would carry two entries for the same
     // window and the later would silently win.
     let duplicate = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
-        font_alternatives: romacs_layout_input::FontAlternativeState::default(),
+        font_alternatives: romacs_layout_input::FontAlternativeState::default(), no_font: Default::default(),
         width: 400, height: 300,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(7, 400, 150, &face) },
@@ -75,7 +75,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
     // A window taller than the frame: its glyphs would be placed outside the
     // presented surface.
     let overflow = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
-        font_alternatives: romacs_layout_input::FontAlternativeState::default(),
+        font_alternatives: romacs_layout_input::FontAlternativeState::default(), no_font: Default::default(),
         width: 400, height: 300,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
             x: 0, y: 200, snapshot: snap(1, 400, 200, &face) }],
@@ -85,7 +85,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
 
     // The honest control: the same windows, placed legally, do lay out.
     let valid = romacs_layout_input::FrameSnapshot { font_selection: romacs_layout_input::FontSelectionState::default(),
-        font_alternatives: romacs_layout_input::FontAlternativeState::default(),
+        font_alternatives: romacs_layout_input::FontAlternativeState::default(), no_font: Default::default(),
         width: 400, height: 300,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snap(1, 400, 150, &face) },

@@ -10,7 +10,7 @@ fn window(text: &str, face_runs: Vec<FaceRun>) -> WindowSnapshot {
     WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 7, width: 600, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: true, stretches: vec![], wrap_flips: vec![], line_numbers: None,
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: true, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None,
         chrome: Default::default(),
         text: TextSlice { extends: vec![], raw: vec![], utf8: text.into(), face_runs },
         faces: vec![face([200; 3]), face([0x75, 0x6b, 0x59]), face([0xf4, 0xe7, 0xc3])],
@@ -81,7 +81,7 @@ fn a_window_below_and_right_of_the_frame_corner_shows_its_block() {
     let mut snapshot = window("xxxx\nyyyy\nzzzz", vec![]);
     snapshot.id = 9;
     let frame_snapshot = romacs_layout_input::FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width: 1200, height: 900,
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width: 1200, height: 900,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 300, y: 400, snapshot }],
     };

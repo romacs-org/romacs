@@ -63,12 +63,12 @@ fn snapshot(face: &Face, width: u32, height: u32, cell: (u32, u32), t: f64) -> F
     let indent = " ".repeat(view.cols.saturating_sub(MESSAGE.chars().count()) / 2);
     let utf8 = format!("{}\n\n{indent}{MESSAGE}", romacs_logo::text(&cells, view.cols));
     FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width, height,
+        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width, height,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
             id: 1, width, height, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: TextSlice { extends: vec![], utf8, face_runs, raw: vec![] }, mode_line: None,
             mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8,
-            wrap: Default::default(), cursor_off: true, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces,
+            wrap: Default::default(), cursor_off: true, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces,
         } }],
     }
 }

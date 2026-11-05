@@ -89,8 +89,7 @@ impl Vm {
             }
             if self.macros.contains(&slot) {
                 let tag = self.intern("macro");
-                self.conses.push((tag, f));
-                return Ok(Value::reference(self.conses.len() - 1, 3));
+                return Ok(self.alloc_cons(tag, f));
             }
             v = f;
             steps += 1;
@@ -238,17 +237,14 @@ impl Vm {
         }
         let old = if self.macros.contains(&slot) {
             let tag = self.intern("macro");
-            self.conses.push((tag, old));
-            Value::reference(self.conses.len() - 1, 3)
+            self.alloc_cons(tag, old)
         } else {
             old
         };
-        self.conses.push((Value::reference(slot + 1, 7), old));
-        let record = Value::reference(self.conses.len() - 1, 3);
+        let record = self.alloc_cons(Value::reference(slot + 1, 7), old);
         let tail = self.slots[queue].value;
         let tail = if tail == Value::TRUE { Value::NIL } else { tail };
-        self.conses.push((record, tail));
-        self.slots[queue].value = Value::reference(self.conses.len() - 1, 3);
+        self.slots[queue].value = self.alloc_cons(record, tail);
     }
     /// fns.c:3751: `provide` while a queue is active records `(0 . features)`.
     pub(super) fn autoload_note_provide(&mut self) {
@@ -257,12 +253,10 @@ impl Vm {
             return;
         }
         let features = self.slot("features");
-        self.conses.push((Value::integer(0).unwrap(), self.slots[features].value));
-        let record = Value::reference(self.conses.len() - 1, 3);
+        let record = self.alloc_cons(Value::integer(0).unwrap(), self.slots[features].value);
         let tail = self.slots[queue].value;
         let tail = if tail == Value::TRUE { Value::NIL } else { tail };
-        self.conses.push((record, tail));
-        self.slots[queue].value = Value::reference(self.conses.len() - 1, 3);
+        self.slots[queue].value = self.alloc_cons(record, tail);
     }
 }
 
@@ -290,6 +284,7 @@ mod tests {
         let d = dir("fundef");
         std::fs::write(d.join("al-gc-nodef.el"), format!("{GARBAGE}\n(defun al-gc-other () 1)\n")).unwrap();
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.set_load_path(std::slice::from_ref(&d)).unwrap();
         // No collection while the garbage and then FUNDEF are allocated, so
         // all 200000 dead conses precede FUNDEF in the arena and the first

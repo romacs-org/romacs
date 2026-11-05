@@ -421,6 +421,7 @@ impl RenderApp {
         // next redisplay walk, video memo IDs remain stable for the restored
         // native sessions, the frame shader/images are re-uploaded, and a
         // full redisplay is forced.
+        self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset = true;
         self.comms.send_input(InputEvent::DisplayReset);
         true
     }

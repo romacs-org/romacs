@@ -6,6 +6,15 @@ fn garbage_collect(_cx) -> Step {
     Ok(Step::Collect)
 }}
 
+// The command loop's idle collection in a wait inside Lisp (a prompt's,
+// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics or
+// finalizers, and abandoned with nothing collected if a key press arrives
+// while it is still marking. t when it collected.
+defsubr! { name = "romacs--collect-idle", gnu = "keyboard.c:2880", effect = Global,
+fn collect_idle(_cx) -> Step {
+    Ok(Step::CollectIdle)
+}}
+
 defsubr! { name = "garbage-collect-maybe", gnu = "alloc.c:6110", effect = Global,
 fn garbage_collect_maybe(cx, factor: Value) -> Step {
     let factor = factor.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", factor))?;
@@ -20,10 +29,19 @@ fn garbage_collect_maybe(cx, factor: Value) -> Step {
 
 // How far the next automatic collection is along, 1 being due
 // (`Vm::collection_share'): for the command loop's idle collection, which
-// the host makes at a request boundary, where request code retires.
+// the host makes at a request boundary, where request code retires. With
+// OBJECTS, how far the objects allocated are alone: all a collection made
+// inside Lisp (a prompt's wait) can reclaim, request code retiring only
+// outside it.
 defsubr! { name = "romacs--collection-share", gnu = "alloc.c:6110", effect = Global,
-fn collection_share(cx) {
-    Ok(cx.float(cx.collection_share()))
+fn collection_share(cx; optional objects: Value) {
+    let share = if objects == Value::NIL {
+        cx.collection_share()
+    } else {
+        let (allocated, budget) = cx.collection_budget();
+        allocated / budget
+    };
+    Ok(cx.float(share))
 }}
 
 /// `garbage-collect-maybe' after the collection it asked for.
@@ -73,4 +91,18 @@ fn arena_census(cx) {
         let tail = cx.cons(value, tail);
         cx.cons(key, tail)
     }))
+}}
+
+// The GNU/Linux sysinfo branch, in KiB; a handler for `default-directory'
+// answers for a remote host.
+defsubr! { name = "memory-info", gnu = "alloc.c:7154", effect = Global,
+fn memory_info(cx) -> Step {
+    let directory = super::fileio::var(cx, "default-directory")?;
+    if let Some(call) = super::fileio::handler(cx, directory, "memory-info", vec![])? { return call; }
+    let Some(info) = crate::host::memory_info() else { return Ok(Step::Done(Value::NIL)) };
+    let list = info.iter().rev().fold(Value::NIL, |list, bytes| {
+        let kib = cx.bigint((bytes / 1024).into());
+        cx.cons(kib, list)
+    });
+    Ok(Step::Done(list))
 }}

@@ -61,6 +61,21 @@ mod tests {
         assert_eq!(vm.display(value).unwrap(), "(t t (2) t)");
     }
 
+    /// The purpose's plist holds its own (0): a property put on
+    /// `syntax-table' (gv.el's `gv-expander') leaves the whitespace
+    /// descriptor every table shares as GNU's (0).
+    #[test]
+    fn a_property_on_syntax_table_leaves_whitespace_syntax_alone() {
+        let mut vm = Vm::new();
+        let value = run(
+            &mut vm,
+            "(progn (standard-syntax-table) (put 'syntax-table 'gv-expander 'x)
+               (list (string-to-syntax \" \") (aref (standard-syntax-table) 32)
+                     (symbol-plist 'syntax-table)))",
+        );
+        assert_eq!(vm.display(value).unwrap(), "((0) (0) (char-table-extra-slots 0 gv-expander x))");
+    }
+
     #[test]
     fn native_syntax_entries_preserve_matching_flags_and_inheritance() {
         let mut vm = Vm::new();
@@ -286,9 +301,11 @@ impl Vm {
             let purpose_slot = purpose.index(7).unwrap() - 1;
             if self.slots[purpose_slot].plist == Value::NIL {
                 let property = self.intern("char-table-extra-slots");
-                let tail = self.regexp_syntax_entry(0, Value::NIL);
-                let plist = Value::reference(self.conses.len(), 3);
-                self.conses.push((property, tail));
+                // A fresh (0): the shared whitespace descriptor here would
+                // let a later `put' on the symbol rewrite every whitespace
+                // syntax entry (syntax.c syms_of_syntax's Fput).
+                let tail = self.alloc_cons(Value::integer(0).unwrap(), Value::NIL);
+                let plist = self.alloc_cons(property, tail);
                 self.slots[purpose_slot].plist = plist;
             }
             let mut table = CharTable::new(purpose);
@@ -374,8 +391,7 @@ impl Vm {
             if let Object::Vector(values) = &mut self.objects[index] { values[code as usize] = entry; }
             return entry;
         }
-        let value = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(code).unwrap(), matching));
+        let value = self.alloc_cons(Value::integer(code).unwrap(), matching);
         value
     }
     fn regexp_syntax_table(&self, table: Value) -> SearchResult<&CharTable> {

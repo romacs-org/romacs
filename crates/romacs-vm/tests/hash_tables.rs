@@ -133,6 +133,7 @@ fn settle(vm: &mut Vm) {
 #[test]
 fn identity_keys_are_found_after_compaction_moves_them() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     eval(
         &mut vm,
         "(setq k (cons 1 2)) (setq v (vector 7)) (setq h (make-hash-table :test 'eq))",

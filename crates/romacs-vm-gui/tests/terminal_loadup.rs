@@ -26,7 +26,7 @@ impl TerminalHost for Host {
     fn close(&mut self, _: u64) -> Result<(), String> { Ok(()) }
     fn input_state(&mut self, _: u64) -> Result<romacs_vm::TerminalInputState, String> {
         let s = self.0.borrow();
-        Ok(romacs_vm::TerminalInputState { running: true, application_cursor: false, bracketed_paste: s.bracketed, alternate_screen: s.alternate })
+        Ok(romacs_vm::TerminalInputState { running: true, application_cursor: false, bracketed_paste: s.bracketed, alternate_screen: s.alternate, shell_foreground: true })
     }
     fn changed_sessions(&mut self) -> Vec<u64> { vec![] }
     fn snapshot(&mut self, _: u64) -> Result<TerminalSnapshot, String> {

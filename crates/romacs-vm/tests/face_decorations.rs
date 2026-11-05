@@ -185,3 +185,36 @@ fn an_underline_s_position_and_the_buffer_s_rules_reach_the_display() {
         assert_eq!((r.minimum_offset, r.at_descent_line, r.use_position), rules, "{form}");
     }
 }
+
+#[test]
+fn a_face_s_box_reaches_the_display_as_gnu_reads_it() {
+    use romacs_layout_input::BoxLine;
+    let mut vm = gnu_session();
+    eval(&mut vm, r##"(progn
+      (erase-buffer)
+      (insert (propertize "a" 'face '(:box t)) (propertize "b" 'face '(:box 3)) (propertize "c" 'face '(:box "red"))
+              (propertize "d" 'face '(:box (:line-width (2 . -1) :color "blue" :style released-button)))
+              (propertize "e" 'face '(:box (:line-width -2 :style pressed-button)))
+              (propertize "f" 'face '(:background "#102030" :box (:style flat-button))))
+      (goto-char (point-min)))"##);
+    let w = window(&mut vm);
+    let boxed = |byte| face_at(&w, byte).decor.boxed;
+    assert_eq!(boxed(0), Some(BoxLine { vertical: 1, horizontal: 1, color: None, style: 1 }));
+    assert_eq!(boxed(1), Some(BoxLine { vertical: 3, horizontal: 3, color: None, style: 1 }));
+    assert_eq!(boxed(2), Some(BoxLine { vertical: 1, horizontal: 1, color: Some([255, 0, 0]), style: 1 }));
+    assert_eq!(boxed(3), Some(BoxLine { vertical: 2, horizontal: -1, color: Some([0, 0, 255]), style: 2 }));
+    // A scalar width is |N| at the sides (realize_gui_face).
+    assert_eq!(boxed(4), Some(BoxLine { vertical: 2, horizontal: -2, color: None, style: 3 }));
+    assert_eq!(boxed(5), Some(BoxLine { vertical: 1, horizontal: 1, color: Some([0x10, 0x20, 0x30]), style: 1 }));
+    eval(&mut vm, r##"(progn
+      (erase-buffer)
+      (insert (propertize "a" 'face '(:box (3 . 0))) (propertize "b" 'face '(:box (:color "red" :style flat-button)))
+              (propertize "c" 'face '(:box -2)))
+      (goto-char (point-min)))"##);
+    let w = window(&mut vm);
+    let boxed = |byte| face_at(&w, byte).decor.boxed;
+    // A direct pair, a zero axis kept; a flat button's own colour kept.
+    assert_eq!(boxed(0), Some(BoxLine { vertical: 3, horizontal: 0, color: None, style: 1 }));
+    assert_eq!(boxed(1), Some(BoxLine { vertical: 1, horizontal: 1, color: Some([255, 0, 0]), style: 1 }));
+    assert_eq!(boxed(2), Some(BoxLine { vertical: 2, horizontal: -2, color: None, style: 1 }));
+}

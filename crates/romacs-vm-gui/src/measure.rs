@@ -833,14 +833,50 @@ mod tests {
         h.eval("(delete-all-overlays)");
     }
 
+    /// The approximations stay within what the window shows: a measure
+    /// ending before it starts is empty, a vertically scrolled window's end
+    /// answers, a position rows below the text area is not visible, the
+    /// recorded end stays within the text, a refusal counts the queried
+    /// buffer's mode, and a unibyte buffer measures by its lines.
+    #[test]
+    fn approximations_stay_within_what_the_window_shows() {
+        let mut h = hosted();
+        let ok = |h: &mut Hosted, form: &str| h.eval(&format!("(condition-case e {form} (error (list 'error (car (cdr e)))))"));
+        h.eval("(progn (erase-buffer) (kill-all-local-variables) (insert \"a\\n\\n\") (setq selective-display t) (set-window-start nil 1))");
+        assert!(!ok(&mut h, "(window-text-pixel-size nil (point-max) t)").starts_with("(error"), "FROM after TO");
+        h.eval("(progn (erase-buffer) (kill-all-local-variables) (insert (propertize \"x\" 'composition '(1 . \"y\")) (make-string 3000 ?w) \"\\nend\") (goto-char 1) (set-window-start nil 1))");
+        h.paint();
+        assert_eq!(ok(&mut h, "(pos-visible-in-window-p 2900)"), "nil", "a position right of a truncated line's text area");
+        assert_eq!(ok(&mut h, "(window-text-pixel-size nil nil nil 50 30)"), "(50 . 30)", "X-LIMIT and Y-LIMIT bound the answer");
+        h.eval("(set (make-local-variable (quote truncate-partial-width-windows)) nil)");
+        assert_eq!(ok(&mut h, "(pos-visible-in-window-p 2900)"), "nil", "a position many rows below the text area");
+        assert_eq!(ok(&mut h, "(pos-visible-in-window-p 20)"), "t", "a position on the first row");
+        assert_eq!(ok(&mut h, "(progn (set-window-vscroll nil 1 t) (prog1 (integerp (window-end nil t)) (set-window-vscroll nil 0 t)))"), "t", "vscroll");
+        assert_eq!(ok(&mut h, "(progn (delete-region 100 (point-max)) (let ((end (window-end nil t))) (and (<= (window-start) end) (<= end (point-max)))))"), "t",
+                   "the recorded end within the text");
+        h.eval("(progn (setq major-mode 'text-mode) (romacs--layout-refusals))");
+        ok(&mut h, "(with-temp-buffer (pos-visible-in-window-p 2 (selected-window)))");
+        assert!(h.eval("(romacs--layout-refusals)").contains("\"text-mode\""), "counted in the queried buffer's mode");
+        h.eval("(progn (erase-buffer) (kill-all-local-variables) (set-buffer-multibyte nil) (insert \"bytes\\nline\") (goto-char 1) (set-window-start nil 1))");
+        for form in ["(window-text-pixel-size)", "(window-text-pixel-size nil t t)", "(window-text-pixel-size nil nil t)",
+                     "(pos-visible-in-window-p 3)", "(posn-at-point 3)"] {
+            let answer = ok(&mut h, form);
+            assert!(!answer.starts_with("(error"), "unibyte {form}: {answer}");
+        }
+        h.eval("(progn (erase-buffer) (set-buffer-multibyte t))");
+    }
+
     /// Text the iterator cannot follow at all (a `composition' property)
-    /// moves by buffer lines, to the end past the last: a line scroll near
+    /// measures and moves by buffer lines, to the end past the last: a line scroll near
     /// the end still advances the start, and the last line ends the motion.
     #[test]
     fn motion_the_iterator_refuses_moves_by_buffer_lines() {
         let mut h = hosted();
         h.eval("(progn (erase-buffer) (kill-all-local-variables) (insert \"ab\\ncd\\nlast\") (put-text-property 1 2 'composition '(1 . \"x\")) (goto-char 1) (set-window-start nil 1))");
-        assert!(h.eval("(condition-case e (progn (window-text-pixel-size) nil) (error (car (cdr e))))").contains("composed text"));
+        // window-text-pixel-size answers by buffer lines, its refusal counted.
+        h.eval("(romacs--layout-refusals)");
+        assert_eq!(h.eval("(condition-case e (consp (window-text-pixel-size)) (error (car (cdr e))))"), "t");
+        assert!(h.eval("(romacs--layout-refusals)").contains("composed text"));
         assert_eq!(h.eval("(progn (goto-char 4) (list (vertical-motion 5) (point)))"), "(1 11)", "TO_THE_END_PAST_THE_LAST_LINE");
         assert_eq!(h.eval("(progn (goto-char (point-max)) (set-window-start nil 1) (scroll-up 1) (window-start))"), "4", "SCROLL_NEAR_THE_END");
     }
@@ -935,10 +971,11 @@ mod tests {
         assert_eq!(h.eval("(let ((standard-display-table (make-char-table 'display-table))) (list (vertical-motion 1) (point)))"), "(1 4)");
     }
 
-    /// What the host does not lay out as GNU displays it refuses; its
-    /// plain twin answers.
+    /// What the host does not lay out as GNU displays it still answers, by
+    /// approximation, and counts its refusal by class and major mode for
+    /// the usage log; its plain twin answers with no refusal.
     #[test]
-    fn displayed_window_refuses_what_the_host_does_not_lay_out() {
+    fn displayed_window_approximates_what_the_host_does_not_lay_out() {
         let mut h = hosted();
         h.eval("(put 'display-table 'char-table-extra-slots 18)");
         for (refused, twin, what) in [
@@ -952,12 +989,14 @@ mod tests {
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
                 // Hosted since setup's paint.
-                h.eval(&format!("(progn (erase-buffer) (delete-all-overlays) (kill-all-local-variables) {form} (goto-char 1) (set-window-start nil 1))"));
-                for call in ["(window-text-pixel-size)", "(posn-at-point 2)", "(pos-visible-in-window-p 2)"] {
+                h.eval(&format!("(progn (erase-buffer) (delete-all-overlays) (kill-all-local-variables) {form} (goto-char 1) (set-window-start nil 1) (romacs--layout-refusals))"));
+                for call in ["(window-text-pixel-size)", "(posn-at-point 2)", "(pos-visible-in-window-p 2)", "(window-end nil t)"] {
                     let answer = h.eval(&format!("(condition-case e {call} (error (car (cdr e))))"));
-                    if refuse { assert_eq!(answer, format!("\"VM2 window-text-pixel-size {what} in a displayed window is unsupported\""), "{form} {call}"); }
-                    else { assert!(!answer.starts_with('"'), "{form} {call}: {answer}"); }
+                    assert!(!answer.starts_with('"'), "{form} {call}: {answer}");
                 }
+                let refusals = h.eval("(romacs--layout-refusals)");
+                let class = format!("\"VM2 window-text-pixel-size {what} in a displayed window is unsupported\" \"fundamental-mode\"");
+                if refuse { assert!(refusals.contains(&class), "{form}: {refusals}"); } else { assert_eq!(refusals, "nil", "{form}"); }
                 // Motion, and recentering and scrolling built on it, still
                 // moves: by the frame's character cells.
                 assert_eq!(h.eval("(progn (goto-char 1) (list (vertical-motion 0) (point)))"), "(0 1)", "{form}");

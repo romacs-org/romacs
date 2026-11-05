@@ -487,6 +487,7 @@ fn the_visited_file_name_survives_a_moving_collection() {
     let f = d.join("notes.org");
     std::fs::write(&f, ORG).unwrap();
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     vm.set_collection_floor(1_000_000);
     // Garbage BELOW the visit, so compaction must move what the visit made.
     eval(&mut vm, "(let ((i 0)) (while (< i 2000) (copy-sequence \"garbage\") (setq i (1+ i))))");

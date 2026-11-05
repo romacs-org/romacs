@@ -38,3 +38,16 @@ fn defvar_1(cx, symbol: Value, init: Value; optional doc: Value) {
 // The compiler still classifies bindings by interned name. An uninterned
 // declaration retains its object-owned flag (including across code images),
 // but later uninterned lexical binding forms do not yet consume that flag.
+
+// eval.c:1051: `defconst' as a function, (defconst SYMBOL 'INIT DOC): the
+// declaration, then set-default's write of the current default (not the
+// toplevel one, GNU's FIXME), then the risky-local-variable mark.
+defsubr! { name = "defconst-1", gnu = "eval.c:1051", effect = Global,
+fn defconst_1(cx, symbol: Value, init: Value; optional doc: Value) {
+    if cx.kind(symbol) != Kind::Symbol { return Err(Fault::Wrong("symbolp", symbol)); }
+    define_uninitialized_variable(cx, symbol, doc)?;
+    super::vars::set_default(cx, symbol, init)?;
+    let risky = cx.intern("risky-local-variable");
+    cx.put_symbol_property(symbol, risky, Value::TRUE)?;
+    Ok(symbol)
+}}

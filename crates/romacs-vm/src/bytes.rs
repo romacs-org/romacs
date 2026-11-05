@@ -67,7 +67,27 @@ pub(crate) struct ByteBuffer {
     pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
 romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held });
+/// A unibyte buffer's or insertion's text properties, by byte.
+pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
+
 impl ByteBuffer {
+    /// PROPERTIES, by offset from AT, onto the bytes just inserted there.
+    pub(crate) fn graft_properties(&mut self, at: ByteOffset, properties: ByteProperties) {
+        self.had_intervals |= !properties.is_empty();
+        self.properties.extend(properties.into_iter().map(|(p, values)| (ByteOffset(at.0 + p.0), values)));
+    }
+    /// make_buffer_string_both with properties for R: its bytes, as a
+    /// unibyte string holding R's text properties when it has any.
+    pub(crate) fn text_object(&self, r: Range<ByteOffset>) -> crate::data::Object {
+        let bytes = self.bytes[r.start.0..r.end.0].to_vec();
+        let properties: BTreeMap<ByteOffset, BTreeMap<String, Value>> = self.properties.range(r.clone())
+            .filter(|(_, values)| !values.is_empty())
+            .map(|(&at, values)| (ByteOffset(at.0 - r.start.0), values.clone())).collect();
+        if properties.is_empty() { return crate::data::Object::Bytes(bytes); }
+        let mut string = crate::data::LispString::from_bytes(bytes, false);
+        string.properties = crate::properties::Properties::from_map(&properties);
+        crate::data::string_object(string)
+    }
     /// An empty buffer's storage, with STATE.
     pub(crate) fn empty(state: BufferState, per_buffer: crate::forwarded::PerBuffer) -> Self {
         ByteBuffer {

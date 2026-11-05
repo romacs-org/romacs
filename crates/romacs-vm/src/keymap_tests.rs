@@ -22,6 +22,7 @@ fn dense_keymap_prompt_and_character_slot_roundtrip() {
 #[test]
 fn dense_keymap_slots_survive_moving_gc_without_retention() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     // Fixed source, fixed symbols, copied payload: neither fresh interned symbols
     // nor a compiler-retained literal can masquerade as retained table storage.
     const SOURCE: &str = "(setq dense-root (make-keymap)) (define-key dense-root [97] (vector (copy-sequence \"slot-payload\"))) (define-key dense-root [945] (vector (copy-sequence \"unicode-payload\"))) nil";
@@ -117,6 +118,7 @@ fn keymap_active_maps_are_buffer_local_and_kbd_parses() {
 #[test]
 fn keymap_roots_survive_counted_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     for _ in 0..200 { vm.conses.push((Value::NIL, Value::NIL)); }
     check(&mut vm, "(setq m (make-sparse-keymap)) (define-key m [97 98] (vector \"payload\")) (global-set-key [f1] m) (use-local-map m)", "nil");
     check(&mut vm, "(use-local-map (make-sparse-keymap)) (define-key (progn (setq private (make-sparse-keymap)) private) [97 98] (vector \"local-only\")) (use-local-map private) (setq private nil)", "nil");

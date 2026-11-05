@@ -73,19 +73,6 @@ impl Session {
     }
 }
 
-/// Steps where Romacs is known to differ (DIVERGENCES.md VM2-HSCROLL1):
-/// `vertical-motion' to goal column 0 in a horizontally scrolled window
-/// with line numbers lands GNU one column further right, as `previous-line'
-/// and `next-line' reach it with point scrolled out on the left; each
-/// sequence's later steps carry the moved point. Romacs's answer is pinned,
-/// so that a change either way shows.
-const RESIDUAL: [(&str, &str, &str); 4] = [
-    ("sequence-2", "(pv-step '((call forward-line 5) previous-line))", "((21 1 200 23 22) (0 1 1 24 22) (0 1 1 49 22))"),
-    ("sequence-2", "(pv-step '(other-window (call set-window-hscroll nil 12)))", "((21 1 200 23 22) (12 1 1 24 22) (0 1 1 49 22))"),
-    ("sequence-2", "(pv-step '((call forward-char 9) next-line))", "((21 1 200 23 22) (0 1 116 24 22) (0 1 1 49 22))"),
-    ("sequence-3", "(pv-step '(beginning-of-line previous-line))", "((136 8052 9613 100 21))"),
-];
-
 fn forms(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter(|line| !line.is_empty() && !line.starts_with(';'))
 }
@@ -117,9 +104,8 @@ fn point_stays_visible_and_scrolls_as_pinned_gnu() {
         } else {
             printed
         };
-        let residual = RESIDUAL.iter().find(|(s, l, _)| *s == sequence && *l == line).map(|r| r.2);
         // Wide characters' widths are the fonts': no comparison there.
-        if residual.is_some_and(|known| known != actual) || (residual.is_none() && actual != expected && !sequence.starts_with("wide-")) { mismatches.push(format!("{sequence} {line}\n  GNU    {expected}\n  Romacs {actual}")); }
+        if actual != expected && !sequence.starts_with("wide-") { mismatches.push(format!("{sequence} {line}\n  GNU    {expected}\n  Romacs {actual}")); }
     }
     assert!(steps > 500, "{steps} steps");
     assert!(invariant.is_empty() && mismatches.is_empty(), "{} cursors outside their text area:\n{}\n{} of {steps} steps differ from GNU:\n{}",
