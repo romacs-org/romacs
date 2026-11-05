@@ -62,8 +62,8 @@ pub(crate) enum ShownKind {
     Stretch(StretchWidth),
     /// A `:relative-width' FACTOR space, as wide as the host draws C.
     Relative { factor: f64, c: char },
-    /// An image a placeholder space stands for.
-    Image(romacs_layout_input::InlineImage),
+    /// An image a placeholder space stands for: the elements' image AT.
+    Image(u32),
 }
 
 /// How the host shows ELEM: None where it shows nothing of it (outside
@@ -77,7 +77,7 @@ fn host_char(source: &mut Source<'_, '_>, e: &Elem) -> R<Option<Option<char>>> {
         (Shape::Glyph { c, .. }, Method::Buffer | Method::String | Method::Vector { .. }) => char::from_u32(c),
         (Shape::Tab, Method::Buffer | Method::String | Method::Vector { .. }) => Some('\t'),
         // A glyphless character's box: a stretch of its width.
-        (Shape::Stretch { .. } | Shape::Align { .. } | Shape::Glyphless { .. } | Shape::Image(..), _) => Some(' '),
+        (Shape::Stretch { .. } | Shape::Align { .. } | Shape::Glyphless { .. } | Shape::Image { .. }, _) => Some(' '),
         // Measured as the glyph it is relative to.
         (Shape::RelativeStretch { c, .. }, _) => char::from_u32(c),
         _ => None,
@@ -140,11 +140,12 @@ impl<'a> Leaf<'a> {
     /// The elements VIEW's window shows from FROM, a line start, through
     /// the last before TO (and the strings at TO, when it is ZV), as a
     /// snapshot publishes them for the host to paint.
-    pub(super) fn shown_elements(&mut self, view: View, from: i64, to: i64) -> R<Vec<Shown>> {
+    /// The images the elements show are beside them, by ShownKind::Image's index.
+    pub(super) fn shown_elements(&mut self, view: View, from: i64, to: i64) -> R<(Vec<Shown>, Vec<romacs_layout_input::InlineImage>)> {
         let zv = view.zv;
         let cursor = self.intern("cursor");
         let mut source = Source::new(self, view, from)?;
-        let mut out = vec![];
+        let (mut out, mut images) = (vec![], vec![]);
         for index in 0.. {
             let Some(e) = source.slot(index)?.elem else { break };
             if e.charpos > to || e.charpos == to && (to < zv || e.method == Method::Buffer) { break; }
@@ -152,7 +153,10 @@ impl<'a> Leaf<'a> {
             // A space replaces when the buffer's display made it, not a string's.
             let (kind, replaces) = match stretch_width(e.shape) {
                 Some(width) => (ShownKind::Stretch(width), e.object == Value::NIL),
-                None if let Shape::Image(image, _) = e.shape => (ShownKind::Image(image), e.object == Value::NIL),
+                None if let Shape::Image { at, .. } = e.shape => {
+                    images.push(source.image(at).0);
+                    (ShownKind::Image(images.len() as u32 - 1), e.object == Value::NIL)
+                }
                 None if let Shape::Glyphless { .. } = e.shape => {
                     let width = glyphless_pixels(&mut source, &e)?;
                     (ShownKind::Stretch(StretchWidth::Width { width, zero_ok: false }), e.object == Value::NIL)
@@ -170,7 +174,7 @@ impl<'a> Leaf<'a> {
             };
             out.push(Shown { c, face: face_key(&e), charpos: e.charpos, kind, replaces, whitespace: e.whitespace });
         }
-        Ok(out)
+        Ok((out, images))
     }
 }
 
@@ -252,7 +256,7 @@ impl Elements for Hosted<'_, '_> {
                 width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height, ascent },
             Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent },
             // Its own size, not the placeholder's.
-            Shape::Image(image, spec) => Shape::Image(image, spec),
+            shape @ Shape::Image { .. } => shape,
             Shape::Tab => Shape::PixelTab { space: width, height, ascent },
             // produce_stretch_glyph: NUMVAL (prop) * it2.pixel_width.
             Shape::RelativeStretch { factor, .. } => Shape::PixelStretch {

@@ -1651,10 +1651,10 @@ impl Vm {
                 let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
                 let pos = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 as i64 + 1);
                 let (from, to) = (pos(shown.start)?, pos(shown.end)?);
-                let Ok(elements) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
+                let Ok((elements, element_images)) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
                 // Hidden and replaced newlines end no row: publish lines
                 // until as many show as the window has rows.
-                let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some(elements) };
+                let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some((elements, element_images)) };
                 lines *= 2;
                 let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
                 let accessible = b.accessible();
@@ -1734,7 +1734,7 @@ impl Vm {
                 _ => face_runs.push(FaceRun { bytes: offset..utf8.len(), face }),
             }
         };
-        let Some(elements) = elements else {
+        let Some((elements, element_images)) = elements else {
             let base = shown.start;
             utf8.push_str(&b.as_str()[shown.clone()]);
             // The raw bytes shown, as offsets into the published text; an
@@ -1805,7 +1805,7 @@ impl Vm {
                 if e.c.is_control() && e.c != '\n' && e.c != '\t' && let Some(escape) = escape { escape } else { face }
             };
             if let crate::prim::ShownKind::Stretch(width) = e.kind { stretches.push(romacs_layout_input::Stretch { byte: display, width }); }
-            if let crate::prim::ShownKind::Image(image) = e.kind { images.push(romacs_layout_input::InlineImage { byte: display, ..image }); }
+            if let crate::prim::ShownKind::Image(k) = e.kind { images.push(romacs_layout_input::InlineImage { byte: display, ..element_images[k as usize] }); }
             // A relative space's width waits for the host's glyph of C.
             let shown = if let crate::prim::ShownKind::Relative { factor, c } = e.kind {
                 relative.push((display, face, c, factor));

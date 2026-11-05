@@ -233,7 +233,7 @@ impl Leaf<'_> {
 
     /// The elements WINDOW shows of its buffer from FROM, a line start,
     /// through TO, in the pixels of a window-system frame (VM2-WTPS1).
-    pub(crate) fn window_shown_elements(&mut self, window: Value, from: i64, to: i64) -> std::result::Result<Vec<super::display_hosted::Shown>, Fault> {
+    pub(crate) fn window_shown_elements(&mut self, window: Value, from: i64, to: i64) -> std::result::Result<(Vec<super::display_hosted::Shown>, Vec<romacs_layout_input::InlineImage>), Fault> {
         let mut area = self.windows().text_area(window, "redisplay")?;
         area.hosted = true;
         let buffer = area.buffer;
@@ -673,7 +673,7 @@ impl Leaf<'_> {
         let (width, height) = match glyph.map(|e| (e, e.shape)) {
             Some((_, motion::Shape::Pixel { c, .. })) if c != 0x0a => hosted.glyph(it.index)?,
             Some((_, motion::Shape::PixelTab { space, .. })) => (motion::pixel_tab(&cx, &it, space), hosted.glyph(it.index)?.1),
-            Some((_, motion::Shape::Image(image, _))) => (image.width, image.ascent + image.descent),
+            Some((_, motion::Shape::Image { width, ascent, descent, .. })) => (width, ascent + descent),
             Some((e, motion::Shape::PixelStretch { width, unnumbered, .. })) => {
                 let width = if it.lnum_x > 0 { width } else { unnumbered.unwrap_or(width) };
                 (motion::pixel_stretch(&cx, &it, &e, width), hosted.glyph(it.index)?.1)
@@ -681,7 +681,7 @@ impl Leaf<'_> {
             _ => hosted.default_advance(' ')?,
         };
         let string = glyph.filter(|e| e.object != Value::NIL).and_then(|e| Some((e.object, e.strpos?)));
-        let image = glyph.and_then(|e| if let motion::Shape::Image(_, spec) = e.shape { Some(spec) } else { None });
+        let image = glyph.and_then(|e| if let motion::Shape::Image { at, .. } = e.shape { Some(hosted.source().image(at).1) } else { None });
         // DY from the glyph's top, which sits the row's ascent less its own
         // below the row's (pos_visible_p).
         let rise = it.max_h.drop(it.h);

@@ -55,8 +55,9 @@ pub(super) enum Shape {
     /// not yet produced (calc_pixel_width_or_height counts it only then).
     PixelStretch { width: romacs_layout_input::StretchWidth, unnumbered: Option<romacs_layout_input::StretchWidth>, height: i64, ascent: i64 },
     /// An image's glyph (produce_image_glyph): its slot's width, ascent
-    /// and descent, and what the host paints in it; and its spec.
-    Image(romacs_layout_input::InlineImage, crate::Value),
+    /// and descent; what the host paints in it and its spec are the
+    /// source's image AT (Source::image), so elements stay small.
+    Image { width: i64, ascent: i64, descent: i64, at: u32 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -252,9 +253,9 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
             let x = it.current_x + if it.align_visually { 0 } else { it.continuation_lines_width };
             stretch(cx, it, e, (target - x).max(0), true)
         }
-        Shape::Image(image, _) => {
-            rise = Rise { ascent: image.ascent, descent: image.descent, tallest: image.ascent + image.descent, settled: true };
-            (image.width, 1)
+        Shape::Image { width, ascent, descent, .. } => {
+            rise = Rise { ascent, descent, tallest: ascent + descent, settled: true };
+            (width, 1)
         }
         Shape::PixelStretch { width, unnumbered, height, ascent } => {
             rise = Rise::of(height, ascent);

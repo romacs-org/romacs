@@ -66,6 +66,8 @@ pub(super) struct Source<'l, 'a> {
     lines: (usize, i64),
     /// How many columns a character takes (width_rule.rs), read once.
     rule: crate::width_rule::WidthRule,
+    /// The images the elements show (Shape::Image's AT), with their specs.
+    images: Vec<(romacs_layout_input::InlineImage, Value)>,
 }
 
 #[derive(Clone, Copy)]
@@ -101,7 +103,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let byte = leaf.buffer_byte(view.buffer, start)?;
         let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule, images: vec![] })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
@@ -112,9 +114,15 @@ impl<'l, 'a> Source<'l, 'a> {
     pub(super) fn width(&self, c: u32) -> i64 { self.rule.width(c) as i64 }
 
     /// Deliver from START again, a line start.
+    /// The image a `Shape::Image' shows, and its spec.
+    pub(super) fn image(&self, at: u32) -> (romacs_layout_input::InlineImage, Value) {
+        self.images[at as usize]
+    }
+
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
         self.slots.clear();
         self.prefixes.clear();
+        self.images.clear();
         self.move_to(start)?;
         (self.run_end, self.stop_due, self.pre, self.ended) = (start, true, None, false);
         Ok(())
@@ -731,7 +739,10 @@ impl<'l, 'a> Source<'l, 'a> {
             Replacement::Image(spec, text_area, slice) => {
                 let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
                 let Some(image) = self.leaf.image_glyph(&parsed, slice)? else { return Ok(()) };
-                self.emit(Elem { shape: Shape::Image(image, spec), method: Method::Stretch, charpos: origin.charpos, whitespace: origin.whitespace_under,
+                let at = self.images.len() as u32;
+                self.images.push((image, spec));
+                let shape = Shape::Image { width: image.width, ascent: image.ascent, descent: image.descent, at };
+                self.emit(Elem { shape, method: Method::Stretch, charpos: origin.charpos, whitespace: origin.whitespace_under,
                     text_area, strpos: origin.strpos, from_display: origin.from_display, object: origin.string, ellipsis: None, face: None, unnumbered: None });
                 Ok(())
             }
