@@ -248,22 +248,28 @@
 ;;;; The ported schemes
 
 (defconst romacs-theme-author-test--ported
-  '(tokyonight-night tokyonight-day catppuccin-mocha catppuccin-latte gruvbox-dark gruvbox-light nord
-    everforest-dark everforest-light kanagawa-wave kanagawa-lotus rose-pine-main rose-pine-dawn dracula
-    one-dark one-light solarized-dark solarized-light)
-  "The schemes ported as Romacs's own.")
+  (seq-remove (lambda (theme) (or (memq theme '(default rum)) (string-prefix-p "omarchy-" (symbol-name theme))))
+              (mapcar #'car romacs-theme-bundled))
+  "The schemes ported as Romacs's own: every shipped theme but the stock
+ones and Omarchy's.")
 
 (defconst romacs-theme-author-test--variants
   '((tokyonight tokyonight-night tokyonight-day) (catppuccin catppuccin-mocha catppuccin-latte)
     (gruvbox gruvbox-dark gruvbox-light) (everforest everforest-dark everforest-light)
     (kanagawa kanagawa-wave kanagawa-lotus) (rose-pine rose-pine-main rose-pine-dawn)
-    (one one-dark one-light) (solarized solarized-dark solarized-light))
+    (one one-dark one-light) (solarized solarized-dark solarized-light)
+    (homage homage-black homage-white) (winter-is-coming winter-is-coming-dark-blue winter-is-coming-light))
   "Each family with an upstream light variant, dark first.")
 
 (defun romacs-theme-author-test--load-ported ()
   "Load every ported theme, without enabling it."
   (dolist (theme romacs-theme-author-test--ported)
     (unless (custom-theme-p theme) (load-theme theme t t))))
+
+(defun romacs-theme-author-test--grey-p (colour)
+  "Whether COLOUR, #rrggbb, is a neutral grey."
+  (and (equal (substring colour 1 3) (substring colour 3 5))
+       (equal (substring colour 3 5) (substring colour 5 7))))
 
 (romacs-deftest romacs-theme-ported-the-table-agrees-with-the-files ()
   (romacs-theme-author-test--load-ported)
@@ -282,6 +288,12 @@
     (romacs-should (eq (plist-get (get (nth 1 family) 'theme-properties) :family) (car family)))
     (romacs-should (eq (plist-get (get (nth 2 family) 'theme-properties) :family) (car family)))))
 
+(romacs-deftest romacs-theme-ported-a-mode-is-what-the-palette-is ()
+  (romacs-theme-author-test--load-ported)
+  (dolist (theme romacs-theme-author-test--ported)
+    (romacs-should (equal (list theme (plist-get (get theme 'theme-properties) :background-mode))
+                          (list theme (romacs-theme--infer-mode (get theme 'romacs-palette)))))))
+
 (romacs-deftest romacs-theme-ported-text-reads-at-its-floor ()
   (romacs-theme-author-test--load-ported)
   (dolist (theme romacs-theme-author-test--ported)
@@ -296,9 +308,9 @@
         (romacs-should (>= (romacs-color-contrast (nth 1 move) (nth 3 move)) 3.0))))))
 
 (romacs-deftest romacs-theme-ported-shows-no-modus-colour ()
-  ;; Colours the upstream palette itself has are its own; the core's show
-  ;; only by coincidence, listed: Nord's diff tint, its own Oklab mix, is
-  ;; the core's `bg-mode-line-active'.
+  ;; Colours the upstream palette itself has are its own.  A neutral grey
+  ;; can coincide: an Oklab mix of a theme's greys lands on the core's.  No
+  ;; hue of the core shows.
   (romacs-theme-author-test--load-ported)
   (let ((core (delq nil (mapcar (lambda (row) (and (stringp (nth 1 row)) (nth 1 row)))
                                 romacs-theme-modus-vivendi-palette))))
@@ -307,8 +319,7 @@
              (own (romacs-theme-author-test--strings (get theme 'romacs-palette)))
              (shown (romacs-theme-author-test--strings (list (plist-get rows :faces) (plist-get rows :variables))))
              (leaks (seq-remove (lambda (colour)
-                                  (or (gethash colour own) (member colour '("#000000" "#ffffff"))
-                                      (and (eq theme 'nord) (equal colour "#505050"))))
+                                  (or (gethash colour own) (romacs-theme-author-test--grey-p colour)))
                                 (seq-filter (lambda (colour) (gethash colour shown)) core))))
         (romacs-should (equal (list theme leaks) (list theme nil)))
         (romacs-should (not (gethash "gray50" shown)))))))

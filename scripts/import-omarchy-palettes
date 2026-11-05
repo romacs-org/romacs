@@ -122,7 +122,7 @@ def ported(root):
         text = path.read_text()
         form = re.search(r'^\(def-romacs-theme (\S+) .*?:mode (\w+) :family (\S+)', text, re.M | re.S)
         if form:
-            who, licence, url = re.search(r'^;; Palette: (.+), ([^,]+), (\S+)$', text, re.M).groups()
+            who, licence, url = re.search(r'^;; Palette: ([^\n]+), ([^,\n]+), (\S+)$', text, re.M).groups()
             rows.append((*form.groups(), who, licence, url))
     return rows
 
