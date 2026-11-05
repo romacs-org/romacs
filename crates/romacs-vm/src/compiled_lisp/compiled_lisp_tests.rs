@@ -167,3 +167,117 @@ fn damaged_artifacts_are_deleted_on_lookup() {
     assert!(!path.exists());
     std::fs::remove_dir_all(&store).unwrap();
 }
+
+/// A private store directory for one test, named NAME.
+fn test_store(name: &str) -> PathBuf {
+    let base = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+        || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"), std::path::PathBuf::from);
+    let store = base.join(format!("compiled-lisp-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store);
+    std::fs::create_dir_all(&store).unwrap();
+    store
+}
+
+/// Publish an artifact for key N of about SIZE bytes.
+fn publish_sized(store: &Path, n: u32, size: usize) -> PathBuf {
+    let mut key = [0; 32];
+    key[..4].copy_from_slice(&n.to_le_bytes());
+    let units = [(0, 0, 0, 1, vec![n as u8; size])];
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new(&format!("/f{n}.el")), &[], &[], &units);
+    store::publish(store, &key, &inputs, &bytes).unwrap()
+}
+
+#[test]
+fn a_failed_compile_is_told_from_a_refused_one() {
+    let store = test_store("status");
+    for status in [store::Status::Source("no-byte-compile".into()), store::Status::Error("line 3: void".into())] {
+        let (bytes, inputs) = store::encode(&status, Path::new("/x.el"), &[], &[], &[]);
+        let path = store::publish(&store, &[1; 32], &inputs, &bytes).unwrap();
+        let read = store::open(&path).unwrap().status;
+        assert!(match (&status, &read) {
+            (store::Status::Source(a), store::Status::Source(b)) | (store::Status::Error(a), store::Status::Error(b)) => a == b,
+            _ => false,
+        });
+    }
+    std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A tree's maintenance keeps every artifact the tree stands for, even
+/// over the budget, and evicts only the others, least recently used first.
+#[test]
+fn pruning_never_evicts_what_it_is_told_to_keep() {
+    let store = test_store("keep");
+    let paths: Vec<PathBuf> = (0..6).map(|n| publish_sized(&store, n, 4096)).collect();
+    for (n, path) in paths.iter().enumerate() {
+        store::note_use(&store, path, Path::new(&format!("/f{n}.el")));
+    }
+    let keep: std::collections::HashSet<PathBuf> = paths[..3].iter().cloned().collect();
+    // A budget the kept three alone exceed.
+    let removed = store::prune(&store, 4096, &keep).unwrap();
+    assert!(paths[..3].iter().all(|p| p.exists()), "a kept artifact was evicted");
+    assert!(paths[3..].iter().all(|p| !p.exists()), "an artifact over the budget survived");
+    assert_eq!(removed.len(), 3);
+    std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// Use-log lines from concurrent writers all land (one append each), and
+/// none is written while maintenance holds the store.
+#[test]
+fn use_log_appends_and_yields_to_maintenance() {
+    let store = test_store("uselog");
+    let path = publish_sized(&store, 1, 16);
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| for _ in 0..200 { store::note_use(&store, &path, Path::new("/f1.el")); });
+        }
+    });
+    let log = store::generation(&store).join("use.log");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1600);
+    let maintenance = store::lock(&store, libc::LOCK_EX).unwrap();
+    store::note_use(&store, &path, Path::new("/f1.el"));
+    drop(maintenance);
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1600);
+    std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// Scaling probe: publishing one artifact costs the same into a store of
+/// 100 artifacts as into one of 1000 (a tree's compiles publish without
+/// pruning; its maintenance runs once). Measured in this thread's
+/// instructions; a machine without the counter fails, never passes
+/// unmeasured.
+#[test]
+fn publication_into_a_growing_store_is_constant() {
+    let store = test_store("scaling");
+    let cost = |from: u32| {
+        let before = host::thread_instructions().expect("an instruction counter");
+        for n in from..from + 50 {
+            publish_sized(&store, n, 64);
+        }
+        host::thread_instructions().unwrap() - before
+    };
+    for n in 0..100 { publish_sized(&store, 1_000_000 + n, 64); }
+    let small = cost(0);
+    for n in 100..1000 { publish_sized(&store, 1_000_000 + n, 64); }
+    let large = cost(10_000);
+    assert!((large as f64) < 1.5 * small as f64, "publication cost grew with the store: {small} -> {large}");
+    std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A tree's JOBS compile at once: four items, four workers, each holding
+/// its item until all four are in hand.
+#[test]
+fn tree_workers_overlap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (active, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    let done = tree::pool((0..4).collect(), 4, |_| {
+        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+        most.fetch_max(now, Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while most.load(Ordering::SeqCst) < 4 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        active.fetch_sub(1, Ordering::SeqCst);
+    });
+    assert_eq!(done.len(), 4);
+    assert_eq!(most.load(Ordering::SeqCst), 4, "the workers ran one at a time");
+}

@@ -31,7 +31,7 @@
 //! base once a plan exists.
 use crate::startup;
 use romacs_vm::Vm;
-use romacs_vm::world::layer::{Plan, REFUSAL};
+use romacs_vm::world::layer::{Entry, Kind, Plan, REFUSAL};
 use romacs_vm::world::store::{Launch, World};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -139,7 +139,8 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
 /// when a launch asked for one (`--init-layer`, the arguments
 /// `builder_args` gives), and exit. The plan is the store's for INIT less
 /// EXCLUDED, and must have DIGEST: a plan that changed since the launch
-/// resolved it is not built under its key.
+/// resolved it is not built under its key. The configurations EXCLUDED
+/// refused stay deferred in this build too (`Vm::world_layer_load`).
 pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, init: Option<&InitLayerArgs>) -> Result<(), String> {
     let Launch::Build = base.launch::<Carry>(Vec::new, false, || {}) else { return Err("not a world builder".into()) };
     let Some(args) = init else { build_and_exit(base, width, height, floor, None) };
@@ -148,12 +149,13 @@ pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, i
     if plan.digest() != args.digest {
         return Err(format!("the plan for {} changed since the launch resolved it", args.init.display()));
     }
-    build_and_exit(&base.layered(plan.recipe()), width, height, floor, Some(plan))
+    let deferred: Vec<Entry> = args.excluded.iter().filter_map(|&at| full.entries.get(at)).filter(|e| e.kind == Kind::After).cloned().collect();
+    build_and_exit(&base.layered(plan.recipe()), width, height, floor, Some((plan, deferred)))
 }
 
 /// Build WORLD, with PLAN's libraries for a layer, and exit with the outcome.
-fn build_and_exit(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<Plan>) -> ! {
-    let result = build(world, width, height, floor, plan.as_ref());
+fn build_and_exit(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<(Plan, Vec<Entry>)>) -> ! {
+    let result = build(world, width, height, floor, plan);
     if let Err(error) = &result { eprintln!("romacs-world: build failed: {error}"); }
     std::process::exit(if result.is_ok() { 0 } else { 1 })
 }
@@ -193,6 +195,9 @@ pub struct Layer {
     full: Plan,
     excluded: Vec<usize>,
     pub plan: Plan,
+    /// For the last usable layer standing in (`layer`): the digest of the
+    /// plan it was resolved from.
+    resolved_from: Option<String>,
 }
 
 impl Layer {
@@ -204,13 +209,48 @@ impl Layer {
 /// The layer a launch may restore for INIT over BASE: the plan the store
 /// keeps for INIT, when INIT still has the content it was planned from,
 /// resolved (`resolve`). None without a plan, or with an edited init.
+///
+/// The last layer usable for INIT (`Plan::write_last`) stands in when it was
+/// planned from the same init content and everything it holds is still in
+/// the plan: at once, when it was resolved from this very plan, so a launch
+/// reads none of the refusals that resolution went through; and while the
+/// plan's own layer is not built yet, whose libraries it lacks load at
+/// their first use and which the launch builds (`after_init`). After an
+/// edit of the init, its configuration forms are other code, so the base
+/// world boots.
 pub fn layer(base: &World, init: &Path) -> Option<Layer> {
     let plan = Plan::read(&base.store, init)?;
     if !plan.current() {
         eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init changed since its plan"}));
         return None;
     }
-    resolve(base, plan)
+    let last = Plan::read_last(&base.store, init).filter(|(last, _)| last.init_digest == plan.init_digest && last.within(&plan));
+    let usable = |last: Plan, from: String| {
+        let world = base.layered(last.recipe());
+        world.ready().then(|| Layer { world, full: last.clone(), excluded: Vec::new(), plan: last, resolved_from: Some(from) })
+    };
+    if let Some((last, from)) = last.clone().filter(|(_, from)| *from == plan.digest()) && let Some(layer) = usable(last, from) {
+        return Some(layer);
+    }
+    let layer = resolve(base, plan)?;
+    if layer.world.ready() {
+        return Some(layer);
+    }
+    match last.and_then(|(last, from)| usable(last, from)) {
+        Some(previous) => {
+            eprintln!("romacs-world: {}", json!({"event": "layer", "previous": true, "entries": previous.plan.entries.len()}));
+            Some(previous)
+        }
+        None => Some(layer),
+    }
+}
+
+/// LAYER is usable: keep its plan as its init's last usable layer's. Every
+/// usable layer was made so here (`build_ahead`), so a launch writes nothing.
+fn keep_last(layer: &Layer) {
+    if let Err(error) = layer.plan.write_last(&layer.world.store, &layer.full.digest()) {
+        eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the last layer's plan cannot be kept: {error}")}));
+    }
 }
 
 /// FULL's layer over BASE less the entries standing refusals name: each
@@ -225,7 +265,7 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
             return None;
         }
         let world = base.layered(plan.recipe());
-        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan }) };
+        let Some(refusals) = world.standing_refusal() else { return Some(Layer { world, full, excluded, plan, resolved_from: None }) };
         // The build replayed the trimmed plan: its entry indices are
         // positions among the entries kept.
         let kept: Vec<usize> = (0..full.entries.len()).filter(|i| !excluded.contains(i)).collect();
@@ -285,15 +325,22 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
         (Some(layer), true) => layer.plan.merged(&recorded),
         _ => recorded,
     };
-    let kept = Plan::read(&worlds.base.store, &plan.init);
-    if plan.supersedes(kept.as_ref()) {
-        if let Err(error) = plan.write(&worlds.base.store) {
-            eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the plan cannot be kept: {error}")}));
-            return;
+    // The store's plan stays when this one loads as it does: what is built
+    // is the store's, whose digest a builder checks; this plan's forms may
+    // print other generated names (`Entry::same`).
+    let plan = match Plan::read(&worlds.base.store, &plan.init) {
+        Some(kept) if !plan.supersedes(Some(&kept)) => kept,
+        _ => {
+            if let Err(error) = plan.write(&worlds.base.store) {
+                eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the plan cannot be kept: {error}")}));
+                return;
+            }
+            eprintln!("romacs-world: {}", json!({"event": "layer-plan", "entries": plan.entries.len()}));
+            plan
         }
-        eprintln!("romacs-world: {}", json!({"event": "layer-plan", "entries": plan.entries.len()}));
-    }
-    if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan)) {
+    };
+    // Restored the layer of these loads, or the one resolved from this plan.
+    if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan) || layer.resolved_from.as_ref() == Some(&plan.digest())) {
         return;
     }
     let (base, width, height, floor) = (worlds.base.clone(), worlds.width, worlds.height, worlds.floor);
@@ -307,6 +354,7 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
     for _ in 0..4 {
         let Some(layer) = resolve(base, full.clone()) else { return false };
         if layer.world.ready() {
+            keep_last(&layer);
             return true;
         }
         let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
@@ -314,6 +362,7 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
         match layer.world.prepare(|| builder_args(&layer.world, width, height, floor, Some(&layer.args()))) {
             Ok(_) => {
                 eprintln!("romacs-world: {}", json!({"event": "layer-built", "key": key}));
+                keep_last(&layer);
                 return true;
             }
             Err(reason) => {
@@ -385,15 +434,14 @@ pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
 
 /// The builder: the launch's steps up to the world's end, with PLAN's
 /// libraries for a layer, headless, on the evaluator's stack, then publish.
-fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<&Plan>) -> Result<(), String> {
+fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<(Plan, Vec<Entry>)>) -> Result<(), String> {
     let world = world.clone();
-    let plan = plan.cloned();
     crate::spawn_evaluator(move || -> Result<(), String> {
         // The fonts load before the build is confined.
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         let mut roots = build_roots(&dir);
-        roots.extend(plan.iter().flat_map(Plan::directories));
+        roots.extend(plan.iter().flat_map(|(plan, _)| plan.directories()));
         world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())?;
         let len = world.build(|| build_world(width, height, floor, &dir, engine, plan.as_ref()))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
@@ -405,7 +453,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Opt
 /// libraries for a layer. The world's VM, its carry and its events (the
 /// plan replayed, with the entries refused), for `World::build` to publish.
 fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
-               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>, plan: Option<&Plan>) -> Result<(Vm, Carry, serde_json::Value), String> {
+               engine: std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>, plan: Option<&(Plan, Vec<Entry>)>) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
     vm.world_begin();
     vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
@@ -421,8 +469,8 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
     let events = match plan {
-        Some(plan) => {
-            let refused = vm.world_layer_load(plan);
+        Some((plan, deferred)) => {
+            let refused = vm.world_layer_load(plan, deferred);
             eprintln!("romacs-world: {}", json!({"event": "layer-load", "entries": plan.entries.len(), "refused": refused}));
             json!({"init-layer": plan.json(), "refused": refused})
         }

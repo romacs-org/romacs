@@ -41,7 +41,7 @@ impl XmlAttributeValue {
 ///
 /// Evaluation resolves competing animations before splicing and produces
 /// at most one override for each attribute site.
-pub(crate) fn apply(
+pub fn apply(
     plan: &super::plan::AnimationPlan,
     data: &[u8],
     overrides: &[AttributeOverride],

@@ -16,9 +16,15 @@
 
 ;; Fetch and parse compact, local-only previews for HTTPS links.  Link
 ;; metadata is derived on demand and is never added to XMPP stanzas.
+;;
+;; In a session started from a world the fetch runs in a worker VM: the
+;; name lookup, the transfer and the parse all happen there, and the
+;; session only receives the metadata.  Batch and source-booted sessions
+;; fetch in their own VM, as before.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'dom)
 (require 'json)
 (require 'seq)
@@ -26,6 +32,13 @@
 (require 'url-expand)
 (require 'url-parse)
 (require 'url-util)
+
+(declare-function isolate-spawn "isolate")
+(declare-function isolate-on-done "isolate")
+(declare-function isolate-await "isolate")
+(declare-function thaw "isolate" (object))
+(defvar isolate-boot)
+(defvar isolate-world)
 
 (defgroup jabber-link-preview nil
   "Local previews for links in chat messages."
@@ -313,9 +326,8 @@ be globally routable."
                 (point-max))
                (jabber-link-preview--abort-oversize process))
               ((and header-end
-                    (> (string-bytes
-                        (buffer-substring-no-properties
-                         header-end (point-max)))
+                    ;; The body's size without copying it at every chunk.
+                    (> (- (position-bytes (point-max)) (position-bytes header-end))
                        jabber-link-preview-max-html-bytes))
                (delete-region
                 (min (point-max)
@@ -408,25 +420,88 @@ be globally routable."
     (process-put process 'jabber-link-preview-kind kind)
     process))
 
-(defun jabber-link-preview-fetch (url callback &rest cbargs)
-  "Fetch preview metadata for URL and call CALLBACK with it and CBARGS.
+(defun jabber-link-preview--fetch-here (url callback &rest cbargs)
+  "Fetch preview metadata for URL in this VM; call CALLBACK with it and CBARGS.
 Retrieval uses a vetted, pinned public address, refuses redirects, sends
-no cookies or referrer, and aborts when response limits are exceeded."
+no cookies or referrer, and aborts when response limits are exceeded.
+Return the retrieval process, or nil when none was started."
   (cond ((not (executable-find jabber-link-preview-program))
-         (apply callback (list :error 'program-unavailable) cbargs))
+         (apply callback (list :error 'program-unavailable) cbargs)
+         nil)
         ((not (jabber-link-preview-safe-url-p url))
-         (apply callback (list :error 'unsafe) cbargs))
+         (apply callback (list :error 'unsafe) cbargs)
+         nil)
         ((not (fboundp 'libxml-parse-html-region))
-         (apply callback (list :error 'parser-unavailable) cbargs))
+         (apply callback (list :error 'parser-unavailable) cbargs)
+         nil)
         (t
          (let* ((oembed (jabber-link-preview--youtube-oembed-url url))
                 (fetch-url (or oembed url))
                 (kind (and oembed 'youtube)))
            (if-let* ((address
                       (jabber-link-preview--resolved-address fetch-url)))
-             (jabber-link-preview--start-process
-              fetch-url url kind address callback cbargs)
-             (apply callback (list :error 'unsafe) cbargs))))))
+               (jabber-link-preview--start-process
+                fetch-url url kind address callback cbargs)
+             (apply callback (list :error 'unsafe) cbargs)
+             nil)))))
+
+(defun jabber-link-preview-worker-fetch (url)
+  "In a worker VM: fetch and parse URL's preview, and return it.
+The value is the metadata plist or (:error KIND).  The name lookup, the
+transfer and the parse happen here; past `jabber-link-preview-timeout'
+and a little more, the transfer is stopped."
+  (let* ((result nil)
+         (process (jabber-link-preview--fetch-here
+                   url (lambda (value) (setq result value))))
+         (deadline (+ (float-time) jabber-link-preview-timeout 2)))
+    (while (and (null result) (< (float-time) deadline))
+      (accept-process-output process 0.05))
+    (when (and (null result) (processp process) (process-live-p process))
+      (delete-process process)
+      (accept-process-output nil 0))
+    (or result (list :error 'timeout))))
+
+(defvar jabber-link-preview-inherited-variables
+  '(jabber-link-preview-max-html-bytes jabber-link-preview-title-length
+    jabber-link-preview-description-length jabber-link-preview-program
+    jabber-link-preview-timeout exec-path)
+  "Variables whose session values a preview's worker gets.")
+
+(defun jabber-link-preview--worker-available-p ()
+  "Non-nil when a preview can be fetched in a worker started from this world."
+  (and (fboundp 'isolate-spawn)
+       (boundp 'isolate-boot) (eq isolate-boot 'world)
+       (boundp 'isolate-world) isolate-world))
+
+(defun jabber-link-preview-fetch (url callback &rest cbargs)
+  "Fetch preview metadata for URL and call CALLBACK with it and CBARGS.
+Retrieval uses a vetted, pinned public address, refuses redirects, sends
+no cookies or referrer, and aborts when response limits are exceeded.
+In a session started from a world it all happens in a worker VM
+\=(`jabber-link-preview-worker-fetch'): this VM never waits on the name
+lookup, the transfer or the parse, and CALLBACK runs when the metadata
+arrives.  Elsewhere it happens here (`jabber-link-preview--fetch-here')."
+  (cond
+   ((not (jabber-link-preview-safe-url-p url))
+    (apply callback (list :error 'unsafe) cbargs))
+   ((jabber-link-preview--worker-available-p)
+    (condition-case nil
+        (let ((future (isolate-spawn
+                       'jabber-link-preview-worker-fetch url
+                       :require '(jabber-link-preview)
+                       :name "jabber-link-preview"
+                       :bindings (cl-loop for variable in jabber-link-preview-inherited-variables
+                                          when (boundp variable)
+                                          collect (cons variable (symbol-value variable))))))
+          (isolate-on-done
+           future
+           (lambda (done)
+             (apply callback
+                    (condition-case nil (thaw (isolate-await done 0))
+                      (error (list :error 'worker)))
+                    cbargs))))
+      (error (apply callback (list :error 'worker) cbargs))))
+   (t (apply #'jabber-link-preview--fetch-here url callback cbargs))))
 
 (provide 'jabber-link-preview)
 

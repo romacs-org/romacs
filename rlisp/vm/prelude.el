@@ -877,6 +877,18 @@ Redisplay calls this in the buffer of a window showing START to END."
         (setq functions (cdr functions))))))
 
 
+;;; Evaluating in a frame
+
+(defun backtrace-eval (exp nframes &optional base)
+  "Evaluate EXP in the context of some activation frame.
+NFRAMES and BASE specify the activation frame to use, as in `backtrace-frame'.
+eval.c Fbacktrace_eval: the dynamic bindings, the current buffer and the
+excursions made since that frame's entry are swapped back while EXP runs,
+and forward again however it exits."
+  (let ((swapped (romacs--backtrace-unrewind nframes (or base 'backtrace-eval))))
+    (unwind-protect (eval exp t)
+      (romacs--backtrace-rewind swapped))))
+
 ;;; The debugger on the signal path
 
 ;; GNU eval.c maybe_call_debugger.  The signal path (threaded_signal.rs

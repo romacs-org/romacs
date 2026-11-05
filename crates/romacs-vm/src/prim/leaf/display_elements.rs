@@ -425,9 +425,7 @@ impl<'l, 'a> Source<'l, 'a> {
             composition_refusal(self.leaf.vm.property_textget(string, i as i64, self.syms.composition)?)?;
             let spec = self.leaf.vm.property_textget(string, i as i64, self.syms.display)?;
             if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, true, origin.from_display)? {
-                let (at, display) = (Value::integer(i as i64).map_err(Fault::Error)?, self.syms.display);
-                let end = self.leaf.vm.next_single_property_change_values(at, display, string, Value::NIL)?
-                    .integer_value().map_or(chars.len(), |n| n as usize);
+                let end = self.string_run_end(string, i, self.syms.display, spec, &chars, end_byte)?;
                 let under = here.whitespace_under || matches!(chars[i].1, 0x20 | 0x09);
                 self.replacement(replacement, Origin { from_display: true, whitespace_under: under, ..here })?;
                 i = end.max(i + 1);
@@ -437,7 +435,7 @@ impl<'l, 'a> Source<'l, 'a> {
             let invisible = self.leaf.invisible_kind(property)?;
             let boundary = self.leaf.vm.next_property_boundary(string, ByteOffset(chars[i].0), ByteOffset(end_byte))
                 .map_err(Fault::Error)?.0;
-            let run = chars.iter().position(|&(b, _)| b >= boundary).unwrap_or(chars.len()).max(i + 1);
+            let run = char_at_byte(&chars, boundary).max(i + 1);
             if invisible != 0 {
                 let (end, ellipsis) = self.skip_invisible_string(string, run, &chars, invisible == 2)?;
                 if ellipsis { self.ellipsis(Origin { strpos: Some(end.min(chars.len().saturating_sub(1))), ..origin }, false)?; }
@@ -452,6 +450,21 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(())
     }
 
+    /// Where STRING's run of PROP, whose value at character AT is VALUE,
+    /// ends (GNU's next-single-property-change): its property boundaries
+    /// walked by byte, each mapped through CHARS, (byte, char) in order,
+    /// without decoding the string again.
+    fn string_run_end(&mut self, string: Value, at: usize, prop: Value, value: Value, chars: &[(usize, u32)], end_byte: usize) -> R<usize> {
+        let mut byte = chars[at].0;
+        loop {
+            let next = self.leaf.vm.next_property_boundary(string, ByteOffset(byte), ByteOffset(end_byte)).map_err(Fault::Error)?.0;
+            if next >= end_byte { return Ok(chars.len()) }
+            let k = char_at_byte(chars, next);
+            if self.leaf.vm.property_textget(string, k as i64, prop)? != value { return Ok(k) }
+            byte = next;
+        }
+    }
+
     fn skip_invisible_string(&mut self, string: Value, mut at: usize, chars: &[(usize, u32)], mut ellipsis: bool) -> R<(usize, bool)> {
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());
         while at < chars.len() {
@@ -463,7 +476,7 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             let boundary = self.leaf.vm.next_property_boundary(string, ByteOffset(chars[at].0), ByteOffset(end_byte))
                 .map_err(Fault::Error)?.0;
-            at = chars.iter().position(|&(b, _)| b >= boundary).unwrap_or(chars.len()).max(at + 1);
+            at = char_at_byte(&chars, boundary).max(at + 1);
         }
         Ok((at, ellipsis))
     }
@@ -861,7 +874,7 @@ impl<'l, 'a> Source<'l, 'a> {
         // An image spec: its own width, margins aside (img->width).
         if car == s.image && self.view.pixels && self.leaf.vm.window_system_open() && let Some(spec) = self.leaf.image_spec(prop)? {
             let env = self.leaf.image_env(Value::NIL)?;
-            let (_, entry, _) = self.leaf.image_lookup(&spec, &env)?;
+            let (_, entry, _) = self.leaf.image_lookup_display(&spec, &env)?;
             return Ok(Some(f64::from(entry.facts.width)));
         }
         if self.leaf.kind(car) == super::Kind::Symbol {
@@ -907,6 +920,12 @@ impl<'l, 'a> Source<'l, 'a> {
 
 /// A unibyte string's byte as get_next_display_element shows it: a
 /// non-ASCII byte is a raw-byte character (BYTE8_TO_CHAR).
+/// The index in CHARS, (byte, char) in byte order, of the first character
+/// at or after BYTE; CHARS' length past its end.
+fn char_at_byte(chars: &[(usize, u32)], byte: usize) -> usize {
+    chars.partition_point(|&(b, _)| b < byte)
+}
+
 fn unibyte_char(b: u8) -> u32 {
     if b.is_ascii() { u32::from(b) } else { 0x3fff00 + u32::from(b) }
 }

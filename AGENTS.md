@@ -74,6 +74,9 @@ possible; say so where you do.
   boundary; the main VM stays interruptible.
 - A parallel path proves itself twice: a scaling probe on large inputs, and
   perkey on ordinary ones (no per-key regression from dispatch).
+- `doc/performance.org` collects the practices behind these rules: measuring
+  slow keys, what runs on the main VM and in worker VMs, handing results
+  over, and bounding the main VM's own work.
 
 ## Testing loop
 

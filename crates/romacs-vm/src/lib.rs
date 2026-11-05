@@ -39,6 +39,7 @@ mod subprocess;
 mod tls;
 mod html;
 mod html_entities;
+mod xml_read;
 pub mod host;
 pub mod world;
 pub mod compiled_lisp;
@@ -50,7 +51,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
@@ -581,6 +582,8 @@ enum Primitive {
     MakeInterpretedClosure,
     SearchBackward,
 }
+/// The file declaring [`PRIMITIVES`], relative to the source tree.
+pub(crate) const PRIMITIVES_FILE: &str = file!();
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
     ("/", Primitive::Div),
@@ -1475,6 +1478,9 @@ pub struct Vm {
     random: random::Random,
     /// A world build's P fence (`world`); None outside build mode.
     fence: Option<Box<world::Fence>>,
+    /// The re-seed definitions waiting for their variable's first access
+    /// (`world::pending`), by slot.
+    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1685,6 +1691,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     isolates,
     inotify,
     fence,
+    pending,
     execution,
     spare_programs,
     idle_since,
@@ -1845,6 +1852,7 @@ impl Vm {
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             fence: None,
+            pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,

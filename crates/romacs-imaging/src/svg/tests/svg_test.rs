@@ -105,3 +105,36 @@ fn face_background_rect_keeps_default_black_paths_masked_against_face_bg() {
         "the default-black path must survive as opaque pixels"
     );
 }
+
+/// The root-tag probe (image_probe.rs `probe_svg_reported') answers the
+/// extent the decode takes, for every SVG in the tree whose root gives
+/// one, and nothing for a document whose extent is its drawing's.
+#[test]
+fn root_tag_extent_is_the_decoded_extent() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut measured = 0;
+    let mut pending = vec![root.join("etc"), root.join("assets"), root.join("crates/romacs-display-runtime/icons")];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() { pending.push(path); continue; }
+            if path.extension().is_none_or(|e| e != "svg") { continue; }
+            let data = std::fs::read(&path).unwrap();
+            let Some(probed) = root_tag_intrinsic_extent(&data[..data.len().min(64 * 1024)]) else { continue };
+            assert_eq!(Some(probed), query_intrinsic_extent(&data), "{}", path.display());
+            measured += 1;
+        }
+    }
+    assert!(measured > 100, "measured {measured}");
+    for (svg, expected) in [
+        (&br#"<?xml version="1.0"?> <!-- c --><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 10" width="60"><g/></svg>"#[..], true),
+        (br#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="5" height="5"/></svg>"#, false),
+        // The decode refuses a DOCTYPE; the probe leaves it to the decode.
+        (br#"<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg" width="9" height="4"/>"#, false),
+    ] {
+        let probed = root_tag_intrinsic_extent(svg);
+        assert_eq!(probed.is_some(), expected);
+        if expected { assert_eq!(probed, query_intrinsic_extent(svg)); }
+    }
+}

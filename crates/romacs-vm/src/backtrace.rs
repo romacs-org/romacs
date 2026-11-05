@@ -1,4 +1,6 @@
 //! Live call metadata. No lexical environment or Lisp source representation is retained.
+//! Every reader of the call stack goes through these activations: GNU's
+//! backtrace primitives, `backtrace-eval`'s unrewind and the debugger.
 use super::*;
 
 /// Where a call's arguments are read from, as GNU's `record_in_backtrace`
@@ -26,19 +28,44 @@ pub(super) struct Activation {
     pub dynamic: usize,
 }
 romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
+/// A `save-excursion` in progress, for `backtrace-eval`'s unrewind (GNU
+/// SPECPDL_UNWIND_EXCURSION): its marker, the selected window when it
+/// showed the marker's buffer (else nil), and where it was made, as the
+/// activation count and the binding depth then. The pair orders it against
+/// both: one made in a caller just before a call is outside the callee's
+/// entry even at the same binding depth.
+pub(super) struct Excursion {
+    pub marker: Value,
+    pub window: Value,
+    pub frames: usize,
+    pub dynamic: usize,
+}
+romacs_snapshot::snapshot_struct!(Excursion { marker, window, frames, dynamic });
 #[derive(Default)]
 pub(super) struct Backtrace {
     pub frames: Vec<Activation>,
     arguments: Vec<Value>,
     next_token: usize,
+    /// The named dynamic bindings, as (depth, symbol), in depth order.
     pub bindings: Vec<(usize, Value)>,
+    /// The tokens of activations whose debug-on-exit flag is set
+    /// (`backtrace-debug`). Tokens are never reused, so a stale one names
+    /// no activation.
+    exit_flags: std::collections::BTreeSet<usize>,
+    /// `exit_flags`' length when its stale tokens were last dropped.
+    exit_pruned: usize,
+    /// The `save-excursion`s in progress, innermost last.
+    pub excursions: Vec<Excursion>,
     /// While a world build observes startup: the token counter, parked here
     /// so that `next_token` stays at its maximum and every call takes the
     /// counter's overflow path, which records the symbol called through.
     /// Symbols are stable slot IDs, so the record needs no tracing.
     observed: Option<(usize, Vec<usize>)>,
+    /// The only symbols an observation records, sorted (`observe_only`);
+    /// empty records every one.
+    only: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, observed });
+romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, exit_flags, exit_pruned, excursions, observed, only });
 impl Backtrace {
     pub fn enter(
         &mut self,
@@ -76,11 +103,27 @@ impl Backtrace {
     fn observed_call(&mut self, function: Value) -> usize {
         let (counter, calls) = self.observed.as_mut().expect("backtrace token exhausted");
         *counter = counter.checked_add(1).expect("backtrace token exhausted");
-        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)));
+        let only = &self.only;
+        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)).filter(|slot| only.is_empty() || only.binary_search(slot).is_ok()));
         *counter
+    }
+    /// Whether calls are being observed (`observe`).
+    pub fn observing(&self) -> bool {
+        self.observed.is_some()
+    }
+    /// Record the calls through ONLY's symbols, from now until `observed`.
+    pub fn observe_only(&mut self, mut only: Vec<usize>) {
+        only.sort_unstable();
+        self.observe();
+        self.only = only;
+    }
+    /// Whether the observation so far recorded a call.
+    pub fn observed_any(&self) -> bool {
+        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
     }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
+        self.only.clear();
         self.observed = Some((std::mem::replace(&mut self.next_token, usize::MAX), Vec::new()));
     }
     /// The symbols called through since `observe`, in call order, and the
@@ -88,6 +131,7 @@ impl Backtrace {
     pub fn observed(&mut self) -> Vec<usize> {
         let (counter, calls) = self.observed.take().expect("observing calls");
         self.next_token = counter;
+        self.only.clear();
         calls
     }
     pub fn resolve_pending(&mut self, resolved: Value) {
@@ -125,7 +169,61 @@ impl Backtrace {
         for (_, symbol) in &mut self.bindings {
             visit(symbol);
         }
+        for excursion in &mut self.excursions {
+            visit(&mut excursion.marker);
+            visit(&mut excursion.window);
+        }
     }
+    /// The stack index of the activation TOKEN names: tokens increase with
+    /// the index, so a binary search finds it.
+    pub fn index_of(&self, token: usize) -> Option<usize> {
+        self.frames.binary_search_by_key(&token, |frame| frame.token).ok()
+    }
+    /// The symbol of the named binding at dynamic depth AT, if it has one.
+    pub fn binding_symbol(&self, at: usize) -> Option<Value> {
+        self.bindings.binary_search_by_key(&at, |(depth, _)| *depth).ok().map(|i| self.bindings[i].1)
+    }
+    /// The named bindings made at depths START..END.
+    pub fn binding_range(&self, start: usize, end: usize) -> &[(usize, Value)] {
+        let lo = self.bindings.partition_point(|(at, _)| *at < start);
+        let hi = self.bindings.partition_point(|(at, _)| *at < end);
+        &self.bindings[lo..hi]
+    }
+    pub fn debug_on_exit(&self, token: usize) -> bool {
+        self.exit_flags.contains(&token)
+    }
+    /// GNU set_backtrace_debug_on_exit for the activation TOKEN names. The
+    /// tokens of activations that left stay until the set has doubled since
+    /// they were last dropped, so a flag costs O(log n) amortized.
+    pub fn set_debug_on_exit(&mut self, token: usize, on: bool) {
+        if on { self.exit_flags.insert(token); } else { self.exit_flags.remove(&token); }
+        if self.exit_flags.len() > 2 * self.exit_pruned.max(32) {
+            let frames = &self.frames;
+            self.exit_flags.retain(|t| frames.binary_search_by_key(t, |frame| frame.token).is_ok());
+            self.exit_pruned = self.exit_flags.len();
+        }
+    }
+    /// A `save-excursion` begins in the activation FRAMES - 1, at binding
+    /// depth DYNAMIC: record MARKER and WINDOW there.
+    pub fn excursion_begin(&mut self, marker: Value, window: Value, frames: usize, dynamic: usize) {
+        self.excursions.push(Excursion { marker, window, frames, dynamic });
+    }
+    /// The `save-excursion` of MARKER ends: drop its record, and any newer
+    /// one an abandoned body left.
+    pub fn excursion_end(&mut self, marker: Value) {
+        if let Some(at) = self.excursions.iter().rposition(|e| e.marker == marker) {
+            self.excursions.truncate(at);
+        }
+    }
+}
+/// The variable a disabled binding binds (`Vm::backtrace_disable_binding`).
+const INERT_BINDING: &str = "#:vm2-inert-binding";
+/// One step of `backtrace-eval`'s unrewind, in the order the stack made
+/// them: a dynamic binding at a depth, or an excursion record.
+#[derive(Clone, Copy)]
+enum Unrewind {
+    Binding(usize),
+    Excursion(usize),
 }
 impl Vm {
     /// The arguments of activation INDEX, where they were pushed.
@@ -187,7 +285,7 @@ impl Vm {
     }
     fn backtrace_boolean_local(&self, at: usize) -> Option<(usize, Value)> {
         let (slot, _, owner, _) = self.dynamic[at];
-        let symbol = self.backtrace.bindings.iter().find_map(|(depth, symbol)| (*depth == at).then_some(*symbol))?;
+        let symbol = self.backtrace.binding_symbol(at)?;
         let base = symbol.index_if(7)? - 1;
         (self.local_binding_slots.contains(&slot) && self.localized_forwarded(base).is_some()).then_some((base, owner))
     }
@@ -213,24 +311,78 @@ impl Vm {
             _ => Ok(true),
         }
     }
-    fn backtrace_binding_value(&mut self, at: usize) -> Result<Value> {
+    /// What makes the binding at AT and a newer one bindings of the same
+    /// variable: its slot, and for a per-buffer variable also whether it is
+    /// the default and whose local it is.
+    fn backtrace_shadow_key(&self, at: usize) -> (usize, bool, u64) {
+        let (slot, _, owner, default) = self.dynamic[at];
+        let fwd = self.localized_forwarded(slot).or_else(|| self.forwarding_ref(slot));
+        match fwd {
+            Some(forwarded::Fwd::Buffer(_)) => (slot, default, if default { Value::NIL.0 } else { owner.0 }),
+            _ => (slot, false, Value::NIL.0),
+        }
+    }
+    /// The binding that saved the value of the one at AT: the nearest newer
+    /// binding of the same variable. A scan of the newer bindings, as GNU's
+    /// `backtrace--locals` unrewinds the whole distance per call;
+    /// `backtrace_successors` gives every binding's in one sweep.
+    fn backtrace_successor(&self, at: usize) -> Option<usize> {
+        if let Some(local) = self.backtrace_boolean_local(at) {
+            return (at + 1..self.dynamic.len()).find(|&next| self.backtrace_boolean_local(next) == Some(local));
+        }
+        let key = self.backtrace_shadow_key(at);
+        (at + 1..self.dynamic.len()).find(|&next| self.backtrace_shadow_key(next) == key)
+    }
+    /// Every binding's `backtrace_successor`, from the newest down: O(bindings).
+    fn backtrace_successors(&self) -> Vec<Option<usize>> {
+        let mut successors = vec![None; self.dynamic.len()];
+        let mut newer = std::collections::HashMap::new();
+        let mut newer_local = std::collections::HashMap::new();
+        for at in (0..self.dynamic.len()).rev() {
+            let key = self.backtrace_shadow_key(at);
+            successors[at] = match self.backtrace_boolean_local(at) {
+                Some(local) => newer_local.insert((local.0, local.1.0), at),
+                None => newer.get(&key).copied(),
+            };
+            newer.insert(key, at);
+        }
+        successors
+    }
+    /// The value of the binding at AT, which SUCCESSOR saved if it is set.
+    fn backtrace_binding_value(&mut self, at: usize, successor: Option<usize>) -> Result<Value> {
         let (slot, _, owner, default) = self.dynamic[at];
         if let Some((base, owner)) = self.backtrace_boolean_local(at) {
-            for next in at + 1..self.dynamic.len() {
-                if self.backtrace_boolean_local(next) == Some((base, owner)) { return Ok(self.dynamic[next].1); }
-            }
+            if let Some(next) = successor { return Ok(self.dynamic[next].1); }
             let local = self.declaration_hash_get(self.slots[base].local, owner)?.ok_or("missing local binding")?;
             return Ok(self.slots[local.index(7)? - 1].value);
         }
-        let fwd = self.localized_forwarded(slot).or_else(|| self.forwarding_ref(slot));
-        let saved = self.dynamic[at + 1..].iter().find(|&&(next, _, next_owner, next_default)| next == slot
-            && !(matches!(fwd, Some(forwarded::Fwd::Buffer(_))) && (default != next_default || (!default && owner != next_owner))));
-        let saved = saved.map(|&(_, old, _, _)| old);
         self.fence_binding(slot, at, owner);
-        match saved {
-            Some(old) => Ok(old),
+        match successor {
+            Some(next) => Ok(self.dynamic[next].1),
             None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
+    }
+    /// Activation INDEX's own bindings, live ones only, as (SYMBOL . VALUE)
+    /// conses, oldest first (GNU unrewind omits LET_LOCAL entries whose
+    /// storage disappeared). SUCCESSORS, when given, are the sweep's.
+    fn backtrace_frame_locals(&mut self, index: usize, successors: Option<&[Option<usize>]>) -> Result<Vec<Value>> {
+        let start = self.backtrace.frames[index].dynamic;
+        let end = self.backtrace.frames[index + 1].dynamic;
+        let bindings = self.backtrace.binding_range(start, end).to_vec();
+        let mut values = Vec::with_capacity(bindings.len());
+        let inert = self.intern(INERT_BINDING);
+        for (at, symbol) in bindings {
+            if symbol == inert || !self.backtrace_binding_live(at, symbol)? {
+                continue;
+            }
+            let successor = match successors {
+                Some(all) => all[at],
+                None => self.backtrace_successor(at),
+            };
+            let value = self.backtrace_binding_value(at, successor)?;
+            values.push(self.alloc_cons(symbol, value));
+        }
+        Ok(values)
     }
     /// The current value of the binding of SLOT that OWNER and DEFAULT name.
     fn backtrace_live_value(&mut self, slot: usize, owner: Value, default: bool) -> Result<Value> {
@@ -260,30 +412,213 @@ impl Vm {
             .backtrace_start(base)?
             .and_then(|i| i.checked_sub(level))
             .ok_or_else(|| prim::Fault::Error("Activation frame not found!".into()))?;
-        let start = self.backtrace.frames[index].dynamic;
-        let end = self.backtrace.frames[index + 1].dynamic;
-        let bindings: Vec<_> = self
-            .backtrace
-            .bindings
-            .iter()
-            .copied()
-            .filter(|(at, _)| *at >= start && *at < end)
-            .collect();
-        let mut values = Vec::with_capacity(bindings.len());
-        for (at, symbol) in bindings {
-            // GNU unrewind omits LET_LOCAL entries whose storage disappeared.
-            if !self
-                .backtrace_binding_live(at, symbol)
-                .map_err(prim::Fault::Error)?
-            {
-                continue;
-            }
-            let value = self
-                .backtrace_binding_value(at)
-                .map_err(prim::Fault::Error)?;
-            let cons = self.alloc_cons(symbol, value);
-            values.push(cons);
-        }
+        let values = self.backtrace_frame_locals(index, None).map_err(prim::Fault::Error)?;
         Ok(self.list_value(&values))
+    }
+    /// GNU get_backtrace_frame: the stack index of the activation NFRAMES
+    /// out from BASE's (the innermost when BASE is nil), if there is one.
+    pub(super) fn backtrace_frame_index(&self, nframes: Value, base: Value) -> std::result::Result<Option<usize>, prim::Fault> {
+        let count = nframes.integer_value().filter(|&n| n >= 0).ok_or(prim::Fault::Wrong("wholenump", nframes))?;
+        Ok(self.backtrace_start(base)?.and_then(|i| i.checked_sub(usize::try_from(count).ok()?)))
+    }
+    /// An activation's FLAGS as `mapbacktrace` passes them.
+    pub(super) fn backtrace_flags(&mut self, index: usize) -> Value {
+        if self.backtrace.debug_on_exit(self.backtrace.frames[index].token) {
+            let key = self.intern(":debug-on-exit");
+            self.list_value(&[key, Value::TRUE])
+        } else {
+            Value::NIL
+        }
+    }
+    /// `mapbacktrace`'s (EVALD FUNCTION ARGS FLAGS) for activation INDEX.
+    pub(super) fn backtrace_frame_values(&mut self, index: usize) -> [Value; 4] {
+        let function = self.backtrace.frames[index].function;
+        let args = self.backtrace_arguments(index).to_vec();
+        let args = self.list_value(&args);
+        let flags = self.backtrace_flags(index);
+        [Value::TRUE, function, args, flags]
+    }
+    /// `backtrace--frames-and-locals`: every activation from BASE's outward
+    /// as (EVALD FUNCTION ARGS FLAGS LOCALS), LOCALS as `backtrace--locals`
+    /// gives them and nil for BASE's own (as `backtrace-get-frames` leaves
+    /// frame 0's), in one walk: O(frames + bindings).
+    pub(super) fn backtrace_frames_and_locals(&mut self, base: Value) -> prim::Out {
+        let Some(start) = self.backtrace_start(base)? else { return Ok(Value::NIL); };
+        let successors = self.backtrace_successors();
+        let mut frames = Vec::with_capacity(start + 1);
+        for index in (0..=start).rev() {
+            let locals = if index == start {
+                Value::NIL
+            } else {
+                let values = self.backtrace_frame_locals(index, Some(&successors)).map_err(prim::Fault::Error)?;
+                self.list_value(&values)
+            };
+            let [evald, function, args, flags] = self.backtrace_frame_values(index);
+            frames.push(self.list_value(&[evald, function, args, flags, locals]));
+        }
+        Ok(self.list_value(&frames))
+    }
+    /// `backtrace-debug`: set activation INDEX's debug-on-exit flag.
+    pub(super) fn backtrace_set_debug(&mut self, index: usize, on: bool) {
+        let token = self.backtrace.frames[index].token;
+        self.backtrace.set_debug_on_exit(token, on);
+    }
+    /// GNU specpdl_unrewind from the top of the stack to activation INDEX's
+    /// entry, for `backtrace-eval`: each binding made since then, and each
+    /// excursion begun inside INDEX or a newer activation, swaps its saved
+    /// state with the current one, newest first. Watchers are not told
+    /// (SET_INTERNAL_THREAD_SWITCH). What it swapped, for
+    /// `backtrace_rewind`, which swaps it back in the other order.
+    pub(super) fn backtrace_unrewind(&mut self, index: usize) -> Result<[usize; 4]> {
+        if self.fence.is_some() {
+            return Err("backtrace-eval while a world is built".into());
+        }
+        let span = [
+            self.backtrace.frames[index].dynamic,
+            self.dynamic.len(),
+            self.backtrace.excursions.partition_point(|e| e.frames <= index),
+            self.backtrace.excursions.len(),
+        ];
+        self.backtrace_swap(span, true)?;
+        Ok(span)
+    }
+    pub(super) fn backtrace_rewind(&mut self, span: [usize; 4]) -> Result<()> {
+        let [_, end, _, excursions] = span;
+        if end > self.dynamic.len() || excursions > self.backtrace.excursions.len() {
+            return Err("backtrace-eval's stack changed under it".into());
+        }
+        self.backtrace_swap(span, false)
+    }
+    /// SPAN's steps (bindings START..END, excursions FROM..TO) newest first
+    /// when DOWN, else oldest first; a step that fails undoes the ones before.
+    fn backtrace_swap(&mut self, [start, end, from, to]: [usize; 4], down: bool) -> Result<()> {
+        let mut steps = Vec::with_capacity(end - start + to - from);
+        let (mut at, mut k) = (end, to);
+        while at > start || k > from {
+            // An excursion begun once the stack held K's depth of bindings is
+            // newer than the bindings below that depth.
+            if k > from && (at == start || self.backtrace.excursions[k - 1].dynamic >= at) {
+                k -= 1;
+                steps.push(Unrewind::Excursion(k));
+            } else {
+                at -= 1;
+                steps.push(Unrewind::Binding(at));
+            }
+        }
+        if !down {
+            steps.reverse();
+        }
+        let trapped = std::mem::take(&mut self.trapped);
+        let mut result = Ok(());
+        for (done, step) in steps.iter().enumerate() {
+            if let Err(error) = self.backtrace_swap_step(*step) {
+                for step in steps[..done].iter().rev() {
+                    let _ = self.backtrace_swap_step(*step);
+                }
+                result = Err(error);
+                break;
+            }
+        }
+        self.trapped = trapped;
+        result
+    }
+    fn backtrace_swap_step(&mut self, step: Unrewind) -> Result<()> {
+        match step {
+            Unrewind::Binding(at) => self.backtrace_swap_binding(at),
+            Unrewind::Excursion(k) => self.backtrace_swap_excursion(k),
+        }
+    }
+    /// One binding: the variable takes the value the binding saved, and the
+    /// binding saves the one it had. A buffer's local binding is swapped
+    /// while the buffer has one, made again since or not (GNU
+    /// `local-variable-p`); one it has lost can be neither undone nor redone,
+    /// so it becomes a binding of nothing (GNU SPECPDL_NOP).
+    fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
+        let (slot, saved, owner, default) = self.dynamic[at];
+        let symbol = self.backtrace.binding_symbol(at);
+        let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
+        let present = match base {
+            Some(base) if self.local_binding_slots.contains(&slot) => self.owner_local_binding(base, owner).is_some(),
+            _ => match self.forwarding_ref(slot) {
+                Some(forwarded::Fwd::Buffer(i)) if !default => self.live_buffer_value(owner)
+                    && owner.index_if(0).is_some_and(|index| self.per_buffer_local_p(index - 1, i)),
+                _ => true,
+            },
+        };
+        if !present {
+            self.backtrace_disable_binding(at);
+            return Ok(());
+        }
+        let current = match base {
+            Some(base) if self.local_binding_slots.contains(&slot) => {
+                let target = self.owner_local_binding(base, owner).unwrap_or(base);
+                self.slots[target].value
+            }
+            _ => self.backtrace_live_value(slot, owner, default)?,
+        };
+        let frame = self.root_frame(&[current]);
+        let restored = self.restore_binding(slot, base, saved, owner, default);
+        let [current] = self.release_frame(frame);
+        restored?;
+        self.dynamic[at].1 = current;
+        Ok(())
+    }
+    /// The binding at AT binds nothing from now on: unbinding it, or
+    /// swapping it again, changes no variable and tells no watcher. Its
+    /// named-binding record stays in place, naming the inert variable,
+    /// which no locals list shows.
+    fn backtrace_disable_binding(&mut self, at: usize) {
+        let nothing = self.intern(INERT_BINDING);
+        let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
+        self.dynamic[at] = (slot, Value::NIL, Value::NIL, false);
+        if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
+            self.backtrace.bindings[i].1 = nothing;
+        }
+    }
+    /// The selected window when it shows the current buffer, else nil (GNU
+    /// save_excursion_save).
+    pub(super) fn excursion_window(&mut self) -> Result<Value> {
+        let window = self.selected_window_value()?;
+        Ok(if self.window(window)?.buffer == self.slots[self.buffer_slot].value { window } else { Value::NIL })
+    }
+    /// One excursion: GNU save_excursion_save of the current state into its
+    /// record, then save_excursion_restore of the state it held: the saved
+    /// buffer and point (none when that buffer was killed), and the saved
+    /// window's point when another window is selected and it still shows
+    /// that buffer.
+    fn backtrace_swap_excursion(&mut self, k: usize) -> Result<()> {
+        let (marker, window) = (self.backtrace.excursions[k].marker, self.backtrace.excursions[k].window);
+        let current = self.slots[self.buffer_slot].value;
+        let here = self.save_excursion_data()?;
+        let here_window = self.excursion_window()?;
+        let frame = self.root_frame(&[marker, window, here, current, here_window]);
+        let mut result = self.backtrace_restore_excursion(marker, window);
+        if result.is_ok() {
+            let (marker, here, current) = (self.rooted(&frame, 0), self.rooted(&frame, 2), self.rooted(&frame, 3));
+            result = self.set_marker_object(marker, here, current).map(drop);
+        }
+        let [_, _, here, _, here_window] = self.release_frame(frame);
+        self.backtrace.excursions[k].window = here_window;
+        let detached = self.set_marker_object(here, Value::NIL, Value::NIL).map(drop);
+        result.and(detached)
+    }
+    fn backtrace_restore_excursion(&mut self, marker: Value, window: Value) -> Result<()> {
+        let buffer = self.marker(marker)?.buffer;
+        if buffer == Value::NIL || !self.live_buffer_value(buffer) {
+            return Ok(());
+        }
+        self.restore_excursion_data(marker)?;
+        let selected = self.selected_window_value()?;
+        if window != Value::NIL && window != selected
+            && matches!(self.object_if(window), Some(crate::data::Object::Window(w)) if w.live() && w.buffer == buffer)
+        {
+            // The point restored, clipped to the accessible portion.
+            let here = self.save_excursion_data()?;
+            let point = self.window(window)?.point;
+            let set = self.set_marker_object(point, here, buffer).map(drop);
+            self.set_marker_object(here, Value::NIL, Value::NIL)?;
+            set?;
+        }
+        Ok(())
     }
 }

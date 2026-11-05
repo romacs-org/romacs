@@ -1498,6 +1498,46 @@
             (jabber-disconnect-one jc)
             (fsm-stop-timer jc)))))))
 
+(ert-deftest jabber-conn-test-filter-parses-within-its-budget ()
+  "Past `jabber-filter-budget' the filter leaves the rest in the buffer and
+asks for a later `:filter' event; output arriving meanwhile is only
+appended; each event parses on, in order."
+  (let ((buffer (generate-new-buffer " *jabber-budget-filter*"))
+        (jabber-namespace-prefixes nil)
+        (jabber-filter-budget 0)
+        process sent)
+    (unwind-protect
+        (cl-letf (((symbol-function 'fsm-send)
+                   (lambda (_fsm event) (setq sent (append sent (list event)))))
+                  ((symbol-function 'jabber-log-xml) #'ignore))
+          (setq process (make-pipe-process :name "jabber-budget" :buffer buffer))
+          (with-current-buffer buffer
+            (insert "<message id='1'/><message id='2'/><message id='3'/>"))
+          (jabber-filter process 'fsm)
+          (should (equal '(:stanza :filter) (mapcar #'car sent)))
+          (should (equal "" (nth 2 (nth 1 sent))))
+          ;; Output arriving before the continuation runs is only appended.
+          (cl-letf (((symbol-function 'fsm-get-state-data) (lambda (_) (list :connection process))))
+            (jabber-pre-filter process "<message id='4'/>" 'fsm)
+            (should (= 2 (length sent)))
+            ;; A continuation arriving while another stream parses (a nested
+            ;; wait) is retried, not dropped.
+            (let ((jabber-core--filtering t))
+              (jabber-pre-filter process "" 'fsm))
+            (should (= 3 (length sent)))
+            (should (eq :filter (car (car (last sent)))))
+            (should (buffer-local-value 'jabber-filter--continuing buffer))
+            ;; The continuations, as the FSM would deliver them.
+            (while (equal (car (car (last sent))) :filter)
+              (jabber-pre-filter process "" 'fsm)))
+          (should (equal '("1" "2" "3" "4")
+                         (delq nil (mapcar (lambda (e) (and (eq (car e) :stanza)
+                                                            (jabber-xml-get-attribute (cadr e) 'id)))
+                                           sent))))
+          (set-process-sentinel process #'ignore))
+      (when process (delete-process process))
+      (kill-buffer buffer))))
+
 (provide 'jabber-test-conn)
 
 ;;; jabber-test-conn.el ends here

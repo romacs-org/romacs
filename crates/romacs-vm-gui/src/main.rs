@@ -535,6 +535,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         once one is prepared in an existing store
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
                         compiled load runs on a miss)
+  --compile-lisp-tree [--jobs N]  compile the installation's Lisp into its
+                        compiled-Lisp store ahead of use, N at a time (default 4)
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
@@ -632,6 +634,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
             "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--compile-lisp-tree" => {
+                let jobs = match (args.next().as_deref(), args.next()) {
+                    (None, _) => 4,
+                    (Some("--jobs"), Some(n)) => n.parse::<usize>().map_err(|e| format!("--jobs: {e}"))?,
+                    _ => return Err("usage: --compile-lisp-tree [--jobs N]".into()),
+                };
+                return batch::compile_lisp_tree(jobs).map(|()| None);
+            }
             "--compile-lisp" => {
                 let file = args.next().ok_or("--compile-lisp needs a FILE")?;
                 return batch::compile_lisp(file.into(), world_store).map(|()| None);
@@ -1121,7 +1131,10 @@ fn evaluate(
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
-            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}))", startup::lisp_string(&store.display().to_string()), key))?;
+            let compiled = romacs_vm::compiled_lisp::store_dir()
+                .map_or("nil".to_owned(), |dir| startup::lisp_string(&dir.display().to_string()));
+            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}) isolate-compiled-store {compiled})",
+                                    startup::lisp_string(&store.display().to_string()), key))?;
         }
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
@@ -1135,12 +1148,14 @@ fn evaluate(
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
     let images = residency::Shared::default();
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_alpha_hook(move |frame, alpha, limit| {
-        // Only a closed window refuses, and then nothing shows it.
-        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
-    }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // An image decoded off the VM wakes the same wait as a terminal.
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
+        .with_alpha_hook(move |frame, alpha, limit| {
+            // Only a closed window refuses, and then nothing shows it.
+            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        }))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1188,11 +1203,17 @@ fn evaluate(
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
-                if worlds.is_some() { vm.record_init_loads(); }
+                // Its `eval-after-load' calls declare the libraries it
+                // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
+                if worlds.is_some() {
+                    vm.record_init_loads();
+                    if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
+                }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+                if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
                 if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
             }
@@ -1488,6 +1509,8 @@ fn evaluate(
                 && let Some(trace) = &mut key_trace {
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
+            // Pixels landed, or a publication left images to send: paint again.
+            if vm.land_images()? || images.borrow().behind() { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
@@ -1588,6 +1611,7 @@ fn evaluate(
                 }
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
+        vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());

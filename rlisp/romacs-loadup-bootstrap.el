@@ -93,6 +93,8 @@
 ;; cl-print's closure method walks body slots VM2 closures do not expose
 ;; (VM2-CLOSEQ1).
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
+;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+(with-eval-after-load 'backtrace (require 'romacs-backtrace))
 (load "simple.el" nil t t)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
@@ -104,6 +106,8 @@
 ;; closures keep private (VM2-ERT-BATCH1): whenever cl-print loads (debug.el's
 ;; *Backtrace*, ERT), they print through the owned method instead.
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
+;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+(with-eval-after-load 'backtrace (require 'romacs-backtrace))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of
@@ -394,39 +398,19 @@ A session that takes its own after the chain's sets it to them
 Each entry is (FEATURE FILE FORM REASON): FILE's FORM, which
 `romacs-world-restart' evaluates again when FEATURE is loaded.")
 
-(defvar romacs--world-reseed-forms nil
-  "Definitions of an init layer's libraries that read a per-process fact.
-Each is (KIND SYMBOL FORM CUT), innermost first: KIND is `defcustom',
-`defvar', `defconst' or `defvar-local', FORM the definition as loaded, and
-CUT non-nil when an effect the build refused cut the definition short, so
-SYMBOL was defined as nil.  A world build keeps them (`world_form_done');
-`romacs-world-restart' evaluates each again in this process, as
-startup.el's delayed init re-evaluates the dumped options whose values
-depend on the process.")
-
-(defun romacs--world-reseed-form (entry)
-  "Evaluate ENTRY, a `romacs--world-reseed-forms' element, in this process.
-A definition cut short is evaluated whole, its symbol unbound first, so
-the definition declares as it would have.  Otherwise a `defcustom' takes
-its standard (or saved) value again through its :set function, and the
-others set their default from the definition's value form."
-  (pcase-let ((`(,kind ,symbol ,form ,cut) entry))
-    (cond (cut (makunbound symbol) (eval form t))
-          ((eq kind 'defcustom) (custom-reevaluate-setting symbol))
-          (t (set-default symbol (eval (nth 2 form) t))))))
+(require 'romacs-world-layer)
 
 (defun romacs-world-restart ()
   "Make a VM restored from a world what a fresh process makes at this point.
 Take the session's last per-process startup steps again
 \(`romacs-startup-function'), then evaluate each `romacs--world-reseed'
-form whose feature is loaded, then each `romacs--world-reseed-forms'
-definition, in the order the libraries loaded them."
+form whose feature is loaded, then the init layer's libraries' re-seed
+definitions (`romacs--world-reseed-all')."
   (funcall romacs-startup-function)
   (dolist (entry romacs--world-reseed)
     (when (featurep (car entry))
       (eval (nth 2 entry) t)))
-  (dolist (entry (reverse romacs--world-reseed-forms))
-    (romacs--world-reseed-form entry)))
+  (romacs--world-reseed-all))
 
 ;; The stock look is a theme: `default' (etc/themes/default-theme.el),
 ;; enabled once Custom and the faces are loaded, so every world built from

@@ -4107,6 +4107,67 @@ CREATE TABLE omemo_store (
                    (sqlite-select jabber-db--connection
                                   "SELECT displayed_at FROM message ORDER BY id")))))
 
+;;; Background sync: one-tick refresh and thread roots (slice 5)
+
+(ert-deftest jabber-test-db-sync-refresh-keeps-the-view ()
+  "A sync refresh reloads in one call, even with input pending, and older
+history lands above while window start and point keep their messages and
+offsets."
+  (jabber-test-db-with-chat-buffer "me@x.com" "alice@x.com"
+    (let ((now (floor (float-time)))
+          (jabber-backlog-days nil)
+          (jabber-backlog-number 20))
+      ;; Messages with text, so offsets into them mean something.
+      (setf (ewoc--pretty-printer jabber-chat-ewoc)
+            (lambda (data)
+              (when (listp (cadr data))
+                (insert (or (plist-get (cadr data) :body) "") "\n"))))
+      (dotimes (i 12)
+        (jabber-db-store-message "me@x.com" "alice@x.com" "in" "chat"
+                                 (format "message number %d, long enough to point into" i)
+                                 (- now (* 60 (- 12 i))) "phone" (format "m%d" i)))
+      (jabber-chat-buffer-refresh t)
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (let ((window (selected-window)))
+          (set-window-start window (+ (ewoc-location (jabber-chat-ewoc-find-by-id "m5")) 3) t)
+          (set-window-point window (+ (ewoc-location (jabber-chat-ewoc-find-by-id "m7")) 2))
+          (jabber-db-store-message "me@x.com" "alice@x.com" "in" "chat" "older"
+                                   (- now 7200) "phone" "m-old")
+          (let ((timers 0))
+            (cl-letf (((symbol-function 'run-with-timer)
+                       (lambda (&rest _) (cl-incf timers) nil))
+                      ((symbol-function 'input-pending-p) #'always))
+              (jabber-chat-buffer-refresh t))
+            (should (= 0 timers)))
+          (should (eq (jabber-chat-ewoc-find-by-id "m-old")
+                      (seq-find (lambda (node) (plist-get (cadr (ewoc-data node)) :id))
+                                (let (nodes (node (ewoc-nth jabber-chat-ewoc 0)))
+                                  (while node (push node nodes) (setq node (ewoc-next jabber-chat-ewoc node)))
+                                  (nreverse nodes)))))
+          (should (= (window-start window)
+                     (+ (ewoc-location (jabber-chat-ewoc-find-by-id "m5")) 3)))
+          (should (= (window-point window)
+                     (+ (ewoc-location (jabber-chat-ewoc-find-by-id "m7")) 2))))))))
+
+(ert-deftest jabber-test-db-older-thread-message-becomes-root ()
+  "Archives read newest first store a reply before its root: the older
+message, once stored, is the thread's root; a later one does not move it."
+  (jabber-test-db-with-db
+    (let ((now (floor (float-time))))
+      (jabber-db-store-message "me@x.com" "room@conference.x.com" "in" "groupchat" "reply"
+                               (+ now 10) "bob" "r2" "s-r2" nil nil nil nil '(:thread-id "t1"))
+      (let ((root (jabber-db-store-message "me@x.com" "room@conference.x.com" "in" "groupchat"
+                                           "root" now "alice" "r1" "s-r1" nil nil nil nil
+                                           '(:thread-id "t1")))
+            (summary (lambda ()
+                       (jabber-db-message-thread-summary "me@x.com" "room@conference.x.com"
+                                                         "groupchat" "t1"))))
+        (should (equal root (plist-get (funcall summary) :root-message-id)))
+        (jabber-db-store-message "me@x.com" "room@conference.x.com" "in" "groupchat" "late"
+                                 (+ now 20) "carol" "r3" "s-r3" nil nil nil nil '(:thread-id "t1"))
+        (should (equal root (plist-get (funcall summary) :root-message-id)))))))
+
 (provide 'jabber-test-db)
 
 ;;; jabber-test-db.el ends here
