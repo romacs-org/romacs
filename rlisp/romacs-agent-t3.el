@@ -197,5 +197,61 @@ instance and says why, once."
         (setq romacs-agent-t3--read (cons file (cons stamp (cons generation result))))
         result))))
 
+(defun romacs-agent-t3-store (settings)
+  "T3's thread store beside its SETTINGS file."
+  (expand-file-name "statev2.sqlite" (file-name-directory (expand-file-name settings))))
+
+(defvar romacs-agent-t3--titles (make-hash-table :test #'equal)
+  "Each thread store read, to (STAMP . TITLES): TITLES from a thread's key
+\(`romacs-agent-t3-title-key') to its title, as of the store's STAMP.")
+
+(defun romacs-agent-t3-title-key (instance native)
+  "The key of T3 INSTANCE's thread on harness conversation NATIVE: two
+instances' homes can hold the same id."
+  (concat instance "\n" native))
+
+(defconst romacs-agent-t3--titles-query
+  (concat "select p.provider_instance_id, json_extract(p.payload_json, '$.nativeThreadRef.nativeId'), t.title"
+          " from orchestration_v2_projection_provider_threads p"
+          " join orchestration_v2_projection_threads t on t.thread_id = p.thread_id"
+          " where t.title is not null and t.title != '' order by p.updated_at")
+  "Each thread's title, by its T3 instance and harness conversation: titles
+only, never a message; the newest row of a key last, so it wins.")
+
+(defun romacs-agent-t3-thread-titles (store)
+  "T3's own titles of its threads in thread STORE (`romacs-agent-t3-store'),
+by `romacs-agent-t3-title-key': a thread T3 delegated starts with T3's
+preamble, its title says what it is about.  Read once while STORE and
+its write-ahead log are unchanged, opened read only (T3 writes it as it
+runs) with a short busy timeout, never waited on; nil when it cannot be
+read (gone, locked, another schema), quietly: a title then comes from
+the prompt, and the next refresh reads again."
+  (let ((stamp (mapcar (lambda (f) (let ((a (file-attributes f)))
+                                     (and a (cons (file-attribute-size a) (file-attribute-modification-time a)))))
+                       (list store (concat store "-wal"))))
+        (cached (gethash store romacs-agent-t3--titles)))
+    (cond ((or (null (car stamp)) (not (fboundp 'sqlite-open))) nil)
+          ((equal (car cached) stamp) (cdr cached))
+          (t
+           (condition-case nil
+               (let ((db (sqlite-open store t)) (titles (make-hash-table :test #'equal)))
+                 (unwind-protect
+                     (progn
+                       (sqlite-pragma db "busy_timeout = 50")
+                       ;; Row by row: a row that cannot be read signals
+                       ;; (a whole-list select stops there quietly).
+                       (let ((rows (sqlite-select db romacs-agent-t3--titles-query nil 'set)))
+                         (unwind-protect
+                             (let (row)
+                               (while (setq row (sqlite-next rows))
+                                 (when (and (stringp (nth 0 row)) (stringp (nth 1 row)) (stringp (nth 2 row)))
+                                   (puthash (romacs-agent-t3-title-key (nth 0 row) (nth 1 row)) (nth 2 row) titles))))
+                           (sqlite-finalize rows))))
+                   (sqlite-close db))
+                 ;; Kept only when read: a failed read is tried again.
+                 (puthash store (cons stamp titles) romacs-agent-t3--titles)
+                 titles)
+             (error nil))))))
+
 (provide 'romacs-agent-t3)
 ;;; romacs-agent-t3.el ends here

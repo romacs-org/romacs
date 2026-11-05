@@ -856,8 +856,10 @@ thousandth a stack mark."
 ;; retired by the next poll.
 (scaling-probe agent-withdraw-deferred :n 64
   :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  ;; An inactive timer: none is scheduled, and retiring the last call
+  ;; cancels it as it would the real one.
   :body (let ((romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
-              (romacs-mcp--deferred-timer t))
+              (romacs-mcp--deferred-timer (timer-create)))
           (dolist (i it)
             (romacs-mcp--defer-request (list :peer 'scaling-peer :cancelled nil) i #'ignore nil))
           (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
@@ -1170,6 +1172,79 @@ thousandth a stack mark."
                                                :config-variable (format "SCALING_IDRIVER_%d_HOME" i)))
                 (cl-loop for i below n collect (list (format "nosuch-%d" i) :harness (intern (format "nosuch-%d" i)))))
   :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
+
+;; observe's buffer summary over N buffers and N processes, each with
+;; its buffer: which has a process is a table made once, not a walk of
+;; the processes per buffer.
+(scaling-probe observe-buffers-processes :n 200
+  :setup (progn (scaling--agent)
+                (require 'romacs-mcp-session)
+                (dotimes (i n)
+                  (let ((buffer (get-buffer-create (format "scaling-observe-%d" i))))
+                    (make-pipe-process :name (format "scaling-observe-%d" i) :buffer buffer :noquery t)))
+                nil)
+  :body (dotimes (_ 5) (romacs-mcp-session--buffers (romacs-mcp--object))))
+
+;; T3's thread titles: a store of N threads read cold, read again after
+;; its file changed (as its write-ahead log does), and kept (the read
+;; skipped, 200 lookups).
+(defun scaling--t3-store (n)
+  (scaling--agent)
+  (require 'romacs-agent-t3)
+  (let* ((dir (make-temp-file "scaling-t3s-" t))
+         (store (expand-file-name "statev2.sqlite" dir))
+         (db (sqlite-open store)))
+    (sqlite-execute db "create table orchestration_v2_projection_threads (thread_id text, title text)")
+    (sqlite-execute db "create table orchestration_v2_projection_provider_threads (thread_id text, payload_json text, updated_at text, provider_instance_id text)")
+    (sqlite-transaction db)
+    (dotimes (i n)
+      (sqlite-execute db "insert into orchestration_v2_projection_threads values (?, ?)" (list (format "t%d" i) (format "Title %d" i)))
+      (sqlite-execute db "insert into orchestration_v2_projection_provider_threads values (?, ?, '1', 'claudeAgent')"
+                      (list (format "t%d" i) (format "{\"nativeThreadRef\":{\"nativeId\":\"n%d\"}}" i))))
+    (sqlite-commit db)
+    (sqlite-close db)
+    store))
+
+(scaling-probe agent-t3-titles-cold :n 2000
+  :setup (scaling--t3-store n)
+  :body (progn (clrhash romacs-agent-t3--titles) (romacs-agent-t3-thread-titles it)))
+
+(scaling-probe agent-t3-titles-changed :n 2000
+  :setup (let ((store (scaling--t3-store n))) (romacs-agent-t3-thread-titles store) store)
+  :body (progn (set-file-times it (time-add (current-time) (random 1000000)))
+               (romacs-agent-t3-thread-titles it)))
+
+(scaling-probe agent-t3-titles-kept :n 2000 :budget 0.5
+  :setup (let ((store (scaling--t3-store n))) (romacs-agent-t3-thread-titles store) store)
+  :body (let ((titles (romacs-agent-t3-thread-titles it)))
+          (dotimes (i 200) (gethash (romacs-agent-t3-title-key "claudeAgent" (format "n%d" i)) titles))))
+
+;; The history listed anew with N instances from T3, each a transcript of
+;; its own: each row's instance, and its title, by an index.
+(scaling-probe agent-history-t3-relist :n 200
+  :setup (let* ((root (make-temp-file "scaling-t3h-" t))
+                (settings (expand-file-name "t3/settings.json" root))
+                (instances (make-hash-table :test #'equal)))
+           (scaling--agent)
+           (require 'romacs-agent-history)
+           (make-directory (file-name-directory settings) t)
+           (dotimes (i n)
+             (let* ((home (expand-file-name (format "home-%d" i) root))
+                    (dir (expand-file-name "projects/-work" home))
+                    (id (format "%08x-0000-4000-8000-%012x" i i)))
+               (make-directory dir t)
+               (with-temp-file (expand-file-name (concat id ".jsonl") dir)
+                 (insert (json-serialize (romacs-mcp--object "type" "user" "cwd" "/work"
+                                                             "message" (romacs-mcp--object "role" "user" "content" (format "task %d" i))))
+                         "\n"))
+               (puthash (format "claudeAgent_%d" i)
+                        (romacs-mcp--object "driver" "claudeAgent" "displayName" (format "C %d" i)
+                                            "config" (romacs-mcp--object "homePath" home))
+                        instances)))
+           (with-temp-file settings (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+           (let ((romacs-agent-providers (list (list 't3 :settings settings)))) (romacs-agent-history-list))
+           (list (list 't3 :settings settings)))
+  :body (let ((romacs-agent-providers it)) (romacs-agent-history-list)))
 
 ;; The home page over N transcripts beside a session per project.
 (scaling-probe agent-home-history :n 200

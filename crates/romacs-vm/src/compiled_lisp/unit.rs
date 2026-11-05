@@ -415,6 +415,11 @@ impl<'a> Encoder<'a> {
             Op::SetGlobal(s, r) => { out.byte(6); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
             Op::Bind(s, r) => { out.byte(7); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
             Op::Unbind(k) => { out.byte(8); n(out, &[k]) }
+            Op::BindLate(s, r) => { out.byte(25); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
+            Op::UnbindLate(r) => { out.byte(26); n(out, &[r]) }
+            Op::ReadLate(d, c, s) => { out.byte(27); let s = self.local_symbol(s, deps)?; n(out, &[d, c, s]) }
+            Op::WriteLate(c, x, s) => { out.byte(28); let s = self.local_symbol(s, deps)?; n(out, &[c, x, s]) }
+            Op::LateForwarded(d, c) => { out.byte(29); n(out, &[d, c]) }
             Op::Jump(t) => { out.byte(9); n(out, &[t]) }
             Op::Unless(r, t) => { out.byte(10); n(out, &[r, t]) }
             Op::Closure(d, id, site) => {
@@ -718,6 +723,11 @@ impl Vm {
                 22 => Op::Protect(v()?, v()?, v()?),
                 23 => Op::LeaveProtect(v()?),
                 24 => Op::ResumeExit,
+                25 => { let s = symbol(v()?)?; Op::BindLate(s, v()?) }
+                26 => Op::UnbindLate(v()?),
+                27 => { let d = v()?; let c = v()?; Op::ReadLate(d, c, symbol(v()?)?) }
+                28 => { let c = v()?; let x = v()?; Op::WriteLate(c, x, symbol(v()?)?) }
+                29 => Op::LateForwarded(v()?, v()?),
                 _ => return Err(bad("op")),
             });
         }
@@ -803,6 +813,10 @@ fn validate_body(f: &Function, captures: impl Fn(usize) -> Option<usize>, slots:
         let ok = match *op {
             Op::Const(d, _) | Op::Cell(d) | Op::Return(d) | Op::LeaveProtect(d) => r(d),
             Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
+            Op::ReadLate(d, x, slot) | Op::WriteLate(d, x, slot) => r(d) && r(x) && s(slot),
+            Op::BindLate(slot, d) => s(slot) && r(d),
+            Op::UnbindLate(d) => r(d),
+            Op::LateForwarded(d, x) => r(d) && r(x),
             Op::Global(d, x) => r(d) && s(x),
             Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => s(x) && r(d),
             Op::Unbind(n) | Op::PopHandlers(n) => n <= f.code.len(),

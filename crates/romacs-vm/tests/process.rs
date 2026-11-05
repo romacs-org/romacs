@@ -1,6 +1,7 @@
 //! Subprocesses against pinned GNU (process.c, callproc.c): process objects
 //! and their accessors, make-process with pipes and a pty, pipe processes as
-//! stderr, filters, sentinels and their default insertion, call-process and
+//! stderr, filters, sentinels and their default insertion (decoded output into
+//! a unibyte buffer as bytes, as a filter's own insert), call-process and
 //! call-process-region destinations and statuses, signals, and loopback
 //! network servers and clients (blocking and :nowait), decoding carried
 //! across reads, waits for children that already exited, sleep-for's
@@ -64,6 +65,8 @@ const CASES: &str = r###"
 (let ((srv (make-network-process :name "s5" :server t :host "127.0.0.1" :service t :noquery t :family 'ipv4 :buffer "romacs-s5"))) (prog1 (list (process-status srv) (buffer-name (process-buffer srv)) (process-id srv) (process-command srv) (process-type srv) (process-query-on-exit-flag srv) (car (process-contact srv)) (plist-get (process-contact srv t) :server)) (delete-process srv)))
 (let ((p (make-pipe-process :name "kb" :buffer "romacs-kb" :noquery t))) (kill-buffer "romacs-kb") (list (process-status p) (process-list)))
 (let ((p (make-process :name "kb2" :noquery t :buffer "romacs-kb2" :command (list "sleep" "10") :connection-type 'pipe))) (kill-buffer "romacs-kb2") (romacs-test-wait p) (list (process-status p) (process-exit-status p)))
+(let* ((b (get-buffer-create "romacs-ub1")) (p (progn (with-current-buffer b (set-buffer-multibyte nil)) (make-process :name "ub1" :buffer b :coding 'utf-8 :sentinel #'ignore :connection-type 'pipe :command (list "printf" "a\\303\\251\\316\\261\\377z"))))) (romacs-test-wait p) (prog1 (with-current-buffer b (list (buffer-string) (point) (marker-position (process-mark p)))) (kill-buffer b)))
+(let* ((b (get-buffer-create "romacs-ub2")) (p (progn (with-current-buffer b (set-buffer-multibyte nil)) (make-process :name "ub2" :buffer b :coding 'utf-8 :sentinel #'ignore :connection-type 'pipe :command (list "printf" "a\\303\\251\\316\\261\\377z") :filter (lambda (proc s) (with-current-buffer (process-buffer proc) (goto-char (point-max)) (insert s))))))) (romacs-test-wait p) (prog1 (with-current-buffer b (list (buffer-string) (point))) (kill-buffer b)))
 "###;
 
 /// The prologue both sides run: GNU's batch UTF-8 process coding, a wait

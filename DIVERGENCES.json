@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "77209fab5184228768e10691224a211afc808a0cd93a1753368abc5ec0c58e81",
+  "input_hash": "60ed5258633443b1fea0a5b72d490cdec0c3ae8c85a4bd3506c0bb6e953e6459",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 365,
-  "symbols": 1114,
+  "rows": 366,
+  "symbols": 1117,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   364
+   365
   ],
   "\\": [
    280
@@ -91,7 +91,7 @@
   ],
   "add-text-properties": [
    304,
-   349
+   350
   ],
   "add-variable-watcher": [
    318,
@@ -108,7 +108,7 @@
    209
   ],
   "after-insert-file-set-coding": [
-   350
+   351
   ],
   "after-load-alist": [
    334
@@ -162,8 +162,8 @@
   ],
   "autoload": [
    322,
-   353,
-   354
+   354,
+   355
   ],
   "autoload-do-load": [
    322,
@@ -180,6 +180,9 @@
   ],
   "backtrace--locals": [
    347
+  ],
+  "backtrace-debug": [
+   349
   ],
   "backtrace-get-frames": [
    348
@@ -241,7 +244,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   350
+   351
   ],
   "buffer-file-name": [
    125
@@ -566,7 +569,7 @@
    247
   ],
   "custom-reevaluate-setting": [
-   353
+   354
   ],
   "custom-set": [
    174
@@ -594,6 +597,9 @@
   ],
   "debug-on-event": [
    33
+  ],
+  "debug-on-next-call": [
+   349
   ],
   "debug-on-quit": [
    32
@@ -630,7 +636,7 @@
    117
   ],
   "default-file-name-coding-system": [
-   350
+   351
   ],
   "default-value": [
    329,
@@ -647,8 +653,8 @@
    164,
    192,
    228,
-   356,
-   360
+   357,
+   361
   ],
   "define-category": [
    311
@@ -661,7 +667,7 @@
    308
   ],
   "define-coding-system": [
-   350
+   351
   ],
   "define-coding-system-alias": [
    309
@@ -736,6 +742,7 @@
    252
   ],
   "ding": [
+   22,
    181
   ],
   "directory-file-name": [
@@ -839,7 +846,7 @@
    345
   ],
   "downcase_char_code_emacs_compat": [
-   363
+   364
   ],
   "elt": [
    35,
@@ -848,13 +855,13 @@
    66
   ],
   "emacs-build-time": [
-   351
+   352
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   363
+   364
   ],
   "emoji": [
    29
@@ -912,7 +919,7 @@
   "eval-after-load": [
    143,
    334,
-   354
+   355
   ],
   "eval-and-compile": [
    141
@@ -986,17 +993,17 @@
    161,
    162,
    163,
-   356,
    357,
-   360
+   358,
+   361
   ],
   "face-family": [
    159,
-   359
+   360
   ],
   "face-font": [
    158,
-   358
+   359
   ],
   "face-remap-add-relative": [
    256
@@ -1006,7 +1013,7 @@
    162,
    163,
    256,
-   362
+   363
   ],
   "face-spec-recalc": [
    258
@@ -1059,7 +1066,7 @@
    124
   ],
   "find-auto-coding": [
-   350
+   351
   ],
   "find-composition": [
    282
@@ -1724,7 +1731,7 @@
   ],
   "last-coding-system-used": [
    125,
-   350
+   351
   ],
   "last-command": [
    94
@@ -1737,7 +1744,7 @@
    257
   ],
   "latin-extra-code-table": [
-   350
+   351
   ],
   "length": [
    66,
@@ -1830,7 +1837,7 @@
    110,
    111,
    121,
-   353
+   354
   ],
   "load-prefer-newer": [
    140
@@ -2160,10 +2167,10 @@
    165
   ],
   "next-property-change": [
-   349
+   350
   ],
   "next-single-char-property-change": [
-   349
+   350
   ],
   "no-byte-compile": [
    144
@@ -2179,6 +2186,9 @@
   ],
   "nobreak-space": [
    280
+  ],
+  "noninteractive": [
+   239
   ],
   "normal-top-level-add-to-load-path": [
    111
@@ -2628,11 +2638,11 @@
    334,
    335,
    336,
-   353
+   354
   ],
   "reset": [
    161,
-   355
+   356
   ],
   "resize-mini-windows": [
    343
@@ -2778,7 +2788,7 @@
    127
   ],
   "romacs-init-layer-exclude": [
-   354
+   355
   ],
   "romacs-layer-animation romacs-layer-show": [
    270
@@ -2956,7 +2966,7 @@
    213
   ],
   "romacs-unsafe-coding": [
-   350
+   351
   ],
   "round": [
    284
@@ -3023,13 +3033,13 @@
    258
   ],
   "select-safe-coding-system": [
-   350
+   351
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   350
+   351
   ],
   "selected-frame": [
    192,
@@ -3071,7 +3081,7 @@
    330
   ],
   "set-auto-coding": [
-   350
+   351
   ],
   "set-buffer": [
    66
@@ -3100,7 +3110,7 @@
   ],
   "set-coding-system-priority": [
    309,
-   350
+   351
   ],
   "set-default": [
    330
@@ -3110,10 +3120,10 @@
    157,
    158,
    159,
-   357,
    358,
    359,
-   361
+   360,
+   362
   ],
   "set-file-acl": [
    11
@@ -3226,10 +3236,10 @@
    33
   ],
   "skip-chars-backward": [
-   364
+   365
   ],
   "skip-chars-forward": [
-   364
+   365
   ],
   "sleep-for": [
    221,
@@ -3548,7 +3558,7 @@
    224
   ],
   "use-package": [
-   354
+   355
   ],
   "usize": [
    107
@@ -4163,12 +4173,13 @@
    "section": "Observable by a package: isolates and frozen values",
    "observable": true,
    "planned": false,
-   "mechanism": "Frame and window queries in a worker",
+   "mechanism": "Frame and window queries, and standard output, in a worker",
    "gnu": "n/a.",
-   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`.",
-   "why": "A worker owns no display.",
+   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`. Its standard output is null (`host::spawn_isolate`): `ding`'s batch BEL and `princ` to `t` go nowhere, never into the spawner's output (a server's journal); `message` still reaches its stderr",
+   "why": "A worker owns no display and no output of the session's.",
    "symbols": [
-    "display-graphic-p"
+    "display-graphic-p",
+    "ding"
    ],
    "symbols_derived": false
   },
@@ -4957,7 +4968,7 @@
    "planned": false,
    "mechanism": "profiler.c's CPU and memory profilers: where samples are taken and what they weigh",
    "gnu": "`SIGPROF` on a `CLOCK_THREAD_CPUTIME_ID` timer interrupts the main thread every SAMPLING-INTERVAL of its CPU time, and the handler records the specpdl backtrace (`get_backtrace`) at that instant, including GNU's `redisplay_internal (C function)` frame during redisplay; a sample inside GC counts in `[Automatic\\ GC nil]`. The memory profiler probes `xmalloc`/`lisp_malloc` with the bytes asked for, so a small object counts only when its block is allocated, and after each GC it probes the bytes the collection freed (`alloc.c:6019`) under the caller's backtrace.",
-   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is running then (its `/proc` state is `R`, which also holds while it is runnable but preempted), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
+   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is on a CPU then (its CPU clock advances between two reads; a thread allowed a single CPU, which the sampler shares, counts as running while its `/proc` state is `R`), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
    "why": "A CPU-time timer is not used: under a zero `RLIMIT_RTTIME` hard limit (agent scopes have one) Linux kills a thread whose CPU timer fires, as it kills pinned GNU there. Same report shape, different counts: a call-dense hot path is charged where it runs; work inside a long primitive is charged to the primitive at its exit. Not running costs one flag test per call boundary; running at 10 ms adds a relaxed load per boundary and a thread wake per interval. Tests: `crates/romacs-vm/src/profiler_tests.rs`, GNU's `test/src/profiler-tests.el`.",
    "symbols": [
     "profiler-cpu-start",
@@ -5899,9 +5910,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "A `let` compiled before its variable is special",
-   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now), so a function that let-binds a package's variable binds it dynamically once the package's `defvar` has run, however early the function was defined",
-   "romacs": "Romacs compiles a top-level form whole and decides then. A lambda inside another lambda's body that sees no lexical binding (a `defun` that `with-eval-after-load` or `use-package :config` wraps) now compiles at its first call (`Vm::lambda`, `lambda_depth`), after the package loaded, so it binds as GNU's does (`tests/late_special.rs`); a top-level function compiled before the `defvar` still binds lexically, as a byte-compiled one would in GNU",
-   "why": "An init `defun` at top level that let-binds a not yet loaded package's variable (for example `smtpmail-smtp-server`) must sit in that package's `with-eval-after-load`/`:config`, or `defvar` the name first",
+   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now): `eval`'d forms and files read as source (readevalloop), so `(progn (require 'org) (let ((org-yank-dnd-method 'attach)) ...))` and a function let-binding a variable its file declares later bind dynamically. Bytecomp takes a top-level `progn`'s children in order, evaluating `require` and declaring `defvar` as it goes (`byte-compile-file-form-progn`), so the `progn` idiom binds dynamically in an `.elc` too, while a function compiled before the `defvar` binds lexically",
+   "romacs": "Romacs compiles every form. Code `eval` compiles (`eval`, `--eval`, `eval-expression`, `eval-buffer` and the closures it makes) and code of a file GNU would read as source (no `.elc`, outside the installation's Lisp trees: `Vm::gnu_loads_compiled`, `interpreting_source`) bind late: a `let` of a symbol not special when it compiled is checked as it binds (`Op::BindLate`), made dynamically if the symbol is special then, its reads, writes and the closures sharing it then going to the dynamic value, except that a lexical binding of the name it hides (one a closure captured) is still what its body's references and `setq` reach, as GNU's lexical environment lookup finds it first. A file GNU would load compiled (the installation's Lisp, or one beside a current `.elc`), read as source or through the compiled-Lisp store's compile process (rlisp/romacs-compile.el walks it by bytecomp's rules), binds as bytecomp would. `tests/late_special_eval.rs` compares every path with GNU's `.el` and `.elc` loads. A late `let` loop costs about 2.8x a lexical one, still some 30x faster than GNU's interpreter; compiled-load code pays nothing. A lambda's parameters decide when it compiles. GNU's cconv drops a captured variable its closure's body never uses freely, so there a late `let` that turns dynamic hides nothing; Romacs still finds the captured binding",
+   "why": "**Package-observable** only for a lambda parameter named as a variable made special after the lambda compiled, and for a closure that rebinds, without otherwise using, a name it captured lexically that became special since",
    "symbols": [
     "let",
     "let*"
@@ -8104,13 +8115,14 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "VM2 is not an Emacs daemon",
-   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized` inspect daemon state and reject initialization in a non-daemon",
-   "romacs": "`(daemonp)` is nil; `(daemon-initialized)` errors that this function requires daemon mode (both measured). No daemon state is fabricated",
-   "why": "Matches GNU non-daemon behavior; daemon startup is not implemented",
+   "mechanism": "Which process is an Emacs daemon",
+   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized`: a `--fg-daemon=NAME` process answers NAME from its start, with `noninteractive` nil, and `daemon-initialized` signals \"The daemon has already been initialized\" once startup ran; any other process answers nil and is told the function needs daemon mode",
+   "romacs": "A server (`--serve NAME`, SERVER2) is GNU's `--fg-daemon=NAME`: `daemonp` answers NAME from the command line on (`host::set_daemon`), so the user's init sees it, `noninteractive` is nil, and `daemon-initialized` signals as an initialized daemon's. Every other process is no daemon, as GNU's. Its frames stay SERVER2's: no initial terminal frame, so `frame-list` differs and server.el's \"only the daemon's terminal frame\" branches never apply. `crates/romacs-vm-gui/harness/server_live.py` (daemon) compares both, and that `ding` in a server, with or without a frame, writes no BEL",
+   "why": "Matches GNU's daemon for `daemonp`, `daemon-initialized` and `noninteractive`; `frame-list` is SERVER2's",
    "symbols": [
     "daemonp",
-    "daemon-initialized"
+    "daemon-initialized",
+    "noninteractive"
    ],
    "symbols_derived": false
   },
@@ -10137,6 +10149,22 @@
    "symbols": [
     "backtrace-get-frames",
     "backtrace--frames-and-locals"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-NEXT-CALL",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`debug-on-next-call` and debug-on-exit observe Lisp calls only",
+   "gnu": "bytecode.c's call opcode and Ffuncall call the debugger with `(lambda)` at the next call of any function, primitives included, and with `(exit VALUE)` when any flagged activation returns, a primitive's too",
+   "romacs": "The call boundary's hooks (`threaded.rs` `arm_debug_on_call`, `debug_on_exit`) stop at the next Lisp function call, with GNU byte-code's `(lambda)`; `debug-on-next-call` stays set through the primitive calls before it, which run as GNU opcodes do. A flagged primitive activation (`j` on a `mapcar` frame) returns without entering the debugger; its flag is dropped as it leaves. Normal returns of Lisp activations, and throws and errors out of them, match GNU byte-code (`tests/debugger_entry.rs`). `debug-on-next-call` is a forwarded boolean, as GNU's DEFVAR_BOOL",
+   "why": "One test on the call path (`profiler.active`) covers profiling and both hooks; primitive calls stay off it",
+   "symbols": [
+    "debug-on-next-call",
+    "backtrace-debug"
    ],
    "symbols_derived": false
   },

@@ -1170,9 +1170,6 @@ impl Vm {
         }
         Ok(bytes)
     }
-    /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
-    /// unibyte string's bytes and ASCII text as they are; other text
-    /// requires an explicit encoder.
     /// A unibyte insertion of ARGS: their bytes, and each string's text
     /// properties at its offset in them (insert_from_string_1 grafts them
     /// onto the new text).
@@ -1180,20 +1177,36 @@ impl Vm {
         let (mut bytes, mut properties) = (Vec::new(), crate::bytes::ByteProperties::new());
         for &v in args {
             if let Some(Object::String(s) | Object::RawString(s)) = self.object_if(v) {
-                for (at, values) in s.properties.to_map() { properties.insert(ByteOffset(bytes.len() + at.0), values); }
+                // Each character becomes one byte: a character's
+                // properties, at its first byte, go to its index.
+                let (text, multibyte) = (s.bytes(), s.is_multibyte());
+                let continuation = |at: usize| multibyte && text.get(at).is_some_and(|b| b & 0xC0 == 0x80);
+                let (mut from, mut index) = (0, 0);
+                for (at, values) in s.properties.to_map() {
+                    if continuation(at.0) { continue; }
+                    index += text[from..at.0].iter().filter(|&&b| !multibyte || b & 0xC0 != 0x80).count();
+                    from = at.0;
+                    properties.insert(ByteOffset(bytes.len() + index), values);
+                }
             }
             bytes.extend(self.unibyte_text(v)?);
         }
         Ok((bytes, properties))
     }
+    /// The bytes TEXT, a character or a string, puts in a unibyte buffer:
+    /// a unibyte string's bytes as they are; each character of multibyte
+    /// text, its low byte (insdel.c's copy_text, CHAR_TO_BYTE8), so a raw
+    /// byte's character is that byte and ASCII is itself.
     pub(crate) fn unibyte_text(&self, text: Value) -> Result<Vec<u8>> {
-        if let Some(i) = text.integer_value() {
-            return Ok(vec![u8::try_from(i).map_err(|_| "invalid octet")?]);
+        if let Some(c) = text.integer_value() {
+            if !(0..=0x3F_FFFF).contains(&c) { return Err("invalid octet".into()); }
+            return Ok(vec![c as u8]);
         }
         match self.object(text)? {
             Object::Bytes(b) => Ok(b.clone()),
             Object::String(s) | Object::RawString(s) if !s.is_multibyte() || s.bytes().is_ascii() => Ok(s.bytes().to_vec()),
-            _ => Err("bytes required; encode text explicitly".into()),
+            Object::String(s) | Object::RawString(s) => Ok(s.view().chars().map(|c| c as u8).collect()),
+            _ => Err("string required".into()),
         }
     }
     fn byte_buffer_primitive(
