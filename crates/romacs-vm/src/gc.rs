@@ -51,7 +51,7 @@ pub(crate) struct Stress {
     /// `ROMACS_GC_VERIFY': a freed entry is poisoned and never reused
     /// (`sweep_tables'), so a stale reference to it is seen, not hidden by
     /// the entry's next tenant.
-    verify: bool,
+    pub(crate) verify: bool,
     /// Every collection compacts ([`Vm::set_gc_moving`]): the fixtures that
     /// prove rooting under the moving collector.
     moving: bool,

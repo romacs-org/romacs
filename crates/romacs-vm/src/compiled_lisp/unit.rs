@@ -608,15 +608,18 @@ impl Install<'_> {
         validate(&headers, &refs, &nodes, entry, caches)?;
         let (ids, cache_ids) = vm.reserve_request_artifact(headers, caches);
         let values = materialise(vm, &nodes, &ids, self.slots, &uninterned)?;
-        for (l, &id) in refs.into_iter().zip(&ids) {
-            let pending = PendingBody {
+        // All or none: a published body owns its cache slots.
+        let bodies = refs.into_iter().map(|l| {
+            Ok(PendingBody {
                 bytes: Arc::clone(self.bytes),
                 body: l.body,
                 values: l.values.iter().map(|&r| resolve_ref(r, &values, self.slots, &uninterned)).collect::<Result<_>>()?,
                 children: l.children.iter().map(|&f| ids[f]).collect(),
                 caches: l.caches.iter().map(|&c| cache_ids[c]).collect(),
                 names: Arc::clone(self.slots),
-            };
+            })
+        }).collect::<Result<Vec<_>>>()?;
+        for (pending, &id) in bodies.into_iter().zip(&ids) {
             Arc::get_mut(&mut vm.functions[id]).expect("a function just installed is private").pending = Some(Box::new(pending));
         }
         vm.claim_caches(&cache_ids);
