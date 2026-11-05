@@ -296,9 +296,12 @@ ready worker, which is then warmed for the next time."
     (advice-add 'project-find-regexp :around #'romacs-project-find-regexp)))
 
 ;; A worker's vc-git asks Git its version once per session; its zygote
-;; asks for all its children.
-(when (boundp 'isolate-zygote-warm-functions)
-  (add-to-list 'isolate-zygote-warm-functions '(vc-git . vc-git--program-version)))
+;; asks for all its children.  (Primitives only: this file also loads in
+;; startups without subr.el.)
+(when (and (boundp 'isolate-zygote-warm-functions)
+           (not (assq 'vc-git isolate-zygote-warm-functions)))
+  (setq isolate-zygote-warm-functions
+        (cons '(vc-git . vc-git--program-version) isolate-zygote-warm-functions)))
 
 (provide 'romacs-project)
 ;;; romacs-project.el ends here
