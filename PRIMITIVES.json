@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f6b3633f71c68dfe3e688f08b4a6aac2aa5765accf34abcc0430863483ac1681",
+  "source_fingerprint": "69813ec14b17274e6c815c02350b03119caeda50cab96c6941b6a9415e7017b2",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1339,
-  "parsed_vm2_only": 1339
+  "parsed_total": 1340,
+  "parsed_vm2_only": 1340
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3437,6 +3437,11 @@
    "name": "nconc",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fns_seq.rs:50"
+  },
+  "network-lookup-address-info": {
+   "name": "network-lookup-address-info",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:553"
   },
   "next-overlay-change": {
    "name": "next-overlay-change",

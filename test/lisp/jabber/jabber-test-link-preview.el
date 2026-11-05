@@ -401,6 +401,117 @@
             (should (equal opened url)))
         (remhash url jabber-link-preview--cache)))))
 
+;;; Fetches off the main VM, against a fixture instead of the network
+
+(defmacro jabber-test-link-preview--with-fixture (response &rest body)
+  "Run BODY with a fake curl answering RESPONSE and DNS answering a public address.
+The fake curl records its arguments in the file ARGS; RESPONSE is the
+raw HTTP response it prints.  LOOKUPS counts the DNS lookups made."
+  (declare (indent 1) (debug t))
+  `(let* ((dir (make-temp-file "jabber-preview" t))
+          (args (expand-file-name "args" dir))
+          (body (expand-file-name "response" dir))
+          (curl (expand-file-name "curl" dir))
+          (lookups 0)
+          (jabber-link-preview-program curl))
+     (unwind-protect
+         (progn
+           (let ((coding-system-for-write 'binary))
+             (write-region ,response nil body nil 'silent))
+           (with-temp-file curl
+             (insert "#!/bin/sh\nprintf '%s\\n' \"$@\" > " (shell-quote-argument args)
+                     "\ncat " (shell-quote-argument body) "\n"))
+           (set-file-modes curl #o700)
+           (cl-letf* ((lookup (symbol-function 'network-lookup-address-info))
+                      ((symbol-function 'network-lookup-address-info)
+                       (lambda (name &optional family hint)
+                         (if (eq hint 'numeric)
+                             (funcall lookup name family hint)
+                           (cl-incf lookups)
+                           (if (string-prefix-p "private." name)
+                               '([10 0 0 7 0])
+                             '([93 184 216 34 0]))))))
+             ,@body))
+       (delete-directory dir t))))
+
+(defun jabber-test-link-preview--http (status type html)
+  "An HTTP response with STATUS, content TYPE and the body HTML."
+  (concat "HTTP/1.1 " status "\r\nContent-Type: " type "\r\n\r\n" html))
+
+(ert-deftest jabber-test-link-preview-worker-fetch-reads-a-page ()
+  "The worker's fetch looks the name up, pins curl to the vetted address,
+and parses the page."
+  (skip-unless (fboundp 'libxml-parse-html-region))
+  (jabber-test-link-preview--with-fixture
+      (jabber-test-link-preview--http "200 OK" "text/html; charset=utf-8"
+                                      jabber-test-link-preview--html)
+    (let ((result (jabber-link-preview-worker-fetch "https://example.org/a")))
+      (should (equal "A useful page" (plist-get result :title)))
+      (should (equal "A short description." (plist-get result :description)))
+      (should (equal "https://example.org/card.png" (plist-get result :image)))
+      (should (= 1 lookups))
+      (with-temp-buffer
+        (insert-file-contents args)
+        (should (search-forward "example.org:443:93.184.216.34" nil t))))))
+
+(ert-deftest jabber-test-link-preview-worker-fetch-refuses-private-answers ()
+  "A name that resolves to a private address is never fetched."
+  (jabber-test-link-preview--with-fixture
+      (jabber-test-link-preview--http "200 OK" "text/html" "<title>x</title>")
+    (should (equal '(:error unsafe)
+                   (jabber-link-preview-worker-fetch "https://private.example.org/")))
+    (should-not (file-exists-p args))))
+
+(ert-deftest jabber-test-link-preview-worker-fetch-reports-bad-answers ()
+  "A failing status and a wrong content type are errors, not previews."
+  (skip-unless (fboundp 'libxml-parse-html-region))
+  (dolist (case `((,(jabber-test-link-preview--http "404 Not Found" "text/html" "<title>x</title>")
+                   (:error response))
+                  (,(jabber-test-link-preview--http "200 OK" "application/pdf" "%PDF")
+                   (:error mime))
+                  (,(jabber-test-link-preview--http "200 OK" "text/html" "<p>no title</p>")
+                   (:error metadata))))
+    (jabber-test-link-preview--with-fixture (car case)
+      (should (equal (cadr case)
+                     (jabber-link-preview-worker-fetch "https://example.org/a"))))))
+
+(ert-deftest jabber-test-link-preview-session-fetches-in-a-worker ()
+  "In a world-booted session the fetch runs in a worker: the session never
+looks a name up or starts curl, and the callback gets the worker's metadata."
+  (skip-unless (fboundp 'libxml-parse-html-region))
+  (jabber-test-link-preview--with-fixture
+      (jabber-test-link-preview--http "200 OK" "text/html" jabber-test-link-preview--html)
+    (let* ((in-worker nil) (session-effects nil) (spawned nil) (result nil)
+           (watch (lambda (what) (lambda (&rest _) (unless in-worker (push what session-effects))))))
+      (advice-add 'make-process :before (funcall watch 'make-process) '((name . jabber-test)))
+      (advice-add 'network-lookup-address-info :before (funcall watch 'lookup) '((name . jabber-test)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'jabber-link-preview--worker-available-p) (lambda () t))
+                    ((symbol-function 'isolate-spawn)
+                     (lambda (function &rest args)
+                       (push (cons function args) spawned)
+                       ;; The worker: run its function as another VM would.
+                       (setq in-worker t)
+                       (unwind-protect (apply function (seq-take args 1))
+                         (setq in-worker nil))))
+                    ((symbol-function 'isolate-on-done) (lambda (future callback) (funcall callback future)))
+                    ((symbol-function 'isolate-await) (lambda (future _timeout) future))
+                    ((symbol-function 'thaw) #'identity))
+            (jabber-link-preview-fetch "https://example.org/a" (lambda (value) (setq result value))))
+        (advice-remove 'make-process 'jabber-test)
+        (advice-remove 'network-lookup-address-info 'jabber-test))
+      (should (equal 'jabber-link-preview-worker-fetch (car (car spawned))))
+      (should (equal "A useful page" (plist-get result :title)))
+      (should-not session-effects))))
+
+(ert-deftest jabber-test-link-preview-session-reports-a-worker-failure ()
+  "A worker that fails gives the callback an error, not silence."
+  (let (result)
+    (cl-letf (((symbol-function 'jabber-link-preview--worker-available-p) (lambda () t))
+              ((symbol-function 'isolate-spawn) (lambda (&rest _) (error "No worker"))))
+      (jabber-link-preview-fetch "https://example.org/a" (lambda (value) (setq result value))))
+    (should (equal '(:error worker) result))))
+
 (provide 'jabber-test-link-preview)
 
 ;;; jabber-test-link-preview.el ends here
