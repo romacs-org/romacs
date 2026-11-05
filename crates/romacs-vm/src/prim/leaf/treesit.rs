@@ -521,6 +521,35 @@ impl Leaf<'_> {
         }).collect()
     }
 
+    /// The tree PARSER's first parse would build, when another parser of its
+    /// buffer already has it: the same grammar parsing the same text from
+    /// nothing builds the same tree, so a copy replaces the parse. c-ts-mode's
+    /// `for-each' parser is why: until it finds a FOR_EACH tail it sees what
+    /// the primary sees, and would parse every C file a second time. Only
+    /// parsers seeing all of the accessible text qualify, so the parsers of
+    /// embedded ranges, however many, pay nothing here.
+    /// A tree whose edits carried no points (a parser that does not track
+    /// line and column) is not the same to one that does.
+    fn ts_twin_tree(&self, parser: Value) -> Option<native::Tree> {
+        let p = self.ts_parser(parser).ok()?;
+        let (core, native) = (p.core.borrow(), p.native.borrow());
+        let length = (core.visible.1 - core.visible.0) as u32;
+        if !native.sees_all(length) {
+            return None;
+        }
+        self.ts_registry(self.ts_base(p.buffer)).parsers.iter().find_map(|(other, other_core)| {
+            if *other == parser {
+                return None;
+            }
+            let c = other_core.borrow();
+            let tree = c.tree.as_ref().filter(|_| c.fresh && !c.need_reparse && c.visible == core.visible
+                && c.linecols.is_some() == core.linecols.is_some())?;
+            let o = self.ts_parser(*other).ok().filter(|o| o.buffer == p.buffer)?;
+            let n = o.native.borrow();
+            (n.language() == native.language() && n.sees_all(length)).then(|| tree.duplicate())
+        })
+    }
+
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
     /// parsed, None when no parse was due. A parse leaves the parser
     /// `within_reparse' for its notifiers (`ts_reparse_done').
@@ -539,11 +568,12 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
-        let new = {
+        let twin = if old.is_none() { self.ts_twin_tree(parser) } else { None };
+        let new = twin.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let mut reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
             native.borrow_mut().parse(old.as_deref(), &mut reader)
-        };
+        });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
         };
@@ -553,6 +583,7 @@ impl Leaf<'_> {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
             c.need_reparse = false;
+            c.fresh = old.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;
         let ranges = match changed {
