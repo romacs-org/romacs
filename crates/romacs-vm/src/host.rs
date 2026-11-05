@@ -2420,12 +2420,15 @@ pub fn take_terminate_quit() -> bool {
 }
 
 /// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
-/// standard input, this process's stderr. Its pid; the caller reaps.
+/// standard input, this process's stderr. Its standard output is null: a
+/// worker's Lisp is batch, but the output it would write (`ding''s BEL,
+/// `princ' to t) is no one's, and this process's may be a session's log.
+/// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
-    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
     Ok(command.spawn()?.id() as i32)
 }
 
@@ -2549,6 +2552,20 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
+/// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
+/// for the whole process.
+static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_daemon(name: &str) {
+    let _ = DAEMON.set(name.to_owned());
+}
+
+/// The name `daemonp' answers, while this process is a server.
+pub fn daemon() -> Option<&'static str> {
+    DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
