@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "edec3343d7f50f75b301344d7b81295289fe7e7f154fad614256235791f5f30f",
+    "input_hash": "517be46eb589d76a04246673949d13a3afcef6f14901e48b74e4f7226bb2a252",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8173
+    "vm2_universe": 8193
   },
   "schema": 2,
   "vm2": {
-    "count": 1346,
+    "count": 1347,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -975,6 +975,7 @@
       "romacs--wait-status",
       "romacs--write-auto-save-list",
       "romacs--write-region-body",
+      "romacs--xml-read-element",
       "romacs-find-buffer-visiting",
       "romacs-instructions",
       "romacs-json-read",

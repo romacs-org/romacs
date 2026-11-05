@@ -737,6 +737,11 @@ A function of `jabber-mam-stall-functions'."
          nil)
       (error (funcall done (cons 'failed (error-message-string err)))))))
 
+(defun jabber-mam-sync--work-due-p ()
+  "Non-nil when a timer is due: stanzas queued while the last poll worked
+\(fsm.el dispatches each as a timer), for the next poll to work."
+  (seq-some (lambda (timer) (not (time-less-p nil (timer--time timer)))) timer-list))
+
 (defun jabber-mam-sync--stamp (seconds)
   "SECONDS since the epoch as an XEP-0082 time."
   (format-time-string "%Y-%m-%dT%H:%M:%SZ" seconds t))
@@ -944,9 +949,19 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
                          jabber-mam-sync-timeout)
                       (memq jc jabber-connections)
                       (or connected (< (- (float-time) start) 60)))
-            (accept-process-output nil 0.1)
-            ;; Its timer commits it first; this is the backstop.
-            (jabber-mam-batch-commit)
+            ;; Work what has arrived and what it queued; commit the batch only
+            ;; when idle, before waiting for more, so it grows while the
+            ;; stream keeps coming.  The wait reads the connection without
+            ;; working it (no timers, so no stanza): what arrives is the
+            ;; next poll's.  No batch opens in a wait, whatever runs there.
+            (unless (or (accept-process-output nil 0)
+                        (jabber-mam-sync--work-due-p))
+              (jabber-mam-batch-commit)
+              (let ((jabber-mam--batch nil)
+                    (process (plist-get (fsm-get-state-data jc) :connection)))
+                (if (processp process)
+                    (accept-process-output process 0.1 nil 0)
+                  (accept-process-output nil 0.1))))
             (jabber-mam-check-stalls))
           (jabber-mam-sync--summary
            account archives outcomes connected (- (float-time) start)

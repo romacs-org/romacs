@@ -2389,6 +2389,8 @@ batch, their effects after it, and the page fails, naming why."
   (jabber-test-mam--watching
     (let* ((room "room@example.com")
            (jabber-mam--batch (jabber-mam-make-batch))
+           ;; Open until the test commits it, however slow the host.
+           (jabber-mam-batch-age 600)
            (committed nil)
            (jabber-mam-committed-functions
             (list (lambda (effects) (push (length effects) committed))))
@@ -2435,6 +2437,7 @@ and its results gone: it never reports success first."
   (jabber-test-mam--watching
     (let ((room "room@example.com")
           (jabber-mam--batch (jabber-mam-make-batch))
+          (jabber-mam-batch-age 600)
           (outcome nil))
       (jabber-test-mam--seed-cursor jc room "archive-000001")
       (jabber-mam--query jc "archive-000001" nil nil nil room nil nil nil

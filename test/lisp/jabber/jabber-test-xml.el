@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'jabber-xml)
 (require 'jabber-core)
 
@@ -317,6 +318,92 @@
   (with-temp-buffer
     (insert "<message><body>hello</bodyx ></message><presence/>")
     (should-not (jabber-xml-parse-next-stanza))))
+
+;;; Group 10: the native reader reads as xml.el does
+
+(defun jabber-test-xml--by-xml-el (text)
+  "TEXT's first stanza as xml.el reads it: what the native reader must match."
+  (with-temp-buffer
+    (insert text)
+    (and (catch 'unfinished
+           (goto-char (point-min))
+           (jabber-xml-skip-tag-forward)
+           (> (point) (point-min)))
+         (cons (car (xml-parse-region (point-min) (point))) (point)))))
+
+(defun jabber-test-xml--natively (text)
+  "TEXT's first stanza as `romacs--xml-read-element' reads it, or `declined'."
+  (with-temp-buffer
+    (insert text)
+    (pcase (romacs--xml-read-element (point-min) (point-max))
+      ('incomplete nil)
+      ('nil 'declined)
+      (read read))))
+
+(defconst jabber-test-xml--stanzas
+  '("<message from='a@b/c' to=\"d@e\" type='chat' id='x1'><body>Hi &amp; bye &lt;3 &#x1F600;&#33;</body><active xmlns='http://jabber.org/protocol/chatstates'/></message>"
+    "<presence from='room@muc/nick'><x xmlns='http://jabber.org/protocol/muc#user'><item affiliation='none' role='participant'/></x><c xmlns='http://jabber.org/protocol/caps' hash='sha-1' node='n' ver='v='/></presence>"
+    "<iq type='result' id='q1'><fin xmlns='urn:xmpp:mam:2' complete='true'><set xmlns='http://jabber.org/protocol/rsm'><first>1</first><last>2</last></set></fin></iq>"
+    "<message><result xmlns='urn:xmpp:mam:2' queryid='q' id='9'><forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' stamp='2026-11-05T10:00:00Z'/><message type='groupchat' from='r@m/n'><body>line one\r\nline two\rthree\n  indented</body></message></forwarded></result></message>"
+    "<message>\n  <body>  spaced  </body>\n  <html xmlns='http://jabber.org/protocol/xhtml-im'><body xmlns='http://www.w3.org/1999/xhtml'><p>a <b>b</b> c</p></body></html>\n</message>"
+    "<message a='1'b='2' c = \"3\"><body>café 日本 مرحبا</body></message>"
+    "<a><b><b><b/></b></b><![CDATA[raw <x> &amp; ]]>after &gt;<c/><![CDATA[]]></a>"
+    "<a x='&quot;q&quot; &apos;s&apos; &#60;&#x3e;'/>"
+    "<a><!-- comment --><b/></a>"
+    "<a>&nbsp;</a>"
+    "<message><body>hello</bodyx ></message><presence/>"
+    "<a>&#0;</a>"
+    "  \n <presence/>")
+  "Stanzas the native reader must read as xml.el does, or decline.")
+
+(defun jabber-test-xml--random-stanza (state depth)
+  "A random stanza from the random STATE, nested at most DEPTH deep."
+  (let* ((names ["a" "b" "body" "x:y" "message" "item_1" "q.r-s"])
+         (texts ["" " " "\n" "t" "a &amp; b" "&lt;&gt;" "&#65;&#x42;" "éè" "\r\n" "x\ry"])
+         (pick (lambda (v) (aref v (cl-random (length v) state))))
+         (name (funcall pick names))
+         (attrs (mapconcat (lambda (_) (format " %s%s='%s'"
+                                               (funcall pick ["k" "id" "xmlns" "x:k"]) (cl-random 99 state)
+                                               (funcall pick ["v" "&amp;" "\"q\"" "" "é" "a b"])))
+                           (number-sequence 1 (cl-random 3 state)) "")))
+    (if (or (zerop depth) (zerop (cl-random 3 state)))
+        (format "<%s%s/>" name attrs)
+      (format "<%s%s>%s</%s>" name attrs
+              (mapconcat (lambda (_)
+                           (pcase (cl-random 4 state)
+                             (0 (funcall pick texts))
+                             (1 (format "<![CDATA[%s]]>%s" (funcall pick ["" "<b>" "]" "a&b"]) (funcall pick texts)))
+                             (_ (jabber-test-xml--random-stanza state (1- depth)))))
+                         (number-sequence 1 (cl-random 5 state)) "")
+              name))))
+
+(ert-deftest jabber-test-xml-native-reads-as-xml-el ()
+  "The native reader reads each stanza, and each of its prefixes, as
+xml.el does: the same element and end, nothing yet, or it declines."
+  (skip-unless (fboundp 'romacs--xml-read-element))
+  (let ((state (cl-make-random-state 7))
+        (stanzas (copy-sequence jabber-test-xml--stanzas)))
+    (dotimes (_ 200)
+      (push (jabber-test-xml--random-stanza state 4) stanzas))
+    (dolist (stanza stanzas)
+      (dolist (end (number-sequence 1 (length stanza)))
+        (let* ((text (substring stanza 0 end))
+               (native (jabber-test-xml--natively text)))
+          (unless (eq native 'declined)
+            (should (equal (list text (jabber-test-xml--by-xml-el text))
+                           (list text native)))))))))
+
+(ert-deftest jabber-test-xml-native-declines-what-xml-el-reads-otherwise ()
+  "Comments, unknown entities and mismatched end tags are left to xml.el."
+  (skip-unless (fboundp 'romacs--xml-read-element))
+  (dolist (stanza '("<a><!-- c --><b/></a>" "<a>&nbsp;</a>"
+                    "<message><body>hello</bodyx ></message><presence/>"))
+    (should (eq 'declined (jabber-test-xml--natively stanza)))
+    ;; And the stanza reader gives xml.el's answer.
+    (with-temp-buffer
+      (insert stanza)
+      (should (equal (let ((r (jabber-test-xml--by-xml-el stanza))) (and r (list (car r))))
+                     (jabber-xml-parse-next-stanza))))))
 
 (provide 'jabber-test-xml)
 ;;; jabber-test-xml.el ends here

@@ -161,11 +161,13 @@ changed, and one with INSERTED t for each message row it added (see
 (defvar jabber-mam--batch nil
   "The batch archived results commit in, or nil for a transaction each.
 A worker binds it to `jabber-mam-make-batch'.  The first result opens
-the batch's transaction and queues its COMMIT behind the stanzas already
-waiting (`jabber-mam-batch-commit'); it commits earlier once it holds
-`jabber-mam-batch-size' results, or as soon as the live session wants to
-write (`jabber-db-share-writes').  So a batch is about one read's worth
-of results, and never stays open while its process waits for input.
+the batch's transaction; its owner commits it (`jabber-mam-batch-commit')
+before its process waits for input, as `jabber-mam-sync-worker-run'
+does, so a batch holds what arrives while the stream keeps coming.  It
+commits earlier once it holds `jabber-mam-batch-size' results, once it
+has been open `jabber-mam-batch-age' seconds, as soon as the live
+session wants to write (`jabber-db-share-writes'), and before a query
+reports success.
 Collections wait while it is open: one would hold the write lock the
 session may be waiting for as long as it takes.")
 
@@ -724,9 +726,12 @@ EFFECTS is `jabber-mam--effects' as the result left it."
 (defvar jabber-mam-batch-size 100
   "Most results a batch holds before it commits.")
 
+(defvar jabber-mam-batch-age 0.05
+  "Seconds a batch stays open at most before its next result commits it.")
+
 (defun jabber-mam-make-batch ()
   "A closed batch for `jabber-mam--batch'."
-  (list :open nil :count 0 :effects nil :undos nil :queries nil :timer nil :gc nil))
+  (list :open nil :count 0 :effects nil :undos nil :queries nil :opened nil :gc nil))
 
 (defun jabber-mam--batch-open (db)
   "Open the batch's transaction on DB unless it is open; return non-nil."
@@ -738,7 +743,7 @@ EFFECTS is `jabber-mam--effects' as the result left it."
     (setq jabber-db--in-transaction db)
     (plist-put jabber-mam--batch :gc gc-cons-threshold)
     (setq gc-cons-threshold most-positive-fixnum)
-    (plist-put jabber-mam--batch :timer (run-at-time 0 nil #'jabber-mam-batch-commit)))
+    (plist-put jabber-mam--batch :opened (float-time)))
   t)
 
 (defun jabber-mam--batch-note (query)
@@ -756,8 +761,9 @@ EFFECTS is `jabber-mam--effects' as the result left it."
   (plist-put jabber-mam--batch :count (1+ (plist-get jabber-mam--batch :count))))
 
 (defun jabber-mam--batch-due-p ()
-  "Non-nil when the open batch should commit now: full, or the session waits."
+  "Non-nil when the open batch should commit now: full, old, or the session waits."
   (or (>= (plist-get jabber-mam--batch :count) jabber-mam-batch-size)
+      (> (- (float-time) (plist-get jabber-mam--batch :opened)) jabber-mam-batch-age)
       (when-let* ((file (jabber-db--intent-file)))
         (jabber-db--intent-fresh-p file))))
 
@@ -769,12 +775,9 @@ changes are undone, and its queries fail: their cursors moved inside it."
               (db (plist-get batch :open)))
     (let ((effects (reverse (plist-get batch :effects)))
           (undos (plist-get batch :undos))
-          (queries (plist-get batch :queries))
-          (timer (plist-get batch :timer)))
-      (when (timerp timer)
-        (cancel-timer timer))
+          (queries (plist-get batch :queries)))
       (setq gc-cons-threshold (or (plist-get batch :gc) gc-cons-threshold))
-      (dolist (key '(:open :effects :undos :queries :timer :gc))
+      (dolist (key '(:open :effects :undos :queries :opened :gc))
         (plist-put batch key nil))
       (plist-put batch :count 0)
       (setq jabber-db--in-transaction nil)

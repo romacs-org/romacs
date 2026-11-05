@@ -1591,6 +1591,35 @@ thousandth a stack mark."
                  (cons (list :room nil :with nil :nick nil) archives)))
   :body (jabber-mam-sync--summary (car it) (cdr it) (mapcar (lambda (a) (cons a 'success)) (cdr it)) t 1.0))
 
+;; The stanza reader (jabber-xml.el, natively romacs--xml-read-element):
+;; one stanza of N children, one of N attributes; and a connection's
+;; buffer of N stanzas read and deleted one at a time, as jabber-filter
+;; does, which stays linear because a read looks at a window of the
+;; buffer, not all that follows.
+(scaling-probe jabber-xml-read-stanza :n 2000
+  :setup (progn (scaling--jabber)
+                (concat "<message>"
+                        (mapconcat (lambda (i) (format "<b x='%d'>t &amp; u</b>" i))
+                                   (number-sequence 1 n) "")
+                        "</message>"))
+  :body (with-temp-buffer (insert it) (jabber-xml-parse-next-stanza)))
+
+(scaling-probe jabber-xml-read-attributes :n 2000
+  :setup (progn (scaling--jabber)
+                (concat "<presence"
+                        (mapconcat (lambda (i) (format " a%d='%d'" i i)) (number-sequence 1 n) "")
+                        "/>"))
+  :body (with-temp-buffer (insert it) (jabber-xml-parse-next-stanza)))
+
+(scaling-probe jabber-xml-read-buffer :n 2000
+  :setup (progn (scaling--jabber)
+                (mapconcat (lambda (i) (format "<presence from='r@m/n%d'><x xmlns='u'/></presence>" i))
+                           (number-sequence 1 n) ""))
+  :body (with-temp-buffer
+          (insert it)
+          (while (jabber-xml-parse-next-stanza)
+            (delete-region (point-min) (point)))))
+
 ;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
 
 ;; N distinct images, each measured, then all N again from the cache: a

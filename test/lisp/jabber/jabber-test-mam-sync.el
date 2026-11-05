@@ -720,6 +720,14 @@ its start and end filters (inclusive), its RSM <after>, pages of at most
          (rest (if after (cdr (member (assoc after matching) matching)) matching))
          (page (seq-take rest jabber-test-mam-sync--server-max)))
     (push (list start end after) jabber-test-mam-sync--queries)
+    (if jabber-test-mam-sync--answer-delay
+        (run-at-time jabber-test-mam-sync--answer-delay nil
+                     #'jabber-test-mam-sync--timed-answer fsm id queryid rest page)
+      (jabber-test-mam-sync--timed-answer fsm id queryid rest page))))
+
+(defun jabber-test-mam-sync--timed-answer (fsm id queryid rest page)
+  "Send `--timed-archive''s PAGE of REST to the query ID / QUERYID on FSM."
+  (progn
     (dolist (m page)
       (jabberd-send
        fsm `(message ((from . "romeo@montague.net") (to . "romeo@montague.net/Orchard"))
@@ -854,11 +862,42 @@ its cursor never passes a message the database lacks."
             (should (member (car m) stored))))
         (should (member cursor stored))))))
 
+(defvar jabber-test-mam-sync--answer-delay nil
+  "Seconds `--timed-archive' waits before it answers, or nil for at once.")
+
+(ert-deftest jabber-test-mam-sync-no-batch-is-open-while-the-worker-waits ()
+  "Pages answered at once (queued while a poll works, so they run in the
+wait after it) or late (arriving during a wait): no wait starts with a
+batch open, and none opens during one."
+  (dolist (delay '(nil 0.05))
+  (jabber-test-mam-sync--with-timed-server 60
+    (let* ((jabber-test-mam-sync--answer-delay delay)
+           (waiting nil) (violations nil)
+           (wait (lambda (function &optional process seconds millisec just-this-one)
+                   (if (not (and (numberp seconds) (> seconds 0)))
+                       (funcall function process seconds millisec just-this-one)
+                     (when (and jabber-mam--batch (plist-get jabber-mam--batch :open))
+                       (push 'open-at-wait violations))
+                     (setq waiting t)
+                     (unwind-protect (funcall function process seconds millisec just-this-one)
+                       (setq waiting nil)))))
+           (open (lambda (&rest _) (when waiting (push 'opened-in-wait violations))))
+           (summary
+            (progn
+              (advice-add 'accept-process-output :around wait)
+              (advice-add 'jabber-mam--batch-open :before open)
+              (unwind-protect (jabber-test-mam-sync--run-personal)
+                (advice-remove 'jabber-mam--batch-open open)
+                (advice-remove 'accept-process-output wait)))))
+      (should (equal '((nil "chat" success 60 nil)) (plist-get summary :archives)))
+      (should (equal (list delay nil) (list delay violations)))))))
+
 (ert-deftest jabber-test-mam-sync-batch-commits-when-the-session-waits ()
   "A batch is due as soon as the live session announces a write."
   (let* ((dir (make-temp-file "jabber-mam-sync" t))
          (jabber-db-path (expand-file-name "test.sqlite" dir))
          (jabber-db--connection nil)
+         (jabber-mam-batch-age 600)
          (jabber-mam--batch (jabber-mam-make-batch)))
     (unwind-protect
         (progn
