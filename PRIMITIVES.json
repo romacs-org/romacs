@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f90b2f6790086f26b8f2332e6b2eaf9ff90be8690becc5671fe076ccb38437e9",
+  "source_fingerprint": "2c26fee4c8dabd77789a1eda93de3ee932ef64b3bbb4e651fb0dc0cf53d3e549",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1339,
-  "parsed_vm2_only": 1339
+  "parsed_total": 1344,
+  "parsed_vm2_only": 1344
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1212,7 +1212,7 @@
   "default-boundp": {
    "name": "default-boundp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:112"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:113"
   },
   "default-file-modes": {
    "name": "default-file-modes",
@@ -1222,12 +1222,12 @@
   "default-toplevel-value": {
    "name": "default-toplevel-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:200"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:201"
   },
   "default-value": {
    "name": "default-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:118"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:119"
   },
   "defconst": {
    "name": "defconst",
@@ -2170,7 +2170,7 @@
   "functionp": {
    "name": "functionp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:129"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:130"
   },
   "garbage-collect": {
    "name": "garbage-collect",
@@ -2491,7 +2491,7 @@
   "indirect-variable": {
    "name": "indirect-variable",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:235"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:236"
   },
   "init-image-library": {
    "name": "init-image-library",
@@ -4374,6 +4374,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:39"
   },
+  "romacs--init-after-load-ordinal": {
+   "name": "romacs--init-after-load-ordinal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/world.rs:58"
+  },
+  "romacs--init-recording-hold": {
+   "name": "romacs--init-recording-hold",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/world.rs:48"
+  },
   "romacs--inotify-add-watch": {
    "name": "romacs--inotify-add-watch",
    "implementation": "vm2",
@@ -4532,7 +4542,7 @@
   "romacs--local-toplevel-cell": {
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:223"
   },
   "romacs--logo-frame": {
    "name": "romacs--logo-frame",
@@ -4558,6 +4568,11 @@
    "name": "romacs--note-command-point",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/undo.rs:17"
+  },
+  "romacs--note-init-after-load": {
+   "name": "romacs--note-init-after-load",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/world.rs:19"
   },
   "romacs--oclosure-type": {
    "name": "romacs--oclosure-type",
@@ -4833,7 +4848,7 @@
   "romacs--set-local-toplevel-cell": {
    "name": "romacs--set-local-toplevel-cell",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:227"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:228"
   },
   "romacs--signal-description": {
    "name": "romacs--signal-description",
@@ -4954,6 +4969,16 @@
    "name": "romacs--wait-status",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:520"
+  },
+  "romacs--world-layer-deferred-by": {
+   "name": "romacs--world-layer-deferred-by",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/world.rs:40"
+  },
+  "romacs--world-pend": {
+   "name": "romacs--world-pend",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/world.rs:29"
   },
   "romacs--write-auto-save-list": {
    "name": "romacs--write-auto-save-list",
@@ -5231,7 +5256,7 @@
   "set-default": {
    "name": "set-default",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:169"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:170"
   },
   "set-default-file-modes": {
    "name": "set-default-file-modes",
@@ -5241,7 +5266,7 @@
   "set-default-toplevel-value": {
    "name": "set-default-toplevel-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:211"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:212"
   },
   "set-file-acl": {
    "name": "set-file-acl",

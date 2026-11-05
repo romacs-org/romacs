@@ -29,6 +29,7 @@
 pub mod arena;
 pub mod image;
 pub mod layer;
+pub(crate) mod pending;
 pub mod store;
 pub mod sandbox;
 pub mod safe;
@@ -185,9 +186,11 @@ impl Vm {
     }
 
     /// Keep the definition FORM of KIND, defining NAME, for restore: pushed
-    /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT), CUT when
-    /// a refused effect cut the form short and restore evaluates it whole.
-    /// NAME's variable is fenced as tainted.
+    /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT DECLARED),
+    /// CUT when a refused effect cut the form short and restore evaluates
+    /// it whole, DECLARED when a library the init only declared defined it,
+    /// so restore may leave it pending until its first read. NAME's
+    /// variable is fenced as tainted.
     fn record_reseed_form(&mut self, kind: &str, name: &str, form: &crate::Form, cut: bool) {
         let slot = self.slot(name);
         // Defined again by a file loaded again: the first form is kept.
@@ -199,13 +202,14 @@ impl Vm {
             let symbol = self.intern(name);
             let form = self.literal(form)?;
             let cut = if cut { Value::TRUE } else { Value::NIL };
-            let entry = self.list_value(&[kind, symbol, form, cut]);
+            let declared = if host::layer_in_declared() { Value::TRUE } else { Value::NIL };
+            let entry = self.list_value(&[kind, symbol, form, cut, declared]);
             let list = self.slot("romacs--world-reseed-forms");
             let old = self.variable_value(list).unwrap_or(Value::NIL);
             self.slots[list].value = self.alloc_cons(entry, old);
             Ok(())
         })();
-        host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut}));
+        host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut, "declared": host::layer_in_declared()}));
         self.fence_variable(slot, Root::Tainted);
     }
 
@@ -405,7 +409,10 @@ impl Vm {
     /// (`make-local-variable`, already refused) leaves the fence. Any other
     /// variable is F's as it is.
     pub(crate) fn unfenced<T>(&mut self, slot: usize, f: impl FnOnce(&mut Vm) -> T) -> T {
-        let Some(own) = self.fence_cell(slot).map(|cell| cell.redirect) else { return f(self) };
+        let Some(own) = self.fence_cell(slot).map(|cell| cell.redirect) else {
+            self.force_pending(slot);
+            return f(self);
+        };
         let fenced = std::mem::replace(&mut self.variable_redirects[slot], own);
         let result = f(self);
         let before = own;
@@ -446,7 +453,7 @@ impl Vm {
     /// An input refuses writes only. While startup runs, a read of an
     /// observed variable makes it an input.
     pub(crate) fn fence_access(&mut self, slot: usize, access: Access, buffer: Value) {
-        let Some(cell) = self.fence_cell(slot) else { return };
+        let Some(cell) = self.fence_cell(slot) else { return self.force_pending(slot) };
         let read = matches!(access, Access::Read | Access::SavedRead);
         if host::in_startup() {
             if cell.root == Root::Observed {
@@ -472,8 +479,14 @@ impl Vm {
         if !shadowed {
             let within = self.innermost_function();
             host::refuse("fence", json!({"root": cell.root as u8, "access": access_name(access),
-                                         "symbol": self.symbol_names[slot], "in": within}));
+                                         "symbol": self.symbol_names[slot], "in": within, "calls": self.innermost_calls(8)}));
         }
+    }
+
+    /// The functions of the innermost COUNT Lisp calls, innermost first,
+    /// for a refusal's reader to find the code that made it.
+    pub(super) fn innermost_calls(&self, count: usize) -> Vec<String> {
+        self.backtrace.frames.iter().rev().take(count).filter_map(|frame| self.symbol_name_of(frame.function)).collect()
     }
 
     /// The function the innermost Lisp call is in, for a refusal's

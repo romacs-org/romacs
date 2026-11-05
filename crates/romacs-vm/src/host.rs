@@ -219,11 +219,15 @@ struct LayerState {
     /// A re-seed form that starts a timer ran (`reseed_reads`).
     timers: bool,
     rerun: bool,
+    /// The entry loading is a library the init only declared
+    /// (`layer::Entry::declared`): its re-seed forms may wait for their
+    /// variable's first read (`romacs--world-pend`).
+    declared: bool,
 }
 
 /// The definition forms a layer re-seeds: the head's kind and the name it
 /// defines, for `(KIND NAME ...`.
-const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+const DEFINITIONS: [&str; 5] = ["defcustom", "defvar", "defconst", "defvar-local", "defimage"];
 
 fn definition(head: &str) -> Option<(&'static str, String)> {
     let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
@@ -251,8 +255,12 @@ fn layer_form(head: &str) {
 }
 
 /// An effect inside a layer's definition form: not done, and the form
-/// is deferred whole to restore, where it is. True when so taken.
+/// is deferred whole to restore, where it is. True when so taken. A
+/// network connection is never deferred: it refuses the entry.
 fn layer_cut(what: &str) -> bool {
+    if ["connect ", "listen ", "resolve "].iter().any(|network| what.starts_with(network)) {
+        return false;
+    }
     LAYER.with(|l| match l.borrow_mut().as_mut() {
         Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
         _ => false,
@@ -292,6 +300,17 @@ pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
         let cut = std::mem::take(&mut layer.cut);
         layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
     })
+}
+
+/// The layer's next entries are libraries the init only declared (ON),
+/// or ones it loaded.
+pub(crate) fn layer_declared(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.declared = on; });
+}
+
+/// Whether the entry loading is a declared library's.
+pub(crate) fn layer_in_declared() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.declared))
 }
 
 /// Whether the startup function may run again now: after a layer's

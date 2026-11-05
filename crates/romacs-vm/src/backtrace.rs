@@ -37,8 +37,11 @@ pub(super) struct Backtrace {
     /// counter's overflow path, which records the symbol called through.
     /// Symbols are stable slot IDs, so the record needs no tracing.
     observed: Option<(usize, Vec<usize>)>,
+    /// The only symbols an observation records, sorted (`observe_only`);
+    /// empty records every one.
+    only: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, observed });
+romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, observed, only });
 impl Backtrace {
     pub fn enter(
         &mut self,
@@ -76,11 +79,27 @@ impl Backtrace {
     fn observed_call(&mut self, function: Value) -> usize {
         let (counter, calls) = self.observed.as_mut().expect("backtrace token exhausted");
         *counter = counter.checked_add(1).expect("backtrace token exhausted");
-        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)));
+        let only = &self.only;
+        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)).filter(|slot| only.is_empty() || only.binary_search(slot).is_ok()));
         *counter
+    }
+    /// Whether calls are being observed (`observe`).
+    pub fn observing(&self) -> bool {
+        self.observed.is_some()
+    }
+    /// Record the calls through ONLY's symbols, from now until `observed`.
+    pub fn observe_only(&mut self, mut only: Vec<usize>) {
+        only.sort_unstable();
+        self.observe();
+        self.only = only;
+    }
+    /// Whether the observation so far recorded a call.
+    pub fn observed_any(&self) -> bool {
+        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
     }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
+        self.only.clear();
         self.observed = Some((std::mem::replace(&mut self.next_token, usize::MAX), Vec::new()));
     }
     /// The symbols called through since `observe`, in call order, and the
@@ -88,6 +107,7 @@ impl Backtrace {
     pub fn observed(&mut self) -> Vec<usize> {
         let (counter, calls) = self.observed.take().expect("observing calls");
         self.next_token = counter;
+        self.only.clear();
         calls
     }
     pub fn resolve_pending(&mut self, resolved: Value) {

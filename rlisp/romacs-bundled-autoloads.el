@@ -586,6 +586,11 @@ however many times `romacs-video' is loaded.")
 (register-definition-prefixes "romacs-workspace-completion" '("buffer-name-history" "execute-extended-command" "extended-command-history" "read-" "romacs-"))
 
 
+;;; Generated autoloads from romacs-world-layer.el
+
+(register-definition-prefixes "romacs-world-layer" '("romacs-"))
+
+
 ;;; Generated autoloads from warm-restart.el
 
 (autoload 'warm-restart-plan "warm-restart"

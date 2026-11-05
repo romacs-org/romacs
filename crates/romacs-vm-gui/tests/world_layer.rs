@@ -47,7 +47,7 @@ impl Home {
 
     /// A plan whose one entry requires FEATURE from DIR.
     fn plan_requiring(&self, feature: &str, dir: &Path) {
-        let entries = vec![Entry { kind: Kind::Require, name: feature.into(), file: None, noerror: false, load_path: 0 }];
+        let entries = vec![Entry { kind: Kind::Require, name: feature.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() }];
         let plan = Plan::new(&self.init, entries, vec![vec![dir.display().to_string()]]).unwrap();
         plan.write(&self.store).unwrap();
     }
@@ -135,5 +135,85 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
     assert_eq!(plan.entries.len(), 1);
     assert!(plan.current());
     assert!(Plan::read(&home.store, Path::new("/elsewhere/init.el")).is_none());
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
+/// Libraries the init only declared are built into its layer after their
+/// configuration's forms; one whose configuration reads a secret, through
+/// auth-source or straight from the password store, is refused and left
+/// out, and nothing the store holds contains the secret.
+#[test]
+fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
+    const SECRET: &str = "romacs-fixture-secret-7f3a9c";
+    let home = Home::new("declared");
+    let lisp = home.home.join("lisp");
+    for (name, text) in [
+        ("layer-cfg", "(defvar layer-cfg-map (make-sparse-keymap))\n(defvar layer-cfg-hook nil)\n(provide 'layer-cfg)\n"),
+        ("layer-cmd", "(defun layer-cmd () (interactive) 'ran)\n(provide 'layer-cmd)\n"),
+        ("layer-secret", "(defvar layer-secret-value nil)\n(provide 'layer-secret)\n"),
+        ("layer-reader", "(defvar layer-reader-value nil)\n(provide 'layer-reader)\n"),
+        ("layer-closure", "(provide 'layer-closure)\n"),
+        ("layer-withheld", "(provide 'layer-withheld)\n"),
+    ] {
+        std::fs::write(lisp.join(format!("{name}.el")), text).unwrap();
+    }
+    let pass = home.home.join(".password-store/xmpp");
+    std::fs::create_dir_all(&pass).unwrap();
+    let entry = pass.join("me.gpg");
+    std::fs::write(&entry, format!("{SECRET}\n")).unwrap();
+    home.build();
+    let after = |name: &str, form: String| Entry { kind: Kind::After, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: vec![form] };
+    let entries = vec![
+        Entry { kind: Kind::Require, name: "layer-lib".into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() },
+        after("layer-cfg", "(t progn (define-key layer-cfg-map \"a\" 'ignore) (add-hook 'layer-cfg-hook 'ignore))".into()),
+        Entry { kind: Kind::Autoload, name: "layer-cmd".into(), file: None, noerror: true, load_path: 0, declared: true, forms: Vec::new() },
+        after("layer-secret", "(t progn (require 'auth-source-pass) (setq layer-secret-value (auth-source-pass-get 'secret \"xmpp/me\")))".into()),
+        after("layer-reader", format!("(t setq layer-reader-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", entry.display().to_string())),
+        // A `with-eval-after-load' closure, and a form withheld after a secret reader ran.
+        after("layer-closure", "(t . #<interpreted-function>)".into()),
+        after("layer-withheld", "#<after a secret reader>".into()),
+    ];
+    // As an init's `load-path' is: its own directory before the installation's.
+    let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp").canonicalize().unwrap();
+    let mut load_path = vec![lisp.display().to_string()];
+    let mut dirs = vec![gnu_lisp];
+    while let Some(dir) = dirs.pop() {
+        load_path.push(dir.display().to_string());
+        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.is_dir()).collect();
+        subdirs.sort();
+        dirs.extend(subdirs.into_iter().rev());
+    }
+    let plan = Plan::new(&home.init, entries, vec![load_path]).unwrap();
+    plan.write(&home.store).unwrap();
+    let said = home.build();
+    assert!(said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    // The refusals name the reasons; the layer built holds the other three.
+    let manifests: Vec<String> = std::fs::read_dir(&home.store).unwrap().filter_map(|e| {
+        let path = e.unwrap().path();
+        (path.extension().is_some_and(|x| x == "json")).then(|| std::fs::read_to_string(path).unwrap())
+    }).collect();
+    let why: Vec<(String, String)> = manifests.iter().filter_map(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+        .flat_map(|m| m["refusals"].as_array().cloned().unwrap_or_default())
+        .filter(|r| r["kind"] == "init-layer")
+        .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
+    assert!(why.iter().any(|(name, why)| name == "layer-secret" && why == "secret: auth-source-pass-get"), "{why:?}");
+    assert!(why.iter().any(|(name, why)| name == "layer-reader" && why == "secret: epa-file-insert-file-contents"), "{why:?}");
+    for name in ["layer-closure", "layer-withheld"] {
+        assert!(why.iter().any(|(n, why)| n == name && why.contains("a form a layer cannot replay")), "{why:?}");
+    }
+    let built: Vec<serde_json::Value> = manifests.iter().filter_map(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+        .filter(|m| m["events"]["init-layer"].is_object() && m["refusals"].as_array().is_none_or(|r| r.is_empty()))
+        .map(|m| m["events"]["init-layer"]["entries"].clone()).collect();
+    let names: Vec<Vec<&str>> = built.iter().map(|entries| entries.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect()).collect();
+    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd"]), "{names:?}");
+    // No file the store holds contains the secret: images, manifests, plans.
+    let mut files = vec![home.home.join("cache")];
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+        } else if let Ok(bytes) = std::fs::read(&path) {
+            assert!(!bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()), "{} holds the secret", path.display());
+        }
+    }
     let _ = std::fs::remove_dir_all(&home.home);
 }

@@ -1477,6 +1477,36 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; An init layer's pending definitions (world/pending.rs): N variables
+;; made pending, then each read once, which evaluates its definition.
+(scaling-probe world-pending :n 2000
+  :setup (let ((symbols (mapcar #'intern (scaling--names "scaling-pending" n))))
+           (dolist (symbol symbols) (set-default symbol 'stale))
+           (setq romacs--world-pending
+                 (vconcat (mapcar (lambda (symbol) (list 'defvar symbol (list 'defvar symbol 1) nil t)) symbols)))
+           symbols)
+  :body (let ((index 0))
+          (dolist (symbol it)
+            (romacs--world-pend symbol index)
+            (setq index (1+ index)))
+          (dolist (symbol it) (symbol-value symbol))))
+
+;; An init layer build's refusal index (world::layer `Deferred'): N
+;; libraries whose configuration is refused, half by feature and half by
+;; file, then N declared entries each asking which of them its loads
+;; (three features, three nested files) hold, as the builder asks.
+(scaling-probe world-layer-refusals :n 2000
+  :setup (let ((names (scaling--names "scaling-refused" n)) (i 0) deferred loaded)
+           (dolist (name names)
+             (push (list name (and (cl-oddp i) (format "/scaling/lib/%s.el" name))) deferred)
+             (push (list (list (format "%s-a" name) (format "%s-b" name) (if (cl-evenp i) name "none"))
+                         (list (format "/scaling/x/%s-1.el" name) (format "/scaling/x/y/%s-2.el" name)
+                               (format "/scaling/lib/%s.el" name)))
+                   loaded)
+             (setq i (1+ i)))
+           (list deferred loaded))
+  :body (romacs--world-layer-deferred-by (car it) (cadr it)))
+
 (scaling-probe gc-free-lists :n 200000
   ;; Rounds of: garbage in every table, a cons, closure, cell and string
   ;; kept above it, a collection, then as much garbage again.  The sweep leaves free

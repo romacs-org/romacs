@@ -1188,11 +1188,17 @@ fn evaluate(
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
-                if worlds.is_some() { vm.record_init_loads(); }
+                // Its `eval-after-load' calls declare the libraries it
+                // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
+                if worlds.is_some() {
+                    vm.record_init_loads();
+                    if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
+                }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+                if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
                 if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
             }

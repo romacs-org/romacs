@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "89aff90c7342a9fa509c95adcdf27c79f587e2d04e3256d08f7a5d5f21d5491b",
+  "input_hash": "08fb6459811e8a9948ea588af584cc51c8b8bfccf9ff556e5ead2d9a1533a1b6",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 359,
-  "symbols": 1088,
+  "rows": 360,
+  "symbols": 1090,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   358
+   359
   ],
   "\\": [
    277
@@ -162,7 +162,8 @@
   ],
   "autoload": [
    318,
-   348
+   348,
+   349
   ],
   "autoload-do-load": [
    318,
@@ -637,8 +638,8 @@
    164,
    192,
    225,
-   350,
-   354
+   351,
+   355
   ],
   "define-category": [
    307
@@ -826,7 +827,7 @@
    341
   ],
   "downcase_char_code_emacs_compat": [
-   357
+   358
   ],
   "elt": [
    35,
@@ -841,7 +842,7 @@
    200
   ],
   "emacs_downcase_compat": [
-   357
+   358
   ],
   "emoji": [
    29
@@ -898,7 +899,8 @@
   ],
   "eval-after-load": [
    143,
-   330
+   330,
+   349
   ],
   "eval-and-compile": [
    141
@@ -972,17 +974,17 @@
    161,
    162,
    163,
-   350,
    351,
-   354
+   352,
+   355
   ],
   "face-family": [
    159,
-   353
+   354
   ],
   "face-font": [
    158,
-   352
+   353
   ],
   "face-remap-add-relative": [
    253
@@ -992,7 +994,7 @@
    162,
    163,
    253,
-   356
+   357
   ],
   "face-spec-recalc": [
    255
@@ -2580,7 +2582,7 @@
   ],
   "reset": [
    161,
-   349
+   350
   ],
   "resize-mini-windows": [
    339
@@ -2724,6 +2726,9 @@
   ],
   "romacs-gui-install-command": [
    127
+  ],
+  "romacs-init-layer-exclude": [
+   349
   ],
   "romacs-layer-animation romacs-layer-show": [
    267
@@ -3049,10 +3054,10 @@
    157,
    158,
    159,
-   351,
    352,
    353,
-   355
+   354,
+   356
   ],
   "set-file-acl": [
    11
@@ -3162,10 +3167,10 @@
    33
   ],
   "skip-chars-backward": [
-   358
+   359
   ],
   "skip-chars-forward": [
-   358
+   359
   ],
   "sleep-for": [
    220,
@@ -3467,6 +3472,9 @@
   "upcase-region": [
    61,
    77
+  ],
+  "use-package": [
+   349
   ],
   "usize": [
    107
@@ -10048,6 +10056,24 @@
     "autoload",
     "custom-reevaluate-setting",
     "load-path"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-WORLD4",
+   "source": "DIVERGENCES.md",
+   "section": "World snapshots",
+   "observable": false,
+   "planned": false,
+   "mechanism": "The libraries a user's init only declares, in a VM restored from its layer",
+   "gnu": "A library the init configures for later (`use-package`'s :config, :bind, :commands, :hook, :defer and :bind-keymap, `with-eval-after-load`, an `autoload`) loads at its first use: the command's autoload or the `require` loads its files, then its `eval-after-load` forms run, and its load-time definitions evaluate in that process.",
+   "romacs": "The init's plan also lists each library its `eval-after-load` calls configure, with their forms, and each file its `autoload` calls name, at the init's own depth (`world::layer`, `Kind::After`, a declared `Kind::Autoload`); `use-package :if nil` declares nothing, and `romacs-init-layer-exclude` leaves a library out. The layer build registers the forms and loads the library as its first use would, under the fence, so they run there; the init gives the same forms at each start and skips them by position (`romacs--layer-baked-after-loads`). A library whose load or forms start a timer or a process outside a definition, connect to the network, read outside the build's roots, signal, or call a secret reader (`auth-source-search`, `auth-source-pass-get`, `epa-file-insert-file-contents`, `read-passwd`, ...) is refused whole, with any declared entry that loaded it anyway, and keeps GNU's first use. Its re-seed definitions that only compute a value (`defvar`, `defconst`, `defimage`, a `defcustom` without :set or :initialize) wait for their variable's first access (`world/pending.rs`, `romacs--world-pend`), so no start pays a library's probes (smime's `openssl version`). While a new plan's layer builds, a launch restores the last layer usable for the init when the new plan asks for everything it holds.",
+   "why": "**Package-observable** as VM2-WORLD3, and more often, since a declared library's load-time code and its configuration both run before the init: they see the standard values of variables the init sets (`:custom`, `setopt` and `custom-set-variables` still end with the init's values through the option's setter). A configured library is loaded (`featurep`) from the start, where GNU loads it at first use. A pending definition reads the process at the variable's first access instead of at the library's load.",
+   "symbols": [
+    "eval-after-load",
+    "autoload",
+    "use-package",
+    "romacs-init-layer-exclude"
    ],
    "symbols_derived": false
   },
