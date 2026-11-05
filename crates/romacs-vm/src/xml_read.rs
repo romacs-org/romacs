@@ -330,6 +330,16 @@ fn expand(text: &str) -> Step<String> {
     Ok(out)
 }
 
+/// libxml2's entities nested deeper than this end the document.
+const MAX_ENTITY_DEPTH: usize = 19;
+/// Content models nested deeper than this end it too.
+const MAX_MODEL_DEPTH: usize = 256;
+/// parser.c's XML_ENT_FIXED_COST, XML_PARSER_ALLOWED_EXPANSION and
+/// XML_MAX_AMPLIFICATION_DEFAULT.
+const ENTITY_FIXED_COST: u64 = 20;
+const ALLOWED_EXPANSION: u64 = 1_000_000;
+const MAX_AMPLIFICATION: u64 = 5;
+
 /// XML 1.0's Char.
 fn xml_char(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..)
@@ -402,10 +412,15 @@ struct Doc {
     external: bool,
     standalone: bool,
     /// Entities proven well-formed, in content and in attributes, and those
-    /// being checked.
+    /// being checked or expanded, never more than MAX_ENTITY_DEPTH.
     content_ok: HashSet<String>,
     attribute_ok: HashSet<String>,
     checking: Vec<String>,
+    /// xmlParserEntityCheck's account: what each checked entity expands to,
+    /// what the references so far came to, and the document's length.
+    expanded: HashMap<String, u64>,
+    cost: u64,
+    input: u64,
     space: Vec<Space>,
     /// The number of open declarations of each namespace prefix, and the
     /// prefixes each open element declared.
@@ -436,6 +451,13 @@ impl Doc {
         prefix == "xml" || self.prefixes.get(prefix).is_some_and(|&count| count > 0)
     }
 
+    /// Charge one reference to text of SIZE bytes to the amplification
+    /// account; a document that outgrows it ends, as it does in libxml2.
+    fn charge(&mut self, size: u64) -> Step<()> {
+        self.cost = self.cost.saturating_add(size + ENTITY_FIXED_COST);
+        if self.cost > ALLOWED_EXPANSION && self.cost / MAX_AMPLIFICATION > self.input { Err(Stop::Declined) } else { Ok(()) }
+    }
+
     /// An undefined entity is fatal unless something unread may define it.
     fn undefined_is_fatal(&self) -> bool {
         self.standalone || !self.external
@@ -455,7 +477,11 @@ pub(crate) fn parse_document(text: &str) -> Option<Vec<XmlNode>> {
     if !text.chars().all(xml_char) {
         return None;
     }
-    let mut reader = Reader { text, bytes: text.as_bytes(), at: 0, depth: 0, doc: Some(Doc::default()) };
+    // XML 1.0 2.11: line ends are LF before anything is parsed.
+    let normalized = text.contains('\r').then(|| text.replace("\r\n", "\n").replace('\r', "\n"));
+    let text = normalized.as_deref().unwrap_or(text);
+    let doc = Doc { input: text.len() as u64, ..Doc::default() };
+    let mut reader = Reader { text, bytes: text.as_bytes(), at: 0, depth: 0, doc: Some(doc) };
     reader.document().ok()
 }
 
@@ -545,7 +571,7 @@ impl Reader<'_> {
         self.skip_space();
         self.expect("version")?;
         let version = self.declared_value(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))?;
-        if !version.starts_with("1.") {
+        if !version.strip_prefix("1.").is_some_and(|minor| minor.bytes().all(|b| b.is_ascii_digit())) {
             return Err(Stop::Declined);
         }
         let mut spaced = self.at;
@@ -626,7 +652,11 @@ impl Reader<'_> {
         if self.starts("PUBLIC") {
             self.at += "PUBLIC".len();
             self.required_space()?;
-            self.literal()?;
+            let public = self.literal()?;
+            let pubid = |b: u8| b.is_ascii_alphanumeric() || b" \n-'()+,./:=?;!*#@$_%".contains(&b);
+            if !public.bytes().all(pubid) {
+                return Err(Stop::Declined);
+            }
             let before = self.at;
             self.skip_space();
             if notation && self.starts(">") {
@@ -675,7 +705,14 @@ impl Reader<'_> {
                 let name = self.name()?;
                 self.expect(";")?;
                 match self.doc().parameters.get(&name).cloned() {
-                    Some(Some(value)) => self.nested(&value, |sub| sub.subset(false))?,
+                    Some(Some(value)) => {
+                        let open = format!("%{name}");
+                        self.open_entity(&open)?;
+                        self.doc().charge(value.len() as u64)?;
+                        let expanded = self.nested(&value, |sub| sub.subset(false));
+                        self.doc().checking.pop();
+                        expanded?;
+                    }
                     _ => self.doc().external = true,
                 }
             } else if self.starts("<!--") {
@@ -791,7 +828,7 @@ impl Reader<'_> {
             self.at += "ANY".len();
             true
         } else {
-            self.content_model()?
+            self.content_model(1)?
         };
         self.skip_space();
         self.expect(">")?;
@@ -799,18 +836,25 @@ impl Reader<'_> {
         Ok(())
     }
 
-    /// A parenthesized content model with its occurrence mark: whether it
-    /// is mixed, that is, opens with #PCDATA.
-    fn content_model(&mut self) -> Step<bool> {
+    /// A parenthesized content model at DEPTH with its occurrence mark:
+    /// whether it is mixed, that is, opens with #PCDATA, which only the
+    /// whole model may.
+    fn content_model(&mut self, depth: usize) -> Step<bool> {
+        if depth > MAX_MODEL_DEPTH {
+            return Err(Stop::Declined);
+        }
         self.expect("(")?;
         self.skip_space();
         let mixed = self.starts("#PCDATA");
         if mixed {
+            if depth > 1 {
+                return Err(Stop::Declined);
+            }
             self.at += "#PCDATA".len();
         } else {
-            self.content_particle()?;
+            self.content_particle(depth)?;
         }
-        let mut separator = None;
+        let (mut separator, mut names) = (None, false);
         loop {
             self.skip_space();
             let next = self.peek()?;
@@ -822,24 +866,86 @@ impl Reader<'_> {
             }
             self.at += 1;
             self.skip_space();
-            if mixed { self.name().map(|_| ())? } else { self.content_particle()? }
+            if mixed {
+                self.name()?;
+                names = true;
+            } else {
+                self.content_particle(depth)?;
+            }
         }
         self.at += 1;
-        if self.bytes.get(self.at).is_some_and(|b| matches!(b, b'?' | b'*' | b'+')) {
+        let mark = self.bytes.get(self.at).copied();
+        if mixed {
+            if mark == Some(b'*') {
+                self.at += 1;
+            } else if names {
+                return Err(Stop::Declined);
+            }
+        } else if matches!(mark, Some(b'?' | b'*' | b'+')) {
             self.at += 1;
         }
         Ok(mixed)
     }
 
-    fn content_particle(&mut self) -> Step<()> {
+    fn content_particle(&mut self, depth: usize) -> Step<()> {
         if self.starts("(") {
-            return self.content_model().map(|_| ());
+            return self.content_model(depth + 1).map(|_| ());
         }
         self.name()?;
         if self.bytes.get(self.at).is_some_and(|b| matches!(b, b'?' | b'*' | b'+')) {
             self.at += 1;
         }
         Ok(())
+    }
+
+    /// An enumeration's parenthesized alternatives: Names under NOTATION,
+    /// else Nmtokens.
+    fn enumeration(&mut self, names: bool) -> Step<()> {
+        self.expect("(")?;
+        loop {
+            self.skip_space();
+            if names {
+                self.name()?;
+            } else {
+                let rest = &self.text[self.at..];
+                let len = rest.find(|c| !xml_name_char(c)).unwrap_or(rest.len());
+                if len == 0 {
+                    return Err(Stop::Declined);
+                }
+                self.at += len;
+            }
+            self.skip_space();
+            match self.peek()? {
+                b'|' => self.at += 1,
+                b')' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                _ => return Err(Stop::Declined),
+            }
+        }
+    }
+
+    /// An attribute default: the references in it must stand, as a value's.
+    fn default_value(&mut self) -> Step<()> {
+        let value = self.literal()?;
+        self.nested(&value, |sub| {
+            while !sub.at_end() {
+                match sub.peek()? {
+                    b'<' => return Err(Stop::Declined),
+                    b'&' => {
+                        if let Reference::Named(name) = sub.reference()? {
+                            sub.attribute_entity(&name)?;
+                        }
+                    }
+                    _ => {
+                        let rest = &sub.text[sub.at..];
+                        sub.at += rest.find(['<', '&']).unwrap_or(rest.len());
+                    }
+                }
+            }
+            Ok(())
+        })
     }
 
     fn attlist_declaration(&mut self) -> Step<()> {
@@ -862,7 +968,7 @@ impl Reader<'_> {
                         self.required_space()?;
                     }
                     if kind.is_empty() || kind == "NOTATION" {
-                        self.at += self.text[self.at..].find(')').ok_or(Stop::Declined)? + 1;
+                        self.enumeration(!kind.is_empty())?;
                     }
                     self.doc().tokenized.insert(format!("{element}\0{attribute}"));
                 }
@@ -878,7 +984,10 @@ impl Reader<'_> {
                     self.at += "#FIXED".len();
                     self.required_space()?;
                 }
-                self.literal()?;
+                self.default_value()?;
+            }
+            if !self.starts(">") {
+                self.required_space()?;
             }
         }
     }
@@ -907,11 +1016,32 @@ impl Reader<'_> {
         Ok(Reference::Named(name))
     }
 
+    /// Enter entity NAME, one level deeper; it must not be open already.
+    fn open_entity(&mut self, name: &str) -> Step<()> {
+        let doc = self.doc();
+        if doc.checking.len() >= MAX_ENTITY_DEPTH || doc.checking.iter().any(|open| open == name) {
+            return Err(Stop::Declined);
+        }
+        doc.checking.push(name.to_string());
+        Ok(())
+    }
+
+    /// Charge a reference to the checked entity NAME.
+    fn charge_entity(&mut self, name: &str) -> Step<()> {
+        let doc = self.doc();
+        let size = doc.expanded.get(name).copied().unwrap_or(0);
+        doc.charge(size)
+    }
+
     /// Whether NAME may be referred to from an attribute value: it is an
     /// internal entity that expands to no `<' (`Ok(true)`), or undefined
     /// where that is no error (`Ok(false)`).
     fn attribute_entity(&mut self, name: &str) -> Step<bool> {
-        if predefined(name).is_some() || self.doc().attribute_ok.contains(name) {
+        if predefined(name).is_some() {
+            return Ok(true);
+        }
+        if self.doc().attribute_ok.contains(name) {
+            self.charge_entity(name)?;
             return Ok(true);
         }
         let value = match self.doc().entities.get(name).cloned() {
@@ -920,10 +1050,8 @@ impl Reader<'_> {
             None if self.doc().undefined_is_fatal() => return Err(Stop::Declined),
             None => return Ok(false),
         };
-        if self.doc().checking.iter().any(|open| open == name) {
-            return Err(Stop::Declined);
-        }
-        self.doc().checking.push(name.to_string());
+        self.open_entity(name)?;
+        let before = self.doc().cost;
         let checked = self.nested(&value, |sub| {
             while !sub.at_end() {
                 match sub.peek()? {
@@ -943,7 +1071,11 @@ impl Reader<'_> {
         });
         self.doc().checking.pop();
         checked?;
-        self.doc().attribute_ok.insert(name.to_string());
+        let doc = self.doc();
+        let size = (doc.cost - before).saturating_add(value.len() as u64);
+        doc.expanded.insert(name.to_string(), size);
+        doc.attribute_ok.insert(name.to_string());
+        self.doc().charge(value.len() as u64)?;
         Ok(true)
     }
 
@@ -975,10 +1107,7 @@ impl Reader<'_> {
                         }
                     }
                 },
-                b'\r' | b'\n' | b'\t' => {
-                    if self.bytes[self.at] == b'\r' && self.bytes.get(self.at + 1) == Some(&b'\n') {
-                        self.at += 1;
-                    }
+                b'\n' | b'\t' => {
                     self.at += 1;
                     if !ended {
                         value.push(' ');
@@ -986,7 +1115,7 @@ impl Reader<'_> {
                 }
                 _ => {
                     let rest = &self.text[self.at..end];
-                    let len = rest.find(['<', '&', '\r', '\n', '\t']).unwrap_or(rest.len());
+                    let len = rest.find(['<', '&', '\n', '\t']).unwrap_or(rest.len());
                     if !ended {
                         value.push_str(&rest[..len]);
                     }
@@ -1009,7 +1138,8 @@ impl Reader<'_> {
         let declaration = |attr: &str| attr == "xmlns" || attr.starts_with("xmlns:");
         for (attr, value) in &attrs {
             if let Some(prefix) = attr.strip_prefix("xmlns:") {
-                if !value.is_empty() && !prefix.contains(':') && prefix != "xml" && prefix != "xmlns" {
+                let reserved = matches!(value.as_str(), "http://www.w3.org/2000/xmlns/" | "http://www.w3.org/XML/1998/namespace");
+                if !value.is_empty() && !reserved && !prefix.contains(':') && prefix != "xml" && prefix != "xmlns" {
                     *doc.prefixes.entry(prefix.to_string()).or_insert(0) += 1;
                     if let Some(open) = doc.declared.last_mut() {
                         open.push(prefix.to_string());
@@ -1082,7 +1212,7 @@ impl Reader<'_> {
     /// node stays a reference, as without NOENT.
     fn content_entity(&mut self, name: &str) -> Step<()> {
         if self.doc().content_ok.contains(name) {
-            return Ok(());
+            return self.charge_entity(name);
         }
         let value = match self.doc().entities.get(name).cloned() {
             Some(Entity::Internal(value)) => value,
@@ -1091,15 +1221,16 @@ impl Reader<'_> {
             None if self.doc().undefined_is_fatal() => return Err(Stop::Declined),
             None => return Ok(()),
         };
-        if self.doc().checking.iter().any(|open| open == name) {
-            return Err(Stop::Declined);
-        }
-        self.doc().checking.push(name.to_string());
+        self.open_entity(name)?;
+        let before = self.doc().cost;
         let checked = self.nested(&value, |sub| sub.content(None).map(|_| ()));
         self.doc().checking.pop();
         checked?;
-        self.doc().content_ok.insert(name.to_string());
-        Ok(())
+        let doc = self.doc();
+        let size = (doc.cost - before).saturating_add(value.len() as u64);
+        doc.expanded.insert(name.to_string(), size);
+        doc.content_ok.insert(name.to_string());
+        self.doc().charge(value.len() as u64)
     }
 
     /// The run of character data at point, in the element named ELEMENT
@@ -1115,11 +1246,7 @@ impl Reader<'_> {
         self.at += len;
         let dropped = element.is_some_and(|name| self.are_blanks(raw, name, children));
         if !dropped {
-            if raw.contains('\r') {
-                push_text(children, &raw.replace("\r\n", "\n").replace('\r', "\n"));
-            } else {
-                push_text(children, raw);
-            }
+            push_text(children, raw);
             if let Some(top) = self.doc().space.last_mut().filter(|top| **top == Space::Unset) {
                 *top = Space::Text;
             }

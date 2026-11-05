@@ -1647,6 +1647,38 @@ thousandth a stack mark."
                  "]><a>" (mapconcat (lambda (i) (format "&e%d;" i)) (number-sequence 1 n) "") "</a>")
   :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
 
+;; The collections of a document's internal subset, and its prefixes: N
+;; parameter entities each expanded, N element and N attribute declarations,
+;; N attribute entities each used twice, and N prefixes bound and used on
+;; one element.
+(scaling-probe libxml-xml-parameter-entities :n 1000
+  :setup (concat "<!DOCTYPE a ["
+                 (mapconcat (lambda (i) (format "<!ENTITY %% p%d '<!-- c -->'>%%p%d;" i i)) (number-sequence 1 n) "")
+                 "]><a/>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
+(scaling-probe libxml-xml-declarations :n 2000
+  :setup (concat "<!DOCTYPE a ["
+                 (mapconcat (lambda (i) (format "<!ELEMENT e%d (b)><!ATTLIST e%d c NMTOKEN #IMPLIED>" i i)) (number-sequence 1 n) "")
+                 "]><a/>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
+(scaling-probe libxml-xml-attribute-entities :n 1000
+  :setup (concat "<!DOCTYPE a ["
+                 (mapconcat (lambda (i) (format "<!ENTITY e%d 'v'>" i)) (number-sequence 1 n) "")
+                 "]><a "
+                 (mapconcat (lambda (i) (format "b%d='&e%d;' c%d='&e%d;'" i i i i)) (number-sequence 1 n) " ")
+                 "/>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
+(scaling-probe libxml-xml-prefixes :n 2000
+  :setup (concat "<a "
+                 (mapconcat (lambda (i) (format "xmlns:p%d='u%d'" i i)) (number-sequence 1 n) " ")
+                 ">"
+                 (mapconcat (lambda (i) (format "<p%d:b/>" i)) (number-sequence 1 n) "")
+                 "</a>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
 ;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
 
 ;; N distinct images, each measured, then all N again from the cache: a

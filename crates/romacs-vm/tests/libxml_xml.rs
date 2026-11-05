@@ -7,7 +7,8 @@
 //!
 //! Known difference: make_dom interns a non-ASCII name undecoded, so GNU's
 //! symbol has a unibyte name, and Romacs's is the name; those cases only
-//! compare whether the document parses.
+//! compare whether the document parses. An entity literal holding CR LF
+//! keeps the CR in GNU; line ends here are LF before parsing.
 use romacs_vm::Vm;
 use std::path::Path;
 
@@ -221,6 +222,83 @@ const CASES: &[&str] = &[
     "<a.b-c_d1/>",
     "<-a/>",
     "<.a/>",
+    "<?xml version='1.foo'?><a/>",
+    "<?xml version='1.'?><a/>",
+    "<?xml version='1.0.1'?><a/>",
+    "<?xml version='1.5'?><a/>",
+    "<?xml version='1.10'?><a/>",
+    "<?xml version='1'?><a/>",
+    "<?xml version='1.0a'?><a/>",
+    "<a xmlns:p='http://www.w3.org/2000/xmlns/'><p:b/></a>",
+    "<a xmlns:p='http://www.w3.org/XML/1998/namespace'><p:b/></a>",
+    "<a xmlns='http://www.w3.org/2000/xmlns/'><b/></a>",
+    "<a xmlns:xml='http://www.w3.org/XML/1998/namespace'><xml:b/></a>",
+    "<a xmlns:xml='u'><xml:b/></a>",
+    "<a xmlns:xmlns='http://www.w3.org/2000/xmlns/'/>",
+    "<!DOCTYPE a [<!ATTLIST a b () #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b (x) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b (x|) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b (x||y) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b (1x|y.z) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b ( x | y ) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b (x y) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b NOTATION () #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b NOTATION (1x) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b NOTATION (x|y) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b NOTATION(x) #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA \"<\">]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA '&lt;'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA '&nope;'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA '&'>]><a/>",
+    "<!DOCTYPE a [<!ENTITY e 'v'><!ATTLIST a b CDATA '&e;'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA '&e;'><!ENTITY e 'v'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA #FIXED '<'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA #FIXED'v'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA'v'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b ID 'v'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b(x)'x'>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA #IMPLIED c CDATA #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a b CDATA #IMPLIEDc CDATA #IMPLIED>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a>]><a/>",
+    "<!DOCTYPE a [<!ATTLIST a >]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA|b)>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA|b)*>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA)>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA)*>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA)+>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA)?>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA|b)+>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (#PCDATA,b)*>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (b|#PCDATA)*>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (b,(#PCDATA))>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a ()>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (b?)*>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a (b)(c)>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a b>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a EMPTYx>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a ANY x>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a(b)>]><a/>",
+    "<!DOCTYPE a [<!ELEMENT a EMPTY><!ELEMENT a ANY>]><a> <b/> </a>",
+    "<!DOCTYPE a PUBLIC 'p<' 'x'><a/>",
+    "<!DOCTYPE a PUBLIC \"p'q\" 'x'><a/>",
+    "<!DOCTYPE a PUBLIC 'pλ' 'x'><a/>",
+    "<!DOCTYPE a [<!NOTATION n PUBLIC 'p{'>]><a/>",
+    "<!DOCTYPE a SYSTEM'x'><a/>",
+    "<!DOCTYPE a PUBLIC'p' 'x'><a/>",
+    "<!DOCTYPE a PUBLIC 'p''x'><a/>",
+    "<!DOCTYPE a[]><a/>",
+    "<!DOCTYPE a []><a/>",
+    "<!DOCTYPEa><a/>",
+    "<!DOCTYPE><a/>",
+    "<!DOCTYPE a [] x><a/>",
+    "<!DOCTYPE a SYSTEM 'x' [<!ENTITY e 'v'>]><a>&e;</a>",
+    "<a><![CDATA[x\r\ny\rz]]></a>",
+    "<a><!-- x\r\ny\rz --></a>",
+    "<a b='x\ry'/>",
+    "<?p x\ry?><a/>",
+    "<a>x\r\n</a>",
+    "<a>\r\n\r\n</a>",
+    "<a>&#13;\n</a>",
     "<!DOCTYPE a [<!ENTITY e '%x;'>]><a b='&e;'/>",
     "<!DOCTYPE a [<!ENTITY e '%x;'>]><a>&e;</a>",
     "<!DOCTYPE a [<!ENTITY % x 'v'><!ENTITY e '%x;'>]><a b='&e;'/>",
@@ -354,6 +432,15 @@ const FORMS: &str = r#"
 (with-temp-buffer (insert "<a>" (decode-coding-string "\351" 'utf-8) "</a>") (libxml-parse-xml-region))
 (libxml-available-p)
 (mapcar (lambda (n) (with-temp-buffer (dotimes (_ n) (insert "<a>")) (dotimes (_ n) (insert "</a>")) (null (libxml-parse-xml-region)))) '(255 256 257 300))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY % p0 '<!-- x -->'>" (mapconcat (lambda (i) (format "<!ENTITY %% p%d '&#37;p%d;'>" i (1- i))) (number-sequence 1 n) "") (format "%%p%d;" n) "]><a/>") (libxml-parse-xml-region)))) '(18 19 500))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e0 'v'>" (mapconcat (lambda (i) (format "<!ENTITY e%d '&e%d;'>" i (1- i))) (number-sequence 1 n) "") (format "]><a>&e%d;</a>" n)) (libxml-parse-xml-region)))) '(18 19 10000))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e0 'v'>" (mapconcat (lambda (i) (format "<!ENTITY e%d '&e%d;'>" i (1- i))) (number-sequence 1 n) "") (format "]><a b='&e%d;'/>" n)) (libxml-parse-xml-region)))) '(18 19 10000))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ELEMENT a " (make-string n ?\() "b" (make-string n ?\)) ">]><a/>") (libxml-parse-xml-region)))) '(256 257 100000))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY % p0 '<!-- xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx -->'>" (mapconcat (lambda (i) (format "<!ENTITY %% p%d '&#37;p%d;&#37;p%d;'>" i (1- i) (1- i))) (number-sequence 1 n) "") (format "%%p%d;" n) "]><a/>") (libxml-parse-xml-region)))) '(12 13 14 18 40))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e0 '" (make-string 50 ?x) "'>" (mapconcat (lambda (i) (format "<!ENTITY e%d '&e%d;&e%d;'>" i (1- i) (1- i))) (number-sequence 1 n) "") (format "]><a>&e%d;</a>" n)) (libxml-parse-xml-region)))) '(12 14 18 40))
+(mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e0 '" (make-string 50 ?x) "'>" (mapconcat (lambda (i) (format "<!ENTITY e%d '&e%d;&e%d;'>" i (1- i) (1- i))) (number-sequence 1 n) "") (format "]><a b='&e%d;'/>" n)) (libxml-parse-xml-region)))) '(12 14 18 40))
+(mapcar (lambda (k) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e '" (make-string 1000 ?x) "'>]><a>" (mapconcat (lambda (_) "&e;") (number-sequence 1 k) "") "</a>") (libxml-parse-xml-region)))) '(100 900 1000 5000))
+(mapcar (lambda (k) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e '" (make-string 1000 ?x) "'>]><a " (mapconcat (lambda (i) (format "b%d='&e;'" i)) (number-sequence 1 k) " ") "/>") (libxml-parse-xml-region)))) '(100 900 1000 5000))
 (mapcar (lambda (s) (with-temp-buffer (insert s) (null (libxml-parse-xml-region)))) '("<é/>" "<λ β='γ'/>" "<aá/>" "<a·b/>" "<⁰/>" "<a×/>"))
 "#;
 
