@@ -13,6 +13,7 @@ type Result<T> = std::result::Result<T, Fault>;
 
 /// Vprocess_alist: ((NAME . PROCESS) ...), newest first.
 const ALIST: &str = "#:vm2-process-alist";
+const MAIN_THREAD: &str = "#:vm2-main-thread";
 
 fn fixnum(n: i64) -> Value {
     Value::integer(n).expect("process integer is a fixnum")
@@ -132,12 +133,25 @@ impl Leaf<'_> {
         process.set(Slot::Mark, mark);
         process.set(Slot::Filter, self.sym("internal-default-process-filter"));
         process.set(Slot::Sentinel, self.sym("internal-default-process-sentinel"));
+        process.set(Slot::Thread, self.main_thread());
         let value = self.vm.allocate_object(data::Object::Process(Box::new(process)));
         let pair = self.cons(unique, value);
         let alist = self.hidden_value(ALIST);
         let alist = self.cons(pair, alist);
         self.set_hidden_value(ALIST, alist);
         Ok(value)
+    }
+    /// The main thread's object, made on first need: make_process stores
+    /// Fcurrent_thread in every process, also in a threadless build.
+    pub(crate) fn main_thread(&mut self) -> Value {
+        match self.hidden_value(MAIN_THREAD) {
+            Value::NIL => {
+                let thread = self.vm.allocate_object(data::Object::Thread);
+                self.set_hidden_value(MAIN_THREAD, thread);
+                thread
+            }
+            thread => thread,
+        }
     }
     /// remove_process: drop PROC from Vprocess_alist and deactivate it.
     pub(crate) fn remove_process(&mut self, proc: Value) -> Out {

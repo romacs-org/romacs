@@ -183,6 +183,7 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        Thread,
         TreesitParser,
         TreesitNode,
         TreesitQuery,
@@ -1521,6 +1522,7 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Thread) => Kind::Thread,
                     Some(data::Object::Treesit(t)) => match &**t {
                         crate::treesit::Object::Parser(_) => Kind::TreesitParser,
                         crate::treesit::Object::Node(_) => Kind::TreesitNode,
