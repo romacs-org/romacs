@@ -131,7 +131,11 @@ on.  A VM without the process prelude runs no timers."
                  ;; read_char's special events: file notification events
                  ;; run here, never input; an error ends the read.
                  (notified (and (fboundp 'romacs--file-notify-dispatch) (romacs--file-notify-dispatch)))
-                 (dispatched (or (and timers (romacs--process-idle)) (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)) background notified))
+                 ;; Process output and worker messages both, every round:
+                 ;; a busy connection must not starve the workers.
+                 (processes (and timers (romacs--process-idle)))
+                 (isolates (and (fboundp (quote romacs--isolate-idle)) (romacs--isolate-idle)))
+                 (dispatched (or processes isolates background notified))
                  left)
             (and timers (romacs--timer-check))
             (when (and save-at (<= save-at (float-time)) (not (romacs--unread-p)) (not (input-pending-p)))
