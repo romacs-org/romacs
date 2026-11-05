@@ -20,7 +20,8 @@ usage: notmuch_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
 
 Workflows: `controls' (a search whose headers carry control characters,
 no-break spaces and emoji: M->, M-<, scrolling and recentering),
-`read' (hello, a saved search, motion, tagging, archiving,
+`image' (a thread with an image part shown inline, and motion through
+it), `read' (hello, a saved search, motion, tagging, archiving,
 notmuch-show with HTML parts, notmuch-tree), `compose-send' (a new mail
 with address completion, an attachment and a saved draft, sent over
 STARTTLS) and `reply-send' (a reply from the identity it was addressed to;
@@ -259,8 +260,23 @@ ISEARCH_PLAIN = [
     key('isearch-exit', [K('Return')], f'(not {ISEARCHING})', settle=1),
 ]
 
+# A thread whose message has an image part: notmuch fetches it into a
+# unibyte buffer and mm shows it inline; motion through the thread keeps
+# point and the window start as GNU's.
+IMAGE = [
+    key('hello', [C('x'), T('m')], HELLO),
+    key('search-prompt', [T('s')], MINIBUFFER),
+    typed('search', 'mimetype:image/png', [K('Return')], SEARCH, settle=1),
+    key('show', [K('Return')], SHOW, settle=1),
+    *[key(f'line-{i}', [C('n')], SHOW) for i in range(12)],
+    key('next-message', [T('n')], SHOW),
+    key('end', [M('>')], SHOW),
+    key('beginning', [M('<')], SHOW),
+    key('quit-show', [T('q')], SEARCH),
+]
+
 WORKFLOWS = {'read': READ, 'compose-send': COMPOSE_SEND, 'reply-send': REPLY_SEND, 'controls': CONTROLS,
-             'isearch': ISEARCH, 'isearch-plain': ISEARCH_PLAIN}
+             'isearch': ISEARCH, 'isearch-plain': ISEARCH_PLAIN, 'image': IMAGE}
 
 
 def normalised_mail(engine):

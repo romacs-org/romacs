@@ -522,8 +522,8 @@ impl Vm {
         if from == to && inserted == 0 {
             return Ok(None);
         }
-        // A unibyte buffer takes the text as bytes, refused before undo
-        // records anything.
+        // A unibyte buffer takes the text as bytes (`unibyte_text'),
+        // converted before undo records anything.
         let bytes = match self.objects[index] {
             Object::ByteBuffer(_) => Some(self.unibyte_text(text).map_err(Fault::Error)?),
             _ => None,

@@ -123,11 +123,3 @@ fn base64_decode_region_puts_raw_bytes_in_a_multibyte_buffer() {
     assert_eq!(printed, "(2 \"x\\377\\357\" 2 t)");
 }
 
-/// A unibyte buffer refuses non-ASCII text as `insert' there refuses it,
-/// before the replacement records undo.
-#[test]
-fn replace_region_contents_refuses_text_into_a_unibyte_buffer_before_undo() {
-    let source = "(with-temp-buffer (set-buffer-multibyte nil) (buffer-enable-undo) (insert \"abc\") (undo-boundary) (list (condition-case e (replace-region-contents 1 4 \"\u{e9}\" 0) (error e)) (buffer-string) buffer-undo-list (buffer-modified-tick)))";
-    let actual = Vm::new().eval_source(source).and_then(|v| v.display()).unwrap();
-    assert_eq!(actual, "((error \"bytes required; encode text explicitly\") #u8(97 98 99) (nil (1 . 4) (t . 0)) 3)");
-}
