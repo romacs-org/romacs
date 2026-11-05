@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "0278259337e76f68ca42d21bda89a875f906056aff60a02eb811ef21c123c61e",
+  "source_fingerprint": "a735e14fee4ab7e07e9a84c8abbb2f4000e9976fd2c4e6152d15cb2013aa8210",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1352,
-  "parsed_vm2_only": 1352
+  "parsed_total": 1354,
+  "parsed_vm2_only": 1354
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2613,7 +2613,7 @@
   "internal-default-signal-process": {
    "name": "internal-default-signal-process",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:284"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:297"
   },
   "internal-event-symbol-parse-modifiers": {
    "name": "internal-event-symbol-parse-modifiers",
@@ -3456,7 +3456,7 @@
   "network-lookup-address-info": {
    "name": "network-lookup-address-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:553"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:566"
   },
   "next-overlay-change": {
    "name": "next-overlay-change",
@@ -3814,7 +3814,7 @@
   "process-coding-system": {
    "name": "process-coding-system",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:266"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:279"
   },
   "process-command": {
    "name": "process-command",
@@ -3880,7 +3880,7 @@
   "process-running-child-p": {
    "name": "process-running-child-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:273"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:286"
   },
   "process-sentinel": {
    "name": "process-sentinel",
@@ -3892,6 +3892,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:79"
   },
+  "process-thread": {
+   "name": "process-thread",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:267"
+  },
   "process-tty-name": {
    "name": "process-tty-name",
    "implementation": "vm2",
@@ -3900,7 +3905,7 @@
   "process-type": {
    "name": "process-type",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:260"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:273"
   },
   "processp": {
    "name": "processp",
@@ -4272,12 +4277,12 @@
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:509"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:522"
   },
   "romacs--check-directory": {
    "name": "romacs--check-directory",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:474"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:487"
   },
   "romacs--clipboard-set": {
    "name": "romacs--clipboard-set",
@@ -4332,7 +4337,7 @@
   "romacs--decode-output": {
    "name": "romacs--decode-output",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:486"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:499"
   },
   "romacs--decompress-change": {
    "name": "romacs--decompress-change",
@@ -4382,7 +4387,7 @@
   "romacs--get-process": {
    "name": "romacs--get-process",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:320"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:333"
   },
   "romacs--gnutls-verify": {
    "name": "romacs--gnutls-verify",
@@ -4627,137 +4632,137 @@
   "romacs--proc-accept": {
    "name": "romacs--proc-accept",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:391"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:404"
   },
   "romacs--proc-activity": {
    "name": "romacs--proc-activity",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:413"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:426"
   },
   "romacs--proc-attach": {
    "name": "romacs--proc-attach",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:394"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:407"
   },
   "romacs--proc-changed": {
    "name": "romacs--proc-changed",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:434"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:447"
   },
   "romacs--proc-deactivate": {
    "name": "romacs--proc-deactivate",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:400"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:413"
   },
   "romacs--proc-get": {
    "name": "romacs--proc-get",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:326"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:339"
   },
   "romacs--proc-input-pending": {
    "name": "romacs--proc-input-pending",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:416"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:429"
   },
   "romacs--proc-kill-for-delete": {
    "name": "romacs--proc-kill-for-delete",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:466"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:479"
   },
   "romacs--proc-make": {
    "name": "romacs--proc-make",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:323"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:336"
   },
   "romacs--proc-network": {
    "name": "romacs--proc-network",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:376"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:389"
   },
   "romacs--proc-pipe": {
    "name": "romacs--proc-pipe",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:371"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:384"
   },
   "romacs--proc-pty": {
    "name": "romacs--proc-pty",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:368"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:381"
   },
   "romacs--proc-read": {
    "name": "romacs--proc-read",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:419"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:432"
   },
   "romacs--proc-read-done": {
    "name": "romacs--proc-read-done",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:422"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:435"
   },
   "romacs--proc-reap": {
    "name": "romacs--proc-reap",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:449"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:462"
   },
   "romacs--proc-remove": {
    "name": "romacs--proc-remove",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:397"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:410"
   },
   "romacs--proc-select": {
    "name": "romacs--proc-select",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:407"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:420"
   },
   "romacs--proc-send": {
    "name": "romacs--proc-send",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:452"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:465"
   },
   "romacs--proc-send-eof": {
    "name": "romacs--proc-send-eof",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:458"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:471"
   },
   "romacs--proc-set": {
    "name": "romacs--proc-set",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:336"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:349"
   },
   "romacs--proc-signal": {
    "name": "romacs--proc-signal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:461"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:474"
   },
   "romacs--proc-spawn": {
    "name": "romacs--proc-spawn",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:360"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:373"
   },
   "romacs--proc-status-finish": {
    "name": "romacs--proc-status-finish",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:443"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:456"
   },
   "romacs--proc-status-message": {
    "name": "romacs--proc-status-message",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:446"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:459"
   },
   "romacs--proc-tick": {
    "name": "romacs--proc-tick",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:440"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:453"
   },
   "romacs--proc-ticks-acknowledge": {
    "name": "romacs--proc-ticks-acknowledge",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:431"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:444"
   },
   "romacs--proc-ticks-pending": {
    "name": "romacs--proc-ticks-pending",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:428"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:441"
   },
   "romacs--process-forget": {
    "name": "romacs--process-forget",
@@ -4883,7 +4888,7 @@
   "romacs--signal-description": {
    "name": "romacs--signal-description",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:492"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:505"
   },
   "romacs--sort-by-history": {
    "name": "romacs--sort-by-history",
@@ -4998,7 +5003,7 @@
   "romacs--wait-status": {
    "name": "romacs--wait-status",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:520"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:533"
   },
   "romacs--world-layer-deferred-by": {
    "name": "romacs--world-layer-deferred-by",
@@ -5404,6 +5409,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/process.rs:194"
   },
+  "set-process-thread": {
+   "name": "set-process-thread",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:260"
+  },
   "set-process-window-size": {
    "name": "set-process-window-size",
    "implementation": "vm2",
@@ -5577,7 +5587,7 @@
   "signal-names": {
    "name": "signal-names",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:531"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:544"
   },
   "sin": {
    "name": "sin",
@@ -6634,7 +6644,7 @@
   "waiting-for-user-input-p": {
    "name": "waiting-for-user-input-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/process.rs:281"
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:294"
   },
   "while": {
    "name": "while",

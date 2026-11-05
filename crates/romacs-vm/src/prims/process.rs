@@ -257,6 +257,19 @@ fn set_process_plist(cx, process: Value, plist: Value) {
     cx.set_process_slot(process, Slot::Plist, plist)
 }}
 
+defsubr! { name = "set-process-thread", gnu = "process.c:1508", effect = Global,
+fn set_process_thread(cx, process: Value, thread: Value) {
+    check_process(cx, process)?;
+    if thread != Value::NIL && cx.kind(thread) != Kind::Thread { return Err(Fault::Wrong("threadp", thread)); }
+    cx.set_process_slot(process, Slot::Thread, thread)
+}}
+
+defsubr! { name = "process-thread", gnu = "process.c:1533", effect = Reads,
+fn process_thread(cx, process: Value) {
+    check_process(cx, process)?;
+    cx.process_slot(process, Slot::Thread)
+}}
+
 defsubr! { name = "process-type", gnu = "process.c:1704", effect = Reads,
 fn process_type(cx, process: Value) {
     let process = get_process(cx, process)?;
