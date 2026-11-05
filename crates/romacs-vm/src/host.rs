@@ -1789,6 +1789,60 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     Ok(Command::new(program))
 }
 
+/// A child process, as GNU's emacs_spawn starts one (callproc.c): ARGV[0],
+/// a file name with a slash, run with ARGV and ENV (each `NAME=VALUE') in
+/// DIR, FDS as its standard input, output and error, in a session of its
+/// own, with SIGINT, SIGQUIT, SIGPROF and SIGPIPE at their defaults and no
+/// signal blocked. posix_spawn: the child shares this process's memory
+/// until it execs, where a fork would copy page tables whose size grows
+/// with the heap. Each of FDS must be above 2, so no descriptor is
+/// replaced before it is copied.
+pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os::fd::RawFd; 3]) -> io::Result<i32> {
+    use std::ffi::CString;
+    effect(|| format!("run {}", String::from_utf8_lossy(argv.first().map_or(&[][..], Vec::as_slice))))?;
+    let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
+    let strings = |list: &[Vec<u8>]| list.iter().map(|b| CString::new(b.as_slice())).collect::<Result<Vec<_>, _>>().map_err(|_| invalid());
+    let (argv, env, dir) = (strings(argv)?, strings(env)?, CString::new(dir).map_err(|_| invalid())?);
+    let program = argv.first().ok_or_else(invalid)?;
+    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect::<Vec<_>>();
+    let (argp, envp) = (pointers(&argv), pointers(&env));
+    let ok = |r: libc::c_int| if r == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(r)) };
+    // SAFETY: the actions and attributes are initialized before use and
+    // destroyed after; every pointer passed outlives the call.
+    unsafe {
+        let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+        ok(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
+        let mut attr = std::mem::MaybeUninit::<libc::posix_spawnattr_t>::uninit();
+        if let Err(error) = ok(libc::posix_spawnattr_init(attr.as_mut_ptr())) {
+            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
+            return Err(error);
+        }
+        let (actions, attr) = (actions.as_mut_ptr(), attr.as_mut_ptr());
+        let prepared = (|| -> io::Result<()> {
+            for (target, fd) in fds.into_iter().enumerate() {
+                ok(libc::posix_spawn_file_actions_adddup2(actions, fd, target as libc::c_int))?;
+            }
+            ok(libc::posix_spawn_file_actions_addchdir_np(actions, dir.as_ptr()))?;
+            let mut defaults: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut defaults);
+            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF, libc::SIGPIPE] {
+                libc::sigaddset(&mut defaults, signal);
+            }
+            ok(libc::posix_spawnattr_setsigdefault(attr, &defaults))?;
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            ok(libc::posix_spawnattr_setsigmask(attr, &mask))?;
+            let flags = libc::POSIX_SPAWN_SETSID as libc::c_int | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+            ok(libc::posix_spawnattr_setflags(attr, flags as libc::c_short))
+        })();
+        let mut pid: libc::pid_t = 0;
+        let spawned = prepared.and_then(|()| ok(libc::posix_spawn(&mut pid, program.as_ptr(), actions, attr, argp.as_ptr(), envp.as_ptr())));
+        libc::posix_spawnattr_destroy(attr);
+        libc::posix_spawn_file_actions_destroy(actions);
+        spawned.map(|()| pid)
+    }
+}
+
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {

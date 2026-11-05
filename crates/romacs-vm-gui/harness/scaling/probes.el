@@ -1477,6 +1477,13 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; A child's environment (rlisp/vm/subprocess.el romacs--environment-block):
+;; N distinct names in `process-environment', each first definition kept.
+(scaling-probe process-environment-block :n 2000
+  :setup (cl-loop for i below n collect (format "SCALING_ENV_%d=value" i))
+  :body (let ((process-environment it))
+          (romacs--environment-block "/")))
+
 (scaling-probe gc-free-lists :n 200000
   ;; Rounds of: garbage in every table, a cons, closure, cell and string
   ;; kept above it, a collection, then as much garbage again.  The sweep leaves free
