@@ -2282,6 +2282,9 @@ impl Vm {
         if self.variable_value(functions)? == Value::NIL {
             return Ok(true);
         }
+        if self.treesit_parse_pending(root, buffer_slot)? {
+            return Ok(true);
+        }
         let mut range = self.displayed_range(self.slots[root].value, text_height)?;
         let mut tries = 1;
         while let Some((start, end)) = range {
@@ -2310,6 +2313,41 @@ impl Vm {
             };
         }
         Ok(true)
+    }
+    /// Whether the first parse of the buffer in BUFFER_SLOT has not landed,
+    /// so that redisplay shows the window in ROOT plain and leaves its faces
+    /// to the frame the landing wakes (`land_treesit'): fontifying now would
+    /// wait for the parse.
+    fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<bool> {
+        if self.process_jobs.wake().is_none() {
+            return Ok(false);
+        }
+        let buffer = self.slots[buffer_slot].value;
+        let base = match self.object(buffer)? {
+            Object::Buffer(b) if b.base != Value::NIL => b.base,
+            Object::Buffer(_) => buffer,
+            _ => return Ok(false),
+        };
+        let Object::Buffer(text) = self.object_mut(base)? else { return Ok(false) };
+        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
+        if pending {
+            let id = self.window(self.slots[root].value)?.id;
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+        }
+        Ok(pending)
+    }
+    /// Whether a parse landed with windows left plain: they are laid out
+    /// again, as an unchanged window is not, and fontify if theirs was it.
+    pub fn land_treesit(&mut self) -> bool {
+        let landed = !self.treesit_plain.is_empty() && crate::treesit::take_early_landed();
+        if landed {
+            for id in std::mem::take(&mut self.treesit_plain) {
+                self.display_state.repaint_window(id);
+            }
+        }
+        landed
     }
     /// What decides the rows a live window shows: its buffer's edits
     /// (MODIFF, which property changes advance), its character edits

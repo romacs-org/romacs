@@ -127,7 +127,8 @@ fn treesit_matches_pinned_gnu() {
 }
 
 /// An early parse gives the first parser of a buffer what a parse would,
-/// unless the buffer changed, is narrowed or the parser asks otherwise.
+/// through the buffer's changes since, unless it is narrowed or the parser
+/// asks otherwise.
 #[test]
 fn an_early_parse_is_used_only_for_the_text_it_read() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();

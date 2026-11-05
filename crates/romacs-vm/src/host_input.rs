@@ -283,6 +283,8 @@ impl Vm {
             redraw |= self.poll_terminal_output()?;
             // An image decoded off the VM landed: the frame shows it.
             redraw |= self.land_images()?;
+            // So did the parse a redisplay left a window plain for.
+            redraw |= self.land_treesit();
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
             // is non-nil, as it is around Lisp that redisplay itself calls,
             // and waits for pending input; but GNU's `message' displays the

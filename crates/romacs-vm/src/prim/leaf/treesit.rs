@@ -571,25 +571,38 @@ impl Leaf<'_> {
         let Some(slot) = ts::EarlySlot::take() else { return Ok(Value::NIL) };
         let region = self.ts_region(buffer);
         let visible = (region.begv_byte, region.zv_byte);
-        let chars_modiff = self.vm.buffer_state(buffer).map_err(Fault::Error)?.chars_modiff;
         let frozen = self.ts_buffer_text(base).expect("a multibyte buffer").frozen();
-        let early = ts::Early::start(slot, lang, frozen, visible, chars_modiff);
+        let early = ts::Early::start(slot, lang, frozen, visible, self.vm.process_jobs.wake());
         let started = early.is_some();
         self.ts_registry_mut(base).early = early;
         Ok(flag(started))
     }
+    /// `romacs--treesit-parsing-p': whether the current buffer's early parse
+    /// has not given a tree yet, so that asking for one would wait.
+    pub(crate) fn ts_parsing_p(&mut self) -> Out {
+        let buffer = self.current_buffer()?;
+        let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
+        let base = self.ts_base(buffer);
+        Ok(flag(self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending())))
+    }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
-    /// any other leaves it unused, its tree released.
-    fn ts_early_tree(&mut self, parser: Value) -> Option<native::Tree> {
+    /// any other leaves it unused, its tree released. Second, whether the
+    /// tree went through edits, so that it needs a parse to catch up.
+    fn ts_early_tree(&mut self, parser: Value) -> Option<(native::Tree, bool)> {
         let p = self.ts_parser(parser).ok()?;
         let (buffer, core, native) = (p.buffer, p.core.clone(), p.native.clone());
         let base = self.ts_base(buffer);
         let early = self.ts_registry_mut(base).early.take()?;
-        let chars_modiff = self.vm.buffer_state(buffer).ok()?.chars_modiff;
-        let (native, visible) = (native.borrow(), core.borrow().visible);
-        (early.language == native.language() && early.visible == visible && early.chars_modiff == chars_modiff
-            && native.sees_all((visible.1 - visible.0) as u32)).then(|| early.finish()).flatten()
+        ts::note_early_landed();
+        let (core, native) = (core.borrow(), native.borrow());
+        let visible = core.visible;
+        if early.language != native.language() || !native.sees_all((visible.1 - visible.0) as u32) {
+            return None;
+        }
+        let (tree, region, edited) = early.finish(self.ts_buffer_text(base)?)?;
+        // Edits without points are no use to a parser tracking line and column.
+        (region == visible && !(edited && core.linecols.is_some())).then_some((tree, edited))
     }
 
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
@@ -610,11 +623,17 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
-        let twin = if old.is_none() { self.ts_twin_tree(parser).or_else(|| self.ts_early_tree(parser)) } else { None };
-        let new = twin.or_else(|| {
+        let twin = if old.is_none() { self.ts_twin_tree(parser) } else { None };
+        let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
+        let (done, behind) = match early {
+            Some((tree, false)) => (Some(tree), None),
+            Some((tree, true)) => (None, Some(tree)),
+            None => (twin, None),
+        };
+        let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let mut reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse(old.as_deref(), &mut reader)
+            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &mut reader)
         });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
@@ -625,7 +644,7 @@ impl Leaf<'_> {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
             c.need_reparse = false;
-            c.fresh = old.is_none();
+            c.fresh = old.is_none() && behind.is_none();
         }
         self.ts_parser_mut(parser).timestamp += 1;
         let ranges = match changed {

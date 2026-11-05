@@ -11,6 +11,12 @@
 ;; the parse costs only what the mode did not cover.  The language is a
 ;; guess from `auto-mode-alist', which a file's local variables or magic
 ;; can overrule: a wrong one only costs the thread its work.
+;;
+;; Until the tree lands, redisplay shows the text plain and keys run: its
+;; landing brings the faces (`treesit_parse_pending' in display.rs).  What
+;; runs by itself must not ask for the tree meanwhile, or it waits for the
+;; parse with the keys behind it: `show-paren-mode's idle timer is the one
+;; such asker, and highlights no paren until the tree is there.
 
 ;;; Code:
 
@@ -52,8 +58,14 @@ A parse no parser came for is abandoned, its thread left to end."
                      (not (treesit-parser-list nil nil t)))
             (romacs--treesit-parse-early nil)))))))
 
+(defun romacs-treesit--no-parse-p (&rest _)
+  "Whether the current buffer's tree is there to ask for."
+  (not (romacs--treesit-parsing-p)))
+
 (when (fboundp 'advice-add)
-  (advice-add 'after-find-file :around #'romacs-treesit--visit))
+  (advice-add 'after-find-file :around #'romacs-treesit--visit)
+  (with-eval-after-load 'treesit
+    (advice-add 'treesit-show-paren-data :before-while #'romacs-treesit--no-parse-p)))
 
 (provide 'romacs-treesit)
 ;;; romacs-treesit.el ends here

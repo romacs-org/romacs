@@ -209,6 +209,11 @@ fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
+defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
+fn romacs_treesit_parsing_p(cx) {
+    cx.ts_parsing_p()
+}}
+
 defsubr! { name = "treesit-parser-delete", gnu = "treesit.c:2491", effect = Global,
 fn treesit_parser_delete(cx, parser: Value) {
     cx.ts_parser_delete(parser)

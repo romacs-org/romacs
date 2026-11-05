@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "064c0bbef3cc39c12f82811e7c81cae45775d177a5d049b46d06927641a4451d",
+  "input_hash": "1bd62dfd29c42f60d27095766398e04c01e713ad9678ff97fa27ff8c6f19c11b",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -7523,7 +7523,7 @@
    "planned": false,
    "mechanism": "The tree-sitter runtime and buffer substrate under `treesit.c`'s primitives",
    "gnu": "GNU links the system libtree-sitter (0.26 on the pin) and parses any buffer; `#match?` runs `search_buffer`, which sets the match data; `treesit-parse-string`'s buffer is killed when its parser is collected.",
-   "romacs": "VM2 links the tree-sitter 0.27.0 runtime statically and loads the same grammars by GNU's search order (ABI 13-15 in both). It parses multibyte buffers only: `treesit-parser-create` in a unibyte buffer signals, and `set-buffer-multibyte` leaves a buffer's parsers without further edits. `#match?` leaves the match data alone. `treesit-parse-string`'s buffer lives on. A `#pred?` called while another buffer is current runs in the parser's buffer, which is restored after each call rather than after the whole capture. `subst-char-in-region` and `translate-region` record their edit without line/column points, which only line/column-tracking parsers (haskell) read. A parser's first parse copies the tree of another parser of the buffer that parsed the same text from nothing, seeing all of it, with the same grammar: the parse is skipped, not its result. A node of such a tree kept across an edit, until its parser reparses, keeps the end and child offsets from before the edit, where GNU's edit moves them.",
+   "romacs": "VM2 links the tree-sitter 0.27.0 runtime statically and loads the same grammars by GNU's search order (ABI 13-15 in both). It parses multibyte buffers only: `treesit-parser-create` in a unibyte buffer signals, and `set-buffer-multibyte` leaves a buffer's parsers without further edits. `#match?` leaves the match data alone. `treesit-parse-string`'s buffer lives on. A `#pred?` called while another buffer is current runs in the parser's buffer, which is restored after each call rather than after the whole capture. `subst-char-in-region` and `translate-region` record their edit without line/column points, which only line/column-tracking parsers (haskell) read. A parser's first parse copies the tree of another parser of the buffer that parsed the same text from nothing, seeing all of it, with the same grammar: the parse is skipped, not its result. A node of such a tree kept across an edit, until its parser reparses, keeps the end and child offsets from before the edit, where GNU's edit moves them. A visit's first parse runs on a thread (`rlisp/romacs-treesit.el`): until it lands, redisplay shows the text without faces and `treesit-show-paren-data` answers nil, and keys typed meanwhile edit its tree, so that first tree is then an incremental one.",
    "why": "Error recovery on broken code may differ between runtimes, so faces there can differ; everything else a ts-mode reaches behaves as GNU's.",
    "symbols": [
     "treesit-parser-create",

@@ -14,7 +14,8 @@ use native::{TSInputEdit, TSPoint, Tree};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 /// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
 /// GNU's language symbol name, its `tree_sitter_LANG` function, and the
@@ -104,6 +105,16 @@ unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
 /// The most first parses running at once, whatever a session visits.
 const EARLY_LIMIT: usize = 4;
 static EARLY_RUNNING: AtomicUsize = AtomicUsize::new(0);
+/// Whether a first parse ended since `take_early_landed'.
+static EARLY_LANDED: AtomicBool = AtomicBool::new(false);
+/// Whether a first parse ended since the last call.
+pub(crate) fn take_early_landed() -> bool {
+    EARLY_LANDED.swap(false, Ordering::Relaxed)
+}
+/// A first parse is over: a window left plain for it can have its faces.
+pub(crate) fn note_early_landed() {
+    EARLY_LANDED.store(true, Ordering::Relaxed);
+}
 /// One running first parse, counted until its thread ends.
 pub(crate) struct EarlySlot;
 impl EarlySlot {
@@ -123,39 +134,81 @@ impl Drop for EarlySlot {
     }
 }
 
+/// The most edits a tree from an early parse catches up with: more, and a
+/// parse from nothing is as good.
+const EARLY_CHANGES_LIMIT: usize = 1024;
+
 /// A first parse on a thread of its own, overlapping what a visit does
-/// before a parser asks for the tree (`set-auto-mode', the mode's body): it
-/// reads a frozen copy of the text, so a parser may use it while the text
-/// has not changed since (CHARS_MODIFF). Dropped, the thread ends alone.
+/// before a parser asks for the tree (`set-auto-mode', the mode's body),
+/// and whatever a person types while it runs: it reads a frozen copy of the
+/// text, and the changes made since are kept to edit its tree with. Dropped,
+/// the thread ends alone.
 pub(crate) struct Early {
     pub language: native::Language,
     pub visible: (i64, i64),
-    pub chars_modiff: u64,
-    job: std::thread::JoinHandle<Option<native::Loose>>,
+    /// The text's changes since the copy; None past EARLY_CHANGES_LIMIT.
+    changes: RefCell<Option<Vec<Change>>>,
+    result: mpsc::Receiver<Option<native::Loose>>,
+    /// What the thread sent, once `ready' saw it.
+    landed: Option<Option<native::Loose>>,
 }
 impl Early {
-    /// The parse of TEXT's VISIBLE region (1-based bytes) in SLOT.
-    pub(crate) fn start(slot: EarlySlot, language: native::Language, text: FrozenText, visible: (i64, i64), chars_modiff: u64) -> Option<Self> {
-        let job = std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
+    /// The parse of TEXT's VISIBLE region (1-based bytes) in SLOT, calling
+    /// WAKE when it ends.
+    pub(crate) fn start(slot: EarlySlot, language: native::Language, text: FrozenText, visible: (i64, i64),
+                        wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Self> {
+        let (sender, result) = mpsc::channel();
+        std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
             // The slot outlives the text.
             let _slot = slot;
             let text = text;
             let mut parser = native::Parser::new();
             parser.set_language(language);
             let mut reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            parser.parse(None, &mut reader).map(Tree::loose)
+            let _ = sender.send(parser.parse(None, &mut reader).map(Tree::loose));
+            note_early_landed();
+            if let Some(wake) = wake { wake(); }
         }).ok()?;
-        Some(Self { language, visible, chars_modiff, job })
+        Some(Self { language, visible, changes: RefCell::new(Some(Vec::new())), result, landed: None })
     }
-    /// The tree, once the thread ends.
-    pub(crate) fn finish(self) -> Option<Tree> {
-        self.job.join().ok().flatten().map(native::Loose::tree)
+    /// Whether the thread has sent its result.
+    pub(crate) fn ready(&mut self) -> bool {
+        if self.landed.is_none() {
+            self.landed = self.result.try_recv().ok();
+        }
+        self.landed.is_some()
+    }
+    /// Whether a parser asking now would wait for a tree it can use.
+    pub(crate) fn pending(&mut self) -> bool {
+        self.changes.borrow().is_some() && !self.ready()
+    }
+    fn record(&self, change: Change) {
+        let mut changes = self.changes.borrow_mut();
+        if let Some(list) = changes.as_mut() {
+            list.push(change);
+            if list.len() > EARLY_CHANGES_LIMIT {
+                *changes = None;
+            }
+        }
+    }
+    /// The tree, waiting for the thread, as `Core::record' left it after the
+    /// text's changes since the copy, with the region those left and whether
+    /// there were any.
+    pub(crate) fn finish(mut self, text: &TextBody) -> Option<(Tree, (i64, i64), bool)> {
+        let changes = self.changes.take()?;
+        let tree = self.landed.take().or_else(|| self.result.recv().ok()).flatten()?.tree();
+        let mut core = Core::new(self.visible, None);
+        core.tree = Some(Rc::new(tree));
+        for change in &changes {
+            core.record(Change { linecols: None, ..*change }, text);
+        }
+        Rc::into_inner(core.tree.take()?).map(|tree| (tree, core.visible, !changes.is_empty()))
     }
 }
 
 impl Registry {
     pub(crate) fn is_empty(&self) -> bool {
-        self.parsers.is_empty()
+        self.parsers.is_empty() && self.early.is_none()
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for (parser, _) in &mut self.parsers {
@@ -166,6 +219,9 @@ impl Registry {
     pub(crate) fn record(&self, change: Change, text: &TextBody) {
         for (_, core) in &self.parsers {
             core.borrow_mut().record(change, text);
+        }
+        if let Some(early) = &self.early {
+            early.record(change);
         }
     }
 }
