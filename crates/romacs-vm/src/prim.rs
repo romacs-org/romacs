@@ -1913,6 +1913,7 @@ pub(crate) use defsubr;
 pub(crate) mod prims;
 
 include!(concat!(env!("OUT_DIR"), "/generated_prims.rs"));
+include!(concat!(env!("OUT_DIR"), "/variable_sites.rs"));
 
 /// The single ordinal lookup boundary for legacy and generated subrs.
 #[derive(Clone, Copy)]

@@ -19,3 +19,34 @@ fn subr_name(cx, subr: Value) {
     let name = crate::prim::name(subr).ok_or(Fault::Wrong("subrp", subr))?;
     Ok(cx.byte_string(name.as_bytes()))
 }}
+
+// Where Rust defines OBJECT, as help-fns.el's `help-C-file-name' finds a
+// DEFUN or DEFVAR in GNU's DOC file: for KIND `defvar', OBJECT a symbol
+// Rust forwards (its C_VARIABLES entry); else OBJECT a primitive (its
+// defsubr, or a legacy one's row in lib.rs's PRIMITIVES).  (FILE LINE TEXT):
+// FILE relative to the source tree, LINE the registration's line or nil,
+// TEXT the registration's literal text to find there.  nil when Rust
+// defines no such thing.
+defsubr! { name = "romacs--rust-definition", gnu = "romacs:help", effect = Reads,
+fn romacs_rust_definition(cx, object: Value, kind: Value) {
+    let defvar = cx.intern("defvar");
+    let found: Option<(&str, Option<u32>, String)> = if kind == defvar {
+        let name = cx.symbol_name(object)?;
+        crate::prim::VARIABLE_SITES.iter().find(|v| v.0 == name).map(|&(_, file, line, text)| (file, Some(line), text.to_owned()))
+    } else {
+        match object.index_if(6).and_then(crate::prim::descriptor) {
+            // A defsubr's file!() is the path its module was included by:
+            // from the crate on.
+            Some(crate::prim::Descriptor::Generated(d)) => Some((d.file.rfind("crates/romacs-vm/").map_or(d.file, |i| &d.file[i..]), Some(d.line), format!("name = \"{}\"", d.name))),
+            Some(crate::prim::Descriptor::Legacy(name, _)) => Some((crate::PRIMITIVES_FILE,
+                crate::prim::LEGACY_SITES.iter().find(|s| s.0 == name).map(|s| s.1), format!("(\"{name}\", Primitive::"))),
+            None => None,
+        }
+    };
+    let Some((file, line, text)) = found else { return Ok(Value::NIL) };
+    let line = match line { Some(n) => Value::integer(i64::from(n)).unwrap(), None => Value::NIL };
+    let (file, text) = (cx.make_string(file.as_bytes().to_vec(), true), cx.make_string(text.as_bytes().to_vec(), true));
+    let tail = cx.cons(text, Value::NIL);
+    let tail = cx.cons(line, tail);
+    Ok(cx.cons(file, tail))
+}}

@@ -581,6 +581,8 @@ enum Primitive {
     MakeInterpretedClosure,
     SearchBackward,
 }
+/// The file declaring [`PRIMITIVES`], relative to the source tree.
+pub(crate) const PRIMITIVES_FILE: &str = file!();
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
     ("/", Primitive::Div),
