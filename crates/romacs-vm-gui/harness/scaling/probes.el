@@ -1628,6 +1628,25 @@ thousandth a stack mark."
           (while (jabber-xml-parse-next-stanza)
             (delete-region (point-min) (point)))))
 
+;; `libxml-parse-xml-region' (crate::xml_read's document reader): N sibling
+;; elements, N attributes on one, N declared entities each referred to, and
+;; a run of N comments before the root: each stays linear in the document.
+(scaling-probe libxml-xml-children :n 4000
+  :setup (concat "<a>" (mapconcat (lambda (i) (format "<b c='%d'>t &amp; u</b>\n" i))
+                                  (number-sequence 1 n) "")
+                 "</a>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
+(scaling-probe libxml-xml-attributes :n 4000
+  :setup (concat "<a" (mapconcat (lambda (i) (format " a%d='%d'" i i)) (number-sequence 1 n) "") "/>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
+(scaling-probe libxml-xml-entities :n 2000
+  :setup (concat "<!DOCTYPE a ["
+                 (mapconcat (lambda (i) (format "<!ENTITY e%d 'v'>" i)) (number-sequence 1 n) "")
+                 "]><a>" (mapconcat (lambda (i) (format "&e%d;" i)) (number-sequence 1 n) "") "</a>")
+  :body (with-temp-buffer (insert it) (libxml-parse-xml-region)))
+
 ;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
 
 ;; N distinct images, each measured, then all N again from the cache: a

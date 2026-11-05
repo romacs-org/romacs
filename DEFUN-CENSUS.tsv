@@ -213,7 +213,6 @@ lcms-jch->xyz	absent	Little CMS colour management: not linked
 lcms-temp->white-point	absent	Little CMS colour management: not linked
 lcms-xyz->jch	absent	Little CMS colour management: not linked
 lcms2-available-p	absent	Little CMS colour management: not linked
-libxml-parse-xml-region	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 lread--substitute-object-in-subtree	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-closure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a735e14fee4ab7e07e9a84c8abbb2f4000e9976fd2c4e6152d15cb2013aa8210",
+  "source_fingerprint": "07bb3c18e83c0527bdc186266ac8083436c5995dc956f4df2060592755bee779",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1354,
-  "parsed_vm2_only": 1354
+  "parsed_total": 1355,
+  "parsed_vm2_only": 1355
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2858,7 +2858,12 @@
   "libxml-parse-html-region": {
    "name": "libxml-parse-html-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/xml.rs:43"
+   "registered_at": "crates/romacs-vm/src/prims/xml.rs:57"
+  },
+  "libxml-parse-xml-region": {
+   "name": "libxml-parse-xml-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/xml.rs:73"
   },
   "line-beginning-position": {
    "name": "line-beginning-position",
@@ -5028,7 +5033,7 @@
   "romacs--xml-read-element": {
    "name": "romacs--xml-read-element",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/xml.rs:95"
+   "registered_at": "crates/romacs-vm/src/prims/xml.rs:125"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",

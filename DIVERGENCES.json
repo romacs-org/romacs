@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "95d0736b43c3017c177cf548f3695abe2ccd4735ec8f9d1696168c45656b9b78",
+  "input_hash": "3a5fb97a67f595ae5a32a134eb0fcdd005daf7589ed5d115cee8aa2ea0192c33",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -7494,8 +7494,8 @@
    "planned": false,
    "mechanism": "`libxml-available-p`, `libxml-parse-html-region`",
    "gnu": "A GNU build with libxml2 returns t from `libxml-available-p` and parses with libxml2 2.14: `libxml-parse-html-region` (`xml.c:177` parse_region, `htmlReadMemory` with RECOVER and NOBLANKS) builds an HTML5-tokenized document on libxml2's own tree (implied html/head/body, its start-tag auto-close table, end-tag priorities, blank-text rule), and `libxml-parse-xml-region` parses XML",
-   "romacs": "`libxml-parse-html-region` parses with Romacs's own parser (`crates/romacs-vm/src/html.rs`, the WHATWG named references in `html_entities.rs`), whose tables were read off pinned GNU: every start tag after every open element, the head's closers and each element's whitespace rule, plus documents for references, raw text, comments and bogus markup, give GNU's trees (`tests/libxml_html.rs`, 12,722 cases; 400 system HTML documents agreed too). There is no XML parser, so `libxml-available-p` still answers nil and `libxml-parse-xml-region` is void",
-   "why": "Callers that test `fboundp` for the HTML parser (mm-decode's `shr` renderer, shr, eww, rmail, notmuch-show) render HTML; callers that test `libxml-available-p` for XML (dbus.el, nnatom.el) still use xml.el",
+   "romacs": "`libxml-parse-html-region` parses with Romacs's own parser (`crates/romacs-vm/src/html.rs`, the WHATWG named references in `html_entities.rs`), whose tables were read off pinned GNU: every start tag after every open element, the head's closers and each element's whitespace rule, plus documents for references, raw text, comments and bogus markup, give GNU's trees (`tests/libxml_html.rs`, 12,722 cases; 400 system HTML documents agreed too). `libxml-parse-xml-region` reads with `crates/romacs-vm/src/xml_read.rs`, the reader xml.el's stanza path shares, given a document: strict, nil when not well-formed, as xml.c's options (NOBLANKS's blank-node rule, namespace prefixes resolved to local names, no entity substitution, the internal subset read but no external one, xml.c's `top` loop), and `libxml-available-p` is t (`tests/libxml_xml.rs`, 254 documents and region forms)",
+   "why": "Callers that test `fboundp` for the HTML parser (mm-decode's `shr` renderer, shr, eww, rmail, notmuch-show) render HTML; callers that test `libxml-available-p` for XML (dbus.el, nnatom.el) read with it. **Package-observable:** make_dom interns a non-ASCII element or attribute name undecoded, so GNU's symbol has a unibyte name; Romacs's symbol is the name",
    "symbols": [
     "libxml-available-p",
     "libxml-parse-html-region",
