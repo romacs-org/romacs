@@ -624,3 +624,28 @@ fn the_bar_string_follows_the_painter() {
     eval(&mut vm, &zoned(&"L".repeat(60), "C", "R"));
     assert_eq!(shows(&mut vm), format!("{:?}", format!("{}R", "L".repeat(8))));
 }
+
+/// A buffer's `face-remapping-alist' remaps its bands' faces: the bar's
+/// base face while the bar shows that buffer's line (its last expansion
+/// is not reused), and its window's header line.
+#[test]
+fn a_buffers_face_remapping_reaches_its_bands() {
+    let mut vm = session();
+    let base = |b: &romacs_layout_input::StatusBarSnapshot| b.faces[b.face.0 as usize].background;
+    let plain = base(&bar(&mut vm));
+    eval(&mut vm, "(progn (setq header-line-format \"head\")
+                     (setq-local face-remapping-alist
+                       (list '(mode-line-active (:background \"#123456\"))
+                             (list (if (facep 'header-line-active) 'header-line-active 'header-line) '(:background \"#654321\")))))");
+    let remapped = base(&bar(&mut vm));
+    assert_ne!(plain, [0x12, 0x34, 0x56]);
+    assert_eq!(remapped, [0x12, 0x34, 0x56], "the bar's face follows the buffer's remapping");
+    let id = window_id(&mut vm, "(selected-window)");
+    let frame = snapshot(&mut vm);
+    let w = &frame.windows.iter().find(|w| w.snapshot.id == id).unwrap().snapshot;
+    assert_eq!(w.header_line.as_ref().map(|h| h.utf8.as_str()), Some("head"));
+    assert_eq!(w.faces[w.header_line_face.0 as usize].background, [0x65, 0x43, 0x21], "the header line's face follows it too");
+    // Undone, the bar's face is the theme's again.
+    eval(&mut vm, "(kill-local-variable 'face-remapping-alist)");
+    assert_eq!(base(&bar(&mut vm)), plain);
+}

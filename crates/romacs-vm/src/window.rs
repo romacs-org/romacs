@@ -191,8 +191,11 @@ pub(super) struct WindowState {
     /// for it between the root window and the mini-window (VM2-STATUS-BAR).
     pub status_height: u32,
     pub status_reserved: u32,
+    /// The display's device pixels per logical pixel (a HiDPI output's
+    /// scale): images are decoded at it and laid out in logical pixels.
+    pub device_scale: f32,
 }
-romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area, status_height, status_reserved });
+romacs_snapshot::snapshot_struct!(WindowState { next, select_count, width, height, line, column, mini_lines, mini_reserved, next_frame, text_area, status_height, status_reserved, device_scale });
 impl Default for WindowState {
     fn default() -> Self {
         Self {
@@ -208,6 +211,7 @@ impl Default for WindowState {
             text_area: [640, 480],
             status_height: 0,
             status_reserved: 0,
+            device_scale: 1.0,
         }
     }
 }
@@ -1209,6 +1213,16 @@ impl Vm {
         Ok((format != Value::NIL && format != Value::UNBOUND).then_some(format))
     }
     /// Install canonical font metrics before startup Lisp observes window sizes.
+    /// The display's device scale is SCALE (a HiDPI output's 2): images
+    /// realize anew at it.  Whether it changed.
+    pub fn set_device_scale(&mut self, scale: f32) -> bool {
+        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        if scale == self.window_state.device_scale { return false; }
+        self.window_state.device_scale = scale;
+        // Every window publishes again, its images decoded at the new scale.
+        self.display_state.free_realized_faces();
+        true
+    }
     pub fn set_frame_geometry(
         &mut self,
         width: u32,

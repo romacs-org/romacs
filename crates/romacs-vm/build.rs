@@ -630,6 +630,110 @@ fn generate_primitives(root: &Path, out: &Path) {
     .unwrap();
 }
 
+/// TOKENS without the items `#[cfg(test)]' or `#[test]' marks: test code
+/// declares variables production never does.
+fn production_tokens(tokens: &[Token]) -> Vec<&Token> {
+    let text = |i: usize| tokens.get(i).map_or("", |t| t.text.as_str());
+    let (mut kept, mut i) = (Vec::new(), 0);
+    while i < tokens.len() {
+        let test_attribute = text(i) == "#" && text(i + 1) == "["
+            && ((text(i + 2) == "cfg" && text(i + 3) == "(" && text(i + 4) == "test" && text(i + 5) == ")" && text(i + 6) == "]")
+                || (text(i + 2) == "test" && text(i + 3) == "]"));
+        if !test_attribute { kept.push(&tokens[i]); i += 1; continue; }
+        // The item: to its `;' or through its balanced `{...}', at depth 0.
+        let mut depth = 0i32;
+        while i < tokens.len() {
+            match text(i) {
+                "(" | "[" => depth += 1,
+                ")" | "]" => depth -= 1,
+                ";" if depth == 0 => { i += 1; break; }
+                "{" if depth == 0 => {
+                    let mut braces = 0;
+                    while i < tokens.len() {
+                        match text(i) { "{" => braces += 1, "}" => { braces -= 1; if braces == 0 { break; } } _ => {} }
+                        i += 1;
+                    }
+                    i += 1;
+                    break;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    kept
+}
+
+/// Where Rust declares each variable GNU declares with DEFVAR, outside
+/// test code: a C_VARIABLES row (`CVariable { name: "NAME"'), or a
+/// `declare_special_raw' call, whose name is a string or a `for' loop's
+/// variable over a list of names (or of tuples headed by one).  (NAME,
+/// FILE relative to the source tree, LINE of its name's literal, that
+/// literal), the first for each name, for `romacs--rust-definition'.
+fn generate_variable_sites(root: &Path, out: &Path) {
+    fn walk(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
+        let mut paths: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() { walk(&path, files); }
+            else if path.extension().is_some_and(|e| e == "rs") && !path.file_name().unwrap().to_string_lossy().contains("test") { files.push(path); }
+        }
+    }
+    let mut files = vec![];
+    walk(&root.join("src"), &mut files);
+    let (mut seen, mut rows) = (std::collections::HashSet::new(), String::new());
+    for path in files {
+        let relative = format!("crates/romacs-vm/{}", path.strip_prefix(root).unwrap().display());
+        let all = tokens(&path, &fs::read_to_string(&path).unwrap());
+        let toks = production_tokens(&all);
+        let text = |i: usize| toks.get(i).map_or("", |t| t.text.as_str());
+        let string = |i: usize| toks.get(i).and_then(|t| t.string.clone());
+        let mut add = |name: String, line: usize| {
+            if seen.insert(name.clone()) { rows.push_str(&format!("    ({name:?}, {relative:?}, {line}, {:?}),\n", format!("{name:?}"))); }
+        };
+        for i in 0..toks.len() {
+            if text(i) == "CVariable" && text(i + 1) == "{" && text(i + 2) == "name" && text(i + 3) == ":" {
+                if let Some(name) = string(i + 4) { add(name, toks[i + 4].line); }
+            }
+            if text(i) != "declare_special_raw" || text(i + 1) != "(" { continue; }
+            if let Some(name) = string(i + 2) { add(name, toks[i + 2].line); continue; }
+            // `for NAME in [...]' or `for (NAME, ..) in [...]' before it.
+            let variable = text(i + 2);
+            let Some(head) = (0..i).rev().find(|&j| text(j) == "for"
+                && (text(j + 1) == variable || (text(j + 1) == "(" && text(j + 2) == variable))) else { continue };
+            let Some(after) = (head..i).find(|&j| text(j) == "in").map(|j| j + 1) else { continue };
+            // An inline list, or a named one: the `const' or `static' this
+            // file declares by that name, from its value's `['.
+            let open = if text(after) == "[" { after } else if text(after).chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                let name = text(after);
+                let Some(open) = (0..toks.len()).find(|&k| matches!(text(k), "const" | "static") && text(k + 1) == name)
+                    .and_then(|k| (k..toks.len()).find(|&j| text(j) == "=")).and_then(|k| (k..toks.len()).find(|&j| text(j) == "[")) else { continue };
+                open
+            } else { continue };
+            let tuples = text(head + 1) == "(";
+            let mut depth = 0;
+            for j in open..toks.len() {
+                match text(j) {
+                    "[" | "(" => depth += 1,
+                    "]" | ")" => { depth -= 1; if depth == 0 { break; } }
+                    _ => {}
+                }
+                let first = if tuples { depth == 2 && text(j - 1) == "(" } else { depth == 1 };
+                if first { if let Some(name) = string(j) { add(name, toks[j].line); } }
+            }
+        }
+    }
+    // A legacy primitive's row in lib.rs's PRIMITIVES: ("NAME", Primitive::X).
+    let mut legacy = String::new();
+    for (n, line) in fs::read_to_string(root.join("src/lib.rs")).unwrap().lines().enumerate() {
+        let Some(rest) = line.trim_start().strip_prefix("(\"") else { continue };
+        let Some(end) = rest.find("\", Primitive::") else { continue };
+        legacy.push_str(&format!("    ({:?}, {}),\n", &rest[..end], n + 1));
+    }
+    fs::write(out.join("variable_sites.rs"), format!("pub(crate) static VARIABLE_SITES: &[(&str, &str, u32, &str)] = &[\n{rows}];\n\
+        pub(crate) static LEGACY_SITES: &[(&str, u32)] = &[\n{legacy}];\n")).unwrap();
+}
+
 #[cfg(test)]
 #[path = "build/attribution_tests.rs"]
 mod attribution_tests;
@@ -638,6 +742,7 @@ fn main() {
     let root = env::current_dir().unwrap();
     let out = std::path::PathBuf::from(env::var_os("OUT_DIR").unwrap());
     generate_primitives(&root, &out);
+    generate_variable_sites(&root, &out);
     let mut hash = Sha256::new();
     println!("cargo:rerun-if-changed=src");
     sources(&root, &root.join("src"), &mut hash);

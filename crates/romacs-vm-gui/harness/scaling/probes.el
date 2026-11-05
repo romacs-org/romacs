@@ -1440,6 +1440,208 @@ thousandth a stack mark."
   :setup (scaling--wrapped-line n nil)
   :body (with-current-buffer it (scaling--wrapped-step i)))
 
+;;;; Jabber: the archive catch-up's collections (rlisp/jabber/jabber-mam.el,
+;;;; jabber-mam-sync.el).  A connection here is an FSM symbol with state
+;;;; data and no transport: the probes count bookkeeping, not traffic.
+
+(defvar jabber-connections)
+(defvar jabber-buffer-connection)
+(defvar jabber-group)
+(defvar jabber-mam--dirty-peers)
+(defvar jabber-mam--room-nicks)
+(defvar jabber-mam-sync--accounts)
+(defvar jabber-mam-sync--stored)
+(defvar jabber-mam-sync--merge-queue)
+(defvar jabber-mam-sync--merge-tail)
+(defvar jabber-mam-sync--merge-queued)
+(defvar jabber-mam-sync--live-jobs)
+
+(defun scaling--jabber ()
+  "Jabber loaded, and a connection for romeo@montague.net, made current."
+  (require 'jabber)
+  (let ((jc (make-symbol "scaling-jc")))
+    (put jc :state :session-established)
+    (put jc :state-data (list :username "romeo" :server "montague.net" :resource "scaling"
+                              :password "pw" :connection-type 'network))
+    (setq jabber-connections (list jc))
+    jc))
+
+;; N distinct nicknames rendered on one background, each twice: the
+;; colour cache (jabber-muc.el) computes each once.  kN stays under its
+;; bound (`jabber-muc-nick-colors-limit', 4096), past which it starts over.
+(defvar jabber-muc--nick-colors)
+(scaling-probe jabber-nick-colors :n 1000
+  :setup (progn (scaling--jabber) (clrhash jabber-muc--nick-colors) (scaling--names "nick" n))
+  :body (dotimes (_ 2) (dolist (nick it) (jabber-muc--nick-face nick))))
+
+;; N rooms requested for one account's background catch-up.
+(scaling-probe jabber-sync-requests :n 400
+  :setup (let ((jc (scaling--jabber))) (clrhash jabber-mam-sync--accounts) (cons jc (scaling--names "room" n)))
+  :body (dolist (room (cdr it)) (jabber-mam-sync-request (car it) room)))
+
+;; N accounts, each requesting its personal archive.
+(scaling-probe jabber-sync-accounts :n 400
+  :setup (progn
+           (scaling--jabber)
+           (clrhash jabber-mam-sync--accounts)
+           (mapcar (lambda (name)
+                     (let ((jc (make-symbol name)))
+                       (put jc :state :session-established)
+                       (put jc :state-data (list :username name :server "montague.net" :resource "r"))
+                       jc))
+                   (scaling--names "user" n)))
+  :body (dolist (jc it) (jabber-mam-sync-request jc)))
+
+;; N accounts, each through a whole job: requested, started, finished
+;; (no worker: the isolate functions answer at once), all retained.
+(scaling-probe jabber-sync-lifecycle :n 300
+  :setup (progn
+           (scaling--jabber)
+           (clrhash jabber-mam-sync--accounts)
+           (setq jabber-mam-sync--live-jobs 0)
+           (mapcar (lambda (name)
+                     (let ((jc (make-symbol name)))
+                       (put jc :state :session-established)
+                       (put jc :state-data (list :username name :server "montague.net"
+                                                 :resource "r" :password "pw"))
+                       jc))
+                   (scaling--names "user" n)))
+  :body (let (callbacks)
+          (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) 'future))
+                    ((symbol-function 'isolate-on-done) (lambda (_f callback) (push callback callbacks)))
+                    ((symbol-function 'isolate-await) (lambda (&rest _) '(:archives nil :peers nil)))
+                    ((symbol-function 'isolate-future-isolate) (lambda (_) 'worker))
+                    ((symbol-function 'isolate-live-p) #'ignore)
+                    ((symbol-function 'thaw) #'identity)
+                    ((symbol-function 'jabber-mam-sync--toast) #'ignore)
+                    ((symbol-function 'jabber-db-share-writes) #'ignore))
+            (dolist (jc it)
+              (jabber-mam-sync-request jc)
+              (jabber-mam-sync--start (jabber-connection-bare-jid jc)))
+            (dolist (callback callbacks) (funcall callback 'future)))))
+
+;; N finished jobs' merges, one changed peer and its open buffer each.
+(scaling-probe jabber-sync-merge-repeat :n 400
+  :setup (let ((jc (scaling--jabber)) summaries)
+           (setq jabber-mam-sync--merge-queue nil jabber-mam-sync--merge-tail nil)
+           (clrhash jabber-mam-sync--merge-queued)
+           (dolist (room (scaling--names "room" n))
+             (with-current-buffer (get-buffer-create (concat " *scaling-merge-" room "*"))
+               (setq major-mode 'jabber-chat-mode)
+               (setq-local jabber-buffer-connection jc)
+               (setq-local jabber-group room)
+               (jabber-buffer-registry-register 'muc (list "romeo@montague.net" room)))
+             (push (list :peers (list (list "romeo@montague.net" room "groupchat" 1 1))) summaries))
+           summaries)
+  :body (dolist (summary it) (jabber-mam-sync--merge summary)))
+
+;; A finished job's N changed peers against N open (hidden) chat buffers:
+;; the histories are marked changed; no buffer is looked for.
+(scaling-probe jabber-sync-merge :n 400
+  :setup (let ((jc (scaling--jabber)) peers)
+           (setq jabber-mam-sync--merge-queue nil)
+           (dolist (room (scaling--names "room" n))
+             (with-current-buffer (get-buffer-create (concat " *scaling-" room "*"))
+               (setq major-mode 'jabber-chat-mode)
+               (setq-local jabber-buffer-connection jc)
+               (setq-local jabber-group room)
+               (jabber-buffer-registry-register 'muc (list "romeo@montague.net" room)))
+             (push (list "romeo@montague.net" room "groupchat" 1 1) peers))
+           (list :peers peers))
+  :body (jabber-mam-sync--merge it))
+
+;; N archived results marking N/2 peers dirty, twice each, and their page's redraw.
+(defvar jabber-mam--redraw-peers)
+(defvar jabber-mam--redraw-timer)
+
+;; Pages of a catch-up over N peers: each page marks them dirty and
+;; schedules their redraw, as `jabber-mam--accept-page' does.
+(scaling-probe jabber-mam-redraw-schedule :n 2000
+  :setup (progn (setq jabber-mam--dirty-peers nil jabber-mam--redraw-peers nil)
+                (cons (scaling--jabber) (scaling--names "peer" n)))
+  :body (dotimes (_ 3)
+          (dolist (peer (cdr it)) (jabber-mam--mark-dirty (car it) peer "chat"))
+          (jabber-mam--schedule-redraw jabber-mam--dirty-peers)
+          (when jabber-mam--redraw-timer (cancel-timer jabber-mam--redraw-timer)
+                (setq jabber-mam--redraw-timer nil))))
+
+(scaling-probe jabber-mam-dirty-peers :n 4000
+  :setup (progn (setq jabber-mam--dirty-peers nil)
+                (cons (scaling--jabber) (scaling--names "peer" (/ n 2))))
+  :body (progn
+          (dotimes (_ 2)
+            (dolist (peer (cdr it)) (jabber-mam--mark-dirty (car it) peer "chat")))))
+
+;; Our nickname looked up once per archived result, over N rooms read unjoined.
+(scaling-probe jabber-mam-room-nicks :n 4000
+  :setup (let ((nicks (make-hash-table :test #'equal)) (rooms (scaling--names "room" n)))
+           (scaling--jabber)
+           (dolist (room rooms) (puthash room "romeo" nicks))
+           (setq jabber-mam--room-nicks nicks)
+           (cons (car jabber-connections) rooms))
+  :body (dolist (room (cdr it)) (jabber-mam--our-muc-nick-p room "romeo" (car it))))
+
+;; A room buffer refreshed over N stored messages (`jabber-backlog-number'
+;; N): what runs before the first idle tick, the database's materialization
+;; of the backlog among it.  The clearing and insertion ticks run later.
+(scaling-probe jabber-chat-refresh :n 300
+  :setup (let* ((jc (scaling--jabber))
+                (room "room@conference.montague.net"))
+           (setq jabber-db-path (make-temp-file "scaling-jabber" nil ".db")
+                 jabber-db--connection nil
+                 jabber-backlog-number n)
+           (dotimes (i n)
+             (jabber-db-store-message "romeo@montague.net" room "in" "groupchat"
+                                      (format "message %d %s" i (make-string 60 ?x))
+                                      (+ 1700000000 i) "nick" (format "s%d" i)))
+           (let ((buffer (jabber-muc-create-buffer jc room)))
+             ;; The creation's own backlog load: let it finish first.
+             (with-current-buffer buffer
+               (cl-incf jabber-chat--backlog-generation))
+             buffer))
+  :body (with-current-buffer it (jabber-chat-buffer-refresh)))
+
+;; A worker's summary of N archives and N changed peers.
+(scaling-probe jabber-sync-summary :n 2000
+  :setup (let ((archives nil))
+           (scaling--jabber)
+           (setq jabber-mam-sync--stored (make-hash-table :test #'equal))
+           (dolist (room (scaling--names "room" n))
+             (push (list :room room :with nil :nick "romeo") archives)
+             (puthash (list "romeo@montague.net" room "groupchat") (cons 3 3) jabber-mam-sync--stored))
+           (cons (list :username "romeo" :server "montague.net")
+                 (cons (list :room nil :with nil :nick nil) archives)))
+  :body (jabber-mam-sync--summary (car it) (cdr it) (mapcar (lambda (a) (cons a 'success)) (cdr it)) t 1.0))
+
+;; The stanza reader (jabber-xml.el, natively romacs--xml-read-element):
+;; one stanza of N children, one of N attributes; and a connection's
+;; buffer of N stanzas read and deleted one at a time, as jabber-filter
+;; does, which stays linear because a read looks at a window of the
+;; buffer, not all that follows.
+(scaling-probe jabber-xml-read-stanza :n 2000
+  :setup (progn (scaling--jabber)
+                (concat "<message>"
+                        (mapconcat (lambda (i) (format "<b x='%d'>t &amp; u</b>" i))
+                                   (number-sequence 1 n) "")
+                        "</message>"))
+  :body (with-temp-buffer (insert it) (jabber-xml-parse-next-stanza)))
+
+(scaling-probe jabber-xml-read-attributes :n 2000
+  :setup (progn (scaling--jabber)
+                (concat "<presence"
+                        (mapconcat (lambda (i) (format " a%d='%d'" i i)) (number-sequence 1 n) "")
+                        "/>"))
+  :body (with-temp-buffer (insert it) (jabber-xml-parse-next-stanza)))
+
+(scaling-probe jabber-xml-read-buffer :n 2000
+  :setup (progn (scaling--jabber)
+                (mapconcat (lambda (i) (format "<presence from='r@m/n%d'><x xmlns='u'/></presence>" i))
+                           (number-sequence 1 n) ""))
+  :body (with-temp-buffer
+          (insert it)
+          (while (jabber-xml-parse-next-stanza)
+            (delete-region (point-min) (point)))))
+
 ;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
 
 ;; N distinct images, each measured, then all N again from the cache: a
@@ -1478,6 +1680,47 @@ thousandth a stack mark."
   ;; The message is the step's visible change, so the host paints it.
   :body (let (size) (dotimes (_ 2) (dolist (spec it) (setq size (image-size spec t)))) (message "%S" size)))
 
+;;;; Attachments (rlisp/romacs-attach.el)
+
+(defun scaling--attach-files (n)
+  "N small distinct PNG files in a temporary directory: their names."
+  (let ((dir (make-temp-file "scaling-attach" t)) (files nil)
+        (png (base64-decode-string "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==")))
+    (dotimes (i n)
+      (let ((file (expand-file-name (format "a%d.png" i) dir)))
+        (let ((coding-system-for-write 'binary)) (write-region png nil file nil 'silent))
+        (push file files)))
+    (nreverse files)))
+
+(defun scaling--attach-host (files)
+  "The attach test host with FILES attached: its buffer."
+  (romacs-attach-test-host)
+  (romacs-attach-set-items nil)
+  (erase-buffer)
+  (when files (romacs-attach-files files))
+  (current-buffer))
+
+;; One batch insertion of N items: planned and rendered once, linear.
+(scaling-probe attach-tray :gui t :n 100 :steps 1
+  :setup (progn (require 'romacs-attach) (cons (scaling--attach-host nil) (scaling--attach-files n)))
+  :body (with-current-buffer (car it) (romacs-attach-set-items nil) (romacs-attach-files (cdr it))))
+
+;; A key typed into the draft under N chips: the cached tray string is
+;; put again as it is, so the key's cost does not grow with N.
+(scaling-probe attach-tray-key :gui t :n 100 :steps 20 :budget 0.5
+  :setup (progn (require 'romacs-attach) (scaling--attach-host (scaling--attach-files n)))
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; A draft naming N files beside N orphans: one listing, linear.
+(scaling-probe attach-drafts-reconcile :n 1000 :steps 1
+  :setup (progn (require 'romacs-attach)
+                (let* ((named (scaling--attach-files n))
+                       (dir (file-name-directory (car named))))
+                  (cons dir (mapcar (lambda (file) (list :path file)) named))))
+  :body (let ((dir (car it)))
+          (dotimes (i n) (write-region "o" nil (expand-file-name (format "orphan%d" i) dir) nil 'silent))
+          (romacs-attach-reconcile dir (cdr it))))
+
 ;;;; Collection
 
 (defvar scaling--keeper nil
@@ -1490,6 +1733,13 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 2)) (make-vector 1 nil))
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
+
+;; A child's environment (rlisp/vm/subprocess.el romacs--environment-block):
+;; N distinct names in `process-environment', each first definition kept.
+(scaling-probe process-environment-block :n 2000
+  :setup (cl-loop for i below n collect (format "SCALING_ENV_%d=value" i))
+  :body (let ((process-environment it))
+          (romacs--environment-block "/")))
 
 (scaling-probe gc-free-lists :n 200000
   ;; Rounds of: garbage in every table, a cons, closure, cell and string
@@ -1504,6 +1754,71 @@ closures over a mutable variable (each a closure and a cell)."
           (setq scaling--keeper (let ((y 0)) (list n (lambda () (setq y (1+ y))) (make-string 16 ?y))))
           (garbage-collect)
           (scaling--churn n)))
+
+;; The debugger's frame model: `backtrace-get-frames' (every frame with
+;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
+;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
+;; GNU's per-frame `backtrace--locals' would be quadratic.
+(defvar scaling--bt-depth nil)
+(defun scaling--bt-frames (n)
+  (let ((scaling--bt-depth n))
+    (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+(scaling-probe backtrace-frames :n 200 :k 4
+  :setup (progn (require 'backtrace) (require 'romacs-backtrace)
+                (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))
+  :body (dotimes (_ 4) (scaling--bt-frames n)))
+
+;; `save-excursion' records nested N deep, then `backtrace-eval' at the
+;; outermost frame, whose unrewind swaps all N excursions and bindings and
+;; back: linear in N.
+(defun scaling--bt-excursions (n top)
+  (let ((scaling--bt-depth n))
+    (save-excursion
+      (if (> n 0) (scaling--bt-excursions (1- n) top)
+        (backtrace-eval '(list scaling--bt-depth (point)) top 'scaling--bt-excursions)))))
+(scaling-probe backtrace-excursions :n 200 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 4) (scaling--bt-excursions n n)))
+
+;; `backtrace-debug' flags: every frame of a stack N deep flags itself and
+;; clears the flag before it returns, then N calls each leave theirs set
+;; (whose tokens go stale once they return): O(log N) amortized a flag.
+(defun scaling--bt-flag-deep (n)
+  (backtrace-debug 0 t 'scaling--bt-flag-deep)
+  (prog1 (if (> n 0) (scaling--bt-flag-deep (1- n)) 0)
+    (backtrace-debug 0 nil 'scaling--bt-flag-deep)))
+(defun scaling--bt-flag-leave () (backtrace-debug 0 t 'scaling--bt-flag-leave) nil)
+(defun scaling--bt-flag-any (n)
+  ;; Flags the N frames below the leaf newest to oldest, then clears them
+  ;; oldest first: insertion and removal away from the end of the set.
+  (if (> n 0) (scaling--bt-flag-any (1- n))
+    (let ((depth (length (backtrace-frames 'scaling--bt-flag-any))))
+      (dotimes (i depth) (backtrace-debug i t 'scaling--bt-flag-any))
+      (dotimes (i depth) (backtrace-debug (- depth 1 i) nil 'scaling--bt-flag-any)))))
+(scaling-probe backtrace-debug-flags :n 400 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (let ((debugger (lambda (&rest args) (cadr args))))
+          (scaling--bt-flag-deep n)
+          (scaling--bt-flag-any n)
+          (dotimes (_ n) (scaling--bt-flag-leave))))
+
+;; `backtrace-eval' over N buffer-local bindings whose locals are gone (each
+;; becomes inert in place) below N live bindings: one unrewind, linear.
+(defun scaling--bt-dead-inner () (backtrace-eval nil 1 'scaling--bt-dead-inner))
+(defun scaling--bt-dead-outer (locals globals)
+  (cl-progv locals (make-list (length locals) 1)
+    (kill-all-local-variables)
+    (cl-progv globals (make-list (length globals) 2)
+      (scaling--bt-dead-inner))))
+(scaling-probe backtrace-eval-dead-locals :n 500 :k 4
+  :setup (let ((locals (mapcar #'intern (scaling--names "scaling--bt-local" n)))
+               (globals (mapcar #'intern (scaling--names "scaling--bt-global" n))))
+           (dolist (g globals) (set g 0))
+           (list locals globals))
+  :body (with-temp-buffer
+          (dotimes (_ 4)
+            (dolist (l (car it)) (set (make-local-variable l) 0))
+            (scaling--bt-dead-outer (car it) (cadr it)))))
 
 ;;;; Running
 

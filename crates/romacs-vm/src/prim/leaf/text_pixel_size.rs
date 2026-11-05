@@ -810,10 +810,11 @@ impl Leaf<'_> {
         }
         // Both faces' digits and spaces advance alike, in rows no taller
         // than the default's; an undefined face merges to the default.
-        let (special, line_height) = self.vm.host_default_advance('\\').map_err(Fault::Error)?;
+        let window = Some(area.window);
+        let (special, line_height) = self.vm.host_face_advance_in(window, "default", '\\').map_err(Fault::Error)?;
         let mut digit = None;
         for (face, c) in [("line-number", '0'), ("line-number", ' '), ("line-number-current-line", '0'), ("line-number-current-line", ' ')] {
-            let (advance, height) = self.vm.host_face_advance(face, c).or_else(|_| self.vm.host_default_advance(c)).map_err(Fault::Error)?;
+            let (advance, height) = self.vm.host_face_advance_in(window, face, c).or_else(|_| self.vm.host_face_advance_in(window, "default", c)).map_err(Fault::Error)?;
             if *digit.get_or_insert(advance) != advance || height > line_height {
                 return Err(unsupported("with a line-number face of its own widths or height"));
             }

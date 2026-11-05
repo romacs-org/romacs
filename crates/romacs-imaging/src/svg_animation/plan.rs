@@ -20,59 +20,59 @@ use resvg::usvg;
 
 /// A compiled document timeline.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct AnimationPlan {
-    pub(crate) rules: Vec<AnimationRule>,
+pub struct AnimationPlan {
+    pub rules: Vec<AnimationRule>,
 }
 
 /// One animation element resolved against the source text.
 #[derive(Clone, Debug)]
-pub(crate) struct AnimationRule {
+pub struct AnimationRule {
     /// Where the computed value goes in the source bytes.
-    pub(crate) site: AttributeSite,
+    pub site: AttributeSite,
     /// What value the document shows at a given time.
-    pub(crate) timeline: Timeline,
+    pub timeline: Timeline,
 }
 
 /// A splice site for one attribute of one element.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AttributeSite {
+pub struct AttributeSite {
     /// The attribute's local name.
-    pub(crate) attribute: String,
+    pub attribute: String,
     /// Byte range of the attribute's value in the source text, when the
     /// element already carries the attribute.
-    pub(crate) value_range: Option<std::ops::Range<usize>>,
+    pub value_range: Option<std::ops::Range<usize>>,
     /// Index of the start tag's `>` (before the `/` of a self-closing tag):
     /// where ` attribute="value"` is inserted when the attribute is absent.
-    pub(crate) insert_pos: usize,
+    pub insert_pos: usize,
 }
 
 /// Timing and values of one rule.
 #[derive(Clone, Debug)]
-pub(crate) struct Timeline {
+pub struct Timeline {
     /// Document time the rule activates at.
-    pub(crate) begin: Duration,
+    pub begin: Duration,
     /// One cycle of the rule's values.
-    pub(crate) dur: Duration,
+    pub dur: Duration,
     /// How many cycles the rule runs.
-    pub(crate) repeat: Repeat,
+    pub repeat: Repeat,
     /// Parsed keyframe values, in cycle order.
-    pub(crate) values: Vec<AnimatedValue>,
+    pub values: Vec<AnimatedValue>,
     /// Author-stated key times as cycle fractions in `[0, 1]`, first 0 and
     /// last 1 for linear mode; discrete mode may end earlier.
     /// `None` means uniform segments.
-    pub(crate) key_times: Option<Vec<f64>>,
+    pub key_times: Option<Vec<f64>>,
     /// How values move between keyframes.
-    pub(crate) calc: CalcMode,
+    pub calc: CalcMode,
     /// Whether the last value holds past the active duration
     /// (`fill="freeze"`); the SMIL default removes the animation, restoring
     /// the base value.
-    pub(crate) freeze: bool,
+    pub freeze: bool,
     /// The `type` of an `animateTransform`; plain attributes are `None`.
-    pub(crate) transform: Option<TransformKind>,
+    pub transform: Option<TransformKind>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Repeat {
+pub enum Repeat {
     /// `repeatCount="indefinite"`.
     Indefinite,
     /// Validated active span, including fractional repeats (default one cycle).
@@ -80,13 +80,13 @@ pub(crate) enum Repeat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CalcMode {
+pub enum CalcMode {
     Linear,
     Discrete,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TransformKind {
+pub enum TransformKind {
     Rotate,
     Translate,
     Scale,
@@ -97,7 +97,7 @@ pub(crate) enum TransformKind {
 impl TransformKind {
     /// The CSS transform function name, as it appears in a `transform`
     /// attribute value.
-    pub(crate) const fn function(self) -> &'static str {
+    pub const fn function(self) -> &'static str {
         match self {
             Self::Rotate => "rotate",
             Self::Translate => "translate",
@@ -110,7 +110,7 @@ impl TransformKind {
 
 /// One keyframe value, in the representation it can animate in.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum AnimatedValue {
+pub enum AnimatedValue {
     /// Space-separated number list (`opacity="0.5"`, `values="0 50;360 50"`).
     Numbers(Vec<f64>),
     /// A color, interpolable channel-wise and re-serialized as `#rrggbb`.
@@ -129,7 +129,7 @@ fn uniform_fractions(count: usize) -> Vec<f64> {
 
 impl AnimationPlan {
     /// Whether any rule survived compilation.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
@@ -142,7 +142,7 @@ impl AnimationPlan {
     }
 
     /// Whether any rule repeats indefinitely.
-    pub(crate) fn has_indefinite(&self) -> bool {
+    pub fn has_indefinite(&self) -> bool {
         self.rules
             .iter()
             .any(|rule| rule.timeline.repeat == Repeat::Indefinite)
@@ -153,7 +153,7 @@ impl AnimationPlan {
     /// The sampler starts a looping plan's grid here: everything before is
     /// introductory state, and a loop restarting the introduction every
     /// cycle would insert a base-value gap SMIL does not have.
-    pub(crate) fn intro_end(&self) -> Duration {
+    pub fn intro_end(&self) -> Duration {
         self.rules
             .iter()
             .filter_map(|rule| match rule.timeline.repeat {
@@ -168,7 +168,7 @@ impl AnimationPlan {
     /// Checked nanosecond LCM preserves every rule's phase on wrap. Finite
     /// rules do not contribute to an indefinite period: they have finished
     /// by `intro_end`, and their frozen or removed effects remain stable.
-    pub(crate) fn loop_period(&self) -> Option<Duration> {
+    pub fn loop_period(&self) -> Option<Duration> {
         if self.has_indefinite() {
             let mut common = 1_u128;
             for rule in &self.rules {
@@ -269,7 +269,7 @@ impl AnimatedVisual for AnimationPlan {
 /// `data` must be the exact text the byte ranges will splice into — the
 /// pipeline's own rewrites (face colors, root dimensions) run after this on
 /// the patched text, so their range arithmetic stays self-consistent.
-pub(crate) fn compile(data: &[u8]) -> Option<AnimationPlan> {
+pub fn compile(data: &[u8]) -> Option<AnimationPlan> {
     let text = std::str::from_utf8(data).ok()?;
     let document = usvg::roxmltree::Document::parse(text).ok()?;
     let root = document.root_element();
@@ -552,13 +552,13 @@ fn duration_from_nanos(nanos: u128) -> Option<Duration> {
 
 /// Finite spans have a terminal state; only proven periodic spans wrap.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum SampleTimeline {
+pub enum SampleTimeline {
     Finite { end: Duration },
     Repeating { origin: Duration, period: Duration },
 }
 
 impl AnimationPlan {
-    pub(crate) fn sample_timeline(&self) -> Option<SampleTimeline> {
+    pub fn sample_timeline(&self) -> Option<SampleTimeline> {
         let span = self.loop_period()?;
         Some(if self.has_indefinite() {
             SampleTimeline::Repeating {

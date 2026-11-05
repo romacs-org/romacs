@@ -159,3 +159,23 @@ fn relative_heights_truncate_like_gnu() {
     }
     assert_eq!(checked, 24);
 }
+
+/// A `:filtered` remapping is its face where the window's parameter is the
+/// filter's value and nothing elsewhere (xfaces.c filter_face_ref,
+/// evaluate_face_filter), and names the parameter it tests.
+#[test]
+fn filtered_remapping_follows_the_window() {
+    let mut df = Deffaces::default();
+    df.defface("default", &d("((t nil))")).unwrap();
+    let theme = Theme::build(Arc::new(df), None, Background::Light, plain_base()).unwrap();
+    let remap = Remap::from_alist(&romacs_face::BoundedDatum::new(&d(
+        "((default (:filtered (:window wide t) (:height 2.0)) default))",
+    )).unwrap()).unwrap();
+    assert_eq!(remap.filter_parameters().iter().map(|p| &**p).collect::<Vec<_>>(), ["wide"]);
+    let height = |matches: &dyn Fn(&str, &Datum) -> bool| {
+        let view = View::bind(&theme, &remap.for_window(matches)).unwrap();
+        attrs_get(&view.realize("default").unwrap(), Attribute::Height)
+    };
+    assert_eq!(height(&|name, value| name == "wide" && *value == Datum::T), d("200"));
+    assert_eq!(height(&|_, _| false), d("100"));
+}

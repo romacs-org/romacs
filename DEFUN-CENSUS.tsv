@@ -31,8 +31,6 @@ android-set-clipboard	absent	platform: Android build only
 android-set-mouse-absolute-pixel-position	absent	platform: Android build only
 android-toggle-on-screen-keyboard	absent	platform: Android build only
 backtrace--frames-from-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-backtrace-debug	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-backtrace-eval	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 bidi-find-overridden-directionality	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 bidi-resolved-levels	absent	no shipped Lisp calls it and it is no command
 bitmap-spec-p	absent	no shipped Lisp calls it and it is no command
@@ -261,7 +259,6 @@ native-comp-unit-set-file	needed	lane builtins-b (fonts, coding, images, system,
 native-elisp-load	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 network-interface-info	absent	no shipped Lisp calls it and it is no command
 network-interface-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-network-lookup-address-info	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 new-fontset	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 newline-cache-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
 next-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)

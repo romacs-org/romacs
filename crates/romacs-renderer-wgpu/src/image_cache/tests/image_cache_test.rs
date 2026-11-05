@@ -2,7 +2,8 @@ use super::*;
 use crate::image_bands::{BandPlacement, DecodedBand, RasterBand, RowRange};
 use crate::image_probe::{ImageProbeSource, probe_image_layout};
 use romacs_display_protocol::{
-    AxisSize, ImageFrameDelay, ImageFrameIndex, ImageRotation, ImageSizeSpec,
+    AxisSize, ImageEmbeddedMetadata, ImageFrameDelay, ImageFrameIndex, ImageHeuristicMask, ImageMaskKind,
+    ImageRotation, ImageSizeSpec,
 };
 use std::io::Cursor;
 use std::num::NonZeroUsize;
@@ -44,7 +45,7 @@ fn toolbar_png_keeps_intrinsic_colors_and_alpha() {
 }
 
 fn decode_toolbar_pixels(data: &[u8]) -> Vec<u8> {
-    let pixels = ImageCache::decode_data(
+    let pixels = Decode::decode_data(
         EncodedBytes::copy_of(data),
         ImageSizeSpec::default(),
         ImageRotation::None,
@@ -1487,7 +1488,7 @@ fn test_convert_argb32_to_rgba_basic() {
         0, 0, 0, 0, // Pixel (1,1): A=0, R=0, G=0, B=0 (transparent)
     ];
 
-    let result = ImageCache::convert_argb32_to_rgba(&data, width, height, stride);
+    let result = Decode::convert_argb32_to_rgba(&data, width, height, stride);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1523,7 +1524,7 @@ fn test_convert_argb32_with_stride_padding() {
         0, 0, 0, 0, // Padding (ignored)
     ];
 
-    let result = ImageCache::convert_argb32_to_rgba(&data, width, height, stride);
+    let result = Decode::convert_argb32_to_rgba(&data, width, height, stride);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1541,7 +1542,7 @@ fn test_convert_argb32_with_stride_padding() {
 fn test_convert_argb32_invalid_data_size() {
     // Data too small for 2x2 image
     let data: Vec<u8> = vec![255, 100, 150, 200]; // Only 1 pixel
-    let result = ImageCache::convert_argb32_to_rgba(&data, 2, 2, 8);
+    let result = Decode::convert_argb32_to_rgba(&data, 2, 2, 8);
     assert!(result.is_none());
 }
 
@@ -1561,7 +1562,7 @@ fn test_convert_rgb24_to_rgba_basic() {
         0, 0, 0, // Pixel (1,1): R=0, G=0, B=0 (black)
     ];
 
-    let result = ImageCache::convert_rgb24_to_rgba(&data, width, height, stride);
+    let result = Decode::convert_rgb24_to_rgba(&data, width, height, stride);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1593,7 +1594,7 @@ fn test_convert_rgb24_with_stride_padding() {
         0, 0, // Padding (ignored)
     ];
 
-    let result = ImageCache::convert_rgb24_to_rgba(&data, width, height, stride);
+    let result = Decode::convert_rgb24_to_rgba(&data, width, height, stride);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1611,7 +1612,7 @@ fn test_convert_rgb24_with_stride_padding() {
 fn test_convert_rgb24_invalid_data_size() {
     // Data too small for 2x2 image
     let data: Vec<u8> = vec![100, 150, 200]; // Only 1 pixel
-    let result = ImageCache::convert_rgb24_to_rgba(&data, 2, 2, 6);
+    let result = Decode::convert_rgb24_to_rgba(&data, 2, 2, 6);
     assert!(result.is_none());
 }
 
@@ -1637,7 +1638,7 @@ fn constrain_dimensions_only_enforces_the_texture_limit() {
 fn test_convert_argb32_single_pixel() {
     // Single pixel image - edge case
     let data: Vec<u8> = vec![255, 128, 64, 32]; // A=255, R=128, G=64, B=32
-    let result = ImageCache::convert_argb32_to_rgba(&data, 1, 1, 4);
+    let result = Decode::convert_argb32_to_rgba(&data, 1, 1, 4);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1650,7 +1651,7 @@ fn test_convert_argb32_single_pixel() {
 fn test_convert_rgb24_single_pixel() {
     // Single pixel image - edge case
     let data: Vec<u8> = vec![128, 64, 32]; // R=128, G=64, B=32
-    let result = ImageCache::convert_rgb24_to_rgba(&data, 1, 1, 3);
+    let result = Decode::convert_rgb24_to_rgba(&data, 1, 1, 3);
     assert!(result.is_some());
 
     let (w, h, rgba) = result.unwrap();
@@ -1924,7 +1925,7 @@ fn varying_png(width: u32, height: u32) -> Vec<u8> {
 /// Every pixel of the whole-image path's answer for `data`, through the same
 /// call the banded path falls back to.
 fn whole_pixels(data: &[u8]) -> NativePixels {
-    ImageCache::decode_whole(EncodedBytes::copy_of(data)).expect("fixture decodes whole")
+    Decode::decode_whole(EncodedBytes::copy_of(data)).expect("fixture decodes whole")
 }
 
 fn decode_with_bands(
@@ -1932,7 +1933,7 @@ fn decode_with_bands(
     scale: f32,
     bands: &mut Vec<DecodedBand>,
 ) -> Option<DecodedPixels> {
-    ImageCache::decode_data(
+    Decode::decode_data(
         EncodedBytes::copy_of(data),
         ImageSizeSpec::default(),
         ImageRotation::None,
@@ -2127,7 +2128,7 @@ fn every_band_lands_in_the_raster_the_finished_upload_resolves() {
     for (scale, expected) in scales {
         let realization = ImageRealization::with_device_scale(scale, scale);
         let mut bands = Vec::new();
-        let decoded = ImageCache::decode_data(
+        let decoded = Decode::decode_data(
             EncodedBytes::copy_of(&data),
             ImageSizeSpec::default(),
             ImageRotation::None,
@@ -2209,7 +2210,7 @@ fn a_rotation_or_a_rewriting_mask_decodes_the_whole_image() {
     ];
     for (name, rotation, mask) in cases {
         let mut bands = Vec::new();
-        let decoded = ImageCache::decode_data(
+        let decoded = Decode::decode_data(
             EncodedBytes::copy_of(&data),
             ImageSizeSpec::default(),
             rotation,
@@ -2361,7 +2362,7 @@ fn a_source_below_the_threshold_keeps_the_whole_image_paths_filter() {
     );
     let data = varying_png(width, height);
     let mut bands = Vec::new();
-    let decoded = ImageCache::decode_data(
+    let decoded = Decode::decode_data(
         EncodedBytes::copy_of(&data),
         ImageSizeSpec::new(AxisSize::Exact(20), AxisSize::Exact(15)),
         ImageRotation::None,
@@ -2406,7 +2407,7 @@ fn the_rows_a_band_hands_over_are_the_rows_the_finished_image_holds() {
     let mut bands = Vec::new();
     // A realization that really reduces: the raster is 500x500, so a band of
     // source rows has to be filtered rather than passed through.
-    let decoded = ImageCache::decode_data(
+    let decoded = Decode::decode_data(
         EncodedBytes::copy_of(&data),
         ImageSizeSpec::new(AxisSize::Exact(500), AxisSize::Exact(500)),
         ImageRotation::None,
@@ -2498,7 +2499,7 @@ fn the_texture_a_banded_decode_fills_ends_as_the_whole_image_paths() {
     // The finished upload, as `ImageCache::upload_texture` runs it when the
     // decode completes: the whole-image realization, written over the whole
     // texture in one call.
-    let whole = ImageCache::decode_whole(EncodedBytes::copy_of(&data))
+    let whole = Decode::decode_whole(EncodedBytes::copy_of(&data))
         .expect("fixture decodes whole")
         .realize_bitmap(
             size,
@@ -2683,7 +2684,7 @@ fn a_clamped_baseline_jpeg_ends_as_the_whole_image_paths_texture() {
         "a band is a slice of the finished pixels, not an approximation of them"
     );
 
-    let whole = ImageCache::decode_whole(EncodedBytes::copy_of(&data))
+    let whole = Decode::decode_whole(EncodedBytes::copy_of(&data))
         .expect("the fixture decodes whole")
         .realize_bitmap(
             ImageSizeSpec::default(),
@@ -2807,7 +2808,7 @@ fn disabled_animation_policy_never_serves_a_warmed_computed_sequence() {
     // so animated-vs-static is directly observable in the pixels.
     let animated = br##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="0" fill="#ffffff"><animate attributeName="r" values="4;1" dur="1s" repeatCount="indefinite"/></circle></svg>"##;
     let decode = |cache: &ImageSequenceCache, policy| {
-        ImageCache::decode_data(
+        Decode::decode_data(
             EncodedBytes::copy_of(animated),
             ImageSizeSpec::default(),
             ImageRotation::None,

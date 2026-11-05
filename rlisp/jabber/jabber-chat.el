@@ -631,7 +631,50 @@ JC is the Jabber connection."
     (current-buffer)))
 
 (defconst jabber-chat-backlog-chunk-size 100
-  "Number of backlog entries to insert per timer tick.")
+  "Most backlog entries to insert per timer tick.")
+
+(defvar jabber-chat-backlog-chunk-budget 0.002
+  "Seconds of backlog insertion per timer tick.
+A tick inserts at least one entry, then stops at this budget, at
+`jabber-chat-backlog-chunk-size' entries, or when input is pending, so
+loading a long backlog never holds a key behind it.")
+
+(defvar jabber-chat-backlog-chunk-delay 0.02
+  "Seconds between backlog insertion ticks.")
+
+(defvar jabber-chat-backlog-idle 0.25
+  "Seconds without input before a backlog tick works.
+While the user types, ticks wait: a backlog fills in typing pauses, and
+no key waits behind the rendering of a message.")
+
+(defvar jabber-chat-backlog-patience 1.0
+  "Seconds backlog ticks wait for a typing pause before working between keys.")
+
+(defvar jabber-chat-backlog-at-once nil
+  "Non-nil while a refresh works its whole backlog in one tick.
+A background sync's refresh binds it (`jabber-chat-buffer-refresh' with
+ATOMIC), so redisplay sees the old transcript or the new one, never an
+emptied or partial one.  It runs only when the user is idle.")
+
+(defvar-local jabber-chat--backlog-waiting nil
+  "When this buffer's backlog ticks began to wait for the user, or nil.")
+
+(defun jabber-chat--backlog-wait-p (buffer)
+  "Non-nil when BUFFER's backlog tick should wait for the user.
+It never runs while input is pending.  It waits for a pause of
+`jabber-chat-backlog-idle' seconds, but once it has waited
+`jabber-chat-backlog-patience' it runs between keys, so a user who
+never pauses still gets the backlog.  Outside idleness (called from a
+command, or in batch) a tick works."
+  (with-current-buffer buffer
+    (let* ((now (float-time))
+           (since (or jabber-chat--backlog-waiting now))
+           (idle (current-idle-time))
+           (wait (or (input-pending-p)
+                     (and idle (< (float-time idle) jabber-chat-backlog-idle)
+                          (< (- now since) jabber-chat-backlog-patience)))))
+      (setq jabber-chat--backlog-waiting (and wait since))
+      (and wait (not jabber-chat-backlog-at-once)))))
 
 (defun jabber-chat-insert-backlog-entry (msg-plist)
   "Insert backlog MSG-PLIST at beginning of buffer."
@@ -675,7 +718,8 @@ JC is the Jabber connection."
 (defun jabber-chat--insert-backlog-chunked (buffer entries callback
                                                    &optional generation)
   "Insert ENTRIES into BUFFER's ewoc in chunks to avoid blocking.
-Inserts `jabber-chat-backlog-chunk-size' entries per timer tick.
+Each timer tick inserts entries for `jabber-chat-backlog-chunk-budget'
+seconds, at most `jabber-chat-backlog-chunk-size' of them.
 Call CALLBACK with no arguments when all entries are inserted.
 GENERATION, when non-nil, is checked against the buffer's
 `jabber-chat--backlog-generation'; a mismatch means a newer
@@ -692,18 +736,31 @@ refresh has started and this insert sequence should abort."
                            'jabber-chat--backlog-generation buffer))))
         (with-current-buffer buffer
           (funcall callback)))
+    (if (jabber-chat--backlog-wait-p buffer)
+        ;; The user is typing: this tick goes after them.
+        (run-with-timer jabber-chat-backlog-chunk-delay nil
+                        #'jabber-chat--insert-backlog-chunked
+                        buffer entries callback generation)
     (with-current-buffer buffer
-      (let* ((chunk (cl-subseq entries 0
-			       (min jabber-chat-backlog-chunk-size
-				    (length entries))))
-	     (rest (nthcdr (length chunk) entries)))
+      (let ((rest entries)
+            (start (float-time))
+            (count 0))
 	(jabber-chat-buffer--call-with-transcript
-         #'mapc #'jabber-chat-insert-backlog-entry chunk)
+         (lambda ()
+           (while (and rest
+                       (or jabber-chat-backlog-at-once
+                           (and (< count jabber-chat-backlog-chunk-size)
+                                (or (= count 0)
+                                    (and (< (- (float-time) start)
+                                            jabber-chat-backlog-chunk-budget)
+                                         (not (input-pending-p)))))))
+             (jabber-chat-insert-backlog-entry (pop rest))
+             (setq count (1+ count)))))
 	(if rest
-	    (run-with-timer 0.1 nil
+	    (run-with-timer jabber-chat-backlog-chunk-delay nil
 			    #'jabber-chat--insert-backlog-chunked
 			    buffer rest callback generation)
-	  (when callback (funcall callback)))))))
+	  (when callback (funcall callback))))))))
 
 (defun jabber-chat-display-more-backlog (how-many)
   "Display more messages from local history.

@@ -1,0 +1,29 @@
+[package]
+name = "romacs-imaging"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CPU image decoding for Romacs: probes, decoders, masks and metadata"
+
+[dependencies]
+enum_dispatch.workspace = true
+tracing.workspace = true
+image.workspace = true
+png.workspace = true
+zune-jpeg.workspace = true
+imagesize.workspace = true
+flate2.workspace = true
+resvg.workspace = true
+svgtypes.workspace = true
+simplecss.workspace = true
+romacs-display-protocol.workspace = true
+
+[dev-dependencies]
+romacs-infra.workspace = true
+jpeg-encoder.workspace = true
+image-extras.workspace = true
+
+[lints]
+workspace = true

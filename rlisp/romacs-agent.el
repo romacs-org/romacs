@@ -1080,15 +1080,22 @@ harness as its whole stdin."
       (setf (romacs-agent-unit session) nil))
     (romacs-agent--manifest session argv)))
 
+(defun romacs-agent--project-default ()
+  "The directory a new session works in by default: the current
+project's root, else `default-directory'.  The harness's own
+configuration directory comes from its instance, never from here."
+  (let ((project (project-current nil)))
+    (if project (project-root project) default-directory)))
+
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
-  "Start a session in CWD under instance PROVIDER (a name in
-`romacs-agent-providers', by default `romacs-agent-default-provider'),
-sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
+  "Start a session working in the project directory CWD under instance
+PROVIDER (a name in `romacs-agent-providers', by default
+`romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 \(its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session."
-  (interactive (let* ((cwd (read-directory-name "Agent directory: " default-directory))
+  (interactive (let* ((cwd (read-directory-name "Project directory: " (romacs-agent--project-default)))
                       (provider (romacs-agent--read-provider)))
                  (list cwd (read-string "Prompt (empty for none): ") nil provider)))
   (let* ((name (or provider (romacs-agent--default-provider)))

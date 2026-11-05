@@ -488,8 +488,11 @@ A <gone/> renews or retires it alongside durable writes the rollback undoes."
        jc from type (plist-get fields :thread-id))))))
 
 (defun jabber-handle-incoming-message-chatstates (jc xml-data)
-  "Update the chat buffer's typing indicator from XML-DATA on JC."
-  (when-let* ((from (jabber-xml-get-attribute xml-data 'from))
+  "Update the chat buffer's typing indicator from XML-DATA on JC.
+A message with no children (one an archive result was taken out of)
+carries no state and no body: no buffer is looked for."
+  (when-let* (((jabber-xml-node-children xml-data))
+              (from (jabber-xml-get-attribute xml-data 'from))
               (type (or (jabber-xml-get-attribute xml-data 'type) "chat"))
               (buffer (jabber-chatstates--target-buffer
                        jc xml-data from type)))

@@ -1558,6 +1558,33 @@ entry with JC=nil."
         (should (= position (window-start window)))
         (should (= position (window-point window)))))))
 
+(ert-deftest jabber-test-muc-nick-colors-cached-per-background ()
+  "A nickname's colour is computed once per background: another background
+computes its own, colourization off bypasses the cache, and the cache
+starts over past its limit."
+  (let ((jabber-muc--nick-colors (make-hash-table :test #'equal))
+        (jabber-muc-nick-colors-limit 3)
+        (jabber-muc-colorize-nicks t)
+        (computed 0)
+        (background "#000000"))
+    (cl-letf* ((compute (symbol-function 'jabber-muc--nick-color))
+               ((symbol-function 'jabber-muc--nick-color)
+                (lambda (&rest args) (cl-incf computed) (apply compute args)))
+               ((symbol-function 'jabber-muc--default-background) (lambda () background)))
+      (let ((dark (jabber-muc--nick-face "alice")))
+        (should (equal dark (jabber-muc--nick-face "alice")))
+        (should (= 1 computed))
+        (setq background "#ffffff")
+        (should-not (equal (plist-get dark :foreground)
+                           (plist-get (jabber-muc--nick-face "alice") :foreground)))
+        (should (= 2 computed))
+        (let ((jabber-muc-colorize-nicks nil))
+          (should (equal '((:weight semi-bold) jabber-chat-nick-foreign-plaintext)
+                         (jabber-muc--nick-face "alice"))))
+        (jabber-muc--nick-face "bob")
+        (jabber-muc--nick-face "carol")
+        (should (<= (hash-table-count jabber-muc--nick-colors) 3))))))
+
 (ert-deftest jabber-test-muc-nick-hue-matches-xep-0392 ()
   "Nickname hues match the XEP-0392 test vectors."
   (dolist (entry '(("Romeo" . 327.255249)

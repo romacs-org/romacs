@@ -11,7 +11,7 @@ use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, S
 /// What the bar's expansion depends on (`Vm::bar_key').
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BarKey {
-    epoch: u64, collections: u64, faces: u64, columns: usize, focused: bool,
+    epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
     lines: Vec<LineKey>,
 }
@@ -89,11 +89,13 @@ impl Vm {
         // Whether the owner's buffer is modified, read before its line's Lisp
         // runs: that may collect, which moves windows (`owner' is not rooted).
         let buffer = self.window(owner)?.buffer;
+        // The owner's buffer's faces: its `face-remapping-alist' remaps the
+        // bar's faces as it would the window's own mode line.
+        let table = self.window_faces(owner)?;
         let modified = matches!(self.object(buffer)?, Object::Buffer(b) if b.state.modified());
         let band = self.status_bar_band(owner, columns)?;
         // Kept for a click, which reads it as a string (`status_bar_target').
         self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
-        let table = self.display_faces()?;
         let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
         // The owner's line leads the bar, where it has one; its pills read
@@ -133,7 +135,8 @@ impl Vm {
         let [level, origin] = ["romacs--minibuf-level", "romacs--minibuf-selected-window"].map(|name| self.slot(name));
         Ok(BarKey {
             epoch: self.display_state.mode_line_epoch, collections: self.gc_stats.collections,
-            faces: self.display_state.face_revision, columns, focused,
+            // The owner's table changes with its buffer's remapping too.
+            faces: (self.display_state.face_revision, self.window_faces(owner)?.id), columns, focused,
             minibuffer: (self.variable_value(level)?.0, self.variable_value(origin)?.0, self.selected_window_value()?.0),
             lines,
         })

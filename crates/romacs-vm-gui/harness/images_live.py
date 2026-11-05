@@ -21,6 +21,23 @@ labwc with the same font, and evaluates the same forms in both.
               100 with :margin, a slice: line-pixel-height,
               window-text-pixel-size, posn-at-point and vertical-motion
               over them.
+  org         Org's inline images (org-display-inline-images) with
+              org-image-actual-width nil, 30 and (60), an #+ATTR_ORG width,
+              and org-redisplay-inline-images after a file changes: each
+              overlay's span, :width, :scale and image-size, and the line
+              heights.
+  gnosis      gnosis's managed image in a private gnosis-dir (a fixture,
+              never a user's database): its decode validation
+              (gnosis-image--decode, image-size against the manifest), its
+              review image (gnosis-image-format-string) and its occlusion
+              scene masked and revealed (gnosis-image-mask, svg-image with
+              :scale 1.0) laid out in a buffer.
+  hidpi       run with PARITY_OUTPUT_SCALE=2: frame metrics, image-size of
+              an SVG, a PNG and a :scale 2 JPEG, and an image line's
+              height, size and posn-at-point, all in logical pixels.
+  text-scale  a pixel-sized and an em-sized image before, under and after
+              text-scale-set 2: line heights, the glyphs' sizes in
+              posn-at-point, and image-size (the frame's default face).
 
 Fixtures are in harness/fixtures/images.  `canvas' is GNU's Android-only
 type (DIVERGENCES VM2-IMAGE-CANVAS), so the forms leave it out.  COMPARISON POLICY: every form's
@@ -44,6 +61,7 @@ INIT = ''';; -*- lexical-binding: t -*-
 (load {probe} nil t)
 (defmacro im-try (&rest body) `(condition-case err (progn ,@body) (error (cons 'ERROR err))))
 (defun im-file (name) (expand-file-name name {fixtures}))
+(defvar im-root {root})
 (defun im-spec (name &rest props) (append (list 'image :type (image-type (im-file name)) :file (im-file name)) props))
 (with-temp-file (expand-file-name "alive" parity-probe-dir) (insert (number-to-string (float-time))))
 '''
@@ -140,6 +158,39 @@ WORKFLOWS = {
             '(save-excursion (goto-char (point-min)) (list (vertical-motion 2) (point) (vertical-motion 1) (point)))',
         )],
     ],
+    'org': [
+        '(progn (setq im-org-dir (make-temp-file "im-org" t)) (dolist (f (list "plain.png" "photo.jpg" "sized.svg")) (copy-file (im-file f) (expand-file-name f im-org-dir) t)) (find-file (expand-file-name "notes.org" im-org-dir)) (delete-other-windows) (erase-buffer) (insert "Images, no heading: the theme sizes headings\\n[[file:plain.png]]\\n#+ATTR_ORG: :width 50\\n[[file:photo.jpg]]\\n[[file:sized.svg]]\\nend\\n") (org-mode) (goto-char (point-min)) t)',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (setq org-image-actual-width nil) (org-display-inline-images) t)))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (redisplay t) (mapcar (lambda (o) (let ((d (overlay-get o (quote display)))) (list (overlay-start o) (overlay-end o) (plist-get (cdr d) :width) (plist-get (cdr d) :scale) (image-size d t)))) (sort (seq-filter (lambda (o) (eq (car-safe (overlay-get o (quote display))) (quote image))) (overlays-in (point-min) (point-max))) (lambda (a b) (< (overlay-start a) (overlay-start b))))))))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (save-excursion (redisplay t) (goto-char (point-min)) (let (h) (dotimes (_ 6) (push (line-pixel-height) h) (forward-line 1)) (nreverse h)))))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (org-remove-inline-images) (setq org-image-actual-width 30) (org-display-inline-images) t)))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (redisplay t) (mapcar (lambda (o) (let ((d (overlay-get o (quote display)))) (list (overlay-start o) (overlay-end o) (plist-get (cdr d) :width) (plist-get (cdr d) :scale) (image-size d t)))) (sort (seq-filter (lambda (o) (eq (car-safe (overlay-get o (quote display))) (quote image))) (overlays-in (point-min) (point-max))) (lambda (a b) (< (overlay-start a) (overlay-start b))))))))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (org-remove-inline-images) (setq org-image-actual-width (list 60)) (org-display-inline-images) t)))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (redisplay t) (mapcar (lambda (o) (let ((d (overlay-get o (quote display)))) (list (overlay-start o) (overlay-end o) (plist-get (cdr d) :width) (plist-get (cdr d) :scale) (image-size d t)))) (sort (seq-filter (lambda (o) (eq (car-safe (overlay-get o (quote display))) (quote image))) (overlays-in (point-min) (point-max))) (lambda (a b) (< (overlay-start a) (overlay-start b))))))))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (save-excursion (redisplay t) (goto-char (point-min)) (let (h) (dotimes (_ 6) (push (line-pixel-height) h) (forward-line 1)) (nreverse h)))))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (copy-file (im-file "alpha.png") (expand-file-name "plain.png" im-org-dir) t) (org-redisplay-inline-images) t)))',
+        '(with-selected-window (get-buffer-window "notes.org") (with-current-buffer "notes.org" (progn (redisplay t) (mapcar (lambda (o) (let ((d (overlay-get o (quote display)))) (list (overlay-start o) (overlay-end o) (plist-get (cdr d) :width) (plist-get (cdr d) :scale) (image-size d t)))) (sort (seq-filter (lambda (o) (eq (car-safe (overlay-get o (quote display))) (quote image))) (overlays-in (point-min) (point-max))) (lambda (a b) (< (overlay-start a) (overlay-start b))))))))',
+    ],
+    'gnosis': [
+        '(progn (dolist (d (list "gnosis" "emacs-lisp")) (add-to-list (quote load-path) (expand-file-name (concat "rlisp/" d) im-root))) (require (quote gnosis)) (require (quote gnosis-image)) (setq gnosis-dir (file-name-as-directory (make-temp-file "im-gnosis" t))) (setq gn-ref (gnosis-image-import (im-file "photo.jpg") (list (list (cons (quote id) "a") (cons (quote label) "A") (cons (quote rect) (list 0.25 0.25 0.5 0.5)))))) (stringp gn-ref))',
+        '(let ((scene (gnosis-image-resolve gn-ref))) (list (alist-get (quote width) scene) (alist-get (quote height) scene) (image-size (gnosis-image--decode scene) t)))',
+        '(progn (switch-to-buffer (get-buffer-create "gn")) (delete-other-windows) (erase-buffer) (insert "review: " (gnosis-image-format-string (format "see [[gnosis-image:%s]] text" gn-ref)) "\\n") (insert "mask: " (gnosis-image-mask (gnosis-image-resolve gn-ref) "a" nil) "\\nshown: " (gnosis-image-mask (gnosis-image-resolve gn-ref) "a" t) "\\nend\\n") (goto-char (point-min)) (redisplay t) t)',
+        '(with-selected-window (get-buffer-window "gn") (with-current-buffer "gn" (redisplay t) (list (save-excursion (goto-char (point-min)) (let (h) (dotimes (_ 4) (push (line-pixel-height) h) (forward-line 1)) (nreverse h))) (let (out (pos (point-min))) (while (setq pos (next-single-property-change pos (quote display))) (let ((d (get-text-property pos (quote display)))) (when (eq (car-safe d) (quote image)) (push (list (plist-get (cdr d) :type) (image-size d t) (posn-object-width-height (posn-at-point pos))) out)))) (nreverse out)) (window-text-pixel-size nil (point-min) (point-max)))))',
+    ],
+    # Under PARITY_OUTPUT_SCALE=2 (a HiDPI output): sizes stay logical.
+    'hidpi': [
+        '(list (frame-char-width) (frame-char-height) (image-size (im-spec "sized.svg") t) (image-size (im-spec "plain.png") t) (image-size (im-spec "photo.jpg" :scale 2) t))',
+        '(progn (switch-to-buffer (get-buffer-create "im-hidpi")) (delete-other-windows) (erase-buffer) (insert "svg ") (insert-image (im-spec "sized.svg")) (insert " png ") (insert-image (im-spec "plain.png")) (insert "\\nend\\n") (goto-char (point-min)) (redisplay t) t)',
+        '(with-selected-window (get-buffer-window "im-hidpi") (with-current-buffer "im-hidpi" (redisplay t) (list (line-pixel-height) (window-text-pixel-size nil (point-min) (point-max)) (save-excursion (goto-char 5) (let ((p (posn-at-point))) (list (posn-x-y p) (posn-object-width-height p)))))))',
+    ],
+    'text-scale': [
+        '(progn (switch-to-buffer (get-buffer-create "im-scale")) (delete-other-windows) (erase-buffer) (insert "px ") (insert-image (im-spec "plain.png" :width 40)) (insert "\\nem ") (insert-image (im-spec "plain.png" :width (quote (2 . em)))) (insert "\\nend\\n") (goto-char (point-min)) (redisplay t) t)',
+        '(with-selected-window (get-buffer-window "im-scale") (with-current-buffer "im-scale" (progn (redisplay t) (list (save-excursion (goto-char (point-min)) (let (h) (dotimes (_ 3) (push (line-pixel-height) h) (forward-line 1)) (nreverse h))) (save-excursion (goto-char 4) (posn-object-width-height (posn-at-point))) (save-excursion (goto-char (point-min)) (forward-line 1) (goto-char (+ (point) 3)) (posn-object-width-height (posn-at-point))) (image-size (im-spec "plain.png" :width (quote (2 . em))) t)))))',
+        '(with-selected-window (get-buffer-window "im-scale") (with-current-buffer "im-scale" (progn (text-scale-set 2) t)))',
+        '(with-selected-window (get-buffer-window "im-scale") (with-current-buffer "im-scale" (progn (redisplay t) (list (save-excursion (goto-char (point-min)) (let (h) (dotimes (_ 3) (push (line-pixel-height) h) (forward-line 1)) (nreverse h))) (save-excursion (goto-char 4) (posn-object-width-height (posn-at-point))) (save-excursion (goto-char (point-min)) (forward-line 1) (goto-char (+ (point) 3)) (posn-object-width-height (posn-at-point))) (image-size (im-spec "plain.png" :width (quote (2 . em))) t)))))',
+        '(with-selected-window (get-buffer-window "im-scale") (with-current-buffer "im-scale" (progn (text-scale-set 0) t)))',
+        '(with-selected-window (get-buffer-window "im-scale") (with-current-buffer "im-scale" (progn (redisplay t) (list (save-excursion (goto-char (point-min)) (let (h) (dotimes (_ 3) (push (line-pixel-height) h) (forward-line 1)) (nreverse h))) (save-excursion (goto-char 4) (posn-object-width-height (posn-at-point))) (save-excursion (goto-char (point-min)) (forward-line 1) (goto-char (+ (point) 3)) (posn-object-width-height (posn-at-point))) (image-size (im-spec "plain.png" :width (quote (2 . em))) t)))))',
+    ],
 }
 
 
@@ -148,7 +199,8 @@ def launch(engine, base, args):
     # The collector's checks (gc.rs), when the run asks for them.
     env.update({k: v for k, v in parity_live.os.environ.items() if k in ('ROMACS_GC_STRESS', 'ROMACS_GC_VERIFY')})
     chrome = '(menu-bar-mode -1) (tool-bar-mode -1) (scroll-bar-mode -1)\n' if engine == 'gnu' else ''
-    init = INIT.format(chrome=chrome, probe=lisp_string(str(parity_live.PROBE)), fixtures=lisp_string(str(FIXTURES) + '/'))
+    init = INIT.format(chrome=chrome, probe=lisp_string(str(parity_live.PROBE)), fixtures=lisp_string(str(FIXTURES) + '/'),
+                       root=lisp_string(str(parity_live.ROOT) + '/'))
     if engine == 'gnu':
         return gnu_engine(root, home, env, init, None, args.timeout, args.tools)
     return romacs_engine(args.romacs, root, home, env, init, None, args.timeout, args.tools)

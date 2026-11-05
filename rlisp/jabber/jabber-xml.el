@@ -146,16 +146,28 @@ Uses a custom parser instead of `sgml-skip-tag-forward'."
    (t
     (throw 'unfinished nil))))
 
+(declare-function romacs--xml-read-element "romacs:xml" (start end))
+
 (defun jabber-xml-parse-next-stanza ()
   "Parse the first XML stanza in the current buffer.
 Parse and return the first complete XML element in the buffer,
 leaving point at the end of it.  If there is no complete XML
-element, return nil."
-  (and (catch 'unfinished
-	 (goto-char (point-min))
-	 (jabber-xml-skip-tag-forward)
-	 (> (point) (point-min)))
-       (xml-parse-region (point-min) (point))))
+element, return nil.
+Where Romacs reads XML natively (`romacs--xml-read-element'), the
+element is read as `xml-parse-region' reads it; what that declines
+\(comments, unknown entities, anything not well-formed) is read here."
+  (pcase (and (fboundp 'romacs--xml-read-element)
+              (romacs--xml-read-element (point-min) (point-max)))
+    ('incomplete nil)
+    (`(,element . ,end)
+     (goto-char end)
+     (list element))
+    (_
+     (and (catch 'unfinished
+	    (goto-char (point-min))
+	    (jabber-xml-skip-tag-forward)
+	    (> (point) (point-min)))
+	  (xml-parse-region (point-min) (point))))))
 
 (defsubst jabber-xml-node-name (node)
   "Return the tag associated with NODE.

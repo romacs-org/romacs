@@ -77,6 +77,9 @@ pub trait HostInput {
     /// one ready ends it with `Process'.  A host that cannot wait on them
     /// ignores them, and process output waits for Lisp's own waits.
     fn watch_processes(&mut self, _fds: &[(std::os::fd::RawFd, i16)]) {}
+    /// Whether the last paint left images to send and was drawn: paint
+    /// again before waiting for input.
+    fn images_behind(&mut self) -> bool { false }
 
     /// Read CLIPBOARD text with a bounded wait and without running Lisp.
     /// No text (`None`) is distinct from an unavailable host or backend error.
@@ -278,6 +281,8 @@ impl Vm {
         let mut redraw = display;
         loop {
             redraw |= self.poll_terminal_output()?;
+            // An image decoded off the VM landed: the frame shows it.
+            redraw |= self.land_images()?;
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
             // is non-nil, as it is around Lisp that redisplay itself calls,
             // and waits for pending input; but GNU's `message' displays the
@@ -307,6 +312,12 @@ impl Vm {
                     redraw = false;
                 }
                 if self.host_wait_state()? != before { return Ok(HostEvent::Timeout); }
+            }
+            // The paint sent a bounded share of new images: paint the rest
+            // before waiting, while no input waits and redisplay may run.
+            if host.images_behind() && !host.input_pending() && !self.redisplay_inhibited()? {
+                redraw = true;
+                continue;
             }
             // A user signal `debug-on-event' names, which woke this wait:
             // the command reading quits into the debugger now, as GNU's
