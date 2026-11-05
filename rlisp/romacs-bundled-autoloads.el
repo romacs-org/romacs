@@ -560,12 +560,17 @@ recompiling; signals an error if no frame shader is installed
 
 ;;; Generated autoloads from romacs-theme.el
 
-(register-definition-prefixes "romacs-theme" '("romacs-"))
+(register-definition-prefixes "romacs-theme" '("def-romacs-theme" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-theme-modus.el
 
 (register-definition-prefixes "romacs-theme-modus" '("romacs-theme-"))
+
+
+;;; Generated autoloads from romacs-theme-roles.el
+
+(register-definition-prefixes "romacs-theme-roles" '("romacs-theme-"))
 
 
 ;;; Generated autoloads from romacs-unidata.el
