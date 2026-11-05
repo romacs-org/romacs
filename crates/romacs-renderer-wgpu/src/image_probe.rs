@@ -13,10 +13,11 @@
 //! which is the whole point: a layout that resolves late is survivable, a
 //! layout that resolves *wrongly* is worse than waiting.
 //!
-//! Vector documents are deliberately absent. An SVG's intrinsic extent comes
-//! from a document parse whose bounding-box fallback depends on resolved
-//! resources and colors, so it is not a header and cannot be guaranteed to
-//! agree with the rasterized result.
+//! A vector document is measured only when its root start tag gives the
+//! extent (`viewBox`, `width`, `height`: [`probe_svg_reported`]), which its
+//! decode takes from the same attributes. A dimensionless SVG's extent is
+//! its drawing's bounding box, from a document parse whose result depends
+//! on resolved resources and colors: not a header, so it is not probed.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -102,6 +103,35 @@ pub fn probe_image_layout(
             .resolve_geometry(size, intrinsic, rotation)
             .layout(),
     )
+}
+
+/// The size `image-size` reports for `source` (margins aside), from its
+/// encoded header alone: the `reported` extent of the same
+/// [`ImageRealization::resolve_geometry`] a full decode publishes.
+#[must_use]
+pub fn probe_image_reported(
+    source: ImageProbeSource<'_>,
+    size: ImageSizeSpec,
+    rotation: ImageRotation,
+    realization: ImageRealization,
+) -> Option<(u32, u32)> {
+    let intrinsic = probe_intrinsic_extent(source)?;
+    Some(realization.resolve_geometry(size, intrinsic, rotation).reported().dimensions())
+}
+
+/// The size `image-size` reports for an SVG (margins aside) whose root
+/// start tag, in HEAD, a prefix of the document, gives its extent: the
+/// extent its decode takes from the same attributes (svg.rs `load').  None
+/// when the root does not give it.
+#[must_use]
+pub fn probe_svg_reported(
+    head: &[u8],
+    size: ImageSizeSpec,
+    rotation: ImageRotation,
+    realization: ImageRealization,
+) -> Option<(u32, u32)> {
+    let intrinsic = catch_unwind(AssertUnwindSafe(|| crate::svg::root_tag_intrinsic_extent(head))).ok().flatten()?;
+    Some(realization.resolve_geometry(size, intrinsic, rotation).reported().dimensions())
 }
 
 /// Raster formats read only their header. Animated sources composite to the

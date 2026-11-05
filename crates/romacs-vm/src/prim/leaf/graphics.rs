@@ -323,17 +323,58 @@ impl Leaf<'_> {
     /// through the display host when not cached.  A load that fails is
     /// cached as GNU's placeholder, `:width' x `:height' or 30 x 30.
     /// The loader's message when this lookup failed, for `image_error''s log.
+    /// A Lisp query's lookup: a pending decode is waited for (C-g quits
+    /// the wait), so its facts are final.
     pub(crate) fn image_lookup(&mut self, spec: &Spec, env: &ImageEnv)
+                               -> std::result::Result<(ImageKey, ImageEntry, Option<String>), Fault> {
+        let (key, entry, error) = self.image_lookup_display(spec, env)?;
+        if !entry.facts.pending { return Ok((key, entry, error)); }
+        // GNU's loaders decode in the query; this waits for the worker as
+        // they would, but a C-g quits it (a press under `inhibit-quit'
+        // sets `quit-flag' and the wait goes on).
+        let signal = self.vm.quit_signal();
+        let mut quittable = true;
+        // Each press is taken (`maybe_quit'), so a later one quits again;
+        // one left untaken (the evaluator not busy) is not polled again.
+        let finished = loop {
+            let finished = match self.vm.window_system_host() {
+                Some(host) => host.finish_decode(entry.facts.id, &|| quittable && signal.pressed()),
+                None => Err("Window system frame should be used".into()),
+            };
+            if !finished.as_ref().is_err_and(|e| e == crate::display_host::DECODE_QUIT) { break finished; }
+            match self.vm.maybe_quit() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
+                Some(escape) => { self.vm.propagated_escape = Some(escape); return Err(Fault::Escape) }
+                None => quittable = !signal.pressed(),
+            }
+        };
+        self.vm.images.settle(entry.facts.id);
+        let before = entry.clone();
+        let (entry, error) = self.vm.settle_image(&key, entry, finished);
+        if reshown(&before, &entry) { self.vm.display_state.free_realized_faces(); }
+        Ok((key, entry, error))
+    }
+
+    /// Display's lookup: a miss starts the decode and answers at once,
+    /// pending when the host sized the image from its header.
+    pub(crate) fn image_lookup_display(&mut self, spec: &Spec, env: &ImageEnv)
                                -> std::result::Result<(ImageKey, ImageEntry, Option<String>), Fault> {
         let (scale, auto) = self.image_scale(spec, env)?;
         let key = self.image_key(spec, env, scale);
-        if let Some(entry) = self.vm.images.get(&key).filter(|e| !e.failed).cloned() { return Ok((key, entry, None)) }
+        let retry = match self.vm.images.get(&key) {
+            Some(entry) if !entry.failed => return Ok((key, entry.clone(), None)),
+            found => found.is_some(),
+        };
         let mut dependencies = if auto { vec![Dependency::Auto] } else { vec![] };
         let loaded = match self.image_query(spec, env, scale)? {
             Ok((query, file)) => {
                 if let Some(file) = file { dependencies.push(Dependency::File(file)); }
                 match self.vm.window_system_host() {
-                    Some(host) => host.decode_image(query),
+                    // A failed image is loaded again, as GNU's lookup_image
+                    // frees and reloads one; here at once, so a decode that
+                    // fails after its header does not size it again.
+                    Some(host) if retry => host.decode_image(query),
+                    Some(host) => host.begin_decode(query),
                     None => Err("Window system frame should be used".into()),
                 }
             }
@@ -344,8 +385,7 @@ impl Leaf<'_> {
             Ok(facts) => (facts, false),
             Err(message) => {
                 error = Some(message);
-                let dim = |key: &str| spec.get(key).and_then(|v| v.integer_value()).filter(|n| *n >= 0).map_or(30, |n| n as u32);
-                (ImageFacts { id: 0, width: dim(":width"), height: dim(":height"), mask: false, metadata: ImageEmbeddedMetadata::EMPTY, background: None }, true)
+                (placeholder(spec), true)
             }
         };
         let margins = if failed { (0, 0) } else { self.image_margins(spec) };
@@ -380,7 +420,7 @@ impl Leaf<'_> {
     pub(crate) fn image_glyph(&mut self, spec: &Spec, slice: Value, face: Option<&romacs_layout_input::Face>) -> std::result::Result<Option<romacs_layout_input::InlineImage>, Fault> {
         let mut env = self.image_env(Value::NIL)?;
         if let Some(face) = face { self.image_env_face(&mut env, face); }
-        let (_, entry, _) = self.image_lookup(spec, &env)?;
+        let (_, entry, _) = self.image_lookup_display(spec, &env)?;
         let (width, height) = (i64::from(entry.facts.width), i64::from(entry.facts.height));
         let (hmargin, vmargin) = (i64::from(entry.margins.0), i64::from(entry.margins.1));
         // Each of the slice's X, Y, WIDTH, HEIGHT: pixels, or a fraction of the image's.
@@ -597,6 +637,83 @@ impl Leaf<'_> {
     fn bool_vector_bits(&self, v: Value) -> Vec<bool> {
         match self.vm.object_if(v) { Some(crate::data::Object::BoolVector(b)) => (0..b.len).map(|i| b.get(i).unwrap_or(false)).collect(), _ => vec![] }
     }
+}
+
+/// GNU's placeholder for an image that failed to load: `:width' x
+/// `:height', else 30 x 30, with no pixels.
+fn placeholder(spec: &Spec) -> ImageFacts {
+    let dim = |key: &str| spec.get(key).and_then(|v| v.integer_value()).filter(|n| *n >= 0).map_or(30, |n| n as u32);
+    placeholder_sized(dim(":width"), dim(":height"))
+}
+
+fn placeholder_sized(width: u32, height: u32) -> ImageFacts {
+    ImageFacts { id: 0, width, height, mask: false, metadata: ImageEmbeddedMetadata::EMPTY, background: None, pending: false }
+}
+
+/// `placeholder' from KEY's copy of the spec.
+fn placeholder_of_key(key: &ImageKey) -> ImageFacts {
+    let dim = |name: &str| key.plist.iter().find(|(k, _)| k == name)
+        .and_then(|(_, v)| match v { KeyValue::Integer(n) if *n >= 0 => Some(*n as u32), _ => None }).unwrap_or(30);
+    placeholder_sized(dim(":width"), dim(":height"))
+}
+
+impl crate::Vm {
+    /// ENTRY, pending, as its decode FINISHED it: its final facts, or
+    /// GNU's placeholder and the loader's message.
+    pub(crate) fn settle_image(&mut self, key: &ImageKey, mut entry: ImageEntry,
+                               finished: std::result::Result<ImageFacts, String>) -> (ImageEntry, Option<String>) {
+        let error = match finished {
+            Ok(facts) => { entry.facts = facts; None }
+            Err(message) => {
+                entry = ImageEntry { facts: placeholder_of_key(key), margins: (0, 0), failed: true, ..entry };
+                Some(message)
+            }
+        };
+        self.images.insert(key.clone(), entry.clone());
+        (entry, error)
+    }
+
+    /// Apply the decodes the display host finished since the last call:
+    /// their entries' final facts, or GNU's placeholder; the windows are
+    /// laid out again when one shows differently (`reshown').  The loaders' messages, for *Messages*, and
+    /// whether any finished (the frame on screen shows them).
+    pub fn image_completions(&mut self) -> (Vec<String>, bool) {
+        let Some(host) = self.window_system_host() else { return (vec![], false) };
+        let finished = host.finished_decodes();
+        if finished.is_empty() { return (vec![], false); }
+        let (mut messages, mut relayout) = (vec![], false);
+        for (id, result) in finished {
+            let Some(key) = self.images.settle(id) else { continue };
+            let Some(entry) = self.images.get(&key).cloned() else { continue };
+            if let Err(message) = &result { messages.push(message.clone()); }
+            let before = entry.clone();
+            let (entry, _) = self.settle_image(&key, entry, result);
+            relayout |= reshown(&before, &entry);
+        }
+        if relayout { self.display_state.free_realized_faces(); }
+        (messages, true)
+    }
+
+    /// `image_completions', each loader's error logged to *Messages*
+    /// unshown (GNU's image_error); whether any decode finished, so the
+    /// frame on screen goes again.
+    pub fn land_images(&mut self) -> crate::Result<bool> {
+        let (messages, landed) = self.image_completions();
+        for message in messages {
+            let text = self.allocate_object(crate::data::Object::String(Box::new(crate::data::LispString::new(&message))));
+            self.call_prepared_source_raw("(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))", &[text])?;
+        }
+        Ok(landed)
+    }
+}
+
+/// Whether a pending entry BEFORE, settled as AFTER, shows differently, so
+/// the windows' layouts (which hold its glyph) are made again: it failed
+/// (GNU's placeholder, with no margins or relief, whatever its size), its
+/// box differs from its header's, or its mask or background do.
+fn reshown(before: &ImageEntry, after: &ImageEntry) -> bool {
+    let shown = |e: &ImageEntry| (e.facts.width, e.facts.height, e.facts.mask, e.facts.background);
+    after.failed || shown(before) != shown(after)
 }
 
 /// The extension blocks before frame INDEX of GIF BYTES, last first.

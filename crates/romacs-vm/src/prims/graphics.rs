@@ -90,7 +90,7 @@ fn image_flush(cx, spec: Value; optional frame: Value) {
     // FRAME t flushes SPEC on every frame.
     let all = frame == Value::TRUE;
     let env = cx.image_env(if all { Value::NIL } else { frame })?;
-    let (key, _, _) = cx.image_lookup(&parsed, &env)?;
+    let (key, _, _) = cx.image_lookup_display(&parsed, &env)?;
     cx.image_uncache(|k, _| k.plist == key.plist && (all || k.frame == key.frame));
     Ok(Value::NIL)
 }}

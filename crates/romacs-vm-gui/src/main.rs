@@ -1135,12 +1135,14 @@ fn evaluate(
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
     let images = residency::Shared::default();
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_alpha_hook(move |frame, alpha, limit| {
-        // Only a closed window refuses, and then nothing shows it.
-        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
-    }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // An image decoded off the VM wakes the same wait as a terminal.
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
+        .with_alpha_hook(move |frame, alpha, limit| {
+            // Only a closed window refuses, and then nothing shows it.
+            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        }))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1488,6 +1490,7 @@ fn evaluate(
                 && let Some(trace) = &mut key_trace {
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
+            if vm.land_images()? { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
@@ -1588,6 +1591,7 @@ fn evaluate(
                 }
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
+        vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());

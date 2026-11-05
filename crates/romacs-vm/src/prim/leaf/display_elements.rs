@@ -861,7 +861,7 @@ impl<'l, 'a> Source<'l, 'a> {
         // An image spec: its own width, margins aside (img->width).
         if car == s.image && self.view.pixels && self.leaf.vm.window_system_open() && let Some(spec) = self.leaf.image_spec(prop)? {
             let env = self.leaf.image_env(Value::NIL)?;
-            let (_, entry, _) = self.leaf.image_lookup(&spec, &env)?;
+            let (_, entry, _) = self.leaf.image_lookup_display(&spec, &env)?;
             return Ok(Some(f64::from(entry.facts.width)));
         }
         if self.leaf.kind(car) == super::Kind::Symbol {

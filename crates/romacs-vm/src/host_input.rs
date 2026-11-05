@@ -278,6 +278,8 @@ impl Vm {
         let mut redraw = display;
         loop {
             redraw |= self.poll_terminal_output()?;
+            // An image decoded off the VM landed: the frame shows it.
+            redraw |= self.land_images()?;
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
             // is non-nil, as it is around Lisp that redisplay itself calls,
             // and waits for pending input; but GNU's `message' displays the

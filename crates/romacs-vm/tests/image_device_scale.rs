@@ -20,7 +20,7 @@ impl romacs_vm::DisplayHost for ScaleDisplay {
         let mut decodes = self.0.borrow_mut();
         decodes.push(query.realization.device_scale());
         Ok(romacs_vm::ImageFacts { id: decodes.len() as u64, width: 40, height: 24, mask: false,
-                                   metadata: romacs_display_protocol::ImageEmbeddedMetadata::EMPTY, background: None })
+                                   metadata: romacs_display_protocol::ImageEmbeddedMetadata::EMPTY, background: None, pending: false })
     }
 }
 
