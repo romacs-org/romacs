@@ -7,8 +7,7 @@
 //!
 //! Known difference: make_dom interns a non-ASCII name undecoded, so GNU's
 //! symbol has a unibyte name, and Romacs's is the name; those cases only
-//! compare whether the document parses. An entity literal holding CR LF
-//! keeps the CR in GNU; line ends here are LF before parsing.
+//! compare whether the document parses.
 use romacs_vm::Vm;
 use std::path::Path;
 
@@ -295,10 +294,13 @@ const CASES: &[&str] = &[
     "<a><![CDATA[x\r\ny\rz]]></a>",
     "<a><!-- x\r\ny\rz --></a>",
     "<a b='x\ry'/>",
+    "<!DOCTYPE a [<!ENTITY e 'x\r\ny'>]><a b='&e;'/>",
     "<?p x\ry?><a/>",
     "<a>x\r\n</a>",
     "<a>\r\n\r\n</a>",
     "<a>&#13;\n</a>",
+    "<!DOCTYPE a [<!ENTITY e 'x\ry'>]><a b='&e;'/>",
+    "<!-- a\rb --><a/>",
     "<!DOCTYPE a [<!ENTITY e '%x;'>]><a b='&e;'/>",
     "<!DOCTYPE a [<!ENTITY e '%x;'>]><a>&e;</a>",
     "<!DOCTYPE a [<!ENTITY % x 'v'><!ENTITY e '%x;'>]><a b='&e;'/>",
@@ -441,6 +443,7 @@ const FORMS: &str = r#"
 (mapcar (lambda (n) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e0 '" (make-string 50 ?x) "'>" (mapconcat (lambda (i) (format "<!ENTITY e%d '&e%d;&e%d;'>" i (1- i) (1- i))) (number-sequence 1 n) "") (format "]><a b='&e%d;'/>" n)) (libxml-parse-xml-region)))) '(12 14 18 40))
 (mapcar (lambda (k) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e '" (make-string 1000 ?x) "'>]><a>" (mapconcat (lambda (_) "&e;") (number-sequence 1 k) "") "</a>") (libxml-parse-xml-region)))) '(100 900 1000 5000))
 (mapcar (lambda (k) (null (with-temp-buffer (insert "<!DOCTYPE a [<!ENTITY e '" (make-string 1000 ?x) "'>]><a " (mapconcat (lambda (i) (format "b%d='&e;'" i)) (number-sequence 1 k) " ") "/>") (libxml-parse-xml-region)))) '(100 900 1000 5000))
+(let ((entity (concat "<!DOCTYPE a [<!ENTITY e '" (make-string 1000 ?x) "'>]>")) (refs (mapconcat (lambda (_) "&e;") (number-sequence 1 981) "")) (padding (make-string 300000 ?y))) (list (null (with-temp-buffer (insert entity "<a>" refs padding "</a>") (libxml-parse-xml-region))) (null (with-temp-buffer (insert entity "<a>" padding refs "</a>") (libxml-parse-xml-region)))))
 (mapcar (lambda (s) (with-temp-buffer (insert s) (null (libxml-parse-xml-region)))) '("<é/>" "<λ β='γ'/>" "<aá/>" "<a·b/>" "<⁰/>" "<a×/>"))
 "#;
 

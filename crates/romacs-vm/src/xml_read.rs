@@ -58,7 +58,7 @@ type Step<T> = Result<T, Stop>;
 pub(crate) fn read_first_element(text: &str) -> Read {
     let bytes = text.as_bytes();
     let Some(open) = bytes.iter().position(|&b| b == b'<') else { return Read::Incomplete };
-    let mut reader = Reader { text, bytes, at: open, depth: 0, doc: None };
+    let mut reader = Reader { text, bytes, at: open, depth: 0, doc: None, top: true };
     match reader.element() {
         Ok(node) => Read::Element(node, reader.at),
         Err(Stop::Incomplete) => Read::Incomplete,
@@ -73,6 +73,8 @@ struct Reader<'a> {
     depth: usize,
     /// What a document read keeps; None reads as xml.el does.
     doc: Option<Doc>,
+    /// Whether this is the document itself, not an entity's text.
+    top: bool,
 }
 
 /// Elements nested deeper than this are xml.el's (which reaches its own
@@ -417,10 +419,10 @@ struct Doc {
     attribute_ok: HashSet<String>,
     checking: Vec<String>,
     /// xmlParserEntityCheck's account: what each checked entity expands to,
-    /// what the references so far came to, and the document's length.
+    /// what the references so far came to, and the input consumed so far.
     expanded: HashMap<String, u64>,
     cost: u64,
-    input: u64,
+    consumed: u64,
     space: Vec<Space>,
     /// The number of open declarations of each namespace prefix, and the
     /// prefixes each open element declared.
@@ -455,7 +457,7 @@ impl Doc {
     /// account; a document that outgrows it ends, as it does in libxml2.
     fn charge(&mut self, size: u64) -> Step<()> {
         self.cost = self.cost.saturating_add(size + ENTITY_FIXED_COST);
-        if self.cost > ALLOWED_EXPANSION && self.cost / MAX_AMPLIFICATION > self.input { Err(Stop::Declined) } else { Ok(()) }
+        if self.cost > ALLOWED_EXPANSION && self.cost / MAX_AMPLIFICATION > self.consumed { Err(Stop::Declined) } else { Ok(()) }
     }
 
     /// An undefined entity is fatal unless something unread may define it.
@@ -477,11 +479,7 @@ pub(crate) fn parse_document(text: &str) -> Option<Vec<XmlNode>> {
     if !text.chars().all(xml_char) {
         return None;
     }
-    // XML 1.0 2.11: line ends are LF before anything is parsed.
-    let normalized = text.contains('\r').then(|| text.replace("\r\n", "\n").replace('\r', "\n"));
-    let text = normalized.as_deref().unwrap_or(text);
-    let doc = Doc { input: text.len() as u64, ..Doc::default() };
-    let mut reader = Reader { text, bytes: text.as_bytes(), at: 0, depth: 0, doc: Some(doc) };
+    let mut reader = Reader { text, bytes: text.as_bytes(), at: 0, depth: 0, doc: Some(Doc::default()), top: true };
     reader.document().ok()
 }
 
@@ -512,7 +510,8 @@ impl Reader<'_> {
 
     /// F run over TEXT, with this read's document.
     fn nested<T>(&mut self, text: &str, f: impl FnOnce(&mut Reader<'_>) -> Step<T>) -> Step<T> {
-        let mut sub = Reader { text, bytes: text.as_bytes(), at: 0, depth: self.depth, doc: self.doc.take() };
+        self.note_consumed();
+        let mut sub = Reader { text, bytes: text.as_bytes(), at: 0, depth: self.depth, doc: self.doc.take(), top: false };
         let result = f(&mut sub);
         self.doc = sub.doc.take();
         result
@@ -609,7 +608,7 @@ impl Reader<'_> {
     fn comment(&mut self) -> Step<XmlNode> {
         self.at += "<!--".len();
         let len = self.text[self.at..].find("--").ok_or(Stop::Declined)?;
-        let body = self.text[self.at..self.at + len].to_string();
+        let body = line_ends(&self.text[self.at..self.at + len]);
         self.at += len;
         self.expect("-->")?;
         Ok(XmlNode::Comment(body))
@@ -708,7 +707,7 @@ impl Reader<'_> {
                     Some(Some(value)) => {
                         let open = format!("%{name}");
                         self.open_entity(&open)?;
-                        self.doc().charge(value.len() as u64)?;
+                        self.charge(value.len() as u64)?;
                         let expanded = self.nested(&value, |sub| sub.subset(false));
                         self.doc().checking.pop();
                         expanded?;
@@ -1016,6 +1015,21 @@ impl Reader<'_> {
         Ok(Reference::Named(name))
     }
 
+    /// How far the document's own text was read: what amplification is
+    /// measured against, so text not reached yet does not count.
+    fn note_consumed(&mut self) {
+        if self.top {
+            let at = self.at as u64;
+            self.doc().consumed = at;
+        }
+    }
+
+    /// Charge a reference to SIZE bytes of text at this point of the input.
+    fn charge(&mut self, size: u64) -> Step<()> {
+        self.note_consumed();
+        self.doc().charge(size)
+    }
+
     /// Enter entity NAME, one level deeper; it must not be open already.
     fn open_entity(&mut self, name: &str) -> Step<()> {
         let doc = self.doc();
@@ -1028,9 +1042,8 @@ impl Reader<'_> {
 
     /// Charge a reference to the checked entity NAME.
     fn charge_entity(&mut self, name: &str) -> Step<()> {
-        let doc = self.doc();
-        let size = doc.expanded.get(name).copied().unwrap_or(0);
-        doc.charge(size)
+        let size = self.doc().expanded.get(name).copied().unwrap_or(0);
+        self.charge(size)
     }
 
     /// Whether NAME may be referred to from an attribute value: it is an
@@ -1075,7 +1088,7 @@ impl Reader<'_> {
         let size = (doc.cost - before).saturating_add(value.len() as u64);
         doc.expanded.insert(name.to_string(), size);
         doc.attribute_ok.insert(name.to_string());
-        self.doc().charge(value.len() as u64)?;
+        self.charge(value.len() as u64)?;
         Ok(true)
     }
 
@@ -1107,7 +1120,10 @@ impl Reader<'_> {
                         }
                     }
                 },
-                b'\n' | b'\t' => {
+                b'\r' | b'\n' | b'\t' => {
+                    if self.bytes[self.at] == b'\r' && self.bytes.get(self.at + 1) == Some(&b'\n') {
+                        self.at += 1;
+                    }
                     self.at += 1;
                     if !ended {
                         value.push(' ');
@@ -1115,7 +1131,7 @@ impl Reader<'_> {
                 }
                 _ => {
                     let rest = &self.text[self.at..end];
-                    let len = rest.find(['<', '&', '\n', '\t']).unwrap_or(rest.len());
+                    let len = rest.find(['<', '&', '\r', '\n', '\t']).unwrap_or(rest.len());
                     if !ended {
                         value.push_str(&rest[..len]);
                     }
@@ -1183,7 +1199,7 @@ impl Reader<'_> {
                     } else if self.starts("<![CDATA[") {
                         self.at += "<![CDATA[".len();
                         let len = self.text[self.at..].find("]]>").ok_or(Stop::Declined)?;
-                        children.push(XmlNode::Cdata(self.text[self.at..self.at + len].to_string()));
+                        children.push(XmlNode::Cdata(line_ends(&self.text[self.at..self.at + len])));
                         self.at += len + "]]>".len();
                     } else if self.starts("<?") {
                         children.push(self.processing_instruction()?);
@@ -1230,7 +1246,7 @@ impl Reader<'_> {
         let size = (doc.cost - before).saturating_add(value.len() as u64);
         doc.expanded.insert(name.to_string(), size);
         doc.content_ok.insert(name.to_string());
-        self.doc().charge(value.len() as u64)
+        self.charge(value.len() as u64)
     }
 
     /// The run of character data at point, in the element named ELEMENT
@@ -1246,7 +1262,7 @@ impl Reader<'_> {
         self.at += len;
         let dropped = element.is_some_and(|name| self.are_blanks(raw, name, children));
         if !dropped {
-            push_text(children, raw);
+            push_text(children, &line_ends(raw));
             if let Some(top) = self.doc().space.last_mut().filter(|top| **top == Space::Unset) {
                 *top = Space::Text;
             }
@@ -1267,6 +1283,12 @@ impl Reader<'_> {
             None => next_is_tag && !(children.is_empty() && next_is_end) && !is_text(children.last()) && !is_text(children.first()),
         }
     }
+}
+
+/// TEXT with its line ends LF (XML 1.0 2.11). An entity's literal keeps
+/// what it holds, as in libxml2.
+fn line_ends(text: &str) -> String {
+    if text.contains('\r') { text.replace("\r\n", "\n").replace('\r', "\n") } else { text.to_string() }
 }
 
 /// TEXT added to the content CHILDREN, as a text node goes on growing.
