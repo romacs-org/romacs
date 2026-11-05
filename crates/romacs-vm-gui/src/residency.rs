@@ -38,6 +38,9 @@ pub struct Images {
     /// The last attempt sent for each image the VM still holds.
     attempts: HashMap<u32, u64>,
     released: Vec<u32>,
+    /// Pixels decoded off the VM landed since the last publication: the
+    /// frame on screen, which drew nothing for them, goes again.
+    landed: bool,
 }
 
 pub type Shared = std::rc::Rc<std::cell::RefCell<Images>>;
@@ -48,6 +51,12 @@ impl Images {
         self.decoded.insert(id, Arc::new(decoded));
     }
 
+    /// Keep ID's pixels, decoded after a frame may have drawn it.
+    pub fn land(&mut self, id: u32, decoded: SemanticImageDecoded) {
+        self.hold(id, decoded);
+        self.landed = true;
+    }
+
     /// Drop ID's pixels; the renderer's copy goes at the next publication.
     pub fn release(&mut self, id: u32) {
         self.decoded.remove(&id);
@@ -56,17 +65,18 @@ impl Images {
     }
 
     /// Whether the frame on screen must be submitted again though it is
-    /// unchanged: a GPU rebuild lost images it had.  (An image the renderer
-    /// evicts is one no presented frame draws, so a frame that draws it
-    /// again is a changed one.)
+    /// unchanged: pixels it lacked landed, or a GPU rebuild lost images it
+    /// had.  (An image the renderer evicts is one no presented frame draws,
+    /// so a frame that draws it again is a changed one.)
     pub fn must_repaint(&self, sink: &impl Sink) -> bool {
-        !self.resident.is_empty() && sink.reset_pending()
+        self.landed || !self.resident.is_empty() && sink.reset_pending()
     }
 
     /// Send SINK every image FRAMES draw that it lacks, then retire the
     /// released ones.  A frame drawing an image the renderer lacks draws
     /// nothing there.
     pub fn publish<'a>(&mut self, sink: &impl Sink, frames: impl IntoIterator<Item = &'a FrameGlyphBuffer>) -> Result<(), String> {
+        self.landed = false;
         let (evicted, reset) = sink.lost();
         if reset { self.resident.clear(); }
         for id in evicted { self.resident.remove(&id); }

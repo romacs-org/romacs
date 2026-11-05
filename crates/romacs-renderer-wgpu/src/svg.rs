@@ -76,6 +76,38 @@ pub(crate) fn query_intrinsic_extent(data: &[u8]) -> Option<ImageIntrinsicExtent
     .flatten()
 }
 
+/// The intrinsic extent `load' takes from the root's `viewBox', `width' and
+/// `height', read from the root start tag in HEAD (a prefix of the document)
+/// without parsing the rest.  None when the document is compressed, has a
+/// DOCTYPE (which the parser `load' uses refuses), no root tag in HEAD, or
+/// a root without dimensions (its extent is the drawing's).
+pub(crate) fn root_tag_intrinsic_extent(head: &[u8]) -> Option<ImageIntrinsicExtent> {
+    if head.starts_with(&[0x1f, 0x8b]) { return None; }
+    let start = root_tag_start(head)?;
+    let end = find_start_tag_insert_pos(head, start)?;
+    let mut tag = head[start..end].to_vec();
+    tag.extend_from_slice(b"/>");
+    let geometry = root_geometry(&tag)?;
+    geometry.view_box_dimensions().or_else(|| ImageIntrinsicExtent::new(geometry.width?, geometry.height?))
+}
+
+/// Where the root element's start tag begins in HEAD, past the prolog: a
+/// byte order mark, white space, the XML declaration, processing
+/// instructions and comments.
+fn root_tag_start(head: &[u8]) -> Option<usize> {
+    let find = |from: usize, needle: &[u8]| head.get(from..)?.windows(needle.len()).position(|w| w == needle).map(|i| from + i);
+    let mut at = if head.starts_with(&[0xef, 0xbb, 0xbf]) { 3 } else { 0 };
+    loop {
+        while head.get(at).is_some_and(u8::is_ascii_whitespace) { at += 1; }
+        let rest = head.get(at..)?;
+        at = if rest.starts_with(b"<?") { find(at, b"?>")? + 2 }
+        else if rest.starts_with(b"<!--") { find(at + 4, b"-->")? + 3 }
+        else if rest.starts_with(b"<!") { return None }
+        else if rest.starts_with(b"<") { return Some(at) }
+        else { return None };
+    }
+}
+
 pub(crate) fn decode(
     data: &[u8],
     size: ImageSizeSpec,
