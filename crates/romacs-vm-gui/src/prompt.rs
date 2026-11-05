@@ -238,6 +238,13 @@ impl HostInput for GuiHost {
         Some(shared.window_shown())
     }
 
+    fn images_behind(&mut self) -> bool {
+        // Not while a paint is in flight (a stalled render is not spun on),
+        // nor with no window to paint.
+        let shared = self.shared.borrow();
+        self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
+    }
+
     fn input_pending(&mut self) -> bool {
         self.drain();
         let shared = self.shared.borrow();
