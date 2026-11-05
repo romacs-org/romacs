@@ -149,6 +149,43 @@ JABBER = r'''
 (defvar journey-catch-up-start nil "When the first catch-up began: its first page, or its job.")
 (defvar journey-outcomes nil "In-session queries settled: (ARCHIVE . OUTCOME), newest first.")
 (defvar journey-sync-summaries nil "Background syncs' (ACCOUNT SUMMARY TIME), newest first.")
+(defvar journey-posts nil "The running sync's reports: (TIME HISTORIES), newest first.")
+(with-eval-after-load 'jabber-mam-sync
+  (advice-add 'jabber-mam-sync--receive :before
+              (lambda (_sender message)
+                (when (eq (car-safe message) 'jabber-mam-sync)
+                  (push (list (float-time) (length (nth 3 message))) journey-posts)))))
+(defvar journey-chat-window nil "The window F7 shows chats in.")
+(defvar journey-chat-index 0)
+(defvar journey-sent 0 "Messages F8 sent.")
+(defun journey-chat-buffers ()
+  (sort (seq-filter (lambda (b) (with-current-buffer b (derived-mode-p 'jabber-chat-mode))) (buffer-list))
+        (lambda (a b) (string< (buffer-name a) (buffer-name b)))))
+(defun journey-open-chat () "Show the next chat or room buffer." (interactive)
+  (when-let* ((buffers (journey-chat-buffers)))
+    (unless (window-live-p journey-chat-window)
+      (setq journey-chat-window (split-window journey-text-window nil 'right)))
+    (set-window-buffer journey-chat-window (nth (mod journey-chat-index (length buffers)) buffers))
+    (setq journey-chat-index (1+ journey-chat-index))))
+(defun journey-send () "Send a message from the shown chat." (interactive)
+  (when (window-live-p journey-chat-window)
+    (with-current-buffer (window-buffer journey-chat-window)
+      (goto-char (point-max))
+      (insert (format "journey ping %d" (setq journey-sent (1+ journey-sent))))
+      (jabber-chat-buffer-send))))
+(global-set-key [f7] #'journey-open-chat)
+(global-set-key [f8] #'journey-send)
+(defun journey-duplicates ()
+  "Stored and shown duplicates: (STORED-DUPLICATES LIVE-ROWS LIVE-DISTINCT SHOWN-DUPLICATES)."
+  (let ((db (jabber-db-ensure-open)) (shown 0))
+    (dolist (buffer (journey-chat-buffers))
+      (with-current-buffer buffer
+        (let ((seen (make-hash-table :test #'equal)))
+          (dolist (data (ewoc-collect jabber-chat-ewoc #'always))
+            (when-let* ((id (and (listp (cadr data)) (plist-get (cadr data) :server-id))))
+              (if (gethash id seen) (setq shown (1+ shown)) (puthash id t seen)))))))
+    (append (car (sqlite-select db "SELECT (SELECT count(*) FROM (SELECT 1 FROM message WHERE server_id IS NOT NULL GROUP BY account, peer, server_id HAVING count(*) > 1)), count(*), count(DISTINCT server_id) FROM message WHERE server_id LIKE 'live-%'"))
+            (list shown))))
 (defvar journey-toasts nil "The sync's toasts: (TIME TEXT KIND), newest first.")
 (advice-add 'jabber-mam--send-page :before
             (lambda (&rest _) (unless journey-catch-up-start (setq journey-catch-up-start (float-time)))))
@@ -367,16 +404,25 @@ def free_port():
 
 
 KINDS = {'motion': ('next-line', 'previous-line'), 'self-insert-command': ('self-insert-command',),
-         'select-text': ('journey-select-text',), 'select-notmuch': ('journey-select-notmuch',)}
+         'select-text': ('journey-select-text',), 'select-notmuch': ('journey-select-notmuch',),
+         'open-chat': ('journey-open-chat',), 'send': ('journey-send',)}
 
 
-def schedule(duration, seed):
+def schedule(duration, seed, chats=False):
     """(GAP, KEYS) steps: bursts of C-n/C-p in the notmuch window and of
     letters in the text window, F6/F5 (select that window) between, for
-    DURATION seconds."""
+    DURATION seconds.  With CHATS, every third switch also shows the next
+    chat (F7) and, when CHATS is `send', sends a message from it (F8)."""
     rng = random.Random(seed)
-    steps, total, window = [], 0.0, 'notmuch'
+    steps, total, window, switches = [], 0.0, 'notmuch', 0
     while total < duration:
+        switches += 1
+        if chats and switches % 3 == 0:
+            steps.append((1.0, (['-k', 'F7'], 'open-chat')))
+            total += 1.0
+            if chats == 'send':
+                steps.append((1.0, (['-k', 'F8'], 'send')))
+                total += 1.0
         burst = rng.randint(6, 16)
         for _ in range(burst):
             if window == 'notmuch':
@@ -533,6 +579,9 @@ def main():
     parser.add_argument('--wait', type=float, default=600, help='seconds to wait for the catch-up after typing')
     parser.add_argument('--slow', type=float, default=.016)
     parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--chats', choices=('open', 'send'),
+                        help='every third window switch, show the next chat (F7); with send, also send '
+                             'a message from it (F8, fixture only)')
     parser.add_argument('--tools', default=os.path.dirname(os.environ.get('ROMACS_TEST_LABWC', '/usr/bin/labwc')))
     parser.add_argument('--timeout', type=float, default=90)
     parser.add_argument('--resync-after', type=float, default=None,
@@ -541,6 +590,8 @@ def main():
     parser.add_argument('--keep', action='store_true', help='keep the private tree (HOME, world, database)')
     args = parser.parse_args()
     restricted = args.restricted or args.account == 'real'
+    if args.chats == 'send' and restricted:
+        parser.error('--chats send sends messages: fixture account, unrestricted, only')
     args.output.mkdir(parents=True, exist_ok=False)
     base = args.base or Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp'))
     root, home, env = private_tree('jabber', base, args.tools)
@@ -606,7 +657,7 @@ def main():
         # The state before the first key, as the record of a command would hold it.
         first = engine.ask('(list (quote start) nil gcs-done gc-elapsed (float-time))')
         resync = args.resync_after is not None and args.variant == 'worker'
-        for gap, (keys, kind) in schedule(args.duration, args.seed):
+        for gap, (keys, kind) in schedule(args.duration, args.seed, args.chats):
             if resync and time.time() - start >= args.resync_after:
                 # Through the session's own timer, as a later request would come.
                 engine.ask('(progn (run-with-timer 0 nil (function journey-resync)) t)')
@@ -629,8 +680,9 @@ def main():
             report['jabber']['catch_up_s'] = round(done - connect_at, 3) if done else None
             if not done:
                 report['problems'].append(f'catch-up not finished after {args.wait:g} s of waiting')
-            if args.variant == 'worker' and args.account == 'fixture' and not restricted:
+            if args.variant == 'worker' and args.account == 'fixture' and not restricted and not args.chats:
                 # The rooms' buffers are hidden: their history waits, and loads once shown.
+                # (With --chats, F7 has shown them already.)
                 stale = engine.ask('(journey-stale-buffers)') or []
                 name, shown_at = engine.ask('(journey-show-room)')
                 deadline = time.time() + 60
@@ -642,6 +694,15 @@ def main():
                                         'filled_s': round(time.time() - shown_at, 2)}
                 if name not in stale or name in report['shown_room']['stale_after']:
                     report['problems'].append(f'room buffer {name} was not stale until shown: {report["shown_room"]}')
+        if args.chats:
+            stored, live, live_distinct, shown = engine.ask('(journey-duplicates)', timeout=60)
+            posts = engine.ask('(reverse journey-posts)') or []
+            report['chats'] = {'sent': engine.ask('journey-sent'), 'stored_duplicates': stored,
+                               'live_rows': live, 'live_distinct': live_distinct, 'shown_duplicates': shown,
+                               'posts': len(posts),
+                               'first_post_s': round(posts[0][0] - connect_at, 3) if posts else None}
+            if stored or shown or live != live_distinct:
+                report['problems'].append(f'duplicates after the handover: {report["chats"]}')
         report['evaluator_cpu_total_s'] = round(cpu_seconds(stat), 3)
         report['window_buffers'] = engine.ask('(journey-window-buffers)')
         engine.ask(f'(journey-dump {lisp_string(str(args.output))})', timeout=60)
@@ -719,6 +780,13 @@ def check_jabber(report, args, restricted):
         archive, outcome = entry[0], entry[-1]
         if str(outcome) != 'success':
             report['problems'].append(f'in-session query of {archive or "personal"} settled {outcome}')
+    chats = report.get('chats')
+    stats_file = args.output / 'fixture-stats.json'
+    if chats and args.account == 'fixture' and not restricted and stats_file.exists():
+        received = json.loads(stats_file.read_text()).get('client_messages', 0)
+        chats['fixture_received'] = received
+        if received < (chats.get('sent') or 0):
+            report['problems'].append(f'sent {chats["sent"]} messages, the fixture received {received}')
     if restricted:
         refused = state.get('refused') or []
         report['refused'] = refused

@@ -628,6 +628,24 @@ cannot be determined."
   "Prevent QUERY's current page from publishing a durable cursor."
   (plist-put query :failed t))
 
+(defun jabber-mam--stored-readable-p (account archive peer archive-id)
+  "Non-nil when ACCOUNT stored ARCHIVE's ARCHIVE-ID message with PEER readable.
+An encrypted message decrypts once: an archive that brings it again (a
+catch-up overlapping what was read, as the newest messages fetched first
+always do) no longer decrypts it, and the stored text is what counts.
+The row is the archive occurrence's, else one whose server id is it."
+  (when-let* ((db (and account archive peer archive-id (jabber-db-ensure-open)))
+              (body (caar (or (sqlite-select
+                               db "SELECT m.body FROM message_archive a \
+JOIN message m ON m.id = a.message_id \
+WHERE a.account = ? AND a.archive = ? AND a.uid = ? AND m.account = ? AND m.peer = ?"
+                               (list account archive archive-id account peer))
+                              (sqlite-select
+                               db "SELECT body FROM message \
+WHERE account = ? AND peer = ? AND server_id = ? LIMIT 1"
+                               (list account peer archive-id))))))
+    (not (jabber--decrypt-failure-body-p body))))
+
 (defun jabber-mam--process-message (jc xml-data)
   "Process JC's owned MAM result XML-DATA in its own short transaction.
 Consume the owned envelope so live handlers never see archived content.
@@ -842,7 +860,10 @@ JC is the Jabber connection.  XML-DATA is the stanza."
            (timestamp (and-let* ((time (plist-get fields :timestamp)))
                         (floor (float-time time))))
            (action (jabber-mam--message-action jc inner-msg fields)))
-      (when (jabber--decrypt-failure-body-p body)
+      (when (and (jabber--decrypt-failure-body-p body)
+                 (not (jabber-mam--stored-readable-p
+                       (plist-get query :account) (plist-get query :archive)
+                       peer archive-id)))
         (jabber-mam--page-failed query))
       (when (and timestamp (or (null (plist-get query :oldest))
                                (< timestamp (plist-get query :oldest))))

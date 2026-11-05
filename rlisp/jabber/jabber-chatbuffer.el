@@ -114,6 +114,7 @@ previous sequence detect the mismatch and stop.")
 (defvar jabber-chat-earliest-backlog)     ; jabber-chat.el
 (defvar jabber-chat-backlog-chunk-budget) ; jabber-chat.el
 (defvar jabber-chat-backlog-chunk-delay)  ; jabber-chat.el
+(defvar jabber-chat-backlog-at-once)      ; jabber-chat.el
 (declare-function jabber-chat--backlog-wait-p "jabber-chat")
 (defvar jabber-group)                      ; jabber-muc.el
 (defvar jabber-muc-header-line-format)    ; jabber-muc.el
@@ -235,8 +236,8 @@ unaffected."
 
 (defvar-local jabber-chat--loaded-at nil
   "When this buffer last loaded its history from the database.
-Set as the buffer is made (its backlog loads right after) and at each
-refresh; a background catch-up that changed the history later makes
+Set as the buffer is made (its backlog loads right after) and when a
+refresh selects its entries; a background catch-up that changed the history later makes
 the buffer stale (jabber-mam-sync.el).  Permanent: entering the mode
 again loads nothing.")
 (put 'jabber-chat--loaded-at 'permanent-local t)
@@ -611,9 +612,11 @@ must leave the draft text after `jabber-point-insert' untouched."
 ;;   selected-window-only mode is safe only because append leaves the rest
 ;;   untouched; for us, skipping a window means the rebuild clobbers it.
 ;;
-;; The one place we cannot match ERC: it keeps a history reader's exact
-;; point, but our rebuild collapses it (and a message's rendered length
-;; can change across reload), so we settle point on the anchored message.
+;; A history reader keeps its exact view: window start and point are
+;; each anchored as (message, offset into its text) and put back on the
+;; same message at the same offset (clamped, as a message's rendered
+;; length can change across reload).  Point in the input area is past the
+;; transcript and survives the rebuild untouched.
 
 (defun jabber-chat-buffer--node-stanza-id (node)
   "Return the stable index key of message ewoc NODE, or nil."
@@ -645,14 +648,61 @@ so the view can be restored after the ewoc is rebuilt."
           (cons 'msg id)
         'bottom))))
 
+(defun jabber-chat-buffer--node-at (pos)
+  "The first message node at or after POS that has an index key, or nil."
+  (let ((node (and jabber-chat-ewoc (ewoc-locate jabber-chat-ewoc pos))))
+    (while (and node (not (jabber-chat-buffer--node-stanza-id node)))
+      (setq node (ewoc-next jabber-chat-ewoc node)))
+    node))
+
+(defun jabber-chat-buffer--offset-in (node pos)
+  "POS's offset into NODE's text, 0 when POS is before it."
+  (max 0 (- pos (ewoc-location node))))
+
+(defun jabber-chat-buffer--at-offset (node offset)
+  "The position OFFSET into NODE's text, clamped to its last character."
+  (let* ((start (ewoc-location node))
+         (next (ewoc-next jabber-chat-ewoc node))
+         (end (if next (ewoc-location next)
+                (or (and (markerp jabber-point-insert) (marker-position jabber-point-insert))
+                    (point-max)))))
+    (max start (min (+ start offset) (1- end)))))
+
+(defun jabber-chat-buffer--find-anchor (id)
+  "The message node indexed under ID, or nil."
+  (if (stringp id)
+      (jabber-chat-ewoc-find-by-id id)
+    (gethash id jabber-chat--msg-nodes)))
+
 (defun jabber-chat-buffer--capture-view ()
   "Capture per-window view anchors for the current buffer.
-Returns an alist mapping each window showing the buffer to the anchor
-from `jabber-chat-buffer--window-anchor'.  Call before a refresh clears
-the ewoc."
-  (mapcar (lambda (window)
-            (cons window (jabber-chat-buffer--window-anchor window)))
-          (get-buffer-window-list (current-buffer) nil 'visible)))
+Returns an alist mapping each window showing the buffer to its anchor:
+`bottom' for a window following the input area, else (`msg' ID OFFSET .
+POINT): the message at window start, how far into its text the window
+starts, and, when the window's point is in the transcript, (ID . OFFSET)
+for the message at point.  Call before a refresh clears the ewoc."
+  (mapcar
+   (lambda (window)
+     (let ((anchor (jabber-chat-buffer--window-anchor window)))
+       (cons window
+             (if (not (consp anchor))
+                 anchor
+               (let* ((start (window-start window))
+                      (node (jabber-chat-buffer--find-anchor (cdr anchor)))
+                      (wpoint (window-point window))
+                      ;; Without an input area, point is in the transcript.
+                      (pnode (and (or (not (markerp jabber-point-insert))
+                                      (< wpoint jabber-point-insert))
+                                  (jabber-chat-buffer--node-at wpoint))))
+                 (cons 'msg
+                       (cons (cdr anchor)
+                             (cons (if node (jabber-chat-buffer--offset-in node start) 0)
+                                   (and pnode
+                                        (cons (jabber-chat-buffer--node-stanza-id pnode)
+                                              (jabber-chat-buffer--offset-in pnode wpoint)))))))))))
+   ;; Every window showing the buffer, iconified frames' too: the clear
+   ;; collapses their starts all the same.
+   (get-buffer-window-list (current-buffer) nil t)))
 
 (defun jabber-chat-buffer--restore-bottom (window)
   "Force WINDOW to the input area, moving point there, then recenter.
@@ -666,27 +716,40 @@ was composing a message."
 
 (defun jabber-chat-buffer--restore-view (anchors)
   "Restore per-window view from ANCHORS captured before a refresh.
-Windows that followed the input area return to the bottom; windows that
-were reading history are scrolled back to their anchored message, or to
-the bottom when that message is no longer loaded."
+Windows that followed the input area return to the bottom without moving
+point; windows that were reading history get their window start, and
+point when it was in the transcript, back on the same messages at the
+same offsets, or the bottom when the start's message is no longer loaded.
+Only windows still showing this buffer are touched."
   (dolist (entry anchors)
     (let ((window (car entry))
           (anchor (cdr entry)))
-      (when (window-live-p window)
+      (when (and (window-live-p window)
+                 (eq (window-buffer window) (current-buffer)))
         (pcase anchor
           ('bottom
            ;; Point sits in the input area (after the footer) and so
            ;; survived the clear; recenter without moving it to preserve
            ;; a half-typed message's cursor.
            (jabber-chat-buffer--recenter-input-window window))
-          (`(msg . ,id)
-           (if-let* ((node (if (stringp id)
-                               (jabber-chat-ewoc-find-by-id id)
-                             (gethash id jabber-chat--msg-nodes))))
-               (let ((pos (ewoc-location node)))
-                 (set-window-start window pos)
-                 (set-window-point window pos))
-             (jabber-chat-buffer--restore-bottom window))))))))
+          (`(msg . ,rest)
+           (let* ((id (if (consp rest) (car rest) rest))
+                  (offset (if (consp rest) (cadr rest) 0))
+                  (at-point (and (consp rest) (cddr rest)))
+                  (node (jabber-chat-buffer--find-anchor id)))
+             (if (not node)
+                 (jabber-chat-buffer--restore-bottom window)
+               (let ((start (jabber-chat-buffer--at-offset node offset))
+                     (pnode (and at-point (jabber-chat-buffer--find-anchor (car at-point)))))
+                 ;; Point was in the transcript: back on its message, or, when
+                 ;; that is no longer loaded, at the window's start.
+                 (when at-point
+                   (set-window-point window (if pnode
+                                                (jabber-chat-buffer--at-offset pnode (cdr at-point))
+                                              start)))
+                 ;; With point in the input area, redisplay may move the
+                 ;; start to keep point visible rather than move point.
+                 (set-window-start window start (not at-point)))))))))))
 
 ;;; Buffer refresh
 
@@ -695,23 +758,34 @@ the bottom when that message is no longer loaded."
 ANCHORS is the per-window view captured by
 `jabber-chat-buffer--capture-view' before the ewoc was cleared."
   (jabber-chat-display-buffer-images)
-  (jabber-chat-buffer--restore-view anchors))
+  (jabber-chat-buffer--restore-view anchors)
+  (run-hook-with-args 'jabber-chat-buffer-refreshed-functions (current-buffer)))
 
-(defun jabber-chat-buffer-refresh ()
+(defvar jabber-chat-buffer-atomic-limit 40
+  "Most messages a refresh with ATOMIC reloads in one tick.
+A room's message renders in about 0.4 ms on the development machine (123
+ms for 300), so 40 stay within a frame.")
+
+(defvar jabber-chat-buffer-refreshed-functions nil
+  "Abnormal hook run with the buffer when a refresh has reloaded it.")
+
+(defun jabber-chat-buffer-refresh (&optional atomic)
   "Refresh the current chat buffer from the database without killing it.
 Clears the ewoc and reloads backlog entries in place, both in ticks of
 `jabber-chat-backlog-chunk-budget' seconds, so a long transcript never
-holds a key behind it.  Cancels any in-progress refresh by bumping the
-generation counter.  Uses `jabber-chat-buffer-msg-count' for the number
-of messages.  Each window's view is captured before the clear and
-restored after the reload, so a reader scrolled up in history is not
-yanked to the top."
+holds a key behind it; with ATOMIC, in this one call, so redisplay never
+shows an emptied or partial transcript (for an idle moment, at most
+`jabber-chat-buffer-atomic-limit' messages).  Cancels any in-progress
+refresh by bumping the generation counter.  Uses
+`jabber-chat-buffer-msg-count' for the number of messages.  Each
+window's view is captured before the clear and restored after the
+reload, so a reader scrolled up in history keeps what it reads."
   (interactive)
   (cl-incf jabber-chat--backlog-generation)
-  (setq jabber-chat--loaded-at (float-time))
   (let ((generation jabber-chat--backlog-generation)
         (count (jabber-chat-buffer-msg-count))
-        (anchors (jabber-chat-buffer--capture-view)))
+        (anchors (jabber-chat-buffer--capture-view))
+        (jabber-chat-backlog-at-once (or atomic jabber-chat-backlog-at-once)))
     (jabber-chat-buffer--clear-chunked
      (current-buffer) generation
      (lambda () (jabber-chat-buffer--reload count anchors generation)))))
@@ -744,7 +818,7 @@ that arrived meanwhile goes too (the reload brings it back)."
         (jabber-chat-buffer--call-with-transcript
          (lambda ()
            (while (and node
-                       (or (= count 0)
+                       (or (= count 0) jabber-chat-backlog-at-once
                            (and (< (- (float-time) start)
                                    jabber-chat-backlog-chunk-budget)
                                 (not (input-pending-p)))))
@@ -764,6 +838,8 @@ that arrived meanwhile goes too (the reload brings it back)."
 ANCHORS are the windows' views to restore; GENERATION the refresh's."
   ;; Clear message ID tracking
   (clrhash jabber-chat--msg-nodes)
+  ;; What changes after this selection makes the buffer stale again.
+  (setq jabber-chat--loaded-at (float-time))
   (let* ((peer (jabber-chat--peer-jid))
          (account (jabber-connection-bare-jid jabber-buffer-connection))
          (resource (when (and (bound-and-true-p jabber-chatting-with)
@@ -787,7 +863,8 @@ ANCHORS are the windows' views to restore; GENERATION the refresh's."
     (if (null entries)
         (progn
           (setq jabber-chat-earliest-backlog (float-time))
-          (jabber-chat-buffer--restore-view anchors))
+          (jabber-chat-buffer--restore-view anchors)
+          (run-hook-with-args 'jabber-chat-buffer-refreshed-functions (current-buffer)))
       (setq jabber-chat-earliest-backlog
             (float-time (plist-get (car (last entries)) :timestamp)))
       (jabber-chat--insert-backlog-chunked

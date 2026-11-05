@@ -1230,6 +1230,7 @@ forced to the bottom (the only path that overwrites point)."
           (forced nil)
           (started nil))
       (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                ((symbol-function 'window-buffer) (lambda (&optional _w) (current-buffer)))
                 ((symbol-function 'jabber-chat-buffer--recenter-input-window)
                  (lambda (w) (push w recentered)))
                 ((symbol-function 'jabber-chat-buffer--restore-bottom)
@@ -1237,8 +1238,9 @@ forced to the bottom (the only path that overwrites point)."
                 ((symbol-function 'jabber-chat-ewoc-find-by-id)
                  (lambda (id) (when (equal id "present") 'fake-node)))
                 ((symbol-function 'ewoc-location) (lambda (_n) 42))
+                ((symbol-function 'ewoc-next) #'ignore)
                 ((symbol-function 'set-window-start)
-                 (lambda (w pos) (push (list w pos) started)))
+                 (lambda (w pos &optional _noforce) (push (list w pos) started)))
                 ((symbol-function 'set-window-point) (lambda (_w _pos) nil)))
         (jabber-chat-buffer--restore-view
          '((win-bottom . bottom)

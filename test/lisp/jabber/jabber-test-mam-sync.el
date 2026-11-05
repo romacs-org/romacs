@@ -150,7 +150,7 @@ the merged peers; `done' calls the job's completion callback."
                 (lambda (room _jc) (and (equal room "room@muc.example") "romeo")))
                ((symbol-function 'jabber-mam-sync--toast) (lambda (text &optional _kind) (push text toasts)))
                ((symbol-function 'jabber-mam-sync--refresh)
-                (lambda (buffer) (setq refreshed (append refreshed (list buffer))))))
+                (lambda (buffer &optional _shown) (setq refreshed (append refreshed (list buffer))))))
        (unwind-protect (progn ,@body)
          (jabber-db-share-writes nil)))))
 
@@ -166,7 +166,7 @@ the merged peers; `done' calls the job's completion callback."
     (should-not spawned)
     (jabber-mam-sync--start jabber-test-mam-sync--account)
     (should (= 1 (length spawned)))
-    (pcase-let ((`(,function ,account ,archives . ,keys) (car spawned)))
+    (pcase-let ((`(,function ,account ,archives ,heads . ,keys) (car spawned)))
       (should (eq function 'jabber-mam-sync-worker-run))
       (should (string-prefix-p "Orchard-sync-" (plist-get account :resource)))
       (should (equal "pw" (plist-get account :password)))
@@ -174,6 +174,8 @@ the merged peers; `done' calls the job's completion callback."
                        (:room "room@muc.example" :with nil :nick "romeo")
                        (:room nil :with "juliet@capulet.example" :nick nil))
                      archives))
+      ;; Its rooms and chats get their newest messages first.
+      (should (equal '((:room "room@muc.example") (:with "juliet@capulet.example")) heads))
       (should (equal '(jabber) (plist-get keys :require)))
       (should (plist-get keys :fresh))
       (should (assq 'jabber-db-path (plist-get keys :bindings))))
@@ -249,7 +251,7 @@ a hidden buffer is not looked for."
         (cl-letf (((symbol-function 'jabber-chat-buffer--history-key)
                    (lambda (b) (and (eq b buffer) '("me@x" "a@x" "chat" nil))))
                   ((symbol-function 'jabber-chat-buffer-refresh)
-                   (lambda ()
+                   (lambda (&optional _atomic)
                      (setq jabber-chat--loaded-at (float-time))
                      (push (current-buffer) refreshed))))
           (with-current-buffer buffer (setq jabber-chat--loaded-at (- (float-time) 10)))
@@ -287,7 +289,7 @@ And a parent that loaded before the thread was read is stale again."
                    (lambda (&rest args) (push args marked)))
                   ((symbol-function 'run-with-timer) (lambda (&rest _) 'timer))
                   ((symbol-function 'jabber-chat-buffer-refresh)
-                   (lambda ()
+                   (lambda (&optional _atomic)
                      (setq jabber-chat--loaded-at (float-time))
                      (push (current-buffer) order))))
           (with-current-buffer thread
@@ -690,7 +692,11 @@ named with why; the other archive completes."
   "The most results `--timed-archive' puts in a page, whatever is asked.")
 
 (defvar jabber-test-mam-sync--queries nil
-  "Archive queries `--timed-archive' answered, as (START END AFTER), newest first.")
+  "Archive queries `--timed-archive' received, as (START END AFTER BEFORE
+MAX), newest first; BEFORE t for an empty <before/>.")
+
+(defvar jabber-test-mam-sync--silent-before nil
+  "Non-nil when `--timed-archive' never answers a backward page.")
 
 (defun jabber-test-mam-sync--field (query var)
   "QUERY's data form value for VAR, or nil."
@@ -712,18 +718,29 @@ its start and end filters (inclusive), its RSM <after>, pages of at most
          (end (jabber-test-mam-sync--field query "end"))
          (set (car (jabber-xml-get-children query 'set)))
          (after (car (jabber-xml-node-children (car (jabber-xml-get-children set 'after)))))
+         (before-node (car (jabber-xml-get-children set 'before)))
+         ;; An empty <before/> asks for the archive's last page.
+         (before (and before-node (or (car (jabber-xml-node-children before-node)) t)))
+         (asked (car (jabber-xml-node-children (car (jabber-xml-get-children set 'max)))))
+         (max (min jabber-test-mam-sync--server-max
+                   (if asked (string-to-number asked) jabber-test-mam-sync--server-max)))
          (seconds (lambda (stamp) (and stamp (float-time (date-to-time stamp)))))
          (from (funcall seconds start)) (to (funcall seconds end))
          (matching (seq-filter (lambda (m) (and (or (null from) (>= (cdr m) from))
                                                 (or (null to) (<= (cdr m) to))))
                                jabber-test-mam-sync--timeline))
-         (rest (if after (cdr (member (assoc after matching) matching)) matching))
-         (page (seq-take rest jabber-test-mam-sync--server-max)))
-    (push (list start end after) jabber-test-mam-sync--queries)
-    (if jabber-test-mam-sync--answer-delay
+         (rest (cond ((eq before t) matching)
+                     (before (seq-take-while (lambda (m) (not (equal (car m) before))) matching))
+                     (after (cdr (member (assoc after matching) matching)))
+                     (t matching)))
+         (page (if before (last rest (min max (length rest))) (seq-take rest max))))
+    (push (list start end after before max) jabber-test-mam-sync--queries)
+    (if (and before jabber-test-mam-sync--silent-before)
+        nil
+     (if jabber-test-mam-sync--answer-delay
         (run-at-time jabber-test-mam-sync--answer-delay nil
                      #'jabber-test-mam-sync--timed-answer fsm id queryid rest page)
-      (jabber-test-mam-sync--timed-answer fsm id queryid rest page))))
+      (jabber-test-mam-sync--timed-answer fsm id queryid rest page)))))
 
 (defun jabber-test-mam-sync--timed-answer (fsm id queryid rest page)
   "Send `--timed-archive''s PAGE of REST to the query ID / QUERYID on FSM."
@@ -911,6 +928,229 @@ batch open, and none opens during one."
       (setq jabber-db--in-transaction nil)
       (jabber-db-close)
       (delete-directory dir t))))
+
+;;; Newest messages first, then the backfill (slice 5)
+
+(defconst jabber-test-mam-sync--sync-account
+  '(:username "romeo" :server "montague.net" :resource "Orchard-sync-1"
+    :password "foo" :connection-type virtual))
+
+(defconst jabber-test-mam-sync--juliet "juliet@capulet.example")
+
+(defun jabber-test-mam-sync--rows (&optional sql)
+  "The database's count for SQL, by default its message rows."
+  (caar (sqlite-select (jabber-db-ensure-open) (or sql "SELECT count(*) FROM message"))))
+
+(ert-deftest jabber-test-mam-sync-worker-fetches-newest-first ()
+  "A chat's newest messages come first, a backward page at a time, moving
+no cursor; the catch-up then stores the whole archive once, its cursor at
+the newest."
+  (jabber-test-mam-sync--with-timed-server 120
+    (let* ((summary (jabber-mam-sync-worker-run
+                     jabber-test-mam-sync--sync-account
+                     '((:room nil :with nil :nick nil))
+                     `((:with ,jabber-test-mam-sync--juliet))))
+           (queries (reverse jabber-test-mam-sync--queries)))
+      (should (equal '((nil "chat" success 120 nil)) (plist-get summary :archives)))
+      (should (equal `((,jabber-test-mam-sync--juliet success nil))
+                     (mapcar (lambda (h) (seq-take h 3)) (plist-get summary :heads))))
+      (should (numberp (plist-get summary :heads-seconds)))
+      ;; The first query is the head's: the archive's last page.
+      (should (eq t (nth 3 (car queries))))
+      ;; Thirty newest at ten a page: three backward pages, newest first,
+      ;; looked for in the last `jabber-mam-sync-head-days' only.
+      (should (equal '(t "p-110" "p-100")
+                     (delq nil (mapcar (lambda (q) (nth 3 q)) queries))))
+      (should (seq-every-p #'car (seq-filter (lambda (q) (nth 3 q)) queries)))
+      (should (= 120 (jabber-test-mam-sync--rows)))
+      (should (= 120 (jabber-test-mam-sync--rows "SELECT count(DISTINCT server_id) FROM message")))
+      (should (equal "p-119" (car (jabber-db-mam-progress "romeo@montague.net"
+                                                          "romeo@montague.net" nil)))))))
+
+(ert-deftest jabber-test-mam-sync-worker-fails-a-silent-head-by-name ()
+  "A newest-messages page the archive never answers is asked again, then
+fails by name; the catch-up still completes."
+  (jabber-test-mam-sync--with-timed-server 40
+    (let* ((jabber-mam-page-timeout 0.3)
+           (jabber-test-mam-sync--silent-before t)
+           (summary (jabber-mam-sync-worker-run
+                     jabber-test-mam-sync--sync-account
+                     '((:room nil :with nil :nick nil))
+                     `((:with ,jabber-test-mam-sync--juliet)))))
+      (should (equal '((nil "chat" success 40 nil)) (plist-get summary :archives)))
+      (pcase-let ((`((,who ,outcome ,reason ,_seconds)) (plist-get summary :heads)))
+        (should (equal jabber-test-mam-sync--juliet who))
+        (should (eq 'failed outcome))
+        (should (string-match-p "no answer" reason)))
+      ;; Asked twice: the request and the watchdog's retry.
+      (should (= 2 (length (seq-filter (lambda (q) (nth 3 q)) jabber-test-mam-sync--queries))))
+      (should (assq 'retry (mapcar #'cdr (plist-get summary :stalls)))))))
+
+(ert-deftest jabber-test-mam-sync-worker-fails-a-silent-disco-by-name ()
+  "A room whose disco never answers fails by name within the page timeout;
+the other archive completes."
+  (jabber-test-mam-sync--with-paged-server
+    (let* ((jabber-mam-page-timeout 0.3)
+           (jabberd-iq-get-handlers
+            (cons (cons "http://jabber.org/protocol/disco#info"
+                        (lambda (fsm stanza)
+                          (unless (equal (jabber-xml-get-attribute stanza 'to) room)
+                            (jabber-test-mam-sync--disco fsm stanza))))
+                  jabberd-iq-get-handlers))
+           (summary (jabber-test-mam-sync--run-paged)))
+      (should (equal `((nil "chat" success 6 nil)
+                       (,room "groupchat" failed 0 "no disco answer within 0.3s"))
+                     (plist-get summary :archives)))
+      (should (member (list room 'disco-timeout nil) (plist-get summary :stalls))))))
+
+(ert-deftest jabber-test-mam-sync-worker-reports-changes-as-it-goes ()
+  "In a worker, changed histories go to the session at batch boundaries;
+what the last report did not carry is in the summary."
+  (jabber-test-mam-sync--with-timed-server 60
+    (let* ((posts nil)
+           (summary
+            (cl-letf (((symbol-function 'jabber-mam-sync--in-worker-p) #'always)
+                      ((symbol-function 'isolate-send)
+                       (lambda (to message) (push (cons to message) posts)))
+                      ((symbol-function 'isolate-receive) #'ignore))
+              (jabber-mam-sync-worker-run
+               jabber-test-mam-sync--sync-account
+               '((:room nil :with nil :nick nil))
+               `((:with ,jabber-test-mam-sync--juliet)))))
+           (history (list "romeo@montague.net" jabber-test-mam-sync--juliet "chat")))
+      (should posts)
+      (dolist (post posts)
+        (should (eq 'parent (car post)))
+        (should (equal '(jabber-mam-sync "romeo@montague.net" :peers) (seq-take (cdr post) 3))))
+      (should (or (seq-some (lambda (post) (member history (nth 3 (cdr post)))) posts)
+                  (member history (plist-get summary :unposted))))
+      (should (equal '((nil "chat" success 60 nil)) (plist-get summary :archives))))))
+
+(ert-deftest jabber-test-mam-sync-worker-takes-a-forwarded-chat ()
+  "A chat the session forwards to the running job gets its newest messages
+and its catch-up there, and the summary acknowledges it."
+  (jabber-test-mam-sync--with-timed-server 40
+    (let* ((requests (list `(jabber-mam-sync-add
+                             (:room nil :with ,jabber-test-mam-sync--juliet :nick nil)
+                             (:with ,jabber-test-mam-sync--juliet))))
+           (summary
+            (cl-letf (((symbol-function 'jabber-mam-sync--in-worker-p) #'always)
+                      ((symbol-function 'isolate-send) #'ignore)
+                      ((symbol-function 'isolate-receive) (lambda (&rest _) (pop requests))))
+              (jabber-mam-sync-worker-run jabber-test-mam-sync--sync-account
+                                          '((:room nil :with nil :nick nil))))))
+      (should (equal `((nil . ,jabber-test-mam-sync--juliet)) (plist-get summary :accepted)))
+      (should (equal `((,jabber-test-mam-sync--juliet success nil))
+                     (mapcar (lambda (h) (seq-take h 3)) (plist-get summary :heads))))
+      (should (member `(,jabber-test-mam-sync--juliet "chat" success 40 nil)
+                      (plist-get summary :archives)))
+      (should (= 40 (jabber-test-mam-sync--rows))))))
+
+(ert-deftest jabber-test-mam-sync-live-message-stored-once ()
+  "A message the session stored live, which the backfill then brings
+again, is one row."
+  (jabber-test-mam-sync--with-timed-server 30
+    (let ((live (assoc "p-010" jabber-test-mam-sync--timeline)))
+      (jabber-db-store-message "romeo@montague.net" jabber-test-mam-sync--juliet "in" "chat"
+                               "Hello p-010" (floor (cdr live)) "balcony" "m-p-010" "p-010")
+      (let ((summary (jabber-mam-sync-worker-run
+                      jabber-test-mam-sync--sync-account
+                      '((:room nil :with nil :nick nil))
+                      `((:with ,jabber-test-mam-sync--juliet)))))
+        (should (equal '((nil "chat" success 29 nil)) (plist-get summary :archives)))
+        (should (= 30 (jabber-test-mam-sync--rows)))
+        (should (= 1 (jabber-test-mam-sync--rows
+                      "SELECT count(*) FROM message WHERE server_id = 'p-010'")))))))
+
+(ert-deftest jabber-test-mam-sync-forwards-requests-to-the-running-job ()
+  "A room joined while a job runs goes to that job, with its newest
+messages first; one the job never took becomes the next job's."
+  (jabber-test-mam-sync--with-session
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'isolate-live-p) #'always)
+                ((symbol-function 'isolate-retire) #'always)
+                ((symbol-function 'isolate-send)
+                 (lambda (isolate message) (push (list isolate message) sent))))
+        (jabber-mam-maybe-catchup jc)
+        (jabber-mam-sync--start jabber-test-mam-sync--account)
+        (jabber-mam-muc-joined jc "other@muc.example")
+        (should (equal '((worker (jabber-mam-sync-add
+                                  (:room "other@muc.example" :with nil :nick nil)
+                                  (:room "other@muc.example"))))
+                       sent))
+        (should-not (jabber-mam-sync--get jabber-test-mam-sync--account :pending))
+        ;; The worker answered before it polled again: the room waits for
+        ;; the next job.
+        (setq summary '(:archives nil :peers nil :accepted nil))
+        (funcall done)
+        (should (equal '(("other@muc.example")) (jabber-mam-sync--get jabber-test-mam-sync--account :pending)))
+        (should-not (jabber-mam-sync--get jabber-test-mam-sync--account :forwarded))
+        ;; The next job gets it, newest messages first.
+        (jabber-mam-sync--start jabber-test-mam-sync--account)
+        (should (= 2 (length spawned)))
+        (should (equal '((:room "other@muc.example")) (nth 3 (car spawned))))))))
+
+(ert-deftest jabber-test-mam-sync-acknowledged-forward-is-not-repeated ()
+  "A forwarded request the summary acknowledges makes no follow-up job."
+  (jabber-test-mam-sync--with-session
+    (cl-letf (((symbol-function 'isolate-live-p) #'always)
+                ((symbol-function 'isolate-retire) #'always)
+              ((symbol-function 'isolate-send) #'ignore))
+      (jabber-mam-maybe-catchup jc)
+      (jabber-mam-sync--start jabber-test-mam-sync--account)
+      (jabber-mam-muc-joined jc "other@muc.example")
+      (setq summary '(:archives nil :peers nil :accepted (("other@muc.example"))))
+      (funcall done)
+      (should-not (jabber-mam-sync--get jabber-test-mam-sync--account :pending)))))
+
+(ert-deftest jabber-test-mam-sync-reports-apply-only-from-the-running-job ()
+  "A report marks its histories changed when it comes from the account's
+running job's worker, and is ignored from anyone else."
+  (jabber-test-mam-sync--with-session
+    (let ((jabber-mam-sync--changed (make-hash-table :test #'equal))
+          (history (list jabber-test-mam-sync--account jabber-test-mam-sync--juliet "chat")))
+      (jabber-mam-maybe-catchup jc)
+      (jabber-mam-sync--start jabber-test-mam-sync--account)
+      (jabber-mam-sync--receive 'stranger `(jabber-mam-sync ,jabber-test-mam-sync--account
+                                                            :peers (,history)))
+      (should (= 0 (hash-table-count jabber-mam-sync--changed)))
+      (jabber-mam-sync--receive 'worker `(jabber-mam-sync ,jabber-test-mam-sync--account
+                                                          :peers (,history)))
+      (should (gethash (list jabber-test-mam-sync--account jabber-test-mam-sync--juliet "chat")
+                       jabber-mam-sync--changed)))))
+
+(ert-deftest jabber-test-mam-sync-indicates-while-a-job-runs ()
+  "\"syncing history…\" is in the mode line while a job runs, not after."
+  (jabber-test-mam-sync--with-session
+    (let ((global-mode-string nil))
+      (jabber-mam-maybe-catchup jc)
+      (jabber-mam-sync--start jabber-test-mam-sync--account)
+      (should (member jabber-mam-sync--mode-line-entry global-mode-string))
+      (should (equal " syncing history…" (eval (cadr jabber-mam-sync--mode-line-entry) t)))
+      (setq summary '(:archives nil :peers nil))
+      (funcall done)
+      (should-not (member jabber-mam-sync--mode-line-entry global-mode-string)))))
+
+(ert-deftest jabber-test-mam-sync-expanded-buffer-refreshes-only-when-shown ()
+  "A buffer expanded past the one-tick limit is left as it is by an idle
+merge and refreshed, in ticks, when a window comes to show it."
+  (let ((buffer (generate-new-buffer " expanded"))
+        (jabber-mam-sync--changed (make-hash-table :test #'equal))
+        (refreshes nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jabber-chat-buffer--history-key)
+                   (lambda (_) '("me@x" "a@x" "chat" nil)))
+                  ((symbol-function 'jabber-chat-buffer-refresh)
+                   (lambda (&optional atomic) (push atomic refreshes))))
+          (with-current-buffer buffer
+            (setq-local jabber-chat-buffer-msg-count 1000)
+            (setq jabber-chat--loaded-at (- (float-time) 10)))
+          (puthash '("me@x" "a@x" "chat") (float-time) jabber-mam-sync--changed)
+          (jabber-mam-sync--refresh buffer)
+          (should-not refreshes)
+          (jabber-mam-sync--refresh buffer t)
+          (should (equal '(nil) refreshes)))
+      (kill-buffer buffer))))
 
 (provide 'jabber-test-mam-sync)
 ;;; jabber-test-mam-sync.el ends here
