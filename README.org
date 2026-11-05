@@ -39,6 +39,49 @@ interface of its own (DIVERGENCES.md VM2-MAIL1).  A distribution's notmuch
 installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
 =load-path= (VM2-SITELISP1).
 
+* Romacs and GNU Emacs compared
+
+Performance against pinned GNU Emacs, measured with the standing benchmark
+suite (=crates/romacs-vm-gui/harness/perfbench/=).  The table is regenerated
+from each new run, losses included.  To reproduce it:
+
+#+begin_src sh
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --gnu GNU-EMACS
+python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json
+#+end_src
+
+# perfbench-table-begin
+Measured 2026-11-02 on build ~cd568550~ against pinned GNU Emacs ~45b0f769~, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each workload ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
+
+| Workload | Per | GNU | Romacs | Romacs/GNU (time) | Romacs/GNU (instructions) | Notes |
+|-
+| startup -Q --batch | run | 58.3 ms | 2.01 s | 34.52x | 95.85x | process to exit |
+| font-lock-ensure fileio.c | run | 868 ms | 3.67 s | 4.23x | 3.58x | less its setup |
+| font-lock-ensure subr.el | run | 118 ms | 549 ms | 4.66x | 3.51x | less its setup |
+| font-lock-ensure ORG-NEWS | run | 113 ms | 1.31 s | 11.54x | 9.03x | less its setup |
+| dired 5,000 files | run | 107 ms | 820 ms | 7.68x | 9.31x | less its setup |
+| project-find-regexp repo | run | 406 ms | 2.16 s | 5.32x | 5.85x | less its setup |
+| vc-log 2,000 commits | run | 41.1 ms | 216 ms | 5.24x | 5.14x | less its setup |
+| occur xdisp.c | run | 19.5 ms | 36.6 ms | 1.88x | 1.99x | less its setup |
+| how-many xdisp.c | run | 4.86 ms | 1.64 ms | 0.34x | 0.19x | less its setup |
+| micro named call | iteration | 10 ns | 5.07 ns | 0.51x | 0.56x | (m-id i); GNU compiled, Romacs source |
+| micro closure call | iteration | 10.3 ns | 20 ns | 1.95x | 1.97x | (funcall f0 i); GNU compiled, Romacs source |
+| micro mapcar 1 | iteration | 99.1 ns | 168 ns | 1.70x | 2.09x | (mapcar f0 (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr l)))))))))); GNU compiled, Romacs source |
+| micro mapcar 10 | iteration | 710 ns | 562 ns | 0.79x | 1.05x | (mapcar f0 l); GNU compiled, Romacs source |
+| micro dolist + funcall 10 | iteration | 170 ns | 286 ns | 1.68x | 1.73x | (dolist (x l) (funcall f0 x)); GNU compiled, Romacs source |
+| ERT 25 files | total | 15.4 s | 84.1 s | 5.48x | 6.89x | GNU 927/929 expected, Romacs 884/929 expected; wall summed per file |
+| first-start world build | run | - | 5.58 s | - | - | Romacs only: --loadup --world-build in a fresh store |
+| warm launch to first paint | run | - | 260 ms | - | - | Romacs only (its --trace-latency first-paint); GNU has no paint mark |
+| warm launch to idle | run | 397 ms | 290 ms | 0.73x | 0.80x | spawn to the first idle after emacs-startup-hook; instructions to exit there |
+| key self-insert | key | 1.04 ms | 1.63 ms | 1.57x | 1.53x | 40 keys x 3; wall pre-command to idle; samples GNU 120, Romacs 120 |
+| key C-f | key | 118 µs | 1.25 ms | 10.59x | 2.22x | 40 keys x 3; wall pre-command to idle; samples GNU 120, Romacs 120 |
+| key C-n | key | 2.16 ms | 3.51 ms | 1.62x | 1.74x | 40 keys x 3; wall pre-command to idle; samples GNU 120, Romacs 120 |
+| C-x C-f 5,000 files, per key | key | 68.3 ms | 122 ms | 1.79x | 1.84x | fido-vertical, keys of file-1; candidates GNU 1000, Romacs 2084 |
+| hermes dashboard open | run | 60 ms | 170 ms | 2.83x | 3.49x | hermes_parity_live, read-only |
+
+Not measured in this run: init, gnosis.
+# perfbench-table-end
+
 * Source layout
 
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and

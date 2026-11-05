@@ -330,6 +330,10 @@ python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
 ```
 
+After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
+"Romacs and GNU Emacs compared" table in README.org from that run (the block between
+`# perfbench-table-begin` and `# perfbench-table-end`), keeping every row.
+
 A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
 installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
