@@ -661,6 +661,16 @@ thousandth a stack mark."
   :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
                (with-current-buffer (car it) (insert "x"))))
 
+;; Typing at the end of N numbered lines: a label comes from the text's line
+;; index, not from counting the lines before it.
+(scaling-probe line-numbers-at-end :gui t :n 20000 :steps 20 :budget 0.5
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-line-numbers"))))
+           (dotimes (_ n) (insert "a line of the buffer\n"))
+           (setq display-line-numbers t)
+           (goto-char (point-max))
+           buffer)
+  :body (with-current-buffer it (insert "x")))
+
 ;; Clearing N toasts (the echo area's clearing at the next command) with N
 ;; more layers kept hidden: each toast hidden once, no restacking per
 ;; toast, its layer found without a walk over the kept ones.

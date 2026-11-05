@@ -837,8 +837,8 @@ impl Leaf<'_> {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
-        let at = b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0.clamp(r.start.0, r.end.0);
-        Ok(b.as_str().as_bytes()[r.start.0..at].iter().filter(|&&c| c == b'\n').count() as i64)
+        let at = b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.max(r.start).min(r.end);
+        Ok((b.line_of_byte(at).map_err(Fault::Error)? - b.line_of_byte(r.start).map_err(Fault::Error)?) as i64)
     }
 
     /// How WINDOW labels its lines from its start, its buffer current.

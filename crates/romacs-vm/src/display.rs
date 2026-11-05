@@ -79,16 +79,16 @@ pub(crate) struct ShownText {
 /// The labels LABELS gives the lines starting at STARTS, (display byte,
 /// buffer byte) in TEXT, whose accessible part starts at BEGV; none for
 /// the empty line at the end of a text of LEN bytes reaching ZV.
-fn line_numbers(table: &FaceTable, text: &str, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
+fn line_numbers(table: &FaceTable, text: &crate::text::TextBody, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
     -> romacs_layout_input::LineNumbers {
     let face = table.handle("line-number").unwrap_or(FaceHandle(0));
     let current = table.handle("line-number-current-line").unwrap_or(face);
-    let (mut from, mut line) = (begv, 0i64);
+    let line_of = |byte| text.line_of_byte(crate::coordinates::ByteOffset(byte)).unwrap_or(0) as i64;
+    let first = line_of(begv);
     let mut out = vec![];
     for (display, buffer) in starts {
         if display == len && at_zv { break; }
-        line += text.as_bytes()[from.min(buffer)..buffer].iter().filter(|&&c| c == b'\n').count() as i64;
-        from = from.max(buffer);
+        let line = line_of(buffer) - first;
         out.push((display, labels.label(line), line == labels.point_line));
     }
     romacs_layout_input::LineNumbers { columns: (labels.width + 2) as u32, face, current, labels: out }
@@ -1805,7 +1805,7 @@ impl Vm {
             let merged = sources.merged;
             let line_numbers = labels.map(|labels| {
                 let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
-                line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
+                line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
             return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
                 segments: None, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers });
@@ -1869,7 +1869,7 @@ impl Vm {
         segments.push(mini_window::Segment { display: utf8.len(), buffer: shown.end, len: 1, string: false });
         let len = utf8.len();
         let merged = sources.merged;
-        let line_numbers = labels.map(|labels| line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, len, at_zv));
+        let line_numbers = labels.map(|labels| line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, len, at_zv));
         // produce_stretch_glyph: FACTOR times the glyph's pixel width.
         for (byte, face, c, factor) in relative {
             let input = romacs_layout_input::MeasureInput {

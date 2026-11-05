@@ -61,9 +61,6 @@ pub(super) struct Source<'l, 'a> {
     /// An `:align-to' being computed has counted the line number
     /// (calc_pixel_width_or_height's LNUM_ONCE).
     lnum_added: bool,
-    /// A byte and the lines of the accessible text before it, from which
-    /// `line_at' counts on.
-    lines: (usize, i64),
     /// How many columns a character takes (width_rule.rs), read once.
     rule: crate::width_rule::WidthRule,
     /// The images the elements show (Shape::Image's AT), with their specs.
@@ -103,7 +100,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let byte = leaf.buffer_byte(view.buffer, start)?;
         let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule, images: vec![] })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, rule, images: vec![] })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
@@ -946,10 +943,8 @@ impl Source<'_, '_> {
     pub(super) fn line_of(&mut self, pos: i64) -> R<i64> {
         let begv = self.leaf.buffer_byte(self.view.buffer, self.view.begv)?;
         let at = self.leaf.buffer_byte(self.view.buffer, pos.clamp(self.view.begv, self.view.zv))?;
-        let (from, line) = if self.lines.1 >= 0 && self.lines.0 <= at { self.lines } else { (begv, 0) };
-        let line = line + self.text().as_str().as_bytes()[from..at].iter().filter(|&&c| c == b'\n').count() as i64;
-        self.lines = (at, line);
-        Ok(line)
+        let line = |byte| self.text().line_of_byte(crate::coordinates::ByteOffset(byte)).map_err(Fault::Error);
+        Ok((line(at)? - line(begv)?) as i64)
     }
 }
 
