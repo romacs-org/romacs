@@ -34,6 +34,12 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  rpc        a harness added by its driver alone (fakerpc.el, fake_rpc.py):
+             a persistent JSON-RPC harness with startup steps (initialize,
+             session/new or session/load), approvals, a server restart in
+             the middle of its startup, a stop and resume, and its history
+             listed, viewed and imported, one conversation id in two
+             configuration directories two sessions.
   logging    a server keeps its own session record: errors with their
              functions, slow commands, its end.
   home_keys  RET on the home page's other lines, real keys: a project
@@ -77,6 +83,8 @@ from server_live import Server, until, lisp
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
+RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
+RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
 
 
 class Agents(Server):
@@ -1279,35 +1287,219 @@ def unicode(args, base):
 
 
 def environment(args, base):
-    """A harness gets the editor's environment but for the editor's own
-    launch variables (its build, its usage log, its font): a session's
-    harness, after they are set in the editor, sees none of them, and
-    sees the editor's other variables."""
+    """A harness gets the editor's environment but for what no harness
+    inherits: the editor's own launch variables (its build, its usage log,
+    its font), an orchestrator's (T3 Code's), and every harness's own (a
+    parent Claude Code's or Codex's session, their configuration
+    variables).  Only the session's own configuration variable is set,
+    for its instance.  So under both launches: a user unit (which also
+    unsets them from the user manager's environment) and the detached
+    fallback (systemd-run failing)."""
     a = Agents(args, base, 'ev')
     try:
         a.up()
         launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/gnu-lisp',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
                   'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
-        a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in launch.items()) + ' t)')
-        sid = a.start('say ready')
-        a.idle(sid)
-        seen = next(e.get('env', {}) for e in a.logged() if e.get('started') == sid)
+        parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',
+                  'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts', 'T3CODE_THREAD_ID': 'thread-1', 'T3CODE_CLI_PATH': '/t3',
+                  'CODEX_HOME': '/parent/codex', 'CODEX_THREAD_ID': 'parent-thread', 'CODEX_CI': '1'}
+        dropped = [k for k in {**launch, **parent} if k != 'ROMACS_AGENT_TEST_KEPT']
+        a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in {**launch, **parent}.items()) + ' t)')
+        codex_home = a.codex_instance()
+        a.work.mkdir(parents=True, exist_ok=True)
+
+        def children(tag):
+            """A Claude session (its default directory: no variable) and a
+            Codex one (its own home), their logged environments."""
+            sid = a.start(f'say ready {tag}')
+            a.idle(sid)
+            tid = a.start(f'say ready {tag}', 'codex')
+            until(lambda: any(e.get('prompt') == f'say ready {tag}' for e in a.codex_runs()), 30, f'codex {tag} ran')
+            claude = next(e.get('env', {}) for e in a.logged() if e.get('started') == sid)
+            codex = next(e.get('env', {}) for e in a.codex_runs() if e.get('prompt') == f'say ready {tag}')
+            return sid, tid, claude, codex
+
+        sid, tid, claude, codex = children('unit')
         # A command the agent's own evaluation starts in the editor.
         a.send(sid, 'call romacs_eval ' + json.dumps(
-            {'instance': '?', 'code': '(shell-command-to-string "env | grep ^ROMACS_ | sort")'}))
+            {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_)\' | sort")'}))
         a.idle(sid)
         from_eval = a.tool_results()[-1][1]
         # The unit unsets them even from the user manager's environment.
         unit = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
         unset = subprocess.run(['systemctl', '--user', 'show', '-p', 'UnsetEnvironment', unit],
                                capture_output=True, text=True).stdout.strip() if unit != 'nil' else 'no unit'
-        result = {'harness_romacs_env': seen, 'eval_env': from_eval, 'unit_unset': unset}
-        result['ok'] = (not any(k in seen for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
-                        and seen.get('ROMACS_AGENT_TEST_KEPT') == 'kept'
-                        and not any(k in from_eval for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
-                        and 'ROMACS_AGENT_TEST_KEPT' in from_eval
-                        and (unset == 'no unit' or all(k in unset for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')))
+        # The detached fallback: a systemd-run that fails.
+        stub = a.root / 'no-systemd'
+        stub.mkdir()
+        (stub / 'systemd-run').write_text('#!/bin/sh\nexit 1\n')
+        (stub / 'systemd-run').chmod(0o755)
+        a.eval(f'(progn (setq exec-path (cons {lisp(stub)} exec-path)) t)')
+        sid2, tid2, claude2, codex2 = children('detached')
+        detached = [a.eval(f'(romacs-agent-unit {a.s(s)})') for s in (sid2,)]
+
+        def clean(env, own=None):
+            return (not any(k in env for k in dropped if k != own)
+                    and env.get('ROMACS_AGENT_TEST_KEPT') == 'kept')
+        result = {'claude_env': claude, 'codex_env': codex, 'claude_detached': claude2, 'codex_detached': codex2,
+                  'eval_env': from_eval, 'unit_unset': unset, 'detached_units': detached}
+        result['ok'] = (clean(claude) and clean(claude2)
+                        and clean(codex, 'CODEX_HOME') and codex.get('CODEX_HOME') == str(codex_home)
+                        and clean(codex2, 'CODEX_HOME') and codex2.get('CODEX_HOME') == str(codex_home)
+                        and not any(k in from_eval for k in dropped) and 'ROMACS_AGENT_TEST_KEPT' in from_eval
+                        and (unset == 'no unit' or all(k in unset for k in dropped))
+                        and detached == ['nil'])
+        return result
+    finally:
+        a.close()
+
+
+def rpc(args, base):
+    """A harness Romacs learns of by its driver and nothing else: fakerpc
+    (harness/fakerpc.el, defined by this test) runs fake_rpc.py, which takes
+    no prompt before `initialize' then `session/new' (or `session/load'),
+    each step after the last one's answer.  Two turns and an approval; a
+    server restart while its `initialize' is unanswered: no step sent again,
+    a message sent meanwhile held until it is ready; unsolicited lines before
+    a step's echo: still one copy; a stop and resume: `initialize' and
+    `session/load' again, request ids still rising; its transcripts listed,
+    viewed and imported, the same conversation id in two configuration
+    directories two sessions."""
+    a = Agents(args, base, 'rp')
+    try:
+        homes = [a.home / '.fakerpc-a', a.home / '.fakerpc-b']
+        # Compact, as harnesses write their transcripts.
+        line = lambda o: json.dumps(o, separators=(',', ':')) + '\n'
+        for home, title in zip(homes, ('fixture in a', 'fixture in b')):
+            (home / 'sessions').mkdir(parents=True)
+            (home / 'sessions' / 'rpc-same.jsonl').write_text(
+                line({'type': 'prompt', 'text': f'say {title}', 'cwd': str(a.work)}) + line({'type': 'reply', 'text': title}))
+        (homes[0] / 'sessions' / 'rpc-fixture.jsonl').write_text(
+            line({'type': 'prompt', 'text': 'say from the fixture', 'cwd': str(a.work)})
+            + line({'type': 'reply', 'text': 'from the fixture'}))
+        a.work.mkdir(parents=True, exist_ok=True)
+        # The driver, from this test alone, in the init too: a restarted
+        # server restores its sessions knowing it.
+        setup = (f"(progn (load {lisp(RPC_DRIVER)}) (setq fakerpc-program (list \"python3\" {lisp(RPC)})) "
+                 f"(setq romacs-agent-providers (list (cons \"fakerpc\" {lisp(homes[0])}) "
+                 f"(list \"fakerpc2\" :harness 'fakerpc :config-dir {lisp(homes[1])}))) t)")
+        (a.home / '.config/romacs').mkdir(parents=True, exist_ok=True)
+        with open(a.home / '.config/romacs/init.el', 'a') as init:
+            init.write(f"\n(setq romacs-agent-claude-program {lisp(HARNESS)})\n(with-eval-after-load 'romacs-agent {setup})\n")
+        a.up()
+        a.eval(setup)
+        rpcs = lambda: [e for e in a.logged() if 'rpc' in e or 'rpc_started' in e]
+        done = lambda sid: int(a.eval(f'(romacs-agent-done-seq {a.s(sid)})'))
+
+        def turn(sid, text, expect):
+            before = done(sid)
+            a.send(sid, text)
+            until(lambda: done(sid) > before, 30, f'{text} answered')
+            until(lambda: expect in a.chat(sid), 10, f'{expect} shown')
+
+        # Two turns and an approval.
+        sid = a.start('say one', 'fakerpc')
+        until(lambda: done(sid) > 0, 30, 'first turn')
+        a.send(sid, 'ask ls -la')
+        until(lambda: a.state(sid) == 'waiting-approval', 30, 'approval asked')
+        a.eval(f'(romacs-agent-respond {a.s(sid)} (car (hash-table-keys (romacs-agent-approvals {a.s(sid)}))) t)')
+        until(lambda: 'permission allow' in a.chat(sid), 30, 'approval answered')
+        a.idle(sid)
+        turn(sid, 'say two', 'two')
+        native = a.eval(f'(romacs-agent-harness-session {a.s(sid)})').strip('"')
+        run1 = [e for e in rpcs() if e.get('rpc') in ('initialize', 'session/new', 'session/load', 'session/prompt')]
+        # Stopped and resumed: its startup again, going on with its session.
+        a.eval(f'(romacs-agent-stop {a.s(sid)})')
+        until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'stopped')
+        a.eval(f'(romacs-agent-resume {a.s(sid)})')
+        turn(sid, 'say three', 'three')
+        run2 = [e for e in rpcs() if e.get('rpc') in ('initialize', 'session/new', 'session/load', 'session/prompt')][len(run1):]
+        manifest = json.loads((a.home / '.local/state/romacs/agents' / sid / 'manifest.json').read_text())
+
+        # Its chat drawn again (the journal replayed into a copy): nothing
+        # is written to the harness.
+        written = len(rpcs())
+        a.eval(f'(progn (kill-buffer (romacs-agent-buffer {a.s(sid)})) (romacs-agent-show {a.s(sid)}) t)')
+        time.sleep(1)
+        redraw_writes = [e.get('rpc') for e in rpcs()[written:]]
+
+        # Stopped, resumed, and the server restarted while that run's
+        # `initialize' is unanswered: the last run's startup is not taken
+        # for this one's; a message sent meanwhile waits for its readiness.
+        a.eval(f'(romacs-agent-stop {a.s(sid)})')
+        until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'stopped again')
+        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        seen_pids = {e.get('pid') for e in rpcs()}
+        a.eval(f'(romacs-agent-resume {a.s(sid)})')
+        until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'initialize read')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'restored')
+        held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
+                            f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
+        before = done(sid)
+        until(lambda: done(sid) > before, 30, 'held message answered')
+        slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
+        slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
+        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
+
+        # A new session's server restart in the middle of its startup.
+        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        seen_pids = {e.get('pid') for e in rpcs()}
+        fresh = a.start('', 'fakerpc')
+        until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'fresh initialize read')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone again')
+        a.restart()
+        until(lambda: a.eval(f'(and {a.s(fresh)} t)') == 't', 15, 'fresh restored')
+        a.send(fresh, 'say fresh')
+        until(lambda: done(fresh) > 0, 30, 'fresh answered')
+        fresh_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
+        fresh_run = [e.get('rpc') for e in rpcs() if e.get('pid') == fresh_pid and 'rpc' in e]
+        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
+
+        # Its history: listed, viewed, imported; one id in two homes.
+        items = parity_live.read_sexp(a.eval(
+            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
+            "(plist-get i :title)) \"|\")) (seq-filter (lambda (i) (eq (plist-get i :harness) 'fakerpc)) (romacs-agent-history-items))))")) or []
+        items = [i.split('|') for i in items]
+        item = lambda ident, provider: (f"(seq-find (lambda (i) (and (equal (plist-get i :id) {lisp_text(ident)}) "
+                                         f"(equal (plist-get i :provider) {lisp_text(provider)}))) (romacs-agent-history-items))")
+        view = parity_live.read_sexp(a.eval(
+            f'(with-current-buffer (save-window-excursion (romacs-agent-history-open {item("rpc-fixture", "fakerpc")})) '
+            '(list buffer-read-only (buffer-substring-no-properties (point-min) (point-max))))'))
+        imported = [a.eval(f'(romacs-agent-id (romacs-agent-import (quote fakerpc) "rpc-same" '
+                           f'(plist-get {item("rpc-same", p)} :path) {lisp(a.work)} "same" {lisp_text(p)} {lisp(h)}))').strip('"')
+                    for p, h in (('fakerpc', homes[0]), ('fakerpc2', homes[1]))]
+        until(lambda: sum(1 for e in rpcs() if e.get('rpc') == 'session/load' and e.get('session') == 'rpc-same') >= 2,
+              30, 'both imports loaded')
+        loads = sorted(e.get('home') for e in rpcs() if e.get('rpc_started')
+                       and e.get('pid') in {x['pid'] for x in rpcs() if x.get('rpc') == 'session/load' and x.get('session') == 'rpc-same'})
+        turn(imported[1], 'say in b', 'in b')
+        ids = [e['id'] for e in run1 + run2]
+        methods = lambda run: [e['rpc'] for e in run]
+        result = {'run1': methods(run1), 'run2': methods(run2), 'native': native, 'manifest_native': manifest.get('harnessSession'),
+                  'held_state': held_state, 'slow_run': slow_run, 'fresh_run': fresh_run,
+                  'redraw_writes': redraw_writes, 'items': items, 'view': view, 'imported': imported,
+                  'loads': loads, 'ids': ids}
+        result['ok'] = (methods(run1) == ['initialize', 'session/new', 'session/prompt', 'session/prompt', 'session/prompt']
+                        and methods(run2) == ['initialize', 'session/load', 'session/prompt']
+                        and run2[1].get('session') == native and native.startswith('rpc-')
+                        and manifest.get('harnessSession') == native
+                        and ids == sorted(ids) and len(set(ids)) == len(ids)
+                        and redraw_writes == []
+                        and [m for m, _ in slow_run] == ['initialize', 'session/load', 'session/prompt']
+                        and slow_run[1][1] == native and slow_run[2][1] == native
+                        and held_state == '(1 nil)'
+                        and fresh_run == ['initialize', 'session/new', 'session/prompt']
+                        and sorted(i[1] for i in items if i[0] == 'rpc-same') == ['fakerpc', 'fakerpc2']
+                        and ['rpc-fixture', 'fakerpc', 'say from the fixture'] in items
+                        and view and view[0] == 't' and 'from the fixture' in view[1]
+                        and len(set(imported)) == 2
+                        and loads == sorted([str(homes[0]), str(homes[1])])
+                        and 'in b' in a.chat(imported[1]))
         return result
     finally:
         a.close()
@@ -1746,24 +1938,27 @@ def history(args, base):
         until(lambda: len([e for e in a.logged() if e.get('started') == cid]) > runs, 15, 'stale row resumed')
         # A conversation another server is importing right now is refused.
         busy = '01a1a2ee-0000-7000-8000-0000000000ff'
-        (a.home / '.local/state/romacs/agents' / busy).mkdir()
+        # Its directory, named by the conversation's identity.
+        busy_dir = text(f'(romacs-agent--import-id \'codex {lisp_text(str(codex_home))} {lisp_text(busy)})')
+        (a.home / '.local/state/romacs/agents' / busy_dir).mkdir()
         refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} "/nonexistent" {lisp(a.work)} '
                        f'"x" "codex" {lisp_text(str(codex_home))}) (user-error (cadr err)))')
         # Two conversations whose time-ordered ids share their first
         # characters run overlapping turns, each with its own supervisor.
-        twins = ['01a1a2ee-0000-7000-8000-0000000000a1', '01a1a2ee-0000-7000-8000-0000000000a2']
-        for twin in twins:
+        threads = ['01a1a2ee-0000-7000-8000-0000000000a1', '01a1a2ee-0000-7000-8000-0000000000a2']
+        twins = []
+        for twin in threads:
             rollout = codex_home / 'sessions/2026/11/03' / f'rollout-2026-11-03T10-00-01-{twin}.jsonl'
             rollout.write_text(json.dumps({'timestamp': '2026-11-03T10:00:01.000Z', 'type': 'session_meta',
                                            'payload': {'id': twin, 'cwd': str(a.work)}}) + '\n')
-            a.eval(f'(romacs-agent-import \'codex {lisp_text(twin)} {lisp_text(str(rollout))} {lisp(a.work)} '
-                   f'"twin" "codex" {lisp_text(str(codex_home))})')
+            twins.append(text(f'(romacs-agent-id (romacs-agent-import \'codex {lisp_text(twin)} {lisp_text(str(rollout))} '
+                              f'{lisp(a.work)} "twin" "codex" {lisp_text(str(codex_home))}))'))
         sockets = text(f'(list (romacs-agent-host-socket {a.s(twins[0])}) (romacs-agent-host-socket {a.s(twins[1])}))')
         for twin in twins:
             a.send(twin, 'slow 2')
         for twin in twins:
             until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(twin)})') != '0', 30, f'{twin} answered')
-        twin_runs = sorted({e.get('codex') for e in a.codex_runs() if e.get('codex') in twins})
+        twin_runs = sorted({e.get('codex') for e in a.codex_runs() if e.get('codex') in threads})
         twin_failed = text(f'(list (romacs-agent-failed {a.s(twins[0])}) (romacs-agent-failed {a.s(twins[1])}))')
         # Byte ranges: a line starting at BEG is whole; one cut at BEG (inside
         # a UTF-8 character) or at END is left out.
@@ -1801,7 +1996,7 @@ def history(args, base):
             and order(chat_again, '> list the files here', '> say resumed one')
             and imported_again == ['t', cut] and 'Another Romacs' in (refused or '')
             and cuts == {'aligned': ['b', 'c'], 'in-char': ['c'], 'partial-end': ['a', 'b'], 'whole': ['a', 'b', 'c']}
-            and sockets[0] != sockets[1] and twin_runs == twins and twin_failed in (None, [None, None], [])
+            and sockets[0] != sockets[1] and twin_runs == threads and twin_failed in (None, [None, None], [])
             and untouched)
         return result
     finally:
@@ -2011,7 +2206,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys}
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'rpc': rpc}
 
 
 def main():
@@ -2033,7 +2228,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)

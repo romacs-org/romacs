@@ -601,6 +601,26 @@ thousandth a stack mark."
                                          :object-type 'hash-table :null-object :null :false-object :false)))
           (dolist (session it) (romacs-agent--record (romacs-agent-get (romacs-agent-id session)) record))))
 
+;; The same with 50 more harness drivers defined ahead of Claude Code's: a
+;; record reaches its session's driver through the session, never a
+;; registry lookup.
+(scaling-probe agent-dispatch-drivers :n 200
+  :setup (progn (scaling--agent)
+                (setq romacs-agent--drivers
+                      (append (cl-loop for i below 50
+                                       collect (list (intern (format "scaling-driver-%d" i))
+                                                     :lifetime 'persistent
+                                                     :config-variable (format "SCALING_DRIVER_%d_HOME" i)))
+                              (cl-remove-if (lambda (d) (string-prefix-p "scaling-driver-" (symbol-name (car d))))
+                                            romacs-agent--drivers)))
+                (clrhash romacs-agent--sessions)
+                (mapcar (lambda (id) (let ((s (romacs-agent--make :id id :harness 'claude :title id)))
+                                       (puthash id s romacs-agent--sessions) s))
+                        (scaling--names "scaling-session" n)))
+  :body (let ((record (json-parse-string "{\"seq\": 1, \"out\": {\"type\": \"result\", \"total_cost_usd\": 0}}"
+                                         :object-type 'hash-table :null-object :null :false-object :false)))
+          (dolist (session it) (romacs-agent--record (romacs-agent-get (romacs-agent-id session)) record))))
+
 ;; N calls recorded in a session's call log (each an appended line) and
 ;; each looked up.
 (scaling-probe agent-calls :n 200
@@ -826,6 +846,53 @@ thousandth a stack mark."
   :body (scaling--with-history-place it
           (clrhash romacs-agent-history--descriptions)
           (romacs-agent-history-list)))
+
+;; N harness drivers defined, then each defined again, oldest first (the
+;; farthest from the registry's head): each by its name's cell, never by
+;; a walk of the registry.
+(scaling-probe agent-define-harness :n 2000
+  :setup (progn (scaling--agent) (mapcar #'intern (scaling--names "scaling-rdriver" n)))
+  :body (progn
+          (dolist (name it) (romacs-agent-define-harness name :lifetime 'persistent))
+          (dolist (name it) (romacs-agent-define-harness name :lifetime 'per-turn))))
+
+;; A harness's environment, with N harness drivers defined (each a
+;; configuration variable and one it sets for its children) and N other
+;; variables in the editor's: one membership test per variable, linear.
+(scaling-probe agent-environment :n 500
+  :setup (progn (scaling--agent)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-edriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_EDRIVER_%d_HOME" i)
+                                               :scrub (list (format "SCALING_EDRIVER_%d_CHILD" i))))
+                (append (cl-loop for i below n collect (format "SCALING_KEPT_%d=value" i))
+                        (cl-loop for i below n collect (format "SCALING_EDRIVER_%d_CHILD=parent" i))
+                        process-environment))
+  :body (let ((process-environment it)) (dotimes (_ 5) (romacs-agent--harness-environment))))
+
+;; The transcripts no session continues, among 200 listed and 200
+;; sessions, of a harness defined before N others: each row's identity
+;; finds its harness by name, never by a walk of the registry.
+(scaling-probe agent-history-items-drivers :n 400 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-history)
+                ;; Defined first: the N after it stand between it and the head.
+                (romacs-agent-define-harness 'scaling-hlast :lifetime 'persistent :config-variable "SCALING_HLAST_HOME"
+                                             :config-default "/scaling/home")
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-hdriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_HDRIVER_%d_HOME" i)))
+                (clrhash romacs-agent--sessions)
+                (dotimes (i 200)
+                  (let ((id (format "%08x-0000-4000-8000-%012x" i i)))
+                    (puthash id (romacs-agent--make :id id :harness 'scaling-hlast :title id :harness-session id)
+                             romacs-agent--sessions)))
+                (setq romacs-agent-history--listing
+                      (cl-loop for i below 200
+                               collect (list :harness 'scaling-hlast :id (format "%08x-0000-4000-8000-%012x" (* 2 i) i)
+                                             :path (format "/scaling/%d.jsonl" i) :mtime i :config-dir nil)))
+                nil)
+  :body (dotimes (_ 5) (romacs-agent-history-items)))
 
 ;; A tool result of N characters, Unicode text: its check is native, so
 ;; one character costs no Lisp call.

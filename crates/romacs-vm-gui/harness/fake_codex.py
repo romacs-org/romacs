@@ -35,7 +35,9 @@ def main():
     if LOG:
         with open(LOG, 'a') as handle:
             handle.write(json.dumps({'t': time.time(), 'codex': thread, 'argv': argv, 'pid': os.getpid(),
-                                     'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200]}) + '\n')
+                                     'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200],
+                                     'env': {k: v for k, v in os.environ.items()
+                                             if k.startswith(('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_'))}}) + '\n')
     emit({'type': 'thread.started', 'thread_id': thread})
     emit({'type': 'turn.started'})
     if prompt.startswith('Evaluate the learner response'):

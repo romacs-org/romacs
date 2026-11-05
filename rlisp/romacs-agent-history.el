@@ -105,7 +105,7 @@ result, an injected context)."
   ;; An assistant line's first type is its message's.
   (member type '("user" "message" "assistant")))
 
-(defun romacs-agent-history--claude-files (dir)
+(defun romacs-agent-history--claude-files (dir _limit)
   "Claude Code's transcripts under DIR: (PATH SIZE MTIME)."
   (let ((projects (expand-file-name "projects" dir)) (files nil))
     (when (file-directory-p projects)
@@ -130,10 +130,6 @@ while they name no prompt."
              until title)
     (when (and cwd title)
       (list :harness 'claude :id (file-name-base path) :cwd cwd :title title))))
-
-(defun romacs-agent-history--id-p (id)
-  "Whether ID names a conversation as both harnesses do: a UUID."
-  (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\'" id)))
 
 (defun romacs-agent-history--claude-events (objects)
   "A Claude Code transcript's OBJECTS as chat events."
@@ -219,7 +215,7 @@ while they name no prompt."
              until title)
     (setq thread (or thread (and (string-match "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'" path)
                                  (match-string 1 path))))
-    (when (and (romacs-agent-history--id-p thread) cwd title)
+    (when (and (romacs-agent--uuid-p thread) cwd title)
       (list :harness 'codex :id thread :cwd cwd :title title))))
 
 (defun romacs-agent-history--codex-input (payload)
@@ -302,15 +298,9 @@ while they name no prompt."
 
 ;;; Listing
 
-(defconst romacs-agent-history--harnesses
-  '((claude :keep romacs-agent-history--claude-keep :describe romacs-agent-history--claude-describe
-            :events romacs-agent-history--claude-events)
-    (codex :keep romacs-agent-history--codex-keep :describe romacs-agent-history--codex-describe
-           :events romacs-agent-history--codex-events))
-  "How each harness's history is read.")
-
 (defun romacs-agent-history--get (harness key)
-  (plist-get (alist-get harness romacs-agent-history--harnesses) key))
+  "How HARNESS's history is read: its driver's :history KEY."
+  (plist-get (plist-get (romacs-agent--driver-of harness) :history) key))
 
 (defun romacs-agent-history--places ()
   "The directories holding history, each once: (DIR HARNESS PROVIDER
@@ -320,9 +310,9 @@ first instance of that harness, run with the default directory)."
     (dolist (entry romacs-agent-providers)
       (let* ((provider (romacs-agent--provider entry))
              (harness (plist-get provider :harness))
-             (default (expand-file-name (plist-get (alist-get harness romacs-agent--harnesses) :default)))
+             (default (romacs-agent--home harness nil))
              (config-dir (romacs-agent--config-dir provider)))
-        (when (alist-get harness romacs-agent-history--harnesses)
+        (when (plist-get (romacs-agent--driver-of harness) :history)
           (push (list (or config-dir default) harness (car entry) config-dir) places)
           (push (list default harness (car entry) nil) places))))
     (let ((seen (make-hash-table :test #'equal)))
@@ -350,9 +340,7 @@ described (from their heads, once per size and time)."
   (setq romacs-agent-history--listing
         (cl-loop for (dir harness provider config-dir) in (romacs-agent-history--places)
                  append
-                 (let ((files (sort (if (eq harness 'codex)
-                                        (romacs-agent-history--codex-files dir romacs-agent-history-limit)
-                                      (romacs-agent-history--claude-files dir))
+                 (let ((files (sort (funcall (romacs-agent-history--get harness :files) dir romacs-agent-history-limit)
                                     (lambda (a b) (> (nth 2 a) (nth 2 b))))))
                    (cl-loop for (path size mtime) in (seq-take files romacs-agent-history-limit)
                             for description = (romacs-agent-history--describe path size mtime harness)
@@ -364,12 +352,19 @@ described (from their heads, once per size and time)."
 (defun romacs-agent-history-items ()
   "The listed transcripts no Romacs session continues, newest first."
   (let ((known (make-hash-table :test #'equal)))
-    (maphash (lambda (id session)
-               (puthash id t known)
-               (when (romacs-agent-harness-session session) (puthash (romacs-agent-harness-session session) t known))
+    ;; A conversation by its identity: two configuration directories can
+    ;; hold the same id.
+    (maphash (lambda (_id session)
+               (puthash (romacs-agent--native-key (romacs-agent-harness session) (romacs-agent-config-dir session)
+                                                  (romacs-agent--native-id session))
+                        t known)
                (when-let* ((imported (romacs-agent-imported session))) (puthash (plist-get imported :path) t known)))
              romacs-agent--sessions)
-    (sort (cl-remove-if (lambda (item) (or (gethash (plist-get item :id) known) (gethash (plist-get item :path) known)))
+    (sort (cl-remove-if (lambda (item)
+                          (or (gethash (romacs-agent--native-key (plist-get item :harness) (plist-get item :config-dir)
+                                                                 (plist-get item :id))
+                                       known)
+                              (gethash (plist-get item :path) known)))
                         romacs-agent-history--listing)
           (lambda (a b) (> (plist-get a :mtime) (plist-get b :mtime))))))
 
@@ -472,9 +467,7 @@ buffer, for SESSION: its end, from a prompt on."
 harness's own resume, and show its chat: the session already going on
 with it, when there is one, attached or resumed."
   (let* ((id (plist-get item :id))
-         (known (or (romacs-agent-get id)
-                    (cl-find-if (lambda (session) (equal (romacs-agent-harness-session session) id))
-                                (hash-table-values romacs-agent--sessions))))
+         (known (romacs-agent--native-session (plist-get item :harness) (plist-get item :config-dir) id))
          (session (if known (romacs-agent--continue known)
                     (romacs-agent-import (plist-get item :harness) id (plist-get item :path)
                                          (plist-get item :cwd) (plist-get item :title)

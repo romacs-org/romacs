@@ -36,6 +36,8 @@ from romacs_mcp_client import RomacsMcp
 
 OUT = threading.Lock()
 LOG = os.environ.get('FAKE_HARNESS_LOG')
+# The variables whose inheritance the environment tests watch.
+WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_')
 
 
 def emit(obj):
@@ -226,7 +228,7 @@ class Harness:
     def main(self):
         threading.Thread(target=self.read_stdin, daemon=True).start()
         log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
-            cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith('ROMACS_')})
+            cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith(WATCHED)})
         while True:
             text = self.inbox.get()
             if text is None:

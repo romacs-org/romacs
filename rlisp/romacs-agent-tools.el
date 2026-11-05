@@ -458,7 +458,7 @@ started with the same clientRequestId."
     (mapcar (lambda (entry)
               (let* ((instance (romacs-agent--provider entry))
                      (dir (or (plist-get instance :config-dir)
-                              (plist-get (alist-get (plist-get instance :harness) romacs-agent--harnesses) :default))))
+                              (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-default))))
                 (romacs-mcp--object
                  "providerInstanceId" (plist-get instance :name) "harness" (symbol-name (plist-get instance :harness))
                  "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)

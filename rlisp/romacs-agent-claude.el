@@ -1,0 +1,188 @@
+;;; romacs-agent-claude.el --- Claude Code, as Romacs runs it  -*- lexical-binding: t -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
+;; Claude Code's driver (`romacs-agent-define-harness'): one `claude -p'
+;; process per session, stream-json lines both ways.  Its approvals come
+;; to Romacs (--permission-prompt-tool stdio) and are answered by
+;; control_response; an interrupt is a control_request.
+
+;;; Code:
+
+(require 'romacs-agent)
+
+(defun romacs-agent--claude-argv (session resume)
+  "Claude Code's command line for SESSION, resuming its conversation when
+RESUME is non-nil."
+  (let ((dir (romacs-agent-dir session))
+        (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))
+    (romacs-agent--write-json
+     (expand-file-name "mcp.json" dir)
+     (romacs-mcp--object
+      "mcpServers" (romacs-mcp--object
+                    "romacs" (romacs-mcp--object
+                              "command" (romacs-agent--program "romacs-mcp")
+                              "args" (vector "--socket" (romacs-agent--route session) "--reconnect"
+                                             "--session" (romacs-agent-id session)
+                                             "--reply-timeout" (number-to-string romacs-agent-reply-timeout))))))
+    (append (romacs-agent--environment-words session)
+            (list (plist-get instance :program) "-p" "--output-format" "stream-json"
+                  "--input-format" "stream-json" "--verbose" "--include-partial-messages"
+                  ;; The harness's own approvals come to this session's UI.
+                  "--permission-prompt-tool" "stdio"
+                  "--mcp-config" (expand-file-name "mcp.json" dir))
+            (if resume (list "--resume" (romacs-agent--native-id session))
+              (list "--session-id" (romacs-agent-id session)))
+            (romacs-agent--option-words session "--model" "--effort")
+            (plist-get instance :arguments))))
+
+(defun romacs-agent--claude-user (_session text)
+  (romacs-mcp--object "type" "user" "message" (romacs-mcp--object "role" "user" "content" text)))
+
+(defun romacs-agent--claude-events (session line)
+  "The events of LINE, one of Claude Code's stream-json objects."
+  (let ((type (gethash "type" line))
+        (parent (romacs-agent--value (gethash "parent_tool_use_id" line))))
+    (pcase type
+      ("system"
+       (pcase (gethash "subtype" line)
+         ("init" (list (list :type 'session :model (gethash "model" line)
+                             :harness-session (gethash "session_id" line)
+                             :permission-mode (gethash "permissionMode" line)
+                             :mcp (gethash "mcp_servers" line))))
+         ("status" (list (list :type 'status :text (gethash "status" line))))
+         (_ nil)))
+      ("stream_event"
+       (let* ((event (gethash "event" line))
+              (kind (and event (gethash "type" event))))
+         (pcase kind
+           ("message_start"
+            (setf (romacs-agent-message session) (gethash "id" (gethash "message" event)))
+            nil)
+           ("content_block_delta"
+            (let* ((delta (gethash "delta" event)) (dtype (gethash "type" delta)))
+              (puthash (romacs-agent-message session) t (romacs-agent-streamed session))
+              (pcase dtype
+                ("text_delta" (list (list :type 'delta :text (gethash "text" delta) :parent parent
+                                          :message (romacs-agent-message session))))
+                ("thinking_delta" (list (list :type 'thinking :text (gethash "thinking" delta) :parent parent))))))
+           (_ nil))))
+      ("assistant"
+       (let* ((message (gethash "message" line))
+              (id (gethash "id" message))
+              (streamed (gethash id (romacs-agent-streamed session)))
+              (usage (gethash "usage" message))
+              (text nil))
+         (append
+          ;; The prompt this call sent: the context it fills.
+          (when (and (hash-table-p usage) (not parent))
+            (list (list :type 'usage :context-used (+ (or (gethash "input_tokens" usage) 0)
+                                                      (or (gethash "cache_read_input_tokens" usage) 0)
+                                                      (or (gethash "cache_creation_input_tokens" usage) 0)))))
+          (cl-loop for block across (gethash "content" message)
+                   for btype = (gethash "type" block)
+                   when (equal btype "text") do (setq text t)
+                   when (and (equal btype "text") (not streamed))
+                   collect (list :type 'delta :text (gethash "text" block) :parent parent :message id)
+                   when (equal btype "tool_use")
+                   collect (progn
+                             (puthash (gethash "id" block) (or parent t) (romacs-agent-tools session))
+                             (list :type 'tool :state 'started :id (gethash "id" block)
+                                   :name (gethash "name" block) :input (gethash "input" block)
+                                   :parent parent)))
+          ;; The message's text is whole: its view may render it once.
+          (when text (list (list :type 'message-end :message id :parent parent))))))
+      ("user"
+       (let ((content (gethash "content" (gethash "message" line))))
+         (if (stringp content)
+             (list (list :type 'status :text content :parent parent))
+           (cl-loop for block across content
+                    for btype = (gethash "type" block)
+                    when (equal btype "tool_result")
+                    collect (list :type 'tool :state (if (eq (gethash "is_error" block) t) 'failed 'completed)
+                                  :id (gethash "tool_use_id" block)
+                                  :output (romacs-agent--text-of (gethash "content" block))
+                                  :parent parent)
+                    when (equal btype "text")
+                    collect (list :type 'status :text (gethash "text" block) :parent parent)))))
+      ("result"
+       (list (list :type 'done :cost (gethash "total_cost_usd" line)
+                   :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+                   :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
+                   :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
+                                     (when (hash-table-p usage)
+                                       (maphash (lambda (_ model)
+                                                  (let ((size (and (hash-table-p model) (gethash "contextWindow" model))))
+                                                    (when (numberp size) (setq window (max size (or window 0))))))
+                                                usage))
+                                     window))))
+      ("control_request"
+       (let ((request (gethash "request" line)))
+         (when (equal (gethash "subtype" request) "can_use_tool")
+           (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
+           (list (list :type 'approval :request-id (gethash "request_id" line)
+                       :tool (gethash "tool_name" request) :input (gethash "input" request)
+                       :description (gethash "description" request))))))
+      ("control_response"
+       (let ((id (gethash "request_id" (gethash "response" line))))
+         (when (and id (gethash id (romacs-agent-approvals session)))
+           (remhash id (romacs-agent-approvals session)))
+         nil))
+      ("rate_limit_event" nil)
+      (_ (list (list :type 'unknown :raw line))))))
+
+(defun romacs-agent--claude-input-events (session line)
+  "The events of LINE, written to SESSION's harness: a user's prompt, or
+an approval answered."
+  (pcase (gethash "type" line)
+    ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))))
+    ("control_response"
+     (let ((id (gethash "request_id" (gethash "response" line))))
+       (remhash id (romacs-agent-approvals session))
+       (list (list :type 'answered :request-id id
+                   :behavior (gethash "behavior" (gethash "response" (gethash "response" line)))))))
+    (_ nil)))
+
+(defun romacs-agent--claude-interrupt (session)
+  (romacs-mcp--object "type" "control_request"
+                      "request_id" (format "romacs-interrupt-%d" (romacs-agent-request-id session))
+                      "request" (romacs-mcp--object "subtype" "interrupt")))
+
+(defun romacs-agent--claude-respond (session request-id allow message)
+  "The control_response answering approval REQUEST-ID: the tool as asked
+when ALLOW, else denied with MESSAGE."
+  (let ((request (gethash request-id (romacs-agent-approvals session))))
+    (romacs-mcp--object
+     "type" "control_response"
+     "response" (romacs-mcp--object
+                 "subtype" "success" "request_id" request-id
+                 "response" (if allow
+                                (romacs-mcp--object "behavior" "allow"
+                                                    "updatedInput" (or (gethash "input" request) (romacs-mcp--object)))
+                              (romacs-mcp--object "behavior" "deny"
+                                                  "message" (or message "Denied by the user")))))))
+
+(romacs-agent-define-harness 'claude
+  :display "Claude Code" :icon "✳"
+  :config-variable "CLAUDE_CONFIG_DIR" :config-default "~/.claude"
+  :program-option 'romacs-agent-claude-program :arguments-option 'romacs-agent-claude-arguments
+  ;; What Claude Code sets for the commands it runs (a parent session's).
+  :scrub '("CLAUDECODE" "CLAUDE_AGENT_SDK_VERSION" "CLAUDE_CODE_CHILD_SESSION" "CLAUDE_CODE_ENTRYPOINT"
+           "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
+           "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
+  :lifetime 'persistent
+  :argv #'romacs-agent--claude-argv
+  :input #'romacs-agent--claude-user
+  :interrupt #'romacs-agent--claude-interrupt
+  :respond #'romacs-agent--claude-respond
+  :events #'romacs-agent--claude-events
+  :input-events #'romacs-agent--claude-input-events
+  ;; A turn the harness's end cut short goes on (Claude Code's own switch).
+  :resume-environment '("CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1")
+  :native-id-p #'romacs-agent--uuid-p
+  :history '(:files romacs-agent-history--claude-files :keep romacs-agent-history--claude-keep
+             :describe romacs-agent-history--claude-describe :events romacs-agent-history--claude-events))
+
+(provide 'romacs-agent-claude)
+;;; romacs-agent-claude.el ends here
