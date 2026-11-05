@@ -140,7 +140,7 @@
 
 (romacs-deftest romacs-theme-author-attributes-other-than-colours-stay ()
   ;; `error' is a slot as well as a face.
-  (romacs-should (equal (romacs-theme-roles--override '(some-face :inherit error :foreground error) 'dark
+  (romacs-should (equal (romacs-theme--override '(some-face :inherit error :foreground error) 'dark
                                                       '((error . "#ff0000")))
                         '(some-face :inherit error :foreground "#ff0000"))))
 

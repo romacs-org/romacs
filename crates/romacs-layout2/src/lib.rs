@@ -295,6 +295,10 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     let advances: Vec<f32> = chars.iter().map(|c| c.3).collect();
     let places = band.marks.places(text, bounds.width, STATUS_BAR_ACCENT, &advances);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
+    // The band's own overline runs across it, as GNU's does across a mode line.
+    if let Some(line) = band.faces[face].decor.overline {
+        frame.add_background(bounds.x, bounds.y, bounds.width, 1.0, color(line.color.unwrap_or(band.faces[face].foreground)));
+    }
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
     // text in the pill's own foreground where it has one.

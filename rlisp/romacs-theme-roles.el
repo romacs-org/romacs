@@ -271,36 +271,6 @@ it does not choose (`region', `hl-line').  Pairs are computed once each."
                 (unless (equal moved fg)
                   (push (list face fg moved bg minimum) moves))))))))))
 
-;;;; Overrides
-
-(defconst romacs-theme-roles--colour-attributes
-  '(:foreground :background :distant-foreground :underline :overline :strike-through :box)
-  "The face attributes whose values may name a palette slot.")
-
-(defun romacs-theme-roles--value (value env)
-  "VALUE of a colour attribute under ENV, (NAME . VALUE): a slot's name
-reads the colour, a `romacs-theme-' form evaluates, a list maps."
-  (cond ((and (symbolp value) (stringp (cdr (assq value env)))) (cdr (assq value env)))
-        ((and (consp value) (symbolp (car value)) (string-prefix-p "romacs-theme-" (symbol-name (car value))))
-         (eval value env))
-        ((consp value) (mapcar (lambda (each) (romacs-theme-roles--value each env)) value))
-        (t value)))
-
-(defun romacs-theme-roles--override (row mode env)
-  "ROW of `def-romacs-theme''s FACES as (FACE . ATTRIBUTES) for a theme of
-MODE, or nil where it has no branch for MODE."
-  (let ((attributes (if (memq (nth 1 row) '(&dark &light))
-                        (plist-get (cdr row) (if (eq mode 'light) '&light '&dark))
-                      (cdr row)))
-        (out nil))
-    (while attributes
-      (let ((key (car attributes)) (value (nth 1 attributes)))
-        (setq out (append out (list key (if (memq key romacs-theme-roles--colour-attributes)
-                                            (romacs-theme-roles--value value env)
-                                          value)))
-              attributes (cdr (cdr attributes)))))
-    (and out (cons (car row) out))))
-
 ;;;; The value
 
 (defun romacs-theme-roles-rows (palette faces variables)
@@ -315,8 +285,7 @@ merged; FACES come last, on any face, and VARIABLES win."
          (ours (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) (romacs-theme-faces resolved)))
          (baseline (romacs-theme--merge-rows (car settings) ours))
          (floors (romacs-theme-roles-floors baseline resolved))
-         (delta (append (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) floors)
-                        (delq nil (mapcar (lambda (row) (romacs-theme-roles--override row mode resolved)) faces))))
+         (delta (romacs-theme--delta floors faces mode resolved))
          (own (mapcar (lambda (row) (list (car row) (eval (romacs-theme--second row) resolved))) variables)))
     (list :palette resolved :roles bindings
           :faces (romacs-theme--apply-delta baseline delta)

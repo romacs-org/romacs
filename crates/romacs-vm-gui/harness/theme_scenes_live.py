@@ -5,8 +5,8 @@ One fresh private headless labwc and one `romacs-vm-gui --loadup' per
 theme (private HOME/XDG/TMPDIR; keys typed with wtype into that
 compositor only), the theme loaded by the session's init.  Scenes: a
 split with an Emacs Lisp buffer, an active region and line numbers beside
-an empty buffer (`code'); org headings, markup and a source block
-(`org'); help for `find-file' beside a diff (`help-diff'); Emacs Lisp
+an empty buffer (`code'); a Rust file in its tree-sitter mode (`rust');
+org headings, markup and a source block (`org'); help for `find-file' beside a diff (`help-diff'); Emacs Lisp
 beside dired (`elisp-dired'); a message, which Romacs shows as a toast (`toast');
 Customize's buttons (`custom');
 the command panel open (`complete'); with --gnosis-db, gnosis-dashboard
@@ -121,6 +121,10 @@ SCENES = r'''
   (set-window-start nil (point)) (split-window-right)
   (with-selected-window (next-window) (dired (file-name-directory (getenv "TS_SRC"))))
   (ts-done 'elisp-dired)))
+(global-set-key (kbd "<f1>") (lambda () (interactive)
+  (delete-other-windows) (find-file (getenv "TS_RUST")) (goto-char (point-min))
+  (re-search-forward "^pub fn publish_face_text" nil t) (beginning-of-line)
+  (set-window-start nil (point)) (ts-done 'rust)))
 (global-set-key (kbd "<f6>") (lambda () (interactive) (delete-other-windows) (notmuch-hello) (ts-done 'hello)))
 (global-set-key (kbd "<f7>") (lambda () (interactive)
   (delete-other-windows) (notmuch-search "tag:inbox")
@@ -166,7 +170,7 @@ def session(engine, binary, theme, args, out):
                'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
                'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
                'TS_LOG': str(root / 'scenes.txt'), 'TS_SRC': str(src / 'romacs-defaults.el'),
-               'TS_DIFF': str(root / 'sample.diff')}
+               'TS_DIFF': str(root / 'sample.diff'), 'TS_RUST': str(ROOT / 'crates/romacs-font/src/frame.rs')}
         if args.gnosis_db:
             (root / 'gnosis').mkdir()
             shutil.copy(args.gnosis_db, root / 'gnosis' / 'gnosis.db')
@@ -243,6 +247,7 @@ def session(engine, binary, theme, args, out):
                 scene('F3', 'org', 6)
                 scene('F4', 'help-diff', 2)
                 scene('F5', 'elisp-dired', 2)
+                scene('F1', 'rust', 3)
                 if notmuch:
                     scene('F6', 'hello', 2.5)
                     scene('F7', 'search', 2.5)

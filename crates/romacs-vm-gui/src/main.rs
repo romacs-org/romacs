@@ -400,6 +400,21 @@ mod frame_tests {
         assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
+    /// The stock theme's own faces reach a launch without Custom, the bare
+    /// workspace, as they reach one with it.
+    #[test]
+    fn the_workspace_has_the_stock_theme_s_own_faces() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let attribute = |vm: &mut romacs_vm::Vm, face: &str, key: &str| {
+            vm.eval_source(&format!("(internal-get-lisp-face-attribute '{face} {key})")).unwrap().display().unwrap()
+        };
+        assert_eq!(attribute(&mut vm, "mode-line-active", ":overline"), "\"#2e2922\"");
+        assert_eq!(attribute(&mut vm, "romacs-mode-line-pill", ":background"), "\"#50269a\"");
+        assert_eq!(attribute(&mut vm, "font-lock-variable-use-face", ":foreground"), "\"#d4c5a0\"");
+    }
+
     /// A frame differing only in its cursor's colour paints differently, for
     /// the paint and the prompt host alike.
     #[test]

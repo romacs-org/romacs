@@ -65,10 +65,10 @@
       (progn
         (disable-theme 'default)
         (romacs-should (null custom-enabled-themes))
-        (romacs-should (not (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#b395db")))
+        (romacs-should (not (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#c9a2f2")))
         (romacs-should (not (equal (face-attribute 'default :background nil t) "#000000"))))
     (enable-theme 'default))
-  (romacs-should (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#b395db")))
+  (romacs-should (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#c9a2f2")))
 
 (romacs-deftest romacs-theme-a-colour-scheme-replaces-the-stock-theme-once ()
   (unwind-protect
@@ -199,6 +199,35 @@
            (bg (funcall attr 'default :background)))
       (dolist (face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))
         (romacs-should (equal (list theme face (funcall attr face :background)) (list theme face bg)))))))
+
+(romacs-deftest romacs-theme-the-stock-theme-is-romacs-s-own ()
+  ;; `default' grows from Rum, which stays exact.
+  (load-theme 'rum t t)
+  (let ((face (lambda (theme name key)
+                (plist-get (romacs-theme-roles--attributes
+                            (nth 1 (assq name (plist-get (romacs-theme-rows theme) :faces))))
+                           key))))
+    ;; Code: structure carries the colour, a variable's uses stay text.
+    (romacs-should (equal (funcall face 'default 'font-lock-variable-use-face :foreground)
+                          (funcall face 'default 'default :foreground)))
+    (romacs-should (not (equal (funcall face 'default 'font-lock-number-face :foreground)
+                               (funcall face 'default 'default :foreground))))
+    (romacs-should (> (romacs-color-contrast (funcall face 'default 'font-lock-keyword-face :foreground) "#000000")
+                      (romacs-color-contrast (funcall face 'default 'font-lock-type-face :foreground) "#000000")))
+    ;; Secondary text reads, and line numbers sit below it.
+    (romacs-should (>= (romacs-color-contrast (funcall face 'default 'font-lock-comment-face :foreground) "#000000") 7.0))
+    (romacs-should (< (romacs-color-contrast (funcall face 'default 'line-number :foreground) "#000000")
+                      (romacs-color-contrast (funcall face 'default 'font-lock-comment-face :foreground) "#000000")))
+    ;; The bar is quiet, its dim segments read, purple is the pill's alone.
+    (let ((bar (funcall face 'default 'mode-line-active :background)))
+      (romacs-should (equal bar "#1b1814"))
+      (romacs-should (stringp (funcall face 'default 'mode-line-active :overline)))
+      (romacs-should (>= (romacs-color-contrast (funcall face 'default 'romacs-mode-line-dim :foreground) bar) 4.5)))
+    (romacs-should (equal (funcall face 'default 'romacs-mode-line-pill :background) "#50269a"))
+    ;; Rum keeps its bar and its code colours.
+    (romacs-should (equal (funcall face 'rum 'mode-line-active :background) "#50269a"))
+    (romacs-should (equal (funcall face 'rum 'font-lock-variable-name-face :foreground) "#00a6a6"))
+    (romacs-should (null (plist-get (romacs-theme-rows 'rum) :floors)))))
 
 (romacs-deftest romacs-theme-gnu-s-themes-are-not-offered ()
   ;; Romacs offers its own colour schemes.  GNU's are a package away, and

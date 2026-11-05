@@ -583,7 +583,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         // The stock theme, `default', is dark.
-        r##"((default) dark "#756b59" t)"##,
+        r##"((default) dark "#a99c84" t)"##,
         r##"("#000000" "#d4c5a0")"##,
         "(t t t)",
         r##"((tc-light) light "#7f7f7f" t)"##,

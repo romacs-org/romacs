@@ -749,6 +749,40 @@ face with no row gaining one."
                                      (list face (list (cons t (gethash face index))))))
                               (reverse faces))))))
 
+(defconst romacs-theme--colour-attributes
+  '(:foreground :background :distant-foreground :underline :overline :strike-through :box)
+  "The face attributes whose values may name a palette slot.")
+
+(defun romacs-theme--face-value (value env)
+  "VALUE of a colour attribute under ENV, (NAME . VALUE): a slot's name
+reads the colour, a `romacs-theme-' form evaluates, a list maps."
+  (cond ((and (symbolp value) (stringp (cdr (assq value env)))) (cdr (assq value env)))
+        ((and (consp value) (symbolp (car value)) (string-prefix-p "romacs-theme-" (symbol-name (car value))))
+         (eval value env))
+        ((consp value) (mapcar (lambda (each) (romacs-theme--face-value each env)) value))
+        (t value)))
+
+(defun romacs-theme--override (row mode env)
+  "ROW of `def-romacs-theme''s FACES as (FACE . ATTRIBUTES) for a theme of
+MODE, or nil where it has no branch for MODE."
+  (let ((attributes (if (memq (nth 1 row) '(&dark &light))
+                        (plist-get (cdr row) (if (eq mode 'light) '&light '&dark))
+                      (cdr row)))
+        (out nil))
+    (while attributes
+      (let ((key (car attributes)) (value (nth 1 attributes)))
+        (setq out (append out (list key (if (memq key romacs-theme--colour-attributes)
+                                            (romacs-theme--face-value value env)
+                                          value)))
+              attributes (cdr (cdr attributes)))))
+    (and out (cons (car row) out))))
+
+(defun romacs-theme--delta (floors faces mode env)
+  "The attributes FLOORS' moves and FACES, `def-romacs-theme''s rows, set for
+a theme of MODE, as (FACE . ATTRIBUTES), the rows last so they win."
+  (append (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) floors)
+          (delq nil (mapcar (lambda (row) (romacs-theme--override row mode env)) faces))))
+
 (defun romacs-theme--infer-mode (palette)
   "`light' if PALETTE's `bg' is, else `dark'."
   (if (> (nth 0 (romacs-color-oklab (romacs-theme--second (assq 'bg palette)))) 0.6) 'light 'dark))
@@ -773,18 +807,25 @@ roles, on PALETTE (rlisp/romacs-theme-roles.el)."
 
 (defun romacs-theme--plain-rows (properties resolved)
   "`romacs-theme-rows''s value for a theme of PROPERTIES without roles of
-its own: with :modus, Modus's table with Romacs's own faces over it, else
-RESOLVED's faces alone."
+its own: with :modus, Modus's table with Romacs's own faces over it and
+:floor's floors, else RESOLVED's faces; :faces on top of either."
   (let* ((faces (romacs-theme-faces resolved))
-         (modus (plist-get properties :modus)))
+         (modus (plist-get properties :modus))
+         (mode (plist-get properties :mode))
+         (own (plist-get properties :faces)))
     (if (null modus)
-        (list :palette resolved :faces faces)
+        (let ((delta (romacs-theme--delta nil own mode resolved)))
+          (list :palette resolved :faces (romacs-theme--apply-delta faces delta) :delta delta))
       (require 'romacs-theme-modus)
-      (let ((settings (romacs-theme--modus-settings modus (plist-get properties :mode))))
-        (list :palette resolved
-              :faces (romacs-theme--merge-rows
-                      (car settings) (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) faces))
-              :variables (cdr settings))))))
+      (let* ((settings (romacs-theme--modus-settings modus mode))
+             (baseline (romacs-theme--merge-rows
+                        (car settings) (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) faces)))
+             (floors (when (plist-get properties :floor)
+                       (require 'romacs-theme-roles)
+                       (romacs-theme-roles-floors baseline resolved)))
+             (delta (romacs-theme--delta floors own mode resolved)))
+        (list :palette resolved :faces (romacs-theme--apply-delta baseline delta)
+              :delta delta :floors floors :variables (cdr settings))))))
 
 (defun romacs-theme-define (name doc &rest properties)
   "Define theme NAME, documented by DOC, from PROPERTIES :palette (base
@@ -793,9 +834,10 @@ Custom is loaded it is GNU's theme, enabled and disabled as any other;
 elsewhere (a launch without GNU's Lisp) its faces are declared as the
 faces' own specs.  With :modus (`romacs-theme--modus-palette') and
 Custom, its faces are Modus's table over that palette, Romacs's own faces
-over them from :palette.  With :table and Custom, the palette makes every
-role of that table itself (rlisp/romacs-theme-roles.el), floors apply,
-and :faces and :variables, as `def-romacs-theme' takes them, go on top.
+over them from :palette, then :floor's floors and :faces on top.  With
+:table and Custom, the palette makes every role of that table itself
+\(rlisp/romacs-theme-roles.el), floors apply, and :faces and :variables,
+as `def-romacs-theme' takes them, go on top.
 :style is kept as the theme's `romacs-style' property.  Defining it
 changes no face that shows."
   (let* ((given (plist-get properties :palette))
