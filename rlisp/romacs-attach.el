@@ -550,13 +550,19 @@ planned and redrawn once."
   (romacs-attach-set-items
    (romacs-attach-add romacs-attach-items (mapcar (lambda (file) (apply #'romacs-attach-item file properties)) files))))
 
+(defun romacs-attach--here ()
+  "The consumer the current buffer attaches to, (CONSUMER . CONTEXT): its
+tray's, else mail's or org's by its mode, else nil."
+  (cond (romacs-attach--tray (romacs-attach--consumer))
+        ((derived-mode-p 'message-mode) (cons 'message nil))
+        ((derived-mode-p 'org-mode) (cons 'org nil))))
+
 ;;;###autoload
 (defun romacs-attach-file (file)
   "Attach FILE to the current buffer's tray, or insert it in an inline
-consumer's buffer."
+consumer's buffer (mail, org) at point."
   (interactive (list (read-file-name "Attach file: " nil nil t)))
-  (unless romacs-attach--tray (user-error "Nothing here takes attachments"))
-  (let* ((consumer (romacs-attach--consumer))
+  (let* ((consumer (or (romacs-attach--here) (user-error "Nothing here takes attachments")))
          (declaration (romacs-attach-consumer (car consumer))))
     (if (eq (plist-get declaration :style) 'inline)
         (funcall (plist-get declaration :insert) (romacs-attach-item file) (cdr consumer))
@@ -872,6 +878,108 @@ they are typed: any other key closes it and runs as usual."
              (set-transient-map romacs-attach-view-map
                                 (romacs-attach--in-maps '(romacs-attach-view-map) #'romacs-attach-view-quit)
                                 (lambda () (when romacs-attach--view (romacs-attach-view-quit))))))
+
+;;;; Mail and org: inline consumers
+
+(defcustom romacs-attach-save-directory nil
+  "Where an image Romacs made (a screenshot, a clipboard image) becomes
+the user's file when attached in mail; nil for the XDG pictures
+directory's Screenshots/, where Omarchy's own screenshots go."
+  :type '(choice (const nil) directory))
+
+(defcustom romacs-attach-snapshot-max (* 1024 1024)
+  "Bytes of a region or buffer an attachment takes as text."
+  :type 'natnum)
+
+(declare-function xdg-user-dir "xdg" (name))
+(declare-function mml-attach-file "mml" (file &optional type description disposition))
+(declare-function mml-insert-tag "mml" (name &rest plist))
+(declare-function mml-quote-region "mml" (beg end))
+(declare-function org--dnd-local-file-handler "org" (url action &optional separator))
+
+(defun romacs-attach--save-directory ()
+  "The directory owned images go to when attached in mail."
+  (file-name-as-directory
+   (or romacs-attach-save-directory
+       (expand-file-name "Screenshots" (or (and (require 'xdg nil t) (xdg-user-dir "PICTURES")) "~/Pictures")))))
+
+(defun romacs-attach--free-name (directory name)
+  "NAME in DIRECTORY, numbered (NAME-1.EXT ...) past the files there."
+  (let ((file (expand-file-name name directory)) (n 0))
+    (while (file-exists-p file)
+      (setq n (1+ n)
+            file (expand-file-name (format "%s-%d%s" (file-name-sans-extension name) n
+                                           (or (file-name-extension name t) ""))
+                                   directory)))
+    file))
+
+(defun romacs-attach--users (item)
+  "ITEM's file as the user's: an owned one is moved into
+`romacs-attach-save-directory' first, and a toast names it."
+  (if (not (plist-get item :owned)) (plist-get item :path)
+    (let* ((directory (romacs-attach--save-directory))
+           (target (progn (make-directory directory t)
+                          (romacs-attach--free-name directory (plist-get item :name)))))
+      (romacs-attach--move (plist-get item :path) target)
+      (message "Saved %s" (abbreviate-file-name target))
+      target)))
+
+(defun romacs-attach--move (from to)
+  "Move the file FROM to TO: a rename, else (another filesystem, which
+Romacs's `rename-file' refuses) a copy and then FROM's deletion; a real
+failure is the copy's."
+  (condition-case nil
+      (rename-file from to)
+    (error
+     (copy-file from to)
+     (delete-file from))))
+
+(defun romacs-attach--mail-insert (item _context)
+  "Insert ITEM in a mail draft at point, as GNU's commands do: a text
+snapshot (region, buffer, pasted text) as an inline text part quoted as
+`mml-insert-buffer' quotes it, any other file through `mml-attach-file'
+(inline for an image), an owned one made the user's file first."
+  (require 'mml)
+  (let ((caption (plist-get item :caption)))
+    (if (memq (plist-get item :source) '(region buffer paste-text))
+        (progn
+          (apply #'mml-insert-tag 'part 'type "text/plain" 'disposition "inline"
+                 (and caption (list 'description caption)))
+          (let ((start (point))
+                (end (copy-marker (point) t)))
+            (insert-file-contents (plist-get item :path) nil 0 romacs-attach-snapshot-max)
+            (mml-quote-region start end)
+            (goto-char end)
+            (unless (bolp) (insert "\n")))
+          (insert "<#/part>\n")
+          (romacs-attach-delete-owned (list item)))
+      (let ((mime (plist-get item :mime)))
+        (mml-attach-file (romacs-attach--users item) mime caption
+                         (if (string-prefix-p "image/" mime) "inline" "attachment"))))))
+
+(defvar org-yank-image-save-method)
+
+(defun romacs-attach--org-insert (item _context)
+  "Insert ITEM in an org buffer at point as org's own local-file drop
+handler does, by `org-yank-dnd-method' and `org-yank-image-save-method'
+\(a function's directory resolved first, which org's handler does not
+do), attaching by `org-attach-method'.  An owned file becomes the user's
+\(`romacs-attach-save-directory') first, so a link to it stays good."
+  (require 'org)
+  (let ((org-yank-image-save-method
+         (if (functionp org-yank-image-save-method)
+             (let ((directory (funcall org-yank-image-save-method)))
+               (if (stringp directory) directory
+                 (user-error "`org-yank-image-save-method' did not return a string: %S" directory)))
+           org-yank-image-save-method)))
+    (org--dnd-local-file-handler (concat "file://" (string-replace "%" "%25" (romacs-attach--users item)))
+                                 'private "")))
+
+(romacs-attach-define-consumer 'message
+  :display "Mail" :style 'inline :rules '(("" file)) :insert #'romacs-attach--mail-insert)
+
+(romacs-attach-define-consumer 'org
+  :display "Org" :style 'inline :rules '(("" file)) :insert #'romacs-attach--org-insert)
 
 ;;;; A test host
 
