@@ -255,25 +255,10 @@ INSERT OR REPLACE INTO omemo_sessions (account, jid, device_id, session_blob)
                           (jabber-omemo-store--as-blob blob)))))
 
 (defun jabber-omemo-store--session-transaction (operation)
-  "Call OPERATION inside an OMEMO session savepoint."
+  "Call OPERATION atomically, as `jabber-db--with-savepoint' does."
   (when-let* ((db (jabber-db-ensure-open)))
-    (sqlite-execute db "SAVEPOINT omemo_session_migration")
-    (condition-case err
-        (prog1
-            (funcall operation)
-          (sqlite-execute db "RELEASE omemo_session_migration"))
-      (error
-       (condition-case cleanup-err
-           (sqlite-execute db "ROLLBACK TO omemo_session_migration")
-         (error
-          (message "OMEMO session rollback failed: %s"
-                   (error-message-string cleanup-err))))
-       (condition-case cleanup-err
-           (sqlite-execute db "RELEASE omemo_session_migration")
-         (error
-          (message "OMEMO session savepoint release failed: %s"
-                   (error-message-string cleanup-err))))
-       (signal (car err) (cdr err))))))
+    (jabber-db--with-savepoint db
+      (funcall operation))))
 
 (defun jabber-omemo-store-save-session-and-clear-legacy-keys
     (account jid device-id blob)

@@ -2541,6 +2541,53 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
     (host, port).to_socket_addrs().map(Iterator::collect)
 }
 
+/// NAME's IP addresses as the C library's resolver gives them, one for each
+/// datagram socket address (GNU's `network-lookup-address-info'): FAMILY
+/// is `AF_UNSPEC', `AF_INET' or `AF_INET6'; NUMERIC treats NAME as a
+/// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
+/// resolver's reason (`gai_strerror'), or the refusal in build mode.
+pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
+    // SAFETY: an all-zero addrinfo is the documented "no hints" value.
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_family = family;
+    hints.ai_socktype = libc::SOCK_DGRAM;
+    if numeric {
+        hints.ai_flags = libc::AI_NUMERICHOST;
+    }
+    let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+    // SAFETY: c_name and hints outlive the call; res is freed below.
+    let ret = unsafe { libc::getaddrinfo(c_name.as_ptr(), std::ptr::null(), &hints, &mut res) };
+    if ret != 0 {
+        // SAFETY: gai_strerror returns a static string for any code.
+        return Err(unsafe { std::ffi::CStr::from_ptr(libc::gai_strerror(ret)) }.to_string_lossy().into_owned());
+    }
+    let mut addresses = Vec::new();
+    let mut entry = res;
+    while !entry.is_null() {
+        // SAFETY: entry is a node of the list getaddrinfo returned; its
+        // address is a sockaddr of its family.
+        let ai = unsafe { &*entry };
+        match ai.ai_family {
+            libc::AF_INET => {
+                let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
+                addresses.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
+            }
+            libc::AF_INET6 => {
+                let sin6 = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in6) };
+                addresses.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
+            }
+            _ => {}
+        }
+        entry = ai.ai_next;
+    }
+    // SAFETY: res came from a successful getaddrinfo and is freed once.
+    unsafe { libc::freeaddrinfo(res) };
+    Ok(addresses)
+}
+
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {
     effect(|| format!("listen {addr}"))?;
     TcpListener::bind(addr)

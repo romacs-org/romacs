@@ -39,6 +39,7 @@ mod subprocess;
 mod tls;
 mod html;
 mod html_entities;
+mod xml_read;
 pub mod host;
 pub mod world;
 pub mod compiled_lisp;

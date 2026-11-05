@@ -2611,6 +2611,11 @@ accounts.
 (register-definition-prefixes "jabber-mam" '("jabber-mam-"))
 
 
+;;; Generated autoloads from jabber-mam-sync.el
+
+(register-definition-prefixes "jabber-mam-sync" '("jabber-mam-"))
+
+
 ;;; Generated autoloads from jabber-message-correct.el
 
 (register-definition-prefixes "jabber-message-correct" '("jabber-"))
