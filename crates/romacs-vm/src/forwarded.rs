@@ -156,7 +156,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // `debugger' to `debug' once the full debugger can load.
     CVariable { name: "debug-ignored-errors", gnu: "eval.c:4497", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
-    CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-quit", gnu: "eval.c:4510", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-signal", gnu: "eval.c:4552", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debugger", gnu: "eval.c:4534", kind: Kind::Lisp(Init::Symbol("debug-early")) },
@@ -633,6 +632,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "minibuffer-setup-hook", gnu: "minibuf.c:2564", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-error", gnu: "eval.c:4485", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debugger-stack-frame-as-list", gnu: "eval.c:4529", kind: Kind::Bool(false) },
+    // Its writes arm the call boundary's next-call hook (`Vm::debug_hooks_changed`).
+    CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
     CVariable { name: "signal-hook-function", gnu: "eval.c:4487", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_INT that subr.el reads.
     CVariable { name: "undo-limit", gnu: "undo.c:437", kind: Kind::Int(160_000) },
@@ -834,9 +835,19 @@ impl Default for Forwarded {
     }
 }
 
+/// `debug-on-next-call''s index among the boolean variables.
+static NEXT_CALL: std::sync::LazyLock<u16> = std::sync::LazyLock::new(|| {
+    let at = C_VARIABLES.iter().position(|var| var.name == "debug-on-next-call").expect("debug-on-next-call is forwarded");
+    C_VARIABLES[..at].iter().filter(|var| matches!(var.kind, Kind::Bool(_))).count() as u16
+});
+
 impl Forwarded {
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
+    pub(super) fn debug_on_next_call(&self) -> bool { self.bools[*NEXT_CALL as usize] }
+    /// GNU do_debug_on_call's `debug_on_next_call = 0', no watchers; the
+    /// caller rearms the hooks.
+    pub(super) fn clear_debug_on_next_call(&mut self) { self.bools[*NEXT_CALL as usize] = false; }
     pub(super) fn gc_cons_threshold(&self) -> i64 { self.ints[self.gc_cons.0] }
     /// `gc-cons-percentage': its value, or its initial float before Lisp
     /// first reads it (initial values are materialized lazily).
@@ -1424,7 +1435,10 @@ impl Vm {
     fn store_forwarded(&mut self, fwd: Fwd, value: Value, buffer: usize) -> std::result::Result<(), Fault> {
         match fwd {
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = value,
-            Fwd::Bool(i) => self.forwarded.bools[i as usize] = value != Value::NIL,
+            Fwd::Bool(i) => {
+                self.forwarded.bools[i as usize] = value != Value::NIL;
+                if i == *NEXT_CALL { self.debug_hooks_changed(); }
+            }
             Fwd::Int(i) => {
                 // CHECK_INTEGER; VM2 has no bignums, so every integer fits
                 // and GNU's overflow-error arm is unreachable.
@@ -1564,7 +1578,10 @@ impl Vm {
         match fwd {
             Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
-            Fwd::Bool(i) => self.forwarded.bools[i as usize] = old != Value::NIL,
+            Fwd::Bool(i) => {
+                self.forwarded.bools[i as usize] = old != Value::NIL;
+                if i == *NEXT_CALL { self.debug_hooks_changed(); }
+            }
             Fwd::Int(i) => {
                 let Some(n) = old.integer_value() else {
                     let predicate = self.intern("integerp");

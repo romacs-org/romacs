@@ -16,24 +16,24 @@ crates/romacs-regex-engine/src/engine.rs:8620 std::env::var romacs-vm depends on
 crates/romacs-vm/src/autoload.rs:139 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:165 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:169 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/backtrace.rs:267 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:273 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:298 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:333 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
-crates/romacs-vm/src/backtrace.rs:335 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
-crates/romacs-vm/src/backtrace.rs:341 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
-crates/romacs-vm/src/backtrace.rs:517 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
-crates/romacs-vm/src/backtrace.rs:543 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
-crates/romacs-vm/src/backtrace.rs:553 dynamic:saved backtrace-eval's unrewind makes a binding whose buffer lost its local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
+crates/romacs-vm/src/backtrace.rs:282 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:288 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:313 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:348 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:350 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:356 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:533 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+crates/romacs-vm/src/backtrace.rs:559 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+crates/romacs-vm/src/backtrace.rs:569 dynamic:saved backtrace-eval's unrewind makes a binding whose buffer lost its local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
 crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/display.rs:399 delayed-variable the window record's display variables, read through variable_value, which checks the fence
 crates/romacs-vm/src/display.rs:1228 delayed-variable reads through variable_value, which checks the fence
-crates/romacs-vm/src/forwarded.rs:721 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/forwarded.rs:1467 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/forwarded.rs:1661 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/forwarded.rs:722 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/forwarded.rs:1481 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/forwarded.rs:1678 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/gc.rs:225 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
 crates/romacs-vm/src/gc.rs:226 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs:878 dynamic:saved collector: marks the saved values

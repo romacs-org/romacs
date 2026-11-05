@@ -172,6 +172,21 @@ impl Backtrace {
     pub fn debug_on_exit(&self, token: usize) -> bool {
         self.exit_flags.contains(&token)
     }
+    /// Whether any activation's debug-on-exit flag is set.
+    pub fn has_exit_flags(&self) -> bool {
+        !self.exit_flags.is_empty()
+    }
+    /// Whether an activation from MARK up is flagged debug-on-exit. Tokens
+    /// grow with the stack, so those are the tokens from MARK's.
+    pub fn exit_flagged_from(&self, mark: usize) -> bool {
+        self.frames.get(mark).is_some_and(|frame| self.exit_flags.range(frame.token..).next().is_some())
+    }
+    /// Drop the flags of the activations from MARK up, which are leaving.
+    pub fn drop_exit_flags_from(&mut self, mark: usize) {
+        if let Some(frame) = self.frames.get(mark) {
+            self.exit_flags.split_off(&frame.token);
+        }
+    }
     /// GNU set_backtrace_debug_on_exit for the activation TOKEN names. The
     /// tokens of activations that left stay until the set has doubled since
     /// they were last dropped, so a flag costs O(log n) amortized.
@@ -442,6 +457,7 @@ impl Vm {
     pub(super) fn backtrace_set_debug(&mut self, index: usize, on: bool) {
         let token = self.backtrace.frames[index].token;
         self.backtrace.set_debug_on_exit(token, on);
+        self.debug_hooks_changed();
     }
     /// GNU specpdl_unrewind from the top of the stack to activation INDEX's
     /// entry, for `backtrace-eval`: each binding made since then, and each
