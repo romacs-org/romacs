@@ -20,7 +20,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         continuation: [Some(bitmap(7)), Some(bitmap(8))],
         ..Indicators::default()
     };
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),

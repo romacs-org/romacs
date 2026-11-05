@@ -702,6 +702,23 @@ impl<'l, 'a> Source<'l, 'a> {
         }
     }
 
+    /// SPEC's stretch in a header or mode line (`Leaf::band_stretch'): a
+    /// `(space ...)' as the text's stretch is, from no buffer character (a
+    /// `:relative-width' counts a space's width); None for another display.
+    pub(super) fn band_stretch(&mut self, spec: Value) -> R<Option<romacs_layout_input::StretchWidth>> {
+        let space = self.syms.space;
+        if self.leaf.pair(spec).is_none_or(|(car, _)| car != space) { return Ok(None); }
+        let origin = Origin { charpos: self.view.begv, string: Value::NIL, strpos: None, from_display: true, text_area: true, whitespace_under: false };
+        Ok(match self.stretch_shape(spec, origin) {
+            Ok(Shape::Stretch { width, zero_ok }) => Some(romacs_layout_input::StretchWidth::Width { width, zero_ok }),
+            Ok(Shape::Align { target }) => Some(romacs_layout_input::StretchWidth::AlignTo(target)),
+            Ok(Shape::RelativeStretch { factor, .. }) => Some(romacs_layout_input::StretchWidth::Width { width: (factor * self.view.column as f64) as i64, zero_ok: false }),
+            // What the text's stretches refuse (a height of its own, physical
+            // units) shows as one column, as GNU's default width is.
+            Ok(_) | Err(_) => Some(romacs_layout_input::StretchWidth::Width { width: self.view.column, zero_ok: false }),
+        })
+    }
+
     /// produce_stretch_glyph's width, before it depends on the x position.
     /// In pixels, a height other than the face's is refused: the host
     /// makes a stretch as tall as its face.

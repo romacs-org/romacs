@@ -60,9 +60,16 @@ fn a_function_height_stays_in_the_lface_and_realizes_over_the_default_height() {
 fn a_band_shows_control_characters_as_gnu_display_does() {
     // TAB, ^A and U+0085 in a header line: caret forms and an octal
     // escape, the face runs moved with the text they cover.
-    let (text, runs) = super::shown_band("a\tb\u{1}c\u{85}d", vec![(0..1, 'x'), (1..4, 'y'), (4..8, 'z')]);
+    let (text, runs, _) = super::shown_band("a\tb\u{1}c\u{85}d", vec![(0..1, 'x'), (1..4, 'y'), (4..8, 'z')], &[]);
     assert_eq!(text, "a^Ib^Ac\\205d");
     assert_eq!(runs, vec![(0..1, 'x'), (1..6, 'y'), (6..12, 'z')]);
-    let (plain, same) = super::shown_band("plain", vec![(0..5, 'x')]);
+    let (plain, same, _) = super::shown_band("plain", vec![(0..5, 'x')], &[]);
     assert_eq!((plain.as_str(), same), ("plain", vec![(0..5, 'x')]));
+    // A `(space ...)' run shows as one placeholder at its stretch, the
+    // runs after it moved back.
+    let align = romacs_layout_input::StretchWidth::AlignTo(40);
+    let (spaced, runs, stretches) = super::shown_band("ab   cd", vec![(0..2, 'x'), (2..5, 'y'), (5..7, 'z')], &[(2..5, align)]);
+    assert_eq!(spaced, "ab cd");
+    assert_eq!(runs, vec![(0..2, 'x'), (2..3, 'y'), (3..5, 'z')]);
+    assert_eq!(stretches, vec![romacs_layout_input::Stretch { byte: 2, width: align }]);
 }

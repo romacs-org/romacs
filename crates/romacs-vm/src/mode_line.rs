@@ -19,6 +19,11 @@ pub(super) enum Target { Display, String, NoProp }
 /// none.
 const PROJECTED: [&str; 8] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text", "romacs-pill-modified"];
 
+/// The properties a window's header or mode line projects: a string's
+/// `display', whose `(space ...)' the band shows as a stretch, as GNU's
+/// display of a mode-line string does (VM2-MODE-LINE-STRETCH).
+const BAND: [&str; 1] = ["display"];
+
 /// The `:propertize' properties that make a construct one of the status
 /// bar's segments, which owns all it expands to (`Band::segments').
 const SEGMENT: [&str; 5] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-pill-modified", "romacs-priority"];
@@ -42,6 +47,11 @@ pub(super) struct Propertize {
 struct Own {
     face: Option<String>,
     projected: Projected,
+}
+
+impl Band {
+    /// Whether this is the status bar's band, which reads segments.
+    fn marks(&self) -> bool { self.projected.contains(&"romacs-segment") }
 }
 
 /// One expanded mode line: text plus face-name runs over its bytes.
@@ -577,7 +587,8 @@ impl Vm {
         let projected: &'static [&'static str] = match target {
             Target::String => &PROJECTED,
             Target::Display if state.marks => &PROJECTED,
-            Target::Display | Target::NoProp => &[],
+            Target::Display => &BAND,
+            Target::NoProp => &[],
         };
         let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
@@ -614,11 +625,10 @@ impl Vm {
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
                 // The status bar reads a string's own projected properties;
-                // a window's band only its faces.
+                // a window's band its faces and `display'.
                 let own_names: &'static [&'static str] = match band.target {
-                    Target::String => band.projected,
-                    Target::Display if !band.projected.is_empty() => &PROJECTED,
-                    _ => &[],
+                    Target::String | Target::Display => band.projected,
+                    Target::NoProp => &[],
                 };
                 let own = self.ml_own_props(&elt, props.as_deref(), risky, own_names)?;
                 if literal {
@@ -728,7 +738,7 @@ impl Vm {
                                 let start = band.text.len();
                                 // In the status bar a construct naming a segment
                                 // owns all it expands to (`Band::segments').
-                                let segment = (band.target == Target::Display && !band.projected.is_empty()
+                                let segment = (band.target == Target::Display && band.marks()
                                                && plist_has(&plist, "romacs-segment"))
                                     .then(|| propertize_of(&plist, &SEGMENT)).flatten().map(|p| p.projected.clone());
                                 // The bar's painter lays out the zone a `centre-align'

@@ -1769,6 +1769,12 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
     })
 }
 
+/// The stretch SPEC makes in WINDOW's header or mode line
+/// (Leaf::band_stretch).
+pub(crate) fn band_stretch(vm: &mut Vm, window: Value, spec: Value) -> std::result::Result<Option<romacs_layout_input::StretchWidth>, Fault> {
+    Leaf::new(vm).band_stretch(window, spec)
+}
+
 /// The display elements WINDOW shows of its buffer from FROM, a line
 /// start, to TO, as a host paints them (Leaf::window_shown_elements).
 pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<Vec<Shown>, Fault> {

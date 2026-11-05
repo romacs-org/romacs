@@ -22,7 +22,7 @@ pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
 
 /// An empty window in FACE alone: what the frame's character cell is.
 fn metrics_snapshot(face: &Face) -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
@@ -885,21 +885,27 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if let Some(band) = &snapshot.header_line {
         copy += 1;
         let bounds = Rect::new(band_x, window_top, band_width, header_height);
-        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), &metrics)?;
+        let stretches = (&snapshot.band_stretches.header_line[..], left as f32);
+        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, stretches, GlyphRowRole::HeaderLine, (face_base, copy), &metrics)?;
     }
     if let Some(band) = &snapshot.mode_line {
         copy += 1;
         let bounds = Rect::new(band_x, oy + body_height, band_width, snapshot.height as f32 - header_height - body_height);
-        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
+        let stretches = (&snapshot.band_stretches.mode_line[..], left as f32);
+        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, stretches, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
     }
     Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, point: place })
 }
 
 /// Paint BAND, a header or mode line, in BOUNDS: its FACE's background,
 /// then its characters in copies of the window's faces on that background,
-/// published from FACE_BASE plus COPY face tables on.
+/// published from FACE_BASE plus COPY face tables on. A character STRETCHES
+/// names is that stretch, blank (produce_stretch_glyph), its `:align-to'
+/// counted from the text area's left edge, TEXT_LEFT into the band, as
+/// GNU's full-width band row measures it (calc_pixel_width_or_height).
 #[allow(clippy::too_many_arguments)]
 fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &TextSlice, face: FaceHandle, bounds: Rect,
+              (stretches, text_left): (&[romacs_layout_input::Stretch], f32),
               role: GlyphRowRole, (face_base, copy): (u32, u32), metrics: &[(f32, f32, f32, f32)]) -> Result<(), String> {
     let default = face.0 as usize;
     let background = color(snapshot.faces[default].background);
@@ -919,10 +925,20 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
         }
     }
     let mut x = 0.0;
+    let mut stretches = stretches.iter().peekable();
     for (byte, ch) in band.utf8.char_indices() {
         let index = face_at(band, byte, default);
         let id = FaceId::new(face_base + offset + index as u32);
         let (ascent, height, cell, _) = metrics[index];
+        while stretches.peek().is_some_and(|s| s.byte < byte) { stretches.next(); }
+        if let Some(stretch) = stretches.next_if(|s| s.byte == byte) {
+            let width = match stretch.width {
+                StretchWidth::AlignTo(target) => StretchWidth::AlignTo(target + text_left as i64),
+                width => width,
+            };
+            x += stretch_advance(width, f64::from(x), f64::from(x), None) as f32;
+            continue;
+        }
         let advance = advance(frame, id, ch, cell);
         if x < bounds.width {
             frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);

@@ -19,7 +19,7 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
     let bitmap = |number| FringeBitmap { number, bits: vec![0x1800; 8], width: 8, align: BitmapAlign::Center, period: 0, face: FaceHandle(0) };
     let indicators = Indicators { truncation: [Some(bitmap(3)), Some(bitmap(4))], ..Indicators::default() };
     let px = |cells: u32| cells * cell() as u32;
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: px(10), height: 200, start_byte: 0, point_byte: point, buffer_version: 1,
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),

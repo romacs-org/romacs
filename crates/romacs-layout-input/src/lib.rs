@@ -331,8 +331,20 @@ pub struct WindowSnapshot {
     pub chrome: WindowChrome,
     /// Where its underlines go.
     pub underline_rules: UnderlineRules,
+    /// The characters of the header line and of the mode line shown as
+    /// stretches, in byte order: an `:align-to' target counts from the
+    /// text area's left edge, as GNU's display of a band measures it.
+    pub band_stretches: BandStretches,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, wrap_flips, line_numbers, chrome, underline_rules });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
+
+/// A window's header-line and mode-line stretches (`WindowSnapshot').
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BandStretches {
+    pub header_line: Vec<Stretch>,
+    pub mode_line: Vec<Stretch>,
+}
+romacs_snapshot::snapshot_struct!(BandStretches { header_line, mode_line });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -747,11 +759,11 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, wrap_flips, line_numbers, chrome, underline_rules } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
             && *wrap == other.wrap && *stretches == other.stretches && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
-            && *underline_rules == other.underline_rules
+            && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
     }
 }
 

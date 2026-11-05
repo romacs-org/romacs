@@ -144,6 +144,21 @@ impl Leaf<'_> {
             box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin, pixels: false, lnum }
     }
 
+    /// The stretch SPEC, a `(space ...)' display specification in WINDOW's
+    /// header or mode line, makes there, in the pixels of a window-system
+    /// frame: produce_stretch_glyph's width as calc_pixel_width_or_height
+    /// computes it for the window's text area, an `:align-to' target from
+    /// its left edge (VM2-MODE-LINE-STRETCH); None for another display.
+    pub(crate) fn band_stretch(&mut self, window: Value, spec: Value) -> std::result::Result<Option<romacs_layout_input::StretchWidth>, Fault> {
+        let mut area = self.windows().text_area(window, "redisplay")?;
+        area.hosted = true;
+        let buffer = area.buffer;
+        self.with_buffer(buffer, |leaf| {
+            let (begv, zv) = leaf.accessible_positions(buffer)?;
+            Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?.band_stretch(spec)
+        })
+    }
+
     /// The elements WINDOW shows of its buffer from FROM, a line start,
     /// through TO, in the pixels of a window-system frame (VM2-WTPS1).
     pub(crate) fn window_shown_elements(&mut self, window: Value, from: i64, to: i64) -> std::result::Result<Vec<super::display_hosted::Shown>, Fault> {

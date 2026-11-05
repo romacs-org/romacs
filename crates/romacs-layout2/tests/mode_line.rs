@@ -2,7 +2,7 @@ use romacs_display_protocol::{Color, FrameGlyph, GlyphRowRole};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 fn scene() -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1,
         width: 100,
         height: 60,
