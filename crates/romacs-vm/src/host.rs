@@ -1343,15 +1343,42 @@ pub fn die_with_parent(parent: u32) {
     }
 }
 
-/// Lower this process to the background: the weakest CPU niceness and the
-/// idle I/O class, which its children inherit. Best effort.
-pub fn lower_priority() {
+/// How far a background process steps back from the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    /// Work nobody waits for, such as a background compile: the weakest
+    /// CPU niceness and the idle I/O class.
+    Idle,
+    /// A worker isolate: work the session waits for, never ahead of it:
+    /// niceness 10 and the lowest best-effort I/O level, so the session's
+    /// evaluator and render threads always run first.
+    Worker,
+}
+
+/// Lower the calling thread to PRIORITY; the threads and processes it
+/// starts afterwards inherit it, so a process calls it at the start of
+/// main. Best effort.
+pub fn lower_priority(priority: Priority) {
     const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    let (nice, io) = match priority {
+        Priority::Idle => (19, IOPRIO_CLASS_IDLE << 13),
+        Priority::Worker => (10, (IOPRIO_CLASS_BE << 13) | 7),
+    };
     unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+        libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, io);
     }
+}
+
+/// Name the calling thread NAME (the kernel keeps 15 bytes). On a
+/// process's main thread that is the process's own name, the one `ps` and
+/// `pgrep` show.
+pub fn set_thread_name(name: &str) -> io::Result<()> {
+    effect(|| "thread-name".into())?;
+    let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    status(unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr()) })
 }
 
 pub fn euid() -> u32 {

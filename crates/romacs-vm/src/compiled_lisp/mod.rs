@@ -102,7 +102,7 @@ pub fn configure(config: Config) {
     let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
     if host::getenv(BACKGROUND).is_some() {
-        host::lower_priority();
+        host::lower_priority(host::Priority::Idle);
     }
     // A compile process ends with the process that started it, and within
     // a deadline: nothing outlives a session or holds its queue forever.
@@ -127,7 +127,7 @@ pub(crate) fn compiles() -> bool {
 }
 
 /// The configured store, in a process that loads compiled Lisp.
-pub(crate) fn store_dir() -> Option<&'static Path> {
+pub fn store_dir() -> Option<&'static Path> {
     config().map(|c| c.store.as_path())
 }
 
