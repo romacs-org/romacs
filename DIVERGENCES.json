@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "83336d5b083303b37828248204a018d8065d165364ed4126c5637f91dbc0c71c",
+  "input_hash": "1407fd90b1bc469182d4273c96bbe1b98af15ddb471d9795a096c7b038b26d13",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 363,
-  "symbols": 1103,
+  "rows": 364,
+  "symbols": 1105,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   362
+   363
   ],
   "\\": [
    278
@@ -91,7 +91,7 @@
   ],
   "add-text-properties": [
    302,
-   347
+   348
   ],
   "add-variable-watcher": [
    316,
@@ -108,7 +108,7 @@
    209
   ],
   "after-insert-file-set-coding": [
-   348
+   349
   ],
   "after-load-alist": [
    332
@@ -162,8 +162,8 @@
   ],
   "autoload": [
    320,
-   351,
-   352
+   352,
+   353
   ],
   "autoload-do-load": [
    320,
@@ -180,6 +180,9 @@
   ],
   "backtrace--locals": [
    345
+  ],
+  "backtrace-debug": [
+   347
   ],
   "backtrace-get-frames": [
    346
@@ -241,7 +244,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   348
+   349
   ],
   "buffer-file-name": [
    125
@@ -566,7 +569,7 @@
    245
   ],
   "custom-reevaluate-setting": [
-   351
+   352
   ],
   "custom-set": [
    174
@@ -594,6 +597,9 @@
   ],
   "debug-on-event": [
    33
+  ],
+  "debug-on-next-call": [
+   347
   ],
   "debug-on-quit": [
    32
@@ -630,7 +636,7 @@
    117
   ],
   "default-file-name-coding-system": [
-   348
+   349
   ],
   "default-value": [
    327,
@@ -647,8 +653,8 @@
    164,
    192,
    226,
-   354,
-   358
+   355,
+   359
   ],
   "define-category": [
    309
@@ -661,7 +667,7 @@
    306
   ],
   "define-coding-system": [
-   348
+   349
   ],
   "define-coding-system-alias": [
    307
@@ -837,7 +843,7 @@
    343
   ],
   "downcase_char_code_emacs_compat": [
-   361
+   362
   ],
   "elt": [
    35,
@@ -846,13 +852,13 @@
    66
   ],
   "emacs-build-time": [
-   349
+   350
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   361
+   362
   ],
   "emoji": [
    29
@@ -910,7 +916,7 @@
   "eval-after-load": [
    143,
    332,
-   352
+   353
   ],
   "eval-and-compile": [
    141
@@ -984,17 +990,17 @@
    161,
    162,
    163,
-   354,
    355,
-   358
+   356,
+   359
   ],
   "face-family": [
    159,
-   357
+   358
   ],
   "face-font": [
    158,
-   356
+   357
   ],
   "face-remap-add-relative": [
    254
@@ -1004,7 +1010,7 @@
    162,
    163,
    254,
-   360
+   361
   ],
   "face-spec-recalc": [
    256
@@ -1057,7 +1063,7 @@
    124
   ],
   "find-auto-coding": [
-   348
+   349
   ],
   "find-composition": [
    280
@@ -1707,7 +1713,7 @@
   ],
   "last-coding-system-used": [
    125,
-   348
+   349
   ],
   "last-command": [
    94
@@ -1720,7 +1726,7 @@
    255
   ],
   "latin-extra-code-table": [
-   348
+   349
   ],
   "length": [
    66,
@@ -1813,7 +1819,7 @@
    110,
    111,
    121,
-   351
+   352
   ],
   "load-prefer-newer": [
    140
@@ -2140,10 +2146,10 @@
    165
   ],
   "next-property-change": [
-   347
+   348
   ],
   "next-single-char-property-change": [
-   347
+   348
   ],
   "no-byte-compile": [
    144
@@ -2604,11 +2610,11 @@
    332,
    333,
    334,
-   351
+   352
   ],
   "reset": [
    161,
-   353
+   354
   ],
   "resize-mini-windows": [
    341
@@ -2754,7 +2760,7 @@
    127
   ],
   "romacs-init-layer-exclude": [
-   352
+   353
   ],
   "romacs-layer-animation romacs-layer-show": [
    268
@@ -2932,7 +2938,7 @@
    213
   ],
   "romacs-unsafe-coding": [
-   348
+   349
   ],
   "round": [
    282
@@ -2999,13 +3005,13 @@
    256
   ],
   "select-safe-coding-system": [
-   348
+   349
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   348
+   349
   ],
   "selected-frame": [
    192,
@@ -3047,7 +3053,7 @@
    328
   ],
   "set-auto-coding": [
-   348
+   349
   ],
   "set-buffer": [
    66
@@ -3076,7 +3082,7 @@
   ],
   "set-coding-system-priority": [
    307,
-   348
+   349
   ],
   "set-default": [
    328
@@ -3086,10 +3092,10 @@
    157,
    158,
    159,
-   355,
    356,
    357,
-   359
+   358,
+   360
   ],
   "set-file-acl": [
    11
@@ -3199,10 +3205,10 @@
    33
   ],
   "skip-chars-backward": [
-   362
+   363
   ],
   "skip-chars-forward": [
-   362
+   363
   ],
   "sleep-for": [
    221,
@@ -3515,7 +3521,7 @@
    77
   ],
   "use-package": [
-   352
+   353
   ],
   "usize": [
    107
@@ -10065,6 +10071,22 @@
    "symbols": [
     "backtrace-get-frames",
     "backtrace--frames-and-locals"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-NEXT-CALL",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`debug-on-next-call` and debug-on-exit observe Lisp calls only",
+   "gnu": "bytecode.c's call opcode and Ffuncall call the debugger with `(lambda)` at the next call of any function, primitives included, and with `(exit VALUE)` when any flagged activation returns, a primitive's too",
+   "romacs": "The call boundary's hooks (`threaded.rs` `arm_debug_on_call`, `debug_on_exit`) stop at the next Lisp function call, with GNU byte-code's `(lambda)`; `debug-on-next-call` stays set through the primitive calls before it, which run as GNU opcodes do. A flagged primitive activation (`j` on a `mapcar` frame) returns without entering the debugger; its flag is dropped as it leaves. Normal returns of Lisp activations, and throws and errors out of them, match GNU byte-code (`tests/debugger_entry.rs`). `debug-on-next-call` is a forwarded boolean, as GNU's DEFVAR_BOOL",
+   "why": "One test on the call path (`profiler.active`) covers profiling and both hooks; primitive calls stay off it",
+   "symbols": [
+    "debug-on-next-call",
+    "backtrace-debug"
    ],
    "symbols_derived": false
   },

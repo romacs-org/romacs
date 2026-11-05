@@ -179,9 +179,12 @@ threaded.rs autoload_then nested_then 1 suspended  # FUNCTION and FUNDEF are roo
 threaded.rs bind_special bind_variable 1 suspended  # inside watched_write; bind_variable roots the value across its watchers
 threaded.rs bind_special watched_write 1 rooted  # VALUE is a frame while watched, read back for the fault's data
 threaded.rs call_debugger call_in_signal 1 suspended  # CONDITIONS and OBJECT are the pending escape's, quoted into the form
-threaded.rs call_in_signal call_suspended 1 suspended  # the form's objects are the pending escape's and quoted objects
-threaded.rs call_in_signal compile 1 held  # an open compiler builder holds collection
-threaded.rs call_in_signal execute_raw 1 clean  # inside call_suspended; nothing held
+threaded.rs run_in_signal call_suspended 1 suspended  # the form's objects are the pending escape's and quoted objects
+threaded.rs run_in_signal compile 1 held  # an open compiler builder holds collection
+threaded.rs run_in_signal execute_raw 1 clean  # inside call_suspended; nothing held
+threaded.rs hook_debugger compile 1 held  # an open compiler builder holds collection
+threaded.rs hook_debugger execute_raw 1 clean  # inside nested_then's call_suspended; nothing held
+threaded.rs hook_debugger nested_then 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
 threaded.rs checked_unbind unbind_one 1 suspended  # inside watched_write
 threaded.rs checked_unbind watched_write 1 suspended  # the engine is suspended when any variable is watched
 threaded.rs cold_step bind_special 2 suspended  # the value is read from its register; nothing is reused after; a late binding (BindLate, UnbindLate) the same way
