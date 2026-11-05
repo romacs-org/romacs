@@ -234,7 +234,8 @@ impl<'l, 'a> Hosted<'l, 'a> {
     }
     /// The default face's row height and the advance of C in it.
     pub(super) fn default_advance(&mut self, c: char) -> R<(i64, i64)> {
-        let (advance, height) = self.source.leaf().vm.host_default_advance(c).map_err(Fault::Error)?;
+        let window = self.source.window();
+        let (advance, height) = self.source.leaf().vm.host_face_advance_in(Some(window), "default", c).map_err(Fault::Error)?;
         self.default_height = i64::from(height);
         Ok((i64::from(advance), i64::from(height)))
     }
