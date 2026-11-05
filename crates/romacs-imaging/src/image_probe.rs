@@ -72,7 +72,7 @@ pub fn admit(source: ImageProbeSource<'_>, limit: ImageSizeLimit) -> Result<(), 
 ///
 /// `None` means the source carries no extent this crate can read without
 /// decoding it; the caller keeps whatever placeholder it would have used.
-pub(crate) fn probe_intrinsic_extent(source: ImageProbeSource<'_>) -> Option<ImageIntrinsicExtent> {
+pub fn probe_intrinsic_extent(source: ImageProbeSource<'_>) -> Option<ImageIntrinsicExtent> {
     // A decoder that panics on malformed input must not take the prober thread
     // down with it: one thread serves every image a session ever displays, and
     // a dead prober would silently leave every later image on its placeholder.
@@ -169,4 +169,50 @@ fn data_intrinsic_extent(data: &[u8]) -> Option<ImageIntrinsicExtent> {
     }
 
     None
+}
+
+/// The image type BYTES (a file's first bytes) plainly are, by their
+/// signature, as GNU's loaders check their own: a Lisp image type name.
+#[must_use]
+pub fn sniff_format(bytes: &[u8]) -> Option<&'static str> {
+    let text = String::from_utf8_lossy(bytes);
+    Some(match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "png",
+        [0xff, 0xd8, 0xff, ..] => "jpeg",
+        [b'G', b'I', b'F', b'8', ..] => "gif",
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "webp",
+        [b'I', b'I', 0x2a, 0, ..] | [b'M', b'M', 0, 0x2a, ..] => "tiff",
+        [b'P', b'1'..=b'6', ..] => "pbm",
+        // Not one of GNU's types; the attach helper converts it.
+        [b'B', b'M', _, _, _, _, 0, 0, 0, 0, ..] => "bmp",
+        _ if text.contains("/* XPM */") => "xpm",
+        _ if text.contains("<svg") => "svg",
+        _ if text.contains("#define") => "xbm",
+        _ => return None,
+    })
+}
+
+/// How much of a file [`probe_file_pixels`] reads: a raster header, or an
+/// SVG's prolog and root start tag.
+pub const HEAD_BYTES: usize = 64 * 1024;
+
+/// The size in pixels `image-size` reports at scale 1, without `:width`,
+/// `:height` or `:rotation`, for the image in PATH, read from its header
+/// (a raster's, or an SVG root's `viewBox`, `width` and `height`) without
+/// decoding it.  None when its type is not known by its signature, or its
+/// size is not in a header (XBM, XPM, PBM, an SVG without dimensions).
+#[must_use]
+pub fn probe_file_pixels(path: &str) -> Option<(u32, u32)> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(HEAD_BYTES);
+    File::open(path).ok()?.take(HEAD_BYTES as u64).read_to_end(&mut head).ok()?;
+    let (size, rotation) = (ImageSizeSpec::default(), ImageRotation::None);
+    let realization = ImageRealization::new(1.0, 1.0, 1.0);
+    match sniff_format(&head)? {
+        "png" | "jpeg" | "gif" | "webp" | "tiff" => {
+            probe_image_reported(ImageProbeSource::File(path), size, rotation, realization)
+        }
+        "svg" => probe_svg_reported(&head, size, rotation, realization),
+        _ => None,
+    }
 }

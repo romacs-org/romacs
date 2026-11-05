@@ -1464,6 +1464,47 @@ thousandth a stack mark."
   ;; The message is the step's visible change, so the host paints it.
   :body (let (size) (dotimes (_ 2) (dolist (spec it) (setq size (image-size spec t)))) (message "%S" size)))
 
+;;;; Attachments (rlisp/romacs-attach.el)
+
+(defun scaling--attach-files (n)
+  "N small distinct PNG files in a temporary directory: their names."
+  (let ((dir (make-temp-file "scaling-attach" t)) (files nil)
+        (png (base64-decode-string "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==")))
+    (dotimes (i n)
+      (let ((file (expand-file-name (format "a%d.png" i) dir)))
+        (let ((coding-system-for-write 'binary)) (write-region png nil file nil 'silent))
+        (push file files)))
+    (nreverse files)))
+
+(defun scaling--attach-host (files)
+  "The attach test host with FILES attached: its buffer."
+  (romacs-attach-test-host)
+  (romacs-attach-set-items nil)
+  (erase-buffer)
+  (when files (romacs-attach-files files))
+  (current-buffer))
+
+;; One batch insertion of N items: planned and rendered once, linear.
+(scaling-probe attach-tray :gui t :n 100 :steps 1
+  :setup (progn (require 'romacs-attach) (cons (scaling--attach-host nil) (scaling--attach-files n)))
+  :body (with-current-buffer (car it) (romacs-attach-set-items nil) (romacs-attach-files (cdr it))))
+
+;; A key typed into the draft under N chips: the cached tray string is
+;; put again as it is, so the key's cost does not grow with N.
+(scaling-probe attach-tray-key :gui t :n 100 :steps 20 :budget 0.5
+  :setup (progn (require 'romacs-attach) (scaling--attach-host (scaling--attach-files n)))
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; A draft naming N files beside N orphans: one listing, linear.
+(scaling-probe attach-drafts-reconcile :n 1000 :steps 1
+  :setup (progn (require 'romacs-attach)
+                (let* ((named (scaling--attach-files n))
+                       (dir (file-name-directory (car named))))
+                  (cons dir (mapcar (lambda (file) (list :path file)) named))))
+  :body (let ((dir (car it)))
+          (dotimes (i n) (write-region "o" nil (expand-file-name (format "orphan%d" i) dir) nil 'silent))
+          (romacs-attach-reconcile dir (cdr it))))
+
 ;;;; Collection
 
 (defvar scaling--keeper nil

@@ -388,17 +388,19 @@ impl PaintSender {
 
     /// Make DECODED, pixels already decoded, resident in the renderer's
     /// image cache as IMAGE (load ATTEMPT, from 1): the renderer only
-    /// uploads them, before any later-sent frame draws IMAGE.
+    /// uploads them, before any later-sent frame draws IMAGE.  False, and
+    /// nothing sent, while the command channel is full.
     pub fn load_image(&self, image: u32, attempt: u64,
-                      decoded: std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoded>) -> Result<(), String> {
+                      decoded: std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoded>) -> Result<bool, String> {
         use romacs_display_protocol::{ImageId, ImageLoadAttempt, ImageLoadToken};
         let attempt = ImageLoadAttempt::new(attempt).ok_or("image load attempts start at 1")?;
         let load = ImageLoadToken::new(ImageId::new(image), attempt);
         self.send_asset(crate::thread_comm::AssetCommand::ImageLoadDecoded { load, decoded })
     }
 
-    /// Release IMAGE's texture once no presented frame draws it.
-    pub fn retire_image(&self, image: u32) -> Result<(), String> {
+    /// Release IMAGE's texture once no presented frame draws it.  False,
+    /// and nothing sent, while the command channel is full.
+    pub fn retire_image(&self, image: u32) -> Result<bool, String> {
         self.send_asset(crate::thread_comm::AssetCommand::ImageRetire { image: romacs_display_protocol::ImageId::new(image) })
     }
 
@@ -414,8 +416,14 @@ impl PaintSender {
         self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset
     }
 
-    fn send_asset(&self, command: crate::thread_comm::AssetCommand) -> Result<(), String> {
-        let result = self.comms.cmd_tx.try_send(RenderCommand::Asset(command)).map_err(|error| error.to_string());
+    /// Send an asset COMMAND: whether it went, false while the channel is
+    /// full (its sender sends it again later).
+    fn send_asset(&self, command: crate::thread_comm::AssetCommand) -> Result<bool, String> {
+        let result = match self.comms.cmd_tx.try_send(RenderCommand::Asset(command)) {
+            Ok(()) => Ok(true),
+            Err(crossbeam_channel::TrySendError::Full(_)) => Ok(false),
+            Err(error) => Err(error.to_string()),
+        };
         self.proxy.wake_up();
         result
     }

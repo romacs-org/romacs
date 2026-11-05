@@ -119,6 +119,10 @@ pub trait DisplayHost {
     /// The decodes finished since the last call: each image's id and its
     /// final facts or the loader's error.
     fn finished_decodes(&mut self) -> Vec<(u64, Result<crate::ImageFacts, String>)> { vec![] }
+    /// The size `image-size` reports at scale 1 for the image file PATH,
+    /// from its header alone (`romacs-image-header-size`); None when the
+    /// header does not give it.
+    fn image_header_size(&mut self, _path: &str) -> Option<(u32, u32)> { None }
 }
 
 /// The attached display: closed until the session opens it.

@@ -10,7 +10,8 @@
 ;;            (which-key, keymap-popup);
 ;; `cursor'   a chip or short menu after a buffer position (eval results);
 ;; `palette'  a centred prompt and list (romacs-complete's panel);
-;; `hints'    the keys of an active transient map.
+;; `hints'    the keys of an active transient map;
+;; `viewer'   a centred picture or file (romacs-attach.el's viewer).
 ;;
 ;; A menu never takes focus or selects a window: keys reach the command
 ;; loop as in GNU, through the map its caller activated.  Dismissing a
@@ -50,7 +51,8 @@
     (palette :radius 8 :padding 10 :motion slide :edge top)
     (cursor :radius 6 :padding 4 :motion fade :edge top)
     (hints :radius 6 :padding 4 :motion fade :edge bottom)
-    (card :radius 8 :padding 12 :motion fade :edge bottom))
+    (card :radius 8 :padding 12 :motion fade :edge bottom)
+    (viewer :radius 10 :padding 12 :motion fade :edge bottom))
   "Each menu kind's look: corner radius and padding in pixels, and its
 motion: `slide' fades in sliding from its EDGE, `fade' only fades.")
 
@@ -84,7 +86,7 @@ background."
     (prog1 (romacs-layer-show buffer
                               :position (pcase kind
                                           ('panel 'bottom)
-                                          ('palette 'center)
+                                          ((or 'palette 'viewer) 'center)
                                           ('cursor `(at ,(car anchor) ,(cdr anchor)))
                                           ('hints `(window-bottom ,(or anchor (selected-window))))
                                           ('card `(pixel ,(car anchor) ,(cdr anchor)))
@@ -93,7 +95,7 @@ background."
                               ;; A key menu is modal and may be taller than a
                               ;; list: the frame less a few lines of its windows;
                               ;; a card is laid out to fit already.
-                              :max-lines (if (eq kind 'card) lines
+                              :max-lines (if (memq kind '(card viewer)) lines
                                            (and (eq kind 'panel)
                                               (max romacs-layer-max-lines
                                                    (- (frame-text-lines (romacs-layer--root-frame)) 4)))))

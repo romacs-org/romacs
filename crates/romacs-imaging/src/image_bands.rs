@@ -51,7 +51,7 @@ use crate::image_scale::RasterTarget;
 /// takes 1.4 s here, so a four-megapixel source is tens of milliseconds — and
 /// the whole-image path is both simpler and no slower. The threshold only has
 /// to be the point where the first band visibly beats the last one.
-pub(crate) const BANDING_MIN_PIXELS: u64 = 4_000_000;
+pub const BANDING_MIN_PIXELS: u64 = 4_000_000;
 
 /// Largest run of source rows one band reads, in RGBA.
 ///
@@ -61,14 +61,14 @@ pub(crate) const BANDING_MIN_PIXELS: u64 = 4_000_000;
 /// following its height into thousands. It bounds the *reading*, not what a
 /// band hands over — a band's payload is the raster rows those source rows
 /// filled, which is smaller by the reduction.
-pub(crate) const BAND_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub const BAND_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// Most bands one source is planned to produce.
 ///
 /// One band per scanline would be progressive in name only: the first band
 /// would arrive almost as late as the last, because a decoder still has to
 /// produce the rows above it.
-pub(crate) const BAND_TARGET_COUNT: u32 = 32;
+pub const BAND_TARGET_COUNT: u32 = 32;
 
 /// Whether one decode's bands have somewhere to go.
 ///
@@ -85,7 +85,7 @@ pub(crate) const BAND_TARGET_COUNT: u32 = 32;
 /// Both keep the band, which is still progress, and decline the placement,
 /// which is why this is named after the side that is missing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BandFilling {
+pub enum BandFilling {
     /// A band's rows go straight into the texture, below the last one written.
     TopDown,
     /// The texture is filled once, when the decode completes.
@@ -93,7 +93,7 @@ pub(crate) enum BandFilling {
 }
 
 impl BandFilling {
-    pub(crate) const fn of(rotation: ImageRotation, mask: ImageMaskPolicy) -> Self {
+    pub const fn of(rotation: ImageRotation, mask: ImageMaskPolicy) -> Self {
         if matches!(rotation, ImageRotation::None) && matches!(mask, ImageMaskPolicy::Preserve) {
             Self::TopDown
         } else {
@@ -154,7 +154,7 @@ pub struct TextureRows {
 impl TextureRows {
     /// A run of `len` raster rows from `start`; `len` is non-zero, so a run
     /// that fills nothing cannot be built.
-    pub(crate) const fn new(start: u32, len: NonZeroU32) -> Self {
+    pub const fn new(start: u32, len: NonZeroU32) -> Self {
         Self { start, len }
     }
 
@@ -189,7 +189,7 @@ impl BandPlacement {
     ///
     /// Built by whatever filled those rows — [`RasterTarget`] and nothing else
     /// — so a placement cannot name rows outside the raster it was filled in.
-    pub(crate) const fn new(raster: ImageRasterExtent, rows: TextureRows) -> Self {
+    pub const fn new(raster: ImageRasterExtent, rows: TextureRows) -> Self {
         Self { raster, rows }
     }
 
@@ -224,7 +224,7 @@ pub struct RasterBand {
 
 impl RasterBand {
     /// The pixels one band wrote for the rows of `placement`.
-    pub(crate) fn new(placement: BandPlacement, pixels: Arc<[u8]>) -> Self {
+    pub fn new(placement: BandPlacement, pixels: Arc<[u8]>) -> Self {
         let raster = placement.raster();
         let rows = placement.rows();
         assert_eq!(
@@ -291,7 +291,7 @@ impl DecodedBand {
 
 /// What one turn of a banded source produced.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum BandStep {
+pub enum BandStep {
     /// The next band, in order, once.
     Band(DecodedBand),
     /// Every source row has been handed out.
@@ -307,7 +307,7 @@ pub(crate) enum BandStep {
 ///
 /// Matched exhaustively wherever a source is consumed: a third route has to be
 /// a deliberate addition rather than something a wildcard swallows.
-pub(crate) enum BandSource {
+pub enum BandSource {
     /// Whole source rows, in order, one band at a time.
     Banded(BandedSource),
     /// One all-or-nothing decode of the whole image — this renderer's
@@ -319,7 +319,7 @@ pub(crate) enum BandSource {
 
 /// Operations every row-wise image decoder must provide.
 #[enum_dispatch::enum_dispatch]
-pub(crate) trait BandedDecoder: Sized {
+pub trait BandedDecoder: Sized {
     /// Take the next band, or learn that there are no more.
     fn next_band(&mut self) -> BandStep;
 
@@ -339,7 +339,7 @@ pub(crate) trait BandedDecoder: Sized {
 /// for formats `image` might add, and this enum is where a *banded* addition
 /// is caught.
 #[enum_dispatch::enum_dispatch(BandedDecoder)]
-pub(crate) enum BandedSource {
+pub enum BandedSource {
     /// PNG, whose reader yields one transformed row at a time
     /// (`png-0.18.1` `src/decoder/mod.rs:513` `next_row`).
     Png(PngRows),
@@ -359,7 +359,7 @@ pub(crate) enum BandedSource {
 /// (`classify_alpha`), because a filtered raster has alphas the source never
 /// had: intermediate ones, and — a kernel with negative lobes being what it
 /// is — ones the source's own range cannot hold.
-pub(crate) struct RasterPixels {
+pub struct RasterPixels {
     native: ImageNativeExtent,
     raster: ImageRasterExtent,
     rgba: Vec<u8>,
@@ -369,19 +369,19 @@ pub(crate) struct RasterPixels {
 impl RasterPixels {
     /// The extent the source's header named.
     #[must_use]
-    pub(crate) const fn native(&self) -> ImageNativeExtent {
+    pub const fn native(&self) -> ImageNativeExtent {
         self.native
     }
 
     /// The raster the decode realized it onto.
     #[must_use]
-    pub(crate) const fn raster(&self) -> ImageRasterExtent {
+    pub const fn raster(&self) -> ImageRasterExtent {
         self.raster
     }
 
     /// The mask identity of the source's own pixels.
     #[must_use]
-    pub(crate) const fn mask(&self) -> ImageMaskKind {
+    pub const fn mask(&self) -> ImageMaskKind {
         self.mask
     }
 
@@ -391,7 +391,7 @@ impl RasterPixels {
     /// first — which is the order a caller that is about to upload them wants
     /// anyway.
     #[must_use]
-    pub(crate) fn into_rgba(self) -> Vec<u8> {
+    pub fn into_rgba(self) -> Vec<u8> {
         self.rgba
     }
 }
@@ -402,7 +402,7 @@ impl RasterPixels {
 /// distinction is made from the decoded source pixels rather than from
 /// interpolated ones: the renderer may store both as RGBA, but storage must not
 /// collapse them into one semantic state.
-pub(crate) fn classify_alpha(rgba: &[u8]) -> ImageMaskKind {
+pub fn classify_alpha(rgba: &[u8]) -> ImageMaskKind {
     let mut has_transparent = false;
     for alpha in rgba.iter().skip(3).step_by(4).copied() {
         match alpha {
@@ -419,14 +419,14 @@ pub(crate) fn classify_alpha(rgba: &[u8]) -> ImageMaskKind {
 }
 
 /// Intrinsic PNG alpha is an image channel, even if its samples are binary.
-pub(crate) fn png_intrinsic_alpha(info: &png::Info<'_>) -> bool {
+pub fn png_intrinsic_alpha(info: &png::Info<'_>) -> bool {
     matches!(
         info.color_type,
         png::ColorType::Rgba | png::ColorType::GrayscaleAlpha
     ) && info.trns.is_none()
 }
 
-pub(crate) fn classify_source_alpha(rgba: &[u8], intrinsic_alpha: bool) -> ImageMaskKind {
+pub fn classify_source_alpha(rgba: &[u8], intrinsic_alpha: bool) -> ImageMaskKind {
     match classify_alpha(rgba) {
         ImageMaskKind::Clipping if intrinsic_alpha => ImageMaskKind::AlphaChannel,
         kind => kind,
@@ -439,7 +439,7 @@ pub(crate) fn classify_source_alpha(rgba: &[u8], intrinsic_alpha: bool) -> Image
 /// decode only ever has one row at a time: this is what it accumulates into the
 /// answer the whole-image path reaches in one pass.
 #[must_use]
-pub(crate) fn merge_mask(left: ImageMaskKind, right: ImageMaskKind) -> ImageMaskKind {
+pub fn merge_mask(left: ImageMaskKind, right: ImageMaskKind) -> ImageMaskKind {
     match (left, right) {
         (ImageMaskKind::AlphaChannel, _) | (_, ImageMaskKind::AlphaChannel) => {
             ImageMaskKind::AlphaChannel
@@ -458,7 +458,7 @@ impl BandSource {
     /// row is worth. Rotation is deliberately not an input — GNU turns the
     /// image after sizing (`src/image.c:3169-3201`), so the unrotated geometry
     /// is the one whose vertical scale maps source rows onto display rows.
-    pub(crate) fn open(
+    pub fn open(
         data: EncodedBytes,
         size: ImageSizeSpec,
         realization: ImageRealization,
@@ -472,7 +472,7 @@ impl BandSource {
     /// what banding does, so the tests that are about what it does read a
     /// small source rather than encode a four-megapixel one.
     #[cfg(test)]
-    pub(crate) fn open_forced(
+    pub fn open_forced(
         data: EncodedBytes,
         size: ImageSizeSpec,
         realization: ImageRealization,
@@ -578,7 +578,7 @@ impl BandPlan {
     /// would hold rows from two scalings that nothing downstream could tell
     /// apart.
     fn target(self, native: ImageNativeExtent) -> Option<RasterTarget> {
-        let geometry = crate::image_cache::realized_geometry(native, self.size, self.realization);
+        let geometry = crate::decode::realized_geometry(native, self.size, self.realization);
         RasterTarget::new(native, geometry.raster())
     }
 
@@ -618,7 +618,7 @@ type JpegReader = zune_jpeg::McuRowReader<ZuneCursor<EncodedBytes>>;
 /// image. Each source row is expanded to RGBA, resampled into the target's
 /// coordinates and filtered into whichever output rows cover it, and what is
 /// left at the end is the raster the texture takes.
-pub(crate) struct JpegRows {
+pub struct JpegRows {
     /// The row-wise decoder. It carries its own cursor: the bands it hands back
     /// are the next MCU rows and nothing else can be asked of it, which is
     /// where "bands cannot overlap, skip or arrive out of order" comes from
@@ -808,7 +808,7 @@ impl BandedDecoder for JpegRows {
 /// output rows cover it. What is left of the source afterwards is the raster,
 /// which is what the texture takes — so the native-size buffer this path used
 /// to build, and the resample of it that followed, are both gone.
-pub(crate) struct PngRows {
+pub struct PngRows {
     reader: png::Reader<Cursor<EncodedBytes>>,
     /// Original samples carry alpha, rather than tRNS-expanded RGB.
     intrinsic_alpha: bool,

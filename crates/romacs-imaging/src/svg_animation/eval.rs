@@ -17,9 +17,9 @@ use super::plan::{AnimatedValue, AnimationPlan, AnimationRule, CalcMode, Repeat}
 /// decode pool without lifetime plumbing, and the index lookup costs what
 /// the borrow would have folded in anyway.
 #[derive(Clone, Debug)]
-pub(crate) struct AttributeOverride {
-    pub(crate) rule: usize,
-    pub(crate) value: String,
+pub struct AttributeOverride {
+    pub rule: usize,
+    pub value: String,
 }
 
 /// The values the document shows at `doc_time`.
@@ -28,7 +28,7 @@ pub(crate) struct AttributeOverride {
 /// `fill="freeze"`, contribute nothing — the base attribute value in the
 /// source text is what shows, exactly as a renderer that ignores animations
 /// would draw it.
-pub(crate) fn evaluate(plan: &AnimationPlan, doc_time: Duration) -> Vec<AttributeOverride> {
+pub fn evaluate(plan: &AnimationPlan, doc_time: Duration) -> Vec<AttributeOverride> {
     let mut overrides: Vec<AttributeOverride> = Vec::new();
     for (index, rule) in plan.rules.iter().enumerate() {
         if let Some(value) = evaluate_rule(rule, doc_time) {
