@@ -550,6 +550,48 @@ impl Leaf<'_> {
         })
     }
 
+    /// `romacs--treesit-parse-early': start the first parse of the current
+    /// buffer's accessible text for LANGUAGE, t when it started; LANGUAGE nil
+    /// abandons one. Nothing starts in a buffer with parsers.
+    pub(crate) fn ts_parse_early(&mut self, language: Value) -> Out {
+        let buffer = self.ts_buffer_arg(Value::NIL)?;
+        let base = self.ts_base(buffer);
+        if language == Value::NIL {
+            self.ts_registry_mut(base).early = None;
+            return Ok(Value::NIL);
+        }
+        self.ts_symbol(language)?;
+        self.ts_check_size(base)?;
+        let registry = self.ts_registry(base);
+        if !registry.parsers.is_empty() || registry.early.is_some() {
+            return Ok(Value::NIL);
+        }
+        let remapped = self.ts_remap(language)?;
+        let Ok((lang, _)) = self.ts_load(remapped)? else { return Ok(Value::NIL) };
+        let Some(slot) = ts::EarlySlot::take() else { return Ok(Value::NIL) };
+        let region = self.ts_region(buffer);
+        let visible = (region.begv_byte, region.zv_byte);
+        let chars_modiff = self.vm.buffer_state(buffer).map_err(Fault::Error)?.chars_modiff;
+        let frozen = self.ts_buffer_text(base).expect("a multibyte buffer").frozen();
+        let early = ts::Early::start(slot, lang, frozen, visible, chars_modiff);
+        let started = early.is_some();
+        self.ts_registry_mut(base).early = early;
+        Ok(flag(started))
+    }
+    /// The tree of the early parse of PARSER's buffer, which only a first
+    /// parse uses: a parser that sees what that parse saw waits for it, and
+    /// any other leaves it unused, its tree released.
+    fn ts_early_tree(&mut self, parser: Value) -> Option<native::Tree> {
+        let p = self.ts_parser(parser).ok()?;
+        let (buffer, core, native) = (p.buffer, p.core.clone(), p.native.clone());
+        let base = self.ts_base(buffer);
+        let early = self.ts_registry_mut(base).early.take()?;
+        let chars_modiff = self.vm.buffer_state(buffer).ok()?.chars_modiff;
+        let (native, visible) = (native.borrow(), core.borrow().visible);
+        (early.language == native.language() && early.visible == visible && early.chars_modiff == chars_modiff
+            && native.sees_all((visible.1 - visible.0) as u32)).then(|| early.finish()).flatten()
+    }
+
     /// treesit_ensure_parsed up to its notifiers: the changed ranges when it
     /// parsed, None when no parse was due. A parse leaves the parser
     /// `within_reparse' for its notifiers (`ts_reparse_done').
@@ -568,7 +610,7 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
-        let twin = if old.is_none() { self.ts_twin_tree(parser) } else { None };
+        let twin = if old.is_none() { self.ts_twin_tree(parser).or_else(|| self.ts_early_tree(parser)) } else { None };
         let new = twin.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let mut reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));

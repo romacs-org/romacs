@@ -146,3 +146,35 @@ fn bundled_grammars_are_the_commits_gnu_pins() {
     });
     assert_eq!(report, "nil");
 }
+
+/// rlisp/romacs-treesit.el around `after-find-file': a visit's parse reaches
+/// the mode's parser; a visit that cannot use one (unibyte, NOMODES, a file
+/// whose local mode overrules the guess) neither fails nor leaves one behind.
+#[test]
+fn a_visit_parses_early_and_leaves_no_parse_unused() {
+    let directory = scratch("visit");
+    on_big_stack(move || {
+        let mut vm = bootstrapped(&directory);
+        let body = "int a;\n".repeat(1000);
+        let write = |name: &str, text: String| {
+            let path = directory.join(name);
+            std::fs::write(&path, text).unwrap();
+            path.display().to_string()
+        };
+        let (plain, literal, nomodes, local) = (write("plain.c", body.clone()), write("literal.c", body.clone()),
+                                                write("nomodes.c", body.clone()), write("local.c", format!("/* -*- fundamental -*- */\n{body}")));
+        let source = format!(
+            "(progn (require 'treesit) (require 'c-ts-mode) (load \"romacs-treesit\") \
+               (add-to-list 'major-mode-remap-alist '(c-mode . c-ts-mode)) \
+               (let ((idle (lambda () (prog1 (romacs--treesit-parse-early 'c) (romacs--treesit-parse-early nil))))) \
+                 (list (with-current-buffer (find-file-noselect {plain:?}) \
+                         (list major-mode (treesit-node-child-count (treesit-buffer-root-node)))) \
+                       (with-temp-buffer (set-buffer-multibyte nil) (insert-file-contents-literally {literal:?} t) (after-find-file nil nil nil nil t) \
+                         (list enable-multibyte-characters major-mode)) \
+                       (with-temp-buffer (insert-file-contents {nomodes:?} t) (after-find-file nil nil nil nil t) \
+                         (list major-mode (funcall idle))) \
+                       (with-current-buffer (find-file-noselect {local:?}) \
+                         (list major-mode (funcall idle))))))");
+        assert_eq!(printed(&mut vm, &source), "((c-ts-mode 1000) (nil fundamental-mode) (fundamental-mode t) (fundamental-mode t))");
+    });
+}

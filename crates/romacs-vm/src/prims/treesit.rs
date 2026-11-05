@@ -204,6 +204,11 @@ fn treesit_parser_create(cx, language: Value; optional buffer: Value, no_reuse: 
     cx.ts_parser_create(language, buffer, no_reuse, tag)
 }}
 
+defsubr! { name = "romacs--treesit-parse-early", gnu = "romacs:treesit", effect = Global,
+fn romacs_treesit_parse_early(cx, language: Value) {
+    cx.ts_parse_early(language)
+}}
+
 defsubr! { name = "treesit-parser-delete", gnu = "treesit.c:2491", effect = Global,
 fn treesit_parser_delete(cx, parser: Value) {
     cx.ts_parser_delete(parser)

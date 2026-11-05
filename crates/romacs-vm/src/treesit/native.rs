@@ -110,6 +110,25 @@ impl Drop for Tree {
         unsafe { ffi::ts_tree_delete(self.0) };
     }
 }
+
+/// A tree no thread holds yet, on its way from the one that parsed it.
+pub(crate) struct Loose(*mut ffi::TSTree);
+// SAFETY: the only handle of the tree, which shares nothing, so its thread
+// may change as a parser's result may.
+unsafe impl Send for Loose {}
+impl Drop for Loose {
+    fn drop(&mut self) {
+        // SAFETY: owned since `Tree::loose` gave it up.
+        unsafe { ffi::ts_tree_delete(self.0) };
+    }
+}
+impl Loose {
+    pub(crate) fn tree(self) -> Tree {
+        let tree = Tree(self.0, OnceCell::new());
+        std::mem::forget(self);
+        tree
+    }
+}
 impl Tree {
     /// ts_tree_edit of this generation in place, as GNU edits its tree:
     /// nodes made before the edit keep their old offsets.
@@ -120,6 +139,12 @@ impl Tree {
     pub(crate) fn root(&self) -> TSNode {
         // SAFETY: the tree is live.
         unsafe { ffi::ts_tree_root_node(self.0) }
+    }
+    /// This tree, new from a parse, to send to another thread.
+    pub(crate) fn loose(self) -> Loose {
+        let loose = Loose(self.0);
+        std::mem::forget(self);
+        loose
     }
     /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
     /// until the edits part them, so O(1) in the tree's size. Only an

@@ -695,6 +695,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     initialize_editing(vm)?;
     vm.eval_source(include_str!("../../../rlisp/romacs-project.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-fontify.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-treesit.el"))?;
     mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
     mark_phase("journey-keys");

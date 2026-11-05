@@ -126,6 +126,28 @@ fn treesit_matches_pinned_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// An early parse gives the first parser of a buffer what a parse would,
+/// unless the buffer changed, is narrowed or the parser asks otherwise.
+#[test]
+fn an_early_parse_is_used_only_for_the_text_it_read() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} \
+        (let* ((text \"int a; int b;\") \
+               (string (lambda () (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c))))) \
+               (fresh (lambda (text) (with-temp-buffer (insert text) (funcall string))))) \
+          (list (with-temp-buffer (insert text) (list (romacs--treesit-parse-early 'c) (romacs--treesit-parse-early 'c) (equal (funcall string) (funcall fresh text)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (goto-char 1) (insert \"int z; \") (equal (funcall string) (funcall fresh (buffer-string)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (subst-char-in-region 1 14 ?i ?=) (equal (funcall string) (funcall fresh (buffer-string)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (narrow-to-region 8 14) (equal (funcall string) (funcall fresh \"int b;\"))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (romacs--treesit-parse-early nil) (equal (funcall string) (funcall fresh text))) \
+                (with-temp-buffer (insert text) (funcall string) (romacs--treesit-parse-early 'c)) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (let ((p (treesit-parser-create 'c))) (treesit-parser-set-included-ranges p '((1 . 7))) (equal (treesit-node-string (treesit-parser-root-node p)) (funcall fresh \"int a;\")))))))");
+    let value = vm.eval_source(&source).and_then(|v| v.display());
+    assert_eq!(value.as_deref(), Ok("((t nil t) t t t t nil t)"));
+}
+
 /// VM2-TREESIT-HASH: `equal' nodes hash alike, so an `equal' table finds
 /// them (GNU hashes the node object's address and misses).
 #[test]

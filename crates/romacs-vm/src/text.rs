@@ -167,6 +167,40 @@ fn internal_to_rope(bytes: &[u8]) -> Result<(Cow<'_, str>, Vec<u32>)> {
     Ok((Cow::Owned(text), raw))
 }
 
+/// The bytes from AT to the end of its chunk of ROPE, or of TAIL after it.
+fn chunk_from<'a>(rope: &'a ropey_stable::Rope, tail: &'a str, at: usize) -> &'a [u8] {
+    let rope_bytes = rope.len_bytes();
+    if at >= rope_bytes {
+        return tail.as_bytes().get(at - rope_bytes..).unwrap_or(&[]);
+    }
+    let (chunk, start, ..) = rope.chunk_at_byte(at);
+    &chunk.as_bytes()[at - start..]
+}
+
+/// A text as it stood, for a thread of its own: the rope shares its storage
+/// with the text it came from.
+pub(crate) struct FrozenText {
+    rope: ropey_stable::Rope,
+    tail: String,
+    raw: Vec<u32>,
+}
+impl crate::treesit::Chunks for FrozenText {
+    fn chunk_from(&self, at: usize) -> &[u8] {
+        chunk_from(&self.rope, &self.tail, at)
+    }
+    fn raw_in(&self, r: Range<usize>) -> &[u32] {
+        raw_in(&self.raw, r)
+    }
+}
+impl crate::treesit::Chunks for TextBody {
+    fn chunk_from(&self, at: usize) -> &[u8] {
+        TextBody::chunk_from(self, at)
+    }
+    fn raw_in(&self, r: Range<usize>) -> &[u32] {
+        TextBody::raw_in(self, r)
+    }
+}
+
 /// The offsets of RAW inside RANGE.
 fn raw_in(raw: &[u32], range: Range<usize>) -> &[u32] {
     let start = raw.partition_point(|&p| (p as usize) < range.start);
@@ -621,12 +655,11 @@ impl TextBody {
     /// The bytes from AT to the end of its rope chunk (or the tail), for a
     /// parse's reader; empty at the end.
     pub(crate) fn chunk_from(&self, at: usize) -> &[u8] {
-        let rope_bytes = self.bytes_len - self.tail.len();
-        if at >= rope_bytes {
-            return self.tail.as_bytes().get(at - rope_bytes..).unwrap_or(&[]);
-        }
-        let (chunk, start, ..) = self.rope.chunk_at_byte(at);
-        &chunk.as_bytes()[at - start..]
+        chunk_from(&self.rope, &self.tail, at)
+    }
+    /// What a parse on another thread reads of this text.
+    pub(crate) fn frozen(&self) -> FrozenText {
+        FrozenText { rope: self.rope.clone(), tail: self.tail.clone(), raw: self.raw.clone() }
     }
     /// The first newline in FROM..LIMIT (0-based bytes).
     pub(crate) fn newline_after(&self, from: usize, limit: usize) -> Option<usize> {
