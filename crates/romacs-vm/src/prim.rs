@@ -1170,6 +1170,7 @@ mod leaf {
             } else {
                 let slot = self.symbol_slot(symbol)?;
                 self.vm.slots[slot].declared_special = true;
+                self.vm.special_changes += 1;
                 if self.vm.names.get(&name) == Some(&slot) {
                     self.vm.specials.insert(name);
                 }
@@ -1179,6 +1180,7 @@ mod leaf {
         /// Clear the symbol's declaration without following a variable alias.
         pub fn make_variable_non_special(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
             let name = self.symbol_name(symbol)?;
+            self.vm.special_changes += 1;
             if symbol == Value::NIL || symbol == Value::TRUE {
                 self.vm.specials.remove(&name);
             } else {
