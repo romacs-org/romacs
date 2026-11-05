@@ -24,6 +24,18 @@ Workloads (--quick runs those marked q):
   ert        25 GNU ERT files, `-Q --batch -l ert -l FILE -f
              ert-run-tests-batch-and-exit' in both: totals of instructions
              and of per-file wall time, and each engine's expected count.
+  elb        GNU ELPA's elisp-benchmarks (pinned tarball), the suite GNU
+             evaluates native compilation with: every entry point the suite
+             defines in either engine, one process per run, after its own
+             garbage-collect; instructions less a setup-only run, wall the
+             entry's own.  GNU loads the member files byte-compiled (JIT
+             native compilation off) and, when it has native compilation,
+             native-compiled at the suite's elb-speed and elb-safety; Romacs
+             loads their source.  A member missing in an engine, or whose run
+             reported an error (the byte compiler's), has no figures there and
+             says why; the geometric mean names the members it leaves out.
+             Pure Lisp compute, not an editor workload: its own table, never
+             in --quick.
   gui        headless labwc, as the parity harnesses run both engines:
              first-start world build (Romacs only; GNU's dump is built with
              it), warm launch (q) spawn to Romacs's first paint and to the
@@ -138,7 +150,17 @@ ERT_FILES = ['lisp/emacs-lisp/cl-lib-tests.el', 'lisp/emacs-lisp/cl-macs-tests.e
 KEYS = {'self-insert': ['a'], 'C-f': ['-M', 'ctrl', 'f', '-m', 'ctrl'], 'C-n': ['-M', 'ctrl', 'n', '-m', 'ctrl']}
 CTRL = lambda keys: ['-M', 'ctrl', *[a for k in keys for a in ('-k', k)], '-m', 'ctrl']  # noqa: E731
 KEYSYM = {'-': 'minus'}
-GROUPS = ('batch', 'micro', 'ert', 'gui', 'init', 'apps')
+# GNU ELPA's elisp-benchmarks, the suite GNU evaluates native compilation
+# with: (version, tarball URL, its SHA-256, member files).
+ELB = ('1.16', 'https://elpa.gnu.org/packages/elisp-benchmarks-1.16.tar',
+       'e222500d387152bdf3d5a178681071ddf4d9921adf73f97adc3942f3135aad6c', 17)
+# (column, engine, how it loads the member files); gnu_native only when
+# the GNU engine has native compilation.
+ELB_COLUMNS = (('gnu', 'gnu', 'elc'), ('gnu_native', 'gnu', 'eln'), ('romacs', 'romacs', 'source'))
+# An error a run reported instead of signalling: the byte compiler's, or
+# the suite's demoted load and run errors.
+ELB_ERROR = re.compile(r'(?:^|: )(Error(?: loading| running)?: .*)', re.M)
+GROUPS = ('batch', 'micro', 'ert', 'elb', 'gui', 'init', 'apps')
 
 
 class Refused(Exception):
@@ -228,6 +250,60 @@ def row(name, group, unit, gnu, romacs, runs, note=''):
     return {'row': name, 'group': group, 'unit': unit, 'runs': runs, 'gnu': gnu, 'romacs': romacs, 'note': note}
 
 
+def geomean(values):
+    """The geometric mean of positive VALUES, or None if one is missing."""
+    values = list(values)
+    if not values or any(v is None or v <= 0 for v in values):
+        return None
+    return statistics.geometric_mean(values)
+
+
+ENGINE_NAMES = {'gnu': 'GNU', 'gnu_native': 'GNU native', 'romacs': 'Romacs'}
+
+
+def elb_member(samples, setup):
+    """One column's figures from SAMPLES (a member's full runs), less SETUP
+    (the setup-only runs' instructions); a missing or failed member has no
+    figures and says why.  A count at or below the setup's, a member whose
+    work the compiler removed, has no instructions figure and says so."""
+    if isinstance(samples, str):
+        return {'instructions': None, 'wall': None, 'failed': samples}
+    errors = [e for s in samples for e in s['errors']]
+    if errors:
+        return {'instructions': None, 'wall': None, 'failed': f'reported "{errors[0]}"'}
+    instructions = median(s['instructions'] for s in samples) - setup
+    made = {'instructions': instructions if instructions > 0 else None,
+            'wall': median(s['seconds'] for s in samples), 'setup_instructions': setup}
+    if instructions <= 0:
+        made['note'] = f'instructions not above the setup run\'s ({instructions:+.0f})'
+    return made
+
+
+def elb_note(engines):
+    return '; '.join(f'{ENGINE_NAMES[c]}: {v.get("failed") or v["note"]}'
+                     for c, v in engines.items() if v.get('failed') or v.get('note'))
+
+
+def elb_geomean_row(rows, columns, runs):
+    """The geometric mean of every column over the members every column
+    ran; the members left out are named, and a mean a member lacks a
+    figure for is not given."""
+    complete = [r for r in rows if not any(r[c].get('failed') for c in columns)]
+    left_out = [r['row'].removeprefix('elb ') for r in rows if r not in complete]
+    engines = {c: {m: geomean(r[c][m] for r in complete) for m in ('instructions', 'wall')} for c in columns}
+    note = f'over the {len(complete)} of {len(rows)} members every engine ran'
+    if left_out:
+        note += f'; left out: {", ".join(left_out)}'
+    without = [f'{ENGINE_NAMES[c]} {m}' for c in columns for m in ('instructions', 'wall') if engines[c][m] is None]
+    if complete and without:
+        note += f'; no mean of {", ".join(without)}: a member has no figure there'
+    made = row('elb geometric mean', 'elb', 'run', engines['gnu'], engines['romacs'], runs, note)
+    if 'gnu_native' in columns:
+        made['gnu_native'] = engines['gnu_native']
+    made['load'] = max((r.get('load', 0) for r in rows), default=0)
+    return made
+
+
 # --- host and processes -------------------------------------------------------
 
 def load():
@@ -268,7 +344,7 @@ def run(argv, env, cwd, timeout, perf_out=None):
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         process.communicate()
-        raise Refused(f'timed out after {timeout}s: {" ".join(map(str, argv[-4:]))}')
+        raise Refused(f'timed out after {timeout}s: {" ".join(Path(str(a)).name for a in argv[-4:])}')
     wall = time.time() - started
     instructions = stat_instructions(Path(perf_out).read_text()) if perf_out is not None else None
     return output, wall, instructions
@@ -346,8 +422,9 @@ class Batch:
         result = perfbench_line(output)
         if result is None or instructions is None:
             self.ctx.log(f'{engine} {workload}', output)
-            raise Refused(f'{engine}: no result from {workload} (see logs)')
-        return dict(result, instructions=instructions, process_wall=wall)
+            last = next((line for line in reversed(output.splitlines()) if line.strip()), '')
+            raise Refused(f'{engine}: no result from {workload}: {last[:160]!r} (see logs)')
+        return dict(result, instructions=instructions, process_wall=wall, output=output)
 
     def workload(self, name, workload):
         runs, engines = self.ctx.runs, {}
@@ -439,6 +516,96 @@ def ert_row(ctx, batch):
         note += f'; totals withheld, files without a result: GNU {engines["gnu"]["files_without_result"]},' \
                 f' Romacs {engines["romacs"]["files_without_result"]}'
     return row('ERT 25 files', 'ert', 'total', engines['gnu'], engines['romacs'], ctx.runs, note)
+
+
+def elb_tarball(cache):
+    """The pinned elisp-benchmarks tarball, fetched once, checked every run."""
+    version, url, digest, _ = ELB
+    path = cache / 'elb' / f'elisp-benchmarks-{version}.tar'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        staging = path.with_suffix('.part')
+        with urllib.request.urlopen(url, timeout=60) as response:
+            staging.write_bytes(response.read())
+        staging.rename(path)
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise SystemExit(f'{path} does not match its pinned SHA-256')
+    return path
+
+
+def gnu_native_comp(ctx, batch):
+    output, _, _ = run([ctx.engines['gnu'], '-Q', '--batch', '--eval',
+                        '(princ (if (and (fboundp (quote native-comp-available-p)) (native-comp-available-p))'
+                        ' "native-comp yes" "native-comp no"))'], batch.env['gnu'], ctx.work, 60)
+    return 'native-comp yes' in output
+
+
+def elb_rows(ctx, batch):
+    """GNU ELPA's elisp-benchmarks, every entry point the suite defines in
+    either engine: GNU byte-compiled (and native-compiled when it can),
+    Romacs from source.  Instructions are a run's less a setup-only run."""
+    version, _, _, count = ELB
+    tarball = elb_tarball(ctx.cache)
+    ctx.elb_native = gnu_native_comp(ctx, batch)
+    columns = [c for c in ELB_COLUMNS if c[0] != 'gnu_native' or ctx.elb_native]
+    prepared = {}
+    for column, engine, mode in columns:
+        root = ctx.work / f'elb-{column}'
+        root.mkdir()
+        subprocess.run(['tar', '-xf', str(tarball), '-C', str(root)], check=True, timeout=60)
+        package = root / f'elisp-benchmarks-{version}'
+        found = len(list((package / 'benchmarks').glob('*.el')))
+        if found != count:
+            raise Refused(f'elisp-benchmarks {version} has {found} member files, not {count}')
+        env = {'PERFBENCH_ELB_DIR': str(package), 'PERFBENCH_ELB_MODE': mode, 'PERFBENCH_ELN': str(root / 'eln')}
+        prepared[column] = elb_column(batch, engine, env, ctx.runs)
+    members = sorted({e for p in prepared.values() for e in p['entries']})
+    if not members:
+        raise Refused('; '.join(f'{ENGINE_NAMES[c]}: {p["failed"]}' for c, p in prepared.items()))
+    rows = []
+    for member in members:
+        watch = LoadWatch()
+        engines = watch.during(lambda: {c: elb_member(elb_samples(ctx, batch, prepared[c], member), prepared[c].get('setup'))
+                                        for c in prepared})
+        made = row(f'elb {member}', 'elb', 'run', engines['gnu'], engines['romacs'], ctx.runs, elb_note(engines))
+        if 'gnu_native' in engines:
+            made['gnu_native'] = engines['gnu_native']
+        made['load'] = watch.peak
+        rows.append(made)
+    return rows + [elb_geomean_row(rows, list(prepared), ctx.runs)]
+
+
+def elb_column(batch, engine, env, runs):
+    """ENGINE's suite loaded as ENV says: its entry names and its setup-only
+    runs' instructions; or, when it refuses to compile or load the suite,
+    why, so the other columns still have their figures."""
+    try:
+        entries = batch.once(engine, 'elb-prepare', extra=env)['check']
+        setup = median(batch.once(engine, 'elb', skip=True, extra=env)['instructions'] for _ in range(runs))
+    except Refused as error:
+        return {'engine': engine, 'env': env, 'entries': [], 'failed': f'refused: {error}'}
+    return {'engine': engine, 'env': env, 'entries': entries, 'setup': setup}
+
+
+def elb_samples(ctx, batch, column, member):
+    """--runs runs of MEMBER in COLUMN, each with the errors it reported;
+    or why it has none."""
+    if column.get('failed'):
+        return column['failed']
+    if member not in column['entries']:
+        return f'no elb-{member}-entry after loading the suite'
+    extra = {**column['env'], 'PERFBENCH_ELB_ENTRY': member}
+    samples = []
+    for _ in range(ctx.runs):
+        try:
+            sample = batch.once(column['engine'], 'elb', extra=extra)
+        except Refused as error:
+            return f'refused: {error}'
+        errors = ELB_ERROR.findall(sample['output'])
+        if errors:
+            batch.ctx.log(f'elb {column["engine"]} {column["env"]["PERFBENCH_ELB_MODE"]} {member}', sample['output'])
+        samples.append({**sample, 'errors': errors})
+    return samples
 
 
 # --- GUI workloads ------------------------------------------------------------
@@ -804,8 +971,8 @@ def gate_walls(rows, max_load):
     """Clear the wall times of rows measured above MAX_LOAD."""
     for r in rows:
         if r.get('load', 0) > max_load:
-            for engine in ('gnu', 'romacs'):
-                if r[engine] and r[engine].get('wall') is not None:
+            for engine in ENGINE_NAMES:
+                if r.get(engine) and r[engine].get('wall') is not None:
                     r[engine]['wall_refused'] = r[engine].pop('wall')
             r['note'] = f'wall refused: load {r["load"]:.1f} > {max_load}; {r["note"]}'
     return rows
@@ -819,6 +986,8 @@ def with_ratios(rows, previous):
             value = (r['romacs'] or {}).get(metric)
             r[f'{metric}_ratio'] = ratio(value, (r['gnu'] or {}).get(metric))
             r[f'{metric}_change'] = change(value, ((before.get(r['row']) or {}).get('romacs') or {}).get(metric))
+            if 'gnu_native' in r:
+                r[f'native_{metric}_ratio'] = ratio(value, (r['gnu_native'] or {}).get(metric))
     return rows
 
 
@@ -855,15 +1024,40 @@ def table(results):
              '| workload | per | GNU instr | Romacs instr | R/G | Δ instr | GNU wall | Romacs wall | R/G | Δ wall | note |',
              '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|']
     for r in results['rows']:
+        if r['group'] == 'elb':
+            continue
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
         lines.append(f'| {r["row"]} | {r["unit"]} | {scaled(gnu.get("instructions"), "instructions")} | '
                      f'{scaled(romacs.get("instructions"), "instructions")} | {times(r["instructions_ratio"])} | '
                      f'{percent(r["instructions_change"])} | {scaled(gnu.get("wall"), "s")} | '
                      f'{scaled(romacs.get("wall"), "s")} | {times(r["wall_ratio"])} | {percent(r["wall_change"])} | '
                      f'{r["note"]} |')
+    lines += elb_table(results)
     for line in results['skipped']:
         lines.append(f'\nNot run: {line}')
     return '\n'.join(lines) + '\n'
+
+
+def elb_table(results):
+    """The elisp-benchmarks rows, apart: pure Lisp compute, not an editor workload."""
+    rows = [r for r in results['rows'] if r['group'] == 'elb']
+    if not rows:
+        return []
+    native = results['meta'].get('elb_native')
+    lines = ['', f'GNU ELPA elisp-benchmarks {ELB[0]} (pure Lisp compute): GNU .elc'
+             + (', GNU native-compiled' if native else '; the GNU engine has no native compilation')
+             + ', Romacs from source.', '',
+             '| member | GNU instr | GNU native instr | Romacs instr | R/G | GNU wall | GNU native wall | Romacs wall '
+             '| R/G | R/native | note |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|']
+    for r in rows:
+        gnu, native_, romacs = r['gnu'] or {}, r.get('gnu_native') or {}, r['romacs'] or {}
+        lines.append(f'| {r["row"]} | {scaled(gnu.get("instructions"), "instructions")} | '
+                     f'{scaled(native_.get("instructions"), "instructions")} | '
+                     f'{scaled(romacs.get("instructions"), "instructions")} | {times(r["instructions_ratio"])} | '
+                     f'{scaled(gnu.get("wall"), "s")} | {scaled(native_.get("wall"), "s")} | '
+                     f'{scaled(romacs.get("wall"), "s")} | {times(r["wall_ratio"])} | '
+                     f'{times(r.get("native_wall_ratio"))} | {r["note"]} |')
+    return lines
 
 
 def previous_results(out_root, explicit, current):
@@ -890,6 +1084,7 @@ class Context:
         if len(str(self.work)) > 75:  # + /romacs-XXXXXXXX/wayland-NN
             raise SystemExit(f'{self.work}: too long for socket paths; give a shorter --out')
         self.skipped = []
+        self.elb_native = None
 
     def scratch(self, suffix):
         """A fresh path in the work directory."""
@@ -939,8 +1134,8 @@ def main():
     parser.add_argument('--commit')
     parser.add_argument('--quick', action='store_true')
     parser.add_argument('--runs', type=int, default=3)
-    parser.add_argument('--only', nargs='+', help='groups, or workloads (a batch row, micro, ERT 25 files, launch,'
-                        ' keys, init, apps)')
+    parser.add_argument('--only', nargs='+', help='groups, or workloads (a batch row, micro, ERT 25 files, elb,'
+                        ' launch, keys, init, apps)')
     parser.add_argument('--max-load', type=float, default=8.0)
     parser.add_argument('--out', default=os.environ.get('ROMACS_PERFBENCH_OUT', '~/.cache/romacs/perf-bench'))
     parser.add_argument('--previous', help='results.json to compare with (default: the newest saved run)')
@@ -977,6 +1172,7 @@ def main():
                 for name, group, workload, quick in BATCH]
         plan += [('micro', 'micro', True, lambda: micro_rows(ctx, batch)),
                  ('ERT 25 files', 'ert', False, lambda: [ert_row(ctx, batch)]),
+                 ('elb', 'elb', False, lambda: elb_rows(ctx, batch)),
                  ('launch', 'gui', True, lambda: launch_rows(ctx)),
                  ('keys', 'gui', True, lambda: key_rows(ctx)),
                  ('init', 'init', False, lambda: init_rows(ctx)),
@@ -994,13 +1190,14 @@ def main():
                 print(f'  {name}: not run: {error}', flush=True)
                 continue
             for r in made:
-                r['load'] = watch.peak
+                r.setdefault('load', watch.peak)
             rows += made
             print(f'  {name}: {time.time() - started_at:.0f}s, load up to {watch.peak:.1f}', flush=True)
     finally:
         if not args.keep:
             shutil.rmtree(ctx.work, ignore_errors=True)
     meta['load_end'] = load()
+    meta['elb_native'] = ctx.elb_native
     previous = previous_results(out_root, args.previous, run_dir)
     meta['previous'] = str(previous) if previous else None
     results = {'meta': meta, 'skipped': ctx.skipped,

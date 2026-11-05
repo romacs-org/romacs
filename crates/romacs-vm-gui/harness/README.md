@@ -290,6 +290,15 @@ script's docstring:
   result (match counts, line counts) is compared, and a difference is noted.
 * micro: named call, closure call, mapcar of 1 and 10, dolist + funcall,
   per iteration beyond an empty loop; GNU byte-compiled, Romacs from source.
+* elb: GNU ELPA's elisp-benchmarks 1.16 (a pinned tarball, checked by
+  SHA-256), the suite GNU evaluates native compilation with.  One row per
+  entry point the suite defines in either engine, and their geometric
+  mean.  GNU loads the member files byte-compiled (JIT native compilation
+  off) and, when it has native compilation, natively compiled at the
+  suite's own speed and safety, a third column; Romacs loads their source.
+  A member an engine does not define, or whose run reported an error,
+  has no figure there and says why.  Pure Lisp compute rather than an
+  editor workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
   not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
@@ -326,19 +335,22 @@ HOME/XDG/TMPDIR trees, and no workload writes a user's data.
 ```sh
 # in the project environment (pinned GNU oracle and source)
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
-  --romacs INSTALLED/romacs-vm-gui --profile-config PROFILE.json  # about 15 minutes
+  --romacs INSTALLED/romacs-vm-gui --profile-config PROFILE.json  # about an hour, most of it elb
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
 ```
 
 After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
-"Romacs and GNU Emacs compared" table in README.org from that run (the block between
-`# perfbench-table-begin` and `# perfbench-table-end`), keeping every row.
+"Romacs and GNU Emacs compared" tables in README.org from that run, keeping every
+row: the editor workloads between `# perfbench-table-begin` and
+`# perfbench-table-end`, and the elisp-benchmarks members between
+`# perfbench-elb-begin` and `# perfbench-elb-end`.  A block the run did not
+measure is left as it was.
 
 A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
 installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
-from `--commit`.  `--only` takes groups (`batch micro ert gui init apps`)
-or workloads: a batch row's name, `micro`, `ERT 25 files`, `launch`,
+from `--commit`.  `--only` takes groups (`batch micro ert elb gui init apps`)
+or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `launch`,
 `keys`, `init` or `apps`.
 
 ## Line numbers in programming buffers

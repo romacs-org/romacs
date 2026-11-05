@@ -82,6 +82,40 @@ Measured 2026-11-02 on build ~cd568550~ against pinned GNU Emacs ~45b0f769~, on 
 Not measured in this run: init, gnosis.
 # perfbench-table-end
 
+** Lisp compute: GNU's elisp-benchmarks
+
+# perfbench-elb-begin
+This is GNU's own benchmark suite, GNU ELPA's elisp-benchmarks (the one GNU uses to evaluate native compilation), not ours, and it measures pure Lisp compute, not editor responsiveness.
+
+Measured 2026-11-05 on build ~7726078f~ against pinned GNU Emacs ~45b0f769~, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each member ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  GNU loads the member files byte-compiled, with JIT native compilation off, and natively compiled at the suite's own speed and safety; its own Lisp libraries are natively compiled in both columns, as this GNU is built with native compilation.  Romacs loads their source.  A member an engine does not define, or whose run reported an error, has no figure there, and the geometric mean leaves it out.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
+
+| Member | GNU .elc | GNU native | Romacs | Romacs/GNU .elc (time) | Romacs/GNU native (time) | Romacs/GNU .elc (instructions) | Romacs/GNU native (instructions) | Notes |
+|-
+| bubble | - | - | - | - | - | 3.75x | 16.28x | wall refused: load 14.1 > 8.0 |
+| bubble-no-cons | - | - | - | - | - | 5.57x | 37.36x | wall refused: load 13.9 > 8.0 |
+| bytecomp | - | - | - | - | - | - | - | wall refused: load 10.3 > 8.0; Romacs: reported "Error: Symbol’s function definition is void: read-positioning-symbols" |
+| dhrystone | - | - | - | - | - | 4.50x | 6.99x | wall refused: load 12.5 > 8.0 |
+| eieio | - | - | - | - | - | 8.57x | 8.60x | wall refused: load 11.1 > 8.0 |
+| fibn | - | - | - | - | - | 0.49x | 369295.14x | wall refused: load 8.5 > 8.0 |
+| fibn-named-let | - | - | - | - | - | 0.58x | 1.03x | wall refused: load 8.0 > 8.0 |
+| fibn-rec | 1.93 s | 16.9 µs | 3.1 s | 1.61x | 182957.13x | 1.56x | - | GNU native: instructions not above the setup run's (-16701) |
+| fibn-tc | 1.66 s | 2.74 ms | 2.63 s | 1.58x | 961.19x | 1.49x | 1038.62x |  |
+| flet | - | - | - | - | - | 4.03x | 21.50x | wall refused: load 18.6 > 8.0 |
+| font-lock | - | - | - | - | - | 2.74x | 2.75x | wall refused: load 17.7 > 8.0 |
+| inclist | - | - | - | - | - | 0.94x | 12.19x | wall refused: load 17.5 > 8.0 |
+| inclist-type-hints | - | - | - | - | - | - | - | wall refused: load 28.0 > 8.0; Romacs: refused: timed out after 900s: -Q --batch -l perfbench.el |
+| listlen-tc | - | - | - | - | - | 1.90x | 41.07x | wall refused: load 27.0 > 8.0 |
+| map-closure | - | - | - | - | - | 5.16x | 5.16x | wall refused: load 22.5 > 8.0 |
+| nbody | - | - | - | - | - | 5.07x | 7.70x | wall refused: load 24.8 > 8.0 |
+| pack-unpack | - | - | - | - | - | 6.29x | 6.53x | wall refused: load 23.0 > 8.0 |
+| pack-unpack-old | - | - | - | - | - | 7.96x | 7.97x | wall refused: load 18.1 > 8.0 |
+| pcase | - | - | - | - | - | 5.39x | 12.10x | wall refused: load 16.6 > 8.0 |
+| pidigits | - | - | - | - | - | - | - | wall refused: load 11.1 > 8.0; Romacs: refused: romacs: no result from elb: 'Wrong type argument: numberp, 56803950677996156250' (see logs) |
+| scroll | - | - | - | - | - | - | - | wall refused: load 9.3 > 8.0; Romacs: no elb-scroll-entry after loading the suite |
+| smie | - | - | - | - | - | 3.87x | 3.89x | wall refused: load 9.0 > 8.0 |
+| geometric mean | - | - | - | - | - | 2.95x | - | wall refused: load 28.0 > 8.0; over the 18 of 22 members every engine ran; left out: bytecomp, inclist-type-hints, pidigits, scroll; no mean of GNU native instructions: a member has no figure there |
+# perfbench-elb-end
+
 * Source layout
 
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
