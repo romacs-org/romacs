@@ -462,8 +462,12 @@ the job running after it is not hit in its place."
   message)
 
 (defun isolate-receive (&optional timeout)
-  "In a worker: the next message from the parent, waiting up to TIMEOUT."
+  "In a worker: the next message from the parent, waiting up to TIMEOUT.
+A TIMEOUT of 0 polls: it takes what has arrived without waiting, so a
+running job can look for new requests between its own steps."
   (let ((end (and timeout (+ (float-time) timeout))))
+    (unless romacs--isolate-inbox
+      (romacs--isolate-note-control-frames))
     (while (and (null romacs--isolate-inbox)
                 (or (null end) (< (float-time) end)))
       (romacs--isolate-wait (if end (max 0 (- end (float-time))) nil))
