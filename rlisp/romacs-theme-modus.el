@@ -2393,7 +2393,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(all-the-icons-lpink ((,c :foreground ,magenta)))
     `(all-the-icons-lpurple ((,c :foreground ,magenta-faint)))
     `(all-the-icons-lred ((,c :foreground ,red-faint)))
-    `(all-the-icons-lsilver ((,c :foreground "gray50")))
+    `(all-the-icons-lsilver ((,c :foreground ,fg-table-dim)))
     `(all-the-icons-lyellow ((,c :foreground ,yellow-warmer)))
     `(all-the-icons-maroon ((,c :foreground ,magenta)))
     `(all-the-icons-orange ((,c :foreground ,yellow-warmer)))
@@ -2402,7 +2402,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(all-the-icons-purple-alt ((,c :foreground ,blue-warmer)))
     `(all-the-icons-red ((,c :foreground ,red)))
     `(all-the-icons-red-alt ((,c :foreground ,red-cooler)))
-    `(all-the-icons-silver ((,c :foreground "gray50")))
+    `(all-the-icons-silver ((,c :foreground ,fg-table-dim)))
     `(all-the-icons-yellow ((,c :foreground ,yellow)))
 ;;;;; all-the-icons-dired
     `(all-the-icons-dired-dir-face ((,c :foreground ,accent-0)))
@@ -2476,7 +2476,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(avy-lead-face-1 ((,c :inherit (bold romacs-theme-reset-soft) :background ,bg-search-current :foreground ,fg-search-current)))
     `(avy-lead-face-2 ((,c :inherit (bold romacs-theme-reset-soft) :background ,bg-search-current :foreground ,fg-search-current)))
 ;;;;; aw (ace-window)
-    `(aw-background-face ((,c :foreground "gray50")))
+    `(aw-background-face ((,c :foreground ,fg-table-dim)))
     `(aw-key-face ((,c :inherit (bold romacs-theme-fixed-pitch) :foreground ,keybind)))
     `(aw-leading-char-face ((,c :inherit (bold romacs-theme-reset-soft) :height 1.5 :foreground ,err))) ; same as `switch-window-label'
     `(aw-minibuffer-leading-char-face ((,c :inherit (bold romacs-theme-fixed-pitch) :foreground ,keybind)))
@@ -3158,7 +3158,7 @@ If COLOR is unspecified, then return :box unspecified."
 ;;;;; flx
     `(flx-highlight-face ((,c :inherit romacs-theme-bold :background ,bg-completion-match-0 :foreground ,fg-completion-match-0)))
 ;;;;; focus
-    `(focus-unfocused ((,c :foreground "gray50")))
+    `(focus-unfocused ((,c :foreground ,fg-table-dim)))
 ;;;;; fold-this
     `(fold-this-overlay ((,c :background ,bg-inactive)))
 ;;;;; font-lock
@@ -3842,7 +3842,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(markup-italic-face ((,c :inherit romacs-theme-slant)))
     `(markup-list-face ((,c :background ,bg-inactive)))
     `(markup-meta-face ((,c :inherit romacs-theme-fixed-pitch :foreground ,fg-dim)))
-    `(markup-meta-hide-face ((,c :foreground "gray50")))
+    `(markup-meta-hide-face ((,c :foreground ,fg-table-dim)))
     `(markup-reference-face ((,c :inherit romacs-theme-slant :foreground ,fg-alt)))
     `(markup-replacement-face ((,c :inherit romacs-theme-fixed-pitch :foreground ,err)))
     `(markup-secondary-text-face ((,c :height 0.9 :foreground ,fg-alt)))
@@ -3989,7 +3989,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(nerd-icons-lpink ((,c :foreground ,magenta)))
     `(nerd-icons-lpurple ((,c :foreground ,magenta-faint)))
     `(nerd-icons-lred ((,c :foreground ,red-faint)))
-    `(nerd-icons-lsilver ((,c :foreground "gray50")))
+    `(nerd-icons-lsilver ((,c :foreground ,fg-table-dim)))
     `(nerd-icons-lyellow ((,c :foreground ,yellow-warmer)))
     `(nerd-icons-maroon ((,c :foreground ,magenta)))
     `(nerd-icons-orange ((,c :foreground ,yellow-warmer)))
@@ -3998,7 +3998,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(nerd-icons-purple-alt ((,c :foreground ,blue-warmer)))
     `(nerd-icons-red ((,c :foreground ,red)))
     `(nerd-icons-red-alt ((,c :foreground ,red-cooler)))
-    `(nerd-icons-silver ((,c :foreground "gray50")))
+    `(nerd-icons-silver ((,c :foreground ,fg-table-dim)))
     `(nerd-icons-yellow ((,c :foreground ,yellow)))
 ;;;;; nerd-icons-completion
     `(nerd-icons-completion-dir-face ((,c :foreground ,accent-0)))
@@ -4215,7 +4215,7 @@ If COLOR is unspecified, then return :box unspecified."
 ;;;;; org-recur
     `(org-recur ((,c :foreground ,fg-alt)))
 ;;;;; org-roam
-    `(org-roam-dim ((,c :foreground "gray50")))
+    `(org-roam-dim ((,c :foreground ,fg-table-dim)))
     `(org-roam-olp ((,c :foreground ,fg-dim)))
     `(org-roam-preview-heading ((,c :background ,bg-inactive)))
     `(org-roam-preview-heading-highlight ((,c :background ,bg-active :foreground ,fg-main)))
@@ -4257,7 +4257,7 @@ If COLOR is unspecified, then return :box unspecified."
     `(package-status-new ((,c :foreground ,info)))
     `(package-status-unsigned ((,c :foreground ,err)))
 ;;;;; page-break-lines
-    `(page-break-lines ((,c :inherit default :foreground "gray50")))
+    `(page-break-lines ((,c :inherit default :foreground ,fg-table-dim)))
 ;;;;; pandoc-mode
     `(pandoc-citation-key-face ((,c :inherit romacs-theme-bold :foreground ,builtin)))
     `(pandoc-directive-@@-face ((,c :inherit romacs-theme-bold :foreground ,keyword)))
@@ -5015,7 +5015,7 @@ If COLOR is unspecified, then return :box unspecified."
   '(
 ;;;; ansi-colors
     `(ansi-color-faces-vector [default bold shadow italic underline success warning error])
-    `(ansi-color-names-vector ["#595959" ,red ,green ,yellow ,blue ,magenta ,cyan "#a6a6a6"])
+    `(ansi-color-names-vector [,term-dim ,red ,green ,yellow ,blue ,magenta ,cyan ,term-light])
 ;;;; chart
     `(chart-face-color-list
       '( ,bg-graph-red-0 ,bg-graph-green-0 ,bg-graph-yellow-0 ,bg-graph-blue-0 ,bg-graph-magenta-0 ,bg-graph-cyan-0

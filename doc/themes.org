@@ -1,0 +1,101 @@
+#+title: Making a theme
+
+A Romacs theme is an ordinary Emacs theme.  You write a short named
+palette; Romacs derives the rest, every face included.  =load-theme=,
+=enable-theme= and =disable-theme= treat the result as they treat any
+other theme.
+
+* A theme in ten colours
+
+=bg=, =fg= and the six hues are all a theme needs.
+
+#+begin_src emacs-lisp
+(require 'romacs-theme)
+
+(def-romacs-theme harbour "Slate water and buoy paint."
+  :mode dark
+  ((bg "#14191f") (fg "#d5dde6")
+   (red "#e0727a") (green "#8fc08a") (yellow "#dcbc7a")
+   (blue "#6fa8dc") (magenta "#b892d8") (cyan "#68b8c0")
+   (accent yellow)
+   (selection (romacs-theme-blend bg blue 0.3))))
+#+end_src
+
+Save it as =harbour-theme.el= in =custom-theme-directory=, and it shows up
+in =load-theme= like any other theme.
+
+* The palette
+
+Each row is =(SLOT VALUE)=.  VALUE is a colour, the name of another slot,
+or a form over the rows before it.  Name any slot you care about and leave
+the others:
+
+- surfaces: =bg= =bg-dark= =bg-darker= =bg-alt=
+- text: =fg= =fg-dim= =fg-light= =fg-bright= =muted=
+- hues: =red= =green= =yellow= =blue= =magenta= =cyan= =orange= =brown= and
+  their =bright-= forms
+- interface: =accent= =selection= =cursor= =border= =bg-mode-line= =bg-region=
+- code: =keyword= =function= =variable= =type= =constant= =string= =comment=
+  =builtin= =doc= =preprocessor=
+- the terminal's sixteen: =ansi-0= to =ansi-15=
+
+=romacs-theme-slots= lists them all.  Any name of the Modus face table, such
+as =bg-hl-line= or =fg-heading-1=, works too.
+
+* Colour helpers
+
+These work in Oklab, so a blend keeps its perceived lightness.
+
+- =(romacs-theme-lighten COLOR AMOUNT)= and =(romacs-theme-darken COLOR AMOUNT)=
+  move lightness by AMOUNT, 0 to 1.
+- =(romacs-theme-blend A B AMOUNT)= is the colour AMOUNT of the way from A to B.
+- =(romacs-theme-color SLOT)= reads a slot.  While a theme is being defined it
+  reads that theme; otherwise it reads the enabled theme.
+
+* Changing single faces
+
+The optional list after the palette overrides faces.  Attributes merge over
+what the palette gives the face, and a colour attribute may name a slot.
+
+#+begin_src emacs-lisp
+(def-romacs-theme harbour-keel "A warmer keyword, a boxed string."
+  ((bg "#14191f") (fg "#d5dde6")
+   (red "#e0727a") (green "#8fc08a") (yellow "#dcbc7a")
+   (blue "#6fa8dc") (magenta "#b892d8") (cyan "#68b8c0"))
+  ((font-lock-keyword-face :foreground yellow :weight bold)
+   (font-lock-string-face :box (:line-width 1 :color green))
+   (hl-line :background (romacs-theme-blend bg cyan 0.12))))
+#+end_src
+
+Variants that share one list can branch on the theme's mode:
+=(show-paren-match &dark (:underline t) &light (:overline t))=.
+
+The list after that sets variables, as =(VARIABLE FORM)= rows with the slots
+bound.
+
+* Style and mode
+
+=:mode= is =dark= or =light=, read from =bg= when left out.  =:family= groups a
+theme's variants.  =:style= names its material style, =flat= or =modern=, or is a
+property list of style tokens.
+
+* Readability
+
+Romacs keeps text readable: each face's foreground is checked against the
+background it shows on, at a contrast of 4.5:1, or 3:1 for de-emphasised text
+such as comments.  A foreground that falls short moves just far enough.  An
+override in the faces list is your own choice and stays as you wrote it.
+
+See what a theme resolved to and what the floors moved:
+
+#+begin_src emacs-lisp
+(require 'romacs-theme-roles)
+
+(let ((rows (romacs-theme-rows 'harbour)))
+  (list (cdr (assq 'keyword (plist-get rows :palette)))
+        (length (plist-get rows :faces))
+        (plist-get rows :floors)))
+#+end_src
+
+=romacs-theme-palette= returns the resolved palette of an enabled theme, and
+=romacs-theme-uncovered= lists the faces a theme does not reach.

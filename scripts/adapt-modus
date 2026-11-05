@@ -72,6 +72,11 @@ EXCLUDE = {
     'modus-themes-items', 'modus-themes-faces-deuteranopia', 'modus-themes-faces-tritanopia',
 }
 
+# The colours the face table and theme variables write literally, as names:
+# a theme with roles of its own sets them, romacs-theme.el's
+# `romacs-theme--modus-constants' keeps Modus's values for the rest.
+TABLE_LITERALS = {'"gray50"': ',fg-table-dim', '"#595959"': ',term-dim', '"#a6a6a6"': ',term-light'}
+
 # The forms taken, by (head, name); the order is the output's.
 KEEP = [
     ('custom-declare-face-loop', None),  # (dotimes (n 9) (custom-declare-face ... heading ...))
@@ -226,6 +231,9 @@ def adapt(source):
         # the face table, which go to different names.
         form = form.replace(":group 'modus-themes-faces", ":group 'romacs-theme-faces")
         form = re.sub(r":group 'modus-themes\b(?!-)", ":group 'romacs-theme", form)
+        if key[1] in ('modus-themes-faces', 'modus-themes-custom-variables'):
+            for literal, name in TABLE_LITERALS.items():
+                form = form.replace(literal, name)
         out.append(rename(form))
     header = f''';;; romacs-theme-modus.el --- The Modus theming machinery, for Romacs's themes  -*- lexical-binding: t -*-
 

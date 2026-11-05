@@ -126,6 +126,29 @@ as sRGB allows."
   (let ((lch (romacs-color--lch hex)))
     (romacs-color-from-oklab (romacs-color--oklch (nth 0 lch) (* factor (nth 1 lch)) (nth 2 lch)))))
 
+(defun romacs-color-rotate (hex target step)
+  "HEX with its Oklab hue turned by at most STEP degrees toward the hue
+TARGET, in degrees."
+  (let* ((lch (romacs-color--lch hex))
+         (radians (/ 3.141592653589793 180))
+         (gap (- (* target radians) (nth 2 lch)))
+         (shortest (atan (sin gap) (cos gap)))
+         (limit (* step radians)))
+    (romacs-color-from-oklab
+     (romacs-color--oklch (nth 0 lch) (nth 1 lch) (+ (nth 2 lch) (max (- limit) (min limit shortest)))))))
+
+(defun romacs-theme-lighten (color amount)
+  "COLOR with its Oklab lightness raised by AMOUNT (0 to 1)."
+  (romacs-color-lift color amount))
+
+(defun romacs-theme-darken (color amount)
+  "COLOR with its Oklab lightness lowered by AMOUNT (0 to 1)."
+  (romacs-color-lift color (- amount)))
+
+(defun romacs-theme-blend (a b amount)
+  "The colour AMOUNT (0 to 1) of the way from A to B, in Oklab."
+  (romacs-color-mix a b amount))
+
 (defun romacs-color-luminance (hex)
   "HEX's relative luminance, as WCAG 2 defines it."
   (let ((lin (mapcar (lambda (c) (if (<= c 0.03928) (/ c 12.92) (expt (/ (+ c 0.055) 1.055) 2.4)))
@@ -221,7 +244,9 @@ staircase, which no bisection can climb."
     red yellow orange green cyan blue magenta brown
     bright-red bright-yellow bright-green bright-cyan bright-blue bright-magenta)
   "The base slots of a palette, Omarchy colors.toml's keys: `mode' (`dark'
-or `light') and colours.  `orange' and `brown' may be left out.")
+or `light') and colours.  Only `bg', `fg' and the six hues `red' `green'
+`yellow' `blue' `magenta' `cyan' are required; `romacs-theme-rules'
+derives the others.")
 
 (defun romacs-theme--accent-alt (get)
   "The secondary accent: `blue', or `magenta' when `accent' is a blue
@@ -231,8 +256,24 @@ or `light') and colours.  `orange' and `brown' may be left out.")
     (if (< (abs (atan (sin da) (cos da))) (* 40 (/ 3.141592653589793 180))) (funcall get 'magenta) (funcall get 'blue))))
 
 (defconst romacs-theme-rules
-  '((cursor . fg-bright)
-    (accent-alt . romacs-theme--accent-alt)
+  '(;; The base slots a short palette leaves out.
+    (bg-dark lift-away bg -0.025)
+    (bg-darker lift-away bg -0.045)
+    (bg-alt lift-away bg 0.05)
+    (fg-dim mix fg bg 0.45)
+    (fg-light mix fg bg 0.12)
+    (fg-bright lift-away fg 0.06)
+    (accent . blue)
+    (selection mix bg accent 0.3)
+    (muted mix bg fg 0.35)
+    (bright-red lift-away red 0.06)
+    (bright-yellow lift-away yellow 0.06)
+    (bright-green lift-away green 0.06)
+    (bright-cyan lift-away cyan 0.06)
+    (bright-blue lift-away blue 0.06)
+    (bright-magenta lift-away magenta 0.06)
+    (cursor . fg-bright)
+    (accent-alt call romacs-theme--accent-alt)
     (orange mix yellow red 0.5)
     (brown mix fg-dim red 0.5)
     ;; Chrome.
@@ -293,47 +334,62 @@ or `light') and colours.  `orange' and `brown' may be left out.")
     (ansi-8 . muted) (ansi-9 . bright-red) (ansi-10 . bright-green) (ansi-11 . bright-yellow)
     (ansi-12 . bright-blue) (ansi-13 . bright-magenta) (ansi-14 . bright-cyan) (ansi-15 . fg-bright))
   "How each slot a palette leaves out is derived: (SLOT . OTHER) takes
-OTHER's colour; (SLOT . FUNCTION) calls FUNCTION with a slot reader;
-\(SLOT OP ARGS...) applies OP to ARGS, slot names or numbers: `mix' A B
-AMOUNT (`romacs-color-mix'), `floor' FG BG MINIMUM (`romacs-color-floor'),
-`chroma' C FACTOR, and `lift-away' C DELTA (lighter on a dark palette,
-darker on a light one).")
+OTHER's colour; (SLOT OP ARGS...) applies OP to ARGS, slot names or
+numbers: `mix' A B AMOUNT (`romacs-color-mix'), `floor' FG BG MINIMUM
+\(`romacs-color-floor'), `chroma' C FACTOR, `rotate' C TARGET STEP
+\(`romacs-color-rotate'), `lift-away' C DELTA (lighter on a dark palette,
+darker on a light one), and `call' FUNCTION, called with a slot reader.")
 
 (defconst romacs-theme-slots
-  (append romacs-theme-base-slots (mapcar #'car romacs-theme-rules))
+  (let ((slots (reverse romacs-theme-base-slots)))
+    (dolist (rule romacs-theme-rules (reverse slots))
+      (unless (memq (car rule) slots) (setq slots (cons (car rule) slots)))))
   "Every slot a resolved palette holds.")
+
+(defun romacs-theme--reader (palette rule-of)
+  "A function reading a slot of PALETTE, (SLOT VALUE) rows, the first of a
+slot winning: a row's value (a slot name in its place is that slot's;
+`mode' is a symbol), else the rule RULE-OF gives for the slot.  Each slot
+is computed once; `unspecified' reads as itself."
+  (let ((given (make-hash-table :test 'eq)) (done (make-hash-table :test 'eq)) (get nil))
+    (dolist (row (reverse palette)) (puthash (car row) row given))
+    (setq get (lambda (slot)
+                (let ((known (gethash slot done 'none)))
+                  (cond ((eq slot 'unspecified) slot)
+                        ((eq known 'busy) (error "Palette slot `%s' refers to itself" slot))
+                        ((not (eq known 'none)) known)
+                        (t (puthash slot 'busy done)
+                           (let* ((row (gethash slot given))
+                                  (rule (funcall rule-of slot))
+                                  (value (cond ((and row (eq slot 'mode)) (romacs-theme--second row))
+                                               (row (let ((v (romacs-theme--second row)))
+                                                      (if (symbolp v) (funcall get v) v)))
+                                               ((null rule) (error "Palette slot `%s' is missing" slot))
+                                               ((symbolp rule) (funcall get rule))
+                                               (t (romacs-theme--apply rule get)))))
+                             (puthash slot value done)
+                             value))))))
+    get))
 
 (defun romacs-theme-resolve (palette)
   "PALETTE with every slot of `romacs-theme-slots', as an alist
-\(SLOT . VALUE): a slot PALETTE names is its value (a slot name in its
-place is that slot's; `mode' is a symbol), every other one is derived by
-`romacs-theme-rules'."
-  (let ((done nil) (busy nil) (get nil))
-    (setq get (lambda (slot)
-                (let ((known (assq slot done)))
-                  (if known (cdr known)
-                    (when (memq slot busy) (error "Palette slot `%s' refers to itself" slot))
-                    (push slot busy)
-                    (let* ((given (assq slot palette))
-                           (rule (cdr (assq slot romacs-theme-rules)))
-                           (value (cond ((and given (eq slot 'mode)) (romacs-theme--second given))
-                                        (given (let ((v (romacs-theme--second given))) (if (symbolp v) (funcall get v) v)))
-                                        ((null rule) (error "Palette slot `%s' is missing" slot))
-                                        ((symbolp rule) (if (memq rule romacs-theme-slots) (funcall get rule) (funcall rule get)))
-                                        (t (romacs-theme--apply rule get)))))
-                      (push (cons slot value) done)
-                      value)))))
+\(SLOT . VALUE): a slot PALETTE names is its value, every other one is
+derived by `romacs-theme-rules'."
+  (let ((get (romacs-theme--reader palette (lambda (slot) (cdr (assq slot romacs-theme-rules))))))
     (mapcar (lambda (slot) (cons slot (funcall get slot))) romacs-theme-slots)))
 
 (defun romacs-theme--apply (rule get)
   "Apply RULE, (OP ARGS...) of `romacs-theme-rules', reading slots by GET."
-  (let ((args (mapcar (lambda (a) (if (symbolp a) (funcall get a) a)) (cdr rule))))
-    (cond ((eq (car rule) 'mix) (apply #'romacs-color-mix args))
-          ((eq (car rule) 'floor) (apply #'romacs-color-floor args))
-          ((eq (car rule) 'chroma) (apply #'romacs-color-chroma args))
-          ((eq (car rule) 'lift-away)
-           (romacs-color-lift (nth 0 args) (if (eq (funcall get 'mode) 'light) (- (nth 1 args)) (nth 1 args))))
-          (t (error "Unknown palette rule %S" rule)))))
+  (if (eq (car rule) 'call)
+      (funcall (nth 1 rule) get)
+    (let ((args (mapcar (lambda (a) (if (symbolp a) (funcall get a) a)) (cdr rule))))
+      (cond ((eq (car rule) 'mix) (apply #'romacs-color-mix args))
+            ((eq (car rule) 'floor) (apply #'romacs-color-floor args))
+            ((eq (car rule) 'chroma) (apply #'romacs-color-chroma args))
+            ((eq (car rule) 'rotate) (apply #'romacs-color-rotate args))
+            ((eq (car rule) 'lift-away)
+             (romacs-color-lift (nth 0 args) (if (eq (funcall get 'mode) 'light) (- (nth 1 args)) (nth 1 args))))
+            (t (error "Unknown palette rule %S" rule))))))
 
 ;;;; Faces
 
@@ -565,22 +621,52 @@ Modus merges them): MODUS is a plist of :base, :preference, :core (a
           (romacs-theme-modus-generate-palette (plist-get modus :base) (plist-get modus :preference)
                                                (symbol-value (plist-get modus :core)))))
 
+(defconst romacs-theme--modus-constants
+  '((fg-table-dim "gray50") (term-dim "#595959") (term-light "#a6a6a6"))
+  "The literal colours of Modus's table, under the names
+scripts/adapt-modus gives them, as Modus has them: a theme with its own
+roles sets these names, one on Modus's palette gets Modus's values.")
+
+(defun romacs-theme--modus-bindings (palette)
+  "PALETTE's names, each with its colour, as (NAME . VALUE): the first row
+of a name wins, a name in its place is followed, and a value that is
+neither gives `unspecified', as `romacs-theme-modus-retrieve-palette-value'
+does."
+  (let ((index (make-hash-table :test 'eq)) (names nil))
+    (dolist (row palette)
+      (when (eq (gethash (car row) index 'absent) 'absent)
+        (puthash (car row) (romacs-theme--second row) index)
+        (setq names (cons (car row) names))))
+    (mapcar (lambda (name)
+              (let ((value (gethash name index)) (steps 0))
+                (while (and value (symbolp value) (not (eq value 'unspecified)))
+                  (when (> (setq steps (1+ steps)) 64) (error "Palette name `%s' refers to itself" name))
+                  (setq value (gethash value index)))
+                (cons name (if (stringp value) value 'unspecified))))
+            (reverse names))))
+
+(defun romacs-theme--table-settings (bindings mode)
+  "The faces and variables Modus's table gives BINDINGS, (NAME . VALUE),
+for a theme of MODE, as (FACES . VARIABLES): `modus-themes-theme''s
+evaluation.  VARIABLES are (VARIABLE VALUE), evaluated."
+  ;; Modus writes its specs for a colour display of 256 colours or more;
+  ;; Romacs draws only on one, and builds its world on a frame without a
+  ;; window system, so the specs apply to every display.
+  (let ((settings
+         (eval `(let* ((c t)
+                       ,@(mapcar (lambda (binding) (list (car binding) (list 'quote (cdr binding)))) bindings))
+                  (cons (list ,@romacs-theme-modus-faces)
+                        (list ,@romacs-theme-modus-custom-variables '(frame-background-mode ',mode))))
+               t)))
+    (cons (car settings)
+          (mapcar (lambda (row) (list (car row) (eval (romacs-theme--second row) t))) (cdr settings)))))
+
 (defun romacs-theme--modus-settings (modus mode)
   "The faces and variables Modus's table gives the palette MODUS
-describes, for a theme of MODE, as (FACES . VARIABLES):
-`modus-themes-theme''s evaluation, every palette name bound to its value."
-  (let ((palette (romacs-theme--modus-palette modus)))
-    ;; Modus writes its specs for a colour display of 256 colours or more;
-    ;; Romacs draws only on one, and builds its world on a frame without a
-    ;; window system, so the specs apply to every display.
-    (eval `(let* ((c t)
-                  (palette ',palette)
-                  ,@(mapcar (lambda (entry)
-                              (list (car entry) `(romacs-theme-modus-retrieve-palette-value ',(car entry) palette)))
-                            palette))
-             (cons (list ,@romacs-theme-modus-faces)
-                   (list ,@romacs-theme-modus-custom-variables '(frame-background-mode ',mode))))
-          t)))
+describes, for a theme of MODE, as (FACES . VARIABLES)."
+  (romacs-theme--table-settings
+   (romacs-theme--modus-bindings (append (romacs-theme--modus-palette modus) romacs-theme--modus-constants))
+   mode))
 
 (defun romacs-theme--romacs-face-p (face)
   "Whether FACE is one Romacs's engine colours over a Modus table: Romacs's
@@ -593,6 +679,90 @@ colour directly."
       (memq face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border
                    font-lock-comment-delimiter-face))))
 
+(defun romacs-theme--clause-attributes (clause)
+  "The attributes of face spec CLAUSE, a property list."
+  (if (consp (car (cdr clause))) (car (cdr clause)) (cdr clause)))
+
+(defun romacs-theme--with-attributes (spec attributes)
+  "Face SPEC with ATTRIBUTES, a property list, set in every clause a
+display can select: a `default' clause only underlies those.  A spec with
+no such clause for all displays gains one."
+  (let ((merge (lambda (own)
+                 (let ((merged (copy-sequence own)) (rest attributes))
+                   (while rest
+                     (setq merged (plist-put merged (car rest) (romacs-theme--second rest))
+                           rest (cdr (cdr rest))))
+                   merged))))
+    (append (mapcar (lambda (clause)
+                      (if (eq (car clause) 'default)
+                          clause
+                        (cons (car clause) (funcall merge (romacs-theme--clause-attributes clause)))))
+                    spec)
+            (and (null (assq t spec)) (list (cons t (funcall merge nil)))))))
+
+(defun romacs-theme--merge-rows (rows over)
+  "ROWS, (FACE SPEC), with OVER's rows in their place, each face once."
+  (let ((replaced (make-hash-table :test 'eq)))
+    (dolist (row over) (puthash (car row) t replaced))
+    (append (seq-remove (lambda (row) (gethash (car row) replaced)) rows) over)))
+
+(defun romacs-theme--apply-delta (rows delta)
+  "ROWS with DELTA's attributes, (FACE . ATTRIBUTES), merged over them, a
+face with no row gaining one."
+  (let ((index (make-hash-table :test 'eq)) (faces nil) (present (make-hash-table :test 'eq)))
+    (dolist (entry delta)
+      (let ((known (gethash (car entry) index)))
+        (puthash (car entry) (append known (cdr entry)) index)
+        (unless known (setq faces (cons (car entry) faces)))))
+    (dolist (row rows) (puthash (car row) t present))
+    (append (mapcar (lambda (row)
+                      (let ((attributes (gethash (car row) index)))
+                        (if attributes
+                            (list (car row) (romacs-theme--with-attributes (romacs-theme--second row) attributes))
+                          row)))
+                    rows)
+            (delq nil (mapcar (lambda (face)
+                                (and (not (gethash face present))
+                                     (list face (list (cons t (gethash face index))))))
+                              (reverse faces))))))
+
+(defun romacs-theme--infer-mode (palette)
+  "`light' if PALETTE's `bg' is, else `dark'."
+  (if (> (nth 0 (romacs-color-oklab (romacs-theme--second (assq 'bg palette)))) 0.6) 'light 'dark))
+
+(defun romacs-theme--custom-define (name doc properties mode rows)
+  "Declare theme NAME as GNU's theme over ROWS (`romacs-theme-rows'): the
+adapter from that value to Custom."
+  (custom-declare-theme name (intern (concat (symbol-name name) "-theme")) doc
+                        (list :kind 'color-scheme :background-mode mode :family (plist-get properties :family)))
+  (apply #'custom-theme-set-faces name (plist-get rows :faces))
+  (let ((variables (plist-get rows :variables)))
+    (when variables
+      (apply #'custom-theme-set-variables name
+             (mapcar (lambda (row) (list (car row) (list 'quote (romacs-theme--second row)))) variables))))
+  (provide-theme name))
+
+(defun romacs-theme--table-rows (properties palette)
+  "`romacs-theme-rows''s value for a theme of PROPERTIES with its own
+roles, on PALETTE (rlisp/romacs-theme-roles.el)."
+  (require 'romacs-theme-roles)
+  (romacs-theme-roles-rows palette (plist-get properties :faces) (plist-get properties :variables)))
+
+(defun romacs-theme--plain-rows (properties resolved)
+  "`romacs-theme-rows''s value for a theme of PROPERTIES without roles of
+its own: with :modus, Modus's table with Romacs's own faces over it, else
+RESOLVED's faces alone."
+  (let* ((faces (romacs-theme-faces resolved))
+         (modus (plist-get properties :modus)))
+    (if (null modus)
+        (list :palette resolved :faces faces)
+      (require 'romacs-theme-modus)
+      (let ((settings (romacs-theme--modus-settings modus (plist-get properties :mode))))
+        (list :palette resolved
+              :faces (romacs-theme--merge-rows
+                      (car settings) (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) faces))
+              :variables (cdr settings))))))
+
 (defun romacs-theme-define (name doc &rest properties)
   "Define theme NAME, documented by DOC, from PROPERTIES :palette (base
 and pinned slots, `romacs-theme-resolve'), :mode and :family.  Where
@@ -600,34 +770,42 @@ Custom is loaded it is GNU's theme, enabled and disabled as any other;
 elsewhere (a launch without GNU's Lisp) its faces are declared as the
 faces' own specs.  With :modus (`romacs-theme--modus-palette') and
 Custom, its faces are Modus's table over that palette, Romacs's own faces
-over them from :palette.  Defining it changes no face that shows."
-  (let* ((palette (let ((given (plist-get properties :palette)))
-                    (if (assq 'mode given) given (cons (list 'mode (plist-get properties :mode)) given))))
-         (resolved (romacs-theme-resolve palette))
-         (faces (romacs-theme-faces resolved))
-         (modus (plist-get properties :modus)))
+over them from :palette.  With :table and Custom, the palette makes every
+role of that table itself (rlisp/romacs-theme-roles.el), floors apply,
+and :faces and :variables, as `def-romacs-theme' takes them, go on top.
+:style is kept as the theme's `romacs-style' property.  Defining it
+changes no face that shows."
+  (let* ((given (plist-get properties :palette))
+         (mode (or (plist-get properties :mode) (romacs-theme--second (assq 'mode given))
+                   (romacs-theme--infer-mode given)))
+         (properties (plist-put (copy-sequence properties) :mode mode))
+         (palette (if (assq 'mode given) given (cons (list 'mode mode) given)))
+         (custom (fboundp 'custom-theme-set-faces))
+         (rows (if (and custom (plist-get properties :table))
+                   (romacs-theme--table-rows properties palette)
+                 (romacs-theme--plain-rows (if custom properties (plist-put properties :modus nil))
+                                           (romacs-theme-resolve palette)))))
     (put name 'romacs-palette palette)
-    (put name 'romacs-palette-resolved resolved)
-    (if (fboundp 'custom-theme-set-faces)
-        (let ((settings (when modus
-                          (require 'romacs-theme-modus)
-                          (romacs-theme--modus-settings modus (plist-get properties :mode)))))
-          (custom-declare-theme name (intern (concat (symbol-name name) "-theme")) doc
-                                (list :kind 'color-scheme :background-mode (plist-get properties :mode)
-                                      :family (plist-get properties :family)))
-          (if settings
-              (let ((ours (seq-filter (lambda (row) (romacs-theme--romacs-face-p (car row))) faces)))
-                ;; Each face once: Romacs's row where it has one, else Modus's.
-                (apply #'custom-theme-set-faces name
-                       (append (seq-remove (lambda (row) (assq (car row) ours)) (car settings)) ours))
-                (apply #'custom-theme-set-variables name (cdr settings)))
-            (apply #'custom-theme-set-faces name faces))
-          (provide-theme name))
-      (dolist (row faces)
+    (put name 'romacs-palette-resolved (plist-get rows :palette))
+    (put name 'romacs-theme-rows rows)
+    (put name 'romacs-style (plist-get properties :style))
+    (if custom
+        (romacs-theme--custom-define name doc properties mode rows)
+      (dolist (row (plist-get rows :faces))
         (eval (list 'defface (car row) (list 'quote (romacs-theme--with-font (car row) (romacs-theme--second row)))
                     "From the theme.")
               t)))
     name))
+
+(defun romacs-theme-rows (theme)
+  "THEME's definition as data, a property list: :palette its effective
+resolved palette (SLOT . VALUE), :roles the Modus names its table read
+\(NAME . VALUE), :faces its rows (FACE SPEC) with floors and overrides
+applied, each face once, :delta the attributes floors and the theme's own
+overrides set (FACE . ATTRIBUTES), :floors the moves, and :variables its
+rows (VARIABLE VALUE).  Custom's settings are made from this value; it
+owes nothing to how a theme is applied."
+  (get theme 'romacs-theme-rows))
 
 (defun romacs-theme--own-attributes (face)
   "The attributes FACE's own spec (`face-defface-spec') gives every display."
@@ -650,6 +828,62 @@ property list."
   (let ((font nil))
     (dolist (attribute romacs-theme--font-attributes font)
       (setq font (append font (list attribute (face-attribute 'default attribute)))))))
+
+(defvar romacs-theme--reading nil
+  "The slots a theme being defined has so far, as (SLOT . VALUE).")
+
+(defun romacs-theme-color (slot &optional theme)
+  "SLOT's colour: of the theme being defined, else of THEME (default the
+first enabled theme that has a palette)."
+  (cdr (assq slot (or romacs-theme--reading (romacs-theme-palette theme)))))
+
+(defun romacs-theme--eval-palette (rows)
+  "ROWS, `def-romacs-theme''s PALETTE, as a palette: a row's form is
+evaluated with the slots before it bound."
+  (let ((env nil) (palette nil))
+    (dolist (row rows (reverse palette))
+      (let* ((given (romacs-theme--second row))
+             (value (if (consp given)
+                        (let ((romacs-theme--reading env)) (eval given env))
+                      given)))
+        (setq palette (cons (list (car row) value) palette)
+              env (cons (cons (car row) (if (symbolp value) (cdr (assq value env)) value)) env))))))
+
+(defun romacs-theme--check-style (style)
+  "STYLE, or signal: `flat', `modern', a property list, or nil."
+  (unless (or (memq style '(nil flat modern)) (and (consp style) (keywordp (car style))))
+    (error "Theme style %S is not `flat', `modern' or a property list" style))
+  style)
+
+(defmacro def-romacs-theme (name doc &rest args)
+  "Define theme NAME, documented by DOC, from a short named palette.
+ARGS are [:mode dark|light] [:family F] [:style S] PALETTE [FACES]
+\[VARIABLES].
+
+PALETTE rows are (SLOT VALUE): `bg', `fg' and the six hues at least, and
+any slot of `romacs-theme-slots' or role of Modus's table.  VALUE is a
+colour, a slot's name, or a form over the slots before it, such as
+\(romacs-theme-blend bg red 0.2).  The rest is derived.
+
+FACES rows are (FACE :ATTRIBUTE VALUE ...), or (FACE &dark (...) &light
+\(...)) for one list shared by a theme's variants.  Their attributes
+merge over what the palette gives FACE.  A colour attribute's VALUE may
+name a slot or be a `romacs-theme-' form.  VARIABLES rows are (VARIABLE
+FORM), the slots bound.
+
+The result is an ordinary theme, a plain `deftheme': `load-theme',
+`enable-theme' and `disable-theme' treat it as any other."
+  (declare (indent 1) (doc-string 2))
+  (let ((keys nil))
+    (while (keywordp (car args))
+      (setq keys (append keys (list (car args) (list 'quote (romacs-theme--second args))))
+            args (cdr (cdr args))))
+    `(romacs-theme-define ',name ,doc :table t :mode ,(plist-get keys :mode)
+                          :family ,(or (plist-get keys :family) (list 'quote name))
+                          :style (romacs-theme--check-style ,(plist-get keys :style))
+                          :palette (romacs-theme--eval-palette ',(nth 0 args))
+                          :faces ',(nth 1 args)
+                          :variables ',(nth 2 args))))
 
 (defun romacs-theme-palette (&optional theme)
   "THEME's resolved palette (default the first enabled theme that has one)."

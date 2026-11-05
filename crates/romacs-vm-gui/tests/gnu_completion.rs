@@ -584,6 +584,13 @@ fn romacs_theme_rum_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-rum-test.el");
 }
 
+/// `def-romacs-theme' and the role table (tests/romacs-theme-author-test.el),
+/// and the blocks of doc/themes.org.
+#[test]
+fn romacs_theme_author_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
+}
+
 /// FILE's `romacs-deftest's, in a fresh `--loadup' session.
 fn theme_lisp_tests_pass(file: &'static str) {
     let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {

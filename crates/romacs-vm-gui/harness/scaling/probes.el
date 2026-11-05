@@ -116,6 +116,40 @@ thousandth a stack mark."
            faces)
   :body (load-theme 'modus-operandi t))
 
+;; A theme's role resolution over N more palette rows: an index, not a scan
+;; per name.
+(scaling-probe theme-palette-rows :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (append '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                     (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))
+                   (mapcar (lambda (name) (list (intern name) "#123456")) (scaling--names "scaling-slot" n))))
+  :body (romacs-theme-roles-resolve it))
+
+;; The floor pass and its merge over N face rows, a tenth of them failing on
+;; one pair: each pair is computed once, each row merged once.
+(scaling-probe theme-floor-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (mapcar (lambda (name)
+                     (list (intern name) (list (list t :foreground (if (string-suffix-p "1" name) "#333333" "#eeeeee")))))
+                   (scaling--names "scaling-floor" n)))
+  :body (let ((moves (romacs-theme-roles-floors it '((bg . "#101418")))))
+          (romacs-theme--apply-delta it (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) moves))))
+
+;; The floor pass over an `:inherit' chain N deep: each ancestor is read once.
+(scaling-probe theme-inherit-depth :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (let ((names (mapcar #'intern (scaling--names "scaling-inherit" n))) (rows nil) (parent nil))
+             (dolist (name names (nreverse rows))
+               (push (list name (list (if parent
+                                          (list t :inherit parent :background "#101418")
+                                        (list t :foreground "#eeeeee"))))
+                     rows)
+               (setq parent name))))
+  :body (romacs-theme-roles-floors it '((bg . "#101418"))))
+
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
