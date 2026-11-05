@@ -86,17 +86,19 @@ impl Vm {
         if let Some((known, bar)) = &self.display_state.bar_cache && *known == key {
             return Ok(Some(place(bar.clone())));
         }
+        // Whether the owner's buffer is modified, read before its line's Lisp
+        // runs: that may collect, which moves windows (`owner' is not rooted).
+        let buffer = self.window(owner)?.buffer;
+        let modified = matches!(self.object(buffer)?, Object::Buffer(b) if b.state.modified());
         let band = self.status_bar_band(owner, columns)?;
         // Kept for a click, which reads it as a string (`status_bar_target').
         self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
         let table = self.display_faces()?;
         let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
-        // The owner's line leads the bar; its pills read whether its
-        // buffer is modified (`romacs-pill-modified').
-        let buffer = self.window(owner)?.buffer;
-        let modified = matches!(self.object(buffer)?, Object::Buffer(b) if b.state.modified());
-        let owner_chars = self.display_state.bar_parts.first().map_or(0, |(chars, _)| chars.end);
+        // The owner's line leads the bar, where it has one; its pills read
+        // whether its buffer is modified (`romacs-pill-modified').
+        let owner_chars = self.display_state.bar_parts.first().filter(|(_, id)| *id == window).map_or(0, |(chars, _)| chars.end);
         let owner_chars = self.display_state.bar_kept.as_ref().map_or(owner_chars, |kept| kept.partition_point(|&i| i < owner_chars));
         let owner_end = text.char_indices().nth(owner_chars).map_or(text.len(), |(at, _)| at);
         let marks = self.band_marks(&text, &props, &segments, &table, if modified { owner_end } else { 0 })?;

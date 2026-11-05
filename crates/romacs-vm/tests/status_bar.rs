@@ -245,6 +245,29 @@ fn a_context_marker_does_not_align_the_bar() {
     assert_eq!(shown.marks.right_align(), None);
 }
 
+/// A pill reads `romacs-pill-modified' only on the bar's own line, and
+/// from the owner's buffer as it was before the line's Lisp ran, which may
+/// collect: a modified owner with no line of its own leaves a context's
+/// pill in its own colour; a collecting line still recolours the owner's.
+#[test]
+fn only_the_owners_pill_reads_its_modified_state() {
+    let mut vm = session();
+    eval(&mut vm, "(set-face-attribute 'error nil :foreground \"#ff0000\")");
+    let pill = "(:propertize \"ID\" romacs-segment id romacs-pill mode-line-highlight romacs-pill-modified error)";
+    eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
+    eval(&mut vm, &format!("(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '({pill})))"));
+    eval(&mut vm, "(set-window-buffer w2 \"pop\")");
+    eval(&mut vm, "(progn (setq-local mode-line-format nil) (insert \"x\"))");
+    let shown = bar(&mut vm);
+    let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the context's pill");
+    assert_eq!(id.pill.and_then(|p| p.foreground), None, "a context keeps its own colour: {:?}", shown.text.utf8);
+    // The owner's own line collects as it expands: its pill still recolours.
+    eval(&mut vm, &format!("(setq-local mode-line-format '((:eval (progn (garbage-collect) \"\")) {pill}))"));
+    let shown = bar(&mut vm);
+    let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the owner's pill");
+    assert_eq!(id.pill.and_then(|p| p.foreground), Some([0xff, 0, 0]));
+}
+
 /// A `romacs-icon' alist's first entry for a character decides, as
 /// `assq' and the painter do: `none' drops it only when it comes first.
 #[test]
@@ -322,7 +345,8 @@ fn a_full_bar_drops_segments_by_priority() {
     eval(&mut vm, &format!("(rename-buffer \"{}\")", "n".repeat(100)));
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"buffer") && !names.contains(&"major-mode"), "{names:?}");
+    // The mode name has no priority: the position goes, it stays.
+    assert!(names.contains(&"buffer") && names.contains(&"major-mode") && !names.contains(&"position"), "{names:?}");
     assert!(shown.text.utf8.chars().count() <= 119, "{:?}", shown.text.utf8);
     // A click reads the bar's text as it shows, segments dropped.
     let length = shown.text.utf8.chars().count();
@@ -593,4 +617,10 @@ fn the_bar_string_follows_the_painter() {
     assert_eq!(shows(&mut vm), format!("{:?}", "L   C   R"));
     eval(&mut vm, &zoned("LLL", "CC", "RRR"));
     assert_eq!(shows(&mut vm), format!("{:?}", "LLLCC RRR"));
+    // An empty centre: its room is counted once.
+    eval(&mut vm, &zoned("LL", "", "RR"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "LL     RR"));
+    // A left side clipped: the centre shows nothing, no room past the bar.
+    eval(&mut vm, &zoned(&"L".repeat(60), "C", "R"));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}R", "L".repeat(8))));
 }

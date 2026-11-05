@@ -162,6 +162,14 @@ mode line would be."
   (romacs-should (equal (romacs-mode-line--humanise '("Elisp" (lexical-binding (:propertize "/l") (:propertize "/d"))))
                         '("Elisp" (lexical-binding "" (:propertize "/d")))))
   (romacs-should (equal (romacs-mode-line--humanise "Org") "Org"))
+  ;; Only constructs are walked: a keymap among a `:propertize''s
+  ;; properties, an `:eval' form and a dotted list stay as they are.
+  (let* ((map (make-sparse-keymap))
+         (name `("Pkg" (:propertize "+" local-map ,map) (:eval (cdr '(a . b))) ("x" . "y"))))
+    (romacs-should (equal (romacs-mode-line--humanise name) name)))
+  ;; `%p' shows only a percentage: every letter of its words is dropped.
+  (let ((alist (plist-get (cddr (nth 1 (nth 1 romacs-mode-line-position))) 'romacs-icon)))
+    (romacs-should (seq-every-p (lambda (c) (eq (alist-get c alist) 'none)) "AllTopBottom")))
   (romacs-mode-line-test--with-mode
     (with-current-buffer (get-buffer-create " *romacs-mode-line-says*")
       ;; Shown in the selected window: `%l' and `%c' read its point.
@@ -187,6 +195,8 @@ mode line would be."
 
 (romacs-deftest romacs-mode-line-cuts-a-long-name-in-its-middle ()
   (romacs-should (equal (romacs-mode-line--middle-cut "short" 10) "short"))
+  (romacs-should (equal (mapcar (lambda (w) (romacs-mode-line--middle-cut "abcdefgh" w)) '(0 1 2 3))
+                        '("" "…" "a…" "a…h")))
   (let ((cut (romacs-mode-line--middle-cut "abcdefghijklmnopqrstuvwxyz" 9)))
     (romacs-should (equal cut "abcd…wxyz"))
     (romacs-should (= (string-width cut) 9))))

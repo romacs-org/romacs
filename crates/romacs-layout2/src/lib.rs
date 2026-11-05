@@ -244,8 +244,9 @@ fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus
     let accent = if bar.focused { focus.unwrap_or(foreground) } else { dimmed };
     let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
     let band = Marked { text: &bar.text, faces: &bar.faces, face, marks: &bar.marks, bounds, accent: Some(accent) };
-    paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver)?;
+    let places = paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver)?;
     frame.status_bar = Some(bounds);
+    frame.status_bar_places = places.into_iter().map(|place| place.map(|(x, w)| (bounds.x + x, w))).collect();
     Ok(())
 }
 
@@ -265,8 +266,9 @@ struct Marked<'a> {
 /// the accent block, each segment's pill, its characters in its faces on
 /// that background (an icon in place of the character it marks, a pill's
 /// text in the pill's foreground), the part after its `right-align'
-/// marker flush with the right edge (`BandMarks::places').
-fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver) -> Result<(), String> {
+/// marker flush with the right edge (`BandMarks::places'). Where each
+/// character went, from the band's left edge.
+fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver) -> Result<Vec<Option<(f32, f32)>>, String> {
     let (text, face, bounds) = (band.text, band.face, band.bounds);
     validate_runs(text, band.faces.len())?;
     if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
@@ -355,52 +357,16 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
         *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
     }
-    Ok(())
+    Ok(places)
 }
 
 /// Where each character of BAR is as FRAME paints it, in its text's
 /// order: its left edge in the frame and its width, or None where the bar
-/// clipped it; and the indices of its markers' spaces, which span the
+/// clipped it; and the indices of its markers' characters, which span the
 /// room before the zone each starts and run nothing when clicked.
 pub fn status_bar_extents(frame: &FrameGlyphBuffer, bar: &StatusBarSnapshot) -> (Vec<Option<(f32, f32)>>, Vec<usize>) {
-    let drawn: Vec<(f32, f32)> = frame.glyphs.iter().filter_map(|glyph| match glyph {
-        romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, width, .. } => Some((*x, *width)),
-        _ => None,
-    }).collect();
-    marked_extents(&drawn, &bar.text, &bar.marks, bar.x as f32 + STATUS_BAR_PAD, (bar.x + bar.width) as f32 - STATUS_BAR_PAD)
-}
-
-/// Where each character of a marked band's TEXT is, from DRAWN, its
-/// painted glyphs in order, in a band whose text runs from LEFT to RIGHT:
-/// its left edge and width, or None where the band clipped it; and the
-/// indices of its markers' characters, each spanning the room before the
-/// zone it starts. Each zone shows a prefix (`BandMarks::places'): the
-/// right zone shows whole unless it is wider than the band, the left zone
-/// before the centred one, which shows nothing once the left is clipped.
-fn marked_extents(drawn: &[(f32, f32)], text: &TextSlice, marks: &romacs_layout_input::BandMarks, left_edge: f32, right_edge: f32) -> (Vec<Option<(f32, f32)>>, Vec<usize>) {
-    let [left, centre_marker, centre, right_marker, right] = marks.zones(text);
-    let right_shown = drawn.len().min(right.len());
-    let left_shown = (drawn.len() - right_shown).min(left.len());
-    let centre_shown = drawn.len() - right_shown - left_shown;
-    let (left_glyphs, rest) = drawn.split_at(left_shown);
-    let (centre_glyphs, right_glyphs) = rest.split_at(centre_shown);
-    let end = |glyphs: &[(f32, f32)], from: f32| glyphs.last().map_or(from, |(x, w)| x + w);
-    let left_end = end(left_glyphs, left_edge);
-    let centre_start = centre_glyphs.first().map_or(left_end, |(x, _)| *x);
-    let centre_end = end(centre_glyphs, left_end);
-    let right_start = right_glyphs.first().map_or(right_edge, |(x, _)| *x);
-    let mut extents: Vec<Option<(f32, f32)>> = Vec::with_capacity(right.end);
-    let mut zone = |glyphs: &[(f32, f32)], count: usize, extents: &mut Vec<Option<(f32, f32)>>| {
-        extents.extend(glyphs.iter().copied().map(Some));
-        extents.extend(std::iter::repeat_n(None, count - glyphs.len()));
-    };
-    let room = |from: f32, to: f32| Some((from, (to - from).max(0.0)));
-    zone(left_glyphs, left.len(), &mut extents);
-    extents.extend(std::iter::repeat_n(room(left_end, centre_start), centre_marker.len()));
-    zone(centre_glyphs, centre.len(), &mut extents);
-    extents.extend(std::iter::repeat_n(room(centre_end.max(left_end), right_start), right_marker.len()));
-    zone(right_glyphs, right.len(), &mut extents);
-    (extents, centre_marker.chain(right_marker).collect())
+    let [_, centre_marker, _, right_marker, _] = bar.marks.zones(&bar.text);
+    (frame.status_bar_places.clone(), centre_marker.chain(right_marker).collect())
 }
 
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,

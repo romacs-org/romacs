@@ -326,13 +326,15 @@ is cut in its middle."
 
 (defun romacs-mode-line--middle-cut (name width)
   "NAME, cut in its middle with `…' to at most WIDTH columns."
-  (if (<= (string-width name) width)
-      name
-    (let* ((room (max 2 (1- width))) (tail (/ room 2)) (head (- room tail)))
+  (cond
+   ((<= (string-width name) width) name)
+   ((zerop width) "")
+   (t
+    (let* ((room (1- width)) (tail (/ room 2)) (head (- room tail)))
       (concat (truncate-string-to-width name head) "…"
               (let ((end (length name)) (start (length name)))
                 (while (and (> start 0) (<= (string-width name (1- start) end) tail)) (setq start (1- start)))
-                (substring name start))))))
+                (substring name start)))))))
 
 (defun romacs-mode-line--icon (name &optional face)
   "The icon NAME in FACE and a space, where it has one (`romacs-icon'),
@@ -410,12 +412,12 @@ modified."
 (romacs-mode-line-define-segment position
   "Point's column, its line too where no line-number gutter shows it, and
 how far down the window is where it says more than the window's edges
-\(GNU's `All', `Top' and `Bot' are dropped)."
+\(GNU's `All', `Top' and `Bottom' are dropped)."
   :face romacs-mode-line-dim
   :priority 80
   :format ((display-line-numbers "C%c" "%l:%c")
            (:propertize " %p" romacs-icon ((?A . none) (?l . none) (?T . none) (?o . none) (?p . none)
-                                           (?B . none) (?t . none)))
+                                           (?B . none) (?t . none) (?m . none)))
            (size-indication-mode " %I")))
 
 (defun romacs-mode-line--selection ()
@@ -647,10 +649,15 @@ from `mode-name' (`romacs-mode-line--humanise'), else nil.")
 (defun romacs-mode-line--humanise (name)
   "NAME, a `mode-name' construct, without what says the usual: a
 `lexical-binding' conditional shows only while the binding is dynamic
-\(Elisp's `/l')."
+\(Elisp's `/l').  Only constructs are walked: an `:eval' form and a
+`:propertize''s properties are kept as they are, and so is anything
+that is not a proper list."
   (pcase name
-    (`(lexical-binding ,_ . ,dynamic) `(lexical-binding "" ,@dynamic))
-    ((pred consp) (mapcar #'romacs-mode-line--humanise name))
+    ((and `(lexical-binding ,_ . ,dynamic) (guard (proper-list-p dynamic))) `(lexical-binding "" ,@dynamic))
+    (`(:eval . ,_) name)
+    ((and `(:propertize ,element . ,properties) (guard (proper-list-p properties)))
+     `(:propertize ,(romacs-mode-line--humanise element) ,@properties))
+    ((and (pred consp) (pred proper-list-p)) (mapcar #'romacs-mode-line--humanise name))
     (_ name)))
 
 (defun romacs-mode-line--refresh-mode-name ()
@@ -661,8 +668,8 @@ from `mode-name' (`romacs-mode-line--humanise'), else nil.")
 (romacs-mode-line-define-segment major-mode
   "The major mode's name, always (GNU's `mode-name', humanised), its
 process's state (`mode-line-process'), and the minor modes while
-`romacs-mode-line-minor-modes'."
-  :priority 50
+`romacs-mode-line-minor-modes'.  It has no priority: the bar never drops
+it."
   :format ("" " " (romacs-mode-line--mode-name romacs-mode-line--mode-name mode-name) mode-line-process
            (romacs-mode-line-minor-modes (" " minor-mode-alist))))
 

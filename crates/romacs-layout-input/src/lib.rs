@@ -603,10 +603,16 @@ impl BandMarks {
         let left_end = run(left, 0.0, right_x, &mut places);
         let mut end = left_end;
         if let Some(x) = centre_x {
+            // The centre marker's room reaches the centred zone where that
+            // shows; where it shows nothing, the right marker's room is all.
             let x = x.max(left_end);
-            room(centre_marker, left_end, x, &mut places);
+            let marker = places.len()..places.len() + centre_marker.len();
+            room(centre_marker, left_end, left_end, &mut places);
             let centre_end = run(centre, x, right_x, &mut places);
-            if centre_end > x { end = centre_end; }
+            if centre_end > x {
+                places[marker].fill(Some((left_end, x - left_end)));
+                end = centre_end;
+            }
         }
         if !right_marker.is_empty() {
             room(right_marker, end, right_x, &mut places);
