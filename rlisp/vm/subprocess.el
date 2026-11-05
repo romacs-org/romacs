@@ -969,14 +969,27 @@ counts from the start of idleness."
         (setq romacs--timers-run (1+ romacs--timers-run)))
       0)))
 
+(defvar romacs-timer-pass-budget 0.008
+  "Seconds of timers one pass runs before it lets pending input go first.
+GNU's timer_check runs every ripe timer at once; a burst of them (a
+network stream queues one per stanza) then holds the key behind it.  Past
+this budget, with input pending, the ripe timers left run on the next pass,
+in order, after the key.  Nil runs them all, as GNU does.")
+
 (defun romacs--timer-check ()
   "keyboard.c timer_check: run every ripe timer, idle timers only while
 Emacs is idle; the seconds until the next one, or nil.  Copies of the lists
-let a timer add itself again without running twice."
+let a timer add itself again without running twice.  Once the pass has run
+`romacs-timer-pass-budget' and input is pending, it stops and answers 0: the
+ripe timers left stay in the lists for the next pass."
   (let ((timers (copy-sequence timer-list))
         (idle-timers (and (current-idle-time) (copy-sequence timer-idle-list)))
+        (start (float-time))
         (next 0))
-    (while (eql next 0)
+    (while (and (eql next 0)
+                (not (and romacs-timer-pass-budget
+                          (> (- (float-time) start) romacs-timer-pass-budget)
+                          (input-pending-p))))
       (setq next (romacs--timer-check-2 timers idle-timers)))
     next))
 
