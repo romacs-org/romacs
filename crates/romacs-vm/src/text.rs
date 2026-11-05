@@ -74,6 +74,8 @@ pub struct TextBody {
     tail: String,
     tail_chars: usize,
     flat: std::sync::OnceLock<String>,
+    /// Bytes edits have moved in `flat' since it was last read.
+    flat_moved: std::cell::Cell<usize>,
     /// The byte offsets of the placeholders standing for raw bytes
     /// (`internal_to_rope`), sorted; empty for pure Unicode text.
     raw: Vec<u32>,
@@ -97,7 +99,7 @@ pub struct TextBody {
     /// `ts_parser_list'), whose trees every change edits.
     pub(crate) treesit: crate::treesit::Registry,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
+romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -324,6 +326,7 @@ impl Text {
                 tail: String::new(),
                 tail_chars: 0,
                 flat: std::sync::OnceLock::new(),
+                flat_moved: Default::default(),
                 raw,
                 flat_internal: std::sync::OnceLock::new(),
                 search: Default::default(),
@@ -584,8 +587,8 @@ impl TextBody {
     /// `Text::append_utf8`'s edit of the body: S, of CHARS characters,
     /// after its end.
     fn append_body(&mut self, s: &str, chars: usize) {
-        self.invalidate_reads();
         let end = self.bytes_len;
+        self.invalidate_reads_for(end..end, s);
         self.search.replace(end..end, || Cow::Borrowed(s.as_bytes()));
         if self.tail.len() + s.len() > 1024 {
             self.flush_tail();
@@ -621,7 +624,7 @@ impl TextBody {
         }
         #[cfg(not(test))]
         let _ = property_work;
-        self.invalidate_reads();
+        self.invalidate_reads_for(r.start.0..r.end.0, s);
         if start != end {
             self.rope.remove(start.0..end.0);
         }
@@ -640,8 +643,8 @@ impl TextBody {
         self.search.replace(r.start.0..r.end.0, || internal_of(replacement, local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
+        self.invalidate_reads_for(r.start.0..r.end.0, replacement);
         self.properties.resize_character(r, replacement.len());
-        self.invalidate_reads();
         self.rope.remove(start..end);
         self.rope.insert(start, replacement);
         self.bytes_len = self.rope.len_bytes();
@@ -728,6 +731,7 @@ impl TextBody {
         (&chunk.as_bytes()[..end - start], start)
     }
     pub fn as_str(&self) -> &str {
+        self.flat_moved.set(0);
         self.flat.get_or_init(|| {
             count_copied(self.bytes_len);
             let mut text = self.rope.to_string();
@@ -992,6 +996,23 @@ impl TextBody {
         }
         self.chunk.borrow()
     }
+    /// `invalidate_reads' for R of the text replaced by S: the flat text
+    /// stays, changed in place, for redisplay reads it after every key and
+    /// building it costs the whole text. Edits that have moved more of it
+    /// than it holds, with no read between, drop it, as a loop of edits
+    /// would otherwise pay its length each time (text_gap.rs's rule).
+    fn invalidate_reads_for(&mut self, r: Range<usize>, s: &str) {
+        let flat = self.flat.take().filter(|flat| {
+            self.flat_moved.set(self.flat_moved.get() + flat.len() - r.end);
+            self.flat_moved.get() <= flat.len()
+        });
+        self.invalidate_reads();
+        if let Some(mut flat) = flat {
+            count_copied(flat.len() - r.end);
+            flat.replace_range(r, s);
+            self.flat = flat.into();
+        }
+    }
     fn invalidate_reads(&mut self) {
         self.flat.take();
         self.flat_internal.take();
@@ -1210,7 +1231,7 @@ impl TextBody {
         self.search.replace(r.start.0..r.end.0, || internal_of(&replacement, &local));
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
-        self.invalidate_reads();
+        self.invalidate_reads_for(r.start.0..r.end.0, &replacement);
         self.rope.remove(start..end);
         self.rope.insert(start, &replacement);
         self.chars_len = self.rope.len_chars();
@@ -1523,11 +1544,12 @@ mod tests {
         assert!(text.flat.get().is_some());
         text.replace(ByteOffset(0)..ByteOffset(1), "🙂".as_bytes())
             .unwrap();
-        assert!(
-            text.flat.get().is_none(),
-            "mutation retained stale contiguous bytes"
-        );
-        assert_eq!(text.as_str(), format!("🙂{}", &old[1..]));
+        assert_eq!(text.flat.get().map(String::as_str), Some(format!("🙂{}", &old[1..]).as_str()), "an edit changes the flat text in place");
+        for at in 0..64 {
+            text.replace(ByteOffset(at)..ByteOffset(at), b"x").unwrap();
+        }
+        assert!(text.flat.get().is_none(), "edits with no read between stop paying for it");
+        assert_eq!(&text.as_str()[..64], "x".repeat(64));
     }
     #[test]
     fn rope_line_summaries_use_lf_and_survive_width_changing_edits() {
