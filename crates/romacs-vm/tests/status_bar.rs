@@ -648,4 +648,19 @@ fn a_buffers_face_remapping_reaches_its_bands() {
     // Undone, the bar's face is the theme's again.
     eval(&mut vm, "(kill-local-variable 'face-remapping-alist)");
     assert_eq!(base(&bar(&mut vm)), plain);
+    // A remapping of the parent faces alone reaches the faces that inherit
+    // them, as pinned GNU's (merge_named_face reads the remapping: there,
+    // `mode-line' and `header-line' at :height 2.0 grow both bands from 20
+    // to 38 pixels, as their `-active' faces would). The `-active' faces
+    // only inherit here, as GNU's own definitions do; the Romacs theme
+    // gives `mode-line-active' a background of its own, which no parent
+    // remapping overrides, in GNU as here.
+    eval(&mut vm, "(progn (set-face-attribute 'mode-line-active nil :inherit 'mode-line :background 'unspecified)
+                     (when (facep 'header-line-active) (set-face-attribute 'header-line-active nil :inherit 'header-line :background 'unspecified))
+                     (setq-local face-remapping-alist '((mode-line (:background \"#123456\")) (header-line (:background \"#654321\")))))");
+    let faces = eval(&mut vm, "(list (face-attribute 'mode-line-active :inherit) (face-attribute 'mode-line-active :background))");
+    assert_eq!(base(&bar(&mut vm)), [0x12, 0x34, 0x56], "`mode-line' reaches `mode-line-active' {faces}");
+    let frame = snapshot(&mut vm);
+    let w = &frame.windows.iter().find(|w| w.snapshot.id == id).unwrap().snapshot;
+    assert_eq!(w.faces[w.header_line_face.0 as usize].background, [0x65, 0x43, 0x21], "`header-line' reaches `header-line-active'");
 }
