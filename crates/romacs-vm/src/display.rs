@@ -1509,7 +1509,8 @@ impl Vm {
     /// The buffer bytes point may take in WINDOW without leaving its scroll
     /// margins, at the rows painting lays out from its start (try_window's
     /// and try_cursor_movement's check): from the first row below the top
-    /// margin, unless the window starts at BEGV or shows ZV, through the
+    /// margin, unless the window starts at BEGV (GNU has no exception for
+    /// a window that shows ZV), through the
     /// last row whose top is above the bottom margin, which a partly shown
     /// last row moves up. None without a margin or a layout.
     pub(crate) fn margin_bounds(&mut self, window: Value) -> Result<Option<(usize, usize)>> {
@@ -1521,23 +1522,31 @@ impl Vm {
         if margin == 0.0 { return Ok(None); }
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let begv = b.accessible().start.0;
-        let len = shown.text.utf8.len();
         let at_bob = shown.buffer_byte(shown.start_byte) <= begv;
-        let shows_zv = shown.at_zv && end.end >= len;
         let body = end.body_height;
         let partial = end.rows.iter().find(|r| r.y < body && r.y + r.height > body).map_or(0.0, |r| body - r.y);
         let byte = |row: Option<&romacs_layout_input::Row>| row.map_or(usize::MAX, |r| shown.buffer_byte(r.start));
-        let top = if at_bob || shows_zv { 0 } else { byte(end.rows.iter().find(|r| r.y >= margin)) };
+        let top = if at_bob { 0 } else { byte(end.rows.iter().find(|r| r.y >= margin)) };
         let bottom = byte(end.rows.iter().find(|r| r.y > body - partial - margin - 1.0));
         Ok(Some((top, bottom)))
     }
     /// The rows WINDOW's buffer shows from the line starting at byte FROM
     /// through the end of byte TO's line, laid out as painting lays them
     /// out in a window as wide as WINDOW and tall enough for them all: each
-    /// row's buffer byte and height. None as for `window_layout'.
-    pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32)>>> {
+    /// row's buffer byte, height, and first shown byte. None as for
+    /// `window_layout'. A row after a buffer newline starts just after it,
+    /// where GNU's motion by lines puts it, even where invisible text
+    /// follows; its first shown byte is past that text, where motion by
+    /// pixels puts it.
+    pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32, usize)>>> {
         let Some((end, shown)) = self.lay_out_lines(window, from, to, true)? else { return Ok(None) };
-        Ok(Some(end.rows.iter().map(|row| (shown.buffer_byte(row.start), row.height)).collect()))
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let (text, shown_text) = (b.as_str().as_bytes(), shown.text.utf8.as_bytes());
+        let start = |at: usize| match at.checked_sub(1).filter(|&i| shown_text.get(i) == Some(&b'\n')).map(|i| shown.buffer_byte(i)) {
+            Some(newline) if text.get(newline) == Some(&b'\n') => newline + 1,
+            _ => shown.buffer_byte(at),
+        };
+        Ok(Some(end.rows.iter().map(|row| (start(row.start), row.height, shown.buffer_byte(row.start))).collect()))
     }
     /// Where point shows on its line in WINDOW, laid out as painting lays
     /// it out (GNU's cursor on its row, which hscroll_window_tree reads).
