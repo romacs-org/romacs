@@ -222,7 +222,9 @@ impl Vm {
         self.print_number_index = 0;
         let slot = self.slot("print-number-table");
         let table = self.variable_value(slot)?;
-        self.print_preprocess(object, true, &mut options, false, table)?;
+        let continuous = self.slot("print-continuous-numbering");
+        let continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
+        self.print_preprocess(object, true, &mut options, continuous, table)?;
         self.publish_print_number_table(Some(slot), table, options.graph.get_mut(), true)
     }
 

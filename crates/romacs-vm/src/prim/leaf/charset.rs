@@ -337,6 +337,7 @@ impl Leaf<'_> {
             tail = rest;
         }
         if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
+        if cells.is_empty() { return Ok(Value::NIL); }
         let rank: std::collections::HashMap<usize, usize> =
             { self.vm.ensure_charsets(); self.vm.charsets.ordered.iter().enumerate().map(|(rank, &id)| (id, rank)).collect() };
         let mut sorted = Vec::with_capacity(cells.len());

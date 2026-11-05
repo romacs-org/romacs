@@ -568,6 +568,15 @@ impl Vm {
                 self.slots[self.buffer_slot].value = replacement;
             }
         }
+        // A killed buffer's markers keep where they were, as charpos does:
+        // read now, while their anchors stand.
+        let mut last_positions = std::collections::HashMap::new();
+        for i in self.buffer_referrers(index) {
+            if matches!(&self.objects[i], Object::Marker(m) if m.buffer == value)
+                && let Some(position) = self.marker_position_value(Value::reference(i + 1, 0))?.integer_value() {
+                last_positions.insert(i, position);
+            }
+        }
         self.leave_base(value)?;
         for slot in self.local_slots(index) {
             let table = self.slots[slot].local;
@@ -575,16 +584,11 @@ impl Vm {
         }
         if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
         for i in self.buffer_referrers(index) {
-            // A killed buffer's markers keep where they were, as charpos does.
-            let last_position = match &self.objects[i] {
-                Object::Marker(m) if m.buffer == value => self.marker_position_value(Value::reference(i + 1, 0))?.integer_value(),
-                _ => None,
-            };
             match &mut self.objects[i] {
                 Object::Marker(m) if m.buffer == value => {
                     m.buffer = Value::NIL;
                     m.anchor = None;
-                    if let Some(position) = last_position { m.last_position = position; }
+                    if let Some(&position) = last_positions.get(&i) { m.last_position = position; }
                 }
                 Object::Overlay(o) if o.buffer == value => {
                     o.buffer = Value::NIL; o.start = None; o.end = None;

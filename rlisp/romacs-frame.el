@@ -219,10 +219,8 @@ COLOR must be a valid color name."
                ((eq to 'unspecified) from)
                (t invalid)))
         ((functionp from)
-         (if (eq to 'unspecified)
-             invalid
-           (let ((height (condition-case nil (funcall from to) (error nil))))
-             (if (or (integerp height) (floatp height)) height invalid))))
+         (let ((height (condition-case nil (funcall from to) (error nil))))
+           (if (or (integerp height) (floatp height)) height invalid)))
         (t invalid)))
 
 (defun romacs--merge-face-attribute (keyword value to)
@@ -243,22 +241,44 @@ COLOR must be a valid color name."
       (aset to (alist-get keyword romacs--face-attribute-slots)
             (if (and (eq keyword :box) (eq value t)) 1 value)))))
 
+(defun romacs--merge-face-vector (from to merging)
+  "merge_face_vectors: the Lisp face vector FROM into TO."
+  (let ((inherit (aref from 16)))
+    (unless (memq inherit '(nil unspecified))
+      (romacs--merge-face-ref inherit to merging)))
+  (dotimes (i (length from))
+    (let ((value (aref from i)))
+      (cond ((or (= i 0) (= i 15) (eq value 'unspecified)))
+            ((and (= i 4) (not (integerp value)))
+             (aset to i (romacs--merge-face-height value (aref to i) (aref to i))))
+            (t (aset to i value)))))
+  (aset to 16 nil))
+
+(defun romacs--merge-point-open-p (kind face merging)
+  "push_named_merge_point's test: FACE is open as KIND in MERGING, newest first.
+A remapping hides the plain merges of its face before it."
+  (catch 'open
+    (dolist (point merging)
+      (when (eq (cdr point) face)
+        (cond ((eq (car point) kind) (throw 'open t))
+              ((eq (car point) 'remap) (throw 'open nil)))))
+    nil))
+
 (defun romacs--merge-named-face (face to merging)
-  "merge_named_face and merge_face_vectors: FACE's attributes into TO."
-  (let ((from (and (symbolp face) (not (memq face merging))
-                   (internal-lisp-face-p face (selected-frame)))))
-    (when from
-      (let ((inherit (aref from 16))
-            (merging (cons face merging)))
-        (unless (memq inherit '(nil unspecified))
-          (romacs--merge-face-ref inherit to merging))
-        (dotimes (i (length from))
-          (let ((value (aref from i)))
-            (cond ((or (= i 0) (= i 15) (eq value 'unspecified)))
-                  ((and (= i 4) (not (integerp value)))
-                   (aset to i (romacs--merge-face-height value (aref to i) (aref to i))))
-                  (t (aset to i value)))))
-        (aset to 16 nil)))))
+  "merge_named_face: FACE's attributes into TO.
+MERGING lists the merge points open, as (normal . FACE) and (remap . FACE):
+FACE named inside its own remapping means the plain face."
+  (let ((face (if (stringp face) (intern face) face)))
+    (unless (romacs--merge-point-open-p 'normal face merging)
+      (let* ((merging (cons (cons 'normal face) merging))
+             (remapping (and (not (romacs--merge-point-open-p 'remap face merging))
+                             (assq face face-remapping-alist))))
+        (if remapping
+            (let ((from (make-vector 20 'unspecified)))
+              (romacs--merge-face-ref (cdr remapping) from (cons (cons 'remap face) merging))
+              (romacs--merge-face-vector from to merging))
+          (let ((from (and (symbolp face) (internal-lisp-face-p face (selected-frame)))))
+            (when from (romacs--merge-face-vector from to merging))))))))
 
 (defun romacs--merge-face-ref (ref to merging)
   "merge_face_ref: the face reference REF into the vector TO."
@@ -307,6 +327,7 @@ active one, so even with FORCE it stays (VM2-WIN5)."
   "Stop Emacs and return to the superior process.
 Run `suspend-hook' first and `suspend-resume-hook' after the process
 continues.  STUFFSTRING has nowhere to go: Romacs has no terminal input."
+  (interactive)
   (when stuffstring (unless (stringp stuffstring) (signal 'wrong-type-argument (list 'stringp stuffstring))))
   (run-hooks 'suspend-hook)
   (signal-process 0 'SIGTSTP)

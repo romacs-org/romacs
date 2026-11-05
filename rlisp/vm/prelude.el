@@ -1228,14 +1228,14 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
 (defun lread--substitute-object-in-subtree (object placeholder completed)
   "Replace PLACEHOLDER with OBJECT in OBJECT, as the reader does for `#N='.
 COMPLETED is t, or a hash table of the nodes that may be cycle entry points."
-  (let ((seen (make-hash-table :test 'eq)) recurse)
+  (let ((seen (make-hash-table :test 'eq)) (absent (list nil)) recurse)
     (setq recurse
           (lambda (tree)
             (cond
              ((eq tree placeholder) object)
              ((or (symbolp tree) (numberp tree) (bool-vector-p tree) (gethash tree seen)) tree)
              (t
-              (when (or (eq completed t) (gethash tree completed))
+              (when (or (eq completed t) (not (eq (gethash tree completed absent) absent)))
                 (puthash tree t seen))
               (cond
                ((consp tree)
@@ -1245,7 +1245,7 @@ COMPLETED is t, or a hash table of the nodes that may be cycle entry points."
                     (let ((next (cdr cell)))
                       (if (and (consp next) (not (eq next placeholder)) (not (gethash next seen)))
                           (progn
-                            (when (or (eq completed t) (gethash next completed))
+                            (when (or (eq completed t) (not (eq (gethash next completed absent) absent)))
                               (puthash next t seen))
                             (setq cell next))
                         (setcdr cell (funcall recurse next))

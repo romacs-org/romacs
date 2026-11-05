@@ -30,6 +30,14 @@ const FORMS: &str = r###"
 (let (m) (with-temp-buffer (insert "abcd") (setq m (copy-marker 3)) (goto-char 1) (insert "xy")) (marker-last-position m))
 (list (condition-case e (delete-terminal) (error e)) (condition-case e (delete-terminal (frame-terminal)) (error e)) (condition-case e (delete-terminal (selected-frame)) (error e)) (delete-terminal 3))
 (condition-case e (suspend-emacs 3) (error e))
+(list (let (m) (with-temp-buffer (insert "abcd") (let ((b (make-indirect-buffer (current-buffer) "ind"))) (with-current-buffer b (setq m (copy-marker 3))) (kill-buffer b) (list (marker-position m) (marker-last-position m))))))
+(let (m i) (with-temp-buffer (insert "abcd") (setq i (make-indirect-buffer (current-buffer) "ind2")) (with-current-buffer i (setq m (copy-marker 3)))) (list (buffer-live-p i) (marker-position m) (marker-last-position m)))
+(let ((face-remapping-alist '((bold :foreground "red")))) (list (aref (face-attributes-as-vector 'bold) 5) (aref (face-attributes-as-vector 'bold) 9)))
+(let ((face-remapping-alist '((bold bold :foreground "red")))) (list (aref (face-attributes-as-vector 'bold) 5) (aref (face-attributes-as-vector 'bold) 9)))
+(let ((face-remapping-alist '((bold italic) (italic bold)))) (list (aref (face-attributes-as-vector 'bold) 5) (aref (face-attributes-as-vector 'bold) 6)))
+(with-temp-buffer (require 'face-remap) (setq-local face-remapping-alist '((bold :foreground "red"))) (list (face-attrs-more-relative-p 'bold '(:foreground "red" :weight bold))))
+(list (aref (face-attributes-as-vector "bold") 5) (aref (face-attributes-as-vector (list :height (lambda (_) 2.0))) 4) (commandp 'suspend-emacs))
+(let ((print-circle t) (print-gensym t) (print-continuous-numbering t) (print-number-table (make-hash-table :test 'eq)) (g (make-symbol "z"))) (print--preprocess g) (gethash g print-number-table))
 "###;
 
 #[test]
