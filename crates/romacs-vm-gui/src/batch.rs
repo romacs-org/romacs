@@ -179,14 +179,45 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
     configure_compiled_lisp(store.as_deref(), false);
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store, true)?;
-        if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH) {
+        // A tree's compile (none given) keeps the chain's own.
+        if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH)
+            && !path.is_empty()
+        {
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
-        let artifact = vm.compile_lisp_file(&file)?;
+        let (artifact, held) = vm.compile_lisp_file(&file)?;
+        if held { println!("romacs-compile-held"); }
         println!("romacs-compiled: {}", artifact.display());
         vm.shutdown_background_processes()
     })?.join().map_err(|_| "compile process panicked".to_owned())?
+}
+
+/// `--compile-lisp-tree [--jobs N]`: compile the installation's Lisp
+/// trees into its store ahead of use (`compiled_lisp::compile_tree`), N
+/// compile processes at a time, as an interactive session of this
+/// installation would compile them, and print the summary as JSON. Fails
+/// when compiled Lisp is off, the store is unusable, a file's compile
+/// process failed or its artifact did not survive the store's maintenance,
+/// or the tree's artifacts exceed the store's budget. A run whose only
+/// faults are files that failed to compile (their artifacts say so, and
+/// they load as source) exits with status 2, for the installer to judge.
+pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
+    configure_compiled_lisp(None, true);
+    let summary = romacs_vm::compiled_lisp::compile_tree(jobs)?;
+    println!("{summary}");
+    let empty = |field: &str| summary[field].as_array().is_none_or(Vec::is_empty);
+    if !empty("failed") || !empty("lost") {
+        return Err("some files of the tree have no usable artifact (see the summary)".into());
+    }
+    if summary["over_budget"] == true {
+        return Err("the tree's artifacts exceed the compiled-Lisp store's budget (see the summary)".into());
+    }
+    if !empty("errors") {
+        eprintln!("romacs-compile: some files of the tree failed to compile and load as source (see the summary)");
+        std::process::exit(2);
+    }
+    Ok(())
 }
 
 /// The batch session's VM up to the chain's end: its world restored, then
