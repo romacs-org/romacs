@@ -40,6 +40,8 @@ parse outlasts --quiet needs a longer one.  `romacs-pixel', which has the
 hook beside it, fails a run whose settled picture came before the faces
 landed.
 
+Romacs sessions run an installation's compiled Lisp: the store beside the
+binary is filled first, as an installer does (--no-compile-lisp reuses it).
 GNU runs -Q with tree-sitter modes (`treesit-enabled-modes' t, grammars
 from --grammars: `tools/treesit_grammars.py so --out DIR') or, for
 reference, its regex modes; Romacs runs its interactive defaults, whose
@@ -655,6 +657,8 @@ def main():
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--quiet', type=float, default=1.0,
                         help='seconds the screen must stay unchanged before a pixel-measured open counts as settled')
+    parser.add_argument('--no-compile-lisp', dest='compile_lisp', action='store_false',
+                        help='use the compiled-Lisp store as it stands')
     parser.add_argument('--keep-frames', action='store_true', help='keep the pixel measures\' first and settled frames')
     parser.add_argument('files', nargs='+', type=Path)
     args = parser.parse_args()
@@ -666,6 +670,14 @@ def main():
         # The world a --loadup session restores, built once, as an installer does.
         env = dict(os.environ, XDG_CACHE_HOME=args.cache)
         print('world', parity_live.prepare_world(args.romacs, env, args.output), flush=True)
+        # And the compiled Lisp, as an installer fills it: without it each
+        # library's first load in a session reads its source.
+        if args.compile_lisp:
+            # The sessions' store, beside the binary, whatever this shell names.
+            env.pop('ROMACS_COMPILED_LISP_STORE', None)
+            compiled = subprocess.run([args.romacs, '--compile-lisp-tree', '--jobs', '4'], env=env, stdout=subprocess.DEVNULL)
+            if compiled.returncode not in (0, 2):  # 2: some files load as source
+                sys.exit(f'--compile-lisp-tree failed: {compiled.returncode}')
     results = []
     for run in range(args.runs):
         for file in args.files:
