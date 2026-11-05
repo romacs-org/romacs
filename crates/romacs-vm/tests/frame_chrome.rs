@@ -391,12 +391,15 @@ fn without_romacs_chrome_no_pane_chrome_is_drawn() {
 }
 
 /// Under pane chrome a window's fringes are part of its pane: painted in
-/// its default background whatever the theme gives `fringe' (here Modus
-/// Vivendi's dimmer one); classic chrome paints the `fringe' face, as GNU.
+/// its default background whatever the theme gives `fringe' (here a dimmer
+/// one); classic chrome paints the `fringe' face, as GNU.
 #[test]
 fn pane_chrome_paints_fringes_in_the_window_background() {
     let mut vm = themed_session();
-    eval(&mut vm, "(load-theme 'modus-vivendi t)");
+    eval(&mut vm, r##"(progn (deftheme fc-strip)
+                         (custom-theme-set-faces 'fc-strip '(default ((t :background "#000000" :foreground "#ffffff")))
+                                                 '(fringe ((t :background "#1e1e1e"))))
+                         (enable-theme 'fc-strip))"##);
     let fringe_and_default = |vm: &mut Vm| {
         let frame = vm.frame_snapshot(1216, 876).unwrap();
         let window = &frame.windows[0].snapshot;

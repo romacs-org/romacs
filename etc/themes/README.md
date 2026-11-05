@@ -4,6 +4,7 @@ Romacs themes are palettes (rlisp/romacs-theme.el): each file names a
 theme's base colours, and every face is derived from them.
 
 - `default-theme.el`: the stock look a session starts in.
+- `newcomers-presets-theme.el`: GNU's, which sets options rather than colours.
 - `NAME-theme.el` with `def-romacs-theme`: popular colour schemes ported as
   Romacs's own: each upstream's colour values with Romacs's face mapping, its
   source and commit in the file header (table below).
@@ -70,3 +71,7 @@ bright_magenta`, each `"#rrggbb"`.
 Colour values as such carry little or no copyright; the names carry the
 upstream projects' goodwill, which the `omarchy-` prefix and each file's
 attribution line respect.
+
+GNU's bundled colour themes are not shipped; they load from
+`custom-theme-directory` or a package as any other theme.  Modus lends its
+machinery alone (rlisp/romacs-theme-modus.el); Romacs offers no Modus palette.

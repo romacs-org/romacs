@@ -200,6 +200,19 @@
       (dolist (face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))
         (romacs-should (equal (list theme face (funcall attr face :background)) (list theme face bg)))))))
 
+(romacs-deftest romacs-theme-gnu-s-themes-are-not-offered ()
+  ;; Romacs offers its own colour schemes.  GNU's are a package away, and
+  ;; `newcomers-presets', which sets options rather than colours, stays.
+  (let ((available (custom-available-themes)))
+    (dolist (theme '(adwaita deeper-blue dichromacy leuven leuven-dark light-blue manoj-dark misterioso
+                     tango tango-dark tsdh-dark tsdh-light wheatgrass whiteboard wombat
+                     modus-operandi modus-operandi-tinted modus-operandi-deuteranopia modus-operandi-tritanopia
+                     modus-vivendi modus-vivendi-tinted modus-vivendi-deuteranopia modus-vivendi-tritanopia))
+      (romacs-should (equal (list theme (memq theme available)) (list theme nil))))
+    (dolist (theme '(default rum tokyonight-night catppuccin-latte newcomers-presets))
+      (romacs-should (memq theme available))))
+  (romacs-should (eq (condition-case nil (progn (load-theme 'tango-dark t t) 'loaded) (error 'refused)) 'refused)))
+
 (romacs-deftest romacs-theme-a-variant-is-found-before-it-is-loaded ()
   (unwind-protect
       (let ((romacs-theme--stock t))

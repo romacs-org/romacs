@@ -58,7 +58,7 @@ others' and from the one before any theme (romacs-chrome.el
 
 usage: chrome_live.py --binary BIN --output DIR [--classic] [--scale 1.5]
        [--slowdown 8] [--mode 1600x1000] [--gpu-frames 200] [--light]
-       [--themes modus-operandi,tango-dark | --scenes]
+       [--themes catppuccin-latte,tokyonight-night | --scenes]
 """
 import argparse
 import hashlib
@@ -245,7 +245,7 @@ def main():
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--gpu-frames', type=int, default=0)
     ap.add_argument('--light', action='store_true')
-    ap.add_argument('--theme', help='a theme to load in the init (a real light theme: modus-operandi)')
+    ap.add_argument('--theme', help='a theme to load in the init (a real light theme: catppuccin-latte)')
     ap.add_argument('--themes', default='', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--scenes', action='store_true')
     ap.add_argument('--top', action='store_true', help="the status bar at the top (`romacs-status-bar-position')")

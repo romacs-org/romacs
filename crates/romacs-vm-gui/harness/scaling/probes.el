@@ -106,15 +106,14 @@ thousandth a stack mark."
             (setq k (1+ k)))))
 
 ;; A theme application over N more package faces: loading and enabling
-;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
-;; the theme file; nearly flat in the faces, which only the root frame
+;; catppuccin-latte in a -Q window, most of it loading the theme file; nearly flat in the faces, which only the root frame
 ;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
              (custom-declare-face face '((t :inherit font-lock-keyword-face)) "A package face." :group 'scaling))
            faces)
-  :body (load-theme 'modus-operandi t))
+  :body (load-theme 'catppuccin-latte t))
 
 ;; Registering N bundled themes, as a load of romacs-theme.el does: a property
 ;; each, no scan of the table per theme.

@@ -445,7 +445,9 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
 /// the faces every theme sets, light or dark, and the display paints the
 /// root frame's edge and hairline and a shown glass layer's glow and
 /// background from them on the next frame, with no parameter changed.
-/// With no theme the built-in palette's accent shows.
+/// With no theme the built-in palette's accent shows.  `tc-light' and
+/// `tc-dark' are themes as third parties write them, with no palette of
+/// Romacs's; the ported schemes bring their own chrome.
 #[test]
 fn chrome_colours_follow_the_theme() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -471,12 +473,16 @@ fn chrome_colours_follow_the_theme() {
             let toast = frame.children.iter().rev().find(|c| c.radius > 0).expect("a glass toast");
             format!("{lisp} {} {} {} {}", hex(frame.chrome.focus), hex(frame.chrome.border), hex(toast.glow), hex(Some(toast.background)))
         };
+        vm.eval_source(THIRD_PARTY_THEMES).unwrap();
         let mut report = vec![probe(&mut vm)];
-        for step in ["(load-theme 'modus-operandi t)",
-                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+        for step in ["(enable-theme 'tc-light)",
+                     "(progn (disable-theme 'tc-light) (enable-theme 'tc-dark))",
                      "(progn (deftheme tc-focus) (custom-theme-set-faces 'tc-focus '(romacs-pane-focus ((t :foreground \"#ff0000\")))) (enable-theme 'tc-focus))",
                      "(mapc #'disable-theme custom-enabled-themes)",
-                     "(enable-theme 'default)"] {
+                     "(enable-theme 'default)",
+                     "(load-theme 'catppuccin-latte t)",
+                     "(load-theme 'tokyonight-night t)",
+                     "(progn (mapc #'disable-theme custom-enabled-themes) (enable-theme 'default))"] {
             vm.eval_source(step).unwrap();
             report.push(probe(&mut vm));
         }
@@ -484,7 +490,7 @@ fn chrome_colours_follow_the_theme() {
         // foreground, leads with the error glyph, and keeps the toast's text
         // colour; the outline is a graphic of at least 3:1 (WCAG) on both
         // the toast and the frame, in the stock theme and a light one.
-        for theme in ["(enable-theme 'default)", "(progn (mapc #'disable-theme custom-enabled-themes) (load-theme 'modus-operandi t))"] {
+        for theme in ["(enable-theme 'default)", "(progn (mapc #'disable-theme custom-enabled-themes) (enable-theme 'tc-light))"] {
             vm.eval_source(theme).unwrap();
             vm.eval_source("(progn (romacs-layer-toast-clear) (romacs-layer-toast \"boom\" 'error))").unwrap();
             let frame = vm.frame_snapshot(1280, 800).unwrap();
@@ -506,26 +512,44 @@ fn chrome_colours_follow_the_theme() {
         // A colour scheme replaces the stock theme. Light: the cursor is
         // black, so the accent is the link colour; the hairline 15%, glass 8%
         // and selection 20% toward black.
-        r##"(modus-operandi) "#ffffff" "#cccccc" "#3548cf" "#3548cf" "#d9d9d9" "#3548cf" "#ebebeb""##,
+        r##"(tc-light) "#ffffff" "#cccccc" "#3548cf" "#3548cf" "#d9d9d9" "#3548cf" "#ebebeb""##,
         // Dark: the cursor's butter yellow.
-        r##"(tango-dark) "#2e3436" "#54595a" "#fce94f" "#fce94f" "#4b5051" "#fce94f" "#3d4345""##,
+        r##"(tc-dark) "#2e3436" "#54595a" "#fce94f" "#fce94f" "#4b5051" "#fce94f" "#3d4345""##,
         // A theme that sets the focus edge alone changes it alone.
-        r##"(tc-focus tango-dark) "#2e3436" "#54595a" "#fce94f" "#ff0000" "#4b5051" "#fce94f" "#3d4345""##,
+        r##"(tc-focus tc-dark) "#2e3436" "#54595a" "#fce94f" "#ff0000" "#4b5051" "#fce94f" "#3d4345""##,
         // No theme: GNU's stock faces, and the built-in accent.
         r##"nil "#ffffff" "#cccccc" "#d48a20" "#d48a20" "#d9d9d9" "#d48a20" "#ebebeb""##,
         r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
-        // Rum's error colour, then modus-operandi's.
+        // Ported schemes: their own accent on the edge, the match text at
+        // its floor on the selected row.
+        r##"(catppuccin-latte) "#eff1f5" "#bcc0cc" "#6b10c6" "#8839ef" "#d5d7df" "#8839ef" "#e1e3e9""##,
+        r##"(tokyonight-night) "#1a1b26" "#283457" "#7aa2f7" "#7aa2f7" "#2f3141" "#7aa2f7" "#252734""##,
+        r##"(default) "#000000" "#3a2914" "#d48a20" "#d48a20" "#201e18" "#d48a20" "#11100d""##,
+        // Rum's error colour, then the third party's.
         r##""#c97054" "#c97054" "#c97054 t t (t nil)""##,
         r##""#a60000" "#a60000" "#a60000 t t (t nil)""##]);
 }
+
+/// Two themes as third parties write them: faces only, no palette of Romacs's.
+const THIRD_PARTY_THEMES: &str = r##"(progn
+  (deftheme tc-light)
+  (custom-theme-set-faces 'tc-light
+    '(default ((t :background "#ffffff" :foreground "#000000")))
+    '(cursor ((t :background "#000000")))
+    '(link ((t :foreground "#3548cf" :underline t)))
+    '(error ((t :foreground "#a60000"))))
+  (deftheme tc-dark)
+  (custom-theme-set-faces 'tc-dark
+    '(default ((t :background "#2e3436" :foreground "#eeeeec")))
+    '(cursor ((t :background "#fce94f")))))"##;
 
 /// A theme switch recomputes the frame's background mode as GNU's does
 /// (xfaces.c update_face_from_frame_parameter -> frame-set-background-mode),
 /// so a dark theme after a light one gets the dark defface specs; and a
 /// shown layer keeps showing the root frame's faces throughout
-/// (VM2-CHILD-FRAME). Pinned GNU X11 on Xvfb, the same switches from -Q:
-/// modus-operandi `light' "#595959", then tango-dark `dark' "grey70", and
-/// with no theme `light' "grey50".
+/// (VM2-CHILD-FRAME). `shadow', which neither third-party theme sets, shows
+/// its defface branch: `light' "grey50", `dark' "grey70", and with no theme
+/// `light' "grey50", as pinned GNU's specs give.
 #[test]
 fn a_theme_switch_recomputes_the_background_mode() {
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -549,8 +573,9 @@ fn a_theme_switch_recomputes_the_background_mode() {
             (prog1 (list (romacs--frame-shares-faces-p c) (equal (frame-parameter c 'background-color) (frame-parameter nil 'background-color))
                          (equal (with-selected-frame c (frame-parameter nil 'background-color)) (frame-parameter nil 'background-color)))
               (delete-frame c)))"));
-        for step in ["(load-theme 'modus-operandi t)",
-                     "(progn (disable-theme 'modus-operandi) (load-theme 'tango-dark t))",
+        vm.eval_source(THIRD_PARTY_THEMES).unwrap();
+        for step in ["(enable-theme 'tc-light)",
+                     "(progn (disable-theme 'tc-light) (enable-theme 'tc-dark))",
                      "(mapc #'disable-theme custom-enabled-themes)"] {
             report.push(printed(&mut vm, &format!("(progn {step} (bm-probe))")));
         }
@@ -561,8 +586,8 @@ fn a_theme_switch_recomputes_the_background_mode() {
         r##"((default) dark "#756b59" t)"##,
         r##"("#000000" "#d4c5a0")"##,
         "(t t t)",
-        r##"((modus-operandi) light "#595959" t)"##,
-        r##"((tango-dark) dark "#b3b3b3" t)"##,
+        r##"((tc-light) light "#7f7f7f" t)"##,
+        r##"((tc-dark) dark "#b3b3b3" t)"##,
         // No theme: GNU's stock faces, light, as pinned GNU's -Q frame.
         r##"(nil light "#7f7f7f" t)"##]);
 }
