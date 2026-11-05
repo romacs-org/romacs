@@ -234,7 +234,7 @@ map activated with hints inhibited.  `internal-push-keymap' composes
              (when (string-prefix-p prefix name) (setq name (substring name (length prefix)))))))
         ((functionp binding)
          (let ((doc (ignore-errors (documentation binding t))))
-           (if (and doc (not (string-empty-p doc))) (car (split-string doc "\n")) "…")))))
+           (if (and doc (not (string-empty-p doc))) (car (split-string doc "\n")) "function")))))
 
 (defun romacs-popup--hint-fragments (items)
   "ITEMS, character intervals (INDEX LO HI BINDING) in traversal order, as
@@ -325,11 +325,15 @@ its MESSAGE (shown once, here, while the hints show)."
                                               (propertize (cdr e) 'face 'romacs-popup-description)))
                           (romacs-popup--hint-entries map) "   "))
          (columns (max 10 (- (window-body-width window) 4)))
-         (text (if (> (string-width text) columns) (concat (truncate-string-to-width text (1- columns)) "…") text))
+         ;; Cut with room for the `…' as the font paints it (Iosevka's is
+         ;; two cells).
+         (text (if (> (romacs-layer--toast-width text) columns)
+                   (concat (truncate-string-to-width text (- columns (romacs-layer--toast-width "…"))) "…")
+                 text))
          (buffer (romacs-popup--hints-buffer))
          (message (gethash map romacs-popup--hint-maps)))
     (with-current-buffer buffer (let ((inhibit-read-only t)) (erase-buffer) (insert text) (goto-char (point-min))))
-    (romacs-popup-show 'hints buffer :anchor window :columns (1+ (string-width text)) :lines 1)
+    (romacs-popup-show 'hints buffer :anchor window :columns (1+ (romacs-layer--toast-width text)) :lines 1)
     (romacs-popup--hints-follow-hooks t)
     (when (stringp message)
       (dolist (toast (seq-filter (lambda (toast) (equal (nth 3 toast) message)) romacs-layer--toasts))
@@ -670,7 +674,7 @@ column, two spaces, the label, cut with `…' past WIDTH columns."
 WIDTH columns, as rendered."
   (seq-every-p (lambda (page) (let ((lines (split-string page "\n")))
                                 (and (<= (length lines) rows)
-                                     (seq-every-p (lambda (line) (<= (string-width line) width)) lines))))
+                                     (seq-every-p (lambda (line) (<= (romacs-layer--toast-width line) width)) lines))))
                pages))
 
 (defun romacs-popup--card-paged (entries body columns column-width gap)
@@ -701,8 +705,10 @@ Nil when no layout fits: a key wider than the room, or no row to spare."
               for per = (ceiling n (float columns))
               for groups = (seq-partition entries (max 1 per))
               for widths = (mapcar #'romacs-popup--card-natural groups)
-              when (and (<= per rows) (<= (+ (apply #'+ widths) (* gap (1- (length groups)))) width))
-              return (list (romacs-popup--card-join groups widths gap)))
+              for page = (and (<= per rows) (<= (+ (apply #'+ widths) (* gap (1- (length groups)))) width)
+                              (list (romacs-popup--card-join groups widths gap)))
+              when (and page (romacs-popup--card-fits page rows width))
+              return page)
      ;; Pages: a row of each kept for the footer.
      (cl-loop with natural = (romacs-popup--card-natural entries)
               with body = (1- rows)
@@ -749,7 +755,11 @@ in WINDOW nor a shown minibuffer layer; bottom right when all are."
                (posn (posn-at-point (window-point window) window))
                (xy (and posn (posn-x-y posn)))
                (cw (frame-char-width (romacs-layer--root-frame))) (ch (frame-char-height (romacs-layer--root-frame)))
-               (point (and xy (let ((x (+ (nth 0 body) (car xy))) (y (+ (nth 1 body) (cdr xy)))) (list x y (+ x cw) (+ y ch)))))
+               ;; Point's glyph where the window draws it: after an hscroll, or
+               ;; at a truncated row's last column for a point past it (GNU's
+               ;; posn too), a column the card's inset bounds never reach.
+               (point (and xy (let ((x (+ (nth 0 body) (car xy))) (y (+ (nth 1 body) (cdr xy))))
+                                (list x y (+ x cw) (+ y ch)))))
                (host (and (fboundp 'romacs--minibuffer-host) (romacs--minibuffer-host)))
                (panel (and host (frame-visible-p host)
                            (let ((p (frame-position host))) (list (car p) (cdr p) (+ (car p) (frame-pixel-width host)) (+ (cdr p) (frame-pixel-height host))))))
@@ -802,10 +812,10 @@ no card fits.  Records the card's state and which-key's prefix."
                  (cw (frame-char-width root)) (ch (frame-char-height root))
                  (padding (plist-get (alist-get 'card romacs-popup-look) :padding))
                  (lines (length (split-string text "\n")))
-                 ;; Two columns more than the widest row: a window's last
-                 ;; holds its truncation glyph, which the display draws over a
-                 ;; row as wide as `window-max-chars-per-line'.
-                 (columns (+ 2 (seq-reduce (lambda (w l) (max w (string-width l))) (split-string text "\n") 1)))
+                 ;; One column more than the widest row as painted (the
+                 ;; footer's `…' is two cells in Iosevka): a window's last
+                 ;; holds its truncation glyph.
+                 (columns (1+ (seq-reduce (lambda (w l) (max w (romacs-layer--toast-width l))) (split-string text "\n") 1)))
                  (`(,x . ,y) (romacs-popup--card-place window bounds (+ (* columns cw) (* 2 padding)) (+ (* lines ch) (* 2 padding))))
                  ;; which-key's buffer, made as its own display would make it,
                  ;; so `which-key--popup-showing-p' sees the card.

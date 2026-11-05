@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "33d3b7c0d6b5447f400a6036c8b856f5e77af080074d33336fd1270f082dbed1",
+  "input_hash": "827b4adf55016e45daa026625f264e96c5c5c9c79821614ac198797a45cca4c1",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -8539,7 +8539,7 @@
    "planned": false,
    "mechanism": "Line ends of Romacs's own text surfaces",
    "gnu": "Echo-area messages and minibuffer input continue at the window's edge (`word-wrap` nil); a window without fringes, as a child frame made with zero fringes is, shows `\\` at a continued row's end and `$` at a truncated one's, unless a display table sets its `wrap` or `truncation` slot",
-   "romacs": "On a window system Romacs's own text surfaces wrap at words and never show GNU's `\\` or `$` (`rlisp/romacs-layer.el`): the echo area's buffer from its first message and each minibuffer as it is entered get `word-wrap` t, `truncate-lines` nil and `romacs-layer-display-table`, whose `wrap` slot is a blank and `truncation` slot an ellipsis (`…`), as do message toasts; every layer buffer without a display table of its own and the completion panel's candidates show that table. The mini-window keeps its frame's fringes, so its rows show no glyph either, and resizes to the word-wrapped rows (VM2-MINIWIN1); one the completion panel hosts keeps the panel's zero fringes, so its input aligns with the candidates and no fringe shows on the panel's background, and shows the blank wrap glyph instead; a toast is as tall as its window wraps its text, at most six rows. The host draws a display table's truncation and continuation characters for any buffer (VM2-WTPS1). Batch keeps GNU's values",
+   "romacs": "On a window system Romacs's own text surfaces wrap at words and never show GNU's `\\` or `$` (`rlisp/romacs-layer.el`): the echo area's buffer from its first message and each minibuffer as it is entered get `word-wrap` t, `truncate-lines` nil and `romacs-layer-display-table`, whose `wrap` slot is a blank and `truncation` slot `›` (one cell in the frame's font; Iosevka's own `…` is two, and the window keeps one column for the glyph), as do message toasts; every layer buffer without a display table of its own and the completion panel's candidates show that table. The mini-window keeps its frame's fringes, so its rows show no glyph either, and resizes to the word-wrapped rows (VM2-MINIWIN1); one the completion panel hosts keeps the panel's zero fringes, so its input aligns with the candidates and no fringe shows on the panel's background, and shows the blank wrap glyph instead; a toast is as tall as its window wraps its text, at most six rows. The host draws a display table's truncation and continuation characters for any buffer (VM2-WTPS1). Batch keeps GNU's values",
    "why": "**User-observable:** a long message, prompt or input breaks at spaces like prose, with no `\\` at its rows' ends; `word-wrap` reads t in those buffers. `crates/romacs-vm/tests/mini_window.rs` (`word_wrap_counts_the_rows_broken_at_words`), `crates/romacs-vm/src/mini_window.rs` (`rows_break_as_the_window_wraps_them`), `crates/romacs-vm-gui/src/measure.rs` (display-table line glyphs agree with the host's paint)",
    "symbols": [
     "word-wrap",

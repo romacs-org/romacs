@@ -263,6 +263,19 @@ fn menus_share_one_look_and_motion() {
                 (funcall exit) (romacs-popup--hints-reconcile)
                 (push (frame-visible-p f) chip-hint-hidden))))"));
         report.push(printed(&mut vm, "chip-hint-hidden"));
+        // A hint too long for the window is cut where the font paints the
+        // `…', and its frame holds the painted row plus the reserved column.
+        report.push(printed(&mut vm, "(let* ((map (make-sparse-keymap)))
+            (dotimes (i 40) (define-key map (string (+ ?a i)) #'indent-rigidly-right))
+            (romacs-popup--hints-show map)
+            (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf))
+                   (text (with-current-buffer buf (buffer-string)))
+                   (painted (romacs-layer--toast-width text)))
+              (prog1 (list (string-suffix-p \"…\" text)
+                           (<= painted (- (window-body-width (selected-window)) 4))
+                           (>= (window-body-width (frame-root-window f)) (1+ painted))
+                           (romacs-layer--toast-width \"…\"))
+                (romacs-popup--hints-hide))))"));
         report.push(printed(&mut vm, "(let ((map (define-keymap \"o\" #'other-window \"O\" #'ignore)) r)
             (let ((romacs-popup-hints-mode nil)) (romacs-popup-repeat-echo map)
               (push (and romacs-mode-line-repeat (string-match-p \"o O\" romacs-mode-line-repeat) \"\") r))
@@ -371,6 +384,7 @@ fn menus_share_one_look_and_motion() {
         "((\"w\" . \"left\") (\"p\" . \"+…\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
         "(hints t \"<right> indent-rigidly-right   <left> indent-rigidly-left\" t t nil t)",
         "(nil)",
+        "(t t t 2)",
         // The status bar's repeat segment: the keys without hints, nothing with them.
         "(\"\" nil)",
         "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"<f1>\" . \"ignore\") (\"d\" . \"forward-char\") (\"a\" . \"undo\") (\"c\" . \"undo\") (\"e\" . \"undo\")))",
@@ -456,7 +470,7 @@ fn key_hint_cards() {
         report.push(printed(&mut vm, "(progn (setq which-key--automatic-display t) (romacs-popup--card-record [24] nil) (romacs-popup--card-render [24] 0)
             (let* ((w (frame-root-window (romacs-layer--frame-of which-key--buffer)))
                    (lines (with-current-buffer which-key--buffer (split-string (buffer-substring-no-properties (point-min) (point-max)) \"\\n\"))))
-              (prog1 (list (> (window-max-chars-per-line w) (seq-max (mapcar #'string-width lines)))
+              (prog1 (list (>= (window-max-chars-per-line w) (seq-max (mapcar #'string-width lines)))
                            (seq-some (lambda (l) (and (string-search \"…\" l) (not (string-search \"more\" l)))) lines))
                 (romacs-popup-which-key-hide))))"));
         // which-key's automatic hint for C-x: the card, titled C-x, at the
@@ -487,6 +501,13 @@ fn key_hint_cards() {
             (cl-letf (((symbol-function 'posn-at-point)
                        (lambda (&rest _) (list w 1 (cons (- (nth 2 e) (nth 0 e) 30) (- (nth 3 e) (nth 1 e) 30)) 0))))
               (list (= (car (romacs-popup--card-place w bounds 200 100)) (nth 0 bounds))
+                    ;; Point past a truncated row's right edge: its posn is the
+                    ;; row's last column (GNU's too), which the card, inset
+                    ;; within the pane, never covers at the bottom right.
+                    (cl-letf (((symbol-function 'posn-at-point)
+                               (lambda (&rest _) (list w 1 (cons (- (nth 2 e) (nth 0 e) 10) 40) 0))))
+                      (let ((at (romacs-popup--card-place w bounds 200 (- (nth 3 bounds) (nth 1 bounds) 20))))
+                        (and (= (car at) (- (nth 2 bounds) 200)) (<= (+ (car at) 200) (+ (nth 0 e) (- (nth 2 e) (nth 0 e) 10))))))
                     (= (car (cl-letf (((symbol-function 'posn-at-point) (lambda (&rest _) nil)))
                               (romacs-popup--card-place w bounds 200 100)))
                        (- (nth 2 bounds) 200)))))"));
@@ -562,7 +583,7 @@ fn key_hint_cards() {
         "(nil [24] nil)",
         "((1 2 0 1) t)",
         "(nil nil)",
-        "(t t)",
+        "(t t t)",
         // which-key off: GNU's fallback runs `prefix-help-command' with the
         // whole sequence; the card takes nothing.
         "([24 8] nil)",

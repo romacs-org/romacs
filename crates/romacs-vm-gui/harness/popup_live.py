@@ -310,6 +310,8 @@ WHICH_KEY_INIT = '''(require 'which-key)
             :title (and frame (with-current-buffer which-key--buffer
                                 (buffer-substring-no-properties (point-min) (save-excursion (goto-char (point-min)) (line-end-position)))))
             :page (nth 1 romacs-popup--card)
+            :point (let ((xy (posn-x-y (posn-at-point (window-point window) window))) (body (window-edges window t nil t)))
+                     (and xy (list (+ (nth 0 body) (car xy)) (+ (nth 1 body) (cdr xy)) (frame-char-width) (frame-char-height))))
             :pane (window-edges window t nil t)
             :chrome-bottom (romacs-chrome-bottom (romacs-layer--root-frame))
             :command (and (symbolp last-command) (symbol-name last-command))))
@@ -332,6 +334,12 @@ WHICH_KEY_INIT = '''(require 'which-key)
 (global-set-key (kbd "<f5>") #'popup-live-org)
 (global-set-key (kbd "<f6>") #'popup-live-narrow)
 (global-set-key (kbd "<f7>") #'popup-live-flip)
+;; Point past a truncated row's right edge: its posn is the edge's.
+(defun popup-live-flip-truncated () (interactive)
+  (popup-live-flip) (setq truncate-lines t) (setq-local auto-hscroll-mode nil)
+  (erase-buffer) (dotimes (_ 200) (insert (make-string 300 ?x) "\n"))
+  (goto-char (point-min)) (forward-line (- (window-body-height) 3)) (move-to-column 200))
+(global-set-key (kbd "<f10>") #'popup-live-flip-truncated)
 (global-set-key (kbd "<f8>") (lambda () (interactive) (which-key-mode (if which-key-mode -1 1))))
 '''
 
@@ -683,6 +691,21 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     placed(flip, 'left')
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
     gone('flip C-g')
+    keys('-k', 'F10')
+    time.sleep(.5)
+    keys('-M', 'ctrl', 'x', '-m', 'ctrl')
+    card('C-x')
+    keys('4')
+    flip_truncated = card('C-x 4')
+    fio.shot(output / 'card-flip-truncated.png', env, report)
+    report['captures'].append({'name': 'flip truncated', 'state': flip_truncated})
+    # Point past the truncated row's edge is drawn at its last column, which
+    # the card, inset in the pane, does not cover.
+    (px, py, cw, ch), (x, y), (width, height) = flip_truncated['point'], flip_truncated['position'], flip_truncated['size']
+    if px < x + width and x < px + cw and py < y + height and y < py + ch:
+        raise AssertionError(f'card {flip_truncated} over point at {px},{py}')
+    keys('-M', 'ctrl', 'g', '-m', 'ctrl')
+    gone('flip truncated C-g')
     report['checks'].append({'cx': cx['position'], 'narrow': narrow['position'], 'flip': flip['position']})
 
 
