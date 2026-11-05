@@ -1640,22 +1640,35 @@ thousandth a stack mark."
           (setq scaling--fontset-serial (1+ scaling--fontset-serial))))
 
 (scaling-probe fontset-disjoint-rules :n 2000
-  :setup (new-fontset (scaling--fontset-name) nil)
-  :body (dotimes (i n) (set-fontset-font it (+ #x10000 (* 2 i)) "X")))
+  :setup nil
+  :body (dotimes (i n) (set-fontset-font t (+ #x10000 (* 2 i)) "X")))
 
 (scaling-probe fontset-alternatives :n 2000
-  :setup (new-fontset (scaling--fontset-name) nil)
-  :body (dotimes (_ n) (set-fontset-font it '(#x370 . #x3ff) "X" nil 'prepend)))
+  :setup nil
+  :body (dotimes (_ n) (set-fontset-font t '(#x370 . #x3ff) "X" nil 'prepend)))
 
 (scaling-probe fontset-registration :n 1000
   :setup nil
   :body (dotimes (_ n) (fontset-font (new-fontset (scaling--fontset-name) nil) ?a)))
 
 (scaling-probe fontset-edit-among-rules :n 2000
-  :setup (let ((name (new-fontset (scaling--fontset-name) nil)))
-           (dotimes (i n) (set-fontset-font name (+ #x10000 (* 2 i)) "X"))
-           name)
-  :body (dotimes (_ 200) (set-fontset-font it ?Ж "Y") (fontset-font it ?Ж)))
+  :setup (dotimes (i n) (set-fontset-font t (+ #x10000 (* 2 i)) "X"))
+  :body (dotimes (_ 200) (set-fontset-font t ?Ж "Y") (fontset-font t ?Ж)))
+
+;; Edits among N charsets: the charset order is read when it changes.
+(scaling-probe fontset-edit-among-charsets :n 40
+  :setup (dotimes (i n)
+           (define-charset (intern (format "scaling-charset-%d" i)) "A charset for a probe."
+             :code-space [0 255] :code-offset #x110000))
+  :body (dotimes (_ 200) (set-fontset-font t ?Ж "Y") (fontset-font t ?Ж)))
+
+;; N alternatives on a range whose first one has every character: a new
+;; character reads the group in its order, not all its alternatives.
+(scaling-probe fontset-long-group :gui t :n 200 :steps 10
+  :setup (progn
+           (set-fontset-font t '(#x400 . #x4ff) (font-spec :registry "iso10646-1"))
+           (dotimes (_ n) (set-fontset-font t '(#x400 . #x4ff) "No Such Family" nil 'append)))
+  :body (dotimes (c 12) (insert (+ #x410 (* i 12) c))))
 
 (scaling-probe fontset-edit-among-fontsets :n 1000
   :setup (let ((name nil)) (dotimes (_ n) (setq name (new-fontset (scaling--fontset-name) nil))) name)

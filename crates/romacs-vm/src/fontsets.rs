@@ -18,6 +18,9 @@ pub(crate) struct Registry {
     /// Bumped by every edit, and by a change of the charset order.
     revision: u64,
     charset_tick: u64,
+    /// Vcharset_ordered_list's preferred head by charset, and how long it is.
+    charset_rank: Arc<HashMap<u32, u32>>,
+    preferred: u32,
     /// The `symbol' script's ranges, when `use-default-font-for-symbols' is
     /// on: GNU's check of `char-script-table', read once.
     symbols: Arc<Vec<(u32, u32)>>,
@@ -29,13 +32,13 @@ pub(crate) struct Registry {
     staged: Option<(Vec<Arc<Fontset>>, HashMap<String, usize>)>,
     published: Arc<FontsetState>,
 }
-romacs_snapshot::snapshot_struct!(Registry { sets, names, frame, revision, charset_tick, symbols, scripts, script_edits, staged, published });
+romacs_snapshot::snapshot_struct!(Registry { sets, names, frame, revision, charset_tick, charset_rank, preferred, symbols, scripts, script_edits, staged, published });
 
 impl Default for Registry {
     fn default() -> Self {
         let default = Arc::new(Fontset::new(DEFAULT_NAME));
         let names = [(DEFAULT_NAME.to_string(), 0), ("fontset-default".to_string(), 0)].into();
-        Self { sets: vec![default], names, frame: 0, revision: 0, charset_tick: 0, symbols: Arc::default(), scripts: HashMap::new(), script_edits: 0, staged: None, published: Arc::default() }
+        Self { sets: vec![default], names, frame: 0, revision: 0, charset_tick: 0, charset_rank: Arc::default(), preferred: 0, symbols: Arc::default(), scripts: HashMap::new(), script_edits: 0, staged: None, published: Arc::default() }
     }
 }
 
@@ -113,17 +116,18 @@ impl Registry {
     }
 
     /// What painting reads, rebuilt when an edit or CHARSET_TICK moved: a few
-    /// Arc clones and ORDER, the charset order, which only runs then.
+    /// Arc clones. ORDER, the charset order, runs only for a new tick.
     pub(crate) fn state(&mut self, charset_tick: u64, order: impl FnOnce() -> (HashMap<u32, u32>, u32)) -> (Arc<FontsetState>, bool) {
-        if charset_tick != self.charset_tick {
-            self.charset_tick = charset_tick;
-            self.revision += 1;
+        if charset_tick != self.charset_tick || self.charset_rank.is_empty() {
+            let (rank, preferred) = order();
+            let changed = charset_tick != self.charset_tick;
+            (self.charset_tick, self.charset_rank, self.preferred) = (charset_tick, Arc::new(rank), preferred);
+            if changed { self.revision += 1; }
         }
         if self.published.revision == self.revision {
             return (Arc::clone(&self.published), false);
         }
-        let (rank, preferred) = order();
-        let mut state = FontsetState::new(Arc::clone(&self.sets[0]), Arc::clone(&self.sets[self.frame]), Arc::new(rank), preferred, self.revision);
+        let mut state = FontsetState::new(Arc::clone(&self.sets[0]), Arc::clone(&self.sets[self.frame]), Arc::clone(&self.charset_rank), self.preferred, self.revision);
         state.default_font_symbols = Arc::clone(&self.symbols);
         self.published = Arc::new(state);
         (Arc::clone(&self.published), true)

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c3326eba9173a3c390f5f299472a899052a2b22fa8cf71a59fe4bc8703375f58",
+  "source_fingerprint": "4a5779ee6651b6315b92af3a438a29ced874070ddc3e6baa796801ab6d68e8c5",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1910,12 +1910,12 @@
   "fontset-font": {
    "name": "fontset-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:326"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:348"
   },
   "fontset-list": {
    "name": "fontset-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:315"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:337"
   },
   "force-mode-line-update": {
    "name": "force-mode-line-update",
@@ -3506,7 +3506,7 @@
   "new-fontset": {
    "name": "new-fontset",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:260"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:282"
   },
   "next-overlay-change": {
    "name": "next-overlay-change",
@@ -4057,7 +4057,7 @@
   "query-fontset": {
    "name": "query-fontset",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:303"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:325"
   },
   "quote": {
    "name": "quote",
@@ -4422,7 +4422,7 @@
   "romacs--font-encoding": {
    "name": "romacs--font-encoding",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:410"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:432"
   },
   "romacs--font-style-p": {
    "name": "romacs--font-style-p",
@@ -4432,7 +4432,7 @@
   "romacs--fontset-info": {
    "name": "romacs--fontset-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:399"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:421"
   },
   "romacs--frame-shares-faces-p": {
    "name": "romacs--frame-shares-faces-p",
@@ -4657,7 +4657,7 @@
   "romacs--make-frame-fontset": {
    "name": "romacs--make-frame-fontset",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:424"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:446"
   },
   "romacs--minibuffer-host": {
    "name": "romacs--minibuffer-host",
@@ -4958,7 +4958,7 @@
   "romacs--set-fontset-font": {
    "name": "romacs--set-fontset-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:252"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:274"
   },
   "romacs--set-idle": {
    "name": "romacs--set-idle",
@@ -4988,7 +4988,7 @@
   "romacs--stage-fontsets": {
    "name": "romacs--stage-fontsets",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:448"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:470"
   },
   "romacs--startup-phase": {
    "name": "romacs--startup-phase",
@@ -5088,7 +5088,7 @@
   "romacs--unstage-fontsets": {
    "name": "romacs--unstage-fontsets",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:463"
+   "registered_at": "crates/romacs-vm/src/prims/fontset.rs:485"
   },
   "romacs--validate-region": {
    "name": "romacs--validate-region",

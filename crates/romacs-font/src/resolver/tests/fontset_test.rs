@@ -152,6 +152,21 @@ fn a_size_in_the_spec_beats_the_faces() {
     assert_eq!(resolver.resolve_char(&request(), '☀').unwrap().font.pixel_size, 40.0);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_size_of_its_own_gets_no_ascii_preference() {
+    let mut resolver = fixtures();
+    let (first, second) = (5, 9);
+    let sized = FontDef { family: Some(FAMILY.into()), encoding: second, pixel_size: Some(40), ..FontDef::default() };
+    let plain = FontDef { family: Some("Noto Sans Mono".into()), encoding: first, ..FontDef::default() };
+    let mut rules = Fontset::new("d");
+    let range = FontsetTarget::Range(0x416, 0x416);
+    rules.add(range, Some(Arc::new(sized)), FontsetMode::Overwrite);
+    rules.add(range, Some(Arc::new(plain)), FontsetMode::Append);
+    publish(&mut resolver, rules, None, &[(first, 0), (second, 1)], 1);
+    assert_eq!(resolver.resolve_char(&request(), 'Ж').unwrap().font.family, "Noto Sans Mono");
+}
+
 #[test]
 fn registries_match_as_ftfont_get_charset() {
     let def = |registry: &str| FontDef { registry: Some(registry.into()), ..FontDef::default() };

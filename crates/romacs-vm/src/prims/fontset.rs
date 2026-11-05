@@ -188,6 +188,28 @@ fn character(cx: &Leaf<'_>, value: Value) -> std::result::Result<u32, Fault> {
     value.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).map(|c| c as u32).ok_or(Fault::Wrong("characterp", value))
 }
 
+/// TARGETS with overlapping ranges joined, as set_fontset_font folds a
+/// script's ranges into a charset's: a character gets each font once.
+fn merged_targets(targets: Vec<FontsetTarget>) -> Vec<FontsetTarget> {
+    let (mut ranges, mut others) = (Vec::new(), Vec::new());
+    for target in targets {
+        match target {
+            FontsetTarget::Range(from, to) => ranges.push((from.min(to), from.max(to))),
+            other => others.push(other),
+        }
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
+    for (from, to) in ranges {
+        match merged.last_mut() {
+            Some(last) if from <= last.1.saturating_add(1) => last.1 = last.1.max(to),
+            _ => merged.push((from, to)),
+        }
+    }
+    others.extend(merged.into_iter().map(|(from, to)| FontsetTarget::Range(from, to)));
+    others
+}
+
 /// set_fontset_font's work on ID: ADD's mode, what CHARACTERS and SPEC name.
 fn add_font(cx: &mut Leaf<'_>, id: usize, characters: Value, spec: Value, add: Value, encodings: &mut Encodings) -> std::result::Result<bool, Fault> {
     let def = font_def(cx, spec, encodings)?;
@@ -242,7 +264,7 @@ fn add_font(cx: &mut Leaf<'_>, id: usize, characters: Value, spec: Value, add: V
     }
     let entry = def.clone().map(Arc::new);
     let fontset = cx.fontsets_mut().edit(id);
-    for target in targets { fontset.add(target, entry.clone(), mode); }
+    for target in merged_targets(targets) { fontset.add(target, entry.clone(), mode); }
     if ascii_changed { fontset.ascii = def.map(|def| def.name); }
     Ok(ascii_changed)
 }

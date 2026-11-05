@@ -254,6 +254,15 @@ COLOR must be a valid color name."
             (t (aset to i value)))))
   (aset to 16 nil))
 
+(defun romacs--resolve-face-name (face)
+  "resolve_face_name: FACE, a name, through its `face-alias' properties."
+  (let ((face (if (stringp face) (intern face) face))
+        (depth 0))
+    (while (and (symbolp face) (get face 'face-alias) (< depth 10))
+      (setq face (get face 'face-alias)
+            depth (1+ depth)))
+    face))
+
 (defun romacs--merge-point-open-p (kind face merging)
   "push_named_merge_point's test: FACE is open as KIND in MERGING, newest first.
 A remapping hides the plain merges of its face before it."
@@ -268,7 +277,7 @@ A remapping hides the plain merges of its face before it."
   "merge_named_face: FACE's attributes into TO.
 MERGING lists the merge points open, as (normal . FACE) and (remap . FACE):
 FACE named inside its own remapping means the plain face."
-  (let ((face (if (stringp face) (intern face) face)))
+  (let ((face (romacs--resolve-face-name face)))
     (unless (romacs--merge-point-open-p 'normal face merging)
       (let* ((merging (cons (cons 'normal face) merging))
              (remapping (and (not (romacs--merge-point-open-p 'remap face merging))
@@ -377,12 +386,17 @@ FONT-SPEC names; the frame keeps its fontset."
   (let* ((spec (cond ((consp font-spec) (font-spec :family (car font-spec)))
                      ((stringp font-spec) (font-spec :name font-spec))
                      (t font-spec)))
+         (size (font-get spec :size))
          (attributes
-          (mapcan (lambda (key)
-                    (let ((value (font-get spec key)))
-                      (when value
-                        (list key (if (eq key :family) (symbol-name value) value)))))
-                  '(:family :weight :slant :width))))
+          (nconc
+           (mapcan (lambda (key)
+                     (let ((value (font-get spec key)))
+                       (when value
+                         (list key (if (eq key :family) (symbol-name value) value)))))
+                   '(:family :weight :slant :width))
+           ;; An integer size is pixels at the frame's 96 dpi, a float points.
+           (cond ((integerp size) (list :height (round (* size 7.5))))
+                 ((floatp size) (list :height (round (* size 10))))))))
     (when attributes
       (apply #'set-face-attribute 'default (or frame (selected-frame)) attributes))))
 

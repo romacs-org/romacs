@@ -61,6 +61,8 @@ FORMS = r'''
 (condition-case e (set-fontset-font t '(0 . 127) nil) (error e))
 (condition-case e (set-fontset-font t 'latin nil) (error e))
 (progn (set-fontset-font nil nil "Y" nil 'prepend) (car (fontset-font nil ?δ t)))
+(progn (set-fontset-font t 'lao '("Lao" . "iso10646-1") nil 'append) (length (delq nil (mapcar (lambda (entry) (equal (car entry) "Lao")) (fontset-font t ?ກ t)))))
+(progn (set-fontset-font t 'ethiopic '("Eth" . "iso10646-1") nil 'prepend) (length (delq nil (mapcar (lambda (entry) (equal (car entry) "Eth")) (fontset-font t ?አ t)))))
 (progn (new-fontset "-misc-fixed-medium-r-normal--0-0-0-0-c-0-fontset-test" '((greek "Foo" ("Bar" . "iso8859-7")) (latin . "Baz"))) (car (fontset-list)))
 (query-fontset "fontset-test")
 (fontset-font "fontset-test" ?α t)
@@ -127,7 +129,15 @@ JOURNEY = r'''
        (set-face-attribute 'default nil :family "Iosevka")
        (redisplay t)
        (list 'family (eq override (font-get (car (internal-char-font nil ?Ж)) :family))
-             (equal (face-attribute 'default :family) "Iosevka"))))))
+             (equal (face-attribute 'default :family) "Iosevka"))))
+   (lambda ()
+     ;; A size alone: ASCII takes it, and the override stays.
+     (let ((before (window-font-height))
+           (override (font-get (car (internal-char-font nil ?Ж)) :family)))
+       (set-fontset-font nil 'latin (font-spec :size 40))
+       (redisplay t)
+       (list 'size (> (window-font-height) before)
+             (eq override (font-get (car (internal-char-font nil ?Ж)) :family)))))))
 (defun journey-step ()
   (when (file-exists-p journey-go)
     (delete-file journey-go)
@@ -143,7 +153,7 @@ def journey(binary, args, output, report):
     shots, records = [], []
     with tl.session(binary, args, output, 'journey', report, False) as (env, state, process, _log):
         go = Path(str(state) + '.go')
-        for stage in range(6):
+        for stage in range(7):
             fio.wait(lambda: state.exists() and len(tl.records(state)) > stage, args.timeout, f'stage {stage}', process)
             tl.quiet(process, 1, args.timeout)
             time.sleep(1)
@@ -226,7 +236,8 @@ def main():
                   'a rule repaints a shown character': differ(shots[1], shots[2]),
                   'a stop repaints it again': differ(shots[2], shots[3]) and not differ(shots[1], shots[3]),
                   'the ASCII font changes and the override stays': records[4] == '(latin t t t t)' and differ(shots[3], shots[4]),
-                  'a family change keeps the override': records[5] == '(family t t)'}
+                  'a family change keeps the override': records[5] == '(family t t)',
+                  'a size alone reaches ASCII and keeps the override': records[6] == '(size t t)'}
         report['failures'] += [name for name, ok in judged.items() if not ok]
         report['status'] = 'PASS' if not report['failures'] else 'FAIL'
     except Exception as error:  # noqa: BLE001

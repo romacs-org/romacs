@@ -299,6 +299,8 @@ const CASES: &[&str] = &[
     "<a>x\r\n</a>",
     "<a>\r\n\r\n</a>",
     "<a>&#13;\n</a>",
+    "<!DOCTYPE a PUBLIC 'x\ry' 'urn:x'><a/>",
+    "<!DOCTYPE a PUBLIC 'x\r\ny' 'urn:x'><a/>",
     "<!DOCTYPE a [<!ENTITY e 'x\ry'>]><a b='&e;'/>",
     "<!-- a\rb --><a/>",
     "<!DOCTYPE a [<!ENTITY e '%x;'>]><a b='&e;'/>",

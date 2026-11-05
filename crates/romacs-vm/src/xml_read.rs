@@ -652,7 +652,7 @@ impl Reader<'_> {
             self.at += "PUBLIC".len();
             self.required_space()?;
             let public = self.literal()?;
-            let pubid = |b: u8| b.is_ascii_alphanumeric() || b" \n-'()+,./:=?;!*#@$_%".contains(&b);
+            let pubid = |b: u8| b.is_ascii_alphanumeric() || b" \r\n-'()+,./:=?;!*#@$_%".contains(&b);
             if !public.bytes().all(pubid) {
                 return Err(Stop::Declined);
             }

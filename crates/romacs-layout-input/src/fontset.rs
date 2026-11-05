@@ -132,6 +132,12 @@ impl Alternatives {
         front
     }
 
+    /// What names this list while it is held.
+    pub fn identity(&self) -> (usize, usize) {
+        let address = |link: &Link| link.as_ref().map_or(0, |cell| Arc::as_ptr(cell) as usize);
+        (address(&self.front), address(&self.back))
+    }
+
     /// Whether SELF and OTHER are one list: the test for merging runs.
     fn same(&self, other: &Self) -> bool {
         link_eq(&self.front, &other.front) && link_eq(&self.back, &other.back)

@@ -257,6 +257,9 @@ pub struct FontResolver {
     /// The fonts opened for each request and def so far, tried first
     /// (fontset_find_font's "font already opened").
     realized: HashMap<(RequestKey, usize), Vec<ResolvedFont>>,
+    /// Each group in search order, by group and request: reordered once a
+    /// revision, as GNU's realized font-group is.
+    orders: HashMap<((usize, usize), RequestKey), Arc<Vec<romacs_layout_input::Alternative>>>,
     opened: HashMap<(String, u32, u32), Option<OpenedFace>>,
     files: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
 }
@@ -286,6 +289,7 @@ impl FontResolver {
             sole: HashMap::default(),
             lists: HashMap::default(),
             realized: HashMap::default(),
+            orders: HashMap::default(),
             opened: HashMap::default(),
             files: HashMap::default(),
         })
@@ -322,6 +326,7 @@ impl FontResolver {
         self.chars.clear();
         self.sole.clear();
         self.realized.clear();
+        self.orders.clear();
     }
 
     /// Adopt the producer's fontsets: a new revision retires every answer.
@@ -509,9 +514,18 @@ impl FontResolver {
     /// order, until a font has CH or a nil stops the search.
     fn search_group(&mut self, group: Option<&Alternatives>, request: &FontRequest, ch: char, ascii: Option<&ResolvedFont>, state: &Arc<FontsetState>) -> Result<Group, FontResolveError> {
         let Some(group) = group else { return Ok(Group::Missed) };
-        for (index, alternative) in reordered(group.to_vec(), ascii, state, |font, chars| self.has_all(font, chars)).into_iter().enumerate() {
+        let key = (group.identity(), request.cache_key());
+        let order = match self.orders.get(&key) {
+            Some(order) => Arc::clone(order),
+            None => {
+                let order = Arc::new(reordered(group.to_vec(), ascii, state, |font, chars| self.has_all(font, chars)));
+                self.orders.insert(key, Arc::clone(&order));
+                order
+            }
+        };
+        for (index, alternative) in order.iter().enumerate() {
             let Some(def) = alternative else { return Ok(Group::Stopped) };
-            if let Some(found) = self.search_def(&def, request, ch, state)? {
+            if let Some(found) = self.search_def(def, request, ch, state)? {
                 return Ok(Group::Found(Box::new(CharResolution { source: CharResolutionSource::Fontset(index), ..found })));
             }
         }
@@ -880,6 +894,7 @@ fn def_matches(def: &FontDef, font: &ResolvedFont, has_all: &mut impl FnMut(&Res
         && def.weight.is_none_or(|weight| weight == font.weight)
         && def.slant.is_none_or(|slant| slant_kind(slant) == font.slant)
         && def.width.is_none_or(|width| width == font.width)
+        && def.pixel_size.is_none_or(|size| size as f32 == font.pixel_size.round())
         && def.lang.is_empty()
         && has_all(font, &def.script_chars)
 }
