@@ -1805,6 +1805,9 @@ pub enum StoreOpen {
     Write { create: bool, truncate: bool },
     /// To make it where none is (O_CREAT|O_EXCL), and write it.
     New,
+    /// To append to it (O_APPEND), made if missing: concurrent writers'
+    /// lines never overwrite each other.
+    Append,
 }
 
 /// A world store's file at PATH, opened as HOW: never through a symlink,
@@ -1819,6 +1822,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
         StoreOpen::Read => { options.read(true); }
         StoreOpen::Write { create, .. } => { options.write(true).create(create); }
         StoreOpen::New => { options.write(true).create_new(true); }
+        StoreOpen::Append => { options.append(true).create(true); }
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
@@ -1934,6 +1938,7 @@ pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Sto
         StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
         StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
         StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };

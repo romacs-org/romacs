@@ -535,6 +535,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         once one is prepared in an existing store
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
                         compiled load runs on a miss)
+  --compile-lisp-tree [--jobs N]  compile the installation's Lisp into its
+                        compiled-Lisp store ahead of use, N at a time (default 4)
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
@@ -632,6 +634,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
             "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--compile-lisp-tree" => {
+                let jobs = match (args.next().as_deref(), args.next()) {
+                    (None, _) => 4,
+                    (Some("--jobs"), Some(n)) => n.parse::<usize>().map_err(|e| format!("--jobs: {e}"))?,
+                    _ => return Err("usage: --compile-lisp-tree [--jobs N]".into()),
+                };
+                return batch::compile_lisp_tree(jobs).map(|()| None);
+            }
             "--compile-lisp" => {
                 let file = args.next().ok_or("--compile-lisp needs a FILE")?;
                 return batch::compile_lisp(file.into(), world_store).map(|()| None);
