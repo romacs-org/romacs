@@ -170,6 +170,8 @@ the name keeps the default face.")
   "<remap> <exit-minibuffer>" #'romacs-complete-directory-enter
   "<remap> <kill-ring-save>" #'romacs-complete-save
   "M-RET" #'romacs-complete-exit-input
+  ;; Romacs: fido's M-j too: exit with the input as typed.
+  "M-j" #'romacs-complete-exit-input
   "TAB" #'romacs-complete-insert
   ;; Romacs: vertico-directory's file name editing, on by default.
   "DEL" #'romacs-complete-directory-delete-char
