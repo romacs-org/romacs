@@ -580,9 +580,10 @@ impl Leaf<'_> {
             let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
             let bottom = it.current_y + height;
             let (mut x, mut y) = (it.current_x, it.current_y);
-            // Stopped at CHARPOS before its row produced its line number.
-            // pos_visible_p: the last width produced, else the first row's.
-            if let Some(lnum) = cx.lnum && it.lnum_x == 0 && motion::charpos(src, &it)? == charpos {
+            // Stopped at CHARPOS, at or past the first visible x, before its
+            // row produced its line number.  pos_visible_p: the last width
+            // produced, else the first row's.
+            if let Some(lnum) = cx.lnum && it.lnum_x == 0 && it.current_x >= cx.first_visible_x && motion::charpos(src, &it)? == charpos {
                 x += if it.lnum_last > 0 { it.lnum_last } else { lnum.prefix(src.line_at(top_it.index)?).1 };
             }
             if motion::loaded(src, &it)?.is_some_and(|e| matches!(e.method, motion::Method::Vector { .. })) {
@@ -910,6 +911,7 @@ impl Leaf<'_> {
             return Err(unsupported("with a display table's faced truncation or continuation glyphs in a displayed window"));
         }
         Ok(Ctx {
+            first_visible_x: area.first_visible,
             last_visible_x: area.first_visible + area.columns - area.left_margin - area.right_margin - glyph - border,
             wrap,
             tab_width: self.tab_width()? as i64,
@@ -1034,7 +1036,8 @@ fn hosted_context(hosted: &mut Hosted<'_, '_>, mut cx: Ctx, area: &TextArea) -> 
     let glyph = hosted.source().leaf().host_line_glyph(usize::from(cx.wrap != Wrap::Truncate))?;
     let advance = if area.right_fringe > 0 { 0 } else { hosted.default_advance(glyph)?.0 };
     // Iterator x counts from the line's start, the hidden columns too.
-    cx.last_visible_x = area.first_visible * area.column + area.body_width - advance;
+    cx.first_visible_x = area.first_visible * area.column;
+    cx.last_visible_x = cx.first_visible_x + area.body_width - advance;
     Ok(cx)
 }
 
