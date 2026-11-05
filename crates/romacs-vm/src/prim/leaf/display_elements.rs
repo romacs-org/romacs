@@ -702,21 +702,28 @@ impl<'l, 'a> Source<'l, 'a> {
         }
     }
 
-    /// SPEC's stretch in a header or mode line (`Leaf::band_stretch'): a
-    /// `(space ...)' as the text's stretch is, from no buffer character (a
-    /// `:relative-width' counts a space's width); None for another display.
+    /// SPEC's stretch in a header or mode line (`Leaf::band_stretches'): a
+    /// `(space ...)' as the text's stretch is, but that it reads no buffer
+    /// character: a `:relative-width' counts a column, the band's space;
+    /// None for another display.
     pub(super) fn band_stretch(&mut self, spec: Value) -> R<Option<romacs_layout_input::StretchWidth>> {
-        let space = self.syms.space;
-        if self.leaf.pair(spec).is_none_or(|(car, _)| car != space) { return Ok(None); }
+        use romacs_layout_input::StretchWidth;
+        let s = self.syms;
+        if self.leaf.pair(spec).is_none_or(|(car, _)| car != s.space) { return Ok(None); }
+        let plist = self.leaf.pair(spec).map_or(Value::NIL, |(_, p)| p);
+        let column = self.view.column;
+        if self.plist_get(plist, s.width) == Value::NIL
+            && let Some(factor) = self.leaf.number_value(self.plist_get(plist, s.relative_width)).filter(|&f| f > 0.0) {
+            return Ok(Some(StretchWidth::Width { width: (factor * column as f64) as i64, zero_ok: false }));
+        }
         let origin = Origin { charpos: self.view.begv, string: Value::NIL, strpos: None, from_display: true, text_area: true, whitespace_under: false };
-        Ok(match self.stretch_shape(spec, origin) {
-            Ok(Shape::Stretch { width, zero_ok }) => Some(romacs_layout_input::StretchWidth::Width { width, zero_ok }),
-            Ok(Shape::Align { target }) => Some(romacs_layout_input::StretchWidth::AlignTo(target)),
-            Ok(Shape::RelativeStretch { factor, .. }) => Some(romacs_layout_input::StretchWidth::Width { width: (factor * self.view.column as f64) as i64, zero_ok: false }),
+        Ok(Some(match self.stretch_shape(spec, origin) {
+            Ok(Shape::Stretch { width, zero_ok }) => StretchWidth::Width { width, zero_ok },
+            Ok(Shape::Align { target }) => StretchWidth::AlignTo(target),
             // What the text's stretches refuse (a height of its own, physical
             // units) shows as one column, as GNU's default width is.
-            Ok(_) | Err(_) => Some(romacs_layout_input::StretchWidth::Width { width: self.view.column, zero_ok: false }),
-        })
+            Ok(_) | Err(_) => StretchWidth::Width { width: column, zero_ok: false },
+        }))
     }
 
     /// produce_stretch_glyph's width, before it depends on the x position.

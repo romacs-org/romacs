@@ -936,7 +936,12 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
                 StretchWidth::AlignTo(target) => StretchWidth::AlignTo(target + text_left as i64),
                 width => width,
             };
-            x += stretch_advance(width, f64::from(x), f64::from(x), None) as f32;
+            let advance = stretch_advance(width, f64::from(x), f64::from(x), None) as f32;
+            // Blank, but a face's lines run across it (produce_stretch_glyph).
+            if x < bounds.width && advance > 0.0 && snapshot.faces[index].decor != Default::default() {
+                frame.add_stretch(bounds.x + x, bounds.y, advance.min(bounds.width - x), bounds.height, background, id, false);
+            }
+            x += advance;
             continue;
         }
         let advance = advance(frame, id, ch, cell);

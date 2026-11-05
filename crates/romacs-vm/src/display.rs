@@ -2375,27 +2375,39 @@ impl Vm {
     /// holds computes it (`Leaf::band_stretch'). Another display shows the
     /// text.
     fn band_spaces(&mut self, root: usize, band: &mode_line::Band) -> Result<Vec<(std::ops::Range<usize>, StretchWidth)>> {
-        let mut runs: Vec<(std::ops::Range<usize>, &std::rc::Rc<Form>)> = vec![];
-        let mut props: Vec<&(std::ops::Range<usize>, mode_line::Projected)> = band.props.iter().collect();
+        let mut props: Vec<&(std::ops::Range<usize>, mode_line::Projected)> = band.props.iter()
+            .filter(|(_, projected)| projected.iter().any(|(name, _)| *name == "display")).collect();
+        if props.is_empty() { return Ok(vec![]); }
         props.sort_by_key(|(range, _)| range.start);
+        // A run is the adjacent pieces whose value is one object: a string's
+        // own property is the object it carries (split at every face or
+        // help boundary), a `:propertize''s the datum all its pieces share.
+        let identity = |vm: &mut Vm, form: &std::rc::Rc<Form>| -> Result<std::result::Result<Value, *const Form>> {
+            Ok(match &**form { Form::Object(object) => Ok(object.value(vm)?), _ => Err(std::rc::Rc::as_ptr(form)) })
+        };
+        let mut runs: Vec<(std::ops::Range<usize>, &std::rc::Rc<Form>, std::result::Result<Value, *const Form>)> = vec![];
         for (range, projected) in props {
             let Some((_, form)) = projected.iter().find(|(name, _)| *name == "display") else { continue };
+            let id = identity(self, form)?;
             match runs.last_mut() {
-                Some((last, value)) if last.end == range.start && std::rc::Rc::ptr_eq(value, form) => last.end = range.end,
-                _ => runs.push((range.clone(), form)),
+                Some((last, _, last_id)) if last.end == range.start && *last_id == id => last.end = range.end,
+                _ => runs.push((range.clone(), form, id)),
             }
         }
-        if runs.is_empty() { return Ok(vec![]); }
-        let slot = self.slot("#:vm2-band-space");
-        let mut spaces = vec![];
-        for (range, form) in runs {
-            // The value is rooted while the window's display resolves it.
-            self.slots[slot].value = self.ml_prop_value(form)?;
-            let (window, spec) = (self.slots[root].value, self.slots[slot].value);
-            if let Ok(Some(width)) = crate::prim::band_stretch(self, window, spec) { spaces.push((range, width)); }
+        // Every run's value, in one list rooted while the window's display
+        // resolves them all with its geometry read once.
+        let slot = self.slot("#:vm2-band-spaces");
+        self.slots[slot].value = Value::NIL;
+        for (_, form, _) in runs.iter().rev() {
+            let value = self.ml_prop_value(form)?;
+            let cell = self.list_value(&[value]);
+            self.cons_mut(cell)?.1 = self.slots[slot].value;
+            self.slots[slot].value = cell;
         }
+        let (window, specs) = (self.slots[root].value, self.slots[slot].value);
+        let widths = crate::prim::band_stretches(self, window, specs).unwrap_or_default();
         self.slots[slot].value = Value::UNBOUND;
-        Ok(spaces)
+        Ok(runs.into_iter().zip(widths).filter_map(|((range, _, _), width)| Some((range, width?))).collect())
     }
     fn mode_line_string(&mut self, band: &mode_line::Band, face: Value) -> Result<Value> {
         let text = &band.text;

@@ -144,18 +144,21 @@ impl Leaf<'_> {
             box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin, pixels: false, lnum }
     }
 
-    /// The stretch SPEC, a `(space ...)' display specification in WINDOW's
-    /// header or mode line, makes there, in the pixels of a window-system
-    /// frame: produce_stretch_glyph's width as calc_pixel_width_or_height
-    /// computes it for the window's text area, an `:align-to' target from
-    /// its left edge (VM2-MODE-LINE-STRETCH); None for another display.
-    pub(crate) fn band_stretch(&mut self, window: Value, spec: Value) -> std::result::Result<Option<romacs_layout_input::StretchWidth>, Fault> {
+    /// The stretch each of SPECS, a list of `(space ...)' display
+    /// specifications in WINDOW's header or mode line, makes there, in the
+    /// pixels of a window-system frame: produce_stretch_glyph's width as
+    /// calc_pixel_width_or_height computes it for the window's text area,
+    /// an `:align-to' target from its left edge (VM2-MODE-LINE-STRETCH);
+    /// None for another display. The window's geometry is read once.
+    pub(crate) fn band_stretches(&mut self, window: Value, specs: Value) -> std::result::Result<Vec<Option<romacs_layout_input::StretchWidth>>, Fault> {
         let mut area = self.windows().text_area(window, "redisplay")?;
         area.hosted = true;
         let buffer = area.buffer;
         self.with_buffer(buffer, |leaf| {
             let (begv, zv) = leaf.accessible_positions(buffer)?;
-            Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?.band_stretch(spec)
+            let specs = leaf.vm.list_values(specs).map_err(Fault::Error)?;
+            let mut source = Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?;
+            specs.into_iter().map(|spec| source.band_stretch(spec)).collect()
         })
     }
 
