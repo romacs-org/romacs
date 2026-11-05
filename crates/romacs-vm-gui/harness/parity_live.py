@@ -199,7 +199,11 @@ class Engine:
         return self
 
     def randr(self, width, height):
-        subprocess.run([f'{self.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', f'{width}x{height}'],
+        # PARITY_OUTPUT_SCALE: a HiDPI output (2 is a scale-2 display) for
+        # both engines, its mode in physical pixels.
+        scale = os.environ.get('PARITY_OUTPUT_SCALE')
+        mode = f'{width}x{height}' if not scale else f'{round(width * float(scale))}x{round(height * float(scale))}'
+        subprocess.run([f'{self.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', mode, *(['--scale', scale] if scale else [])],
                        env=self.env, check=True, timeout=15, capture_output=True)
 
     def ask(self, form, timeout=None):
@@ -248,7 +252,8 @@ class Engine:
     def output_size(self):
         mode = subprocess.run([f'{self.tools}/wlr-randr'], env=self.env, capture_output=True, text=True).stdout
         current = re.search(r'(\d+)x(\d+) px.*current', mode)
-        return (int(current[1]), int(current[2])) if current else (1280, 900)
+        scale = float(os.environ.get('PARITY_OUTPUT_SCALE') or 1)
+        return (round(int(current[1]) / scale), round(int(current[2]) / scale)) if current else (1280, 900)
 
     def perf(self):
         return subprocess.Popen(['perf', 'stat', '-x', ',', '-e', 'instructions:u', '-p', str(self.process.pid)],
