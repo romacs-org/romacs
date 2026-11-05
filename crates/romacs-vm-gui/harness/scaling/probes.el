@@ -966,6 +966,48 @@ thousandth a stack mark."
           (clrhash romacs-agent-history--descriptions)
           (romacs-agent-history-list)))
 
+;; A tool result of N characters, Unicode text: its check is native, so
+;; one character costs no Lisp call.
+(scaling-probe mcp-result-text :n 20000
+  :setup (progn (require 'romacs-mcp) (make-string n ?é))
+  :body (dotimes (_ 20) (romacs-mcp--result it nil t)))
+
+;; The usage log's work per command (a caught signal's backtrace, its
+;; error record, its slow count) with N kinds already in its slow, traced
+;; and captured tables and N timers pending: a fixed 200 commands, so any
+;; scan of them shows.
+(scaling-probe usage-log-command :n 2000 :budget 0.5
+  :setup (progn (require 'romacs-usage-log)
+                (define-error 'scaling-usage-error "Scaling usage error")
+                (setq romacs-usage-log-file (make-temp-file "scaling-usage-" nil ".jsonl"))
+                (dotimes (i n)
+                  (puthash (format "command-%d fundamental-mode" i) (vector 1 60 60 0) romacs-usage-log--slow)
+                  (puthash (format "command-%d error" i) t romacs-usage-log--traced)
+                  (puthash (format "command-%d scaling-usage-error" i) 0 romacs-usage-log--captured))
+                (dotimes (_ n) (run-at-time 3600 nil #'ignore))
+                (mapcar #'intern (scaling--names "scaling-usage" 200)))
+  :body (let ((signal-hook-function #'romacs-usage-log--signal) (romacs-usage-log-slow-loop-ms 0))
+          (setq romacs-usage-log--pending nil)
+          (dolist (command it)
+            (let ((kind (format "%s scaling-usage-error" command)))
+              (remhash kind romacs-usage-log--traced)
+              (remhash kind romacs-usage-log--captured))
+            (let ((real-this-command command) (this-command command))
+              (romacs-usage-log--pre-command)
+              (condition-case data (signal 'scaling-usage-error nil)
+                (error (romacs-usage-log--command-error data nil nil)))
+              (romacs-usage-log--post-command)
+              (romacs-usage-log--settled)))))
+
+;; A server's start prunes the session records: N kept because their
+;; processes live (pid 1), each looked at once.
+(scaling-probe usage-log-prune :n 500
+  :setup (let ((root (make-temp-file "scaling-sessions-" t)))
+           (require 'romacs-usage-log)
+           (dotimes (i n) (make-directory (expand-file-name (format "20200101T%06d-1" i) root)))
+           root)
+  :body (romacs-usage-log--prune it 50))
+
 ;; The endpoint sweep over N sessions, N routes of sessions gone, N ended
 ;; editors' sockets and N earlier builds' directories: one pass each.
 (defvar romacs-mcp--socket)
@@ -1020,6 +1062,78 @@ thousandth a stack mark."
                        (format "{\"message\":{\"id\":\"b%d\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One **file**.\"}]},\"type\":\"assistant\",\"timestamp\":\"2026-11-03T10:00:05Z\"}\n" i))))
            (list :path file :id "scaling-view" :harness 'claude :provider "claude" :cwd "/tmp" :title "view"))
   :body (kill-buffer (romacs-agent-history-open it)))
+
+;; A chat of N characters over a fixed 100 turns.
+(defun scaling--big-chat (n)
+  (scaling--agent)
+  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :title "big"
+                                     :dir temporary-file-directory))
+        (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
+    (romacs-agent-show session)
+    (dotimes (i 100)
+      (let ((seq (* 10 i)) (id (format "m%d" i)))
+        (romacs-agent-ui--render session (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
+        (romacs-agent-ui--render session (list :type 'delta :text reply :message id :seq (+ seq 2) :last t))
+        (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
+    (romacs-agent-buffer session)))
+
+;; Composer updates with N messages queued: the count is kept, not taken.
+(scaling-probe agent-chat-queue :n 2000
+  :setup (let ((session (progn (scaling--agent) (romacs-agent--make :id "scaling-queue-chat" :harness 'claude :title "queue"
+                                            :dir temporary-file-directory :state 'running))))
+           (romacs-agent-show session)
+           (dotimes (i n) (romacs-agent-send-later session (format "message %d" i)))
+           (romacs-agent-buffer session))
+  :body (with-current-buffer it (dotimes (_ 200) (romacs-agent-ui--composer-update))))
+
+;; M-p through a history of N prompts, then M-n back: each step one cell.
+(scaling-probe agent-chat-history :n 2000
+  :setup (let ((session (progn (scaling--agent) (romacs-agent--make :id "scaling-history-chat" :harness 'claude :title "history"
+                                            :dir temporary-file-directory))))
+           (romacs-agent-show session)
+           (with-current-buffer (romacs-agent-buffer session)
+             (setq romacs-agent-ui--history (scaling--names "prompt" n))
+             (goto-char (point-max))
+             (current-buffer)))
+  :body (with-current-buffer it
+          (dotimes (_ n) (romacs-agent-chat-history-previous))
+          (dotimes (_ n) (romacs-agent-chat-history-next))))
+
+;; A resize of that chat refits its 100 rules: flat in the transcript's size.
+(scaling-probe agent-chat-refit :n 100000 :k 10
+  :setup (scaling--big-chat n)
+  :body (with-current-buffer it
+          (dolist (width '(61 62 63 64 65))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; A resize of a chat of N turns refits its N rules once each: linear.
+(scaling-probe agent-chat-refit-rules :n 200
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-rules-chat" :harness 'claude :title "rules"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  (dotimes (i n)
+                    (romacs-agent-ui--render session (list :type 'input :text "p" :seq (+ (* 10 i) 1) :last t))
+                    (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ (* 10 i) 2) :last t)))
+                  (romacs-agent-buffer session)))
+  :body (with-current-buffer it
+          (dolist (width '(61 62 60 63 59))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; Keys typed into that chat's composer (with the post-command hook): flat.
+(scaling-probe agent-chat-typing :n 100000 :k 10
+  :setup (with-current-buffer (scaling--big-chat n) (goto-char (point-max)) (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (_ 50)
+            (let ((last-command-event ?a) (this-command 'romacs-agent-chat-self-insert))
+              (call-interactively #'romacs-agent-chat-self-insert)
+              (run-hooks 'post-command-hook)))
+          (dotimes (_ 10)
+            (let ((this-command 'romacs-agent-chat-backward-kill-word))
+              (call-interactively #'romacs-agent-chat-backward-kill-word)
+              (run-hooks 'post-command-hook)))))
 
 ;; A chat of N whole turns: the prompt, a streamed reply, its Markdown, the footer.
 (scaling-probe agent-chat-turns :n 100

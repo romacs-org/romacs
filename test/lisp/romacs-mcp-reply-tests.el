@@ -32,10 +32,10 @@ Return nil if the server closes the connection without replying."
 
 (ert-deftest romacs-mcp-unsendable-response-is-error-reply ()
   ;; ESC prints raw but JSON-escapes to 6 bytes: 30000 of them print to
-  ;; about 30 KB but encode to about 180 KB, over the response limit.  A raw
-  ;; byte, as in undecodable process output, cannot be encoded at all.
-  ;; Either must produce an error reply for the request, not a silent
-  ;; disconnect, and the connection must stay usable.
+  ;; about 30 KB but encode to about 180 KB, over the response limit: an
+  ;; error reply for the request, not a silent disconnect, and the
+  ;; connection stays usable.  A raw byte, as in undecodable process
+  ;; output, is sent as U+FFFD.
   (let* ((root (make-temp-file "romacs-mcp-reply-" t))
          (socket (expand-file-name "mcp" root))
          (instance (gethash "instance" (romacs-mcp-identity)))
@@ -52,15 +52,22 @@ Return nil if the server closes the connection without replying."
                         :name "romacs-mcp-reply-client" :family 'local :service socket
                         :coding 'utf-8 :noquery t
                         :filter (lambda (_ chunk) (setcar output (concat (car output) chunk)))))
-          (dolist (case (list (list 1 "romacs_eval"
-                                    (romacs-mcp--object "instance" instance
-                                                         "code" "(make-string 30000 27)"))
-                              (list 2 "raw" (romacs-mcp--object))))
-            (let ((reply (romacs-mcp-test--reply
-                          client output (apply #'romacs-mcp-test--call-line case))))
-              (should reply)
-              (should (equal (car case) (gethash "id" reply)))
-              (should (= -32603 (gethash "code" (gethash "error" reply))))))
+          (let ((reply (romacs-mcp-test--reply
+                        client output
+                        (romacs-mcp-test--call-line
+                         1 "romacs_eval"
+                         (romacs-mcp--object "instance" instance "code" "(make-string 30000 27)")))))
+            (should reply)
+            (should (equal 1 (gethash "id" reply)))
+            (should (= -32603 (gethash "code" (gethash "error" reply)))))
+          ;; A raw byte in a tool's text is U+FFFD, one for one: the result
+          ;; is sent, not refused.
+          (let ((reply (romacs-mcp-test--reply client output
+                                               (romacs-mcp-test--call-line 2 "raw" (romacs-mcp--object)))))
+            (should reply)
+            (should (equal 2 (gethash "id" reply)))
+            (should (equal (string ?a #xFFFD ?b)
+                           (gethash "text" (aref (gethash "content" (gethash "result" reply)) 0)))))
           (let ((reply (romacs-mcp-test--reply
                         client output
                         (romacs-mcp-test--call-line

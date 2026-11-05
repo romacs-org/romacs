@@ -1298,6 +1298,9 @@ pub struct Vm {
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
     idle_since: Option<std::time::Instant>,
+    /// `romacs--redisplay-since-mark': None unmarked; marked, the first
+    /// redisplay's microseconds after the mark, None until it runs.
+    redisplay_since_mark: Option<Option<u64>>,
     /// The host's `C-g', shared with its input thread (quit.rs).
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
@@ -1653,6 +1656,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     reader_trampolines,
     quit,
     force_quit_count,
+    redisplay_since_mark,
     quit_slots,
     debug_event_slots,
 } at_rest {
@@ -1753,6 +1757,7 @@ impl Vm {
             display: None,
             session_host: None,
             idle_since: None,
+            redisplay_since_mark: None,
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],

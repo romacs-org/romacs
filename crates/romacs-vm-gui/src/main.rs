@@ -1488,9 +1488,15 @@ fn evaluate(
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
-                let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else { return Ok(None) };
+                let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else {
+                    vm.redisplay_done(snapshot_start.elapsed());
+                    return Ok(None)
+                };
                 let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
+                // The evaluator's part: the frame's snapshot, layout and
+                // submission; the render thread draws it meanwhile.
+                vm.redisplay_done(snapshot_start.elapsed());
                 Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
                 if let Some((snapshot_start, snapshot_ns, presentation)) = result? {

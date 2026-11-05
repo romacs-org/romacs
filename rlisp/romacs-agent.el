@@ -103,7 +103,12 @@ not started, `outcome unknown' when it had)."
   ;; The last reply, the turns done, and messages waiting for a turn to
   ;; end: (TEXT DELIVERED VALID), DELIVERED called once TEXT reaches the
   ;; harness, and VALID, when given, asked first (nil drops the message).
-  reply (turns 0) queue queue-tail cancelled
+  reply (turns 0) queue queue-tail (queue-length 0) dispatch cancelled
+  ;; The seq of its last prompt, and whether its harness ended in the
+  ;; middle of a turn (a resume then takes that turn up again).
+  input-seq interrupted
+  ;; The seq of its last turn's real end (a done; an exit mid-turn is none).
+  (completed-seq 0)
   ;; A delegated session's turn ends its parent has not had, newest
   ;; first: (SEQ RESULT FAILED).
   ends
@@ -154,18 +159,23 @@ form, readable, and a digest of all of it, since ids made close together
           (random 65536) (random 65536) (random 65536) (random 4096)
           (logior #x8000 (random 16384)) (random 65536) (random 65536) (random 65536)))
 
+(defun romacs-agent--json (object)
+  "OBJECT as JSON text: `json-serialize' gives UTF-8 bytes, this the
+characters they encode, to put in a buffer, a string or more JSON."
+  (decode-coding-string (json-serialize object :false-object :false :null-object :null) 'utf-8))
+
 (defun romacs-agent--write-json (file object)
-  "Write OBJECT as JSON to FILE, atomically, readable only by the user."
-  (let ((temporary (concat file ".tmp")))
+  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user."
+  (let ((temporary (concat file ".tmp")) (coding-system-for-write 'utf-8-unix))
     (with-temp-file temporary
-      (insert (json-serialize object :false-object :false :null-object :null)))
+      (insert (romacs-agent--json object)))
     (set-file-modes temporary #o600)
     (rename-file temporary file t)))
 
 (defun romacs-agent--read-json (file)
   (when (file-readable-p file)
     (with-temp-buffer
-      (insert-file-contents file)
+      (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
       (ignore-errors (json-parse-buffer :object-type 'hash-table :null-object nil :false-object nil)))))
 
 ;; The endpoint harness relays reach.  A named server serves its own
@@ -234,7 +244,7 @@ earlier build."
       (let ((path (expand-file-name file (romacs-agent-dir session))))
         (when (file-readable-p path)
           (with-temp-buffer
-            (insert-file-contents path)
+            (let ((coding-system-for-read 'utf-8)) (insert-file-contents path))
             (while (re-search-forward "[^\"\\]*/session-[0-9]+/server\\.sock" nil t)
               (push (match-string 0) sockets))))))
     (delete-dups sockets)))
@@ -458,7 +468,8 @@ RESUME is non-nil."
 supervisor still runs is attached first; one whose supervisor ended says
 so: it resumes with `romacs-agent-resume'."
   (let ((connection (romacs-agent-connection session))
-        (line (concat (json-serialize (romacs-mcp--object "write" (json-serialize object :false-object :false :null-object :null)))
+        ;; The harness's line is text inside the envelope: serialized once.
+        (line (concat (json-serialize (romacs-mcp--object "write" (romacs-agent--json object)))
                       "\n")))
     (cond ((process-live-p connection) (process-send-string connection line))
           ;; A stopped supervisor leaves its socket: only a connection says it listens.
@@ -624,7 +635,7 @@ stdin; RESUME non-nil continues its thread."
   (let ((output (or (gethash "aggregated_output" item) (gethash "result" item) (gethash "error" item) "")))
     (cond ((stringp output) output)
           ((and (hash-table-p output) (gethash "content" output)) (romacs-agent--text-of (gethash "content" output)))
-          (t (json-serialize output :false-object :false :null-object :null)))))
+          (t (romacs-agent--json output)))))
 
 (defun romacs-agent--codex-item (session item completed)
   "The events of ITEM, started or COMPLETED, in SESSION's current turn."
@@ -697,7 +708,8 @@ goes on whatever becomes of this server."
                 (setf (romacs-agent-permission-mode session) (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
     ('input (setf (romacs-agent-state session) 'running
-                  (romacs-agent-turn-start session) (plist-get event :time))
+                  (romacs-agent-turn-start session) (plist-get event :time)
+                  (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
     ('approval (setf (romacs-agent-state session) 'waiting-approval))
     ('answered (setf (romacs-agent-state session) 'running))
@@ -705,14 +717,26 @@ goes on whatever becomes of this server."
                  (romacs-agent-reply session) (plist-get event :text)
                  (romacs-agent-failed session) (plist-get event :error))
            (cl-incf (romacs-agent-turns session))
-           (setf (romacs-agent-done-seq session) (or (plist-get event :seq) 0))
+           (setf (romacs-agent-done-seq session) (or (plist-get event :seq) 0)
+                 (romacs-agent-completed-seq session) (or (plist-get event :seq) 0)
+                 (romacs-agent-interrupted session) nil)
            (romacs-agent--note-end session)
            (when (plist-get event :context-window)
              (setf (romacs-agent-context-window session) (plist-get event :context-window)))
            ;; Claude's cost is the session's so far, for queries; no view shows it.
            (when (numberp (plist-get event :cost))
-             (setf (romacs-agent-cost session) (plist-get event :cost))))
+             (setf (romacs-agent-cost session) (plist-get event :cost)))
+           ;; A long-lived harness's turn ended: the first message queued
+           ;; for it is next (a per-turn one's run ends with it).
+           (when (and (romacs-agent-queue session) (not (romacs-agent--per-turn-p session))
+                      (process-live-p (romacs-agent-connection session)))
+             (run-at-time 0 nil #'romacs-agent--send-next session)))
     ('exit
+     ;; Ended with its last prompt's turn never done: cut, however many
+     ;; runs (a resumed one journals no prompt) it took.
+     (setf (romacs-agent-interrupted session)
+           (and (not (romacs-agent--per-turn-p session))
+                (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
      (unless (eq (romacs-agent-state session) 'idle)
        ;; It ended mid-turn: that turn failed.
        (setf (romacs-agent-failed session) t
@@ -736,10 +760,11 @@ goes on whatever becomes of this server."
          ;; Read with null and false kept: they are written back.
          (manifest (and (file-readable-p file)
                         (with-temp-buffer
-                          (insert-file-contents file)
+                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
                           (ignore-errors (json-parse-buffer :object-type 'hash-table
                                                             :null-object :null :false-object :false))))))
-    (when (and manifest (not (equal (gethash "title" manifest) (romacs-agent-title session))))
+    (when (and manifest (not (and (equal (gethash "title" manifest) (romacs-agent-title session))
+                                  (eq (gethash "titleAuto" manifest) :false))))
       (puthash "title" (romacs-agent-title session) manifest)
       (puthash "titleAuto" :false manifest)
       (romacs-agent--write-json file manifest))))
@@ -763,7 +788,7 @@ goes on whatever becomes of this server."
                             ((hash-table-p in) (romacs-agent--input-events session in))
                             ;; A per-turn harness's prompt, written as text.
                             ((not (eq in :absent))
-                             (list (list :type 'input :text (if (stringp in) in (json-serialize in)))))
+                             (list (list :type 'input :text (if (stringp in) in (romacs-agent--json in)))))
                             ((not (eq exit :absent)) (list (list :type 'exit :status exit))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
@@ -778,7 +803,7 @@ byte FROM (a record's start) when given."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
-        (insert-file-contents journal nil from)
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from))
         (goto-char (point-min))
         (while (not (eobp))
           (let ((record (ignore-errors
@@ -865,12 +890,51 @@ here; non-nil when that ends with the harness's exit."
 (defun romacs-agent--run-ended (session)
   "A per-turn harness's run ended: the next waiting message starts a turn."
   (when (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle))
-    (let ((next (pop (romacs-agent-queue session))))
-      (while (and next (nth 2 next) (not (funcall (nth 2 next))))
-        (setq next (pop (romacs-agent-queue session))))
-      (when next
-        (romacs-agent--turn session (car next))
-        (when (nth 1 next) (funcall (nth 1 next)))))))
+    (romacs-agent--send-next session)))
+
+(defun romacs-agent--send-next (session &optional force)
+  "Send the first message waiting for SESSION's turn to end, unless a
+turn runs again (FORCE: none can, the harness just resumed): a per-turn
+harness's starts a turn.  One dispatch at a time: a turn that ends while
+its message is being sent (a run that ends before it is attached) asks
+for the next, sent once this one is off the queue."
+  (if (romacs-agent-dispatch session)
+      (setf (romacs-agent-dispatch session) 'again)
+    (setf (romacs-agent-dispatch session) 'busy)
+    (unwind-protect
+        (let ((force force) (more t))
+          (while more
+            (setq more nil)
+            (unless (and (not force) (memq (romacs-agent-state session) '(starting running waiting-approval)))
+              (cl-flet ((drop () (pop (romacs-agent-queue session))
+                          (cl-decf (romacs-agent-queue-length session))
+                          (unless (romacs-agent-queue session) (setf (romacs-agent-queue-tail session) nil))))
+                (let ((next (car (romacs-agent-queue session))))
+                  (while (and next (nth 2 next) (not (funcall (nth 2 next))))
+                    (drop)
+                    (setq next (car (romacs-agent-queue session))))
+                  (when next
+                    ;; Taken off the queue once sent: a send that fails (the
+                    ;; harness gone meanwhile) keeps it for the next turn end
+                    ;; or resume.
+                    (if (romacs-agent--per-turn-p session)
+                        (romacs-agent--turn session (car next))
+                      (romacs-agent--line session (romacs-agent--claude-user (car next))))
+                    (drop)
+                    (when (nth 1 next) (funcall (nth 1 next)))
+                    (setq more (eq (romacs-agent-dispatch session) 'again) force nil)
+                    (setf (romacs-agent-dispatch session) 'busy)))))))
+      (setf (romacs-agent-dispatch session) nil))))
+
+(defun romacs-agent-send-later (session text &optional first)
+  "Send TEXT to SESSION once its running turn ends, now when none runs;
+FIRST puts it ahead of the messages already waiting."
+  (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
+      (romacs-agent-send session text)
+    (if (and first (romacs-agent-queue session))
+        (progn (push (list text nil nil) (romacs-agent-queue session))
+               (cl-incf (romacs-agent-queue-length session)))
+      (romacs-agent--enqueue session (list text nil nil)))))
 
 ;;; Lifecycle
 
@@ -908,6 +972,20 @@ here; non-nil when that ends with the harness's exit."
        (cl-loop for (key . name) in romacs-agent--option-keys
                 when (gethash name object) append (list key (gethash name object)))))
 
+(defconst romacs-agent--editor-variables
+  '("ROMACS_RUNTIME_ROOT" "ROMACS_LISP_DIR" "ROMACS_USAGE_LOG" "ROMACS_GUI_FONT" "ROMACS_GUI_FONT_SIZE")
+  "The editor's own launch variables: they describe this editor's run (its
+build, its usage log, its font), so no harness or command it runs
+inherits them.")
+
+(defun romacs-agent--harness-environment ()
+  "The editor's environment without its own launch variables: a list of
+its own, so a `setenv' under it never changes the editor's."
+  (copy-sequence
+   (cl-remove-if (lambda (entry)
+                   (cl-some (lambda (name) (string-prefix-p (concat name "=") entry)) romacs-agent--editor-variables))
+                 process-environment)))
+
 (defun romacs-agent--environment-arguments ()
   "systemd-run arguments giving a unit this session's environment, by
 name: systemd-run takes each value from its own environment, so none
@@ -931,15 +1009,25 @@ harness as its whole stdin."
          (default-directory (file-name-as-directory (romacs-agent-cwd session))))
     (make-directory (file-name-directory (romacs-agent-host-socket session)) t)
     (set-file-modes (file-name-directory (romacs-agent-host-socket session)) #o700)
-    (if (zerop (apply #'call-process "systemd-run" nil nil nil
+    ;; Arguments (paths, a directory) go out as UTF-8, whatever the locale:
+    ;; the supervisor reads UTF-8.  The harness gets the editor's
+    ;; environment but for the editor's own launch variables.
+    (if (zerop (let ((coding-system-for-write 'utf-8-unix)
+                     (process-environment (romacs-agent--harness-environment)))
+                 (apply #'call-process "systemd-run" nil nil nil
                       (append (list "--user" "--quiet" "--collect" (concat "--unit=" unit)
                                     "--slice=romacs-agents.slice"
                                     (concat "--working-directory=" (expand-file-name default-directory)))
                               (mapcar (lambda (p) (concat "--property=" p)) romacs-agent-unit-properties)
+                              ;; Nor from the user manager's own environment.
+                              (list (concat "--property=UnsetEnvironment="
+                                            (string-join romacs-agent--editor-variables " ")))
                               (romacs-agent--environment-arguments)
-                              (cons "--" command))))
+                              (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
-      (apply #'call-process "setsid" nil 0 nil "--fork" command)
+      (let ((coding-system-for-write 'utf-8-unix)
+            (process-environment (romacs-agent--harness-environment)))
+        (apply #'call-process "setsid" nil 0 nil "--fork" command))
       (setf (romacs-agent-unit session) nil))
     (romacs-agent--manifest session argv)))
 
@@ -1057,6 +1145,7 @@ given, then says it is no longer wanted."
            (when delivered (funcall delivered)))))
 
 (defun romacs-agent--enqueue (session item)
+  (cl-incf (romacs-agent-queue-length session))
   (let ((cell (list item)))
     (if (romacs-agent-queue session)
         (setcdr (romacs-agent-queue-tail session) cell)
@@ -1129,7 +1218,13 @@ keeps the conversation there."
   (let ((process-environment (cons "CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1" process-environment)))
     (romacs-agent--launch session (romacs-agent--claude-argv session t)))
   (setf (romacs-agent-state session) 'starting)
-  (romacs-agent--attach session 50))
+  (romacs-agent--attach session 50)
+  ;; What waited for its turn's end when the harness went goes now, unless
+  ;; the harness ended in the middle of a turn: the resumed harness takes
+  ;; that turn up again, and the queue goes at its end (a done), as known
+  ;; from how the last run ended, not from when attaching completes.
+  (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
+    (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t)))))
 
 ;;; One question
 

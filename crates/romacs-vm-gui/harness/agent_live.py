@@ -34,6 +34,15 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  logging    a server keeps its own session record: errors with their
+             functions, slow commands, its end.
+  home_keys  RET on the home page's other lines, real keys: a project
+             opens its newest, "more" shows every transcript, the help
+             line says how to reach a row.
+  environment  a harness sees none of the editor's own launch variables.
+  unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
+             through prompts, replies, the journal, titles, tools, Codex
+             and history.
   launcher   an editor started with no --server, restarted with its
              sessions detached: the next one serves the same agents'
              endpoint at once, sessions pinned to an ended editor's
@@ -1185,6 +1194,190 @@ def launcher(args, base):
         a.close()
 
 
+UNICODE = 'it’s café 中文 😀 é ok'
+
+
+def unicode(args, base):
+    """Non-ASCII through every boundary of a session: the prompt (’, é,
+    CJK, emoji, a combining mark) to the harness and its reply, the
+    journal, the chat and its title, the manifest after a restart, a tool's
+    input and output, a buffer read with a raw byte in it (its byte written
+    out, the rest intact, not the whole result refused), a Codex turn, and a
+    harness transcript imported from history."""
+    a = Agents(args, base, 'uc')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        sid = a.start(f'say {UNICODE}')
+        a.idle(sid)
+        chat = a.chat(sid)
+        journal = a.journal(sid)
+        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict)), {})
+        sent_text = (sent.get('message') or {}).get('content')
+        results = a.results(sid)
+        title = a.eval(f'(romacs-agent-title {a.s(sid)})')
+        buffer_name = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        # A tool's input and output.
+        a.send(sid, 'call romacs_eval ' + json.dumps({'instance': '?', 'code': f'(concat "{UNICODE}")'}))
+        a.idle(sid)
+        evaluated = a.tool_results()[-1]
+        # A raw byte in a buffer a tool reads.
+        a.eval('(with-current-buffer (get-buffer-create "raw") (erase-buffer) '
+               f'(insert "a" (unibyte-string 255) "b {UNICODE}") t)')
+        a.send(sid, 'call romacs_buffer_read ' + json.dumps({'instance': '?', 'name': 'raw', 'start': 1, 'maxChars': 100}))
+        a.idle(sid)
+        read = a.tool_results()[-1]
+        chat_after = a.chat(sid)
+        # A session in a non-ASCII directory, the editor's locale Latin-1:
+        # the harness starts there all the same.
+        odd = a.work / 'caf\u00e9-w\u00f6rk'
+        odd.mkdir()
+        other = a.eval(f'(let ((locale-coding-system (quote latin-1)) (default-process-coding-system (quote (latin-1 . latin-1)))) '
+                       f'(romacs-agent-id (romacs-agent-start {lisp_text(str(odd))} "say ok")))').strip('"')
+        a.idle(other)
+        started_in = next((e.get('cwd') for e in a.logged() if e.get('started') == other), None)
+        # A Codex turn.
+        a.codex_instance()
+        codex = a.start(f'say {UNICODE}', 'codex')
+        a.idle(codex)
+        codex_reply = a.eval(f'(romacs-agent-reply {a.s(codex)})')
+        # The manifest's title after a restart.
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        a.restart()
+        title_again = a.eval(f'(romacs-agent-title {a.s(sid)})')
+        # A transcript in the harness's history with non-ASCII.
+        claude_dir = a.home / '.config/claude/acct'
+        cid = '33333333-4444-4555-8666-777777777777'
+        project = claude_dir / 'projects' / str(a.work).replace('/', '-')
+        project.mkdir(parents=True)
+        (project / f'{cid}.jsonl').write_text(json.dumps(
+            {'type': 'user', 'isSidechain': False, 'cwd': str(a.work), 'timestamp': '2026-11-04T10:00:00Z',
+             'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
+            encoding='utf-8')
+        a.providers([('claude', claude_dir)])
+        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) '
+                                              '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
+                                            f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
+                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
+        result = {'chat': chat[:300], 'sent': sent_text, 'results': results, 'title': title, 'buffer': buffer_name,
+                  'evaluated': evaluated, 'read': read, 'codex_reply': codex_reply, 'title_again': title_again,
+                  'listed': listed, 'view': (view or '')[:200], 'started_in': started_in}
+        result['ok'] = (f'> say {UNICODE}' in chat and UNICODE in chat.split(f'> say {UNICODE}', 1)[1]
+                        and sent_text == f'say {UNICODE}' and results and results[0] == UNICODE
+                        and UNICODE in title and UNICODE in buffer_name
+                        and UNICODE in evaluated[1] and not evaluated[2]
+                        and json.loads(read[1])['text'] == 'a\ufffdb ' + UNICODE and not read[2]
+                        and started_in == str(odd)
+                        and UNICODE in chat_after.split('romacs_eval', 1)[1]
+                        and UNICODE in codex_reply and UNICODE in title_again
+                        and any(UNICODE in t for t in listed) and f'> {UNICODE}' in (view or ''))
+        return result
+    finally:
+        a.close()
+
+
+def environment(args, base):
+    """A harness gets the editor's environment but for the editor's own
+    launch variables (its build, its usage log, its font): a session's
+    harness, after they are set in the editor, sees none of them, and
+    sees the editor's other variables."""
+    a = Agents(args, base, 'ev')
+    try:
+        a.up()
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/gnu-lisp',
+                  'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
+                  'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
+        a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in launch.items()) + ' t)')
+        sid = a.start('say ready')
+        a.idle(sid)
+        seen = next(e.get('env', {}) for e in a.logged() if e.get('started') == sid)
+        # A command the agent's own evaluation starts in the editor.
+        a.send(sid, 'call romacs_eval ' + json.dumps(
+            {'instance': '?', 'code': '(shell-command-to-string "env | grep ^ROMACS_ | sort")'}))
+        a.idle(sid)
+        from_eval = a.tool_results()[-1][1]
+        # The unit unsets them even from the user manager's environment.
+        unit = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
+        unset = subprocess.run(['systemctl', '--user', 'show', '-p', 'UnsetEnvironment', unit],
+                               capture_output=True, text=True).stdout.strip() if unit != 'nil' else 'no unit'
+        result = {'harness_romacs_env': seen, 'eval_env': from_eval, 'unit_unset': unset}
+        result['ok'] = (not any(k in seen for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
+                        and seen.get('ROMACS_AGENT_TEST_KEPT') == 'kept'
+                        and not any(k in from_eval for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')
+                        and 'ROMACS_AGENT_TEST_KEPT' in from_eval
+                        and (unset == 'no unit' or all(k in unset for k in launch if k != 'ROMACS_AGENT_TEST_KEPT')))
+        return result
+    finally:
+        a.close()
+
+
+def logging(args, base):
+    """A server whose environment names no usage log keeps its own session
+    record, as the launcher keeps a session's: STATE/romacs/sessions/
+    START-PID/ with usage.jsonl and session.json.  An error a real key
+    causes is logged with the functions its signal went through (first of
+    its kind), a command slow in its command loop has its slow record, as
+    does one fast itself whose redisplay is slow (the host's time of it), a
+    stop writes the record's end, and the unit's end (`--server-exited',
+    as systemd runs it for this invocation) fills how it exited in."""
+    a = Agents(args, base, 'lg', env_extra={'INVOCATION_ID': 'live-logging-1'})
+    try:
+        a.up()
+        sessions = a.home / '.local/state/romacs/sessions'
+        until(lambda: any(sessions.glob('*/session.json')), 20, 'the session record')
+        directory = next(sessions.glob('*/session.json')).parent
+        a.keyboard_ready()
+        time.sleep(1.5)
+
+        # A command that fails and one that is slow, on keys (M-: would
+        # enter the debugger, as `eval-expression-debug-on-error' asks).
+        a.eval('(progn (defun logging-live-fail () (interactive) (car 1)) '
+               '(defun logging-live-slow () (interactive) (sleep-for 0.15)) '
+               '(global-set-key (kbd "<f9>") (function logging-live-fail)) '
+               '(global-set-key (kbd "<f8>") (function logging-live-slow)) '
+               # Fast itself; the redisplay after it slow (its header
+               # line's :eval spins 80 ms, once).
+               '(defvar logging-live-spin 0) '
+               '(defun logging-live-spin () (let ((end (+ (float-time) (/ logging-live-spin 1000.0)))) '
+               '(setq logging-live-spin 0) (while (< (float-time) end))) "spun") '
+               '(defun logging-live-paint () (interactive) (setq logging-live-spin 80) '
+               '(setq header-line-format (list (list :eval (list (quote logging-live-spin)))))) '
+               '(global-set-key (kbd "<f7>") (function logging-live-paint)) t)')
+        for key in ('F9', 'F9', 'F8', 'F7'):
+            a.keys('-k', key)
+            time.sleep(1)
+        a.eval('(progn (romacs-usage-log-flush) t)')
+        lines = [json.loads(line) for line in (directory / 'usage.jsonl').read_text().splitlines()]
+        errors = [l for l in lines if l.get('kind') == 'error' and l.get('command') == 'logging-live-fail']
+        slow = [l for l in lines if l.get('kind') == 'slow' and l.get('command') == 'logging-live-slow']
+        painted = [l for l in lines if l.get('kind') == 'slow' and l.get('command') == 'logging-live-paint']
+        started = json.loads((directory / 'session.json').read_text())
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        own_end = json.loads((directory / 'session.json').read_text())
+        subprocess.run([args.romacs, '--server-exited', a.name], check=True, timeout=30,
+                       env={**a.env, 'INVOCATION_ID': 'live-logging-1', 'SERVICE_RESULT': 'success',
+                            'EXIT_CODE': 'exited', 'EXIT_STATUS': '0'})
+        ended = json.loads((directory / 'session.json').read_text())
+        result = {'directory': directory.name, 'errors': errors, 'slow': slow, 'painted': painted,
+                  'started': {k: started.get(k) for k in ('pid', 'server', 'start', 'end')},
+                  'ended': {k: ended.get(k) for k in ('end', 'seconds', 'status')}}
+        result['ok'] = (len(errors) == 2 and isinstance(errors[0].get('backtrace'), list)
+                        and 'logging-live-fail' in errors[0]['backtrace'] and 'backtrace' not in errors[1]
+                        and slow and slow[0]['max'] >= 150 and slow[0]['ms'] >= 150
+                        and painted and painted[0]['ms'] < 50 and painted[0]['redisplay_ms'] >= 80
+                        and painted[0]['max'] >= 80
+                        and started.get('server') == a.name and 'end' not in started
+                        and isinstance(own_end.get('end'), (int, float)) and 'status' not in own_end
+                        and ended.get('end') == own_end['end'] and ended.get('status') == 0
+                        and ended.get('service', {}).get('result') == 'success')
+        return result
+    finally:
+        a.close()
+
+
 def composer_real(args, base):
     """`composer' with a real Claude Code (--claude-model): costs money."""
     return composer(args, base, real=True)
@@ -1279,6 +1472,85 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
+        # emacs-hermes's chat keys and its actions menu, with real keys.
+        ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
+        popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
+        good.append(cleared('composer cleared for keys'))
+        a.keys('a'); a.keys(*ctrl('j')); a.keys('b')
+        good.append(typed('newline', '', 'a\nb'))
+        a.keys(*ctrl('c'), *ctrl('o'))
+        try:
+            until(popup, 10, 'the actions menu')
+            steps['menu_opened'] = True
+        except RuntimeError:
+            steps['menu_opened'] = False
+        a.keys('R')
+        until(lambda: a.eval('(and (active-minibuffer-window) t)') == 't', 10, 'the rename prompt')
+        a.keys(*ctrl('a'), *ctrl('k'))
+        a.keys('menu title')
+        a.keys('-k', 'Return')
+        until(lambda: a.eval(f'(romacs-agent-title {a.s(sid)})') == '"menu title"', 10, 'renamed from the menu')
+        steps['renamed'] = a.eval(f'(buffer-name (romacs-agent-buffer {a.s(sid)}))')
+        good.append(steps['menu_opened'] and 'menu title' in steps['renamed'])
+        a.eval(f'(with-current-buffer {chat} (delete-region romacs-agent-ui--end (point-max)))')
+        # A message queued while a turn runs is sent when it ends.
+        a.keys('slow 30'); a.keys('-k', 'Return')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the slow turn')
+        a.keys('say queued one'); a.keys(*ctrl('c'), *ctrl('q'))
+        steps['queued_composer'] = look()[0]
+        until(lambda: 'queued one' in a.chat(sid).split('> say queued one', 1)[-1] and '> say queued one' in a.chat(sid),
+              40, 'the queued message sent after the turn')
+        a.idle(sid)
+        good.append(steps['queued_composer'] == '')
+        # Interrupt and send: the turn ends, then the composer's text is sent.
+        a.keys('slow 200'); a.keys('-k', 'Return')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'the long turn')
+        a.keys('say after interrupt'); a.keys(*ctrl('c'), *ctrl('k'))
+        until(lambda: '> say after interrupt' in a.chat(sid), 30, 'sent after the interrupt')
+        a.idle(sid)
+        steps['interrupted_then_sent'] = 'after interrupt' in a.chat(sid).split('> say after interrupt', 1)[-1]
+        good.append(steps['interrupted_then_sent'])
+        # M-p / M-n walk the composer's history; ? in the transcript opens the
+        # menu, C-g closes it; w copies the turn at point.
+        a.keys('-M', 'alt', '-k', 'p', '-m', 'alt')
+        good.append(typed('history_previous', '', 'say after interrupt'))
+        good.append(cleared('composer cleared for transcript keys'))
+        a.keys('-M', 'alt', '<', '-m', 'alt')
+        a.keys('?')
+        try:
+            until(popup, 10, 'the menu from the transcript')
+            steps['menu_from_transcript'] = True
+        except RuntimeError:
+            steps['menu_from_transcript'] = False
+        a.keys(*ctrl('g'))
+        until(lambda: not popup(), 10, 'the menu closed')
+        a.keys('w')
+        steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+        good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
+        a.keys('-M', 'alt', '>', '-m', 'alt')
+        # The queue is the session's: sent though the chat buffer is gone, and
+        # after a Codex turn an interrupt ended (its run exits, no result).
+        a.send(sid, 'slow 30')
+        until(lambda: a.state(sid) in ('running', 'starting'), 10, 'a turn to queue behind')
+        a.eval(f'(progn (romacs-agent-send-later {a.s(sid)} "say queued unseen") '
+               f'(let ((kill-buffer-query-functions nil)) (kill-buffer (romacs-agent-buffer {a.s(sid)}))) t)')
+        until(lambda: 'queued unseen' in (a.results(sid) or [''])[-1], 40, 'the queued message sent with no chat')
+        a.idle(sid)
+        a.eval(f'(progn (save-window-excursion (romacs-agent-show {a.s(sid)})) '
+               f'(delete-other-windows) (switch-to-buffer (romacs-agent-buffer {a.s(sid)})) (goto-char (point-max)) t)')
+        a.codex_instance()
+        codex = a.start('slow 30', 'codex')
+        until(lambda: a.state(codex) in ('running', 'starting'), 15, 'a Codex turn')
+        a.eval(f'(progn (romacs-agent-send-later {a.s(codex)} "say queued codex") (romacs-agent-interrupt {a.s(codex)}) t)')
+        until(lambda: 'queued codex' in str(a.eval(f'(romacs-agent-reply {a.s(codex)})')), 40, 'the Codex queue after an interrupt')
+        steps['queue_survives'] = True
+        a.providers([('claude', '~/.claude')])
+        # Non-ASCII typed with real keys, then sent: the harness gets it whole.
+        good.append(cleared('composer cleared for unicode'))
+        good.append(typed('unicode_typed', f'say {UNICODE}'))
+        turn('unicode')
+        steps['unicode_sent'] = UNICODE in a.chat(sid).rsplit(f'> say {UNICODE}', 1)[-1]
+        good.append(steps['unicode_sent'])
         good.append(cleared('composer cleared for selection'))
         # With delete-selection-mode, a selection in the composer is
         # replaced by a typed key, as anywhere.
@@ -1319,12 +1591,13 @@ def composer(args, base, real=False):
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
         # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer; M-> from there reaches it too.
+        # there goes to the composer (SPC there scrolls, as in hermes's
+        # chat); M-> from there reaches it too.
         a.keys('-M', 'alt', '<', '-m', 'alt')
-        good.append(typed('typed_in_transcript', ' sixth', 'third fourth fifth sixth'))
+        good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
         a.keys('-M', 'alt', '<', '-m', 'alt')
         a.keys('-M', 'alt', '>', '-m', 'alt')
-        good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth sixth seventh'))
+        good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
         # A session started from the home page with c, its prompt typed in
         # the minibuffer: its chat is shown, and its composer takes keys.
@@ -1598,6 +1871,89 @@ def real(args, base):
         a.close()
 
 
+def home_keys(args, base):
+    """RET on the home page's lines that are no row, as real keys: on a
+    project, its newest session (by last activity, not by start, a
+    delegated one too) or, with
+    none, its newest transcript opens; on "◇ N more", every transcript is
+    shown; elsewhere a hint says n and p reach a row, and nothing opens; a
+    project whose newest session is gone since the page was drawn says so
+    and draws it again."""
+    a = Agents(args, base, 'hk')
+    try:
+        a.up()
+        claude_dir, codex_home = a.home / '.config/claude/acct', a.home / '.config/codex-acct'
+        a.work.mkdir(parents=True, exist_ok=True)
+        transcripts = a.root / 'transcripts'
+        transcripts.mkdir()
+        cid, tid = history_fixtures(claude_dir, codex_home, transcripts)
+        claude_file = next((claude_dir / 'projects').rglob(f'{cid}.jsonl'))
+        codex_file = next(codex_home.rglob(f'*{tid}.jsonl'))
+        now = time.time()
+        os.utime(claude_file, (now - 100, now - 100))
+        os.utime(codex_file, (now - 50, now - 50))
+        a.providers([('claude', claude_dir), ('codex', codex_home, CODEX, [])])
+        sids = []
+        for prompt in ('say one', 'say two', 'say three'):
+            sid = a.start(prompt)
+            until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 30, f'{prompt} answered')
+            a.idle(sid)
+            sids.append(sid)
+        # The third, delegated by the first (its row under the first's), is
+        # the most recently active; then the second.
+        a.eval(f'(progn (setf (romacs-agent-options {a.s(sids[2])}) '
+               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) t)')
+        for sid, at in zip(sids, (now - 30, now - 20, now - 10)):
+            a.eval(f'(progn (setf (romacs-agent-last-time {a.s(sid)}) {at}) t)')
+        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) (romacs-agents) '
+               '(delete-other-windows) t)')
+        a.keyboard_ready()
+        shown = lambda: a.eval('(buffer-name (window-buffer (selected-window)))').strip('"')
+        # The session whose chat the selected window shows, if any.
+        showing = lambda: parity_live.read_sexp(a.eval(
+            '(with-current-buffer (window-buffer (selected-window)) '
+            '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
+
+        def ret_on(regexp):
+            """Point to the home page's line REGEXP matches; RET there."""
+            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+                   f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
+            a.keys('-k', 'Return')
+            time.sleep(1)
+
+        steps = {}
+        ret_on('^transcripts  ')
+        steps['project_without_session'] = parity_live.read_sexp(a.eval(
+            '(with-current-buffer (window-buffer (selected-window)) '
+            '(list buffer-read-only (plist-get romacs-agent-history--item :path)))'))
+        ret_on('^work  ')
+        steps['project_with_session'] = showing()
+        steps['nested'] = parity_live.read_sexp(a.eval(
+            f'(mapcar (function romacs-agent-id) (gethash {lisp_text(sids[0])} (cdr (romacs-agent-ui--tree))))'))
+        ret_on('◇ [0-9]+ more')
+        steps['more'] = [shown(), a.eval('romacs-agents--all-history'),
+                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search "more  (h shows all)" (buffer-string)) t))')]
+        ret_on('^RET open')
+        steps['help_line'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
+        # The newest session forgotten after the page was drawn.
+        a.eval(f'(progn (remhash {lisp_text(sids[2])} romacs-agent--sessions) t)')
+        ret_on('^work  ')
+        steps['gone'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
+        ret_on('^work  ')
+        steps['after_gone'] = showing()
+        result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
+        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file)]
+                        and steps['project_with_session'] == sids[2] and steps['nested'] == [sids[2]]
+                        and steps['more'] == ['*romacs-agents*', 't', 'nil']
+                        and steps['help_line'][0] == '*romacs-agents*'
+                        and 'n and p' in (steps['help_line'][1] or '')
+                        and steps['gone'][0] == '*romacs-agents*' and 'gone' in (steps['gone'][1] or '')
+                        and steps['after_gone'] == sids[1])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -1654,7 +2010,8 @@ def history_real(args, base):
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
-             'composer-real': composer_real, 'launcher': launcher}
+             'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys}
 
 
 def main():
@@ -1676,7 +2033,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
