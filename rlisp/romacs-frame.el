@@ -334,6 +334,122 @@ continues.  STUFFSTRING has nowhere to go: Romacs has no terminal input."
   (run-hooks 'suspend-resume-hook)
   nil)
 
+;;;; fontset.c over the leaves in prims/fontset.rs.
+
+(defvar fontset-alias-alist
+  (list (cons "-*-*-*-*-*-*-*-*-*-*-*-*-fontset-default" "fontset-default"))
+  "Alist of fontset names vs the aliases.")
+
+(defvar use-default-font-for-symbols t
+  "If non-nil, use the default face's font for symbols and punctuation.
+By default, Emacs will try to use the default face's font for
+displaying symbol and punctuation characters, disregarding the
+fontsets, if the default font can display the character.
+Set this to nil to make Emacs honor the fontsets instead.")
+
+(put 'fontset-info 'char-table-extra-slots 1)
+
+(defun set-fontset-font (fontset characters font-spec &optional frame add)
+  "Modify FONTSET to use font specification in FONT-SPEC for displaying CHARACTERS.
+
+FONTSET should be a fontset name (a string); or nil, meaning the
+fontset of FRAME; or t, meaning the default fontset.
+
+CHARACTERS may be a single character, a cons (FROM . TO), a script
+symbol, a charset symbol, or nil for any character for which no
+font-spec is specified in FONTSET.
+
+FONT-SPEC may be a font-spec object, a cons (FAMILY . REGISTRY), a
+font name string, or nil, which explicitly specifies that there's no
+font for CHARACTERS.
+
+ADD, if non-nil, specifies how to add FONT-SPEC to the previously set
+font specifications for CHARACTERS: `prepend' or `append'.  By default,
+FONT-SPEC overwrites the previous settings."
+  (when (romacs--set-fontset-font fontset characters font-spec frame add)
+    (romacs--set-default-font font-spec frame))
+  nil)
+
+(defun romacs--set-default-font (font-spec frame)
+  "Make FONT-SPEC, as `set-fontset-font' takes it, FRAME's ASCII font.
+The default face is what paints ASCII, so its attributes change, each one
+FONT-SPEC names; the frame keeps its fontset."
+  (let* ((spec (cond ((consp font-spec) (font-spec :family (car font-spec)))
+                     ((stringp font-spec) (font-spec :name font-spec))
+                     (t font-spec)))
+         (attributes
+          (mapcan (lambda (key)
+                    (let ((value (font-get spec key)))
+                      (when value
+                        (list key (if (eq key :family) (symbol-name value) value)))))
+                  '(:family :weight :slant :width))))
+    (when attributes
+      (apply #'set-face-attribute 'default (or frame (selected-frame)) attributes))))
+
+(defun romacs--fontset-info-table (table runs)
+  "Fill the char-table TABLE from RUNS, (FALLBACK (FROM TO . ALIST) ...)."
+  (when (car runs) (set-char-table-range table nil (car runs)))
+  (dolist (run (cdr runs))
+    (set-char-table-range table (cons (car run) (cadr run)) (cddr run))))
+
+(defun fontset-info (fontset &optional frame)
+  "Return information about a fontset FONTSET on frame FRAME.
+
+FONTSET is a fontset name string, nil for the fontset of FRAME, or t
+for the default fontset.  FRAME nil means the selected frame.
+
+The value is a char-table whose elements have this form:
+
+    ((FONT OPENED-FONT ...) ...)
+
+FONT is a name of font specified for a range of characters.
+
+OPENED-FONT is a name of a font actually opened.
+
+The char-table has one extra slot.  If FONTSET is not the default
+fontset, the value the extra slot is a char-table containing the
+information about the derived fonts from the default fontset.  The
+format is the same as above."
+  (let ((runs (romacs--fontset-info fontset frame))
+        (table (make-char-table 'fontset-info)))
+    (romacs--fontset-info-table table (car runs))
+    (when (cdr runs)
+      (let ((shared (make-char-table nil)))
+        (romacs--fontset-info-table shared (cdr runs))
+        (set-char-table-extra-slot table 0 shared)))
+    table))
+
+(defun x-list-fonts (pattern &optional _face frame maximum _width)
+  "Return a list of the names of available fonts matching PATTERN.
+If optional arguments FACE and FRAME are specified, return only fonts
+the same size as FACE on FRAME.  MAXIMUM limits the number of names."
+  (mapcar (lambda (font) (font-xlfd-name font))
+          (list-fonts (font-spec :name pattern) frame maximum)))
+
+(defun romacs--make-default-fontsets ()
+  "The default fontset's rules and the standard fontset."
+  (create-default-fontset)
+  (create-fontset-from-fontset-spec standard-fontset-spec t))
+
+(defun romacs--setup-fontsets ()
+  "What a window system's initialization does for fontsets: the default
+fontset's rules, the standard fontset, and the frame's own fontset from its
+font (fontset_from_font)."
+  (unless (romacs--unstage-fontsets)
+    (romacs--make-default-fontsets))
+  (let* ((font (frame-parameter nil 'font))
+         (spec (font-spec :name font))
+         (registry (font-get spec :registry))
+         (target (let ((encoding (romacs--font-encoding (symbol-name registry))))
+                   (let ((charset (if (consp encoding) (cdr encoding) encoding)))
+                     (if (charsetp charset) charset 'latin))))
+         (rule (font-spec :registry registry)))
+    (font-put spec :registry 'fontset-startup)
+    (let ((name (font-xlfd-name spec nil t)))
+      (romacs--make-frame-fontset name (list "fontset-startup" (downcase font)) font)
+      (romacs--set-fontset-font name target rule)
+      (romacs--set-fontset-font name nil rule))))
+
 ;;;; frame.el: background mode.
 
 (defun frame--current-background-mode (frame)

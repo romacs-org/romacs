@@ -1586,6 +1586,29 @@ mod leaf {
                 position => Ok(position),
             }
         }
+        /// The fontset registry.
+        pub fn fontsets(&self) -> &crate::fontsets::Registry { &self.vm.display_state.fontsets }
+        pub fn fontsets_mut(&mut self) -> &mut crate::fontsets::Registry { &mut self.vm.display_state.fontsets }
+        /// What painting reads, the host brought up to date.
+        pub fn fontset_state(&mut self) -> std::sync::Arc<romacs_layout_input::FontsetState> { self.vm.fontset_state() }
+        /// free_realized_fontsets: rules changed, so what was resolved from
+        /// them goes, and every window lays out again.
+        pub fn note_fontset_change(&mut self) {
+            self.vm.fontset_state();
+            self.clear_face_cache();
+        }
+        pub fn char_table_edits(&self, table: Value) -> std::result::Result<u64, Fault> {
+            self.vm.char_table_edits(table).map_err(Fault::Error)
+        }
+        /// TABLE's runs of one value, in character order.
+        pub fn char_table_runs(&self, table: Value) -> std::result::Result<Vec<(u32, u32, Value)>, Fault> {
+            self.vm.char_table_runs(table).map_err(Fault::Error)
+        }
+        /// Fset or Fset_default of a plain global variable.
+        pub fn set_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
+            let symbol = self.intern(name);
+            self.variable_set(symbol, value)
+        }
         /// SYMBOL, an alias, made plain and void.
         pub fn delete_variable_alias(&mut self, symbol: Value) {
             if let Some(slot) = symbol.index_if(7).and_then(|n| n.checked_sub(1)) { self.vm.delete_variable_alias(slot); }

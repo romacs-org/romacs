@@ -419,5 +419,10 @@ definitions (`romacs--world-reseed-all')."
 (require 'romacs-theme)
 (romacs-theme-start)
 
+;; The default fontsets are data for the window system's initialization
+;; (`romacs--setup-fontsets'), made once here so no launch pays for them.
+(romacs--make-default-fontsets)
+(romacs--stage-fontsets)
+
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

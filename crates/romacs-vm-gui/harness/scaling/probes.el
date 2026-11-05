@@ -1628,6 +1628,39 @@ thousandth a stack mark."
           (while (jabber-xml-parse-next-stanza)
             (delete-region (point-min) (point)))))
 
+;;;; Fontsets (fontsets.rs, romacs_layout_input::fontset)
+
+;; Each edit publishes, so a snapshot holds what the next edit touches, as
+;; one edit per redisplay does: N disjoint rules, N alternatives on one
+;; range, N fontsets each found by name, and an edit and a lookup among N
+;; unrelated rules, N unrelated fontsets.
+(defvar scaling--fontset-serial 0)
+(defun scaling--fontset-name ()
+  (format "-misc-fixed-medium-r-normal--0-0-0-0-c-0-fontset-p%d"
+          (setq scaling--fontset-serial (1+ scaling--fontset-serial))))
+
+(scaling-probe fontset-disjoint-rules :n 2000
+  :setup (new-fontset (scaling--fontset-name) nil)
+  :body (dotimes (i n) (set-fontset-font it (+ #x10000 (* 2 i)) "X")))
+
+(scaling-probe fontset-alternatives :n 2000
+  :setup (new-fontset (scaling--fontset-name) nil)
+  :body (dotimes (_ n) (set-fontset-font it '(#x370 . #x3ff) "X" nil 'prepend)))
+
+(scaling-probe fontset-registration :n 1000
+  :setup nil
+  :body (dotimes (_ n) (fontset-font (new-fontset (scaling--fontset-name) nil) ?a)))
+
+(scaling-probe fontset-edit-among-rules :n 2000
+  :setup (let ((name (new-fontset (scaling--fontset-name) nil)))
+           (dotimes (i n) (set-fontset-font name (+ #x10000 (* 2 i)) "X"))
+           name)
+  :body (dotimes (_ 200) (set-fontset-font it ?Ж "Y") (fontset-font it ?Ж)))
+
+(scaling-probe fontset-edit-among-fontsets :n 1000
+  :setup (let ((name nil)) (dotimes (_ n) (setq name (new-fontset (scaling--fontset-name) nil))) name)
+  :body (dotimes (_ 200) (set-fontset-font it ?Ж "Y") (fontset-font it ?Ж)))
+
 ;; `libxml-parse-xml-region' (crate::xml_read's document reader): N sibling
 ;; elements, N attributes on one, N declared entities each referred to, and
 ;; a run of N comments before the root: each stays linear in the document.

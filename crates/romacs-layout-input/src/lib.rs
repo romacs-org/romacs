@@ -1,6 +1,8 @@
 //! Seam L: owned layout input. No evaluator, heap reference or glyph matrix.
 use std::ops::Range;
 pub mod cluster;
+pub mod fontset;
+pub use fontset::{Alternative, Alternatives, FontDef, Fontset, FontsetMode, FontsetState, FontsetTarget, OpenedDefFont, OtfSpec};
 
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +85,8 @@ impl FontAlternativeState {
 pub struct FrameSnapshot {
     pub font_selection: FontSelectionState,
     pub font_alternatives: FontAlternativeState,
+    /// The fontsets characters resolve through.
+    pub fontsets: std::sync::Arc<FontsetState>,
     pub width: u32,
     pub height: u32,
     pub windows: Vec<PlacedWindowSnapshot>,
@@ -148,6 +152,7 @@ impl FrameSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
+            && self.fontsets == other.fontsets
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
             && self.status_bar == other.status_bar
@@ -794,6 +799,7 @@ pub fn stretch_advance(width: StretchWidth, x: f64, line_x: f64, last_visible_x:
 pub struct MeasureInput {
     pub font_selection: FontSelectionState,
     pub font_alternatives: FontAlternativeState,
+    pub fontsets: std::sync::Arc<FontsetState>,
     pub faces: Vec<Face>,
     pub text: TextSlice,
     /// How a character no font has a glyph for shows, as the frame's.

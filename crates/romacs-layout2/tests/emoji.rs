@@ -24,14 +24,14 @@ fn lay_out_in(text: TextSlice, point_byte: usize, width: u32, faces: Vec<Face>) 
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(),
         tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         text, faces };
-    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 100,
+    let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 100,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: window }], background_alpha: 1.0, children: vec![], tab_bar: None,
         chrome: Default::default(), status_bar: None, no_font: Default::default() };
     LayoutEngine::new().unwrap().layout_frame(&frame, 1, Some((1, Color::from_pixel(0xffffff)))).unwrap().0
 }
 
 fn measured(text: &str) -> Vec<u32> {
-    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), faces: vec![face()], text: slice(text), no_font: Default::default() };
+    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), faces: vec![face()], text: slice(text), no_font: Default::default() };
     LayoutEngine::new().unwrap().measure(&input).unwrap().glyphs.iter().map(|g| g.0).collect()
 }
 

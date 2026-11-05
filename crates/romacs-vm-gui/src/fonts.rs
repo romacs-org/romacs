@@ -3,7 +3,7 @@
 //! and the fonts Lisp lists, opens and asks about are the ones painting
 //! draws with. A character's font is resolved as layout resolves it: the
 //! face's family at its pixel size, with no fontset of its own.
-use romacs_font::{FontRequest, FontResolver, FontsetPolicy, entity};
+use romacs_font::{FontRequest, FontResolver, entity};
 use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
@@ -31,7 +31,6 @@ pub mod residency;
 
 pub struct Display {
     resolver: FontResolver,
-    policy: FontsetPolicy,
     /// Opened faces by file, index and pixel size, and characters' fonts by
     /// family, pixel size and character: `frame-parameters' asks for the
     /// frame's font each time.
@@ -112,7 +111,7 @@ impl Worker {
 
 impl Display {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, policy: FontsetPolicy::new(),
+        Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
                   opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
@@ -212,7 +211,7 @@ impl Display {
         // The request painting makes (romacs-layout2 `font_request').
         let slant = if face.italic { romacs_display_protocol::font::FontSlantKind::Italic } else { romacs_display_protocol::font::FontSlantKind::Normal };
         let request = FontRequest { weight: face.weight, slant, width: face.width, ..FontRequest::new(&face.family, face.pixel_size) };
-        let resolved = self.resolver.resolve_char(&request, ch, &self.policy).ok()?;
+        let resolved = self.resolver.resolve_char(&request, ch).ok()?;
         let file = resolved.font.identity.file_path.clone()?;
         let index = resolved.font.identity.freetype_selector()?;
         let entity = entity::find(&resolved.font.family, &file, index).map(font_entity)?;
@@ -275,6 +274,14 @@ impl romacs_vm::DisplayHost for Display {
         let found = self.char_font_uncached(face, ch);
         self.chars.insert(key, found.clone());
         found
+    }
+    fn set_fontsets(&mut self, state: std::sync::Arc<romacs_font::FontsetState>) {
+        self.resolver.set_fontsets(state);
+        self.chars.clear();
+    }
+    fn opened_def_font(&mut self, font: &romacs_font::OpenedDefFont) -> Option<OpenedFont> {
+        let entity = entity::find(&font.family, &font.file, font.selector).map(font_entity)?;
+        romacs_vm::DisplayHost::open_font(self, &entity, i64::from(font.pixel_size))
     }
     fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) {
         if let Some(hook) = &mut self.alpha_hook { hook(frame, alpha, limit); }
@@ -395,7 +402,7 @@ mod tests {
         assert!(register_icon_font());
         let mut resolver = FontResolver::new().unwrap();
         for family in ["Liberation Mono", "PlemolJP Console NF"] {
-            let resolved = resolver.resolve_char(&FontRequest::new(family, 15.0), '\u{FE001}', &FontsetPolicy::new()).unwrap();
+            let resolved = resolver.resolve_char(&FontRequest::new(family, 15.0), '\u{FE001}').unwrap();
             let file = resolved.font.identity.file_path.clone().unwrap();
             assert_eq!(std::path::Path::new(&file).canonicalize().unwrap(), icon_font().canonicalize().unwrap(), "{family}");
             assert_ne!(resolved.glyph.glyph_id.get(), 0, "{family}: the glyph, not .notdef");

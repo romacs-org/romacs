@@ -287,7 +287,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-frame.el
 
-(register-definition-prefixes "romacs-frame" '("color-" "display-" "face-attributes-as-vector" "find-composition-internal" "frame-" "romacs-" "suspend-emacs" "tty-color-alist"))
+(register-definition-prefixes "romacs-frame" '("color-" "display-" "face-attributes-as-vector" "find-composition-internal" "fontset-" "frame-" "romacs-" "set-fontset-font" "suspend-emacs" "tty-color-alist" "use-default-font-for-symbols" "x-list-fonts"))
 
 
 ;;; Generated autoloads from romacs-fzf.el

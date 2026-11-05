@@ -179,6 +179,7 @@ pub(super) struct DisplayState {
     table_ids: u64,
     pub(super) font_selection_order: romacs_layout_input::FontSelectionState,
     font_alternatives: romacs_layout_input::FontAlternativeState,
+    pub(super) fontsets: crate::fontsets::Registry,
     /// Last publication **per window**, keyed by the window's stable id. One
     /// shared snapshot made every window compare against whichever window
     /// published last, so alternating between two windows bumped the version
@@ -227,7 +228,7 @@ pub(super) struct DisplayState {
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, remapped, table_ids, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { theme, pending_faces, face_table, remapped, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -359,6 +360,7 @@ impl DisplayState {
         Self {
             font_selection_order: romacs_layout_input::FontSelectionState::default(),
             font_alternatives: romacs_layout_input::FontAlternativeState::default(),
+            fontsets: Default::default(),
             face_table: None,
             remapped: vec![],
             table_ids: 0,
@@ -670,7 +672,7 @@ impl Vm {
         let tab_bar = self.tab_bar_snapshot()?;
         let chrome = self.pane_chrome()?;
         let no_font = self.no_font_display();
-        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
+        Ok(romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order, font_alternatives, fontsets: self.fontset_state(), width, height, windows, background_alpha, children: children?, tab_bar, chrome, status_bar, no_font })
     }
     /// The host frame's pane chrome, from its `romacs-pane-radius',
     /// `romacs-pane-dim' and `romacs-pane-chrome' parameters
@@ -814,6 +816,34 @@ impl Vm {
     }
     /// Freeze live Lisp state, not a stale copy from the setter. Malformed later
     /// user mutation is an error rather than silently missing fallback rows.
+    /// `char-script-table''s `symbol' ranges.
+    fn symbol_script_ranges(&mut self) -> Vec<(u32, u32)> {
+        let (table, symbol) = (self.slot("char-script-table"), self.slot("symbol"));
+        let symbol = Value::reference(symbol + 1, 7);
+        let Ok(table) = self.variable_value(table) else { return Vec::new() };
+        self.char_table_runs(table).map_or_else(|_| Vec::new(), |runs| runs.into_iter().filter(|&(_, _, value)| value == symbol).map(|(from, to, _)| (from, to)).collect())
+    }
+    /// The fontsets painting reads; a change goes to the display host too,
+    /// so its own answers retire before a query asks for one.
+    pub fn fontset_state(&mut self) -> std::sync::Arc<romacs_layout_input::FontsetState> {
+        self.ensure_charsets();
+        let option = self.slot("use-default-font-for-symbols");
+        let wanted = !matches!(self.variable_value(option), Ok(Value::NIL | Value::UNBOUND) | Err(_));
+        if wanted == self.display_state.fontsets.symbols_empty() {
+            let symbols = if wanted { self.symbol_script_ranges() } else { Vec::new() };
+            // A table without the script stays empty, and costs this walk.
+            if !symbols.is_empty() || !wanted { self.display_state.fontsets.set_symbols(symbols); }
+        }
+        let (tick, charsets) = (self.charsets.ordered_tick, &self.charsets);
+        let (state, changed) = self.display_state.fontsets.state(tick, || {
+            let rank: std::collections::HashMap<u32, u32> = charsets.ordered.iter().take_while(|&&id| Some(id) != charsets.non_preferred_head)
+                .enumerate().map(|(rank, &id)| (id as u32, rank as u32)).collect();
+            let preferred = rank.len() as u32;
+            (rank, preferred)
+        });
+        if changed && let Some(host) = self.window_system_host() { host.set_fontsets(std::sync::Arc::clone(&state)); }
+        state
+    }
     pub fn font_alternative_state(&mut self) -> Result<romacs_layout_input::FontAlternativeState> {
         fn spine(vm: &Vm, original: Value) -> Result<Vec<Value>> {
             let mut seen = std::collections::HashSet::new();
@@ -1590,7 +1620,7 @@ impl Vm {
     pub(crate) fn lay_out_alone(&mut self, snapshot: WindowSnapshot) -> Result<romacs_layout_input::WindowEnd> {
         let (width, height) = (snapshot.width, snapshot.height);
         let frame = romacs_layout_input::FrameSnapshot { font_selection: self.display_state.font_selection_order,
-            font_alternatives: self.font_alternative_state()?, width, height,
+            font_alternatives: self.font_alternative_state()?, fontsets: self.fontset_state(), width, height,
             background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot }],
             no_font: self.no_font_display() };
         self.host_lay_out(&frame)?.into_iter().next().ok_or_else(|| "layout host laid out no window".into())
@@ -1875,6 +1905,7 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                fontsets: self.fontset_state(),
                 no_font: self.no_font_display(),
                 faces: faces.clone(),
                 text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![FaceRun { bytes: 0..c.len_utf8(), face }], raw: vec![] },
@@ -2676,6 +2707,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            fontsets: self.fontset_state(),
             no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: text, face_runs, raw: vec![] },
@@ -2825,6 +2857,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            fontsets: self.fontset_state(),
             no_font: self.no_font_display(),
             faces: vec![face],
             text: TextSlice { extends: vec![], utf8: c.to_string(), face_runs: vec![], raw: vec![] },
@@ -2863,6 +2896,7 @@ impl Vm {
         let input = romacs_layout_input::MeasureInput {
             font_selection: self.display_state.font_selection_order,
             font_alternatives: self.font_alternative_state()?,
+            fontsets: self.fontset_state(),
             no_font: self.no_font_display(),
             faces,
             text: TextSlice { extends: vec![], utf8: " ".repeat(runs.len()), face_runs, raw: vec![] },

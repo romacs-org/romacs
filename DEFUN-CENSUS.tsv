@@ -112,9 +112,6 @@ font-match-p	needed	lane builtins-b (fonts, coding, images, system, processes, t
 font-otf-alternates	absent	no shipped Lisp calls it and it is no command
 font-shape-gstring	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 font-variation-glyphs	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-fontset-font	absent	no shipped Lisp calls it and it is no command
-fontset-info	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-fontset-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 fontset-list-all	absent	no shipped Lisp calls it and it is no command
 frame--z-order-lessp	absent	no shipped Lisp calls it and it is no command
 frame-child-frame-border-width	absent	no shipped Lisp calls it and it is no command
@@ -246,7 +243,6 @@ native-comp-unit-set-file	needed	lane builtins-b (fonts, coding, images, system,
 native-elisp-load	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 network-interface-info	absent	no shipped Lisp calls it and it is no command
 network-interface-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-new-fontset	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 newline-cache-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
 next-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 open-dribble-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -272,7 +268,6 @@ previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, disp
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
 query-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-query-fontset	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-command	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-function	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -288,7 +283,6 @@ remove-pos-from-symbol	needed	lane A (editing, windows, frames, minibuffer reade
 resize-mini-window-internal	needed	lane A (editing, windows, frames, minibuffer readers, display)
 serial-process-configure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-cursor-size	absent	no shipped Lisp calls it and it is no command
-set-fontset-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-frame-size-and-position-pixelwise	needed	lane A (editing, windows, frames, minibuffer readers, display)
 set-frame-window-state-change	absent	no shipped Lisp calls it and it is no command
 set-input-interrupt-mode	absent	terminal frames: Romacs has none (GUI and batch only)
@@ -453,7 +447,6 @@ x-get-selection-internal	absent	platform: X11 build only (Romacs frames are Wayl
 x-gtk-debug	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-hide-tip	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-internal-focus-input-context	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
-x-list-fonts	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 x-load-color-file	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-menu-bar-open-internal	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-mouse-absolute-pixel-position	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)

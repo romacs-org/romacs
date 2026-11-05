@@ -132,6 +132,7 @@ mod fringe;
 mod tab_bar;
 mod overlay_order;
 mod window;
+mod fontsets;
 mod frame;
 mod hash;
 mod intervals;

@@ -276,6 +276,7 @@ impl Vm {
             let input = romacs_layout_input::MeasureInput {
                 font_selection: self.display_state.font_selection_order,
                 font_alternatives: self.font_alternative_state()?,
+                fontsets: self.fontset_state(),
                 no_font: self.no_font_display(),
                 faces: bar.faces.iter().map(|f| romacs_layout_input::Face { background, ..f.clone() }).collect(),
                 text: TextSlice { extends: vec![], utf8: shown, face_runs, raw: vec![] },

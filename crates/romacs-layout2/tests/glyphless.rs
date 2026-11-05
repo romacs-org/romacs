@@ -24,7 +24,7 @@ fn window(text: &str, faces: Vec<Face>) -> WindowSnapshot {
 }
 
 fn frame(text: &str, no_font: NoFont) -> FrameSnapshot {
-    FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 100,
+    FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 100,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: window(text, vec![face("Liberation Mono")]) }], background_alpha: 1.0,
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, no_font }
 }
@@ -34,7 +34,7 @@ fn lay_out(text: &str, no_font: NoFont) -> FrameGlyphBuffer {
 }
 
 fn measured(text: &str, no_font: NoFont) -> Vec<u32> {
-    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), faces: vec![face("Liberation Mono")],
+    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), faces: vec![face("Liberation Mono")],
         text: slice(text), no_font };
     LayoutEngine::new().unwrap().measure(&input).expect("measuring a character no font has succeeds").glyphs.iter().map(|g| g.0).collect()
 }

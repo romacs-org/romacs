@@ -323,6 +323,17 @@ impl Leaf<'_> {
         registry.mule_list = ordered.iter().copied().filter(|id| registry.mule_list.contains(id)).collect();
         Ok(Value::NIL)
     }
+    /// charset.c CHAR_CHARSET_P for the charset ID.
+    pub fn char_in_charset_id(&mut self, id: usize, c: u32) -> std::result::Result<bool, Fault> {
+        self.vm.ensure_charsets();
+        let i = self.vm.charsets.ids[id];
+        Ok(self.charset_encode(i, c)?.is_some())
+    }
+    /// CHARSET_ASCII_COMPATIBLE_P.
+    pub fn charset_ascii_compatible(&mut self, charset: Value) -> std::result::Result<bool, Fault> {
+        let i = self.charset_record(charset)?;
+        Ok(self.vm.charsets.records[i].ascii_compatible)
+    }
     /// charset.c Fcharset_id_internal.
     pub fn charset_id_internal(&mut self, charset: Value) -> super::super::Out {
         let i = self.charset_record(charset)?;

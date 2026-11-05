@@ -800,6 +800,142 @@ fn query_of(cx: &Leaf<'_>, font: Value) -> FontQuery {
         registry: name_of(cx, slot(cx, font, REGISTRY)),
     }
 }
+/// font_parse_family_registry over a fresh spec, as Fset_fontset_font takes
+/// a (FAMILY . REGISTRY) cons: FAMILY may hold a foundry, REGISTRY an
+/// encoding.
+pub(super) fn spec_from_family_registry(cx: &mut Leaf<'_>, family: Value, registry: Value) -> Out {
+    let spec = make_font(cx, "font-spec", SPEC_SLOTS)?;
+    if family != Value::NIL {
+        let text = cx.string_text(family).map_err(|_| Fault::Wrong("stringp", family))?;
+        let (foundry, name) = match text.split_once('-') { Some((foundry, name)) => (Some(foundry.to_string()), name.to_string()), None => (None, text) };
+        if let Some(foundry) = foundry {
+            let value = intern_prop(cx, foundry.as_bytes(), true);
+            cx.record_set(spec, FOUNDRY, value)?;
+        }
+        let value = intern_prop(cx, name.as_bytes(), true);
+        cx.record_set(spec, FAMILY, value)?;
+    }
+    if registry != Value::NIL {
+        let text = cx.string_text(registry).map_err(|_| Fault::Wrong("stringp", registry))?.to_lowercase();
+        let text = if text.contains('-') { text } else if text.ends_with('*') { format!("{text}-*") } else { format!("{text}*-*") };
+        let value = intern_prop(cx, text.as_bytes(), true);
+        cx.record_set(spec, REGISTRY, value)?;
+    }
+    Ok(spec)
+}
+
+/// `(font-spec :name NAME)'.
+pub(super) fn spec_from_name(cx: &mut Leaf<'_>, name: Value) -> Out {
+    let spec = make_font(cx, "font-spec", SPEC_SLOTS)?;
+    let text = cx.string_text(name)?;
+    if !parse_name(cx, text.as_bytes(), spec)? {
+        return Err(signal_error(cx, "Invalid font name", name));
+    }
+    let key = cx.intern(":name");
+    put_extra(cx, spec, key, name)?;
+    Ok(spec)
+}
+
+pub(super) fn is_spec(cx: &mut Leaf<'_>, value: Value) -> bool {
+    font_kind(cx, value) == Some(Kind3::Spec)
+}
+
+/// A symbol's list, or the one symbol: an `:otf' feature or `:lang' value.
+fn symbol_names(cx: &Leaf<'_>, value: Value) -> Vec<String> {
+    if cx.kind(value) == Kind::Symbol && value != Value::NIL { return name_of(cx, value).into_iter().collect(); }
+    let (mut out, mut tail) = (Vec::new(), value);
+    while let Some((item, rest)) = cx.pair(tail) {
+        out.extend(name_of(cx, item));
+        tail = rest;
+    }
+    out
+}
+
+/// An `:otf' feature list: tags a font must have, then, after a nil, tags
+/// it must lack.
+fn otf_features(cx: &Leaf<'_>, mut list: Value) -> Vec<(String, bool)> {
+    let (mut features, mut wanted) = (Vec::new(), true);
+    while let Some((item, rest)) = cx.pair(list) {
+        if item == Value::NIL { wanted = false; } else if let Some(tag) = name_of(cx, item) { features.push((tag, wanted)); }
+        list = rest;
+    }
+    features
+}
+
+/// `otf_spec': the value of an `:otf' property.
+fn otf_spec(cx: &Leaf<'_>, value: Value) -> Option<romacs_layout_input::OtfSpec> {
+    let (script, rest) = cx.pair(value)?;
+    let script = if script == Value::NIL { "DFLT".to_string() } else { name_of(cx, script)? };
+    let (langsys, rest) = cx.pair(rest).unwrap_or((Value::NIL, Value::NIL));
+    let (gsub, rest) = cx.pair(rest).unwrap_or((Value::NIL, Value::NIL));
+    let (gpos, _) = cx.pair(rest).unwrap_or((Value::NIL, Value::NIL));
+    Some(romacs_layout_input::OtfSpec { script, langsys: name_of(cx, langsys).filter(|_| langsys != Value::NIL), gsub: otf_features(cx, gsub), gpos: otf_features(cx, gpos) })
+}
+
+/// A font-spec reduced to a font-def, its charsets left for the caller.
+pub(super) fn font_def_of(cx: &mut Leaf<'_>, spec: Value) -> std::result::Result<romacs_layout_input::FontDef, Fault> {
+    let text = |cx: &Leaf<'_>, index| { let value = slot(cx, spec, index); (value != Value::NIL).then(|| name_of(cx, value)).flatten() };
+    let style = |cx: &mut Leaf<'_>, index| { let value = slot(cx, spec, index); (value != Value::NIL).then(|| style_name(cx, index, value)).flatten() };
+    let (weight, slant, width) = (style(cx, WEIGHT), style(cx, SLANT), style(cx, WIDTH));
+    let mut def = romacs_layout_input::FontDef {
+        family: text(cx, FAMILY),
+        foundry: text(cx, FOUNDRY),
+        registry: text(cx, REGISTRY).map(|registry| registry.to_lowercase()),
+        name: unparse_xlfd(cx, spec, 0),
+        weight: weight.as_deref().map(romacs_face::attr::css_weight),
+        width: width.as_deref().map(romacs_face::attr::width_class),
+        slant: slant.as_deref().map(|name| match name { "italic" => 1, "oblique" => 2, _ => 0 }),
+        pixel_size: u32::try_from(pixel_size(cx, spec, 0)).ok().filter(|&size| size > 0),
+        ..Default::default()
+    };
+    let (mut extra, script_table) = (slot(cx, spec, EXTRA), super::fileio::var(cx, "script-representative-chars")?);
+    while let Some((pair, rest)) = cx.pair(extra) {
+        extra = rest;
+        let Some((key, value)) = cx.pair(pair) else { continue };
+        match name_of(cx, key).as_deref() {
+            Some(":lang") => def.lang = symbol_names(cx, value),
+            Some(":otf") => def.otf = otf_spec(cx, value),
+            Some(":script") => {
+                let mut table = script_table;
+                while let Some((row, next)) = cx.pair(table) {
+                    table = next;
+                    let Some((script, mut chars)) = cx.pair(row) else { continue };
+                    if script != value { continue; }
+                    while let Some((c, more)) = cx.pair(chars) {
+                        def.script_chars.extend(c.integer_value().map(|c| c as u32));
+                        chars = more;
+                    }
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(def)
+}
+
+/// A new fontset's NAME, in XLFD format: its registry, `fontset-*', the
+/// short alias, and the name with registry iso8859-1, its ASCII font.
+pub(super) fn fontset_name_parts(cx: &mut Leaf<'_>, name: &str) -> std::result::Result<(String, String), Fault> {
+    let spec = make_font(cx, "font-spec", SPEC_SLOTS)?;
+    if !parse_xlfd(cx, name.as_bytes(), spec)? { return Err(error(cx, "Fontset name must be in XLFD format".into())); }
+    let short = name_of(cx, slot(cx, spec, REGISTRY)).unwrap_or_default();
+    if !short.starts_with("fontset-") || short.len() < 9 {
+        return Err(error(cx, "Registry field of fontset name must be \"fontset-*\"".into()));
+    }
+    let registry = cx.intern("iso8859-1");
+    cx.record_set(spec, REGISTRY, registry)?;
+    let ascii = unparse_xlfd(cx, spec, 0);
+    Ok((short, ascii))
+}
+
+/// The XLFD name of the font a def was realized to.
+pub(super) fn opened_name(cx: &mut Leaf<'_>, font: &romacs_layout_input::OpenedDefFont) -> std::result::Result<Option<String>, Fault> {
+    let Some(opened) = cx.font_host().and_then(|host| host.opened_def_font(font)) else { return Ok(None) };
+    let object = make_object(cx, &opened)?;
+    Ok(name_of(cx, slot(cx, object, NAME)))
+}
+
 /// font_pixel_size: an integer size, else points at the frame's 96 dpi.
 fn pixel_size(cx: &Leaf<'_>, font: Value, default: i64) -> i64 {
     let size = slot(cx, font, SIZE);

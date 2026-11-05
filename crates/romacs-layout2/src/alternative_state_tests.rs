@@ -8,7 +8,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
     let mut engine = LayoutEngine::new().unwrap();
     let mut snapshot = FrameSnapshot {
         font_selection: FontSelectionState::default(),
-        font_alternatives: FontAlternativeState::default(), no_font: Default::default(),
+        font_alternatives: FontAlternativeState::default(), fontsets: Default::default(), no_font: Default::default(),
         background_alpha: 1.0,
         width: 400,
         height: 300,
