@@ -110,6 +110,21 @@ pub(crate) fn style_value(cx: &mut Leaf<'_>, slot: usize, name: &str, noerror: b
     Some((100 << 8) | ((row as i64) << 4))
 }
 /// font_style_symbolic: the name an encoded style value stands for.
+// FONT_WEIGHT_NAME_NUMERIC and its kin, as xfaces.c's merge_face_ref tests a
+// face's :weight, :slant or :width: whether NAME is a style KIND has.
+defsubr! { name = "romacs--font-style-p", gnu = "romacs:font", effect = Reads,
+fn romacs_font_style_p(cx, kind: Value, name: Value) {
+    let slot = match cx.symbol_name(kind)?.as_str() {
+        "weight" => WEIGHT,
+        "slant" => SLANT,
+        "width" => WIDTH,
+        _ => return Err(Fault::Wrong("font-style-kind", kind)),
+    };
+    if name == Value::NIL || cx.kind(name) != Kind::Symbol { return Ok(Value::NIL); }
+    let name = cx.symbol_name(name)?;
+    Ok(if style_value(cx, slot, &name, false).is_some() { Value::TRUE } else { Value::NIL })
+}}
+
 fn style_name(cx: &mut Leaf<'_>, slot: usize, value: Value) -> Option<String> {
     let n = value.integer_value()?;
     let (row, name) = (((n >> 4) & 0xF) as usize, (n & 0xF) as usize);

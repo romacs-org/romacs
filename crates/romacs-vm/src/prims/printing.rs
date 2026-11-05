@@ -1,5 +1,11 @@
 //! GNU print.c output entry points; callbacks cross the traced T2 boundary.
 use super::*;
+
+defsubr! { name = "print--preprocess", gnu = "print.c:1516", effect = Global,
+fn print_preprocess(cx, object: Value) {
+    cx.print_preprocess_only(object)?;
+    Ok(Value::NIL)
+}}
 use std::io::Write;
 
 // Each print first answers its unreadable objects (`answered'), then prints

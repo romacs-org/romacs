@@ -1222,4 +1222,48 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
       (call-interactively command nil keys)
       (setq last-command command))))
 
+;; lread.c substitute_object_recurse, for edebug.el's reader of `#N=': PLACEHOLDER
+;; replaced by OBJECT everywhere in OBJECT.  With COMPLETED t every node is
+;; remembered; a hash table names the nodes that can start a cycle.
+(defun lread--substitute-object-in-subtree (object placeholder completed)
+  "Replace PLACEHOLDER with OBJECT in OBJECT, as the reader does for `#N='.
+COMPLETED is t, or a hash table of the nodes that may be cycle entry points."
+  (let ((seen (make-hash-table :test 'eq)) recurse)
+    (setq recurse
+          (lambda (tree)
+            (cond
+             ((eq tree placeholder) object)
+             ((or (symbolp tree) (numberp tree) (bool-vector-p tree) (gethash tree seen)) tree)
+             (t
+              (when (or (eq completed t) (gethash tree completed))
+                (puthash tree t seen))
+              (cond
+               ((consp tree)
+                (let ((cell tree) (going t))
+                  (while going
+                    (setcar cell (funcall recurse (car cell)))
+                    (let ((next (cdr cell)))
+                      (if (and (consp next) (not (eq next placeholder)) (not (gethash next seen)))
+                          (progn
+                            (when (or (eq completed t) (gethash next completed))
+                              (puthash next t seen))
+                            (setq cell next))
+                        (setcdr cell (funcall recurse next))
+                        (setq going nil))))))
+               ((or (vectorp tree) (recordp tree))
+                (dotimes (i (length tree))
+                  (aset tree i (funcall recurse (aref tree i)))))
+               ((hash-table-p tree)
+                (maphash (lambda (key value) (puthash key (funcall recurse value) tree)) tree))
+               ((stringp tree)
+                (dolist (interval (object-intervals tree))
+                  (set-text-properties (nth 0 interval) (nth 1 interval)
+                                       (funcall recurse (nth 2 interval)) tree)))
+               ((or (char-table-p tree) (closurep tree)))
+               (t (signal 'wrong-type-argument (list 'sequencep tree))))
+              tree))))
+    (unless (eq (funcall recurse object) object)
+      (error "Unexpected mutation error in reader"))
+    nil))
+
 ;;; prelude.el ends here

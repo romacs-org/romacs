@@ -65,11 +65,11 @@ crates/romacs-vm/src/prim/leaf/editor_mark.rs:41 delayed-variable reads through 
 crates/romacs-vm/src/subprocess.rs:509 std::net ProcessWatch's cancel pair: a socket pair private to this process that stops its own poll thread; it reaches no host fact
 crates/romacs-vm/src/variable_runtime.rs:137 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/variable_runtime.rs:151 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:268 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:382 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
-crates/romacs-vm/src/variable_runtime.rs:413 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/variable_runtime.rs:540 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
-crates/romacs-vm/src/variable_runtime.rs:560 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/variable_runtime.rs:274 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/variable_runtime.rs:388 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
+crates/romacs-vm/src/variable_runtime.rs:419 dynamic:saved specbind: pushes a new binding, saving the value it shadows
+crates/romacs-vm/src/variable_runtime.rs:546 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/variable_runtime.rs:566 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
 crates/romacs-vm/src/world/arena.rs:464 libc::getenv the world allocator reads whether it runs in a builder at its first allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
 crates/romacs-vm/src/world/arena.rs:472 libc::getrandom the world allocator picks a random arena address at its first allocation; no Lisp value depends on it
 crates/romacs-vm/src/world/arena.rs:501 libc::file a builder backs its arena with an unlinked memory file at its first allocation, before host.rs can run; no Lisp value depends on it

@@ -323,6 +323,32 @@ impl Leaf<'_> {
         registry.mule_list = ordered.iter().copied().filter(|id| registry.mule_list.contains(id)).collect();
         Ok(Value::NIL)
     }
+    /// charset.c Fcharset_id_internal.
+    pub fn charset_id_internal(&mut self, charset: Value) -> super::super::Out {
+        let i = self.charset_record(charset)?;
+        Ok(self.vm.charsets.records[i].attrs[0])
+    }
+    /// charset.c Fsort_charsets: CHARSETS reordered in place by priority.
+    pub fn sort_charsets(&mut self, charsets: Value) -> super::super::Out {
+        let mut cells = Vec::new();
+        let mut tail = charsets;
+        while let Some((name, rest)) = self.pair(tail) {
+            cells.push((tail, name));
+            tail = rest;
+        }
+        if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
+        let rank: std::collections::HashMap<usize, usize> =
+            { self.vm.ensure_charsets(); self.vm.charsets.ordered.iter().enumerate().map(|(rank, &id)| (id, rank)).collect() };
+        let mut sorted = Vec::with_capacity(cells.len());
+        for &(_, name) in &cells {
+            let i = self.charset_record(name)?;
+            let id = self.vm.charsets.records[i].attrs[0].integer_value().unwrap_or(0) as usize;
+            sorted.push((rank.get(&id).copied().unwrap_or(usize::MAX), name));
+        }
+        sorted.sort_by_key(|&(rank, _)| rank);
+        for (&(cell, _), &(_, name)) in cells.iter().zip(&sorted) { self.setcar(cell, name)?; }
+        Ok(charsets)
+    }
     /// charset.c Fcharset_priority_list.
     pub fn charset_priority_list(&mut self, highestp: Value) -> super::super::Out {
         self.vm.ensure_charsets();

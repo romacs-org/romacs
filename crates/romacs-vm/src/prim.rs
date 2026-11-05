@@ -1576,6 +1576,24 @@ mod leaf {
             self.vm.char_table_get(table, index).map_err(Fault::Error)
         }
         /// The value of a VM-private `#:vm2-' slot, unbound reading as nil.
+        pub fn marker_last_position(&mut self, marker: Value) -> super::Out {
+            let last = match self.vm.object_if(marker) {
+                Some(data::Object::Marker(m)) => m.last_position,
+                _ => return Err(Fault::Wrong("markerp", marker)),
+            };
+            match self.vm.marker_position_value(marker).map_err(Fault::Error)? {
+                Value::NIL => Value::integer(last).map_err(Fault::Error),
+                position => Ok(position),
+            }
+        }
+        /// SYMBOL, an alias, made plain and void.
+        pub fn delete_variable_alias(&mut self, symbol: Value) {
+            if let Some(slot) = symbol.index_if(7).and_then(|n| n.checked_sub(1)) { self.vm.delete_variable_alias(slot); }
+        }
+        /// Fprint_preprocess.
+        pub fn print_preprocess_only(&mut self, object: Value) -> std::result::Result<(), Fault> {
+            self.vm.print_preprocess_only(object).map_err(Fault::Error)
+        }
         pub fn hidden_value(&mut self, name: &str) -> Value {
             let slot = self.vm.slot(name);
             match self.vm.slots[slot].value { Value::UNBOUND => Value::NIL, value => value }

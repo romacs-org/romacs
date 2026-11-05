@@ -158,6 +158,161 @@ The value is (RED GREEN BLUE), each between 0 and 65535, or nil."
   (unless (member color '(unspecified "unspecified-fg" "unspecified-bg"))
     (tty-color-values color frame)))
 
+(defun romacs--color-rgb (color frame)
+  "The (RED GREEN BLUE) of COLOR, a list of them or a name, for `color-distance'."
+  (or (if (consp color)
+          (and (proper-list-p color) (= (length color) 3)
+               (fixnump (nth 0 color)) (fixnump (nth 1 color)) (fixnump (nth 2 color))
+               color)
+        (and (stringp color) (color-values color frame)))
+      (signal 'error (cons "Invalid color" (if (proper-list-p color) color (list color))))))
+
+(defun color-distance (color1 color2 &optional frame metric)
+  "Return an integer distance between COLOR1 and COLOR2 on FRAME.
+COLOR1 and COLOR2 may be either strings containing the color name,
+or lists of the form (RED GREEN BLUE), each in the range 0 to 65535
+inclusive.  If FRAME is unspecified or nil, the current frame is used.
+If METRIC is specified, it should be a function that accepts two
+lists of the form (RED GREEN BLUE) aforementioned."
+  (when (and frame (not (frame-live-p frame)))
+    (signal 'wrong-type-argument (list 'frame-live-p frame)))
+  (let ((rgb1 (romacs--color-rgb color1 frame))
+        (rgb2 (romacs--color-rgb color2 frame)))
+    (if metric
+        (funcall metric rgb1 rgb2)
+      (let ((mean (ash (+ (nth 0 rgb1) (nth 0 rgb2)) -1))
+            (r (- (nth 0 rgb1) (nth 0 rgb2)))
+            (g (- (nth 1 rgb1) (nth 1 rgb2)))
+            (b (- (nth 2 rgb1) (nth 2 rgb2))))
+        (ash (+ (ash (* (+ (* 2 65536) mean) r r) -16)
+                (* 4 g g)
+                (ash (* (- (+ (* 2 65536) 65535) mean) b b) -16))
+             -16)))))
+
+(defun color-supported-p (color &optional frame background-p)
+  "Return non-nil if COLOR can be displayed on FRAME.
+BACKGROUND-P non-nil means COLOR is used as a background.
+COLOR must be a valid color name."
+  (unless (stringp color) (signal 'wrong-type-argument (list 'stringp color)))
+  (cond ((not (display-graphic-p frame)) (color-defined-p color frame))
+        ((display-color-p frame) t)
+        ((member (downcase color) '("black" "white")) t)
+        ((or background-p (display-grayscale-p frame))
+         (let ((rgb (color-values color frame)))
+           (and rgb (= (nth 0 rgb) (nth 1 rgb) (nth 2 rgb)))))))
+
+;;;; xfaces.c: `face-attributes-as-vector', merge_face_ref over a Lisp vector.
+
+(defconst romacs--face-attribute-slots
+  '((:family . 1) (:foundry . 2) (:width . 3) (:height . 4) (:weight . 5) (:slant . 6)
+    (:underline . 7) (:inverse-video . 8) (:foreground . 9) (:background . 10)
+    (:stipple . 11) (:overline . 12) (:strike-through . 13) (:box . 14) (:font . 15)
+    (:distant-foreground . 18) (:extend . 19))
+  "Each attribute `merge_face_ref' sets, and its slot in a Lisp face vector.")
+
+(defun romacs--merge-face-height (from to invalid)
+  "merge_face_heights: FROM, a height, over the height TO; INVALID if none."
+  (cond ((integerp from) from)
+        ((floatp from)
+         (cond ((integerp to) (truncate (* from to)))
+               ((floatp to) (* from to))
+               ((eq to 'unspecified) from)
+               (t invalid)))
+        ((functionp from)
+         (if (eq to 'unspecified)
+             invalid
+           (let ((height (condition-case nil (funcall from to) (error nil))))
+             (if (or (integerp height) (floatp height)) height invalid))))
+        (t invalid)))
+
+(defun romacs--merge-face-attribute (keyword value to)
+  "Merge face attribute KEYWORD's VALUE into the vector TO, if it is valid."
+  (let ((valid
+         (pcase keyword
+           ((or :family :foundry :foreground :background :distant-foreground) (stringp value))
+           ((or :weight :slant :width)
+            (romacs--font-style-p (intern (substring (symbol-name keyword) 1)) value))
+           (:underline (or (memq value '(t nil)) (stringp value) (consp value)))
+           ((or :overline :strike-through) (or (memq value '(t nil)) (stringp value)))
+           (:box (or (eq value t) (null value) (stringp value) (consp value)
+                     (and (integerp value) (/= value 0))))
+           ((or :inverse-video :extend) (memq value '(t nil)))
+           (:stipple (or (null value) (bitmap-spec-p value)))
+           (:font (fontp value)))))
+    (when valid
+      (aset to (alist-get keyword romacs--face-attribute-slots)
+            (if (and (eq keyword :box) (eq value t)) 1 value)))))
+
+(defun romacs--merge-named-face (face to merging)
+  "merge_named_face and merge_face_vectors: FACE's attributes into TO."
+  (let ((from (and (symbolp face) (not (memq face merging))
+                   (internal-lisp-face-p face (selected-frame)))))
+    (when from
+      (let ((inherit (aref from 16))
+            (merging (cons face merging)))
+        (unless (memq inherit '(nil unspecified))
+          (romacs--merge-face-ref inherit to merging))
+        (dotimes (i (length from))
+          (let ((value (aref from i)))
+            (cond ((or (= i 0) (= i 15) (eq value 'unspecified)))
+                  ((and (= i 4) (not (integerp value)))
+                   (aset to i (romacs--merge-face-height value (aref to i) (aref to i))))
+                  (t (aset to i value)))))
+        (aset to 16 nil)))))
+
+(defun romacs--merge-face-ref (ref to merging)
+  "merge_face_ref: the face reference REF into the vector TO."
+  (cond
+   ((null ref))
+   ((consp ref)
+    (let ((first (car ref)))
+      (cond
+       ((eq first 'foreground-color) (when (stringp (cdr ref)) (aset to 9 (cdr ref))))
+       ((eq first 'background-color) (when (stringp (cdr ref)) (aset to 10 (cdr ref))))
+       ((eq first :filtered))
+       ((keywordp first)
+        (while (and (consp ref) (consp (cdr ref)))
+          (let ((keyword (car ref)) (value (cadr ref)))
+            (cond ((eq value 'unspecified))
+                  ((eq keyword :height)
+                   (let ((height (romacs--merge-face-height value (aref to 4) nil)))
+                     (when height (aset to 4 height))))
+                  ((eq keyword :inherit) (romacs--merge-face-ref value to merging))
+                  ((assq keyword romacs--face-attribute-slots)
+                   (romacs--merge-face-attribute keyword value to))))
+          (setq ref (cddr ref))))
+       (t
+        (when (cdr ref) (romacs--merge-face-ref (cdr ref) to merging))
+        (romacs--merge-face-ref first to merging)))))
+   (t (romacs--merge-named-face ref to merging))))
+
+(defun face-attributes-as-vector (plist)
+  "Return a vector of face attributes corresponding to PLIST."
+  (let ((to (make-vector 20 'unspecified)))
+    (romacs--merge-face-ref plist to nil)
+    to))
+
+;;;; terminal.c, keyboard.c.
+
+(defun delete-terminal (&optional terminal force)
+  "Delete TERMINAL by deleting all frames on it and closing the terminal.
+TERMINAL may be a terminal object, a frame, or nil (meaning the
+selected frame's terminal).  Romacs has one terminal: it is the sole
+active one, so even with FORCE it stays (VM2-WIN5)."
+  (ignore force)
+  (when (or (null terminal) (framep terminal) (terminal-live-p terminal))
+    (error "Attempt to delete the sole active display terminal")))
+
+(defun suspend-emacs (&optional stuffstring)
+  "Stop Emacs and return to the superior process.
+Run `suspend-hook' first and `suspend-resume-hook' after the process
+continues.  STUFFSTRING has nowhere to go: Romacs has no terminal input."
+  (when stuffstring (unless (stringp stuffstring) (signal 'wrong-type-argument (list 'stringp stuffstring))))
+  (run-hooks 'suspend-hook)
+  (signal-process 0 'SIGTSTP)
+  (run-hooks 'suspend-resume-hook)
+  nil)
+
 ;;;; frame.el: background mode.
 
 (defun frame--current-background-mode (frame)

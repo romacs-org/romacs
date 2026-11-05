@@ -40,15 +40,10 @@ byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, thre
 canvas-refresh	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 ccl-execute	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 ccl-execute-on-string	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-ccl-program-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-charset-id-internal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 check-coding-systems-region	absent	no shipped Lisp calls it and it is no command
-clear-charset-maps	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 clear-font-cache	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 close-font	absent	no shipped Lisp calls it and it is no command
-color-distance	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 color-gray-p	absent	no shipped Lisp calls it and it is no command
-color-supported-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 combine-windows	needed	lane A (editing, windows, frames, minibuffer readers, display)
 comp--compile-ctxt-to-file0	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 comp--init-ctxt	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -88,7 +83,6 @@ declare-equiv-charset	absent	no shipped Lisp calls it and it is no command
 decode-big5-char	absent	no shipped Lisp calls it and it is no command
 decode-sjis-char	absent	no shipped Lisp calls it and it is no command
 default-printer-name	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-delete-terminal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 delete-xwidget-view	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 display--line-is-continued-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 display--update-for-mouse-movement	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -107,7 +101,6 @@ dump-tool-bar-row	absent	portable dumper: Romacs starts from its own world image
 encode-big5-char	absent	no shipped Lisp calls it and it is no command
 encode-sjis-char	absent	no shipped Lisp calls it and it is no command
 event-convert-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
-face-attributes-as-vector	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 file-attributes-lessp	absent	no shipped Lisp calls it and it is no command
 font-drive-otf	absent	no shipped Lisp calls it and it is no command
 font-face-attributes	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -136,7 +129,6 @@ frame-window-state-change	absent	no shipped Lisp calls it and it is no command
 fringe-bitmaps-at-pos	needed	lane A (editing, windows, frames, minibuffer readers, display)
 funcall-with-delayed-message	needed	lane A (editing, windows, frames, minibuffer readers, display)
 gap-position	absent	no shipped Lisp calls it and it is no command
-gap-size	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
 get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 get-display-property	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -194,7 +186,6 @@ internal--obarray-buckets	absent	GNU hash-table and obarray internals: Romacs's 
 internal--set-buffer-modified-tick	absent	no shipped Lisp calls it and it is no command
 internal--track-mouse	needed	lane A (editing, windows, frames, minibuffer readers, display)
 internal-decode-string-utf-8	absent	no shipped Lisp calls it and it is no command
-internal-delete-indirect-variable	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 internal-encode-string-utf-8	absent	no shipped Lisp calls it and it is no command
 internal-face-x-get-resource	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 internal-lisp-face-empty-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -213,7 +204,6 @@ lcms-jch->xyz	absent	Little CMS colour management: not linked
 lcms-temp->white-point	absent	Little CMS colour management: not linked
 lcms-xyz->jch	absent	Little CMS colour management: not linked
 lcms2-available-p	absent	Little CMS colour management: not linked
-lread--substitute-object-in-subtree	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-closure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-condition-variable	absent	no shipped Lisp calls it and it is no command
@@ -224,7 +214,6 @@ make-thread	absent	no shipped Lisp calls it and it is no command
 make-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 malloc-info	absent	glibc malloc diagnostics: Romacs's heap is its own arena
 malloc-trim	absent	glibc malloc diagnostics: Romacs's heap is its own arena
-marker-last-position	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 markers-in	absent	no shipped Lisp calls it and it is no command
 memory-use-counts	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 menu-bar-menu-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -280,7 +269,6 @@ play-sound-internal	needed	lane builtins-b (fonts, coding, images, system, proce
 position-symbol	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 posn-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
 previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
-print--preprocess	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
 query-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -320,11 +308,7 @@ set-xwidget-buffer	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 set-xwidget-plist	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 set-xwidget-query-on-exit-flag	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 show-face-resources	absent	GNU C core debugging aid: Romacs's diagnostics are its own
-sort-charsets	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 subr-native-comp-unit	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-subr-native-lambda-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-subr-type	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-suspend-emacs	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 symbol-with-pos-pos	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 system-move-file-to-trash	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 thread--blocker	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)

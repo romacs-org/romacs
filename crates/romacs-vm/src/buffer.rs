@@ -575,8 +575,17 @@ impl Vm {
         }
         if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
         for i in self.buffer_referrers(index) {
+            // A killed buffer's markers keep where they were, as charpos does.
+            let last_position = match &self.objects[i] {
+                Object::Marker(m) if m.buffer == value => self.marker_position_value(Value::reference(i + 1, 0))?.integer_value(),
+                _ => None,
+            };
             match &mut self.objects[i] {
-                Object::Marker(m) if m.buffer == value => { m.buffer = Value::NIL; m.anchor = None; }
+                Object::Marker(m) if m.buffer == value => {
+                    m.buffer = Value::NIL;
+                    m.anchor = None;
+                    if let Some(position) = last_position { m.last_position = position; }
+                }
                 Object::Overlay(o) if o.buffer == value => {
                     o.buffer = Value::NIL; o.start = None; o.end = None;
                 }
@@ -1999,7 +2008,7 @@ impl Vm {
     /// there with ADVANCES (insertion-type t).
     pub(crate) fn watch_marker(&mut self, buffer: Value, position: i64, advances: bool) -> std::result::Result<Value, crate::prim::Fault> {
         let bias = if advances { crate::anchors::Bias::Right } else { crate::anchors::Bias::Left };
-        let marker = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer: Value::NIL, anchor: None, bias })));
+        let marker = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer: Value::NIL, anchor: None, bias, last_position: 0 })));
         let position = Value::integer(position).map_err(crate::prim::Fault::Error)?;
         self.set_marker_object(marker, position, buffer).map_err(crate::prim::Fault::Error)?;
         Ok(marker)

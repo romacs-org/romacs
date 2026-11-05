@@ -326,6 +326,7 @@ impl Vm {
             assert!(self.marker_anchors_mut(buffer)?.set(a, p, m.bias));
             return Ok(v);
         }
+        let last_position = self.marker_position_value(v)?.integer_value();
         if let Some(a) = m.anchor {
             self.marker_anchors_mut(m.buffer)?.remove(a);
         }
@@ -335,6 +336,7 @@ impl Vm {
         };
         target.buffer = if anchor.is_some() { buffer } else { Value::NIL };
         target.anchor = anchor;
+        if let Some(position) = last_position { target.last_position = position; }
         if anchor.is_some() { self.note_referrer(buffer, v.index(0)? - 1); }
         Ok(v)
     }
@@ -827,7 +829,7 @@ impl Vm {
             MakeMarker => Ok(self.allocate_object(Object::Marker(Box::new(Marker {
                 buffer: Value::NIL,
                 anchor: None,
-                bias: Bias::Left,
+                bias: Bias::Left, last_position: 0
             })))),
             SetMarker => {
                 let buffer = if n == 3 && args[2] != Value::NIL {
@@ -841,7 +843,7 @@ impl Vm {
                 // Fcopy_marker: no MARKER makes a marker pointing nowhere.
                 if x == Value::NIL {
                     let bias = if n == 2 { bias(args[1]) } else { Bias::Left };
-                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias }))));
+                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias, last_position: 0 }))));
                 }
                 let pos = if x.as_integer().is_ok() {
                     x
@@ -857,6 +859,7 @@ impl Vm {
                     buffer: Value::NIL,
                     anchor: None,
                     bias: if n == 2 { bias(args[1]) } else { Bias::Left },
+                    last_position: 0,
                 })));
                 self.set_marker_object(m, pos, buffer)
             }
