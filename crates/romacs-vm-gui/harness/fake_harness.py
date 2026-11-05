@@ -36,6 +36,8 @@ from romacs_mcp_client import RomacsMcp
 
 OUT = threading.Lock()
 LOG = os.environ.get('FAKE_HARNESS_LOG')
+# The variables whose inheritance the environment tests watch.
+WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_')
 
 
 def emit(obj):
@@ -109,7 +111,7 @@ class Harness:
                                                   'input': arguments}]}})
         started = time.time()
         ident, text, error = self.mcp.tool(name, arguments)
-        log(tool=name, id=ident, text=text[:400], error=error, seconds=time.time() - started)
+        log(tool=name, id=ident, text=text[:16000], error=error, seconds=time.time() - started)
         if 'outcome unknown' in text:
             # Ask until a Romacs answers: while none listens the question
             # itself is `not executed'.
@@ -130,7 +132,7 @@ class Harness:
         elif 'not executed: Romacs is not running' in text:
             time.sleep(1)
             ident, text, error = self.mcp.tool(name, arguments)
-            log(tool=name, id=ident, text=text[:400], error=error, repeated=True)
+            log(tool=name, id=ident, text=text[:16000], error=error, repeated=True)
         emit({'type': 'user', 'parent_tool_use_id': None,
               'message': {'content': [{'type': 'tool_result', 'tool_use_id': use, 'content': text, 'is_error': error}]}})
         return text
@@ -225,7 +227,8 @@ class Harness:
 
     def main(self):
         threading.Thread(target=self.read_stdin, daemon=True).start()
-        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'))
+        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
+            cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith(WATCHED)})
         while True:
             text = self.inbox.get()
             if text is None:

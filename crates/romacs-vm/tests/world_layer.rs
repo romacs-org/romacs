@@ -76,7 +76,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn plan(dir: &Path, names: &[&str]) -> Plan {
-    let entries = names.iter().map(|name| Entry { kind: Kind::Require, name: (*name).to_owned(), file: None, noerror: false, load_path: 0 }).collect();
+    let entries = names.iter().map(|name| Entry { kind: Kind::Require, name: (*name).to_owned(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() }).collect();
     Plan::new(&dir.join("init.el"), entries, vec![vec![dir.join("lisp").display().to_string()]]).unwrap()
 }
 
@@ -90,7 +90,7 @@ fn build(name: &str, names: &[&str]) -> (Vm, Vec<(usize, String)>, Json) {
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
     vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
-    let refused = vm.world_layer_load(&plan(&dir, names));
+    let refused = vm.world_layer_load(&plan(&dir, names), &[]);
     let trace = host::leave_build().unwrap();
     (vm, refused, trace)
 }
@@ -174,4 +174,172 @@ fn a_library_may_ask_whether_a_delayed_variable_is_bound_and_rewrite_what_startu
     let written: Vec<(u64, &str, &str)> = refusals(&trace, "fence").iter().filter(|r| r["access"] == "write")
         .map(|r| (r["root"].as_u64().unwrap(), r["symbol"].as_str().unwrap(), r["property"].as_str().unwrap())).collect();
     assert_eq!(written, [(6, "fence-mode", "custom-set")], "{trace}");
+}
+
+/// Libraries the init declared (`Kind::After`, a declared `Kind::Autoload`)
+/// are noted at the init's own depth, each once, with their forms in order;
+/// `romacs-init-layer-exclude` leaves one out.
+#[test]
+fn the_libraries_an_init_declares_are_noted_once_with_their_forms() {
+    let dir = scratch("declares");
+    std::fs::write(dir.join("lisp/lib-x.el"), "(romacs--note-init-after-load 'lib-nested \"(t . 1)\")\n(autoload 'lib-nested-cmd \"lib-nested\")\n(provide 'lib-x)\n").unwrap();
+    let init = dir.join("init.el");
+    std::fs::write(&init, format!("(setq load-path (cons {:?} load-path))
+(romacs--note-init-after-load 'lib-x \"(t setq lib-x-a 1)\")
+(autoload 'lib-z-cmd \"lib-z\" nil t)
+(romacs--note-init-after-load \"lib-y\" \"(nil . 2)\")
+(autoload 'lib-z-other \"lib-z\")
+(setq ordinals (list (romacs--init-after-load-ordinal 'lib-x) (romacs--init-after-load-ordinal \"lib-y\") (romacs--init-after-load-ordinal 'lib-new)))
+(romacs--note-init-after-load 'lib-x \"(t setq lib-x-b 2)\")
+(require 'lib-x)
+(romacs--note-init-after-load 'lib-q \"(t . 3)\")
+(setq romacs-init-layer-exclude '(lib-q))
+(romacs--init-recording-hold t)
+(romacs--note-init-after-load 'lib-held \"(t . 4)\")
+(require 'lib-x)
+(romacs--init-recording-hold nil)
+", dir.join("lisp").display().to_string())).unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.record_init_loads();
+    vm.load_file(&init).unwrap();
+    let plan = vm.take_init_loads(&init).expect("a plan");
+    let seen: Vec<(Kind, &str, Option<&str>, bool, Vec<&str>)> = plan.entries.iter()
+        .map(|e| (e.kind, e.name.as_str(), e.file.as_deref(), e.declared, e.forms.iter().map(String::as_str).collect())).collect();
+    assert_eq!(seen, [
+        (Kind::After, "lib-x", None, true, vec!["(t setq lib-x-a 1)", "(t setq lib-x-b 2)"]),
+        (Kind::Autoload, "lib-z", None, true, vec![]),
+        (Kind::After, "lib-y", Some("lib-y"), true, vec!["(nil . 2)"]),
+        (Kind::Require, "lib-x", None, false, vec![]),
+    ], "the nested library's calls are lib-x's, not the init's; lib-q is excluded; held calls are not the init's");
+    assert_eq!(Plan::from_json(&plan.json()).as_ref(), Some(&plan));
+    assert_eq!(eval(&mut vm, "(list ordinals (romacs--init-after-load-ordinal 'lib-x))"), "((1 1 0) nil)", "no recording, no ordinal");
+}
+
+/// A declared library's definitions that read a per-process fact are kept
+/// as declared, so restore may leave them pending; one whose load or
+/// configuration reads a secret, or that connects to the network, is
+/// refused by name.
+#[test]
+fn a_declared_library_is_refused_for_a_secret_or_a_connection() {
+    let dir = scratch("declared");
+    std::fs::write(dir.join("lisp/lib-p.el"), "(defcustom lib-p-program (car exec-path) \"doc\")\n(provide 'lib-p)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-s.el"), "(defun auth-source-pass-get (&rest _) \"hunter2\")\n(defvar lib-s-secret (auth-source-pass-get 'secret \"x\"))\n(provide 'lib-s)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-n.el"), "(defvar lib-n-connection (condition-case nil (make-network-process :name \"n\" :host \"127.0.0.1\" :service 9) (error nil)))\n(provide 'lib-n)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-u.el"), "(require 'lib-v)\n(provide 'lib-u)\n").unwrap();
+    std::fs::write(dir.join("rlisp/romacs-loadup-bootstrap.el"),
+                   format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))
+(defun romacs--layer-load-configured (library forms)
+  (require library) (mapc (lambda (f) (eval (cdr (car (read-from-string f))) t)) forms))\n")).unwrap();
+    let declared = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: Vec::new() };
+    let entries = vec![
+        Entry { kind: Kind::Require, name: "lib-a".into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() },
+        declared("lib-p"), declared("lib-s"), declared("lib-n"),
+        // lib-u loads lib-v, whose configuration is refused.
+        declared("lib-u"),
+        Entry { kind: Kind::After, name: "lib-v".into(), file: None, noerror: true, load_path: 0, declared: true, forms: vec!["(t error \"refused\")".into()] },
+    ];
+    let plan = Plan::new(&dir.join("init.el"), entries, vec![vec![dir.join("lisp").display().to_string()]]).unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused.len(), 4, "{}", trace["refusals"]);
+    assert_eq!(refused[0], (2, "secret: auth-source-pass-get"));
+    assert_eq!(refused[1].0, 3, "a connection is never deferred to restore: {}", trace["refusals"]);
+    assert_eq!(refused[2].0, 5);
+    assert_eq!(refused[3], (4, "loads lib-v, whose configuration is refused"), "the library stays deferred whole");
+    assert!(refusals(&trace, "effect").iter().any(|r| r["what"].as_str().is_some_and(|w| w.starts_with("connect ") || w.starts_with("resolve "))), "{trace}");
+    // lib-a's definitions are the init's own load's; lib-p's are a declared library's.
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car (cdr e)) (nth 4 e))) (reverse romacs--world-reseed-forms))"),
+               "((lib-a-program nil) (lib-a-derived nil) (lib-p-program t))");
+}
+
+/// A pending variable's first access evaluates its definition, once, then
+/// takes the plain paths; a write, a `let' and `boundp' force it too; it
+/// can be made pending again; one bound by a `let' cannot be.
+#[test]
+fn a_pending_variable_is_defined_at_its_first_access() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().expect("prelude");
+    eval(&mut vm, "(progn (setq forced nil)
+  (defun romacs--world-force (i) (setq forced (cons i forced)) (set-default (aref '[pa pb pc pd] i) (* 10 (1+ i))))
+  (defvar pa 'stale) (defvar pb 'stale) (defvar pc 'stale) (defvar pd 'stale)
+  (defun read-pa () pa))");
+    for (name, index) in [("pa", 0), ("pb", 1), ("pc", 2), ("pd", 3)] {
+        assert_eq!(eval(&mut vm, &format!("(romacs--world-pend '{name} {index})")), "t");
+    }
+    assert_eq!(eval(&mut vm, "forced"), "nil", "pending costs nothing until read");
+    // Read, compiled and interpreted, many times: one evaluation.
+    assert_eq!(eval(&mut vm, "(let ((n 0)) (while (< n 200) (read-pa) (setq n (1+ n))) (list (read-pa) pa forced))"), "(10 10 (0))");
+    assert_eq!(eval(&mut vm, "(progn (setq pb 'mine) (list pb forced))"), "(mine (1 0))", "a write forces, then stores");
+    assert_eq!(eval(&mut vm, "(list (let ((pc 'bound)) pc) pc forced)"), "(bound 30 (2 1 0))");
+    assert_eq!(eval(&mut vm, "(list (boundp 'pd) forced)"), "(t (3 2 1 0))");
+    // Pending again, as every restore makes it: read again, evaluated again.
+    assert_eq!(eval(&mut vm, "(progn (setq pa 'stale) (romacs--world-pend 'pa 0))"), "t");
+    assert_eq!(eval(&mut vm, "(list (read-pa) (car forced))"), "(10 0)");
+    assert_eq!(eval(&mut vm, "(let ((pa 1)) (romacs--world-pend 'pa 0))"), "nil", "a let-bound variable cannot wait");
+    assert_eq!(eval(&mut vm, "(romacs--world-pend 'tab-width 0)"), "nil", "a built-in cannot wait");
+}
+
+/// A form the init gives after a secret reader ran is noted withheld, never
+/// as its text, which may hold what the reader returned.
+#[test]
+fn a_form_given_after_a_secret_reader_is_withheld_from_the_plan() {
+    let dir = scratch("secret-recording");
+    let init = dir.join("init.el");
+    std::fs::write(&init, "(romacs--note-init-after-load 'lib-early \"(t . 1)\")
+(defun auth-source-pass-get (&rest _) \"hunter2\")
+(romacs--note-init-after-load 'lib-pw (concat \"(t setq pw \" (prin1-to-string (auth-source-pass-get 'secret \"x\")) \")\"))
+").unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.record_init_loads();
+    vm.load_file(&init).unwrap();
+    let plan = vm.take_init_loads(&init).expect("a plan");
+    let forms: Vec<(&str, &[String])> = plan.entries.iter().map(|e| (e.name.as_str(), e.forms.as_slice())).collect();
+    assert_eq!(forms, [("lib-early", &["(t . 1)".to_owned()][..]), ("lib-pw", &["#<after a secret reader>".to_owned()][..])]);
+    assert!(!plan.json().to_string().contains("hunter2"));
+}
+
+/// A configuration an earlier build of the plan refused (DEFERRED) stays
+/// deferred: a declared entry that loads its library, by feature or by
+/// file, is refused.
+#[test]
+fn a_refused_configuration_carries_into_the_next_build() {
+    let dir = scratch("deferred");
+    std::fs::write(dir.join("lisp/lib-v.el"), "(provide 'lib-v)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-u.el"), "(require 'lib-v)\n(provide 'lib-u)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-w.el"), "(defvar lib-w 1)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-y.el"), "(load \"lib-w\" nil t)\n(provide 'lib-y)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-q.el"), "(defvar lib-q 1)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-z.el"), "(load \"lib-q\" nil t)\n(provide 'lib-z)\n").unwrap();
+    // An absolute name through a symbolic link names the file's true name.
+    std::os::unix::fs::symlink(dir.join("lisp"), dir.join("alias")).unwrap();
+    let alias = dir.join("alias/lib-w.el").display().to_string();
+    // A name without its suffix, which exists only with one.
+    std::fs::write(dir.join("lisp/lib-s2.el"), "(defvar lib-s2 1)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-t.el"), "(load \"lib-s2\" nil t)\n(provide 'lib-t)\n").unwrap();
+    let bare_alias = dir.join("alias/lib-s2").display().to_string();
+    std::fs::write(dir.join("rlisp/romacs-loadup-bootstrap.el"),
+                   format!("{BOOTSTRAP}(defun romacs--layer-load-declared (file) (load file nil t))\n")).unwrap();
+    let declared = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: Vec::new() };
+    let after = |name: &str, file: Option<&str>| Entry { kind: Kind::After, name: name.into(), file: file.map(str::to_owned), noerror: true, load_path: 0, declared: true, forms: vec!["(t . 1)".into()] };
+    let plan = Plan::new(&dir.join("init.el"), vec![declared("lib-u"), declared("lib-y"), declared("lib-f"), declared("lib-z"), declared("lib-t")],
+                         vec![vec![dir.join("lisp").display().to_string()]]).unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("rlisp/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[after("lib-v", None), after(&alias, Some(&alias)), after("lib-q", Some("lib-q")),
+                                              after(&bare_alias, Some(&bare_alias))]);
+    let _ = host::leave_build();
+    assert_eq!(refused, [(0, "loads lib-v, whose configuration is refused".to_owned()), (1, format!("loads {alias}, whose configuration is refused")),
+                         (3, "loads lib-q, whose configuration is refused".to_owned()), (4, format!("loads {bare_alias}, whose configuration is refused"))]);
 }

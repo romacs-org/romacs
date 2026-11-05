@@ -386,7 +386,11 @@ def run_env(root, home):
 def test_env(root, home, names=None):
     """Pure test normalization, also used with stable paths for receipt identity."""
     e = env(root, names=names)
-    for k in ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS'):
+    # No desktop session, and none of a running editor's own launch
+    # variables (a gate started from inside Romacs is a plain shell's).
+    for k in ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS',
+              'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_USAGE_LOG',
+              'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE'):
         e.pop(k, None)
     e.update(HOME=f'{home}/home', XDG_CONFIG_HOME=f'{home}/home/.config',
              XDG_DATA_HOME=f'{home}/home/.local/share', XDG_STATE_HOME=f'{home}/home/.local/state',

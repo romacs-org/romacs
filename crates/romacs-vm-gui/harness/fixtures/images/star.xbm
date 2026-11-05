@@ -1,0 +1,4 @@
+#define star_width 8
+#define star_height 4
+static char star_bits[] = {
+0x18, 0x3c, 0x7e, 0xff};

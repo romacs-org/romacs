@@ -1,7 +1,7 @@
 Romacs's icons: the glyphs in this directory (*.svg), the codepoint list
 (codepoints.txt) and the provenance list (sources.txt).
 
-Each *.svg is an upstream glyph, scaled and placed in one text cell by
+Each *.svg but romacs.svg is an upstream glyph, scaled and placed in one text cell by
 scripts/import-icon-glyphs.py from Symbols Nerd Font Mono 3.4.0
 (Nerd Fonts, https://github.com/ryanoasis/nerd-fonts). That font is
 Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com) and is
@@ -18,6 +18,10 @@ glyphs too:
   oct     Octicons (https://github.com/primer/octicons): MIT,
           Copyright (c) 2023 GitHub Inc.
   custom  Nerd Fonts' own glyphs: MIT, Copyright (c) 2014 Ryan L McIntyre.
+
+romacs.svg is Romacs's own: the R of the Romacs mark
+(crates/romacs-display-runtime/assets/window-icon.svg), part of Romacs
+and offered in this font under the SIL Open Font License 1.1 as well.
 
 The MIT License text, for the MIT sets above (each set's copyright notice
 as given there):

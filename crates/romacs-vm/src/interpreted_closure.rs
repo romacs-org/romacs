@@ -369,8 +369,7 @@ impl Vm {
                     {
                         index
                     } else {
-                        let index = self.cells.len();
-                        self.cells.push(value);
+                        let index = self.alloc_cell(value);
                         self.cell_pairs.insert(index, pair);
                         index
                     };
@@ -396,6 +395,7 @@ impl Vm {
                     pending_specials: self.pending_specials.clone(),
                     dynamic_scope: a[2] == Value::NIL,
                     deferred: false,
+                    file_level: false,
                     // GNU's interpreted closure evaluates the structure it holds.
                     evaluated: true,
                 };
@@ -440,8 +440,7 @@ impl Vm {
                     };
                     metadata.push(if modes == Value::NIL { spec } else { self.allocate_object(data::Object::Vector(vec![spec, modes])) });
                 }
-                let result = Value::reference(self.closures.len(), 4);
-                self.closures.push(Closure {
+                let result = self.alloc_closure(Closure {
                     function,
                     captures,
                     metadata,
@@ -461,8 +460,7 @@ impl Vm {
                         let (function, names) = self.function(&[], &[form], &outer, &specials)?;
                         let captures = names.iter().map(|name| values[name]).collect();
                         let body = self.list_value(&[spec]);
-                        let thunk = Value::reference(self.closures.len(), 4);
-                        self.closures.push(Closure {
+                        let thunk = self.alloc_closure(Closure {
                             function,
                             captures,
                             metadata: vec![Value::NIL, body, a[2]],

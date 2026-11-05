@@ -210,6 +210,88 @@ def check_prompt_grow(process, keys, control, extended, shell, visible, capture,
     process.wait(timeout=timeout)
 
 
+def check_leave(keys, control, shell, visible, capture, trace, report):
+    """C-c C-j leaves the cursor: C-p, M-<, an isearch and M-w work in the
+    scrollback as in any buffer; typing returns to the prompt and sends."""
+    # The sentinel is in the output alone, not the command line.
+    shell('stty -echo; printf "TOP_%s\\n" SENTINEL; seq 1 300; printf "LEAVE_READY\\n"')
+    visible('LEAVE_READY')
+    control('c')
+    control('j')
+    visible('Terminal left at its cursor')
+    for _ in range(3):
+        control('p')
+    keys('-M', 'alt', '<', '-m', 'alt')
+    visible('TOP_SENTINEL')
+    capture('leave-scrolled-back', cursor=False)
+    report['checks'] += ['C_C_C_J_LEAVES_THE_CURSOR', 'M_LESS_MOVES_TO_THE_SCROLLBACK_TOP']
+    control('s')
+    keys('TOP_SENTI')
+    keys('-k', 'Return')
+    control('a')
+    keys('-M', 'ctrl', '-k', 'space', '-m', 'ctrl')
+    control('e')
+    keys('-M', 'alt', 'w', '-m', 'alt')
+    # Typing goes back to the prompt and sends; C-y sends what M-w copied.
+    keys('echo COPIED:')
+    control('y')
+    keys('-k', 'Return')
+    visible('COPIED:TOP_SENTINEL')
+    capture('leave-returned', cursor=False)
+    report['checks'] += ['ISEARCH_AND_M_W_COPY_FROM_THE_SCROLLBACK', 'TYPING_RETURNS_TO_THE_PROMPT']
+    # Motion keys stay with Emacs at the prompt, as in shell-mode: C-p moves
+    # into the scrollback, C-n back; typing then runs at the prompt.
+    control('p')
+    control('p')
+    control('n')
+    shell('printf "TYPED_%s\\n" AWAY')
+    visible('TYPED_AWAY')
+    report['checks'] += ['C_P_C_N_MOVE_AT_THE_PROMPT', 'TYPING_AFTER_MOVING_RUNS_AT_THE_PROMPT']
+    # Up stays bash's history: the last command runs again.
+    keys('-k', 'Up')
+    keys('-k', 'Return')
+    fio.wait(lambda: sum('TYPED_AWAY' in row for row in ff.current_rows(trace())) >= 2, 30, 'Up recalls the last command', None)
+    report['checks'].append('UP_RECALLS_BASH_HISTORY')
+    # A program the shell runs in the foreground gets C-p: Python's REPL
+    # recalls its own history with it.
+    shell('python3 -q')
+    visible('>>>')
+    shell('print("PY_" + "RECALLED")')
+    visible('PY_RECALLED')
+    control('p')
+    keys('-k', 'Return')
+    fio.wait(lambda: sum('PY_RECALLED' in row for row in ff.current_rows(trace())) >= 2, 30, 'C-p recalls Python history', None)
+    shell('exit()')
+    shell('printf "BACK_%s\\n" AT_BASH')
+    visible('BACK_AT_BASH')
+    report['checks'].append('A_FOREGROUND_REPL_GETS_C_P')
+    # Out of the terminal and back, by C-x b and by C-x o: the window is on
+    # the prompt again, following the output it shows.
+    shell('(sleep 3; printf "BG_%s\\n" BUFFER) &')
+    control('x')
+    keys('b')
+    keys('*scratch*')
+    keys('-k', 'Return')
+    control('x')
+    keys('b')
+    keys('*romacs-term*')
+    keys('-k', 'Return')
+    visible('BG_BUFFER')
+    shell('(sleep 3; printf "BG_%s\\n" WINDOW) &')
+    control('x')
+    keys('2')
+    control('x')
+    keys('o')
+    control('x')
+    keys('o')
+    visible('BG_WINDOW')
+    control('x')
+    keys('1')
+    capture('leave-switched-back', cursor=False)
+    report['checks'] += ['C_X_B_OUT_AND_BACK_LANDS_ON_THE_PROMPT', 'C_X_O_OUT_AND_BACK_LANDS_ON_THE_PROMPT']
+    report.update(status='PASS', exit=0)
+
+
 def check_colors(shell, visible, capture, trace, output, report):
     import struct
     shell("printf '\\033[31mANSI_RED\\033[0m \\033[91mBRIGHT_RED\\033[0m \\033[38;5;196mINDEXED\\033[0m \\033[38;2;12;34;56mTRUE\\033[48;2;65;43;21mBG_SAMPLE\\033[0m RESET\\nCOLOR_DONE\\n'")
@@ -245,6 +327,8 @@ def main():
     parser.add_argument('--exit-resize', action='store_true')
     parser.add_argument('--colors', action='store_true')
     parser.add_argument('--editor-prefix', action='store_true')
+    parser.add_argument('--leave', action='store_true',
+                        help='C-c C-j leaves the cursor for the scrollback; typing returns')
     parser.add_argument('--prompt-grow', action='store_true',
                         help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
     parser.add_argument('--labwc', default=live.LABWC)
@@ -314,7 +398,9 @@ def main():
                 keyboard = subprocess.Popen(['/usr/bin/wtype', '-s', '120000', '-k', 'Shift_L'], env=env,
                                             stdout=log, stderr=log)
                 time.sleep(.3)
-                flags = ['--loadup'] if args.prompt_grow else []
+                # The leave journey needs GNU's Lisp (isearch, M-w), as a
+                # daily session has it.
+                flags = ['--loadup'] if args.prompt_grow or args.leave else []
                 if args.prompt_grow:
                     # The minibuffer must grow over the terminal: fido-vertical's
                     # display, not the default layer (VM2-COMPLETE-DEFAULT).
@@ -371,6 +457,9 @@ def main():
                     return 0
                 if args.editor_prefix:
                     check_editor_prefix(process, keys, control, shell, visible, capture, trace, work, original, report, args.timeout)
+                    return 0
+                if args.leave:
+                    check_leave(keys, control, shell, visible, capture, trace, report)
                     return 0
                 shell('stty -echo; printf "ROMACS_SHELL_READY\\n"')
                 visible('ROMACS_SHELL_READY')

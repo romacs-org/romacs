@@ -16,7 +16,7 @@ pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> O
         if !(0..=0x0fff_ffff).contains(&ch) { return Ok(object); }
         let flags = ch as u32 & 0x0fc0_0000;
         let code = ch as u32 & !0x0fc0_0000;
-        let multibyte = cx.casing_multibyte()? || code >= 256;
+        let multibyte = cx.buffer_multibyte()? || code >= 256;
         let code = if !multibyte && (128..256).contains(&code) {
             code + BYTE8_OFFSET
         } else { code };

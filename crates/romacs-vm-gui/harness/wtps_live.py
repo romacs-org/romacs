@@ -49,6 +49,27 @@ MEASURE = ('(with-current-buffer (get-buffer-create " *wtps-measure*") (erase-bu
 # (NAME, INSERT, FORMS): INSERT runs in the shown buffer *wtps*, emptied
 # first, then each of FORMS is asked; a number among them waits that many
 # seconds, for the engines to redisplay.
+# truncated-wide's forms, asked without fringes and with them.
+TRUNCATED_WIDE = [
+    '(list (window-fringes) (window-body-width) (frame-char-width))',
+    '(list (window-pixel-width) (window-body-width nil t) (window-total-width) (window-margins) (window-scroll-bar-width) (window-right-divider-width))',
+    '(window-max-chars-per-line)',
+    '(mapcar (lambda (c) (let ((p (posn-at-point (1+ c)))) (and p (list (car (nth 2 p)) (nth 6 p))))) (list 0 50 (1- (window-max-chars-per-line)) (window-max-chars-per-line) (1+ (window-max-chars-per-line)) 121 250))',
+    '(mapcar (lambda (c) (pos-visible-in-window-p (1+ c) nil t)) (list 50 (1- (window-max-chars-per-line)) (window-max-chars-per-line) 121))',
+    '(let* ((z (+ 603 (window-max-chars-per-line)))) (list (posn-x-y (posn-at-point z)) (pos-visible-in-window-p z nil t) (posn-x-y (posn-at-point (1- z)))))',
+    '(progn (set-window-hscroll nil 50) (goto-char 122) 0.3)',
+    '(mapcar (lambda (c) (let ((p (posn-at-point (1+ c)))) (and p (list (car (nth 2 p)) (nth 6 p))))) (list 10 49 50 51 121 250))',
+    '(mapcar (lambda (c) (pos-visible-in-window-p (1+ c) nil t)) (list 10 50 121 250))',
+    # Line numbers under the hscroll: the number shows at the first
+    # visible x, and columns count from it.
+    '(progn (setq display-line-numbers t) (set-window-hscroll nil 50) (goto-char 61) 0.3)',
+    '(mapcar (lambda (c) (let ((p (posn-at-point (1+ c)))) (and p (list (car (nth 2 p)) (nth 6 p))))) (list 49 50 51 60 80))',
+    '(mapcar (lambda (c) (pos-visible-in-window-p (1+ c) nil t)) (list 50 60 80))',
+    '(progn (goto-char 61) (list (vertical-motion 1) (point) (progn (goto-char 61) (vertical-motion (cons 5 0))) (point)))',
+    '(progn (setq display-line-numbers nil) 0.1)',
+    '(progn (set-window-hscroll nil 0) (set-window-fringes nil nil nil) (delete-other-windows) (set-frame-parameter nil (quote right-divider-width) wtps-divider) (goto-char 1) 0.3)',
+    ]
+
 CASES = [
     ('rule-work-buffer', '(insert "chat transcript\\n")', [
         MEASURE(RULE),
@@ -147,6 +168,19 @@ CASES = [
         '(window-text-pixel-size)', '(window-text-pixel-size nil 1 (save-excursion (goto-char 1) (line-end-position)))',
         '(list (pos-visible-in-window-p 20 nil t) (pos-visible-in-window-p 150 nil t))',
         '(progn (goto-char 1) (list (vertical-motion (cons 40 2)) (point)))', '(window-end nil t)',
+    ]),
+    # Point past a truncated row's right edge: GNU's walk to a position
+    # does not stop at the edge.  Then scrolled, and a row exactly as wide
+    # as the window, without fringes and with them.
+    ('truncated-wide-bare', '(setq wtps-divider (frame-parameter nil (quote right-divider-width))) (set-frame-parameter nil (quote right-divider-width) 6) (split-window-right 64) (set-window-fringes nil 0 0) (setq truncate-lines t) (insert (make-string 300 ?x) "\\n" (make-string 300 ?y) "\\n" (make-string (window-max-chars-per-line) ?z) "\\n" (make-string (1+ (window-max-chars-per-line)) ?w) "\\n")', TRUNCATED_WIDE),
+    ('truncated-wide-fringes', '(setq wtps-divider (frame-parameter nil (quote right-divider-width))) (set-frame-parameter nil (quote right-divider-width) 6) (split-window-right 64) (set-window-fringes nil 8 8) (setq truncate-lines t) (insert (make-string 300 ?x) "\\n" (make-string 300 ?y) "\\n" (make-string (window-max-chars-per-line) ?z) "\\n" (make-string (1+ (window-max-chars-per-line)) ?w) "\\n")', TRUNCATED_WIDE),
+    # A fringe-less window whose display table ends truncated rows in an
+    # ellipsis (romacs-layer.el's): a row exactly as wide as the window less
+    # the glyph's column shows whole.
+    ('truncated-ellipsis', '(setq wtps-divider (frame-parameter nil (quote right-divider-width))) (set-frame-parameter nil (quote right-divider-width) 6) (split-window-right 64) (set-window-fringes nil 0 0) (setq truncate-lines t) (setq buffer-display-table (make-display-table)) (set-char-table-extra-slot buffer-display-table 0 ?…) (set-char-table-extra-slot buffer-display-table 1 ?\\s) (insert (make-string (window-max-chars-per-line) ?z) "\\n" (make-string (1+ (window-max-chars-per-line)) ?w) "\\n")', [
+        '(list (string-pixel-width "…") (string-pixel-width "z") (window-max-chars-per-line))',
+        '(let ((n (window-max-chars-per-line))) (list (pos-visible-in-window-p n nil t) (posn-x-y (posn-at-point n)) (posn-x-y (posn-at-point (1+ n))) (pos-visible-in-window-p (+ n 2 n) nil t)))',
+        '(progn (setq buffer-display-table nil) (delete-other-windows) (set-frame-parameter nil (quote right-divider-width) wtps-divider) 0.1)',
     ]),
     # The session browser itself: a tabulated list, its header line, its
     # padded and ellipsized columns.

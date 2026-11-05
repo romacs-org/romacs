@@ -21,6 +21,22 @@ impl Leaf<'_> {
             return Ok(Value::TRUE);
         }
         let origin = Value::integer(self.point()?).map_err(Fault::Error)?;
+        let (reached, complete) = self.scan_words(count)?;
+        self.goto_char_position(reached)?;
+        // Avoid jumping out of an input field.
+        let reached = Value::integer(reached).map_err(Fault::Error)?;
+        let kept = self.constrain_to_field(reached, origin, Value::NIL, Value::NIL, Value::NIL)?;
+        if kept != reached {
+            self.goto_char_position(kept.integer_value().expect("a position"))?;
+        }
+        Ok(if complete && kept == reached { Value::TRUE } else { Value::NIL })
+    }
+
+    /// syntax.c scan_words from point: the position COUNT words away
+    /// (back for a negative COUNT), and whether all COUNT were crossed;
+    /// where an edge of the accessible text comes first, that edge's
+    /// position with false. Point does not move.
+    pub(crate) fn scan_words(&mut self, count: i64) -> std::result::Result<(i64, bool), Fault> {
         let source = self.vm.word_motion_syntax()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = crate::regexp::VmSyntax::new(self.vm, source);
@@ -77,24 +93,12 @@ impl Leaf<'_> {
             }
             remaining -= 1;
         }
-        let offset = at;
         drop(syntax);
-        match &mut self.vm.objects[index] {
-            data::Object::Buffer(buffer) => {
-                buffer.point = ByteOffset(buffer.accessible().start.0 + offset);
-            }
-            data::Object::ByteBuffer(buffer) => {
-                buffer.point = ByteOffset(buffer.restriction.start.0 + offset);
-            }
-            _ => unreachable!("buffer_index validates"),
-        }
-        // Avoid jumping out of an input field.
-        let reached = Value::integer(self.point()?).map_err(Fault::Error)?;
-        let kept = self.constrain_to_field(reached, origin, Value::NIL, Value::NIL, Value::NIL)?;
-        if kept != reached {
-            self.goto_char_position(kept.integer_value().expect("a position"))?;
-        }
-        Ok(if remaining == 0 && kept == reached { Value::TRUE } else { Value::NIL })
+        let position = match &self.vm.objects[index] {
+            data::Object::Buffer(buffer) => buffer.char_of_byte(ByteOffset(low + at)).map_err(Fault::Error)?.0 as i64 + 1,
+            _ => (low + at) as i64 + 1,
+        };
+        Ok((position, remaining == 0))
     }
 
     /// syntax.c skip_syntaxes: move point across characters whose syntax

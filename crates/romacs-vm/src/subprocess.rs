@@ -359,6 +359,19 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     use std::os::unix::process::CommandExt;
     // A process creation retries a reaper that failed to start.
     REAPER.adopt(Vec::new(), spawn_reaper);
+    // A program named by a path and no controlling terminal: posix_spawn,
+    // which a fork's page-table copy would make cost what the heap weighs.
+    if !spec.controlling_tty && spec.argv.first().is_some_and(|p| p.contains(&b'/')) {
+        let above = |fd: RawFd| -> io::Result<OwnedFd> {
+            let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+            if duplicate < 0 { Err(last_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(duplicate) }) }
+        };
+        let fds = [above(spec.stdin)?, above(spec.stdout)?, above(spec.stderr)?];
+        let env: Vec<Vec<u8>> = spec.env.iter().filter(|e| e.contains(&b'=')).cloned().collect();
+        let pid = crate::host::spawn_child(spec.argv, &env, spec.dir, fds.each_ref().map(|fd| fd.as_raw_fd()))?;
+        crate::isolate::child_spawned(pid);
+        return Ok(pid);
+    }
     let os = |b: &[u8]| std::ffi::OsStr::from_bytes(b).to_os_string();
     let mut command = crate::host::command(os(&spec.argv[0]))?;
     command.args(spec.argv[1..].iter().map(|a| os(a)));
@@ -614,6 +627,23 @@ pub(crate) fn signal_description(signal: i32) -> Option<String> {
     }
     Some(unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned())
 }
+
+/// gnulib sig2str's name for SIGNUM on GNU/Linux: the first name its table
+/// gives the number, or RTMIN+N / RTMAX-N in the real-time range.
+pub(crate) fn signal_name(signum: i32) -> Option<String> {
+    const NAMES: [&str; 32] = ["EXIT", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV",
+        "USR2", "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU", "XFSZ",
+        "VTALRM", "PROF", "WINCH", "POLL", "PWR", "SYS"];
+    if let Some(name) = usize::try_from(signum).ok().and_then(|i| NAMES.get(i)) { return Some((*name).into()); }
+    let (min, max) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+    if !(min..=max).contains(&signum) { return None; }
+    Some(if signum <= min + (max - min) / 2 {
+        if signum == min { "RTMIN".into() } else { format!("RTMIN+{}", signum - min) }
+    } else if signum == max { "RTMAX".into() } else { format!("RTMAX-{}", max - signum) })
+}
+
+/// SIGNUM_BOUND: the largest signal number.
+pub(crate) fn signal_bound() -> i32 { libc::SIGRTMAX() }
 
 /// Signal names GNU's `signal-process' accepts (sysdep.c sys_siglist order).
 pub(crate) fn signal_number(name: &str) -> Option<i32> {

@@ -306,6 +306,16 @@ fn window_body_height(cx; optional window: Value, pixelwise: Value) {
     cx.windows().window_body_size(window, pixelwise, false)
 }}
 
+defsubr! { name = "window-text-width", gnu = "window.c:7459", effect = Reads,
+fn window_text_width(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_text_size(window, pixelwise, true)
+}}
+
+defsubr! { name = "window-text-height", gnu = "window.c:7481", effect = Reads,
+fn window_text_height(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_text_size(window, pixelwise, false)
+}}
+
 // Frame visibility (frame.c). The host frame is always visible, as a
 // terminal frame is in GNU batch: requests change nothing, and making it
 // invisible needs FORCE. A child frame shows and hides (VM2-CHILD-FRAME).

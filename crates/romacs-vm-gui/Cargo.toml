@@ -14,6 +14,7 @@ romacs-display-protocol.workspace = true
 romacs-logo.workspace = true
 romacs-font.workspace = true
 romacs-face.workspace = true
+romacs-imaging.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-display-runtime = { path = "../romacs-display-runtime", default-features = false, features = ["core-free"] }
 serde_json.workspace = true

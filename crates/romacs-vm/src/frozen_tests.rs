@@ -126,6 +126,21 @@ fn bool_vectors_and_category_tables_freeze_and_read() {
     assert_eq!(eval(&mut vm, "(let* ((c (make-category-table)) (f (progn (define-category ?z \"zed\" c) (freeze c)))) (list (category-docstring ?z f) (category-table-p (copy-category-table f)) (condition-case e (define-category ?y \"why\" f) (error (car (cdr e))))))"), "(\"zed\" t \"Attempt to modify read-only object\")");
 }
 
+/// A thawed hash table is charged its entries, which fill it after the
+/// funnel charged its placeholder empty.
+#[test]
+fn a_thawed_table_is_charged_its_entries() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq pt-full (make-hash-table) pt-empty (make-hash-table)) (dotimes (i 1000) (puthash i i pt-full)) (setq pt-full (freeze pt-full) pt-empty (freeze pt-empty))");
+    let mut charged = |name: &str| {
+        let before = vm.free.allocated;
+        assert_eq!(eval(&mut vm, &format!("(hash-table-p (thaw {name}))")), "t");
+        vm.free.allocated - before
+    };
+    let (empty, full) = (charged("pt-empty"), charged("pt-full"));
+    assert!(full >= empty + 1000 * 24, "1000 entries charged {full}, none {empty}");
+}
+
 #[test]
 fn unibyte_strings_keep_their_properties_across_freeze_and_thaw() {
     // Sol r1 S9: a unibyte string's properties were dropped on decode.

@@ -13,9 +13,7 @@ impl Vm {
         Value::reference(self.slot(name) + 1, 7)
     }
     pub(super) fn keymap_cons(&mut self, car: Value, cdr: Value) -> Value {
-        let index = self.conses.len();
-        self.conses.push((car, cdr));
-        Value::reference(index, 3)
+        self.alloc_cons(car, cdr)
     }
     fn sparse_keymap(&mut self, prompt: Value) -> Value {
         let head = self.keymap_symbol("keymap");
@@ -250,7 +248,11 @@ impl Vm {
             } else if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
                 event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64)
                     .map(|c| self.char_table_get(entry, c as usize)).transpose()?.filter(|&v| v != Value::NIL)
-            } else if matches!(self.object_if(entry), Some(Object::Vector(_) | Object::SyntaxTable(_))) {
+            } else if let Some(Object::Vector(slots)) = self.object_if(entry) {
+                // access_keymap_1: a vector binds each character below its
+                // length, a nil slot an explicit nil that shadows a parent.
+                event.integer_value().and_then(|c| usize::try_from(c).ok()).and_then(|c| slots.get(c).copied())
+            } else if matches!(self.object_if(entry), Some(Object::SyntaxTable(_))) {
                 return Err("dense keymaps are not supported".into());
             } else { None };
             if let Some(value) = binding {
@@ -284,6 +286,22 @@ impl Vm {
             if tail == Value::NIL { break; }
             let (entry, next) = self.cons_pair(tail)?;
             if entry == keymap_symbol { break; }
+            if let Some(Object::Vector(slots)) = self.object_if(entry) {
+                // store_in_keymap: a vector takes a character below its
+                // length, and the part of a range below it; the rest of the
+                // range, and a key past it, go after it.
+                let len = slots.len();
+                if let Some(c) = event.integer_value().and_then(|c| usize::try_from(c).ok()).filter(|&c| c < len) {
+                    self.keymap_vector_fill(entry, c, c, value)?;
+                    return Ok(());
+                }
+                if let Some((from, to)) = range.filter(|_| len > 0) {
+                    let last = to.min(len - 1);
+                    if from <= last { self.keymap_vector_fill(entry, from, last, value)?; }
+                    if last == to { return Ok(()); }
+                }
+                insertion = tail;
+            }
             if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
                 let single = event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64).map(|c| (c as usize, c as usize));
                 if let Some((from, to)) = single.or(range) {
@@ -340,6 +358,12 @@ impl Vm {
             let new = self.keymap_cons(binding, old);
             self.traversal(Primitive::Setcdr, insertion, new)?;
         }
+        Ok(())
+    }
+    /// A dense keymap's VECTOR binds FROM through TO to VALUE, as given.
+    fn keymap_vector_fill(&mut self, vector: Value, from: usize, to: usize, value: Value) -> Result<()> {
+        let Object::Vector(slots) = self.object_mut(vector)? else { return Err("vector required".into()) };
+        slots[from..=to].fill(value);
         Ok(())
     }
     fn set_keymap_table_range(&mut self, table: Value, from: usize, to: usize, value: Value) -> Result<()> {

@@ -1160,6 +1160,19 @@ impl Vm {
     /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
     /// unibyte string's bytes and ASCII text as they are; other text
     /// requires an explicit encoder.
+    /// A unibyte insertion of ARGS: their bytes, and each string's text
+    /// properties at its offset in them (insert_from_string_1 grafts them
+    /// onto the new text).
+    pub(crate) fn unibyte_insertion(&self, args: &[Value]) -> Result<(Vec<u8>, crate::bytes::ByteProperties)> {
+        let (mut bytes, mut properties) = (Vec::new(), crate::bytes::ByteProperties::new());
+        for &v in args {
+            if let Some(Object::String(s) | Object::RawString(s)) = self.object_if(v) {
+                for (at, values) in s.properties.to_map() { properties.insert(ByteOffset(bytes.len() + at.0), values); }
+            }
+            bytes.extend(self.unibyte_text(v)?);
+        }
+        Ok((bytes, properties))
+    }
     pub(crate) fn unibyte_text(&self, text: Value) -> Result<Vec<u8>> {
         if let Some(i) = text.integer_value() {
             return Ok(vec![u8::try_from(i).map_err(|_| "invalid octet")?]);
@@ -1184,12 +1197,11 @@ impl Vm {
             Some(Object::Marker(_)) => self.marker_position_value(v),
             _ => Ok(v),
         }).collect::<Result<Vec<Value>>>()?;
+        let mut grafted = Default::default();
         let inserted = if p == Insert {
-            let mut out = vec![];
-            for &v in &self.stack[start..start + n] {
-                out.extend(self.unibyte_text(v)?);
-            }
-            out
+            let (bytes, properties) = self.unibyte_insertion(&self.stack[start..start + n])?;
+            grafted = properties;
+            bytes
         } else if p == InsertFileBytes {
             let path = String::from_utf8(self.string_bytes(args[0])?)
                 .map_err(|_| "invalid filename")?;
@@ -1254,6 +1266,7 @@ impl Vm {
             Insert | InsertFileBytes => {
                 let at = b.point;
                 b.replace(at..at, &inserted)?;
+                b.graft_properties(at, grafted);
                 if p == InsertFileBytes {
                     b.point = at;
                     let count = Value::integer(inserted.len() as i64)?;
@@ -1357,6 +1370,7 @@ mod tests {
     #[test]
     fn casetab_four_disconnected_roots_survive_conversion_and_gc() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.eval_source_raw("(set-buffer-multibyte t)").unwrap();
         let index = vm.buffer_index().unwrap();
         vm.allocate_object(Object::Bytes(vec![0; 37]));
@@ -1566,6 +1580,7 @@ mod tests {
     #[test]
     fn string_property_identity_edges_move_with_compaction_and_width_changes() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.allocate_object(Object::Bytes(vec![0]));
         let f = vm.compile(&form(serde_json::json!(["let", [["s", {"string":"aλz"}]], ["put-text-property",1,2,["quote","x"],["vector",7],"s"], ["aset","s",1,128578], "s"]))).unwrap();
         let string = vm.execute_raw(f).unwrap();
@@ -2035,7 +2050,7 @@ impl Vm {
     /// face, which starts with a keyword) gains FACE in front or, copied, at
     /// the end; a single face becomes a two-element list.
     fn combined_face(&mut self, old: Value, face: Value, append: bool) -> Value {
-        let cons = |vm: &mut Self, car, cdr| { vm.conses.push((car, cdr)); Value::reference(vm.conses.len() - 1, 3) };
+        let cons = |vm: &mut Self, car, cdr| vm.alloc_cons(car, cdr);
         let anonymous = self.cons_pair(old).ok().is_some_and(|(head, _)| {
             head.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).is_some_and(|n| n.starts_with(':'))
         });

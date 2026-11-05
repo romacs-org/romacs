@@ -901,3 +901,11 @@ fn merge_face_attribute(cx, attribute: Value, value1: Value, value2: Value) -> S
 fn merged_height(_: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
     Ok(Step::Done(if saved[1].integer_value().is_some() && result.integer_value().is_none() { saved[0] } else { result }))
 }
+
+// xfaces.c:794. THOROUGHLY also frees unused fonts in GNU; the display
+// host owns opened fonts here, so only the realized faces go.
+defsubr! { name = "clear-face-cache", gnu = "xfaces.c:794", effect = Global,
+fn clear_face_cache(cx; optional thoroughly: Value) {
+    cx.clear_face_cache();
+    Ok(Value::NIL)
+}}

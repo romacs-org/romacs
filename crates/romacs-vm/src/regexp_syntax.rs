@@ -304,10 +304,8 @@ impl Vm {
                 // A fresh (0): the shared whitespace descriptor here would
                 // let a later `put' on the symbol rewrite every whitespace
                 // syntax entry (syntax.c syms_of_syntax's Fput).
-                let tail = Value::reference(self.conses.len(), 3);
-                self.conses.push((Value::integer(0).unwrap(), Value::NIL));
-                let plist = Value::reference(self.conses.len(), 3);
-                self.conses.push((property, tail));
+                let tail = self.alloc_cons(Value::integer(0).unwrap(), Value::NIL);
+                let plist = self.alloc_cons(property, tail);
                 self.slots[purpose_slot].plist = plist;
             }
             let mut table = CharTable::new(purpose);
@@ -393,8 +391,7 @@ impl Vm {
             if let Object::Vector(values) = &mut self.objects[index] { values[code as usize] = entry; }
             return entry;
         }
-        let value = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(code).unwrap(), matching));
+        let value = self.alloc_cons(Value::integer(code).unwrap(), matching);
         value
     }
     fn regexp_syntax_table(&self, table: Value) -> SearchResult<&CharTable> {

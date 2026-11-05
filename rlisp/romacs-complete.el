@@ -170,6 +170,8 @@ the name keeps the default face.")
   "<remap> <exit-minibuffer>" #'romacs-complete-directory-enter
   "<remap> <kill-ring-save>" #'romacs-complete-save
   "M-RET" #'romacs-complete-exit-input
+  ;; Romacs: fido's M-j too: exit with the input as typed.
+  "M-j" #'romacs-complete-exit-input
   "TAB" #'romacs-complete-insert
   ;; Romacs: vertico-directory's file name editing, on by default.
   "DEL" #'romacs-complete-directory-delete-char
@@ -952,7 +954,7 @@ Exit with current input if prefix ARG is given."
     (with-current-buffer buffer
       (setq-local truncate-lines t mode-line-format nil header-line-format nil
                   cursor-type nil cursor-in-non-selected-windows nil
-                  ;; A truncated candidate ends in an ellipsis, not `$'.
+                  ;; A truncated candidate ends in the layer's one-cell `›', not `$'.
                   buffer-display-table (romacs-layer-display-table)))
     buffer))
 
@@ -984,6 +986,83 @@ large font gets a panel as wide as the frame."
   (min room (max (* 60 column)
                  (min (- room (* 4 column))
                       (round (* romacs-complete-center-width room))))))
+
+(defvar romacs-complete--prompt-width nil
+  "The widest line of the shown prompt-only minibuffer, as painted, in
+pixels; nil for a completion one (`romacs-complete--measure-prompt').")
+
+(defun romacs-complete--prompt-room (frame)
+  "The widest FRAME's layer can be, in pixels: its root frame's text width
+less the layer's borders."
+  (- (frame-text-width (frame-parent frame)) (* 2 (or (frame-parameter frame 'child-frame-border-width) 0))))
+
+(defun romacs-complete--measure-prompt (buffer column room)
+  "The widest line of BUFFER's text (its prompt and input) as painted, in
+pixels, COLUMN-pixel characters, at most ROOM: each line with its own
+faces and display properties through `string-pixel-width', in BUFFER,
+so a glyph the font draws wider than a cell and a face's height count;
+its columns times COLUMN where the display cannot measure.  Only what
+can matter is read, so an edit of a long input costs no more: a line is
+read no further than ROOM's columns of characters, its end searched
+for no further, and one longer than that counts as filling ROOM (a
+small face's characters might still fit it: the layer then takes the
+room rather than wrap them); no line is read once one has filled ROOM."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char (point-min))
+      (let ((widest 0) (most (1+ (/ room (max 1 column)))))
+        (while (and (not (eobp)) (< widest room))
+          (let* ((start (point))
+                 (limit (min (point-max) (+ start most)))
+                 ;; The line's end, searched no further than LIMIT (past the
+                 ;; prompt's field: the input is on the line too).
+                 (end (if (search-forward "\n" limit t) (1- (point)) limit))
+                 (cut (and (= end limit) (< limit (point-max)) (/= (char-after limit) ?\n))))
+            (if cut
+                (setq widest room)
+              ;; The line with its faces, without the prompt's read-only and
+              ;; field properties, which refuse its copy into the measuring
+              ;; buffer.
+              (let ((line (buffer-substring start end)))
+                (remove-text-properties 0 (length line) '(read-only nil field nil front-sticky nil rear-nonsticky nil
+                                                           inhibit-read-only nil cursor-intangible nil)
+                                        line)
+                (setq widest (max widest (or (and (fboundp 'string-pixel-width)
+                                                  (ignore-errors (string-pixel-width line buffer)))
+                                             (* column (string-width line))))))
+              (goto-char (min (point-max) (1+ end))))))
+        (min widest room)))))
+
+(defun romacs-complete--prompt-only-p (buffer)
+  "Whether BUFFER is a minibuffer with no completion of Romacs's: a
+read-from-minibuffer menu (notmuch-jump, read-multiple-choice, y-or-n-p)."
+  (and (buffer-live-p buffer) (not (local-variable-p 'romacs-complete--input buffer))))
+
+(defun romacs-complete--prompt-follow (buffer)
+  "Record BUFFER's prompt width when it is prompt-only, else none, and
+place the shown layer for it when that changed; nothing while the mode
+is off or its layer is gone (the mode never makes a layer here)."
+  (let ((frame romacs-complete--layer))
+    (when (and romacs-complete-mode (frame-live-p frame))
+      (let ((width (and (romacs-complete--prompt-only-p buffer)
+                        (romacs-complete--measure-prompt buffer (frame-char-width (frame-parent frame))
+                                                         (romacs-complete--prompt-room frame)))))
+        (unless (equal width romacs-complete--prompt-width)
+          (setq romacs-complete--prompt-width width)
+          (when (frame-visible-p frame) (romacs-complete--place frame 0)))))))
+
+(defun romacs-complete--prompt-hooks-off ()
+  "Take the prompt width's edit hook out of every minibuffer, as the mode
+turns off."
+  (setq romacs-complete--prompt-width nil)
+  (dolist (buffer (buffer-list))
+    (when (string-prefix-p " *Minibuf-" (buffer-name buffer))
+      (with-current-buffer buffer (remove-hook 'after-change-functions #'romacs-complete--prompt-edited t)))))
+
+(defun romacs-complete--prompt-edited (&rest _)
+  "`after-change-functions' of a prompt-only minibuffer: its text changed
+\(typed, deleted, the prompt replaced), so its widest line may have."
+  (romacs-complete--prompt-follow (current-buffer)))
 
 (declare-function romacs-chrome-bottom "romacs-chrome" (&optional frame except))
 (declare-function romacs-chrome-top "romacs-chrome" (&optional frame))
@@ -1032,7 +1111,14 @@ downward and its input stays put."
          (ch (frame-char-height root)) (cw (frame-char-width root))
          (mini (window-pixel-height (minibuffer-window root)))
          (room (- (frame-text-width root) (* 2 border)))
-         (width (romacs-complete--panel-width room cw))
+         (normal (romacs-complete--panel-width room cw))
+         ;; A prompt with no candidates under it (read-from-minibuffer's
+         ;; menus: notmuch-jump, read-multiple-choice, a long y-or-n-p) was
+         ;; laid out for a minibuffer as wide as the frame, as GNU's is: the
+         ;; layer widens to its widest line, two columns spare (the
+         ;; continuation glyph's and the cursor's), up to the room.
+         (prompt (and (= rows 0) romacs-complete--prompt-width))
+         (width (if (and prompt (> (+ prompt (* 2 cw)) normal)) (min room (+ prompt (* 2 cw))) normal))
          (tallest (+ (* (romacs-complete--rows) ch) mini (* 2 border))))
     ;; Centred on the frame: child frames are placed from its native
     ;; origin, outside the internal border round the windows.
@@ -1076,8 +1162,15 @@ SELECTION the row of the current one, if any."
     (unless (frame-visible-p frame) (make-frame-visible frame))))
 
 (defun romacs-complete--minibuffer-setup ()
-  "Show the minibuffer's layer for a minibuffer without candidates."
-  (unless (local-variable-p 'romacs-complete--input)
+  "Show the minibuffer's layer for a minibuffer without candidates, as
+wide as its prompt asks; a completion one records no prompt width."
+  (if (local-variable-p 'romacs-complete--input)
+      (setq romacs-complete--prompt-width nil)
+    (let ((frame (romacs-complete--frame)))
+      (setq romacs-complete--prompt-width
+            (romacs-complete--measure-prompt (current-buffer) (frame-char-width (frame-parent frame))
+                                             (romacs-complete--prompt-room frame))))
+    (add-hook 'after-change-functions #'romacs-complete--prompt-edited nil t)
     (let ((buffer (romacs-complete--candidates-buffer)))
       (with-current-buffer buffer (let ((inhibit-read-only t)) (erase-buffer)))
       (romacs-complete--show buffer 0))))
@@ -1087,8 +1180,16 @@ SELECTION the row of the current one, if any."
 show the enclosing minibuffer's candidates again."
   (when (frame-live-p romacs-complete--layer)
     (if (<= (minibuffer-depth) 1)
-        (make-frame-invisible romacs-complete--layer)
+        (progn (setq romacs-complete--prompt-width nil)
+               (make-frame-invisible romacs-complete--layer))
       (let ((outer (get-buffer (format " *romacs-complete-%d*" (1- (minibuffer-depth))))))
+        ;; This hook runs before the outer minibuffer is current again:
+        ;; measure the outer one's own buffer, not this one.
+        (let ((outer-minibuffer (get-buffer (format " *Minibuf-%d*" (1- (minibuffer-depth))))))
+          (setq romacs-complete--prompt-width
+                (and (romacs-complete--prompt-only-p outer-minibuffer)
+                     (romacs-complete--measure-prompt outer-minibuffer (frame-char-width (frame-parent romacs-complete--layer))
+                                                      (romacs-complete--prompt-room romacs-complete--layer)))))
         (when outer
           (romacs-complete--show outer (with-current-buffer outer
                                          (if (= (buffer-size) 0) 0 (count-lines (point-min) (point-max))))))))))
@@ -1100,17 +1201,22 @@ show the enclosing minibuffer's candidates again."
 or nil once the echo area is cleared.")
 
 (defun romacs-complete--message (text)
-  "Show TEXT, the echo area's new message, as a toast.  The echo area's
-clearing at the next command leaves a toast to its own timeout: it
-covers nothing that needs it gone."
-  (when (and text (not (equal text "")))
-    (romacs-layer-toast text)))
+  "Show TEXT, the echo area's new message, as a toast, unless a function
+of `romacs-layer-echo-claim-functions' shows it otherwise.  TEXT nil,
+the echo area's clearing as the next command starts, fades the toasts,
+as GNU's echo area clears."
+  (cond
+   ((null text) (setq romacs-layer--command-error nil) (romacs-complete--hide-message))
+   ((equal text ""))
+   ((seq-some (lambda (regexp) (string-match-p regexp text)) romacs-layer-toast-ignore)
+    (setq romacs-layer--command-error nil))
+   ((run-hook-with-args-until-success 'romacs-layer-echo-claim-functions text)
+    (setq romacs-layer--command-error nil))
+   (t (romacs-layer-toast text (romacs-layer-toast-kind)))))
 
 (defun romacs-complete--hide-message ()
   "Hide every message toast."
-  (dolist (toast romacs-layer--toasts)
-    (cancel-timer (nth 2 toast))
-    (romacs-layer--toast-expire (car toast))))
+  (romacs-layer-toast-clear))
 
 ;;;; The mode
 
@@ -1139,14 +1245,19 @@ frame's top-right corner (`romacs-layer-toast').  Turning it on turns `fido-mode
     (add-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (add-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
     (add-hook 'romacs-echo-area-functions #'romacs-complete--message)
+    (advice-add 'romacs--cmd-error :before #'romacs-layer--note-command-error)
+    (advice-add 'undefined :before #'romacs-layer--note-undefined)
     (add-hook 'rfn-eshadow-update-overlay-hook #'romacs-complete-directory-tidy)
     (romacs-complete--frame))
    (t
     (remove-hook 'minibuffer-setup-hook #'romacs-complete--minibuffer-setup)
     (remove-hook 'minibuffer-exit-hook #'romacs-complete--minibuffer-exit)
     (remove-hook 'romacs-echo-area-functions #'romacs-complete--message)
+    (advice-remove 'romacs--cmd-error #'romacs-layer--note-command-error)
+    (advice-remove 'undefined #'romacs-layer--note-undefined)
     (remove-hook 'rfn-eshadow-update-overlay-hook #'romacs-complete-directory-tidy)
     (romacs-complete--hide-message)
+    (romacs-complete--prompt-hooks-off)
     (romacs--host-minibuffer nil)
     (when (frame-live-p romacs-complete--layer) (delete-frame romacs-complete--layer))
     (setq romacs-complete--layer nil))))

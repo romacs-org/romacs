@@ -24,13 +24,16 @@ pub struct Idle {
 }
 
 /// One idle pass: file notification events (read_char's special events),
-/// process output, ripe timers, the idle auto-save (SAVE),
+/// process output and worker (isolate) messages, each every pass so a
+/// busy connection never starves the workers, ripe timers, the idle
+/// auto-save (SAVE),
 /// then, on a pass where none of those ran and no message waits to be
 /// shown, whether to collect (`romacs--idle-collect', rlisp/vm/keyboard.el).
 macro_rules! idle_form {
     ($save:literal) => {
         concat!("(let* ((notified (romacs--file-notify-idle))
-                  (output (or (romacs--process-idle) (romacs--isolate-idle) notified)) (check (romacs--timer-check-idle))
+                  (processes (romacs--process-idle)) (isolates (romacs--isolate-idle))
+                  (output (or processes isolates notified)) (check (romacs--timer-check-idle))
                   (save ", $save, ")
                   (ran (or output (car check) (eq save t)))
                   (message (not (eq (current-message) (and (boundp 'romacs--echo-shown) romacs--echo-shown))))
@@ -49,7 +52,9 @@ const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) 
 /// not retired is in flight, which it polls every millisecond: GNU
 /// auto-saves after redisplay. An idle collection the Lisp asks for is
 /// made here, after it returned: no request is running, so the request
-/// code it compiled retires too.
+/// code it compiled retires too. A key press arriving while it still
+/// marks abandons it (`Vm::collect_garbage_until_key'): the key is read
+/// at once, and the collection waits for the next quiet moment.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
     let (ran, rest) = vm.eval_source(if auto_save { IDLE_AUTO_SAVE } else { IDLE })?.cons_pair()?;
     let ran = !ran.is_nil();
@@ -58,7 +63,7 @@ pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
     let (micros, rest) = rest.cons_pair()?;
     let delay = if micros.is_nil() { None } else { Some(Duration::from_micros(micros.as_integer()?.max(0) as u64)) };
     if !rest.cons_pair()?.0.is_nil() {
-        vm.collect_garbage();
+        vm.collect_garbage_until_key();
     }
     Ok(Idle { ran, message, delay })
 }
@@ -309,6 +314,57 @@ mod tests {
         printed(&mut vm, "(progn (setq romacs-gc-idle-delay nil) (dotimes (_ 20000) (make-list 10 nil)))");
         vm.timer_stop_idle();
         assert_eq!(idle(&mut vm, true).unwrap().delay, None);
+    }
+
+    /// A keyboard that is idle for WAITS waits, each the time asked for or
+    /// 20 ms at most, then gives KEY.
+    struct Idling(usize, Option<romacs_vm::CommandEvent>);
+    impl romacs_vm::HostInput for Idling {
+        fn input_pending(&mut self) -> bool { false }
+        fn redisplay(&mut self, _: romacs_vm::HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
+        fn next_event(&mut self, timeout: Option<Duration>) -> Result<romacs_vm::HostEvent, String> {
+            if self.0 == 0 {
+                return self.1.take().map(romacs_vm::HostEvent::Key).ok_or_else(|| "keys exhausted".into());
+            }
+            self.0 -= 1;
+            std::thread::sleep(timeout.unwrap_or(Duration::MAX).min(Duration::from_millis(20)));
+            Ok(romacs_vm::HostEvent::Timeout)
+        }
+    }
+
+    /// A prompt's wait for a key (a minibuffer read) collects at idle as
+    /// the host's idle pass does: once idle for the delay with enough
+    /// allocated, one collection, and the key it waited for is read. Only
+    /// the objects allocated count there: request code, which a collection
+    /// inside Lisp cannot retire, would have it collect again and again.
+    #[test]
+    fn a_prompt_wait_collects_at_idle() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(prompt_collect_body).unwrap().join().unwrap();
+    }
+    fn prompt_collect_body() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        vm.eval_source(include_str!("../../../rlisp/vm/process.el")).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        // The command loop's Lisp half, as a session's first key installs it.
+        printed(&mut vm, "(read-event nil nil 0)");
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil gc-cons-threshold 16000000 gc-cons-percentage nil
+                                romacs-gc-idle-delay 0.05 romacs-gc-idle-factor 10)");
+        vm.collect_garbage();
+        // Closures that count toward a code collection: past the idle
+        // share, short of an automatic one.
+        printed(&mut vm, "(dotimes (i 500) (eval (list 'function (list 'lambda nil i)) t))");
+        assert_eq!(printed(&mut vm, "(> (romacs--collection-share) 0.2)"), "t");
+        let done: i64 = printed(&mut vm, "(progn (dotimes (_ 20000) (make-list 10 nil)) gcs-done)").parse().unwrap();
+        vm.set_host_input(Some(Box::new(Idling(10, Some(romacs_vm::CommandEvent::Character(120))))));
+        assert_eq!(printed(&mut vm, "(list (romacs--read-host-char nil) gcs-done)"), format!("(120 {})", done + 1));
+        // Under the delay, none.
+        printed(&mut vm, "(progn (setq romacs-gc-idle-delay 5) (dotimes (_ 20000) (make-list 10 nil)))");
+        vm.set_host_input(Some(Box::new(Idling(3, Some(romacs_vm::CommandEvent::Character(121))))));
+        assert_eq!(printed(&mut vm, "(list (romacs--read-host-char nil) gcs-done)"), format!("(121 {})", done + 1));
     }
 
     /// Work that runs during a command-key wait and schedules a timer,

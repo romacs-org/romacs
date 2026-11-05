@@ -146,6 +146,9 @@ pub enum Fact<'a> {
     /// between processes, so each process asks again, as GNU's
     /// `num-processors' does.
     Processors,
+    /// The machine's live load: memory and load averages change at every
+    /// read, so no world is keyed on them.
+    Machine,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -173,6 +176,9 @@ pub const P_ENV: [&str; 17] = [
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
 /// the world was built, as a dumped GNU's is its dump time.
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
+/// jit-lock.el's default for `jit-lock-stealth-load' only asks whether
+/// `load-average' works, and a dumped GNU keeps the dump's answer.
+const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-load");
 
 /// Load-time forms outside startup that GNU evaluates in each process and
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
@@ -213,11 +219,15 @@ struct LayerState {
     /// A re-seed form that starts a timer ran (`reseed_reads`).
     timers: bool,
     rerun: bool,
+    /// The entry loading is a library the init only declared
+    /// (`layer::Entry::declared`): its re-seed forms may wait for their
+    /// variable's first read (`romacs--world-pend`).
+    declared: bool,
 }
 
 /// The definition forms a layer re-seeds: the head's kind and the name it
 /// defines, for `(KIND NAME ...`.
-const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+const DEFINITIONS: [&str; 5] = ["defcustom", "defvar", "defconst", "defvar-local", "defimage"];
 
 fn definition(head: &str) -> Option<(&'static str, String)> {
     let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
@@ -245,8 +255,12 @@ fn layer_form(head: &str) {
 }
 
 /// An effect inside a layer's definition form: not done, and the form
-/// is deferred whole to restore, where it is. True when so taken.
+/// is deferred whole to restore, where it is. True when so taken. A
+/// network connection is never deferred: it refuses the entry.
 fn layer_cut(what: &str) -> bool {
+    if ["connect ", "listen ", "resolve "].iter().any(|network| what.starts_with(network)) {
+        return false;
+    }
     LAYER.with(|l| match l.borrow_mut().as_mut() {
         Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
         _ => false,
@@ -286,6 +300,17 @@ pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
         let cut = std::mem::take(&mut layer.cut);
         layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
     })
+}
+
+/// The layer's next entries are libraries the init only declared (ON),
+/// or ones it loaded.
+pub(crate) fn layer_declared(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.declared = on; });
+}
+
+/// Whether the entry loading is a declared library's.
+pub(crate) fn layer_in_declared() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.declared))
 }
 
 /// Whether the startup function may run again now: after a layer's
@@ -336,7 +361,8 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
-        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors => Class::P,
+        Fact::Machine if site.is_some_and(|s| s.at(BAKED_LOAD)) => Class::B,
+        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors | Fact::Machine => Class::P,
         Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
@@ -655,6 +681,21 @@ pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
+/// The Romacs source tree this build came from, `source-directory':
+/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
+/// build's own root while it is a git checkout of one, else none.  A gate's
+/// build slot mirrors a checkout without `.git`, so a build made there
+/// names no tree it would not find again.
+pub fn source_directory() -> Option<PathBuf> {
+    let tree = |dir: &Path| metadata(dir.join("crates/romacs-vm/src/prims")).is_ok_and(|m| m.is_dir());
+    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
+        // Absolute, so a buffer's own directory never resolves it.
+        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
+    }
+    let root = build_root();
+    (tree(&root) && symlink_metadata(root.join(".git")).is_ok()).then_some(root)
+}
+
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -1336,15 +1377,42 @@ pub fn die_with_parent(parent: u32) {
     }
 }
 
-/// Lower this process to the background: the weakest CPU niceness and the
-/// idle I/O class, which its children inherit. Best effort.
-pub fn lower_priority() {
+/// How far a background process steps back from the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    /// Work nobody waits for, such as a background compile: the weakest
+    /// CPU niceness and the idle I/O class.
+    Idle,
+    /// A worker isolate: work the session waits for, never ahead of it:
+    /// niceness 10 and the lowest best-effort I/O level, so the session's
+    /// evaluator and render threads always run first.
+    Worker,
+}
+
+/// Lower the calling thread to PRIORITY; the threads and processes it
+/// starts afterwards inherit it, so a process calls it at the start of
+/// main. Best effort.
+pub fn lower_priority(priority: Priority) {
     const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    let (nice, io) = match priority {
+        Priority::Idle => (19, IOPRIO_CLASS_IDLE << 13),
+        Priority::Worker => (10, (IOPRIO_CLASS_BE << 13) | 7),
+    };
     unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+        libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, io);
     }
+}
+
+/// Name the calling thread NAME (the kernel keeps 15 bytes). On a
+/// process's main thread that is the process's own name, the one `ps` and
+/// `pgrep` show.
+pub fn set_thread_name(name: &str) -> io::Result<()> {
+    effect(|| "thread-name".into())?;
+    let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    status(unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr()) })
 }
 
 pub fn euid() -> u32 {
@@ -1583,6 +1651,24 @@ pub fn boot_clock() -> Option<std::time::Duration> {
     ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
 }
 
+/// sysinfo(2)'s RAM and swap totals and free amounts, in bytes:
+/// (total RAM, free RAM, total swap, free swap).
+pub fn memory_info() -> Option<[u64; 4]> {
+    p_read(Fact::Machine, "memory-info".into());
+    let mut si: libc::sysinfo = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sysinfo(&mut si) } != 0 { return None; }
+    let unit = u64::from(si.mem_unit);
+    Some([si.totalram as u64 * unit, si.freeram as u64 * unit, si.totalswap as u64 * unit, si.freeswap as u64 * unit])
+}
+
+/// getloadavg(3): the 1, 5 and 15 minute averages it has, None on failure.
+pub fn load_average() -> Option<Vec<f64>> {
+    p_read(Fact::Machine, "load-average".into());
+    let mut loads = [0f64; 3];
+    let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
+    (n >= 0).then(|| loads[..n as usize].to_vec())
+}
+
 /// The memory page size in bytes (`getpagesize`).
 pub fn page_size() -> u64 {
     u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok().filter(|&n| n > 0).unwrap_or(4096)
@@ -1600,6 +1686,25 @@ pub fn clock() -> SystemTime {
         return with_build(|b| b.pinned.clock).unwrap_or(SystemTime::UNIX_EPOCH);
     }
     SystemTime::now()
+}
+
+/// The processor time this process has used, user and system, as
+/// `getrusage (RUSAGE_SELF)` sums them (GNU sysdep.c
+/// `get-internal-run-time'); in build mode none, a per-process fact.
+pub fn run_time() -> io::Result<std::time::Duration> {
+    if refusing() {
+        p_read(Fact::Monotonic, "run time".into());
+        return Ok(std::time::Duration::ZERO);
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage writes the whole struct it is given.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: initialized by the successful call above.
+    let usage = unsafe { usage.assume_init() };
+    let part = |t: libc::timeval| std::time::Duration::new(t.tv_sec.max(0) as u64, (t.tv_usec.clamp(0, 999_999) as u32) * 1000);
+    Ok(part(usage.ru_utime) + part(usage.ru_stime))
 }
 
 /// The monotonic clock, for deadlines and measurement.
@@ -1764,6 +1869,60 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     Ok(Command::new(program))
 }
 
+/// A child process, as GNU's emacs_spawn starts one (callproc.c): ARGV[0],
+/// a file name with a slash, run with ARGV and ENV (each `NAME=VALUE') in
+/// DIR, FDS as its standard input, output and error, in a session of its
+/// own, with SIGINT, SIGQUIT, SIGPROF and SIGPIPE at their defaults and no
+/// signal blocked. posix_spawn: the child shares this process's memory
+/// until it execs, where a fork would copy page tables whose size grows
+/// with the heap. Each of FDS must be above 2, so no descriptor is
+/// replaced before it is copied.
+pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os::fd::RawFd; 3]) -> io::Result<i32> {
+    use std::ffi::CString;
+    effect(|| format!("run {}", String::from_utf8_lossy(argv.first().map_or(&[][..], Vec::as_slice))))?;
+    let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
+    let strings = |list: &[Vec<u8>]| list.iter().map(|b| CString::new(b.as_slice())).collect::<Result<Vec<_>, _>>().map_err(|_| invalid());
+    let (argv, env, dir) = (strings(argv)?, strings(env)?, CString::new(dir).map_err(|_| invalid())?);
+    let program = argv.first().ok_or_else(invalid)?;
+    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect::<Vec<_>>();
+    let (argp, envp) = (pointers(&argv), pointers(&env));
+    let ok = |r: libc::c_int| if r == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(r)) };
+    // SAFETY: the actions and attributes are initialized before use and
+    // destroyed after; every pointer passed outlives the call.
+    unsafe {
+        let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+        ok(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
+        let mut attr = std::mem::MaybeUninit::<libc::posix_spawnattr_t>::uninit();
+        if let Err(error) = ok(libc::posix_spawnattr_init(attr.as_mut_ptr())) {
+            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
+            return Err(error);
+        }
+        let (actions, attr) = (actions.as_mut_ptr(), attr.as_mut_ptr());
+        let prepared = (|| -> io::Result<()> {
+            for (target, fd) in fds.into_iter().enumerate() {
+                ok(libc::posix_spawn_file_actions_adddup2(actions, fd, target as libc::c_int))?;
+            }
+            ok(libc::posix_spawn_file_actions_addchdir_np(actions, dir.as_ptr()))?;
+            let mut defaults: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut defaults);
+            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF, libc::SIGPIPE] {
+                libc::sigaddset(&mut defaults, signal);
+            }
+            ok(libc::posix_spawnattr_setsigdefault(attr, &defaults))?;
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            ok(libc::posix_spawnattr_setsigmask(attr, &mask))?;
+            let flags = libc::POSIX_SPAWN_SETSID as libc::c_int | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+            ok(libc::posix_spawnattr_setflags(attr, flags as libc::c_short))
+        })();
+        let mut pid: libc::pid_t = 0;
+        let spawned = prepared.and_then(|()| ok(libc::posix_spawn(&mut pid, program.as_ptr(), actions, attr, argp.as_ptr(), envp.as_ptr())));
+        libc::posix_spawnattr_destroy(attr);
+        libc::posix_spawn_file_actions_destroy(actions);
+        spawned.map(|()| pid)
+    }
+}
+
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
@@ -1780,6 +1939,9 @@ pub enum StoreOpen {
     Write { create: bool, truncate: bool },
     /// To make it where none is (O_CREAT|O_EXCL), and write it.
     New,
+    /// To append to it (O_APPEND), made if missing: concurrent writers'
+    /// lines never overwrite each other.
+    Append,
 }
 
 /// A world store's file at PATH, opened as HOW: never through a symlink,
@@ -1794,6 +1956,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
         StoreOpen::Read => { options.read(true); }
         StoreOpen::Write { create, .. } => { options.write(true).create(create); }
         StoreOpen::New => { options.write(true).create_new(true); }
+        StoreOpen::Append => { options.append(true).create(true); }
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
@@ -1909,6 +2072,7 @@ pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Sto
         StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
         StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
         StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
@@ -2499,6 +2663,53 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
     effect(|| format!("resolve {host}:{port}"))?;
     use std::net::ToSocketAddrs;
     (host, port).to_socket_addrs().map(Iterator::collect)
+}
+
+/// NAME's IP addresses as the C library's resolver gives them, one for each
+/// datagram socket address (GNU's `network-lookup-address-info'): FAMILY
+/// is `AF_UNSPEC', `AF_INET' or `AF_INET6'; NUMERIC treats NAME as a
+/// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
+/// resolver's reason (`gai_strerror'), or the refusal in build mode.
+pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
+    // SAFETY: an all-zero addrinfo is the documented "no hints" value.
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_family = family;
+    hints.ai_socktype = libc::SOCK_DGRAM;
+    if numeric {
+        hints.ai_flags = libc::AI_NUMERICHOST;
+    }
+    let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+    // SAFETY: c_name and hints outlive the call; res is freed below.
+    let ret = unsafe { libc::getaddrinfo(c_name.as_ptr(), std::ptr::null(), &hints, &mut res) };
+    if ret != 0 {
+        // SAFETY: gai_strerror returns a static string for any code.
+        return Err(unsafe { std::ffi::CStr::from_ptr(libc::gai_strerror(ret)) }.to_string_lossy().into_owned());
+    }
+    let mut addresses = Vec::new();
+    let mut entry = res;
+    while !entry.is_null() {
+        // SAFETY: entry is a node of the list getaddrinfo returned; its
+        // address is a sockaddr of its family.
+        let ai = unsafe { &*entry };
+        match ai.ai_family {
+            libc::AF_INET => {
+                let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
+                addresses.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
+            }
+            libc::AF_INET6 => {
+                let sin6 = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in6) };
+                addresses.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
+            }
+            _ => {}
+        }
+        entry = ai.ai_next;
+    }
+    // SAFETY: res came from a successful getaddrinfo and is freed once.
+    unsafe { libc::freeaddrinfo(res) };
+    Ok(addresses)
 }
 
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {

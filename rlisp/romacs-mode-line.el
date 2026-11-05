@@ -423,6 +423,77 @@ whole buffer shows (GNU's `All' is dropped)."
   "The point the segments after it are laid out from the right edge."
   :format " ")
 
+(defvar romacs-mode-line-repeat nil
+  "The keys a pending repeat takes, as the status bar shows them, or nil:
+set by `romacs-popup-repeat-echo' where hints do not show them.")
+
+(defun romacs-mode-line-repeat-text (map)
+  "MAP's keys after the keyboard glyph, as the repeat segment shows them."
+  (let (keys)
+    (map-keymap (lambda (event binding) (when (and binding (not (consp event))) (push (key-description (vector event)) keys))) map)
+    (concat (or (romacs-mode-line--icon 'keyboard) "") (string-join (nreverse keys) " ") " ")))
+
+(romacs-mode-line-define-segment repeat
+  "The keys a pending repeat takes, where hints do not show them."
+  :priority 60
+  :format ("" romacs-mode-line-repeat))
+
+;; What packages add to `mode-line-modes': GNU shows it in every mode
+;; line, `[Compiling]' while a compilation runs, erc-track's channel
+;; activity, repeat's `repeat-echo-mode-line'; its own elements (the
+;; major mode's name, the process, the minor modes' lighters, the
+;; narrowing and recursive-edit specs) other segments show or leave out.
+
+(defun romacs-mode-line--gnu-modes-element-p (element)
+  "Non-nil for an element of GNU's own `mode-line-modes' (bindings.el),
+told by its content: a package's entry may be added before this file
+loads (compile.el adds its own as it loads)."
+  (pcase element
+    ((pred stringp) (member (substring-no-properties element) '("%[" "%]" "%n" "(" ")" " " "")))
+    (`(:eval (,(or 'car 'cdr) mode-line-modes-delimiters)) t)
+    (`(:propertize ("" mode-name) . ,_) t)
+    (`("" ,(or 'mode-line-process 'mode-line-minor-modes 'minor-mode-alist)) t)))
+
+(defun romacs-mode-line--modes-extra (modes)
+  "The elements of MODES, a `mode-line-modes' value, packages added."
+  (seq-remove #'romacs-mode-line--gnu-modes-element-p (if (listp modes) modes (list modes))))
+
+(defvar romacs-mode-line-modes-extra nil
+  "What packages added to `mode-line-modes', as the `modes' segment shows
+it: kept by `romacs-mode-line--modes-watch' as `mode-line-modes' is set.")
+(put 'romacs-mode-line-modes-extra 'risky-local-variable t)
+
+(defun romacs-mode-line--modes-watch (_symbol value operation where)
+  "`mode-line-modes' is about to be VALUE by OPERATION, in buffer WHERE
+when that is its local value: keep `romacs-mode-line-modes-extra' to
+match.  A local value killed (`makunbound' in WHERE) takes the default's
+again."
+  (cond ((and (buffer-live-p where) (eq operation 'makunbound))
+         (with-current-buffer where (kill-local-variable 'romacs-mode-line-modes-extra)))
+        ((buffer-live-p where)
+         (with-current-buffer where
+           (setq-local romacs-mode-line-modes-extra (romacs-mode-line--modes-extra value))))
+        (t (set-default 'romacs-mode-line-modes-extra
+                        (and (not (eq operation 'makunbound)) (romacs-mode-line--modes-extra value))))))
+
+(defun romacs-mode-line--modes-reconcile ()
+  "Make `romacs-mode-line-modes-extra' match `mode-line-modes' everywhere:
+its default, and each buffer's own value where it has one, once, as the
+watcher starts."
+  (set-default 'romacs-mode-line-modes-extra (romacs-mode-line--modes-extra (default-value 'mode-line-modes)))
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (cond ((local-variable-p 'mode-line-modes)
+             (setq-local romacs-mode-line-modes-extra (romacs-mode-line--modes-extra mode-line-modes)))
+            ((local-variable-p 'romacs-mode-line-modes-extra)
+             (kill-local-variable 'romacs-mode-line-modes-extra))))))
+
+(romacs-mode-line-define-segment modes
+  "What packages add to `mode-line-modes': a compilation in progress,
+chat activity."
+  :priority 45
+  :format ("" romacs-mode-line-modes-extra))
+
 (romacs-mode-line-define-segment misc
   "What packages and the user add (`mode-line-misc-info', with
 `global-mode-string': the time, a clock, a timer)."
@@ -514,9 +585,11 @@ then `vc-mode''s text without the backend's name, with its help and map."
     (image-mode . image) (help-mode . help) (helpful-mode . help) (Info-mode . info) (Man-mode . info)
     (message-mode . mail) (notmuch-search-mode . mail) (notmuch-show-mode . mail) (notmuch-tree-mode . mail)
     (jabber-chat-mode . chat) (erc-mode . chat) (rcirc-mode . chat)
-    (lisp-interaction-mode . scratch) (text-mode . text) (prog-mode . default) (special-mode . default))
-  "Each major mode's icon, found for a mode through its parents; a mode
-whose nearest icon is `default' also shows its name."
+    (lisp-interaction-mode . scratch) (text-mode . text))
+  "Each major mode's icon, found for a mode through its parents.  A mode
+with none (fundamental, special and dashboard buffers, a language with
+no icon of its own) shows Romacs's R, which says only that this is
+Romacs, so its name shows too: an icon earns its place by naming the mode."
   :type '(alist :key-type symbol :value-type symbol))
 
 (defvar-local romacs-mode-line--iconic nil
@@ -534,13 +607,14 @@ of them does not also show its name."
   (let ((mode major-mode) icon)
     (while (and mode (not (setq icon (alist-get mode romacs-mode-line-mode-icons))))
       (setq mode (get mode 'derived-mode-parent)))
-    (or icon 'default)))
+    (or icon 'romacs)))
 
 (romacs-mode-line-define-segment mode-icon
   "The major mode's icon."
   :hooks (window-buffer-change-functions)
   :compute (lambda () (let* ((name (romacs-mode-line--mode-icon-name))
-                             (icon (romacs-mode-line--icon name)))
+                             ;; Romacs's R in the mark's colour where it shows.
+                             (icon (romacs-mode-line--icon name (and (eq name 'romacs) 'romacs-mode-line-mark))))
                         (setq romacs-mode-line--iconic (and icon (memq name romacs-mode-line-telling-icons) t))
                         icon)))
 
@@ -591,7 +665,7 @@ mode-line constructs."
   :set #'romacs-mode-line--set-layout)
 
 (defcustom romacs-mode-line-right
-  '(misc lsp encoding major-mode vc diagnostics)
+  '(repeat modes misc lsp encoding major-mode vc diagnostics)
   "The mode line's segments laid out from the right edge."
   :type '(repeat sexp)
   :set #'romacs-mode-line--set-layout)
@@ -671,6 +745,8 @@ Off, GNU's default returns where this mode's is installed."
         (unless romacs-mode-line-format (romacs-mode-line-rebuild))
         (romacs-mode-line--hook t)
         (romacs-mode-line--refresh-all)
+        (romacs-mode-line--modes-reconcile)
+        (add-variable-watcher 'mode-line-modes #'romacs-mode-line--modes-watch)
         (if (or (eq current romacs-mode-line--gnu-default)
                 (and romacs-mode-line--installed (eq current romacs-mode-line--installed)))
             (progn
@@ -679,6 +755,7 @@ Off, GNU's default returns where this mode's is installed."
               (setq romacs-mode-line--installed romacs-mode-line-format))
           (message "romacs-mode-line-mode: keeping the installed `mode-line-format'")))
     (romacs-mode-line--hook nil)
+    (remove-variable-watcher 'mode-line-modes #'romacs-mode-line--modes-watch)
     (when (and romacs-mode-line--installed (eq (default-value 'mode-line-format) romacs-mode-line--installed))
       (romacs-mode-line--install romacs-mode-line--installed romacs-mode-line--gnu-default))))
 

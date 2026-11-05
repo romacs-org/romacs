@@ -295,3 +295,15 @@ mod tests {
         assert_eq!(total_memory(b""), 2 * 1024 * 1024);
     }
 }
+
+// fns.c:3688: getloadavg's averages, times 100 and truncated unless
+// USE-FLOATS.
+defsubr! { name = "load-average", gnu = "fns.c:3688", effect = Reads,
+fn load_average(cx; optional use_floats: Value) {
+    let loads = crate::host::load_average()
+        .ok_or_else(|| Fault::Error("load-average not implemented for this operating system".into()))?;
+    Ok(loads.into_iter().rev().fold(Value::NIL, |list, load| {
+        let value = if use_floats == Value::NIL { Value::integer((100.0 * load) as i64).unwrap() } else { cx.float(load) };
+        cx.cons(value, list)
+    }))
+}}

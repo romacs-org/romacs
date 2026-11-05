@@ -245,12 +245,62 @@ signals is the tool's error.  A closed or cancelled request stops polling."
   (unless (functionp poll) (error "Invalid deferred MCP poll"))
   (list 'romacs-mcp--deferred poll))
 
+(defun romacs-mcp--valid-char-p (char)
+  "Whether CHAR is a Unicode scalar value (JSON can carry it)."
+  (and (<= char #x10FFFF) (not (<= #xD800 char #xDFFF))))
+
+(defun romacs-mcp--unicode (text)
+  "TEXT as JSON can carry it: TEXT itself when it serializes (a native
+check), else with each raw byte, surrogate or character past Unicode
+replaced by U+FFFD, one for one, so a buffer's coordinates in a tool's
+result stay true.  A unibyte TEXT is bytes, one character each, as its
+buffer counts them: a byte past ASCII is a raw byte."
+  (let ((text (if (multibyte-string-p text) text (string-to-multibyte text))))
+    (if (ignore-errors (json-serialize text) t)
+        text
+      (concat (mapcar (lambda (char) (if (romacs-mcp--valid-char-p char) char #xFFFD)) text)))))
+
+(defun romacs-mcp--unicode-tree (value &optional depth)
+  "VALUE with every string in it, a key too, as `romacs-mcp--unicode'
+makes it: hash tables, vectors, alists and plists.  A circular list, or
+nesting deeper than JSON's limit, is left as it is: serializing it is
+refused as before."
+  (let ((depth (or depth 0)))
+    (cond ((> depth 10000) value)
+          ((stringp value) (romacs-mcp--unicode value))
+          ((vectorp value) (vconcat (mapcar (lambda (item) (romacs-mcp--unicode-tree item (1+ depth))) value)))
+          ((hash-table-p value)
+           (let ((copy (make-hash-table :test (hash-table-test value) :size (hash-table-count value))))
+             (maphash (lambda (key item)
+                        (puthash (romacs-mcp--unicode-tree key (1+ depth))
+                                 (romacs-mcp--unicode-tree item (1+ depth)) copy))
+                      value)
+             copy))
+          ((and (consp value) (condition-case nil (progn (length value) nil) (circular-list t) (error nil)))
+           value)
+          ((consp value)
+           (let ((items nil) (tail value))
+             (while (consp tail)
+               (push (romacs-mcp--unicode-tree (car tail) (1+ depth)) items)
+               (setq tail (cdr tail)))
+             (nconc (nreverse items) (romacs-mcp--unicode-tree tail (1+ depth)))))
+          (t value))))
+
+(defun romacs-mcp--unicode-value (value)
+  "VALUE, a JSON value, as JSON can carry it: VALUE itself when it
+serializes, else with its strings made Unicode (`romacs-mcp--unicode-tree')."
+  (if (ignore-errors (json-serialize value :false-object :false :null-object :null) t)
+      value
+    (romacs-mcp--unicode-tree value)))
+
 (defun romacs-mcp--result (value failed modern)
-  "Return the MODERN or legacy tool envelope for VALUE, an error if FAILED."
-  (let* ((text (if (stringp value) value
-                 (decode-coding-string
-                  (json-serialize value :false-object :false :null-object :null)
-                  'utf-8)))
+  "Return the MODERN or legacy tool envelope for VALUE, an error if FAILED.
+Its text is Unicode: a raw byte in VALUE becomes U+FFFD, not a refusal."
+  (let* ((text (romacs-mcp--unicode
+                (if (stringp value) value
+                  (decode-coding-string
+                   (json-serialize (romacs-mcp--unicode-value value) :false-object :false :null-object :null)
+                   'utf-8))))
          (result (romacs-mcp--object
                   "content" (vector (romacs-mcp--object "type" "text" "text" text))
                   "isError" (if failed t :false))))

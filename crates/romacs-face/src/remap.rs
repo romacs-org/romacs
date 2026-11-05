@@ -29,6 +29,11 @@ pub(crate) enum Layer {
         layers: Vec<Layer>,
     },
 }
+romacs_snapshot::snapshot_enum!(Layer {
+    Layer::Named(f0) => (f0),
+    Layer::Anonymous(f0) => (f0),
+    Layer::Filtered { parameter, value, layers } => (parameter, value, layers),
+});
 
 /// An anonymous face: an attribute plist, possibly inheriting.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +41,7 @@ pub(crate) struct AnonymousFace {
     pub attrs: Attrs,
     pub inherit: Vec<Layer>,
 }
+romacs_snapshot::snapshot_struct!(AnonymousFace { attrs, inherit });
 
 /// Parse a face reference into layers, highest precedence first.
 ///
@@ -143,6 +149,7 @@ pub struct Remap {
     entries: FxHashMap<Arc<str>, Vec<Layer>>,
     order: Vec<Arc<str>>,
 }
+romacs_snapshot::snapshot_struct!(Remap { generation, entries, order });
 
 impl Remap {
     pub fn empty() -> Arc<Remap> {
@@ -186,6 +193,67 @@ impl Remap {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// The window parameters its `:filtered` layers test, sorted, once each.
+    pub fn filter_parameters(&self) -> Vec<Arc<str>> {
+        let mut names = Vec::new();
+        for layers in self.entries.values() {
+            filter_names(layers, &mut names);
+        }
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// This remapping as a window shows it (xfaces.c filter_face_ref and
+    /// evaluate_face_filter): each `(:filtered (:window PARAMETER VALUE) REF)`
+    /// is REF where MATCHES says the window's PARAMETER is VALUE, else nothing.
+    pub fn for_window(&self, matches: &dyn Fn(&str, &Datum) -> bool) -> Arc<Remap> {
+        Arc::new(Remap {
+            generation: Generation::mint(),
+            entries: self.entries.iter().map(|(face, layers)| (face.clone(), for_window(layers, matches))).collect(),
+            order: self.order.clone(),
+        })
+    }
+}
+
+impl FaceRef {
+    /// This reference as a window shows it, as [`Remap::for_window`].
+    pub fn for_window(&self, matches: &dyn Fn(&str, &Datum) -> bool) -> FaceRef {
+        FaceRef(for_window(&self.0, matches))
+    }
+}
+
+fn filter_names(layers: &[Layer], out: &mut Vec<Arc<str>>) {
+    for layer in layers {
+        match layer {
+            Layer::Named(_) => {}
+            Layer::Anonymous(face) => filter_names(&face.inherit, out),
+            Layer::Filtered { parameter, layers, .. } => {
+                out.push(parameter.clone());
+                filter_names(layers, out);
+            }
+        }
+    }
+}
+
+fn for_window(layers: &[Layer], matches: &dyn Fn(&str, &Datum) -> bool) -> Vec<Layer> {
+    let mut out = Vec::with_capacity(layers.len());
+    for layer in layers {
+        match layer {
+            Layer::Named(_) => out.push(layer.clone()),
+            Layer::Anonymous(face) => out.push(Layer::Anonymous(Arc::new(AnonymousFace {
+                attrs: face.attrs.clone(),
+                inherit: for_window(&face.inherit, matches),
+            }))),
+            Layer::Filtered { parameter, value, layers } => {
+                if matches(parameter, value) {
+                    out.extend(for_window(layers, matches));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A theme and a buffer-local remapping, resolved as immutable values.
@@ -196,6 +264,7 @@ pub struct View {
     resolved: Arc<Remap>,
     default_realized: Attrs,
 }
+romacs_snapshot::snapshot_struct!(View { theme, remap, resolved, default_realized });
 
 impl View {
     /// Reject cycles between remapping entries, not valid inheritance backrefs.

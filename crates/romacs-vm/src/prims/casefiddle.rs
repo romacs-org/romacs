@@ -22,22 +22,24 @@ fn region_case(code: Value) -> RegionCase {
 // modify_text's bracket over the region, each character cased in place,
 // and one after-change over what changed. Registers between the steps:
 //   [START, END, CASE, INHIBITED]
-// CASE is the fixnum index of the command in REGION_CASES.
-fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncontiguous: Value) -> Next {
+// CASE is the fixnum index of the command in REGION_CASES. WORD, for the
+// word commands (casify_word), leaves point at the region's end as the
+// change leaves it (SET_PT of casify_region's value).
+fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncontiguous: Value, word: Value) -> Next {
     if noncontiguous != Value::NIL {
         let function = cx.intern(REGION_CASES[case.integer_value().expect("region case code") as usize].0);
         if super::insdel::half_missing(cx)? {
-            return super::insdel::install_half(cx, casify_restart, vec![case, beg, end, noncontiguous]);
+            return super::insdel::install_half(cx, casify_restart, vec![case, beg, end, noncontiguous, word]);
         }
         return Ok(Step::Call { f: cx.intern("romacs--casify-noncontiguous"), args: vec![function], then: casified, saved: vec![] });
     }
     let (start, end) = cx.validate_region(beg, end)?;
-    if start == end { return Ok(Step::Done(Value::NIL)); }
+    if start == end { return word_done(cx, word, end); }
     let prepared = cx.prepare_change(start, end)?;
     if (prepared.before || cx.after_change_runs(false, false)?) && super::insdel::half_missing(cx)? {
-        return super::insdel::install_half(cx, casify_restart, vec![case, fixnum(start), fixnum(end), Value::NIL]);
+        return super::insdel::install_half(cx, casify_restart, vec![case, fixnum(start), fixnum(end), Value::NIL, word]);
     }
-    let saved = vec![fixnum(start), fixnum(end), case, flag(prepared.inhibited)];
+    let saved = vec![fixnum(start), fixnum(end), case, flag(prepared.inhibited), word];
     if !prepared.before { return casify_edit(cx, Value::NIL, &saved); }
     let buffer = cx.current_buffer()?;
     let hooks = prepared.modification_hooks.iter().rev().fold(Value::NIL, |tail, &h| cx.cons(h, tail));
@@ -46,45 +48,76 @@ fn casify_region(cx: &mut Leaf<'_>, case: Value, beg: Value, end: Value, noncont
 }
 
 fn casify_restart(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    casify_region(cx, saved[0], saved[1], saved[2], saved[3])
+    casify_region(cx, saved[0], saved[1], saved[2], saved[3], saved[4])
+}
+
+/// Done, with point at END for a word command.
+fn word_done(cx: &mut Leaf<'_>, word: Value, end: i64) -> Next {
+    if word != Value::NIL { cx.goto_char_position(end)?; }
+    Ok(Step::Done(Value::NIL))
 }
 
 fn casify_edit(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
     let overlays = super::insdel::found_overlays(cx, before);
     cx.change_deactivates_mark(saved[3] != Value::NIL)?;
     let (start, end) = (saved[0].integer_value().expect("start"), saved[1].integer_value().expect("end"));
+    let word = saved[4];
     let Some((first, last, added)) = cx.casify_region_edit(start, end, region_case(saved[2]))? else {
-        return Ok(Step::Done(Value::NIL));
+        return word_done(cx, word, end);
     };
-    if !cx.after_change_runs(overlays != Value::NIL, false)? { return Ok(Step::Done(Value::NIL)); }
+    let new_end = end + added;
+    if !cx.after_change_runs(overlays != Value::NIL, false)? { return word_done(cx, word, new_end); }
     let buffer = cx.current_buffer()?;
     let args = vec![buffer, fixnum(first), fixnum(last), fixnum(last - first - added), Value::NIL, Value::NIL, overlays];
-    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: casified, saved: vec![] })
+    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: casified, saved: vec![word, fixnum(new_end)] })
 }
 
-fn casified(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(Value::NIL))
+fn casified(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    match saved {
+        [word, end] => word_done(cx, *word, end.integer_value().expect("end")),
+        _ => Ok(Step::Done(Value::NIL)),
+    }
+}
+
+// casify_word (casefiddle.c:661): from point COUNT words on, or back for a
+// negative COUNT (scan_words, no field constraint), or to the accessible
+// text's edge where that comes first, which is where the scan stops;
+// cased as the region commands case.
+fn casify_word(cx: &mut Leaf<'_>, case: Value, count: Value) -> Next {
+    let n = count.integer_value().ok_or(Fault::Wrong("fixnump", count))?;
+    let point = cx.point()?;
+    let (farend, _) = cx.scan_words(n)?;
+    casify_region(cx, case, fixnum(point), fixnum(farend), Value::NIL, Value::TRUE)
 }
 
 defsubr! { name = "upcase-region", gnu = "casefiddle.c:609", effect = Global,
 fn upcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, fixnum(0), beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(0), beg, end, region_noncontiguous_p, Value::NIL)
 }}
 
 defsubr! { name = "downcase-region", gnu = "casefiddle.c:621", effect = Global,
 fn downcase_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, fixnum(1), beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(1), beg, end, region_noncontiguous_p, Value::NIL)
 }}
 
 defsubr! { name = "capitalize-region", gnu = "casefiddle.c:632", effect = Global,
 fn capitalize_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, fixnum(2), beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(2), beg, end, region_noncontiguous_p, Value::NIL)
 }}
 
 defsubr! { name = "upcase-initials-region", gnu = "casefiddle.c:646", effect = Global,
 fn upcase_initials_region(cx, beg: Value, end: Value; optional region_noncontiguous_p: Value) -> Step {
-    casify_region(cx, fixnum(3), beg, end, region_noncontiguous_p)
+    casify_region(cx, fixnum(3), beg, end, region_noncontiguous_p, Value::NIL)
 }}
+
+defsubr! { name = "upcase-word", gnu = "casefiddle.c:671", effect = Global,
+fn upcase_word(cx, arg: Value) -> Step { casify_word(cx, fixnum(0), arg) }}
+
+defsubr! { name = "downcase-word", gnu = "casefiddle.c:684", effect = Global,
+fn downcase_word(cx, arg: Value) -> Step { casify_word(cx, fixnum(1), arg) }}
+
+defsubr! { name = "capitalize-word", gnu = "casefiddle.c:696", effect = Global,
+fn capitalize_word(cx, arg: Value) -> Step { casify_word(cx, fixnum(2), arg) }}
 
 #[cfg(test)]
 mod tests {
@@ -181,6 +214,7 @@ mod tests {
     #[test]
     fn native_case_survives_moving_gc() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.eval_source_raw("(setq waste (make-string 1000 97)) (setq waste nil) (setq saved-prop (list 8)) (setq saved-case-string (propertize (unibyte-string 97 233) 'p saved-prop)) (let ((u (char-table-extra-slot (current-case-table) 0))) (aset u 223 223)) (setq saved-case-result (upcase saved-case-string))").unwrap();
         let before = vm.standard_case_tables;
         vm.collect(&mut []);

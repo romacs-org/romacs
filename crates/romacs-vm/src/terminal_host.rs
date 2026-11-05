@@ -90,12 +90,17 @@ pub struct TerminalInputState {
     pub application_cursor: bool,
     pub bracketed_paste: bool,
     pub alternate_screen: bool,
+    /// Whether the shell's own process group is the PTY's foreground one
+    /// (`tcgetpgrp' of the PTY is the shell's pid): the shell, not a
+    /// program it runs, reads the terminal, as at its prompt.
+    pub shell_foreground: bool,
 }
 
 impl TerminalSnapshot {
     /// Read protocol flags from an immutable publication.
     pub fn input_state(&self) -> TerminalInputState {
-        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste, alternate_screen: self.alternate_screen }
+        // A publication does not know the foreground process group.
+        TerminalInputState { running: self.running, application_cursor: self.application_cursor, bracketed_paste: self.bracketed_paste, alternate_screen: self.alternate_screen, shell_foreground: false }
     }
 }
 
@@ -561,7 +566,10 @@ impl Vm {
         // The route's map, then the global map, as the command loop's lookup:
         // `romacs-term-send-key' directly, or a global command the route
         // remaps to it (`self-insert-command' for non-ASCII characters).
-        let route = value(self, if alternate { "romacs-term-alternate-map" } else { "romacs-term--passthrough" })?;
+        // While the shell itself has the terminal (its prompt), the shell
+        // route keeps `romacs-term-shell-exceptions' for Emacs too.
+        let shell = !alternate && self.terminal_input_state(session).is_ok_and(|s| s.shell_foreground);
+        let route = value(self, if alternate { "romacs-term-alternate-map" } else if shell { "romacs-term--shell" } else { "romacs-term--passthrough" })?;
         let global = self.slots[self.names["#:vm2-global-keymap"]].value;
         // Events with default bindings, as the reader's `key-binding'; remaps
         // without, as `command-remapping'.

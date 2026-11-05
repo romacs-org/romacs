@@ -10,18 +10,31 @@ quick: typing works right after the landing appears: C-x b *scratch* RET
 and "quick" reach the scene within seconds, while the landing opens; C-x b
 *Romacs* RET goes back to it.
 
-open: shots at moments of the landing's first seconds (open-*.png) differ
-from first to last.  On a real GPU (ROMACS_HARNESS_WLR_ENV) the mark is a
-page scene: braille dots rain into a lit, turning R, so every shot differs
-from the one before and the last shows the mark as a solid.
+open: shots through the landing's first seconds (open-*.png) move: one
+differs from the first.  On a real GPU (ROMACS_HARNESS_WLR_ENV) the mark is a page
+scene: braille dots rain into a lit, turning R, so once it moves the open
+never stands still for more than a stall a loaded host's frame clock may
+take (no shot equals every shot after it within STALL seconds, judged over
+two seconds at least of shots that have STALL seconds after them), and the
+last shows the mark as a solid.
 
 split: C-x 2 shows the landing in two windows, both of which must turn,
 and keep turning after C-x o and after moving the cursor; C-x 1 again.
 
 pause: SPC holds the logo still, SPC again sets it moving.
 
+Motion is judged over shots a loaded host may need several seconds to
+change between: a moving landing changes within WITHIN seconds of shots,
+a still one shows three alike in a row within them (a pause or a reduced
+setting may reach the display late), so a host at load 20 judges as an
+idle one does.
+
 scroll: M-> then M-<, C-v then M-v, and C-u 0 C-l on the logo's fifth line
-then M-<, each with the logo turning.  Under ROMACS_DIAGNOSTICS=1 the
+then M-<, each with the logo turning.  The landing is the logo alone,
+sized to the window, so M-> scrolls it by the line or two its controls
+take below the window (GNU's end-of-buffer: point at the end, the window
+start moving only as far as point's line needs); whether a window
+scrolled is read from the rows the evaluator's scene shows in it.  Under ROMACS_DIAGNOSTICS=1 the
 render thread says how each window draws its animation (a scene and its
 placement, cells, or hidden) whenever that changes.  Back at the top the
 window must draw it as it did before: on a GPU as the scene, at the same
@@ -79,6 +92,9 @@ import re
 import live_oracle as live
 
 WIDTH, HEIGHT = 1600, 1000
+# How long a moving landing may take to show it moves, and a still one to
+# come to rest, on a loaded host; and the longest stall the open may show.
+WITHIN, STALL = 20.0, 1.25
 # The backdrop behind a translucent frame: far from any theme's background.
 BACKDROP = '#3a9d6e'
 
@@ -163,17 +179,38 @@ def main():
                                          capture_output=True, text=True, check=True)
                     return float(out.stdout)
 
-                def turning(name, *regions):
-                    """The most each REGION changed between three shots 2 s apart:
-                    a third of the logo's sweep, so the light crosses the
-                    letters in one of them."""
-                    shots = []
-                    for step in 'abc':
-                        shots.append(shot(f'{name}-{step}'))
-                        if step != 'c':
-                            time.sleep(2.0)
-                    most = [max(differ(x, y, region) for x, y in zip(shots, shots[1:])) for region in regions]
+                last = {}
+
+                def turning(name, *regions, threshold=1000):
+                    """The most each REGION changed between shots 2 s apart (a
+                    third of the logo's sweep, so the light crosses the letters
+                    in one of them), taken until every region changed more than
+                    THRESHOLD or WITHIN seconds went by, three shots at least: a
+                    loaded host may hold the frame clock for seconds."""
+                    shots, most = [shot(f'{name}-0')], [0.0] * len(regions)
+                    end = time.monotonic() + WITHIN
+                    while len(shots) < 3 or (min(most) <= threshold and time.monotonic() < end):
+                        time.sleep(2.0)
+                        shots.append(shot(f'{name}-{len(shots)}'))
+                        most = [max(m, differ(shots[-2], shots[-1], region)) for m, region in zip(most, regions)]
+                    last[name] = shots[-1]
                     return most[0] if len(most) == 1 else tuple(most)
+
+                def resting(name, region):
+                    """The least, over runs of three shots 1 s apart, of the most
+                    REGION changed within the run, taken until a run is under
+                    600 or WITHIN seconds went by: whether the landing came to
+                    rest, which a loaded host may show late."""
+                    shots, least = [shot(f'{name}-0')], float('inf')
+                    end = time.monotonic() + WITHIN
+                    while least >= 600 and (len(shots) < 3 or time.monotonic() < end):
+                        time.sleep(1.0)
+                        shots.append(shot(f'{name}-{len(shots)}'))
+                        if len(shots) < 3:
+                            continue
+                        least = min(least, max(differ(x, y, region) for x, y in zip(shots[-3:], shots[-2:])))
+                    last[name] = shots[-1]
+                    return least
 
                 def red(path, region):
                     """The share of REGION's pixels in the mark's lit red."""
@@ -203,20 +240,33 @@ def main():
                 # open
                 back = time.monotonic()
                 opening = []
-                for at in (0.2, 0.7, 1.2, 1.8, 2.6, 4.0):
+                for at in [0.2 + 0.4 * n for n in range(15)]:
                     time.sleep(max(0.0, back + at - time.monotonic()))
-                    opening.append(shot(f'open-{at:.1f}s'))
-                steps = [differ(x, y, whole) for x, y in zip(opening, opening[1:])]
-                check('the landing opens in motion', differ(opening[0], opening[-1], whole) > 1000, steps)
+                    opening.append((time.monotonic(), shot(f'open-{at:.1f}s')))
+                steps = [differ(x, y, whole) for (_, x), (_, y) in zip(opening, opening[1:])]
+                # Some shot differs from the first (the light's sweep in cells
+                # comes round again in about six seconds).
+                moved = max(differ(opening[0][1], x, whole) for _, x in opening[1:])
+                check('the landing opens in motion', moved > 1000, {'steps': steps, 'most from the first': moved})
                 if wlr:
-                    check('on a GPU every moment of the open differs', min(steps) > 1000, steps)
-                    solid = red(opening[-1], whole)
+                    # From its first moving frame (the switch back takes a
+                    # loaded host a while), a shot the open never moves on
+                    # from within STALL seconds is a frozen open; a shorter
+                    # stall is the host's.
+                    began = next((n for n, step in enumerate(steps) if step > 1000), len(steps))
+                    # Only a shot with STALL seconds of shots after it is judged.
+                    judged = [(n, t, x) for n, (t, x) in enumerate(opening) if n >= began and opening[-1][0] - t >= STALL]
+                    frozen = [round(t - back, 1) for n, t, x in judged
+                              if all(differ(x, y, whole) <= 1000 for u, y in opening[n + 1:] if u - t <= STALL)]
+                    seen = judged[-1][1] - judged[0][1] if judged else 0.0
+                    check('on a GPU the open never stands still', not frozen and seen >= 2.0,
+                          {'steps': steps, 'frozen at': frozen, 'judged for': round(seen, 1)})
+                    solid = red(opening[-1][1], whole)
                     check('on a GPU the mark is a lit solid', solid > 0.04, solid)
 
                 check('the landing turns', turning('landing', whole) > 1000)
                 keys(' ')
-                time.sleep(1.0)  # the pause reaches the display with the next frame
-                held = turning('paused', whole)
+                held = resting('paused', whole)
                 check('SPC holds the landing still', held < 600, held)
                 keys(' ')
                 check('SPC again sets it moving', turning('resumed', whole) > 1000)
@@ -251,6 +301,19 @@ def main():
 
                 way = 'scene' if wlr else 'cells'
 
+                def views():
+                    """Each window's rows in the scene the evaluator submitted
+                    last, by its top, for windows at least 300 pixels tall (not
+                    the echo area or a toast, which come and go): what part of
+                    its buffer each shows."""
+                    scene = fio.last_scene(stderr_path.read_text(errors='replace'))
+                    found = {}
+                    for g in scene['glyphs'] if scene else []:
+                        if g['role'] == 'Text' and g['clip'] and g['clip']['height'] >= 300:
+                            found.setdefault(round(g['clip']['y']), {}).setdefault(g['y'], []).append((g['x'], g['char']))
+                    return {top: tuple(''.join(c for _, c in sorted(row)) for _, row in sorted(rows.items()))
+                            for top, rows in found.items()}
+
                 def ctrl(*names):
                     for name in names:
                         keys('-M', 'ctrl', name, '-m', 'ctrl')
@@ -260,18 +323,22 @@ def main():
                         keys('-M', 'alt', name, '-m', 'alt')
 
                 def trip(name, away, back):
-                    """Keys AWAY then BACK from the top; how the window draws the
-                    landing before, away and after."""
-                    before = drawn()
+                    """Keys AWAY then BACK from the top: how the window draws the
+                    landing before, away and after, and whether it showed
+                    other rows away and its first ones again after."""
+                    before, shown = drawn(), views()
                     since = mark()
                     away()
-                    until(lambda: drawn(since))
+                    moved = until(lambda: views() != shown)
+                    if wlr:
+                        until(lambda: drawn(since))
                     there = drawn(since)
                     back()
-                    until(lambda: drawn() == before)
+                    returned = until(lambda: views() == shown and drawn() == before)
                     after = drawn()
-                    report.setdefault('scroll', {})[name] = {'before': before, 'away': there, 'after': after}
-                    return before, there, after
+                    report.setdefault('scroll', {})[name] = {'before': before, 'away': there, 'after': after,
+                                                             'moved': moved, 'returned': returned}
+                    return before, there, after, moved, returned
 
                 time.sleep(1.0)
                 start = drawn()
@@ -279,10 +346,12 @@ def main():
                 for name, tag, away, back in (('M-> M-<', 'end', lambda: alt('>'), lambda: alt('<')),
                                               ('C-v M-v', 'page', lambda: ctrl('v'), lambda: alt('v')),
                                               ('M-> C-l M-<', 'recenter', lambda: (alt('>'), ctrl('l')), lambda: alt('<'))):
-                    before, there, after = trip(name, away, back)
-                    check(f'{name}: the window scrolled the landing away', any(v[0] != way or v != before.get(k)
-                                                                              for k, v in there.items()), there)
-                    check(f'{name}: back at the top it draws as before', after == before, {'before': before, 'after': after})
+                    before, there, after, moved, returned = trip(name, away, back)
+                    # On a GPU the scene's placement follows the scroll.
+                    check(f'{name}: the window scrolled the landing', moved and (not wlr or any(
+                        v[0] != way or v != before.get(k) for k, v in there.items())), there)
+                    check(f'{name}: back at the top it draws as before', returned and after == before,
+                          {'before': before, 'after': after})
                     check(f'{name}: the landing still turns', turning(f'scroll-{tag}', whole) > 1000)
                 window = next(iter(start), None)
                 at = start.get(window, (None, None))[1]
@@ -310,32 +379,36 @@ def main():
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
                 keys('2')
                 time.sleep(1.0)
-                turned = turning('split', top, bottom)
+                turned = turning('split', top, bottom, threshold=400)
                 check('both landing windows turn after C-x 2', min(turned) > 400, turned)
                 # Scroll only the selected window, the upper one C-x 2 kept,
                 # away and back.
                 # Only this window has shown the landing before the split.
-                pair = drawn()
+                pair, shown = drawn(), views()
                 upper = window
+                tops = sorted(shown)
                 since = mark()
                 alt('>')
-                left = until(lambda: upper in drawn(since))
-                away = drawn(since)
+                left = len(tops) == 2 and until(lambda: views().get(tops[0]) != shown[tops[0]])
+                if wlr:
+                    until(lambda: upper in drawn(since))
+                away, seen = drawn(since), views()
                 alt('<')
-                returned = left and until(lambda: drawn() == pair)
+                returned = left and until(lambda: views() == shown and drawn() == pair)
                 back = drawn()
                 lower = [k for k in pair if k != upper]
                 report.setdefault('scroll', {})['split'] = {'before': pair, 'away': away, 'after': back}
                 check('split: both windows draw the landing', len(pair) == 2 and all(v[0] == way for v in pair.values()), pair)
-                check('split: M-> moves only the selected window', left and set(away) == {upper}, away)
+                check('split: M-> moves only the selected window', left and seen.get(tops[1]) == shown.get(tops[1])
+                      and (not wlr or set(away) == {upper}), {'away': away, 'windows': tops})
                 check('split: M-< brings it back, the other never moved', returned and back == pair and len(lower) == 1, back)
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
                 keys('o')
-                turned = turning('other', top, bottom)
+                turned = turning('other', top, bottom, threshold=400)
                 check('both landing windows turn after C-x o', min(turned) > 400, turned)
                 keys('-M', 'ctrl', 'n', '-m', 'ctrl')
                 keys('-M', 'ctrl', 'n', '-m', 'ctrl')
-                turned = turning('moved', top, bottom)
+                turned = turning('moved', top, bottom, threshold=400)
                 check('both landing windows turn after moving the cursor', min(turned) > 400, turned)
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
                 keys('1')
@@ -350,24 +423,24 @@ def main():
                 setq("'reduced")
                 time.sleep(1.0)
                 # The landing, short of the corner a message pops up in.
-                held = turning('reduced', f'{WIDTH * 3 // 4}x{HEIGHT - 80}+0+0')
+                held = resting('reduced', f'{WIDTH * 3 // 4}x{HEIGHT - 80}+0+0')
                 check('under reduced motion the landing stands still', held < 600, held)
                 if wlr:
-                    posed = red(a.output / 'reduced-c.png', whole)
+                    posed = red(last['reduced'], whole)
                     check('on a GPU the still frame is the lit mark', posed > 0.04, posed)
                 # The still frame after a scroll away and back looks as before.
                 landing = f'{WIDTH * 3 // 4}x{HEIGHT - 80}+0+0'
                 for name, tag, away, back in (('M-> M-<', 'end', lambda: alt('>'), lambda: alt('<')),
                                               ('C-v M-v', 'page', lambda: ctrl('v'), lambda: alt('v'))):
-                    before_drawn = drawn()
+                    before_drawn, shown = drawn(), views()
                     before = shot(f'still-{tag}-before')
                     since = mark()
                     away()
-                    left = until(lambda: drawn(since))
+                    left = until(lambda: views() != shown)
                     time.sleep(0.5)
                     shot(f'still-{tag}-away')
                     back()
-                    returned = left and until(lambda: drawn() == before_drawn)
+                    returned = left and until(lambda: views() == shown and drawn() == before_drawn)
                     time.sleep(0.5)
                     after = shot(f'still-{tag}-after')
                     changed = differ(before, after, landing)
@@ -482,7 +555,7 @@ def main():
                 time.sleep(1.0)
                 left = f'{WIDTH // 2 - 20}x{HEIGHT - 80}+0+0'
                 check('the landing beside *scratch* turns', turning('beside', left) > 1000)
-                beside = a.output / 'beside-c.png'
+                beside = last['beside']
                 drawn = ink(beside, f'{WIDTH // 2 - 40}x100+{WIDTH // 2 + 20}+0')
                 check('*scratch* beside the landing is drawn', drawn > 0.01, drawn)
 

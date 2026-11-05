@@ -154,6 +154,7 @@ impl Vm {
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(_) => Ok(json!({"type":"hash-table"})),
                 data::Object::Obarray(_) => Ok(json!({"type":"obarray"})),
+                data::Object::Free => Err("invalid object reference".into()),
             },
             4 => Ok(json!({"type":"function"})),
             _ => Err("unsupported structured result".into()),

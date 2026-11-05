@@ -877,7 +877,10 @@ impl World {
         let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
-        vm.collect_garbage();
+        vm.collect_compacting();
+        if vm.free.len() != 0 {
+            return Err("world image: the tables did not compact".into());
+        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let len = image::capture(vm, carry, &file, self.key)?;
         file.sync_all().map_err(|e| e.to_string())?;
@@ -910,6 +913,9 @@ struct Stored {
     bytes: u64,
     /// A builder or a restored process holds it.
     busy: bool,
+    /// It has a manifest and no image: a build's refusal on its inputs,
+    /// which a launch resolving a layer reads (romacs-vm-gui world.rs).
+    refusal: bool,
 }
 
 /// The worlds of WORLDS to delete, family by family (`plan_family`).
@@ -925,11 +931,15 @@ fn prune_plan(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
 /// The worlds of WORLDS, one family's, to delete, CURRENT's kept: those a
 /// builder or a restored process holds are kept too, and the others, most
 /// recently used first, while they were used within `UNUSED` and the family
-/// stays within `MOST_WORLDS` worlds and `MOST_BYTES` bytes.
+/// stays within `MOST_WORLDS` worlds and `MOST_BYTES` bytes. A refusal is
+/// kept while it is within `UNUSED`, outside the bounds: forgotten, the
+/// next launch would build its refused inputs again, as an init layer's
+/// resolution does after each one it forgets.
 fn plan_family(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
+    let refusal = |w: &&Stored| w.refusal && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
     let (mut count, mut bytes) = worlds.iter().filter(kept).fold((0, 0), |(c, b), w| (c + 1, b + w.bytes));
-    let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w)).collect();
+    let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w) && !refusal(w)).collect();
     others.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.key.cmp(&b.key)));
     let mut delete = vec![];
     for world in others {
@@ -1060,6 +1070,7 @@ impl World {
             used: files.iter().filter(|(n, _)| [".use", ".json", ".rwi"].iter().any(|s| n.ends_with(s))).map(|(_, m)| m.mtime().max(0) as u64).max().unwrap_or(0),
             bytes: files.iter().map(|(_, m)| m.blocks() * 512).sum(),
             busy: held(self.store.join(format!("{key}.lock"))) || held(self.store.join(format!("{key}.use"))),
+            refusal: files.iter().any(|(n, _)| n.ends_with(".json")) && !files.iter().any(|(n, _)| n.ends_with(".rwi")),
         }).collect();
         let current = hex(&self.key);
         let mine = self.family(&current);
@@ -1540,7 +1551,7 @@ mod tests {
     }
 
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
-        Stored { key: key.repeat(64 / key.len()), family: String::new(), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy }
+        Stored { key: key.repeat(64 / key.len()), family: String::new(), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy, refusal: false }
     }
 
     #[test]
@@ -1566,6 +1577,12 @@ mod tests {
                       batch("d", 0), batch("e", 1), batch("f", 2), batch("g", 3)];
         assert_eq!(prune_plan(&worlds, &key("a"), now), [key("g")]);
         assert_eq!(prune_plan(&worlds, &key("g"), now), [key("f")]);
+        // A refusal within a week stays beside three worlds and counts toward
+        // nothing; an older one goes.
+        let refusal = |k, days| Stored { refusal: true, ..stored(k, days, 1, false) };
+        let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
+                      refusal("d", 0), refusal("e", 8)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("e")]);
     }
 
     #[test]

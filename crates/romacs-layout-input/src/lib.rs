@@ -1,5 +1,6 @@
 //! Seam L: owned layout input. No evaluator, heap reference or glyph matrix.
 use std::ops::Range;
+pub mod cluster;
 
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +98,23 @@ pub struct FrameSnapshot {
     /// The status bar between the windows and the mini-window, while
     /// `romacs-status-bar-lines' shows one.
     pub status_bar: Option<StatusBarSnapshot>,
+    /// How a character no font has a glyph for shows.
+    pub no_font: NoFont,
 }
+
+/// How a window-system frame shows a character no installed font has a
+/// glyph for: `glyphless-char-display''s `no-font' extra slot, as
+/// lookup_glyphless_char_display reads it for C -1 (the graphical half of
+/// a cons; nil, `zero-width' or an unknown method is `empty-box').
+/// `hex-code' is GNU's default (`glyphless-char-display-control').
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum NoFont { ThinSpace, EmptyBox, #[default] HexCode, Acronym(String) }
+romacs_snapshot::snapshot_enum!(NoFont {
+    NoFont::ThinSpace => (),
+    NoFont::EmptyBox => (),
+    NoFont::HexCode => (),
+    NoFont::Acronym(text) => (text),
+});
 
 /// The paint-only pane chrome of the root frame's windows but the
 /// mini-window MINIBUFFER (`romacs-pane-*' frame parameters): corners of
@@ -134,6 +151,7 @@ impl FrameSnapshot {
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
             && self.status_bar == other.status_bar
+            && self.no_font == other.no_font
             && windows_lay_out_like(&self.windows, &other.windows)
     }
 }
@@ -174,6 +192,10 @@ pub struct ChildFrameSnapshot {
     pub radius: u32,
     pub glow: Option<[u8; 3]>,
     pub shadow: bool,
+    /// A 1px hairline round it in this colour, drawn even on a glowing
+    /// layer: the foreground of the face its `romacs-layer-outline-face'
+    /// parameter names (an error toast's).
+    pub outline: Option<[u8; 3]>,
 }
 
 /// `romacs-layer-animation': no layer animation, fades only, or fades,
@@ -220,8 +242,24 @@ pub struct Decor {
     pub underline: Option<Line>,
     pub overline: Option<Line>,
     pub strike: Option<Line>,
+    /// GNU's `:box'.
+    pub boxed: Option<BoxLine>,
 }
-romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike });
+romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike, boxed });
+
+/// A face's box (xfaces.c realize_gui_face): VERTICAL the left and right
+/// edges' width, HORIZONTAL the top and bottom edges', in device pixels,
+/// each drawn outside the text when positive (widening the run and the
+/// row) and inside it when negative; COLOR, else the foreground; STYLE 1 a
+/// line, 2 a released button, 3 a pressed one (protocol `BoxType' codes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoxLine {
+    pub vertical: i16,
+    pub horizontal: i16,
+    pub color: Option<[u8; 3]>,
+    pub style: u8,
+}
+romacs_snapshot::snapshot_struct!(BoxLine { vertical, horizontal, color, style });
 
 /// One line a face draws: STYLE is romacs-display-protocol's
 /// `UnderlineStyle' code (1 line, 2 double, 3 wave, 4 dotted, 5 dashed;
@@ -315,6 +353,8 @@ pub struct WindowSnapshot {
     pub cursor_off: bool,
     /// The characters of TEXT shown as stretches, in byte order.
     pub stretches: Vec<Stretch>,
+    /// The characters of TEXT shown as images, in byte order.
+    pub images: Vec<InlineImage>,
     /// The bytes of TEXT whose character's word-wrap class is not its own,
     /// sorted: a space or TAB there is no wrap whitespace, another
     /// character is. GNU's IT_DISPLAYING_WHITESPACE looks under a stretch
@@ -328,7 +368,7 @@ pub struct WindowSnapshot {
     /// Where its underlines go.
     pub underline_rules: UnderlineRules,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, wrap_flips, line_numbers, chrome, underline_rules });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, images, wrap_flips, line_numbers, chrome, underline_rules });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -608,6 +648,31 @@ pub struct Stretch {
 }
 romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 
+/// An `(image ...)' display specification the host lays out in place of
+/// the character of a window's text at BYTE (a placeholder space in the
+/// image's face), as GNU's produce_image_glyph makes its glyph: a slot
+/// WIDTH pixels wide, ASCENT above the row's baseline and DESCENT below
+/// it, holding the slice SOURCE (x, y, width, height in the image's own
+/// pixels) of the image FULL pixels in size, IMAGE in the renderer's
+/// cache, at BODY_X and BODY_Y in the slot (its margins and relief).
+/// RELIEF is `:relief' (raised when positive), its colors from
+/// RELIEF_BACKGROUND (0xRRGGBB), else the face's background.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineImage {
+    pub byte: usize,
+    pub image: u32,
+    pub width: i64,
+    pub ascent: i64,
+    pub descent: i64,
+    pub body_x: i64,
+    pub body_y: i64,
+    pub source: (i64, i64, i64, i64),
+    pub full: (i64, i64),
+    pub relief: i64,
+    pub relief_background: Option<u32>,
+}
+romacs_snapshot::snapshot_struct!(InlineImage { byte, image, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
+
 /// A stretch's width before it depends on where it is laid out, in pixels
 /// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,
 /// or `:align-to' TARGET pixels from the text area's left edge.
@@ -683,10 +748,10 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, wrap_flips, line_numbers, chrome, underline_rules } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
-            && *wrap == other.wrap && *stretches == other.stretches && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
+            && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
             && *underline_rules == other.underline_rules
     }
 }
@@ -731,6 +796,8 @@ pub struct MeasureInput {
     pub font_alternatives: FontAlternativeState,
     pub faces: Vec<Face>,
     pub text: TextSlice,
+    /// How a character no font has a glyph for shows, as the frame's.
+    pub no_font: NoFont,
 }
 
 /// The host's geometry for a `MeasureInput`, in whole pixels: each
@@ -742,6 +809,11 @@ pub struct MeasureInput {
 pub struct Measured {
     pub glyphs: Vec<(u32, u32)>,
     pub face_heights: Vec<u32>,
+    /// Each glyph's ascent, its face's: where the row's baseline is below
+    /// its top when it is the tallest above the baseline.
+    pub ascents: Vec<u32>,
+    /// Each face's ascent, beside FACE_HEIGHTS.
+    pub face_ascents: Vec<u32>,
 }
 
 #[cfg(test)]

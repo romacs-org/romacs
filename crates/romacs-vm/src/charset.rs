@@ -197,8 +197,7 @@ impl Registry {
 
 impl Vm {
     fn charset_cons(&mut self, car: Value, cdr: Value) -> Value {
-        let value = Value::reference(self.conses.len(), 3);
-        self.conses.push((car, cdr));
+        let value = self.alloc_cons(car, cdr);
         value
     }
     pub(super) fn ensure_charsets(&mut self) {

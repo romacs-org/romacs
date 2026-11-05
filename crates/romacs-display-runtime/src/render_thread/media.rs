@@ -362,6 +362,9 @@ impl RenderApp {
         {
             self.frame_windows.mark_top_level_dirty();
         }
+        if let romacs_display_protocol::ImageStateEvent::Evicted(image) = event {
+            self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).evicted.push(image.get());
+        }
         self.comms
             .send_input(crate::thread_comm::InputEvent::ImageStateChanged { event });
     }

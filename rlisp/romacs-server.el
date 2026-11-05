@@ -410,6 +410,9 @@ beside its build.json), or nil."
       (setq server-name name)
       (server-start))
     (romacs-server--watch-build)
+    ;; Its own session record, as the launcher keeps a session's.
+    (require 'romacs-usage-log)
+    (romacs-usage-log-server-session name)
     ;; Started (by a launcher) while a restart of this server was under
     ;; way: the session it carries is restored here, once.
     (when (file-exists-p (romacs-server--pending-restart name))

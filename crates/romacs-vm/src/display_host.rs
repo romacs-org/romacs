@@ -72,6 +72,9 @@ impl FaceFont {
     }
 }
 
+/// `DisplayHost::finish_decode''s error when the wait was quit.
+pub const DECODE_QUIT: &str = "quit";
+
 /// The embedder's window system, asked synchronously.
 pub trait DisplayHost {
     /// The `window-system' symbol's name for frames on this display.
@@ -93,6 +96,33 @@ pub trait DisplayHost {
     /// inactive, negative leaving its opacity alone, raised to LIMIT,
     /// `frame-alpha-lower-limit'.
     fn set_frame_alpha(&mut self, _frame: u64, _alpha: [f32; 2], _limit: f32) {}
+    /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
+    /// pixels under the facts' id until `release_image'.  An error is the
+    /// loader's message; the image then shows as a placeholder.
+    fn decode_image(&mut self, _query: crate::ImageQuery) -> Result<crate::ImageFacts, String> {
+        Err("images are not supported on this display".into())
+    }
+    /// Forget the pixels kept under ID.
+    fn release_image(&mut self, _id: u64) {}
+    /// Start decoding QUERY for display: the image's facts at once, PENDING
+    /// when the host sized it without decoding (its pixels and final facts
+    /// follow through `finished_decodes'), else after a decode here.
+    fn begin_decode(&mut self, query: crate::ImageQuery) -> Result<crate::ImageFacts, String> {
+        self.decode_image(query)
+    }
+    /// Wait for image ID's pending decode: its final facts, or the loader's
+    /// error.  QUIT says when to give up (`C-g'); then the error is
+    /// [`DECODE_QUIT`].
+    fn finish_decode(&mut self, _id: u64, _quit: &dyn Fn() -> bool) -> Result<crate::ImageFacts, String> {
+        Err("no pending decode".into())
+    }
+    /// The decodes finished since the last call: each image's id and its
+    /// final facts or the loader's error.
+    fn finished_decodes(&mut self) -> Vec<(u64, Result<crate::ImageFacts, String>)> { vec![] }
+    /// The size `image-size` reports at scale 1 for the image file PATH,
+    /// from its header alone (`romacs-image-header-size`); None when the
+    /// header does not give it.
+    fn image_header_size(&mut self, _path: &str) -> Option<(u32, u32)> { None }
 }
 
 /// The attached display: closed until the session opens it.

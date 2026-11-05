@@ -65,6 +65,7 @@ pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
     pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub images: crate::fonts::residency::Shared,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
     /// The process descriptors the next wait also watches.
     pub processes: Vec<(std::os::fd::RawFd, i16)>,
@@ -237,11 +238,24 @@ impl HostInput for GuiHost {
         Some(shared.window_shown())
     }
 
+    fn images_behind(&mut self) -> bool {
+        // Not while a paint is in flight (a stalled render is not spun on),
+        // nor with no window to paint.
+        let shared = self.shared.borrow();
+        self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
+    }
+
     fn input_pending(&mut self) -> bool {
         self.drain();
         let shared = self.shared.borrow();
         // A closed frame is not repainted.
         shared.closed || !shared.pending.is_empty()
+    }
+
+    fn key_pending(&mut self) -> bool {
+        self.drain();
+        let shared = self.shared.borrow();
+        shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
@@ -254,7 +268,7 @@ impl HostInput for GuiHost {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
                 && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
-                && *animations == frame.text_animations {
+                && *animations == frame.text_animations && !self.images.borrow().must_repaint(self.sender.as_ref()) {
                 return Ok(ends.clone());
             }
         }
@@ -265,7 +279,7 @@ impl HostInput for GuiHost {
             shared.presentation
         };
         let laying = std::time::Instant::now();
-        let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, presentation, &frame)?;
+        let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
         let submitted = std::time::Instant::now();
         // Synchronous, like the oracle path: the prompt is on screen before
         // the evaluator blocks for its key. A window the compositor does not

@@ -4199,6 +4199,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-attach"
+version = "0.0.19"
+dependencies = [
+ "base64 0.22.1",
+ "image",
+ "libc",
+ "romacs-display-protocol",
+ "romacs-imaging",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "romacs-chars"
 version = "0.1.0"
 dependencies = [
@@ -4419,6 +4433,26 @@ name = "romacs-host-abi"
 version = "0.0.19"
 
 [[package]]
+name = "romacs-imaging"
+version = "0.0.19"
+dependencies = [
+ "enum_dispatch",
+ "flate2",
+ "image",
+ "image-extras",
+ "imagesize 0.15.0",
+ "jpeg-encoder",
+ "png",
+ "resvg",
+ "romacs-display-protocol",
+ "romacs-infra",
+ "simplecss",
+ "svgtypes",
+ "tracing",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "romacs-infra"
 version = "0.0.19"
 dependencies = [
@@ -4585,6 +4619,7 @@ dependencies = [
  "romacs-display-protocol",
  "romacs-font",
  "romacs-font-materializer",
+ "romacs-imaging",
  "romacs-infra",
  "romacs-scene",
  "romacs-test-fonts",
@@ -4722,6 +4757,7 @@ dependencies = [
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "foldhash",
  "icu_casemap",
  "icu_locale_core",
@@ -4754,7 +4790,6 @@ dependencies = [
  "twox-hash",
  "unicode-bidi",
  "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]
@@ -4769,6 +4804,7 @@ dependencies = [
  "romacs-face",
  "romacs-font",
  "romacs-grammars",
+ "romacs-imaging",
  "romacs-layout-input",
  "romacs-layout2",
  "romacs-logo",

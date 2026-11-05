@@ -42,6 +42,7 @@ lyon.workspace = true
 unicode-script.workspace = true
 unicode-segmentation = "1.13.2"
 romacs-display-protocol.workspace = true
+romacs-imaging.workspace = true
 romacs-font.workspace = true
 romacs-font-materializer.workspace = true
 romacs-scene.workspace = true

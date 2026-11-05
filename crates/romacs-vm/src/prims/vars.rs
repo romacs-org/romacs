@@ -88,6 +88,7 @@ fn autoload(cx, function: Value, file: Value; optional docstring: Value, interac
         descriptor = cx.cons(value, descriptor);
     }
     cx.defalias_function(function, descriptor)?;
+    cx.note_init_declared(file);
     Ok(function)
 }}
 

@@ -170,12 +170,50 @@ pub fn exited(argv: &[String]) -> i32 {
         return 2;
     };
     let var = |key: &str| std::env::var(key).unwrap_or_default();
-    if let Some((title, body)) = crash_notice(name, &var("SERVICE_RESULT"), &var("EXIT_CODE"), &var("EXIT_STATUS")) {
+    let (result, code, status) = (var("SERVICE_RESULT"), var("EXIT_CODE"), var("EXIT_STATUS"));
+    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&std::env::var_os("HOME").unwrap_or_else(|| "/".into())).join(".local/state"));
+    let session = record_end(&state, name, &var("INVOCATION_ID"), &result, &code, &status, now());
+    if let Some((title, mut body)) = crash_notice(name, &result, &code, &status) {
+        if let Some(directory) = &session { body.push_str(&format!("\nSession: {}", directory.display())); }
         eprintln!("romacs: {title}; {body}");
         let _ = std::process::Command::new("notify-send").env_remove("LD_LIBRARY_PATH")
             .args(["-u", "critical", "-a", "Romacs", &title, &body]).status();
     }
     0
+}
+
+fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// Server NAME's session record (rlisp/romacs-usage-log.el) at its unit's
+/// end, named by STATE/romacs/server-NAME.session for the systemd
+/// INVOCATION that ran it: how systemd says it ended (its status, signal
+/// and core dump: the server's own end cannot know its exit code) goes in
+/// its session.json, and an end the server could not write itself (a
+/// crash, a kill) gets its time.  A pointer another invocation
+/// wrote (an earlier server's, this one failing before its own) is left
+/// alone.  Return the directory, when this run has a record.
+fn record_end(state: &Path, name: &str, invocation: &str, result: &str, code: &str, status: &str, at: f64) -> Option<PathBuf> {
+    let pointer: Json = serde_json::from_str(&std::fs::read_to_string(state.join(format!("romacs/server-{name}.session"))).ok()?).ok()?;
+    if pointer.get("invocation").and_then(Json::as_str) != Some(invocation) || invocation.is_empty() { return None; }
+    let directory = PathBuf::from(pointer.get("directory")?.as_str()?);
+    let file = directory.join("session.json");
+    let mut record: Json = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+    let object = record.as_object_mut()?;
+    object.insert("service".into(), json!({"result": result, "code": code, "status": status}));
+    if !object.contains_key("end") {
+        let start = object.get("start").and_then(Json::as_f64).unwrap_or(at);
+        object.insert("end".into(), json!(at));
+        object.insert("seconds".into(), json!(((at - start) * 1000.0).round() / 1000.0));
+    }
+    let signal = matches!(code, "killed" | "dumped").then(|| format!("SIG{status}"));
+    object.insert("status".into(), if code == "exited" { json!(status.parse::<i64>().ok()) } else { Json::Null });
+    object.insert("signal".into(), json!(signal));
+    object.insert("coredump".into(), json!(code == "dumped"));
+    std::fs::write(&file, format!("{}\n", serde_json::to_string_pretty(&record).ok()?)).ok()?;
+    Some(directory)
 }
 
 /// The notification for server NAME's end, or None for a clean one.
@@ -300,6 +338,35 @@ pub fn main(argv: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_servers_end_fills_its_session_record() {
+        let root = std::env::temp_dir().join(format!("romacs-record-end-{}", std::process::id()));
+        let directory = root.join("romacs/sessions/20261104T100000-42");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(root.join("romacs/server-work.session"),
+                       json!({"directory": directory, "pid": 42, "invocation": "run-1"}).to_string()).unwrap();
+        // A crash: the server wrote only its start.
+        std::fs::write(directory.join("session.json"), r#"{"pid":42,"start":100.0}"#).unwrap();
+        // Another run's end (a later server failing before its own record)
+        // touches nothing.
+        assert_eq!(record_end(&root, "work", "run-2", "exit-code", "exited", "1", 111.0), None);
+        assert_eq!(std::fs::read_to_string(directory.join("session.json")).unwrap(), r#"{"pid":42,"start":100.0}"#);
+        assert_eq!(record_end(&root, "work", "run-1", "core-dump", "dumped", "SEGV", 112.5), Some(directory.clone()));
+        let record: Json = serde_json::from_str(&std::fs::read_to_string(directory.join("session.json")).unwrap()).unwrap();
+        assert_eq!((record["end"].as_f64(), record["seconds"].as_f64()), (Some(112.5), Some(12.5)));
+        assert_eq!((record["signal"].as_str(), record["coredump"].as_bool()), (Some("SIGSEGV"), Some(true)));
+        assert_eq!(record["service"]["result"], "core-dump");
+        // An end the server wrote itself keeps its time; its status is
+        // systemd's, (kill-emacs 3) exiting 3.
+        std::fs::write(directory.join("session.json"), r#"{"pid":42,"start":100.0,"end":105.0}"#).unwrap();
+        record_end(&root, "work", "run-1", "exit-code", "exited", "3", 106.0);
+        let record: Json = serde_json::from_str(&std::fs::read_to_string(directory.join("session.json")).unwrap()).unwrap();
+        assert_eq!((record["end"].as_f64(), record["status"].as_i64()), (Some(105.0), Some(3)));
+        assert_eq!((record["signal"].as_str(), record["coredump"].as_bool()), (None, Some(false)));
+        assert!(record_end(&root, "other", "run-1", "success", "exited", "0", 1.0).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn only_an_abnormal_end_is_noticed() {

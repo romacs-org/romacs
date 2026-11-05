@@ -31,6 +31,8 @@ mod batch;
 mod user_init;
 mod measure;
 mod fonts;
+use fonts::residency;
+mod defun_census;
 mod grammars;
 mod timers;
 mod world;
@@ -223,7 +225,7 @@ mod lent_tests {
         lent.run(&host, |_| host.borrow_mut().presentation += 1);
         assert!(live.ready(), "the prompt's presentation left no repaint scheduled");
         let next = frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(changed_frame(&mut vm, &shown, next, host.borrow().presentation).unwrap().is_some(),
+        assert!(changed_frame(&mut vm, &shown, next, host.borrow().presentation, false).unwrap().is_some(),
             "the prompt-covered paint was kept");
     }
 }
@@ -345,9 +347,9 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4, tab_bar: vec![], status_bar: Default::default() };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
+        assert!(super::changed_frame(&mut vm, &shown, same, 4, false).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(super::changed_frame(&mut vm, &shown, same, 5).unwrap().is_some(), "a prompt's presentation left the frame unrepainted");
+        assert!(super::changed_frame(&mut vm, &shown, same, 5, false).unwrap().is_some(), "a prompt's presentation left the frame unrepainted");
     }
 
     /// A button over the painted tab bar runs its binding with the column
@@ -415,7 +417,7 @@ mod frame_tests {
         let shown = super::Shown { frame: painted, ends, presentation: 1, tab_bar: vec![], status_bar: Default::default() };
         vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
         let next = super::frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
+        assert!(super::changed_frame(&mut vm, &shown, next, 1, false).unwrap().is_none(), "the frame did not change");
         assert_eq!(vm.eval_source("(window-end)").unwrap().display().unwrap(), end);
     }
 }
@@ -446,6 +448,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
         && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot));
     a.font_selection == b.font_selection
         && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
+        && a.no_font == b.no_font
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
@@ -477,8 +480,8 @@ struct Shown {
 /// A kept paint's window ends are applied again: a command can drop them
 /// without changing the frame (`set-window-buffer' to the buffer shown), and
 /// the same frame lays out to the same ends.
-fn changed_frame(vm: &mut Vm, shown: &Shown, next: Frame, presentation: u64) -> Result<Option<Frame>, String> {
-    if shown.presentation != presentation || shown.frame != next { return Ok(Some(next)); }
+fn changed_frame(vm: &mut Vm, shown: &Shown, next: Frame, presentation: u64, force: bool) -> Result<Option<Frame>, String> {
+    if force || shown.presentation != presentation || shown.frame != next { return Ok(Some(next)); }
     vm.display_apply_layout(&shown.ends)?;
     Ok(None)
 }
@@ -503,7 +506,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     if g1 {
         // Preserve G1's explicitly full-height legacy selected-window fixture.
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
-            font_alternatives: vm.font_alternative_state()?,
+            font_alternatives: vm.font_alternative_state()?, no_font: Default::default(),
             width: 400, height: 300,
             background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
@@ -532,6 +535,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         once one is prepared in an existing store
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
                         compiled load runs on a miss)
+  --compile-lisp-tree [--jobs N]  compile the installation's Lisp into its
+                        compiled-Lisp store ahead of use, N at a time (default 4)
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
@@ -629,6 +634,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
             "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--compile-lisp-tree" => {
+                let jobs = match (args.next().as_deref(), args.next()) {
+                    (None, _) => 4,
+                    (Some("--jobs"), Some(n)) => n.parse::<usize>().map_err(|e| format!("--jobs: {e}"))?,
+                    _ => return Err("usage: --compile-lisp-tree [--jobs N]".into()),
+                };
+                return batch::compile_lisp_tree(jobs).map(|()| None);
+            }
             "--compile-lisp" => {
                 let file = args.next().ok_or("--compile-lisp needs a FILE")?;
                 return batch::compile_lisp(file.into(), world_store).map(|()| None);
@@ -875,6 +888,7 @@ fn paint(
     engine: &mut romacs_layout2::LayoutEngine,
     vm: &mut Vm,
     sender: &PaintSender,
+    images: &residency::Shared,
     presentation: u64,
     force_gc: bool,
     floor: Option<usize>,
@@ -933,9 +947,9 @@ fn paint(
     let glyphs: Vec<_> = std::iter::once(&frame).chain(&children).filter(|_| SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)).flat_map(|frame| {
         let (id, origin) = (frame.frame_placement.frame().get(), frame.frame_placement.outer_in_parent());
         frame.glyphs.iter().filter_map(move |glyph| {
-            if let romacs_display_protocol::FrameGlyph::Char { char, row_role, face_id, x, y, clip_rect, .. } = glyph {
+            if let romacs_display_protocol::FrameGlyph::Char { char, composed, row_role, face_id, x, y, clip_rect, .. } = glyph {
                 let face = &frame.faces[face_id];
-                Some(json!({"char":char,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
+                Some(json!({"char":char,"composed":composed,"role":format!("{row_role:?}"),"foreground":hex(face.foreground),
                     "background":hex(face.background),"x":x + origin.x(),"y":y + origin.y(),"clip":clip_rect,"frame":id}))
             } else { None }
         })
@@ -944,6 +958,7 @@ fn paint(
     let tab_bar = romacs_layout2::tab_bar_extents(&frame);
     let status_bar = shown.snapshot.status_bar.as_ref().map(|bar| romacs_layout2::status_bar_extents(&frame, bar)).unwrap_or_default();
     let submit_start = Instant::now();
+    images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
     sender.submit_scene(frame, children, shown.animations.clone())?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
@@ -1053,6 +1068,7 @@ fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, childre
 fn paint_prompt(
     engine: &mut romacs_layout2::LayoutEngine,
     sender: &PaintSender,
+    images: &residency::Shared,
     presentation: u64,
     frame: &romacs_vm::HostFrame,
 ) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
@@ -1072,6 +1088,7 @@ fn paint_prompt(
             })
         }).collect::<Vec<_>>()
     });
+    images.borrow_mut().publish(sender, std::iter::once(&glyphs).chain(&children))?;
     sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
     if let Some(observed) = observed {
         eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
@@ -1114,7 +1131,10 @@ fn evaluate(
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
-            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}))", startup::lisp_string(&store.display().to_string()), key))?;
+            let compiled = romacs_vm::compiled_lisp::store_dir()
+                .map_or("nil".to_owned(), |dir| startup::lisp_string(&dir.display().to_string()));
+            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}) isolate-compiled-store {compiled})",
+                                    startup::lisp_string(&store.display().to_string()), key))?;
         }
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
@@ -1127,12 +1147,15 @@ fn evaluate(
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_alpha_hook(move |frame, alpha, limit| {
-        // Only a closed window refuses, and then nothing shows it.
-        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
-    }))));
+    let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // An image decoded off the VM wakes the same wait as a terminal.
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
+        .with_alpha_hook(move |frame, alpha, limit| {
+            // Only a closed window refuses, and then nothing shows it.
+            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        }))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1180,11 +1203,17 @@ fn evaluate(
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
-                if worlds.is_some() { vm.record_init_loads(); }
+                // Its `eval-after-load' calls declare the libraries it
+                // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
+                if worlds.is_some() {
+                    vm.record_init_loads();
+                    if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
+                }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+                if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
                 if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
             }
@@ -1233,7 +1262,7 @@ fn evaluate(
     host.borrow_mut().presentation = first_presentation;
     let last_presentation = || host.borrow().presentation;
     if live {
-        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
+        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     // A server listens before its first window, which a client asks for
     // (rlisp/romacs-server.el); one that cannot listen ends here.
@@ -1256,7 +1285,7 @@ fn evaluate(
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
         Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {
-        paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending,
+        paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
     let mut live_presentation = presentation::Presentation::new();
@@ -1327,7 +1356,9 @@ fn evaluate(
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
                 let event = command::unwrap_event(event);
                 command_start = Instant::now();
-                if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
+                if live && let InputEvent::WindowResize { width: w, height: h, scale_factor, .. } = event {
+                    // A HiDPI output: images decode at its device pixels.
+                    if vm.set_device_scale(scale_factor as f32) { live_presentation.changed(); }
                     if w > 0 && h > 0 && (width, height) != (w, h) {
                         width = w; height = h;
                         if let Some(server) = host.borrow_mut().server.as_mut() { server.size = (w, h); }
@@ -1405,7 +1436,7 @@ fn evaluate(
                     let next = frame(&mut vm, g1, width, height)?;
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
-                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+                    previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -1478,6 +1509,8 @@ fn evaluate(
                 && let Some(trace) = &mut key_trace {
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
+            // Pixels landed, or a publication left images to send: paint again.
+            if vm.land_images()? || images.borrow().behind() { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
@@ -1486,9 +1519,16 @@ fn evaluate(
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
-                let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else { return Ok(None) };
+                let lost = images.borrow().must_repaint(sender.as_ref());
+                let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? else {
+                    vm.redisplay_done(snapshot_start.elapsed());
+                    return Ok(None)
+                };
                 let presentation = next_presentation(&host)?;
-                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
+                previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
+                // The evaluator's part: the frame's snapshot, layout and
+                // submission; the render thread draws it meanwhile.
+                vm.redisplay_done(snapshot_start.elapsed());
                 Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
                 if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
@@ -1535,6 +1575,10 @@ fn evaluate(
                     live_presentation.changed();
                     continue;
                 }
+                // An event the idle pass took from the channel to see it
+                // (`input-pending-p', an idle collection giving way to a
+                // key) is queued here now: read it rather than wait.
+                if !pending.is_empty() { continue; }
                 // read_char's wait_reading_process_output also selects on
                 // the processes: one ready wakes the loop to read it.
                 let processes = vm.process_wait_fds();
@@ -1567,10 +1611,13 @@ fn evaluate(
                 }
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
+        vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
-        if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? {
+        // Asked apart: a borrow in the condition would outlive it into paint's publication.
+        let lost = images.borrow().must_repaint(sender.as_ref());
+        if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {
             let presentation = next_presentation(&host)?;
-            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+            previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,

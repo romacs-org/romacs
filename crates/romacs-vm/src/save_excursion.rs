@@ -130,8 +130,7 @@ impl Vm {
         let [beg, end] = [(beg, Bias::Left), (end, Bias::Right)].map(|(anchor, bias)| {
             self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias })))
         });
-        self.conses.push((beg, end));
-        Ok(Value::reference(self.conses.len() - 1, 3))
+        Ok(self.alloc_cons(beg, end))
     }
 
     /// editfns.c save_restriction_restore_1: widen a buffer saved unnarrowed,

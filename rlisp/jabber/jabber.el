@@ -193,6 +193,7 @@ One disabled account with a non-standard port:
 (require 'jabber-compose)
 (require 'jabber-muc)
 (require 'jabber-mam)
+(require 'jabber-mam-sync)
 (require 'jabber-muc-nick-completion)
 (require 'jabber-version)
 (require 'jabber-ahc-presence)

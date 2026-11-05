@@ -12,7 +12,7 @@ fn gzip(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn decode_data(bytes: &[u8], frame: u64, policy: ImageAnimationPolicy) -> Option<DecodedPixels> {
-    ImageCache::decode_data(
+    Decode::decode_data(
         EncodedBytes::copy_of(bytes),
         ImageSizeSpec::default(),
         ImageRotation::None,
@@ -38,7 +38,7 @@ fn with_file(bytes: &[u8], name: &str, test: impl FnOnce(&str)) {
 }
 
 fn decode_file(path: &str, frame: u64, policy: ImageAnimationPolicy) -> Option<DecodedPixels> {
-    ImageCache::decode_file(
+    Decode::decode_file(
         path,
         ImageSizeSpec::default(),
         ImageRotation::None,

@@ -13,7 +13,6 @@
 
 (require 'romacs-webkit nil t)
 (require 'romacs-video nil t)
-(require 'romacs-image nil t)
 
 (defvar inline-media-test-image-path
   (or (let ((home-pic (expand-file-name "~/Pictures/559-4K.jpg")))
