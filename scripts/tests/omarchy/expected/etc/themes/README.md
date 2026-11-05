@@ -33,6 +33,11 @@ Colour values as such carry little or no copyright; the names carry the
 upstream projects' goodwill, which the `omarchy-` prefix and each file's
 attribution line respect.
 
+Not ported: doom-themes' Monokai Pro filters (`doom-monokai-pro`, `-machine`,
+`-octagon`, `-ristretto`, `-spectrum`).  Monokai Pro is a commercial product with
+conditions of its own on ports, which doom-themes' MIT licence does not speak
+for.  The original Monokai is here as `monokai-classic`.
+
 GNU's bundled colour themes are not shipped; they load from
 `custom-theme-directory` or a package as any other theme.  Modus lends its
 machinery alone (rlisp/romacs-theme-modus.el); Romacs offers no Modus palette.
