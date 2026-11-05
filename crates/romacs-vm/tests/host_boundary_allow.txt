@@ -62,7 +62,7 @@ crates/romacs-vm/src/prim.rs:1021 dynamic:saved saved-binding accessor: checks t
 crates/romacs-vm/src/prim.rs:1030 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:1130 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/prim/leaf/editor_mark.rs:41 delayed-variable reads through variable_value, which checks the fence
-crates/romacs-vm/src/subprocess.rs:495 std::net ProcessWatch's cancel pair: a socket pair private to this process that stops its own poll thread; it reaches no host fact
+crates/romacs-vm/src/subprocess.rs:508 std::net ProcessWatch's cancel pair: a socket pair private to this process that stops its own poll thread; it reaches no host fact
 crates/romacs-vm/src/variable_runtime.rs:137 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/variable_runtime.rs:151 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/variable_runtime.rs:268 dynamic:saved reads the bound variable, owner or flag, not the saved value
