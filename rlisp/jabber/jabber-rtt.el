@@ -61,8 +61,10 @@
 ;;;###autoload
 (defun jabber-rtt-handle-message (jc xml-data)
   "Process an inbound message XML-DATA on JC for XEP-0301 RTT events."
-  ;; We could support this for MUC as well, if useful.
-  (when-let* (((not (jabber-muc-message-p xml-data jc)))
+  ;; We could support this for MUC as well, if useful.  A message with
+  ;; no children (one an archive result was taken out of) has no text.
+  (when-let* (((jabber-xml-node-children xml-data))
+              ((not (jabber-muc-message-p xml-data jc)))
               (from (jabber-xml-get-attribute xml-data 'from))
               (buffer (get-buffer (jabber-chat-get-buffer from jc))))
     (with-current-buffer buffer

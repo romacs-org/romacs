@@ -2383,6 +2383,73 @@ so the history does not end short of its limit."
         (should (equal '("1" nil "archive-000009") (jabber-test-mam--rsm (car sent))))
         (should (jabber-mam-syncing-p))))))
 
+(ert-deftest jabber-test-mam-batch-rolls-back-one-failed-result ()
+  "In a batch a failing result rolls back alone: the others commit with the
+batch, their effects after it, and the page fails, naming why."
+  (jabber-test-mam--watching
+    (let* ((room "room@example.com")
+           (jabber-mam--batch (jabber-mam-make-batch))
+           (committed nil)
+           (jabber-mam-committed-functions
+            (list (lambda (effects) (push (length effects) committed))))
+           (refuse (lambda (&rest args)
+                     (when (equal (nth 4 args) "Message 3") (error "Refused")))))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room)
+      (advice-add 'jabber-db-store-message :before refuse)
+      (unwind-protect
+          ;; As `jabber-process-input' contains a handler's error.
+          (dolist (i '(2 3 4))
+            (ignore-errors (jabber-test-mam--room-message jc (car sent) room i)))
+        (advice-remove 'jabber-db-store-message refuse))
+      (should (plist-get jabber-mam--batch :open))
+      (should-not committed)
+      (jabber-mam-batch-commit)
+      (should (= 2 (length committed)))
+      (should (equal '(("Message 2") ("Message 4"))
+                     (sqlite-select (jabber-db-ensure-open)
+                                    "SELECT body FROM message ORDER BY body")))
+      (jabber-test-mam--room-fin jc (car sent) room "archive-000002" "archive-000004" nil)
+      (should (equal `((,room "a result could not be stored")) failures))
+      (should-not jabber-db--in-transaction))))
+
+(defmacro jabber-test-mam--failing-batch-commits (&rest body)
+  "Run BODY with every batch's COMMIT failing as a full disk would."
+  (declare (indent 0) (debug t))
+  `(let* ((in-commit nil)
+          (fail (lambda (_db sql &rest _)
+                  (when (and in-commit (equal sql "COMMIT")) (error "Disk full"))))
+          (commit (symbol-function 'jabber-mam-batch-commit)))
+     (advice-add 'sqlite-execute :before fail)
+     (unwind-protect
+         (cl-letf (((symbol-function 'jabber-mam-batch-commit)
+                    (lambda ()
+                      (setq in-commit t)
+                      (unwind-protect (funcall commit) (setq in-commit nil)))))
+           ,@body)
+       (advice-remove 'sqlite-execute fail))))
+
+(ert-deftest jabber-test-mam-query-fails-when-its-batch-cannot-commit ()
+  "A query whose last page's batch fails to commit fails, its cursor unmoved
+and its results gone: it never reports success first."
+  (jabber-test-mam--watching
+    (let ((room "room@example.com")
+          (jabber-mam--batch (jabber-mam-make-batch))
+          (outcome nil))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room nil nil nil
+                         (lambda (o) (setq outcome o)))
+      (jabber-test-mam--room-message jc (car sent) room 2)
+      (jabber-test-mam--failing-batch-commits
+        (jabber-test-mam--room-fin jc (car sent) room "archive-000002" "archive-000002" t))
+      (should (eq 'failed outcome))
+      (should (string-prefix-p "its results could not be stored" (cadr (car failures))))
+      (should-not (caar (sqlite-select (jabber-db-ensure-open)
+                                       "SELECT 1 FROM message WHERE body = 'Message 2'")))
+      (should (equal "archive-000001"
+                     (car (jabber-db-mam-progress (jabber-connection-bare-jid jc) room nil))))
+      (should-not jabber-db--in-transaction))))
+
 (ert-deftest jabber-test-mam-results-keep-a-slow-page-alive ()
   "Results arriving are an answer: a page that streams slowly is no silence."
   (jabber-test-mam--watching

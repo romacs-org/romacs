@@ -681,5 +681,197 @@ named with why; the other archive completes."
                        (,room "groupchat" success 6 nil))
                      (plist-get summary :archives))))))
 
+;;; A fast catch-up: time slices and batched results
+
+(defvar jabber-test-mam-sync--timeline nil
+  "The personal archive `--timed-archive' serves: (ID . SECONDS), oldest first.")
+
+(defvar jabber-test-mam-sync--server-max 10
+  "The most results `--timed-archive' puts in a page, whatever is asked.")
+
+(defvar jabber-test-mam-sync--queries nil
+  "Archive queries `--timed-archive' answered, as (START END AFTER), newest first.")
+
+(defun jabber-test-mam-sync--field (query var)
+  "QUERY's data form value for VAR, or nil."
+  (let ((x (car (jabber-xml-get-children query 'x))))
+    (seq-some (lambda (field)
+                (and (equal (jabber-xml-get-attribute field 'var) var)
+                     (car (jabber-xml-node-children
+                           (car (jabber-xml-get-children field 'value))))))
+              (jabber-xml-get-children x 'field))))
+
+(defun jabber-test-mam-sync--timed-archive (fsm stanza)
+  "Answer STANZA's personal archive query on FSM as a server would:
+its start and end filters (inclusive), its RSM <after>, pages of at most
+`jabber-test-mam-sync--server-max'."
+  (let* ((id (jabber-xml-get-attribute stanza 'id))
+         (query (car (jabber-xml-get-children stanza 'query)))
+         (queryid (jabber-xml-get-attribute query 'queryid))
+         (start (jabber-test-mam-sync--field query "start"))
+         (end (jabber-test-mam-sync--field query "end"))
+         (set (car (jabber-xml-get-children query 'set)))
+         (after (car (jabber-xml-node-children (car (jabber-xml-get-children set 'after)))))
+         (seconds (lambda (stamp) (and stamp (float-time (date-to-time stamp)))))
+         (from (funcall seconds start)) (to (funcall seconds end))
+         (matching (seq-filter (lambda (m) (and (or (null from) (>= (cdr m) from))
+                                                (or (null to) (<= (cdr m) to))))
+                               jabber-test-mam-sync--timeline))
+         (rest (if after (cdr (member (assoc after matching) matching)) matching))
+         (page (seq-take rest jabber-test-mam-sync--server-max)))
+    (push (list start end after) jabber-test-mam-sync--queries)
+    (dolist (m page)
+      (jabberd-send
+       fsm `(message ((from . "romeo@montague.net") (to . "romeo@montague.net/Orchard"))
+                     (result ((xmlns . ,jabber-mam-xmlns) (queryid . ,queryid) (id . ,(car m)))
+                             (forwarded ((xmlns . ,jabber-mam-forward-xmlns))
+                                        (delay ((xmlns . ,jabber-mam-delay-xmlns)
+                                                (stamp . ,(format-time-string "%Y-%m-%dT%H:%M:%SZ" (cdr m) t))))
+                                        (message ((type . "chat") (from . "juliet@capulet.example/balcony")
+                                                  (to . "romeo@montague.net") (id . ,(concat "m-" (car m))))
+                                                 (body () ,(concat "Hello " (car m)))))))))
+    (jabberd-send
+     fsm `(iq ((type . "result") (id . ,id))
+              (fin ((xmlns . ,jabber-mam-xmlns)
+                    (complete . ,(if (> (length rest) (length page)) "false" "true")))
+                   (set ((xmlns . ,jabber-mam-rsm-xmlns))
+                        ,@(when page
+                            `((first () ,(car (car page))) (last () ,(car (car (last page))))))))))))
+
+(defmacro jabber-test-mam-sync--with-timed-server (count &rest body)
+  "Run BODY against a virtual server whose personal archive holds COUNT
+messages an hour apart, the newest an hour ago."
+  (declare (indent 1) (debug t))
+  `(let* ((dir (make-temp-file "jabber-mam-sync" t))
+          (jabber-db-path (expand-file-name "test.sqlite" dir))
+          (jabber-db--connection nil)
+          (jabber-connections nil)
+          (jabber-virtual-server-function #'jabberd-handle)
+          (jabberd-iq-get-handlers
+           (cons (cons "http://jabber.org/protocol/disco#info" #'jabber-test-mam-sync--disco)
+                 jabberd-iq-get-handlers))
+          (jabberd-iq-set-handlers
+           (cons (cons jabber-mam-xmlns #'jabber-test-mam-sync--timed-archive)
+                 jabberd-iq-set-handlers))
+          (now (float-time))
+          (jabber-test-mam-sync--timeline
+           (cl-loop for i below ,count
+                    collect (cons (format "p-%03d" i) (- now (* 3600 (- ,count i))))))
+          (jabber-test-mam-sync--queries nil))
+     (unwind-protect (progn ,@body)
+       (jabber-db-close)
+       (delete-directory dir t))))
+
+(defun jabber-test-mam-sync--run-personal ()
+  "Run the worker over the personal archive alone; return its summary."
+  (jabber-mam-sync-worker-run
+   '(:username "romeo" :server "montague.net" :resource "Orchard-sync-1"
+     :password "foo" :connection-type virtual)
+   '((:room nil :with nil :nick nil))))
+
+(ert-deftest jabber-test-mam-sync-worker-slices-a-long-catch-up ()
+  "A long personal catch-up runs as time slices side by side: every message
+arrives once, and the cursor ends at the newest."
+  (jabber-test-mam-sync--with-timed-server 120
+    (let* ((jabber-mam-sync-slices 4)
+           (summary (jabber-test-mam-sync--run-personal)))
+      (should (equal '((nil "chat" success 120 nil)) (plist-get summary :archives)))
+      (should (= 120 (caar (sqlite-select (jabber-db-ensure-open)
+                                          "SELECT count(DISTINCT server_id) FROM message"))))
+      (should (= 120 (caar (sqlite-select (jabber-db-ensure-open) "SELECT count(*) FROM message"))))
+      ;; Slices: queries started at several times, side by side.
+      (should (>= (length (delete-dups (mapcar #'car jabber-test-mam-sync--queries))) 4))
+      (should (equal "p-119" (car (jabber-db-mam-progress "romeo@montague.net"
+                                                          "romeo@montague.net" nil)))))))
+
+(ert-deftest jabber-test-mam-sync-worker-keeps-short-catch-ups-whole ()
+  "A catch-up its first page completes is one query, the cursor moved by it."
+  (jabber-test-mam-sync--with-timed-server 6
+    (let ((summary (jabber-test-mam-sync--run-personal)))
+      (should (equal '((nil "chat" success 6 nil)) (plist-get summary :archives)))
+      (should (= 1 (length jabber-test-mam-sync--queries)))
+      (should (equal "p-005" (car (jabber-db-mam-progress "romeo@montague.net"
+                                                          "romeo@montague.net" nil)))))))
+
+(ert-deftest jabber-test-mam-sync-worker-batches-results ()
+  "Results commit many to a transaction, their effects counted once each."
+  (jabber-test-mam-sync--with-timed-server 60
+    (let* ((begins 0)
+           (count (lambda (_db sql &rest _)
+                    (when (and (stringp sql) (string-prefix-p "BEGIN" sql)) (cl-incf begins))))
+           (summary (progn (advice-add 'sqlite-execute :before count)
+                           (unwind-protect (jabber-test-mam-sync--run-personal)
+                             (advice-remove 'sqlite-execute count)))))
+      (should (equal '((nil "chat" success 60 nil)) (plist-get summary :archives)))
+      ;; Each message inserted once; a narrowed slice's page in flight may
+      ;; bring a few again, which change nothing.
+      (let ((peer (car (plist-get summary :peers))))
+        (should (= 1 (length (plist-get summary :peers))))
+        (should (equal '("romeo@montague.net" "juliet@capulet.example" "chat" 60)
+                       (seq-take peer 4)))
+        (should (<= 60 (nth 4 peer) (+ 60 (* 3 jabber-test-mam-sync--server-max)))))
+      ;; Pages of ten: a transaction a page at most, not one a result.
+      (should (<= begins 20)))))
+
+(ert-deftest jabber-test-mam-sync-a-failed-batch-keeps-the-cursor-honest ()
+  "When a batch fails to commit while slices run, the catch-up fails and
+its cursor never passes a message the database lacks."
+  (jabber-test-mam-sync--with-timed-server 120
+    (let* ((jabber-mam-sync-slices 4)
+           ;; The first batch COMMIT after a slice succeeds fails: the batch
+           ;; that may hold that slice's last results.
+           (armed nil) (fired nil) (in-commit nil)
+           (arm (lambda (_query outcome) (when (and (eq outcome 'success) (not fired)) (setq armed t))))
+           (fail (lambda (_db sql &rest _)
+                   (when (and in-commit armed (not fired) (equal sql "COMMIT"))
+                     (setq fired t)
+                     (error "Disk full"))))
+           (commit (symbol-function 'jabber-mam-batch-commit))
+           (summary
+            (progn
+              (advice-add 'sqlite-execute :before fail)
+              (advice-add 'jabber-mam--complete-query :before arm)
+              (unwind-protect
+                  (cl-letf (((symbol-function 'jabber-mam-batch-commit)
+                             (lambda ()
+                               (let ((outer in-commit))
+                                 (setq in-commit t)
+                                 (unwind-protect (funcall commit) (setq in-commit outer))))))
+                    (jabber-test-mam-sync--run-personal))
+                (advice-remove 'jabber-mam--complete-query arm)
+                (advice-remove 'sqlite-execute fail))))
+           (archive (car (plist-get summary :archives)))
+           (cursor (car (jabber-db-mam-progress "romeo@montague.net" "romeo@montague.net" nil)))
+           (stored (mapcar #'car (sqlite-select (jabber-db-ensure-open)
+                                                "SELECT server_id FROM message"))))
+      (should fired)
+      (should (eq 'failed (nth 2 archive)))
+      (should (string-prefix-p "its results could not be stored" (nth 4 archive)))
+      ;; Every message up to the cursor is stored.
+      (when cursor
+        (dolist (m jabber-test-mam-sync--timeline)
+          (when (string< (car m) cursor)
+            (should (member (car m) stored))))
+        (should (member cursor stored))))))
+
+(ert-deftest jabber-test-mam-sync-batch-commits-when-the-session-waits ()
+  "A batch is due as soon as the live session announces a write."
+  (let* ((dir (make-temp-file "jabber-mam-sync" t))
+         (jabber-db-path (expand-file-name "test.sqlite" dir))
+         (jabber-db--connection nil)
+         (jabber-mam--batch (jabber-mam-make-batch)))
+    (unwind-protect
+        (progn
+          (jabber-mam--batch-open (jabber-db-ensure-open))
+          (should-not (jabber-mam--batch-due-p))
+          (write-region "" nil (jabber-db--intent-file) nil 'silent)
+          (should (jabber-mam--batch-due-p))
+          (jabber-mam-batch-commit)
+          (should-not (plist-get jabber-mam--batch :open))
+          (should-not jabber-db--in-transaction))
+      (setq jabber-db--in-transaction nil)
+      (jabber-db-close)
+      (delete-directory dir t))))
+
 (provide 'jabber-test-mam-sync)
 ;;; jabber-test-mam-sync.el ends here

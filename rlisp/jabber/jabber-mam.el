@@ -158,6 +158,17 @@ Each function receives the result's effects, a list of entries
 changed, and one with INSERTED t for each message row it added (see
 `jabber-mam--note-effect').  A result rolled back has none.")
 
+(defvar jabber-mam--batch nil
+  "The batch archived results commit in, or nil for a transaction each.
+A worker binds it to `jabber-mam-make-batch'.  The first result opens
+the batch's transaction and queues its COMMIT behind the stanzas already
+waiting (`jabber-mam-batch-commit'); it commits earlier once it holds
+`jabber-mam-batch-size' results, or as soon as the live session wants to
+write (`jabber-db-share-writes').  So a batch is about one read's worth
+of results, and never stays open while its process waits for input.
+Collections wait while it is open: one would hold the write lock the
+session may be waiting for as long as it takes.")
+
 (defvar jabber-mam--effects nil
   "While a result's transaction runs with `jabber-mam-committed-functions':
 a cons whose cdr collects the transaction's effects.")
@@ -413,10 +424,10 @@ is found even if every timer were lost."
   (setq jabber-mam--watchdog nil))
 
 (defun jabber-mam--build-query (queryid &optional with start after-id max
-                                        before-id)
+                                        before-id end)
   "Build a MAM <query> sexp.
 QUERYID is echoed in results for correlation.
-WITH filters by JID, START is an XEP-0082 datetime string.
+WITH filters by JID, START and END are XEP-0082 datetime strings.
 AFTER-ID is an RSM cursor for forward pagination.
 MAX is the page size.
 BEFORE-ID is an RSM cursor for backward pagination; when t, emit
@@ -424,7 +435,7 @@ an empty <before/> element (meaning \"last page\")."
   (let ((form-fields nil)
         (rsm-children nil))
     ;; Data form fields
-    (when (or with start)
+    (when (or with start end)
       (push `(field ((var . "FORM_TYPE") (type . "hidden"))
                     (value () ,jabber-mam-xmlns))
             form-fields)
@@ -435,6 +446,10 @@ an empty <before/> element (meaning \"last page\")."
       (when start
         (push `(field ((var . "start"))
                       (value () ,start))
+              form-fields))
+      (when end
+        (push `(field ((var . "end"))
+                      (value () ,end))
               form-fields))
       (setq form-fields (nreverse form-fields)))
     ;; RSM
@@ -655,15 +670,18 @@ raises, aborts the transaction.  So does retirement of QUERY meanwhile.
 Otherwise roll back and restore in-memory state the transaction
 consumed or changed, so a retry starts again from the restored durable
 state.  Effects deferred with `jabber-chat--on-decrypt-commit' run only
-after COMMIT."
-  (let ((db (jabber-db-ensure-open))
-        (jabber-chat--decrypt-undo (list #'ignore))
-        (jabber-chat--decrypt-commit nil)
-        (jabber-mam--effects (and jabber-mam-committed-functions (list nil)))
-        (committed nil))
+after COMMIT.  In a batch (`jabber-mam--batch') the result is a
+savepoint of the batch's transaction instead, and its effects wait for
+the batch's COMMIT."
+  (let* ((db (jabber-db-ensure-open))
+         (batch (and db jabber-mam--batch (jabber-mam--batch-open db)))
+         (jabber-chat--decrypt-undo (list #'ignore))
+         (jabber-chat--decrypt-commit nil)
+         (jabber-mam--effects (and jabber-mam-committed-functions (list nil)))
+         (committed nil))
     (when db
       ;; Immediate: see `jabber-db--with-savepoint'.
-      (sqlite-execute db "BEGIN IMMEDIATE"))
+      (sqlite-execute db (if batch "SAVEPOINT jabber_mam_result" "BEGIN IMMEDIATE")))
     (unwind-protect
         (let ((jabber-db--in-transaction db))
           (jabber-mam--process-owned-message jc stanza)
@@ -672,18 +690,107 @@ after COMMIT."
              jc stanza (lambda (err) (signal (car err) (cdr err)))))
           (when (jabber-mam--current-query-p jc query)
             (when db
-              (sqlite-execute db "COMMIT"))
+              (sqlite-execute db (if batch "RELEASE jabber_mam_result" "COMMIT")))
             (setq committed t)
-            (let ((jabber-db--in-transaction nil))
-              (when jabber-mam--effects
-                (jabber-lifecycle--dispatch-contained
-                 'jabber-mam-committed-functions (cdr jabber-mam--effects)))
-              (dolist (effect (reverse jabber-chat--decrypt-commit))
-                (jabber-lifecycle--call-contained effect)))))
+            (let ((effects (jabber-mam--result-effects
+                            jabber-mam--effects jabber-chat--decrypt-commit)))
+              (if batch
+                  (jabber-mam--batch-add query effects jabber-chat--decrypt-undo)
+                (let ((jabber-db--in-transaction nil))
+                  (funcall effects))))))
       (unless committed
         (when db
-          (ignore-error sqlite-error (sqlite-execute db "ROLLBACK")))
-        (mapc #'jabber-lifecycle--call-contained jabber-chat--decrypt-undo)))))
+          (ignore-error sqlite-error
+            (if (not batch)
+                (sqlite-execute db "ROLLBACK")
+              (sqlite-execute db "ROLLBACK TO jabber_mam_result")
+              (sqlite-execute db "RELEASE jabber_mam_result"))))
+        (mapc #'jabber-lifecycle--call-contained jabber-chat--decrypt-undo)))
+    (when (and batch (jabber-mam--batch-due-p))
+      (jabber-mam-batch-commit))))
+
+(defun jabber-mam--result-effects (effects commits)
+  "A function running a committed result's EFFECTS, then its decrypt COMMITS.
+EFFECTS is `jabber-mam--effects' as the result left it."
+  (lambda ()
+    (when effects
+      (jabber-lifecycle--dispatch-contained
+       'jabber-mam-committed-functions (cdr effects)))
+    (dolist (effect (reverse commits))
+      (jabber-lifecycle--call-contained effect))))
+
+;;; Batched results: one transaction for many
+
+(defvar jabber-mam-batch-size 100
+  "Most results a batch holds before it commits.")
+
+(defun jabber-mam-make-batch ()
+  "A closed batch for `jabber-mam--batch'."
+  (list :open nil :count 0 :effects nil :undos nil :queries nil :timer nil :gc nil))
+
+(defun jabber-mam--batch-open (db)
+  "Open the batch's transaction on DB unless it is open; return non-nil."
+  (unless (plist-get jabber-mam--batch :open)
+    (sqlite-execute db "BEGIN IMMEDIATE")
+    (plist-put jabber-mam--batch :open db)
+    ;; Statements now hold the lock: none waits for it (`jabber-db--begin',
+    ;; `jabber-db--acquires-lock-p').
+    (setq jabber-db--in-transaction db)
+    (plist-put jabber-mam--batch :gc gc-cons-threshold)
+    (setq gc-cons-threshold most-positive-fixnum)
+    (plist-put jabber-mam--batch :timer (run-at-time 0 nil #'jabber-mam-batch-commit)))
+  t)
+
+(defun jabber-mam--batch-note (query)
+  "Count QUERY among the open batch's queries, if a batch is open."
+  (when (and jabber-mam--batch (plist-get jabber-mam--batch :open)
+             (not (memq query (plist-get jabber-mam--batch :queries))))
+    (plist-put jabber-mam--batch :queries
+               (cons query (plist-get jabber-mam--batch :queries)))))
+
+(defun jabber-mam--batch-add (query effects undos)
+  "Add QUERY's committed result to the open batch: its EFFECTS and UNDOS."
+  (jabber-mam--batch-note query)
+  (plist-put jabber-mam--batch :effects (cons effects (plist-get jabber-mam--batch :effects)))
+  (plist-put jabber-mam--batch :undos (cons undos (plist-get jabber-mam--batch :undos)))
+  (plist-put jabber-mam--batch :count (1+ (plist-get jabber-mam--batch :count))))
+
+(defun jabber-mam--batch-due-p ()
+  "Non-nil when the open batch should commit now: full, or the session waits."
+  (or (>= (plist-get jabber-mam--batch :count) jabber-mam-batch-size)
+      (when-let* ((file (jabber-db--intent-file)))
+        (jabber-db--intent-fresh-p file))))
+
+(defun jabber-mam-batch-commit ()
+  "Commit the open batch, then run its results' effects in order.
+Should the COMMIT fail, the batch rolls back, its results' in-memory
+changes are undone, and its queries fail: their cursors moved inside it."
+  (when-let* ((batch jabber-mam--batch)
+              (db (plist-get batch :open)))
+    (let ((effects (reverse (plist-get batch :effects)))
+          (undos (plist-get batch :undos))
+          (queries (plist-get batch :queries))
+          (timer (plist-get batch :timer)))
+      (when (timerp timer)
+        (cancel-timer timer))
+      (setq gc-cons-threshold (or (plist-get batch :gc) gc-cons-threshold))
+      (dolist (key '(:open :effects :undos :queries :timer :gc))
+        (plist-put batch key nil))
+      (plist-put batch :count 0)
+      (setq jabber-db--in-transaction nil)
+      (if (condition-case err
+              (progn (sqlite-execute db "COMMIT") t)
+            (error
+             (ignore-error sqlite-error (sqlite-execute db "ROLLBACK"))
+             (dolist (undo undos)
+               (mapc #'jabber-lifecycle--call-contained undo))
+             (dolist (query queries)
+               (when (memq query jabber-mam--syncing)
+                 (jabber-mam--fail-query
+                  query (format "its results could not be stored: %s"
+                                (error-message-string err)))))
+             nil))
+          (mapc #'funcall effects)))))
 
 (defun jabber-mam--message-identity (jc query inner-msg archive-id)
   "Return accepted QUERY's identity for INNER-MSG and ARCHIVE-ID on JC.
@@ -737,6 +844,9 @@ JC is the Jabber connection.  XML-DATA is the stanza."
       (when (and timestamp (or (null (plist-get query :oldest))
                                (< timestamp (plist-get query :oldest))))
         (plist-put query :oldest timestamp))
+      (when (and timestamp (or (null (plist-get query :latest))
+                               (> timestamp (plist-get query :latest))))
+        (plist-put query :latest timestamp))
       (when (and (eq page (plist-get query :page))
                  (jabber-mam--current-query-p jc query))
         (pcase action
@@ -858,7 +968,11 @@ catch-up shows its progress without rebuilding buffers for every page."
 (defun jabber-mam--accept-page (query last-id)
   "Advance QUERY's forward cursor to LAST-ID after its page's results.
 Each result has already committed in its own transaction, so this is
-one autocommitted write; then schedule a redraw of committed peers."
+one autocommitted write (inside an open batch, part of it); then
+schedule a redraw of committed peers."
+  (when last-id
+    (plist-put query :last-uid last-id))
+  (jabber-mam--batch-note query)
   (when (plist-get query :forward)
     (let ((expected (plist-get query :cursor-expected))
           (uid (or last-id (plist-get query :cursor-expected))))
@@ -879,7 +993,8 @@ one autocommitted write; then schedule a redraw of committed peers."
     (if limit (max 1 (min size limit)) size)))
 
 (defun jabber-mam--query (jc &optional after-id queryid with start to
-                             before-id max callback result-callback limit)
+                             before-id max callback result-callback limit
+                             extra)
   "Start a MAM query on JC, paginating from AFTER-ID.
 QUERYID correlates results; generate it if nil.  WITH and START are filters.
 TO is nil for the personal archive, or a room bare JID.
@@ -889,6 +1004,13 @@ Then call RESULT-CALLBACK once with `success', `failed' or `cancelled'.
 With LIMIT and BEFORE-ID t, page back from the archive's newest message
 until LIMIT results arrived or the archive's start; the query records
 the newest UID as :newest and the oldest message time as :oldest.
+EXTRA is a plist of query properties set over the computed ones:
+`:end', an XEP-0082 time the results stop at (it may be moved between
+pages); `:forward', nil to keep the query from advancing the stored
+cursor; `:on-page', a function called with the query after each page
+that leaves it incomplete, before the next is requested.  Every query
+records its last page's last UID as :last-uid and its newest message
+time as :latest.
 Success means accepted query completion, including a bounded backward page,
 not complete archive coverage.  Each result commits on arrival in its own
 transaction; a page's fin then advances the forward cursor.
@@ -916,6 +1038,7 @@ Return the owned query record."
                      :page nil :timer nil :iq-id nil
                      :retried nil :failed nil :received 0
                      :due-at nil :heard-at nil :silent nil :error nil :retired-ids nil
+                     :end nil :on-page nil :last-uid nil :latest nil
                      :account account :archive archive
                      :cursor-expected (car progress)
                      :coverage-start (if progress (cadr progress) start)
@@ -923,6 +1046,8 @@ Return the owned query record."
                                    (equal after-id (car progress))
                                    (or (null progress)
                                        (equal start (cadr progress)))))))
+    (cl-loop for (key value) on extra by #'cddr
+             do (plist-put query key value))
     (push query jabber-mam--syncing)
     (jabber-mam--send-page query)
     query))
@@ -959,7 +1084,8 @@ made, the watchdog makes it (`jabber-mam-check-stalls')."
                (jabber-mam--build-query
                 (plist-get query :id) (plist-get query :with)
                 (plist-get query :start) (plist-get query :after)
-                (plist-get query :max) (plist-get query :before))
+                (plist-get query :max) (plist-get query :before)
+                (plist-get query :end))
                #'jabber-mam--handle-fin (cons query page)
                #'jabber-mam--handle-error (cons query page)
                (plist-get query :iq-id)
@@ -1004,7 +1130,11 @@ made, the watchdog makes it (`jabber-mam-check-stalls')."
                ((or (plist-get fin :complete)
                     (and before (or (not limit) (>= total limit)
                                     (null (plist-get fin :first)))))
-                (jabber-mam--complete-query query 'success))
+                ;; Stored before it is said to have succeeded: should its
+                ;; batch fail to commit, the query fails instead.
+                (jabber-mam-batch-commit)
+                (when (memq query jabber-mam--syncing)
+                  (jabber-mam--complete-query query 'success)))
                (t
                 (jabber-mam--release-page query)
                 (if before
@@ -1012,6 +1142,8 @@ made, the watchdog makes it (`jabber-mam-check-stalls')."
                       (plist-put query :before (plist-get fin :first))
                       (plist-put query :max (jabber-mam--catch-up-page-size (- limit total))))
                   (plist-put query :after last-id))
+                (when-let* ((on-page (plist-get query :on-page)))
+                  (jabber-lifecycle--call-contained on-page query))
                 (jabber-mam--schedule-page query)))))))
       ((error quit)
        (jabber-mam--page-failed query)

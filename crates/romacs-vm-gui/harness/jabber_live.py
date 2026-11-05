@@ -149,7 +149,7 @@ JABBER = r'''
 (defvar journey-catch-up-start nil "When the first catch-up began: its first page, or its job.")
 (defvar journey-outcomes nil "In-session queries settled: (ARCHIVE . OUTCOME), newest first.")
 (defvar journey-sync-summaries nil "Background syncs' (ACCOUNT SUMMARY TIME), newest first.")
-(defvar journey-toasts nil "The sync's toasts: (TIME TEXT), newest first.")
+(defvar journey-toasts nil "The sync's toasts: (TIME TEXT KIND), newest first.")
 (advice-add 'jabber-mam--send-page :before
             (lambda (&rest _) (unless journey-catch-up-start (setq journey-catch-up-start (float-time)))))
 (advice-add 'jabber-mam--complete-query :before
@@ -189,7 +189,7 @@ JABBER = r'''
     (advice-add f :around (journey--wrap f)))
   (add-hook 'jabber-mam-sync-finished-functions
             (lambda (account summary) (push (list account summary (float-time)) journey-sync-summaries)))
-  (advice-add 'jabber-mam-sync--toast :before (lambda (text) (push (list (float-time) text) journey-toasts))))
+  (advice-add 'jabber-mam-sync--toast :before (lambda (text &optional kind) (push (list (float-time) text kind) journey-toasts))))
 (setq jabber-db-path (expand-file-name "jabber.db" (getenv "HOME"))
       jabber-auto-reconnect nil
       jabber-backlog-number (string-to-number (getenv "JOURNEY_BACKLOG"))
@@ -269,7 +269,32 @@ none is shown in a window."
                                                        (and (fboundp 'jabber-mam-sync--buffer-key)
                                                             (jabber-mam-sync--buffer-key b))))))
                                         (buffer-list)))
-        :session-pid (emacs-pid) :refused (and (boundp 'journey-refused) journey-refused)))
+        :session-pid (emacs-pid) :refused (and (boundp 'journey-refused) journey-refused)
+        :jobs (journey-sync-jobs) :finish-errors journey-finish-errors))
+(defvar journey-finish-errors nil "Errors the session's handling of a finished sync signalled.")
+(with-eval-after-load 'jabber-mam-sync
+  (advice-add 'jabber-mam-sync--finished :around
+              (lambda (function &rest args)
+                (condition-case err (apply function args)
+                  (error (push (format "%S" err) journey-finish-errors) nil)))))
+(defun journey-sync-jobs ()
+  "Each account's job: whether its future resolved, its isolate lives, and a
+look at a resolved result."
+  (when (boundp 'jabber-mam-sync--accounts)
+    (let (jobs)
+      (maphash (lambda (account state)
+                 (let ((future (plist-get state :future)))
+                   (push (list account (and future t)
+                               (and future (isolate-future-done-p future))
+                               (and future (isolate-live-p (isolate-future-isolate future)))
+                               (and future (isolate-future-done-p future)
+                                    (substring (format "%S" (condition-case err (isolate-await future 0)
+                                                              (error (list 'error err))))
+                                               0 (min 300 (length (format "%S" (condition-case err (isolate-await future 0) (error (list 'error err))))))))
+                               (plist-get state :pending) (and (plist-get state :timer) t) (plist-get state :jobs))
+                         jobs)))
+               jabber-mam-sync--accounts)
+      jobs)))
 '''
 
 FIXTURE_ACCOUNT = r'''

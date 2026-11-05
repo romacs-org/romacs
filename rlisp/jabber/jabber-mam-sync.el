@@ -105,11 +105,29 @@ the next catch-up continue where this one stopped."
   :type 'natnum
   :group 'jabber)
 
+(defcustom jabber-mam-sync-slices 4
+  "Queries a background catch-up of the personal archive runs at once.
+A long catch-up is split by time into slices paged side by side; a
+slice that finishes takes the later half of the widest one left."
+  :type 'natnum
+  :group 'jabber)
+
+(defvar jabber-mam-sync-min-slice 600
+  "Seconds of archive a slice keeps at least when it is split.")
+
+(defcustom jabber-mam-sync-page-size 250
+  "Results a background catch-up's page asks for.
+Servers clamp a page to their own maximum.  A page's results are worked
+in the worker, so a large page only saves round trips."
+  :type 'natnum
+  :group 'jabber)
+
 (defvar jabber-mam-sync-inherited-variables
   '(jabber-db-path jabber-db-busy-timeout jabber-mam-page-size
     jabber-mam-catch-up-min-page-size jabber-mam-room-history
     jabber-mam-sync-timeout
-    jabber-mam-sync-parallel jabber-default-connection-type
+    jabber-mam-sync-parallel jabber-mam-sync-page-size jabber-mam-sync-slices
+    jabber-default-connection-type
     network-security-level nsm-settings-file gnutls-verify-error
     gnutls-trustfiles gnutls-min-prime-bits gnutls-algorithm-priority)
   "Variables whose session values a background catch-up's worker gets.")
@@ -628,6 +646,20 @@ It counts once its result's transaction commits."
   "Note that the job made progress now (`:after' advice, hook)."
   (setq jabber-mam-sync--progress-at (float-time)))
 
+(defvar jabber-mam-sync--pages nil
+  "In a worker: hash of archive (room, peer or nil) to the pages it answered.")
+
+(defvar jabber-mam-sync--timings nil
+  "In a worker: (ARCHIVE-SPEC . SECONDS) each archive took to settle.")
+
+(defun jabber-mam-sync--note-page (_jc _xml-data closure)
+  "Count CLOSURE's page answered; the job made progress (`:after' advice)."
+  (jabber-mam-sync--note-progress)
+  (when-let* ((query (car-safe closure))
+              ((consp query)))
+    (let ((key (or (plist-get query :to) (plist-get query :with))))
+      (puthash key (1+ (gethash key jabber-mam-sync--pages 0)) jabber-mam-sync--pages))))
+
 (defun jabber-mam-sync--committed (effects)
   "Count a committed result's EFFECTS (`jabber-mam-committed-functions')."
   (jabber-mam-sync--note-progress)
@@ -645,14 +677,16 @@ It counts once its result's transaction commits."
 so an archive's outcome takes it from here.")
 
 (defun jabber-mam-sync--note-failure (_query reason)
-  "Keep REASON for the failed query's outcome (`jabber-mam-query-failed-functions')."
+  "Keep REASON for the failed query's outcome.
+A function of `jabber-mam-query-failed-functions'."
   (setq jabber-mam-sync--failure reason))
 
 (defvar jabber-mam-sync--stalls nil
   "In a worker: the watchdog's actions, as (ARCHIVE ACTION FOUND), newest first.")
 
 (defun jabber-mam-sync--note-stall (query action found)
-  "Record the watchdog's ACTION on QUERY and what it FOUND (`jabber-mam-stall-functions')."
+  "Record the watchdog's ACTION on QUERY and what it FOUND.
+A function of `jabber-mam-stall-functions'."
   (jabber-mam-sync--note-progress)
   (push (list (jabber-mam-archive-name query) action found) jabber-mam-sync--stalls))
 
@@ -697,19 +731,126 @@ so an archive's outcome takes it from here.")
                           (let ((progress (jabber-db-mam-progress target target with)))
                             (jabber-mam--query jc (car progress) nil with (cadr progress)
                                                nil nil nil nil finish)))
-                         (t (jabber-mam--catch-up jc finish)))
+                         (t (jabber-mam-sync--sliced-catch-up jc finish)))
                  (error (funcall done (cons 'failed (error-message-string err))))))
             (t (funcall done 'unsupported))))
          nil)
       (error (funcall done (cons 'failed (error-message-string err)))))))
 
-(defun jabber-mam-sync--without-collections (function &rest args)
-  "Call FUNCTION with ARGS with collections deferred until it returns.
-`:around' advice on `jabber-mam--commit-result': a collection inside a
-result's transaction would hold the database's write lock, which the
-live session may be waiting for, as long as the collection takes."
-  (let ((gc-cons-threshold most-positive-fixnum))
-    (apply function args)))
+(defun jabber-mam-sync--stamp (seconds)
+  "SECONDS since the epoch as an XEP-0082 time."
+  (format-time-string "%Y-%m-%dT%H:%M:%SZ" seconds t))
+
+(defun jabber-mam-sync--slice-from (slice)
+  "Where SLICE's remaining time starts: its newest message, else its start."
+  (max (plist-get slice :start)
+       (or (plist-get (plist-get slice :query) :latest) 0)))
+
+(defun jabber-mam-sync--slice-span (slice now)
+  "Seconds of archive SLICE has left at NOW."
+  (- (or (plist-get slice :end) now) (jabber-mam-sync--slice-from slice)))
+
+(defun jabber-mam-sync--widest (slices now)
+  "The running slice of SLICES with the most time left at NOW, if it can be
+split: each half keeps `jabber-mam-sync-min-slice' seconds."
+  (let ((widest nil))
+    (dolist (slice slices)
+      (when (and (memq (plist-get slice :query) jabber-mam--syncing)
+                 (> (jabber-mam-sync--slice-span slice now) (* 2 jabber-mam-sync-min-slice))
+                 (or (null widest)
+                     (> (jabber-mam-sync--slice-span slice now) (jabber-mam-sync--slice-span widest now))))
+        (setq widest slice)))
+    widest))
+
+(defun jabber-mam-sync--sliced-catch-up (jc done)
+  "Catch up JC's personal archive in time slices paged at once.
+DONE gets `success' or (failed . REASON).  The first slice pages forward
+from the stored cursor and moves it, as `jabber-mam--catch-up' does.
+Once its first page shows more to come, the widest slice is halved until
+`jabber-mam-sync-slices' run; whenever one finishes, the widest left
+gives it its later half.  A narrowed slice's next page stops at its new
+end; what a page in flight brings past it is stored once anyway.  When
+every slice has succeeded the cursor moves to the newest message; should
+one fail, it stays where the first slice left it, and the next catch-up
+reads the rest again."
+  (let* ((account (jabber-connection-bare-jid jc))
+         (state (list :slices nil :running 0 :failure nil :split nil :first nil))
+         (start-slice nil) (split nil) (slice-done nil))
+    (setq split
+          (lambda ()
+            (let* ((now (float-time))
+                   (victim (jabber-mam-sync--widest (plist-get state :slices) now)))
+              (when victim
+                (let* ((from (jabber-mam-sync--slice-from victim))
+                       (end (plist-get victim :end))
+                       (mid (+ from (/ (- (or end now) from) 2.0))))
+                  (plist-put victim :end mid)
+                  (plist-put (plist-get victim :query) :end (jabber-mam-sync--stamp mid))
+                  (funcall start-slice mid end)
+                  t)))))
+    (setq slice-done
+          (lambda (outcome)
+            (plist-put state :running (1- (plist-get state :running)))
+            (when (and (not (eq outcome 'success)) (not (plist-get state :failure)))
+              ;; The failure hook ran just before this callback.
+              (plist-put state :failure (if (eq outcome 'failed)
+                                            (or jabber-mam-sync--failure "a slice failed")
+                                          "cancelled")))
+            (unless (plist-get state :failure)
+              (while (and (< (plist-get state :running) (max 1 jabber-mam-sync-slices))
+                          (funcall split))))
+            (when (zerop (plist-get state :running))
+              (funcall done (jabber-mam-sync--slices-settled account state)))))
+    (setq start-slice
+          (lambda (start end)
+            (let ((slice (list :start start :end end :query nil)))
+              (plist-put state :running (1+ (plist-get state :running)))
+              (plist-put state :slices
+                         (sort (cons slice (plist-get state :slices))
+                               (lambda (a b) (< (plist-get a :start) (plist-get b :start)))))
+              (plist-put slice :query
+                         (jabber-mam--query
+                          jc nil nil nil (jabber-mam-sync--stamp start) nil nil nil nil
+                          slice-done nil
+                          (list :end (and end (jabber-mam-sync--stamp end)) :forward nil))))))
+    ;; The first slice: forward from the cursor, open at the end.
+    (let* ((progress (jabber-db-mam-progress account account nil))
+           (slice (list :start 0 :end nil :query nil)))
+      (plist-put state :running 1)
+      (plist-put state :slices (list slice))
+      (plist-put state :first slice)
+      (plist-put slice :query
+                 (jabber-mam--query
+                  jc (car progress) nil nil (cadr progress) nil nil nil nil
+                  slice-done nil
+                  (list :on-page
+                        (lambda (query)
+                          (unless (plist-get state :split)
+                            (plist-put state :split t)
+                            (plist-put query :on-page nil)
+                            (while (and (< (plist-get state :running)
+                                           (max 1 jabber-mam-sync-slices))
+                                        (funcall split))))))))
+      nil)))
+
+(defun jabber-mam-sync--slices-settled (account state)
+  "The outcome of ACCOUNT's sliced catch-up STATE, its cursor moved on success.
+The cursor moves to the newest UID a slice reached, the latest slice's
+first, with the first slice's coverage: the slices cover it all."
+  (if-let* ((failure (plist-get state :failure)))
+      (cons 'failed failure)
+    (let ((slices (plist-get state :slices)))
+      (when (cdr slices)
+        (let ((newest (seq-some (lambda (slice) (plist-get (plist-get slice :query) :last-uid))
+                                (reverse slices)))
+              (first (plist-get (plist-get state :first) :query)))
+          (when-let* ((newest newest)
+                      (db (jabber-db-ensure-open)))
+            (jabber-db--advance-mam-progress
+             db account account nil
+             (car (jabber-db-mam-progress account account nil))
+             newest (plist-get first :coverage-start)))))
+      'success)))
 
 (defun jabber-mam-sync-worker-run (account archives)
   "In a worker VM: catch up ARCHIVES of ACCOUNT over a session of its own.
@@ -738,10 +879,17 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
          ;; Each page is requested from the previous one's answer, with no
          ;; timer between them; the loop below runs the watchdog too.
          (jabber-mam-page-delay 0)
+         (jabber-mam-catch-up-min-page-size
+          (max jabber-mam-catch-up-min-page-size jabber-mam-sync-page-size))
+         ;; fsm.el logs every event to a buffer by default.
+         (fsm-debug nil)
          (jabber-mam-query-failed-functions (list #'jabber-mam-sync--note-failure))
          (jabber-mam-stall-functions (list #'jabber-mam-sync--note-stall))
          (jabber-mam-sync--failure nil)
          (jabber-mam-sync--stalls nil)
+         (jabber-mam--batch (jabber-mam-make-batch))
+         (jabber-mam-sync--pages (make-hash-table :test #'equal))
+         (jabber-mam-sync--timings nil)
          (jabber-db-busy-timeout (max jabber-db-busy-timeout 30000))
          (jabber-mam--room-nicks
           (let ((nicks (make-hash-table :test #'equal)))
@@ -761,7 +909,7 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
     (setq next
           (lambda ()
             (while (and queue (< running (max 1 jabber-mam-sync-parallel)))
-              (let ((archive (pop queue)) (settled nil))
+              (let ((archive (pop queue)) (settled nil) (began (float-time)))
                 (setq running (1+ running))
                 (jabber-mam-sync--worker-start
                  jc archive
@@ -770,12 +918,12 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
                      (setq settled t running (1- running)
                            settled-count (1+ settled-count))
                      (push (cons archive outcome) outcomes)
+                     (push (cons archive (- (float-time) began)) jabber-mam-sync--timings)
                      (funcall next))))))))
     (advice-add 'jabber-send-sexp--raw :before #'jabber-mam-sync--gate)
     (advice-add 'jabber-send-string :before #'jabber-mam-sync--gate-string)
     (advice-add 'jabber-db--insert-message :after #'jabber-mam-sync--count-insert)
-    (advice-add 'jabber-mam--commit-result :around #'jabber-mam-sync--without-collections)
-    (advice-add 'jabber-mam--handle-fin :after #'jabber-mam-sync--note-progress)
+    (advice-add 'jabber-mam--handle-fin :after #'jabber-mam-sync--note-page)
     (jabber-db-share-writes 'defer)
     (unwind-protect
         (progn
@@ -797,19 +945,21 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
                       (memq jc jabber-connections)
                       (or connected (< (- (float-time) start) 60)))
             (accept-process-output nil 0.1)
+            ;; Its timer commits it first; this is the backstop.
+            (jabber-mam-batch-commit)
             (jabber-mam-check-stalls))
           (jabber-mam-sync--summary
            account archives outcomes connected (- (float-time) start)
            (if (memq jc jabber-connections)
                (format "no progress for %ds" jabber-mam-sync-timeout)
              "the sync session ended")))
+      (ignore-errors (jabber-mam-batch-commit))
       (dolist (c jabber-connections)
         (ignore-errors (jabber-disconnect-one c)))
       (advice-remove 'jabber-send-sexp--raw #'jabber-mam-sync--gate)
       (advice-remove 'jabber-send-string #'jabber-mam-sync--gate-string)
       (advice-remove 'jabber-db--insert-message #'jabber-mam-sync--count-insert)
-      (advice-remove 'jabber-mam--commit-result #'jabber-mam-sync--without-collections)
-      (advice-remove 'jabber-mam--handle-fin #'jabber-mam-sync--note-progress)
+      (advice-remove 'jabber-mam--handle-fin #'jabber-mam-sync--note-page)
       (jabber-db-share-writes nil))))
 
 (defun jabber-mam-sync--summary (account archives outcomes connected seconds
@@ -855,6 +1005,13 @@ Counts are of committed results only.  An archive with no outcome is
       :account (concat (plist-get account :username) "@" (plist-get account :server))
       :refused (reverse jabber-mam-sync--refused)
       :stalls (reverse jabber-mam-sync--stalls)
+      ;; (ARCHIVE PAGES SECONDS), ARCHIVE as in :archives.
+      :timing (mapcar (lambda (archive)
+                        (let ((key (or (plist-get archive :room) (plist-get archive :with))))
+                          (list key
+                                (if jabber-mam-sync--pages (gethash key jabber-mam-sync--pages 0) 0)
+                                (cdr (assq archive jabber-mam-sync--timings)))))
+                      archives)
       :seconds seconds
       :pid (emacs-pid)
       :cpu (jabber-mam-sync--cpu-seconds)))))
