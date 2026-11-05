@@ -1115,7 +1115,8 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
                 frame.add_stretch(bounds.x + x, bounds.y, advance.min(bounds.width - x), bounds.height, background, id, false);
                 let at = frame.glyphs.len() - 1;
                 if step.boxed {
-                    set_glyph_box_edges(frame, at, edges(step.side == 0.0 && opening, step.ends));
+                    // No side spacer pads a stretch: it owns the left edge.
+                    set_glyph_box_edges(frame, at, edges(opening, step.ends));
                     boxed_top |= step.top > 0.0;
                 }
                 open_glyph = step.open.then_some(at);
