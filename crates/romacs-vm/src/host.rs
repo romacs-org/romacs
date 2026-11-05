@@ -1564,10 +1564,15 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    thread_local! {
-        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
-    }
-    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+    INSTRUCTION_COUNTER.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
+    })
+}
+
+thread_local! {
+    /// The calling thread's counter, once opened (None inside: refused).
+    static INSTRUCTION_COUNTER: std::cell::RefCell<Option<Option<std::os::fd::OwnedFd>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_os = "linux")]
@@ -2380,6 +2385,90 @@ pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::
     let mut command = command(program)?;
     command.arg("--isolate").arg("0").args(args).stdin(socket);
     Ok(command.spawn()?.id() as i32)
+}
+
+/// This process was forked from a zygote (`fork_isolate`).
+static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The threads of this process other than its main thread and the
+/// caller (/proc/self/task): those a fork from the caller would lose.
+pub fn other_threads() -> io::Result<Vec<i32>> {
+    let (main, caller) = (unsafe { libc::getpid() }, unsafe { libc::gettid() });
+    let mut others = Vec::new();
+    for entry in std::fs::read_dir("/proc/self/task")? {
+        let tid = entry?.file_name().to_string_lossy().parse::<i32>().map_err(io::Error::other)?;
+        if tid != main && tid != caller { others.push(tid); }
+    }
+    Ok(others)
+}
+
+/// fork(2) from a zygote isolate, which checked that no thread but the
+/// caller and its parked main thread exists (`other_threads`): 0 in the child, whose one
+/// thread is the caller, else the child's pid. The child resets what is
+/// its own with `forked_child_reset`.
+pub fn fork_isolate() -> io::Result<i32> {
+    effect(|| "fork".into())?;
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
+    Ok(pid)
+}
+
+/// Whether this process is a child forked from a zygote: it ends with
+/// `exit`, since no main thread is left to return to.
+pub fn forked_child() -> bool {
+    FORKED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// In a child just forked from ZYGOTE: its process name, no signal noted
+/// yet, a wake pipe of its own (the zygote's would wake both), SIGTERM
+/// once the zygote is gone (fork clears it), and its own instruction
+/// counter (the inherited one counts the zygote's thread).
+pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
+    set_process_name("romacs-worker")?;
+    INTERRUPT.store(false, Ordering::SeqCst);
+    TERMINATE.store(false, Ordering::SeqCst);
+    TERMINATE_QUIT.store(false, Ordering::SeqCst);
+    for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
+        if end >= 0 { unsafe { libc::close(end) }; }
+    }
+    catch_isolate_signals()?;
+    INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
+    set_parent_death_signal(libc::SIGTERM)?;
+    if parent_pid() != zygote {
+        return Err(io::Error::other(format!("zygote {zygote} is gone")));
+    }
+    Ok(())
+}
+
+/// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
+/// write end closes unwritten (false); a termination ends the wait too.
+pub fn await_gate(gate: OwnedFd) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut byte = 0u8;
+    loop {
+        match unsafe { libc::read(gate.as_raw_fd(), (&raw mut byte).cast(), 1) } {
+            1 => return true,
+            0 => return false,
+            _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted && !terminate_pending() => {}
+            _ => return false,
+        }
+    }
+}
+
+/// Open GATE, the write end `await_gate` waits on: one byte, then closed.
+pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| "gate".into())?;
+    status((unsafe { libc::write(gate.as_raw_fd(), [1u8].as_ptr().cast(), 1) } as libc::c_int).min(0))
+}
+
+/// Name this process NAME (the kernel keeps 15 bytes): its thread-group
+/// leader's name, the one `ps` and `pgrep` show, from any of its threads.
+pub fn set_process_name(name: &str) -> io::Result<()> {
+    effect(|| "process-name".into())?;
+    std::fs::write("/proc/self/comm", name)
 }
 
 /// emacs_pipe: a close-on-exec pipe (read end, write end).

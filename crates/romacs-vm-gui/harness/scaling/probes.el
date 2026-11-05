@@ -1477,6 +1477,24 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; A zygote's validity check before each dispatch (rlisp/vm/isolate.el,
+;; worker-vms design §2.4): the inherited variables compared, then the
+;; files it loaded and the `load-path' directories stamped.  Linear in
+;; each, and in nothing else.
+(scaling-probe isolate-zygote-check :n 200
+  :setup (let* ((environment (scaling--names "SCALING_VARIABLE=value" (* 10 n)))
+                (directories (scaling--names "/nonexistent/scaling-lisp" n))
+                (files (scaling--names "/nonexistent/scaling-library.el" n))
+                (inputs (let ((process-environment environment) (load-path directories))
+                          (romacs--isolate-inputs)))
+                (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
+           (list environment directories
+                 (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
+                         expanded (romacs--isolate-stamp expanded) 0)))
+  :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
+          (dotimes (_ 10)
+            (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
 (scaling-probe gc-free-lists :n 200000
   ;; Rounds of: garbage in every table, a cons, closure, cell and string
   ;; kept above it, a collection, then as much garbage again.  The sweep leaves free

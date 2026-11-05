@@ -134,3 +134,65 @@ defsubr! { name = "romacs--isolate-executable", gnu = "romacs:isolate", effect =
 fn isolate_executable(cx) {
     cx.isolate_executable()
 }}
+
+// (romacs--isolate-fork-request ID): ask zygote ID for a child, a new
+// worker of this VM's; its id. Its pid comes with the zygote's report.
+defsubr! { name = "romacs--isolate-fork-request", gnu = "romacs:isolate", effect = Global,
+fn isolate_fork_request(cx, isolate: Value) {
+    cx.isolate_fork_request(id(cx, isolate)?)
+}}
+
+// (romacs--isolate-fork GENERATION): in a zygote, fork the child the
+// `fork' frame of GENERATION asked for: its pid in the zygote, nil in the
+// child, which then serves the spawner as a worker of its own.
+defsubr! { name = "romacs--isolate-fork", gnu = "romacs:isolate", effect = Global,
+fn isolate_fork(cx, generation: Value) {
+    cx.isolate_fork(id(cx, generation)?)
+}}
+
+// (romacs--isolate-release GENERATION): in a zygote, report the child
+// forked for GENERATION to the spawner, then let it run.
+defsubr! { name = "romacs--isolate-release", gnu = "romacs:isolate", effect = Global,
+fn isolate_release(cx, generation: Value) {
+    cx.isolate_release(id(cx, generation)?)
+}}
+
+// (romacs--isolate-fork-refusal): why this worker cannot fork now, or nil.
+defsubr! { name = "romacs--isolate-fork-refusal", gnu = "romacs:isolate", effect = Reads,
+fn isolate_fork_refusal(cx) {
+    cx.isolate_fork_refusal()
+}}
+
+// (romacs--isolate-compact-next): the next collection compacts the heap.
+defsubr! { name = "romacs--isolate-compact-next", gnu = "romacs:isolate", effect = Global,
+fn isolate_compact_next(cx) {
+    cx.isolate_compact_next();
+    Ok(Value::NIL)
+}}
+
+// (romacs--isolate-reserve N): room in the heap's tables for N more entries.
+defsubr! { name = "romacs--isolate-reserve", gnu = "romacs:isolate", effect = Global,
+fn isolate_reserve(cx, needed: Value) {
+    cx.isolate_reserve(id(cx, needed)? as usize);
+    Ok(Value::NIL)
+}}
+
+// (romacs--isolate-stamp FILES): a fixnum digest of the size, change time
+// and inode of each file in FILES (nil for a missing one), equal while
+// none of them changed.
+defsubr! { name = "romacs--isolate-stamp", gnu = "romacs:isolate", effect = Reads,
+fn isolate_stamp(cx, files: Value) {
+    cx.isolate_stamp(files)
+}}
+
+// (romacs--isolate-name-process NAME): this process's name, as `ps' shows it.
+defsubr! { name = "romacs--isolate-name-process", gnu = "romacs:isolate", effect = Global,
+fn isolate_name_process(cx, name: Value) {
+    cx.isolate_name_process(name)
+}}
+
+// (romacs--isolate-forked): in a zygote, its children not yet reaped.
+defsubr! { name = "romacs--isolate-forked", gnu = "romacs:isolate", effect = Reads,
+fn isolate_forked(cx) {
+    Value::integer(cx.isolate_forked() as i64).map_err(Fault::Error)
+}}
