@@ -929,9 +929,9 @@ The result is an ordinary theme, a plain `deftheme': `load-theme',
 
 (defun romacs-theme-read-palette (file)
   "The palette of FILE, KEY = \"#rrggbb\" lines in Omarchy colors.toml's
-vocabulary (`romacs-theme-file-keys') and a `mode' of dark or light.
-Other keys are ignored; a known key that is not #rrggbb, or another
-mode, signals."
+vocabulary (`romacs-theme-file-keys') and a `mode' of dark or light,
+read from the background when left out.  Other keys are ignored; a known
+key that is not #rrggbb, or another mode, signals."
   (let ((palette nil) (mode nil))
     (with-temp-buffer
       (insert-file-contents file)
@@ -945,8 +945,7 @@ mode, signals."
                  (unless (string-match-p "\\`#[0-9a-fA-F]\\{6\\}\\'" value)
                    (error "%s: %s %S is not #rrggbb" file key value))
                  (push (list (cdr (assq key romacs-theme-file-keys)) (downcase value)) palette))))))
-    (unless mode (error "%s: no mode" file))
-    (cons (list 'mode mode) (nreverse palette))))
+    (cons (list 'mode (or mode (romacs-theme--infer-mode palette))) (nreverse palette))))
 
 ;; A user option where Custom is loaded (`defcustom''s expansion); the
 ;; launch without GNU's Lisp has no Custom and no `system' theme.
@@ -956,7 +955,7 @@ mode, signals."
      "A palette file behind the theme `system', or nil.
 The file holds KEY = \"#rrggbb\" lines in the Omarchy colors.toml
 vocabulary (see etc/themes/README.md), for example
-~/.config/omarchy/current/theme/colors.toml."
+~/.local/state/omarchy/current/theme/colors.toml."
      :type '(choice (const nil) file) :group 'faces)
   (defvar romacs-theme-system-file nil))
 

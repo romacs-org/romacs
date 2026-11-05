@@ -444,6 +444,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-oclosure" '("oclosure-type"))
 
 
+;;; Generated autoloads from romacs-omarchy.el
+
+(register-definition-prefixes "romacs-omarchy" '("omarchy-"))
+
+
 ;;; Generated autoloads from romacs-orderless.el
 
 (autoload 'orderless-all-completions "romacs-orderless"

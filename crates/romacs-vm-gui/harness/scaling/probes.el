@@ -115,6 +115,19 @@ thousandth a stack mark."
            faces)
   :body (load-theme 'catppuccin-latte t))
 
+;; N Omarchy themes Romacs does not ship, made one after another, the first
+;; made again: Custom's theme list and `features' grow by one each.  Sessions
+;; meet tens of them.
+(scaling-probe omarchy-generated-themes :n 40
+  :setup (progn
+           (require 'romacs-omarchy)
+           (cons (mapcar #'intern (scaling--names "omarchy-scaling" n))
+                 '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                   (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))))
+  :body (let ((palette (cdr it)))
+          (dolist (theme (car it)) (omarchy--define theme "scaling" palette))
+          (omarchy--define (car (car it)) "scaling" palette)))
+
 ;; Registering N bundled themes, as a load of romacs-theme.el does: a property
 ;; each, no scan of the table per theme.
 (scaling-probe theme-bundled-rows :n 4000
