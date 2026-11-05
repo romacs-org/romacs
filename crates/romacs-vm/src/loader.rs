@@ -7,7 +7,7 @@ pub(super) struct Loader {
     pub(super) propagate: usize,
     active: Vec<PathBuf>,
     /// Every file a step was recorded in, once, in first-step order.
-    files: Vec<PathBuf>,
+    pub(super) files: Vec<PathBuf>,
     steps: Vec<Step>,
     completed_files: usize,
     completed_forms: usize,

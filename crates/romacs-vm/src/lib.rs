@@ -1478,6 +1478,9 @@ pub struct Vm {
     random: random::Random,
     /// A world build's P fence (`world`); None outside build mode.
     fence: Option<Box<world::Fence>>,
+    /// The re-seed definitions waiting for their variable's first access
+    /// (`world::pending`), by slot.
+    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1688,6 +1691,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     isolates,
     inotify,
     fence,
+    pending,
     execution,
     spare_programs,
     idle_since,
@@ -1848,6 +1852,7 @@ impl Vm {
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             fence: None,
+            pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,

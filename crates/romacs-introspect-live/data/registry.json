@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "3658f4cae7de9ec73ff717391fa5ffe0f7549d94b0d1279202f54984f377f6a9",
+    "input_hash": "01892d8428bc65f8d0692382e0ea29801fbacf4452f8cfd733b613a0e693bcf8",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8234
+    "vm2_universe": 8266
   },
   "schema": 2,
   "vm2": {
-    "count": 1354,
+    "count": 1360,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -444,6 +444,7 @@
       "get-char-property",
       "get-char-property-and-overlay",
       "get-file-buffer",
+      "get-internal-run-time",
       "get-load-suffixes",
       "get-pos-property",
       "get-process",
@@ -863,6 +864,8 @@
       "romacs--gnutls-verify",
       "romacs--host-minibuffer",
       "romacs--indirect-buffers",
+      "romacs--init-after-load-ordinal",
+      "romacs--init-recording-hold",
       "romacs--inotify-add-watch",
       "romacs--inotify-close",
       "romacs--inotify-read",
@@ -900,6 +903,7 @@
       "romacs--native-window",
       "romacs--nconc-list",
       "romacs--note-command-point",
+      "romacs--note-init-after-load",
       "romacs--oclosure-type",
       "romacs--orderless-filter",
       "romacs--orderless-highlight",
@@ -979,6 +983,8 @@
       "romacs--treesit-detach",
       "romacs--validate-region",
       "romacs--wait-status",
+      "romacs--world-layer-deferred-by",
+      "romacs--world-pend",
       "romacs--write-auto-save-list",
       "romacs--write-region-body",
       "romacs--xml-read-element",

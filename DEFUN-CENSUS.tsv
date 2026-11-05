@@ -140,7 +140,6 @@ gap-size	needed	lane builtins-b (fonts, coding, images, system, processes, threa
 garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
 get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 get-display-property	needed	lane A (editing, windows, frames, minibuffer readers, display)
-get-internal-run-time	absent	no shipped Lisp calls it and it is no command
 get-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 get-unused-iso-final-char	absent	no shipped Lisp calls it and it is no command
 gfile-add-watch	absent	file notification: Romacs implements the inotify backend (rlisp/vm/inotify.el)

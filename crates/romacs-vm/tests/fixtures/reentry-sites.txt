@@ -239,4 +239,5 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
 world/layer.rs timer_count eval_source_raw 1 clean  # no Values before the call; its value is a fixnum, read at once
 world/layer.rs world_layer_load eval_source_raw 3 boundary  # a layer build's top-level requests: the builder holds no Values, and each result is dropped or only matched
+world/pending.rs force_pending safe_call 1 held  # gc_holds is raised across the call; INDEX is a fixnum and nothing heap is used after it
 world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds
