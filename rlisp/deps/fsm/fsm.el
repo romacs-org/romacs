@@ -120,9 +120,11 @@
 
 (require 'cl-lib)
 
-(defvar fsm-debug "*fsm-debug*"
+(defvar fsm-debug nil
   "*Name of buffer for fsm debug messages.
-If nil, don't output debug messages.")
+If nil, don't output debug messages.  Romacs: nil by default (upstream
+\"*fsm-debug*\"): tracing every event costs each stanza of a network
+stream; failures are logged regardless (`fsm-report-failure').")
 
 (defvar fsm-debug-timestamp-format nil
   "*Timestamp format (a string) for `fsm-debug-output'.
@@ -140,6 +142,13 @@ FORMAT and ARGS are passed to `format'."
 		    (format-time-string fsm-debug-timestamp-format)
 		  (concat (current-time-string) ": "))
 		(apply #'format format args) "\n")))))
+
+(defun fsm-report-failure (format &rest args)
+  "Log a state machine failure: to `*Messages*' without echoing, and to
+the `fsm-debug' buffer when tracing.  FORMAT and ARGS are `format''s."
+  (apply #'fsm-debug-output format args)
+  (let ((inhibit-message t))
+    (apply #'message (concat "fsm: " format) args)))
 
 (cl-defmacro define-state-machine (name &key start sleep)
   "Define a state machine class called NAME.
@@ -349,8 +358,8 @@ CALLBACK with the response as only argument."
 		(put fsm :state-data newer-state-data)
 		(fsm-maybe-change-timer fsm newer-timeout))
 	    ((debug error)
-	     (fsm-debug-output "%s/%s update didn't work: %S"
-			       fsm-name new-state e)))))
+	     (fsm-report-failure "%s/%s update didn't work: %S"
+			         fsm-name new-state e)))))
 
       (let ((deferred (nreverse (get fsm :deferred))))
 	(put fsm :deferred nil)
@@ -383,17 +392,17 @@ CALLBACK with the response as only argument."
 	  (fsm-debug-output "Warning: event %S ignored in state %s/%s"
 			    event fsm-name state))
 	 ((eq (car-safe result) :error-signaled)
-	  (fsm-debug-output "Error in %s/%s: %s"
-			    fsm-name state
-			    (error-message-string (cdr result))))
+	  (fsm-report-failure "Error in %s/%s: %s"
+			      fsm-name state
+			      (error-message-string (cdr result))))
 	 ((and (listp result)
 	       (<= 2 (length result))
 	       (<= (length result) 3))
 	  (apply #'fsm-update fsm result))
 	 (t
-	  (fsm-debug-output "Incorrect return value in %s/%s: %S"
-			    fsm-name state
-			    result)))))))
+	  (fsm-report-failure "Incorrect return value in %s/%s: %S"
+			      fsm-name state
+			      result)))))))
 
 (defun fsm-call (fsm event)
   "Send EVENT to FSM synchronously, and wait for a reply.

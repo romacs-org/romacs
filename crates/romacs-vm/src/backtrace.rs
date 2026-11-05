@@ -61,8 +61,11 @@ pub(super) struct Backtrace {
     /// counter's overflow path, which records the symbol called through.
     /// Symbols are stable slot IDs, so the record needs no tracing.
     observed: Option<(usize, Vec<usize>)>,
+    /// The only symbols an observation records, sorted (`observe_only`);
+    /// empty records every one.
+    only: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, exit_flags, exit_pruned, excursions, observed });
+romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, exit_flags, exit_pruned, excursions, observed, only });
 impl Backtrace {
     pub fn enter(
         &mut self,
@@ -100,11 +103,27 @@ impl Backtrace {
     fn observed_call(&mut self, function: Value) -> usize {
         let (counter, calls) = self.observed.as_mut().expect("backtrace token exhausted");
         *counter = counter.checked_add(1).expect("backtrace token exhausted");
-        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)));
+        let only = &self.only;
+        calls.extend(function.index_if(7).and_then(|i| i.checked_sub(1)).filter(|slot| only.is_empty() || only.binary_search(slot).is_ok()));
         *counter
+    }
+    /// Whether calls are being observed (`observe`).
+    pub fn observing(&self) -> bool {
+        self.observed.is_some()
+    }
+    /// Record the calls through ONLY's symbols, from now until `observed`.
+    pub fn observe_only(&mut self, mut only: Vec<usize>) {
+        only.sort_unstable();
+        self.observe();
+        self.only = only;
+    }
+    /// Whether the observation so far recorded a call.
+    pub fn observed_any(&self) -> bool {
+        self.observed.as_ref().is_some_and(|(_, calls)| !calls.is_empty())
     }
     /// Record the functions every call names, from now until `observed`.
     pub fn observe(&mut self) {
+        self.only.clear();
         self.observed = Some((std::mem::replace(&mut self.next_token, usize::MAX), Vec::new()));
     }
     /// The symbols called through since `observe`, in call order, and the
@@ -112,6 +131,7 @@ impl Backtrace {
     pub fn observed(&mut self) -> Vec<usize> {
         let (counter, calls) = self.observed.take().expect("observing calls");
         self.next_token = counter;
+        self.only.clear();
         calls
     }
     pub fn resolve_pending(&mut self, resolved: Value) {
@@ -171,6 +191,21 @@ impl Backtrace {
     }
     pub fn debug_on_exit(&self, token: usize) -> bool {
         self.exit_flags.contains(&token)
+    }
+    /// Whether any activation's debug-on-exit flag is set.
+    pub fn has_exit_flags(&self) -> bool {
+        !self.exit_flags.is_empty()
+    }
+    /// Whether an activation from MARK up is flagged debug-on-exit. Tokens
+    /// grow with the stack, so those are the tokens from MARK's.
+    pub fn exit_flagged_from(&self, mark: usize) -> bool {
+        self.frames.get(mark).is_some_and(|frame| self.exit_flags.range(frame.token..).next().is_some())
+    }
+    /// Drop the flags of the activations from MARK up, which are leaving.
+    pub fn drop_exit_flags_from(&mut self, mark: usize) {
+        if let Some(frame) = self.frames.get(mark) {
+            self.exit_flags.split_off(&frame.token);
+        }
     }
     /// GNU set_backtrace_debug_on_exit for the activation TOKEN names. The
     /// tokens of activations that left stay until the set has doubled since
@@ -442,6 +477,7 @@ impl Vm {
     pub(super) fn backtrace_set_debug(&mut self, index: usize, on: bool) {
         let token = self.backtrace.frames[index].token;
         self.backtrace.set_debug_on_exit(token, on);
+        self.debug_hooks_changed();
     }
     /// GNU specpdl_unrewind from the top of the stack to activation INDEX's
     /// entry, for `backtrace-eval`: each binding made since then, and each

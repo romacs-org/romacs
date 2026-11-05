@@ -405,14 +405,20 @@ its excess over `--slow` (16 ms). Variants: `session` (in-session
 catch-up, `--page`), `worker` (`jabber-mam-background`), `none` (noise
 floor). `--restricted` makes the live connection read-only (no presence,
 no joins, a send gate); `--push-bookmark` has the fixture push an autojoin
-bookmark, which must not lead to a join. The run fails on an unfinished
-catch-up, a failed archive, no worker, unpaired keys, a refresh error or,
-in the worker variant, a key during the catch-up attributable to the
-sync's work.
+bookmark, which must not lead to a join. `--chats open` shows the next
+chat or room buffer (F7) every third window switch; `--chats send` also
+sends a message from it (F8; fixture account only), and the report counts
+the sends the fixture received, the background sync's reports to the
+session (`first_post_s` after connecting) and duplicates after the
+handover: stored, shown, and live messages stored more than once. The run
+fails on an unfinished catch-up, a failed archive, no worker, unpaired
+keys, a refresh error, a duplicate or a lost send or, in the worker
+variant, a key during the catch-up attributable to the sync's work.
 
 ```sh
 python3 -B crates/romacs-vm-gui/harness/jabber_live.py --binary BIN --output DIR \
-  --variant worker [--backlog 300] [--resync-after 25] [--duration 60]   # about 3 minutes
+  --variant worker [--backlog 300] [--resync-after 25] [--duration 60] \
+  [--chats open|send]   # about 3 minutes
 ```
 
 # Driving Romacs through its MCP tools (`romacs_mcp_client.py`)

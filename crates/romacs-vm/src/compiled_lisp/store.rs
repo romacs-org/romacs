@@ -2,7 +2,9 @@
 //! world store, private like it. One directory per compiler generation,
 //! one per key in it, one artifact per set of observed inputs:
 //! `GEN/KEY/INPUTS.rlc`. Writes are a private temporary file renamed into
-//! place, so a reader sees a whole artifact or none.
+//! place, so a reader sees a whole artifact or none. One lock file,
+//! `STORE/lock`, orders the writers: publication and the use log take it
+//! shared, maintenance (`prune`) exclusive.
 //!
 //! An artifact is `MAGIC`, the xxh3-128 of its body (a check against
 //! damage, read on every load, so a fast one), then the body: the
@@ -15,9 +17,9 @@ use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const MAGIC: &[u8] = b"RLC3\n";
+const MAGIC: &[u8] = b"RLC4\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 3\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 4\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
@@ -45,10 +47,13 @@ pub(super) fn key(env: &str, source: &Path, digest: &[u8; 32]) -> [u8; 32] {
     hash.finalize().into()
 }
 
-/// Why an artifact's file loads as source, or that it is compiled.
+/// Why an artifact's file loads as source, or that it is compiled: the
+/// compile refused it (`Source`: `no-byte-compile', say) or failed
+/// (`Error`). Either loads as source.
 pub(super) enum Status {
     Compiled,
     Source(String),
+    Error(String),
 }
 
 /// One unit's place: the top-level form it came from and its bytes.
@@ -89,6 +94,10 @@ pub(super) fn encode(status: &Status, source: &Path, inputs: &[Json], names: &[S
         }
         Status::Source(reason) => {
             body.byte(1);
+            body.str(reason);
+        }
+        Status::Error(reason) => {
+            body.byte(2);
             body.str(reason);
         }
     }
@@ -140,6 +149,7 @@ pub(super) fn decode(bytes: Vec<u8>) -> crate::Result<Artifact> {
     let status = match (r.byte()?, r.str()?) {
         (0, _) => Status::Compiled,
         (1, reason) => Status::Source(reason.to_owned()),
+        (2, reason) => Status::Error(reason.to_owned()),
         _ => return Err("compiled Lisp artifact: bad status".into()),
     };
     let _source = r.str()?;
@@ -212,12 +222,23 @@ pub(super) fn open(path: &Path) -> crate::Result<Artifact> {
 
 /// Whether the store's filesystem has room for writing: at least the
 /// smaller of 5% of it and 2 GB free.
-fn room(store: &Path) -> bool {
+pub(super) fn room(store: &Path) -> bool {
     let Ok(path) = std::ffi::CString::new(store.as_os_str().as_encoded_bytes()) else { return false };
     let Ok(stat) = host::statvfs(&path) else { return false };
     let free = stat.f_bavail as u64 * stat.f_frsize as u64;
     let size = stat.f_blocks as u64 * stat.f_frsize as u64;
     free >= (size / 20).min(2 << 30)
+}
+
+/// STORE's lock, taken as KIND (`libc::LOCK_SH`, `LOCK_EX`, with
+/// `LOCK_NB` not to wait), held until the file is dropped.
+pub(super) fn lock(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let file = host::open_store_file(store.join("lock"), host::StoreOpen::Write { create: true, truncate: false })?;
+    if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(file)
 }
 
 /// Publish BYTES as KEY's artifact named by INPUTS: its path, or an error
@@ -228,6 +249,7 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
     }
     let generation = generation(store);
     subdir(store)?;
+    let _lock = lock(store, libc::LOCK_SH)?;
     subdir(&generation)?;
     let dir = generation.join(hex(key));
     subdir(&dir)?;
@@ -240,31 +262,26 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
 
 /// Note that the artifact at PATH, of the source file SOURCE, was used:
 /// for pruning, and for what a background compile does first (`history`).
-/// A line is the artifact's path in its generation, a tab, the source's.
+/// A line is the artifact's path in its generation, a tab, the source's,
+/// appended in one write. Not recorded while maintenance holds the store,
+/// which no load waits for.
 pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     use std::io::Write;
+    let Ok(_lock) = lock(store, libc::LOCK_SH | libc::LOCK_NB) else { return };
     let log = generation(store).join("use.log");
-    if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Write { create: true, truncate: false }) {
+    if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Append) {
         let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
-        let _ = file.seek_end().and_then(|()| file.write_all(line.as_bytes()));
-    }
-}
-
-trait SeekEnd {
-    fn seek_end(&mut self) -> std::io::Result<()>;
-}
-impl SeekEnd for std::fs::File {
-    fn seek_end(&mut self) -> std::io::Result<()> {
-        use std::io::Seek;
-        self.seek(std::io::SeekFrom::End(0)).map(drop)
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
 /// Keep the store within BUDGET: other generations go first, then this
 /// generation's least recently used artifacts by the use log (atime is not
-/// trusted), which is then compacted. Runs after a compile publishes,
-/// never inside a load.
-pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> {
+/// trusted), which is then compacted; never one of KEEP, at the cost of the
+/// budget. Runs after a compile publishes, never inside a load, holding
+/// the store's lock alone.
+pub(super) fn prune(store: &Path, budget: u64, keep: &std::collections::HashSet<PathBuf>) -> std::io::Result<Vec<PathBuf>> {
+    let _lock = lock(store, libc::LOCK_EX)?;
     let current = generation(store);
     let mut removed = vec![];
     // Every older generation: at most two are kept, the current and the one
@@ -323,7 +340,7 @@ pub(super) fn prune(store: &Path, budget: u64) -> std::io::Result<Vec<PathBuf>> 
     }
     let mut files = artifacts(&current);
     files.sort_by_key(|(path, _)| last_use.get(path).map_or(0, |(i, _)| i + 1));
-    for (path, size) in files {
+    for (path, size) in files.into_iter().filter(|(path, _)| !keep.contains(path)) {
         if total <= budget * 9 / 10 {
             break;
         }

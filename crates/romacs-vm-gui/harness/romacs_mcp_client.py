@@ -46,6 +46,8 @@ class RomacsMcp:
                                                'clientInfo': {'name': name, 'version': '1'}})
         if 'error' in reply:
             raise ToolError(f"initialize: {reply['error']}")
+        # What the server said of itself (its instructions among it).
+        self.server = reply.get('result', {})
         self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         self.instance, self._schemas = None, None
 

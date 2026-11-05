@@ -25,6 +25,7 @@
 //! as a GNU installation without `.elc` files.
 mod background;
 mod codec;
+mod tree;
 pub(crate) mod store;
 mod unit;
 #[cfg(test)]
@@ -32,6 +33,7 @@ mod compiled_lisp_tests;
 
 use crate::*;
 pub(crate) use background::{note_idle, start as start_background, stop as stop_background};
+pub use tree::compile_tree;
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -74,6 +76,9 @@ struct Configured {
     config: Config,
     chain: String,
     trace: bool,
+    /// A compile of a tree's (`tree`): its publications leave the store's
+    /// maintenance to the tree's end.
+    no_prune: bool,
     identity: std::sync::OnceLock<String>,
 }
 
@@ -101,8 +106,9 @@ pub fn requested(interactive: bool) -> bool {
 pub fn configure(config: Config) {
     let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
+    let no_prune = host::getenv(NO_PRUNE).is_some();
     if host::getenv(BACKGROUND).is_some() {
-        host::lower_priority();
+        host::lower_priority(host::Priority::Idle);
     }
     // A compile process ends with the process that started it, and within
     // a deadline: nothing outlives a session or holds its queue forever.
@@ -117,7 +123,7 @@ pub fn configure(config: Config) {
             std::process::exit(124);
         });
     }
-    let _ = CONFIG.set(Configured { config, chain, trace, identity: std::sync::OnceLock::new() });
+    let _ = CONFIG.set(Configured { config, chain, trace, no_prune, identity: std::sync::OnceLock::new() });
 }
 
 /// Whether this process may compile Lisp: it loads compiled Lisp and runs
@@ -127,7 +133,7 @@ pub(crate) fn compiles() -> bool {
 }
 
 /// The configured store, in a process that loads compiled Lisp.
-pub(crate) fn store_dir() -> Option<&'static Path> {
+pub fn store_dir() -> Option<&'static Path> {
     config().map(|c| c.store.as_path())
 }
 
@@ -153,10 +159,23 @@ const PARENT: &str = "ROMACS_COMPILE_PARENT";
 /// background compile does (`background`).
 pub const BACKGROUND: &str = "ROMACS_COMPILE_BACKGROUND";
 
+/// In a compile process's environment, and its nested compiles': publish
+/// without pruning the store (`tree`, which prunes once at its end).
+const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
+
 /// The compile process for the source file PATH on LOAD_PATH, as
 /// (PROGRAM ARGS ENVIRONMENT): None when this process compiles nothing, or
 /// PATH is being compiled already up the chain (its compile-time loads
 /// read source, as GNU's would with no `.elc`).
+/// Whether PATH is in the installation's Lisp trees: the configured ones,
+/// else the runtime root's gnu-lisp/ and rlisp/.
+fn installed_lisp(path: &Path) -> bool {
+    match config() {
+        Some(config) => config.runtime.iter().any(|root| path.starts_with(root)),
+        None => { let root = host::runtime_root(); ["gnu-lisp", "rlisp"].iter().any(|tree| path.starts_with(root.join(tree))) }
+    }
+}
+
 fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
     -> Option<(OsString, Vec<OsString>, Vec<(OsString, OsString)>)> {
     let name = path.to_string_lossy();
@@ -173,7 +192,50 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
         (PARENT.into(), host::pid().to_string().into()),
         ("ROMACS_COMPILED_LISP".into(), "on".into()),
     ]);
+    if configured.no_prune {
+        environment.push((NO_PRUNE.into(), "1".into()));
+    }
     Some((program.clone(), args, environment))
+}
+
+/// Run the compile process PROGRAM ARGS in ENVIRONMENT, its standard error
+/// appended to STORE's compile log, within the compile deadline: its
+/// standard output when it succeeded.
+fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment: Vec<(OsString, OsString)>) -> Option<String> {
+    let log = store::generation(store).join("compile.log");
+    let _ = host::create_dir_all(store::generation(store));
+    let stderr = host::open_output(&log, host::OpenOptions::new().append(true).create(true))
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(|_| std::process::Stdio::null());
+    let mut command = host::command(program).ok()?;
+    command.args(args)
+        .env_clear()
+        .envs(environment)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(stderr);
+    let mut child = command.spawn().ok()?;
+    let mut stdout = child.stdout.take().expect("piped");
+    let reader = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut out = String::new();
+        let _ = stdout.read_to_string(&mut out);
+        out
+    });
+    let deadline = host::monotonic() + std::time::Duration::from_secs(600);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(2)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let out = reader.join().unwrap_or_default();
+    status.is_some_and(|s| s.success()).then_some(out)
 }
 
 /// The `.el` files under DIR, its subdirectories' after its own, each
@@ -273,9 +335,28 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// a file of the installation's Lisp trees, or one beside an `.elc`
     /// that is not older than it when `load-prefer-newer` asks.
     fn has_compiled_form(&self, config: &Config, path: &Path) -> bool {
-        if config.runtime.iter().any(|root| path.starts_with(root)) {
-            return true;
-        }
+        config.runtime.iter().any(|root| path.starts_with(root)) || self.current_elc(path)
+    }
+
+    /// Whether GNU would load the source file PATH compiled: a file of the
+    /// installation's Lisp trees (the configured ones, else the runtime
+    /// root's gnu-lisp/ and rlisp/), or one beside a current `.elc`.  When
+    /// not, GNU's readevalloop interprets it.
+    pub(crate) fn gnu_loads_compiled(&self, path: &Path) -> bool {
+        installed_lisp(path) || self.current_elc(path)
+    }
+
+    /// Whether a load of PATH, a source file, is interpreted as GNU's
+    /// readevalloop would: one GNU would not load compiled, or one a Lisp
+    /// `load' named with its `.el' (EXPLICIT) outside the installation's
+    /// Lisp trees, which GNU reads as source even beside an `.elc'.
+    pub(crate) fn gnu_interprets(&self, path: &Path, explicit: bool) -> bool {
+        !self.gnu_loads_compiled(path) || (explicit && !installed_lisp(path))
+    }
+
+    /// Whether an `.elc` beside PATH is one GNU's suffix rules would pick:
+    /// any, or one not older than PATH when `load-prefer-newer` asks.
+    fn current_elc(&self, path: &Path) -> bool {
         let elc = path.with_extension("elc");
         let Ok(compiled) = host::metadata(&elc) else { return false };
         let prefer_newer = self.names.get("load-prefer-newer").is_some_and(|&s| self.slots[s].value != Value::NIL);
@@ -288,12 +369,16 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
 
     /// The compiled load of the source file PATH (resolved), when this
     /// load is one: a stored artifact whose inputs hold, else one compiled
-    /// now. None loads PATH as source: no store, no compiled form, or a
-    /// compile refused, failed or not ours to run.
+    /// now. None loads PATH as source: no store, no compiled form, a
+    /// compile refused, failed or not ours to run, or PATH being compiled
+    /// up this compile's chain (a cycle: gnus-sum's compile requires
+    /// gnus-art, which requires gnus-sum), whatever the store holds, so a
+    /// compile's result never depends on whether another one published
+    /// first.
     pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<Option<Compiled>> {
         let Some(configured) = configured() else { return Ok(None) };
         let config = &configured.config;
-        if !self.has_compiled_form(config, path) {
+        if !self.has_compiled_form(config, path) || configured.chain.lines().any(|file| Path::new(file) == path) {
             return Ok(None);
         }
         let load_path = self.load_path_strings()?;
@@ -314,7 +399,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 None => return Ok(None),
             },
         };
-        if let store::Status::Source(_) = data.status {
+        if !matches!(data.status, store::Status::Compiled) {
             return Ok(None);
         }
         store::note_use(&config.store, &artifact, path);
@@ -341,43 +426,8 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     fn compile_now(&mut self, config: &Config, path: &Path, load_path: &[String]) -> Result<Option<PathBuf>> {
         let Some(configured) = configured() else { return Ok(None) };
         let Some((program, args, environment)) = compile_command(configured, path, load_path) else { return Ok(None) };
-        let log = store::generation(&config.store).join("compile.log");
-        let _ = host::create_dir_all(store::generation(&config.store));
-        let stderr = host::open_output(&log, host::OpenOptions::new().append(true).create(true))
-            .map(std::process::Stdio::from)
-            .unwrap_or_else(|_| std::process::Stdio::null());
-        let mut command = host::command(program).map_err(|e| e.to_string())?;
-        command.args(args)
-            .env_clear()
-            .envs(environment)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(stderr);
-        let Ok(mut child) = command.spawn() else { return Ok(None) };
-        let mut stdout = child.stdout.take().expect("piped");
-        let reader = std::thread::spawn(move || {
-            use std::io::Read;
-            let mut out = String::new();
-            let _ = stdout.read_to_string(&mut out);
-            out
-        });
-        let deadline = host::monotonic() + std::time::Duration::from_secs(600);
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break Some(status),
-                Ok(None) if host::monotonic() < deadline => std::thread::sleep(std::time::Duration::from_millis(2)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
-            }
-        };
-        let out = reader.join().unwrap_or_default();
-        if !status.is_some_and(|s| s.success()) {
-            return Ok(None);
-        }
-        Ok(out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from))
+        Ok(run_compile(&config.store, program, args, environment)
+            .and_then(|out| out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)))
     }
 
     /// Install unit INDEX of a compiled load, with SLOTS for its names:
@@ -400,14 +450,20 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     }
 
     /// The compile process: compile SOURCE, publish its artifact in the
-    /// configured store and say where on standard output. The walk's
-    /// errors and refusals make a source-only artifact, so the next load
-    /// reads source without compiling again until an input changes.
-    pub fn compile_lisp_file(&mut self, source: &Path) -> Result<PathBuf> {
+    /// configured store and say where on standard output, with whether an
+    /// artifact whose inputs hold was there already (then nothing compiles).
+    /// The walk's refusals and errors make a source-only artifact, so the
+    /// next load reads source without compiling again until an input
+    /// changes.
+    pub fn compile_lisp_file(&mut self, source: &Path) -> Result<(PathBuf, bool)> {
         let configured = configured().ok_or("compiled Lisp is not configured in this process")?;
         let config = &configured.config;
         let identity = configured.identity().ok_or("no compile world")?;
         let source = host::canonicalize(source).map_err(|e| format!("{}: {e}", source.display()))?;
+        let load_path = self.load_path_strings()?;
+        if let Ok(Some((held, _))) = self.stored(configured, &source, &load_path) {
+            return Ok((held, true));
+        }
         let digest = store::source_digest(&config.store, &source).map_err(|e| e.to_string())?;
         let key = store::key(identity, &source, &digest);
         host::enter_record();
@@ -423,23 +479,29 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             .collect();
         let (status, units) = match walked {
             Ok(Ok(units)) => (store::Status::Compiled, units),
-            Ok(Err(reason)) | Err(reason) => {
+            Ok(Err(reason)) => {
                 eprintln!("romacs-compile: {}: {reason}", source.display());
                 (store::Status::Source(reason), vec![])
+            }
+            Err(reason) => {
+                eprintln!("romacs-compile: {}: {reason}", source.display());
+                (store::Status::Error(reason.to_string()), vec![])
             }
         };
         let (bytes, inputs_digest) = store::encode(&status, &source, &inputs, &names.names, &units);
         let path = store::publish(&config.store, &key, &inputs_digest, &bytes).map_err(|e| e.to_string())?;
-        if let Ok(removed) = store::prune(&config.store, store::BUDGET)
+        if !configured.no_prune
+            && let Ok(removed) = store::prune(&config.store, store::BUDGET, &Default::default())
             && !removed.is_empty()
         {
             eprintln!("romacs-compile: {}", json!({"pruned": removed.len()}));
         }
-        Ok(path)
+        Ok((path, false))
     }
 
-    /// Walk SOURCE and compile what it emits: the units, or why it is not
-    /// compiled (Ok(Err)); Err for a signal.
+    /// Walk SOURCE and compile what it emits: the units, or why the walk
+    /// refused it (Ok(Err)); Err for a signal or a form that failed to
+    /// compile.
     fn compile_walk(&mut self, source: &Path, names: &mut unit::Names)
         -> Result<std::result::Result<Vec<(usize, usize, usize, usize, Vec<u8>)>, String>> {
         self.eval_source_raw("(require 'romacs-compile)")?;
@@ -474,7 +536,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             for (form, [byte, end, line, ordinal], specials) in emitted {
                 let data = match self.compile_unit(&form, specials, names) {
                     Ok(data) => data,
-                    Err(reason) => return Ok(Err(format!("line {}: {reason}", line?))),
+                    Err(reason) => return Err(format!("line {}: {reason}", line?).into()),
                 };
                 units.push((ordinal?, byte?, end?, line?, data));
             }

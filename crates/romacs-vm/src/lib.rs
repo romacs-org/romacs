@@ -861,6 +861,20 @@ enum Op {
     SetGlobal(usize, usize),
     Bind(usize, usize),
     Unbind(usize),
+    /// A `let' binding `eval' compiled before its symbol was special
+    /// (VM2-LATE-SPECIAL1): (slot, cell).  Bound dynamically when the
+    /// symbol is special as the binding is made, its cell then holding
+    /// `Value::UNBOUND', which the late reads and writes forward to the
+    /// symbol's dynamic value; else the cell keeps the lexical value.
+    BindLate(usize, usize),
+    /// Ends a late binding: unbinds it when it was made dynamically. (cell)
+    UnbindLate(usize),
+    /// (destination, cell, slot): a late binding's value.
+    ReadLate(usize, usize, usize),
+    /// (cell, source, slot): sets a late binding.
+    WriteLate(usize, usize, usize),
+    /// (destination, cell): t when the late binding was made dynamically.
+    LateForwarded(usize, usize),
     Jump(usize),
     Unless(usize, usize),
     Closure(usize, usize, usize),
@@ -890,6 +904,11 @@ romacs_snapshot::snapshot_enum!(Op {
     Op::SetGlobal(f0, f1) => (f0, f1),
     Op::Bind(f0, f1) => (f0, f1),
     Op::Unbind(f0) => (f0),
+    Op::BindLate(f0, f1) => (f0, f1),
+    Op::UnbindLate(f0) => (f0),
+    Op::ReadLate(f0, f1, f2) => (f0, f1, f2),
+    Op::WriteLate(f0, f1, f2) => (f0, f1, f2),
+    Op::LateForwarded(f0, f1) => (f0, f1),
     Op::Jump(f0) => (f0),
     Op::Unless(f0, f1) => (f0, f1),
     Op::Closure(f0, f1, f2) => (f0, f1, f2),
@@ -918,10 +937,12 @@ impl Op {
             | Self::Closure(d, _, _)
             | Self::Condition(d, _, _)
             | Self::Protect(d, _, _) => *d = map(*d),
-            Self::Move(d, s) | Self::ReadCell(d, s) | Self::WriteCell(d, s) => {
+            Self::Move(d, s) | Self::ReadCell(d, s) | Self::WriteCell(d, s)
+            | Self::ReadLate(d, s, _) | Self::WriteLate(d, s, _) | Self::LateForwarded(d, s) => {
                 *d = map(*d);
                 *s = map(*s);
             }
+            Self::BindLate(_, r) | Self::UnbindLate(r) => *r = map(*r),
             Self::Cell(r)
             | Self::SetGlobal(_, r)
             | Self::Bind(_, r)
@@ -1021,6 +1042,10 @@ struct LazyBody {
     args: Vec<Form>,
     names: Vec<Name>,
     cells: Vec<bool>,
+    /// Which of the captures are late bindings (`Binding::late'), and the
+    /// binding each hides (`Binding::shadow').
+    lates: Vec<bool>,
+    shadows: Vec<Option<GeneratedName>>,
     local_specials: NameSet<String>,
     pending_specials: NameSet<String>,
     dynamic_scope: bool,
@@ -1033,12 +1058,21 @@ struct LazyBody {
     evaluated: bool,
     /// A deferred form of a loading file's own (`Builder::file_level`).
     file_level: bool,
+    /// Made while interpreting a source file (`Vm::interpreting_source`).
+    interpreting: bool,
 }
-romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, local_specials, pending_specials, dynamic_scope, deferred, evaluated, file_level });
+romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, lates, shadows, local_specials, pending_specials, dynamic_scope, deferred, evaluated, file_level, interpreting });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
     cell: bool,
+    /// A late binding: its cell is read and written through the late ops
+    /// (`Op::BindLate').
+    late: bool,
+    /// A late binding's view of the lexical binding of its name it hides,
+    /// kept in the environment under this compiler name: while the late
+    /// binding is dynamic, GNU's lexical lookups still find that one.
+    shadow: Option<GeneratedName>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Name {
@@ -1348,6 +1382,10 @@ pub struct Vm {
     file_level_request: bool,
     /// R215: compile `lambda' bodies lazily (GNU's non-eager load regime).
     lazy_regime: bool,
+    /// Loading a file GNU would read as source (no compiled form,
+    /// `Vm::gnu_loads_compiled'): GNU's readevalloop interprets its forms,
+    /// so its `let's bind late (`Op::BindLate'), as `eval''s do.
+    interpreting_source: bool,
     /// R215: compile a failing form as a deferred reach-time expansion.
     defer_expansion_errors: bool,
     /// Compiling for `eval', which GNU interprets: a macro call whose
@@ -1456,6 +1494,13 @@ pub struct Vm {
     generated_slots: HashMap<usize, GeneratedName>,
     slots: Vec<Slot>,
     specials: NameSet<String>,
+    /// Bumped whenever a symbol stops being special or an uninterned one's
+    /// declaration changes: with the size of `specials', which an insertion
+    /// that matters grows, it keys `special_cache'.
+    special_changes: u64,
+    /// Per slot, `slot_is_special''s last answer and the key it held under
+    /// (`Vm::special_key'), for the late bindings' check at each `let'.
+    special_cache: Vec<u64>,
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
     register_width: usize,
@@ -1478,6 +1523,9 @@ pub struct Vm {
     random: random::Random,
     /// A world build's P fence (`world`); None outside build mode.
     fence: Option<Box<world::Fence>>,
+    /// The re-seed definitions waiting for their variable's first access
+    /// (`world::pending`), by slot.
+    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1587,6 +1635,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     seed_file_specials,
     file_level_request,
     lazy_regime,
+    interpreting_source,
     defer_expansion_errors,
     evaluating,
     quit_unwinding,
@@ -1632,6 +1681,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     generated_slots,
     slots,
     specials,
+    special_changes,
+    special_cache,
     functions,
     request_code,
     register_width,
@@ -1688,6 +1739,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     isolates,
     inotify,
     fence,
+    pending,
     execution,
     spare_programs,
     idle_since,
@@ -1786,6 +1838,7 @@ impl Vm {
             seed_file_specials: false,
             file_level_request: false,
             lazy_regime: false,
+            interpreting_source: false,
             defer_expansion_errors: false,
             evaluating: false,
             quit_unwinding: false,
@@ -1836,6 +1889,8 @@ impl Vm {
             generated_slots: HashMap::default(),
             slots: vec![],
             specials: NameSet::default(),
+            special_changes: 0,
+            special_cache: Vec::new(),
             functions: vec![],
             request_code: request_code::RequestCode::default(),
             register_width: 1,
@@ -1848,6 +1903,7 @@ impl Vm {
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             fence: None,
+            pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
@@ -2041,6 +2097,8 @@ impl Vm {
         }
         let i = self.slots.len();
         self.names.insert(name.to_owned(), i);
+        // A reused slot names another symbol now (Vm::special_cache).
+        self.special_changes += 1;
         self.set_initial_obarray(i, true);
         self.symbol_names.push(name.to_owned());
         self.slots.push(Slot::new());
@@ -2161,6 +2219,8 @@ impl Vm {
                 Binding {
                     reg,
                     cell: outer[name].cell,
+                    late: outer[name].late,
+                    shadow: outer[name].shadow,
                 },
             );
         }
@@ -2211,7 +2271,7 @@ impl Vm {
                 dynamic += 1;
             } else {
                 let cell = true;
-                b.env.insert(name, Binding { reg, cell });
+                b.env.insert(name, Binding { reg, cell, late: false, shadow: None });
                 if cell {
                     b.emit(Op::Cell(reg));
                 }
@@ -2316,12 +2376,8 @@ impl Vm {
     }
     fn lookup(&mut self, b: &mut Builder, name: &str) -> usize {
         let r = b.reg();
-        if let Some(v) = b.env.get(&Name::Source(name.to_owned())) {
-            b.emit(if v.cell {
-                Op::ReadCell(r, v.reg)
-            } else {
-                Op::Move(r, v.reg)
-            });
+        if let Some(&v) = b.env.get(&Name::Source(name.to_owned())) {
+            self.read_binding(b, &Name::Source(name.to_owned()), v, r);
         } else {
             let s = self.slot(name);
             b.emit(Op::Global(r, s));
@@ -2369,18 +2425,23 @@ impl Vm {
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
         let cells = names.iter().map(|n| b.env[n].cell).collect();
+        let lates = names.iter().map(|n| b.env[n].late).collect();
+        let shadows = names.iter().map(|n| b.env[n].shadow).collect();
         let body_value = self.literal(&Form::List(body.to_vec()))?;
         let lazy = LazyBody {
             body: body_value,
             args: args.to_vec(),
             names: names.clone(),
             cells,
+            lates,
+            shadows,
             local_specials: b.local_specials.clone(),
             pending_specials: self.pending_specials.clone(),
             dynamic_scope: self.dynamic_scope,
             deferred,
             evaluated: self.evaluating,
             file_level: deferred && b.file_level,
+            interpreting: self.interpreting_source,
         };
         let id = self.install_function(Function {
             capture_mutations: vec![true; names.len()],
@@ -2426,7 +2487,8 @@ impl Vm {
             .iter()
             .zip(&lazy.cells)
             .enumerate()
-            .map(|(reg, (name, &cell))| (name.clone(), Binding { reg, cell }))
+            .zip(lazy.lates.iter().zip(&lazy.shadows))
+            .map(|((reg, (name, &cell)), (&late, &shadow))| (name.clone(), Binding { reg, cell, late, shadow }))
             .collect();
         let saved_regime = std::mem::replace(&mut self.lazy_regime, true);
         let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, true);
@@ -2434,6 +2496,7 @@ impl Vm {
         let saved_scope = std::mem::replace(&mut self.dynamic_scope, lazy.dynamic_scope);
         let saved_pending = std::mem::replace(&mut self.pending_specials, lazy.pending_specials.clone());
         let saved_evaluating = std::mem::replace(&mut self.evaluating, lazy.evaluated);
+        let saved_interpreting = std::mem::replace(&mut self.interpreting_source, lazy.interpreting);
         if self.compile_depth == 0 {
             self.expanded_macros.clear();
             self.expanded_symbols.clear();
@@ -2452,6 +2515,7 @@ impl Vm {
         self.strict_root = saved_strict;
         self.dynamic_scope = saved_scope;
         self.pending_specials = saved_pending;
+        self.interpreting_source = saved_interpreting;
         self.evaluating = saved_evaluating;
         let (compiled, names) = result?;
         if names != lazy.names {
@@ -2901,12 +2965,8 @@ impl Vm {
                                 return Err("cannot set a constant".into());
                             }
                             r = self.expr(b, &pair[1])?;
-                            if let Some(v) = b.env.get(&name) {
-                                b.emit(if v.cell {
-                                    Op::WriteCell(v.reg, r)
-                                } else {
-                                    Op::Move(v.reg, r)
-                                });
+                            if let Some(&v) = b.env.get(&name) {
+                                self.write_binding(b, &name, v, r);
                             } else {
                                 let slot = match name {
                                     Name::Source(ref source) => self.slot(source),
@@ -2948,6 +3008,7 @@ impl Vm {
                         let saved = b.env.clone();
                         let saved_specials = b.local_specials.clone();
                         let mut pending = vec![];
+                        let mut order: Vec<(Binding, bool)> = vec![];
                         let mut dyn_count = 0;
                         for spec in rest[0].list()? {
                             let (name, init) = match spec {
@@ -2973,18 +3034,33 @@ impl Vm {
                             if cell {
                                 b.emit(Op::Cell(reg));
                             }
-                            let bind = (name, Binding { reg, cell });
+                            // Code `eval' compiles binds as GNU's interpreter
+                            // does: dynamically when the symbol is special as
+                            // the binding is made (VM2-LATE-SPECIAL1).
+                            let late = cell && (self.evaluating || self.interpreting_source) && matches!(name, Name::Source(_));
+                            let bind = (name, Binding { reg, cell, late, shadow: None });
                             if head == "let*" {
-                                dyn_count += self.bind(b, &bind);
+                                let dynamic = self.bind(b, &bind);
+                                dyn_count += dynamic;
+                                order.push((bind.1, dynamic == 1));
                             } else {
                                 pending.push(bind);
                             }
                         }
                         for bind in pending {
-                            dyn_count += self.bind(b, &bind);
+                            let dynamic = self.bind(b, &bind);
+                            dyn_count += dynamic;
+                            order.push((bind.1, dynamic == 1));
                         }
                         let r = self.progn(b, &rest[1..])?;
-                        if dyn_count != 0 {
+                        if order.iter().any(|(binding, _)| binding.late) {
+                            // Last bound first, as the dynamic stack unwinds,
+                            // each as `bind' made it.
+                            for &(binding, dynamic) in order.iter().rev() {
+                                if binding.late { b.emit(Op::UnbindLate(binding.reg)); }
+                                else if dynamic { b.emit(Op::Unbind(1)); }
+                            }
+                        } else if dyn_count != 0 {
                             b.emit(Op::Unbind(dyn_count));
                         }
                         b.env = saved;
@@ -3169,7 +3245,7 @@ impl Vm {
             }
             self.bind(
                 b,
-                &(variable.clone(), Binding { reg, cell }),
+                &(variable.clone(), Binding { reg, cell, late: false, shadow: None }),
             )
         };
         let result = self.progn(b, body)?;
@@ -3199,14 +3275,70 @@ impl Vm {
             Name::Generated(id) => self.generated_symbol(*id).index(7).expect("a generated symbol") - 1,
         }
     }
+    /// Bind NAME as BINDING says, in B's environment: 1 when the binding
+    /// is a static dynamic one (`Op::Bind'), else 0.  A late binding stays
+    /// late whatever the forms compiled since declared (its cleanup is
+    /// `Op::UnbindLate'), and keeps the lexical binding of NAME it hides.
     fn bind(&mut self, b: &mut Builder, (name, binding): &(Name, Binding)) -> usize {
-        if self.binds_dynamically(b, name, true) {
+        if binding.late {
+            let slot = self.name_slot(name);
+            b.emit(Op::BindLate(slot, binding.reg));
+            let shadow = b.env.get(name).copied().map(|outer| {
+                let id = expand::generated_id();
+                b.env.insert(Name::Generated(id), outer);
+                id
+            });
+            b.env.insert(name.clone(), Binding { shadow, ..*binding });
+            0
+        } else if self.binds_dynamically(b, name, true) {
             let slot = self.name_slot(name);
             b.emit(Op::Bind(slot, binding.reg));
             1
         } else {
             b.env.insert(name.clone(), *binding);
             0
+        }
+    }
+    /// Read binding V of the variable NAME into R.  A late one that hides
+    /// another (`Binding::shadow') reads that while it is dynamic.
+    fn read_binding(&mut self, b: &mut Builder, name: &Name, v: Binding, r: usize) {
+        if !v.late {
+            b.emit(if v.cell { Op::ReadCell(r, v.reg) } else { Op::Move(r, v.reg) });
+            return;
+        }
+        let slot = self.name_slot(name);
+        if let Some(outer) = v.shadow.and_then(|id| b.env.get(&Name::Generated(id)).copied()) {
+            let flag = b.reg();
+            b.emit(Op::LateForwarded(flag, v.reg));
+            let lexical = b.emit(Op::Unless(flag, 0));
+            self.read_binding(b, name, outer, r);
+            let end = b.emit(Op::Jump(0));
+            b.code[lexical] = Op::Unless(flag, b.code.len());
+            b.emit(Op::ReadLate(r, v.reg, slot));
+            b.code[end] = Op::Jump(b.code.len());
+        } else {
+            b.emit(Op::ReadLate(r, v.reg, slot));
+        }
+    }
+    /// Set binding V of the variable NAME to register VALUE, as
+    /// `read_binding' reads it.
+    fn write_binding(&mut self, b: &mut Builder, name: &Name, v: Binding, value: usize) {
+        if !v.late {
+            b.emit(if v.cell { Op::WriteCell(v.reg, value) } else { Op::Move(v.reg, value) });
+            return;
+        }
+        let slot = self.name_slot(name);
+        if let Some(outer) = v.shadow.and_then(|id| b.env.get(&Name::Generated(id)).copied()) {
+            let flag = b.reg();
+            b.emit(Op::LateForwarded(flag, v.reg));
+            let lexical = b.emit(Op::Unless(flag, 0));
+            self.write_binding(b, name, outer, value);
+            let end = b.emit(Op::Jump(0));
+            b.code[lexical] = Op::Unless(flag, b.code.len());
+            b.emit(Op::WriteLate(v.reg, value, slot));
+            b.code[end] = Op::Jump(b.code.len());
+        } else {
+            b.emit(Op::WriteLate(v.reg, value, slot));
         }
     }
     /// Read compiled data only: never enters Lisp, executes code, or warms caches.
@@ -3248,6 +3380,11 @@ impl Vm {
                     Op::SetGlobal(s, r) => format!("value s{s} = r{r}"),
                     Op::Bind(s, r) => format!("bind-special s{s} r{r}"),
                     Op::Unbind(n) => format!("unbind {n}"),
+                    Op::BindLate(s, r) => format!("bind-late s{s} cell r{r}"),
+                    Op::UnbindLate(r) => format!("unbind-late cell r{r}"),
+                    Op::ReadLate(d, c, s) => format!("r{d} = late-value cell r{c} s{s}"),
+                    Op::WriteLate(c, v, s) => format!("late-value cell r{c} s{s} = r{v}"),
+                    Op::LateForwarded(d, c) => format!("r{d} = late-dynamic cell r{c}"),
                     Op::Jump(to) => format!("jump {to:04}"),
                     Op::Unless(r, to) => format!("unless r{r} jump {to:04}"),
                     Op::Closure(d, function, site) => {
@@ -3726,10 +3863,15 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     read(r);
                     writes[r] += 1;
                 }
-                Op::WriteCell(d, s) => {
+                Op::WriteCell(d, s) | Op::WriteLate(d, s, _) => {
                     read(d);
                     read(s);
                 }
+                Op::ReadLate(d, c, _) | Op::LateForwarded(d, c) => {
+                    read(c);
+                    writes[d] += 1;
+                }
+                Op::BindLate(_, r) | Op::UnbindLate(r) => read(r),
                 Op::SetGlobal(_, r)
                 | Op::Bind(_, r)
                 | Op::Define(_, r)

@@ -219,11 +219,15 @@ struct LayerState {
     /// A re-seed form that starts a timer ran (`reseed_reads`).
     timers: bool,
     rerun: bool,
+    /// The entry loading is a library the init only declared
+    /// (`layer::Entry::declared`): its re-seed forms may wait for their
+    /// variable's first read (`romacs--world-pend`).
+    declared: bool,
 }
 
 /// The definition forms a layer re-seeds: the head's kind and the name it
 /// defines, for `(KIND NAME ...`.
-const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+const DEFINITIONS: [&str; 5] = ["defcustom", "defvar", "defconst", "defvar-local", "defimage"];
 
 fn definition(head: &str) -> Option<(&'static str, String)> {
     let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
@@ -251,8 +255,12 @@ fn layer_form(head: &str) {
 }
 
 /// An effect inside a layer's definition form: not done, and the form
-/// is deferred whole to restore, where it is. True when so taken.
+/// is deferred whole to restore, where it is. True when so taken. A
+/// network connection is never deferred: it refuses the entry.
 fn layer_cut(what: &str) -> bool {
+    if ["connect ", "listen ", "resolve "].iter().any(|network| what.starts_with(network)) {
+        return false;
+    }
     LAYER.with(|l| match l.borrow_mut().as_mut() {
         Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
         _ => false,
@@ -292,6 +300,17 @@ pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
         let cut = std::mem::take(&mut layer.cut);
         layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
     })
+}
+
+/// The layer's next entries are libraries the init only declared (ON),
+/// or ones it loaded.
+pub(crate) fn layer_declared(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.declared = on; });
+}
+
+/// Whether the entry loading is a declared library's.
+pub(crate) fn layer_in_declared() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.declared))
 }
 
 /// Whether the startup function may run again now: after a layer's
@@ -1358,15 +1377,42 @@ pub fn die_with_parent(parent: u32) {
     }
 }
 
-/// Lower this process to the background: the weakest CPU niceness and the
-/// idle I/O class, which its children inherit. Best effort.
-pub fn lower_priority() {
+/// How far a background process steps back from the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    /// Work nobody waits for, such as a background compile: the weakest
+    /// CPU niceness and the idle I/O class.
+    Idle,
+    /// A worker isolate: work the session waits for, never ahead of it:
+    /// niceness 10 and the lowest best-effort I/O level, so the session's
+    /// evaluator and render threads always run first.
+    Worker,
+}
+
+/// Lower the calling thread to PRIORITY; the threads and processes it
+/// starts afterwards inherit it, so a process calls it at the start of
+/// main. Best effort.
+pub fn lower_priority(priority: Priority) {
     const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    let (nice, io) = match priority {
+        Priority::Idle => (19, IOPRIO_CLASS_IDLE << 13),
+        Priority::Worker => (10, (IOPRIO_CLASS_BE << 13) | 7),
+    };
     unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+        libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, io);
     }
+}
+
+/// Name the calling thread NAME (the kernel keeps 15 bytes). On a
+/// process's main thread that is the process's own name, the one `ps` and
+/// `pgrep` show.
+pub fn set_thread_name(name: &str) -> io::Result<()> {
+    effect(|| "thread-name".into())?;
+    let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    status(unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr()) })
 }
 
 pub fn euid() -> u32 {
@@ -1642,6 +1688,25 @@ pub fn clock() -> SystemTime {
     SystemTime::now()
 }
 
+/// The processor time this process has used, user and system, as
+/// `getrusage (RUSAGE_SELF)` sums them (GNU sysdep.c
+/// `get-internal-run-time'); in build mode none, a per-process fact.
+pub fn run_time() -> io::Result<std::time::Duration> {
+    if refusing() {
+        p_read(Fact::Monotonic, "run time".into());
+        return Ok(std::time::Duration::ZERO);
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage writes the whole struct it is given.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: initialized by the successful call above.
+    let usage = unsafe { usage.assume_init() };
+    let part = |t: libc::timeval| std::time::Duration::new(t.tv_sec.max(0) as u64, (t.tv_usec.clamp(0, 999_999) as u32) * 1000);
+    Ok(part(usage.ru_utime) + part(usage.ru_stime))
+}
+
 /// The monotonic clock, for deadlines and measurement.
 pub fn monotonic() -> Instant {
     if building() {
@@ -1874,6 +1939,9 @@ pub enum StoreOpen {
     Write { create: bool, truncate: bool },
     /// To make it where none is (O_CREAT|O_EXCL), and write it.
     New,
+    /// To append to it (O_APPEND), made if missing: concurrent writers'
+    /// lines never overwrite each other.
+    Append,
 }
 
 /// A world store's file at PATH, opened as HOW: never through a symlink,
@@ -1888,6 +1956,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
         StoreOpen::Read => { options.read(true); }
         StoreOpen::Write { create, .. } => { options.write(true).create(create); }
         StoreOpen::New => { options.write(true).create_new(true); }
+        StoreOpen::Append => { options.append(true).create(true); }
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
@@ -2003,6 +2072,7 @@ pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Sto
         StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
         StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
         StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
@@ -2415,12 +2485,15 @@ pub fn take_terminate_quit() -> bool {
 }
 
 /// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
-/// standard input, this process's stderr. Its pid; the caller reaps.
+/// standard input, this process's stderr. Its standard output is null: a
+/// worker's Lisp is batch, but the output it would write (`ding''s BEL,
+/// `princ' to t) is no one's, and this process's may be a session's log.
+/// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
-    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
     Ok(command.spawn()?.id() as i32)
 }
 
@@ -2477,26 +2550,47 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// profiler.c's SIGPROF timer, as a thread that only counts: every
 /// INTERVAL nanoseconds it looks at the calling thread, and when that
 /// thread is running, adds one to TICKS. A late wake samples once: the
-/// thread's state over the intervals it missed is unknown. The evaluator takes them at its next
-/// call boundary, a moment later, under the stack that was running. A
-/// sample is never counted for a thread that waits, so like GNU's
-/// CLOCK_THREAD_CPUTIME_ID timer the samples measure the thread's CPU time,
-/// and no wait is charged with work done before it. (A thread CPU-time
-/// timer itself is not used: under a zero RLIMIT_RTTIME hard limit
-/// Linux kills a thread whose CPU timer fires.) Dropping the sender ends
-/// the thread.
+/// thread's state over the intervals it missed is unknown. The evaluator
+/// takes them at its next call boundary, a moment later, under the stack
+/// that was running. A sample is never counted for a thread that waits,
+/// so like GNU's CLOCK_THREAD_CPUTIME_ID timer the samples measure the
+/// thread's CPU time, and no wait is charged with work done before it.
+/// Running means on a CPU: the thread's CPU clock advances between two
+/// reads. Its scheduler state would not do, since `R' also holds while a
+/// woken thread waits for a CPU, and on a loaded host that wait follows
+/// every sleep. (A thread CPU-time timer itself
+/// is not used: under a zero RLIMIT_RTTIME hard limit Linux kills a
+/// thread whose CPU timer fires.) Dropping the sender ends the thread.
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
-    use std::os::unix::fs::FileExt;
     effect(|| "cpu profiler sampler".into())?;
+    let mut clock: libc::clockid_t = 0;
+    match unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) } {
+        0 => {}
+        error => return Err(io::Error::from_raw_os_error(error)),
+    }
+    let cpu_time = move || {
+        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+        (unsafe { libc::clock_gettime(clock, &mut time) } == 0).then_some((time.tv_sec, time.tv_nsec))
+    };
+    // A thread allowed only one CPU shares it with the sampler, which
+    // never sees it there: for it, runnable has to stand for running.
+    // Read once: an affinity changed later takes a profiler restart.
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    status(unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) })?;
+    let alone = unsafe { libc::CPU_COUNT(&cpus) } == 1;
     let stat = File::open("/proc/thread-self/stat")?;
     // stat's third field, after the parenthesized command name.
-    let running = move || {
+    let runnable = move || {
+        use std::os::unix::fs::FileExt;
         let mut text = [0u8; 512];
         let n = stat.read_at(&mut text, 0).ok()?;
         let close = text[..n].iter().rposition(|&b| b == b')')?;
         Some(text.get(close + 2) == Some(&b'R'))
     };
-    running().ok_or_else(|| io::Error::other("unreadable thread state"))?;
+    // A clock read is a system call, so a thread on a CPU has run between
+    // two of them; a waiting one has not.
+    let running = move || Some(cpu_time()? < cpu_time()? || alone && runnable()?);
+    running().ok_or_else(|| io::Error::other("unreadable thread CPU clock"))?;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let period = std::time::Duration::from_nanos(interval.max(100_000));
     std::thread::Builder::new().name("romacs-profiler".into()).stack_size(64 * 1024).spawn(move || {
@@ -2507,7 +2601,7 @@ pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::Atomi
                 _ => break,
             }
             due = next_sample(due, Instant::now(), period);
-            // The profiled thread is gone: its state no longer reads.
+            // The profiled thread is gone: its clock no longer reads.
             let Some(running) = running() else { break };
             if running {
                 ticks.fetch_add((period.as_nanos() as u64 / interval).max(1), std::sync::atomic::Ordering::Relaxed);
@@ -2544,6 +2638,20 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
+/// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
+/// for the whole process.
+static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_daemon(name: &str) {
+    let _ = DAEMON.set(name.to_owned());
+}
+
+/// The name `daemonp' answers, while this process is a server.
+pub fn daemon() -> Option<&'static str> {
+    DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.

@@ -856,8 +856,10 @@ thousandth a stack mark."
 ;; retired by the next poll.
 (scaling-probe agent-withdraw-deferred :n 64
   :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  ;; An inactive timer: none is scheduled, and retiring the last call
+  ;; cancels it as it would the real one.
   :body (let ((romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
-              (romacs-mcp--deferred-timer t))
+              (romacs-mcp--deferred-timer (timer-create)))
           (dolist (i it)
             (romacs-mcp--defer-request (list :peer 'scaling-peer :cancelled nil) i #'ignore nil))
           (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
@@ -1171,6 +1173,79 @@ thousandth a stack mark."
                 (cl-loop for i below n collect (list (format "nosuch-%d" i) :harness (intern (format "nosuch-%d" i)))))
   :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
 
+;; observe's buffer summary over N buffers and N processes, each with
+;; its buffer: which has a process is a table made once, not a walk of
+;; the processes per buffer.
+(scaling-probe observe-buffers-processes :n 200
+  :setup (progn (scaling--agent)
+                (require 'romacs-mcp-session)
+                (dotimes (i n)
+                  (let ((buffer (get-buffer-create (format "scaling-observe-%d" i))))
+                    (make-pipe-process :name (format "scaling-observe-%d" i) :buffer buffer :noquery t)))
+                nil)
+  :body (dotimes (_ 5) (romacs-mcp-session--buffers (romacs-mcp--object))))
+
+;; T3's thread titles: a store of N threads read cold, read again after
+;; its file changed (as its write-ahead log does), and kept (the read
+;; skipped, 200 lookups).
+(defun scaling--t3-store (n)
+  (scaling--agent)
+  (require 'romacs-agent-t3)
+  (let* ((dir (make-temp-file "scaling-t3s-" t))
+         (store (expand-file-name "statev2.sqlite" dir))
+         (db (sqlite-open store)))
+    (sqlite-execute db "create table orchestration_v2_projection_threads (thread_id text, title text)")
+    (sqlite-execute db "create table orchestration_v2_projection_provider_threads (thread_id text, payload_json text, updated_at text, provider_instance_id text)")
+    (sqlite-transaction db)
+    (dotimes (i n)
+      (sqlite-execute db "insert into orchestration_v2_projection_threads values (?, ?)" (list (format "t%d" i) (format "Title %d" i)))
+      (sqlite-execute db "insert into orchestration_v2_projection_provider_threads values (?, ?, '1', 'claudeAgent')"
+                      (list (format "t%d" i) (format "{\"nativeThreadRef\":{\"nativeId\":\"n%d\"}}" i))))
+    (sqlite-commit db)
+    (sqlite-close db)
+    store))
+
+(scaling-probe agent-t3-titles-cold :n 2000
+  :setup (scaling--t3-store n)
+  :body (progn (clrhash romacs-agent-t3--titles) (romacs-agent-t3-thread-titles it)))
+
+(scaling-probe agent-t3-titles-changed :n 2000
+  :setup (let ((store (scaling--t3-store n))) (romacs-agent-t3-thread-titles store) store)
+  :body (progn (set-file-times it (time-add (current-time) (random 1000000)))
+               (romacs-agent-t3-thread-titles it)))
+
+(scaling-probe agent-t3-titles-kept :n 2000 :budget 0.5
+  :setup (let ((store (scaling--t3-store n))) (romacs-agent-t3-thread-titles store) store)
+  :body (let ((titles (romacs-agent-t3-thread-titles it)))
+          (dotimes (i 200) (gethash (romacs-agent-t3-title-key "claudeAgent" (format "n%d" i)) titles))))
+
+;; The history listed anew with N instances from T3, each a transcript of
+;; its own: each row's instance, and its title, by an index.
+(scaling-probe agent-history-t3-relist :n 200
+  :setup (let* ((root (make-temp-file "scaling-t3h-" t))
+                (settings (expand-file-name "t3/settings.json" root))
+                (instances (make-hash-table :test #'equal)))
+           (scaling--agent)
+           (require 'romacs-agent-history)
+           (make-directory (file-name-directory settings) t)
+           (dotimes (i n)
+             (let* ((home (expand-file-name (format "home-%d" i) root))
+                    (dir (expand-file-name "projects/-work" home))
+                    (id (format "%08x-0000-4000-8000-%012x" i i)))
+               (make-directory dir t)
+               (with-temp-file (expand-file-name (concat id ".jsonl") dir)
+                 (insert (json-serialize (romacs-mcp--object "type" "user" "cwd" "/work"
+                                                             "message" (romacs-mcp--object "role" "user" "content" (format "task %d" i))))
+                         "\n"))
+               (puthash (format "claudeAgent_%d" i)
+                        (romacs-mcp--object "driver" "claudeAgent" "displayName" (format "C %d" i)
+                                            "config" (romacs-mcp--object "homePath" home))
+                        instances)))
+           (with-temp-file settings (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+           (let ((romacs-agent-providers (list (list 't3 :settings settings)))) (romacs-agent-history-list))
+           (list (list 't3 :settings settings)))
+  :body (let ((romacs-agent-providers it)) (romacs-agent-history-list)))
+
 ;; The home page over N transcripts beside a session per project.
 (scaling-probe agent-home-history :n 200
   :setup (let ((dir (scaling--history n)))
@@ -1452,6 +1527,14 @@ thousandth a stack mark."
     (setq jabber-connections (list jc))
     jc))
 
+;; N distinct nicknames rendered on one background, each twice: the
+;; colour cache (jabber-muc.el) computes each once.  kN stays under its
+;; bound (`jabber-muc-nick-colors-limit', 4096), past which it starts over.
+(defvar jabber-muc--nick-colors)
+(scaling-probe jabber-nick-colors :n 1000
+  :setup (progn (scaling--jabber) (clrhash jabber-muc--nick-colors) (scaling--names "nick" n))
+  :body (dotimes (_ 2) (dolist (nick it) (jabber-muc--nick-face nick))))
+
 ;; N rooms requested for one account's background catch-up.
 (scaling-probe jabber-sync-requests :n 400
   :setup (let ((jc (scaling--jabber))) (clrhash jabber-mam-sync--accounts) (cons jc (scaling--names "room" n)))
@@ -1718,6 +1801,36 @@ closures over a mutable variable (each a closure and a cell)."
   :setup (cl-loop for i below n collect (format "SCALING_ENV_%d=value" i))
   :body (let ((process-environment it))
           (romacs--environment-block "/")))
+
+;; An init layer's pending definitions (world/pending.rs): N variables
+;; made pending, then each read once, which evaluates its definition.
+(scaling-probe world-pending :n 2000
+  :setup (let ((symbols (mapcar #'intern (scaling--names "scaling-pending" n))))
+           (dolist (symbol symbols) (set-default symbol 'stale))
+           (setq romacs--world-pending
+                 (vconcat (mapcar (lambda (symbol) (list 'defvar symbol (list 'defvar symbol 1) nil t)) symbols)))
+           symbols)
+  :body (let ((index 0))
+          (dolist (symbol it)
+            (romacs--world-pend symbol index)
+            (setq index (1+ index)))
+          (dolist (symbol it) (symbol-value symbol))))
+
+;; An init layer build's refusal index (world::layer `Deferred'): N
+;; libraries whose configuration is refused, half by feature and half by
+;; file, then N declared entries each asking which of them its loads
+;; (three features, three nested files) hold, as the builder asks.
+(scaling-probe world-layer-refusals :n 2000
+  :setup (let ((names (scaling--names "scaling-refused" n)) (i 0) deferred loaded)
+           (dolist (name names)
+             (push (list name (and (cl-oddp i) (format "/scaling/lib/%s.el" name))) deferred)
+             (push (list (list (format "%s-a" name) (format "%s-b" name) (if (cl-evenp i) name "none"))
+                         (list (format "/scaling/x/%s-1.el" name) (format "/scaling/x/y/%s-2.el" name)
+                               (format "/scaling/lib/%s.el" name)))
+                   loaded)
+             (setq i (1+ i)))
+           (list deferred loaded))
+  :body (romacs--world-layer-deferred-by (car it) (cadr it)))
 
 (scaling-probe gc-free-lists :n 200000
   ;; Rounds of: garbage in every table, a cons, closure, cell and string
