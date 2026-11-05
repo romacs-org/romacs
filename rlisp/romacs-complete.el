@@ -952,7 +952,7 @@ Exit with current input if prefix ARG is given."
     (with-current-buffer buffer
       (setq-local truncate-lines t mode-line-format nil header-line-format nil
                   cursor-type nil cursor-in-non-selected-windows nil
-                  ;; A truncated candidate ends in an ellipsis, not `$'.
+                  ;; A truncated candidate ends in the layer's one-cell `›', not `$'.
                   buffer-display-table (romacs-layer-display-table)))
     buffer))
 

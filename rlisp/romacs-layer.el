@@ -111,8 +111,10 @@ buffer's `kill-buffer-hook' deletes its layer and its entry.")
 
 (defun romacs-layer-display-table ()
   "The display table Romacs's own text surfaces show: a truncated line
-ends in an ellipsis and a continued row in a blank, where a window
-without fringes, as every layer is, shows GNU's `$' and `\\'."
+ends in `›' and a continued row in a blank, where a window without
+fringes, as every layer is, shows GNU's `$' and `\\'.  The window
+keeps one column for that glyph, so it must be one cell in the frame's
+font: Iosevka's own `…' is two."
   (or romacs-layer--display-table
       ;; Made as disp-table.el's `make-display-table' makes one, without
       ;; loading that file, which gives `standard-display-table' a value
@@ -120,7 +122,7 @@ without fringes, as every layer is, shows GNU's `$' and `\\'."
       (progn (unless (get 'display-table 'char-table-extra-slots)
                (put 'display-table 'char-table-extra-slots 18))
              (let ((table (make-char-table 'display-table nil)))
-               (set-char-table-extra-slot table 0 ?…)
+               (set-char-table-extra-slot table 0 ?›)
                (set-char-table-extra-slot table 1 ?\s)
                (setq romacs-layer--display-table table)))))
 
