@@ -13,15 +13,15 @@ use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
-use crate::image_cache::constrain_raster_extent;
+use crate::decode::constrain_raster_extent;
 use romacs_display_protocol::{
     ImageColorContext, ImageIntrinsicExtent, ImageRealization, ImageRotation, ImageSizeSpec,
     ResolvedImageGeometry,
 };
 
-pub(crate) struct DecodedSvg {
-    pub(crate) geometry: ResolvedImageGeometry,
-    pub(crate) rgba: Vec<u8>,
+pub struct DecodedSvg {
+    pub geometry: ResolvedImageGeometry,
+    pub rgba: Vec<u8>,
 }
 
 /// Filesystem authority available while parsing an in-memory SVG.
@@ -63,11 +63,11 @@ struct RootGeometry {
 }
 
 const DEFAULT_DPI: f64 = 96.0;
-pub(crate) const MAX_SVG_INPUT_SIZE: usize = 8 * 1024 * 1024;
+pub const MAX_SVG_INPUT_SIZE: usize = 8 * 1024 * 1024;
 const MAX_SVG_RASTER_BYTES: usize = 64 * 1024 * 1024;
 const FALLBACK_VIEWPORT_SIZE: f32 = 0.001;
 
-pub(crate) fn query_intrinsic_extent(data: &[u8]) -> Option<ImageIntrinsicExtent> {
+pub fn query_intrinsic_extent(data: &[u8]) -> Option<ImageIntrinsicExtent> {
     catch_unwind(AssertUnwindSafe(|| {
         load(data, &SvgResourceContext::Isolated, SvgColorMode::Intrinsic)
             .map(|loaded| loaded.intrinsic)
@@ -81,7 +81,7 @@ pub(crate) fn query_intrinsic_extent(data: &[u8]) -> Option<ImageIntrinsicExtent
 /// without parsing the rest.  None when the document is compressed, has a
 /// DOCTYPE (which the parser `load' uses refuses), no root tag in HEAD, or
 /// a root without dimensions (its extent is the drawing's).
-pub(crate) fn root_tag_intrinsic_extent(head: &[u8]) -> Option<ImageIntrinsicExtent> {
+pub fn root_tag_intrinsic_extent(head: &[u8]) -> Option<ImageIntrinsicExtent> {
     if head.starts_with(&[0x1f, 0x8b]) { return None; }
     let start = root_tag_start(head)?;
     let end = find_start_tag_insert_pos(head, start)?;
@@ -108,7 +108,7 @@ fn root_tag_start(head: &[u8]) -> Option<usize> {
     }
 }
 
-pub(crate) fn decode(
+pub fn decode(
     data: &[u8],
     size: ImageSizeSpec,
     rotation: ImageRotation,
@@ -280,7 +280,7 @@ fn inject_root_face_color<'a>(
 
 /// The document bytes a decode may see: UTF-8-bounded and size-bounded,
 /// gunzipped when the source is compressed.
-pub(crate) fn bounded_svg_data(data: &[u8]) -> Option<Cow<'_, [u8]>> {
+pub fn bounded_svg_data(data: &[u8]) -> Option<Cow<'_, [u8]>> {
     if data.len() > MAX_SVG_INPUT_SIZE {
         return None;
     }
@@ -811,7 +811,7 @@ fn resolve_relative_raster(href: &str, base_directory: Option<&Path>) -> Option<
     raster_image_from_magic(Arc::new(data))
 }
 
-pub(crate) fn resolve_embedded_image(
+pub fn resolve_embedded_image(
     mime: &str,
     data: Arc<Vec<u8>>,
     options: &usvg::Options<'_>,

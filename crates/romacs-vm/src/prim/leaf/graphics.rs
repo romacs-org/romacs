@@ -570,6 +570,21 @@ impl Leaf<'_> {
 
     /// GNU `image_find_image_fd': an absolute FILE as it is, a relative one
     /// in `data-directory''s images/, then `x-bitmap-file-path'.
+    /// `romacs-image-header-size': FILE found as an image spec's `:file'
+    /// is, and its size from the display host's header probe.
+    pub(crate) fn image_header_size(&mut self, file: Value) -> std::result::Result<Value, Fault> {
+        let name = match self.vm.str_view(file) {
+            Some(name) => String::from_utf8_lossy(name.bytes()).into_owned(),
+            None => return Err(Fault::Wrong("stringp", file)),
+        };
+        let Some(path) = self.image_find_file(&name)? else { return Ok(Value::NIL) };
+        let Some((width, height)) = self.vm.window_system_host().and_then(|host| host.image_header_size(&path)) else {
+            return Ok(Value::NIL);
+        };
+        let (width, height) = (Value::integer(i64::from(width)).unwrap(), Value::integer(i64::from(height)).unwrap());
+        Ok(self.cons(width, height))
+    }
+
     fn image_find_file(&mut self, name: &str) -> std::result::Result<Option<String>, Fault> {
         let expand = |dir: &str| std::path::Path::new(dir).join(name);
         if std::path::Path::new(name).is_absolute() || name.starts_with('~') {

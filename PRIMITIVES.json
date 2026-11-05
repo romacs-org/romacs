@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "41925e3577a8f9a6a19e96a75b188bd4114cc559a994b3dc62245be372b2049f",
+  "source_fingerprint": "cb8de9615fe757f8fe020ffad714f56122d3267588020c719778406fef150a5e",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1338,
-  "parsed_vm2_only": 1338
+  "parsed_total": 1339,
+  "parsed_vm2_only": 1339
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -868,7 +868,7 @@
   "clear-image-cache": {
    "name": "clear-image-cache",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:98"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:108"
   },
   "clear-string": {
    "name": "clear-string",
@@ -2441,22 +2441,22 @@
   "image-cache-size": {
    "name": "image-cache-size",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:119"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:129"
   },
   "image-flush": {
    "name": "image-flush",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:87"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:97"
   },
   "image-mask-p": {
    "name": "image-mask-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:50"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:60"
   },
   "image-metadata": {
    "name": "image-metadata",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:68"
   },
   "image-size": {
    "name": "image-size",
@@ -2466,7 +2466,7 @@
   "image-transforms-p": {
    "name": "image-transforms-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:124"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:134"
   },
   "imagep": {
    "name": "imagep",
@@ -2987,12 +2987,12 @@
   "lookup-image": {
    "name": "lookup-image",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:133"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:143"
   },
   "lookup-image-map": {
    "name": "lookup-image-map",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:143"
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:153"
   },
   "lookup-key": {
    "name": "lookup-key",
@@ -4964,6 +4964,11 @@
    "name": "romacs-find-buffer-visiting",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/file_identity.rs:35"
+  },
+  "romacs-image-header-size": {
+   "name": "romacs-image-header-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/graphics.rs:57"
   },
   "romacs-instructions": {
    "name": "romacs-instructions",

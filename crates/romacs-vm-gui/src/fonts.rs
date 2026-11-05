@@ -43,14 +43,14 @@ pub struct Display {
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
     /// of each image the VM's cache holds, by id, for the renderer
     /// (residency.rs).
-    images: std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoder>,
+    images: std::sync::Arc<romacs_imaging::decode::SemanticImageDecoder>,
     decoded: residency::Shared,
     next_image: u64,
     /// The decode worker: images sized from their headers decode there,
     /// off the VM, and their results wait here until taken.
     worker: Option<Worker>,
     /// Finished decodes not yet taken, by image id.
-    finished: HashMap<u64, Result<romacs_renderer_wgpu::image_cache::SemanticImageDecoded, String>>,
+    finished: HashMap<u64, Result<romacs_imaging::decode::SemanticImageDecoded, String>>,
     /// Images pending on the worker, and those released while pending,
     /// whose results are dropped.
     pending: std::collections::HashSet<u64>,
@@ -60,8 +60,8 @@ pub struct Display {
 }
 
 /// The first 64 KiB of an SVG SOURCE, where its root start tag is.
-fn svg_head(source: &romacs_renderer_wgpu::image_cache::SemanticImageSource) -> Option<Vec<u8>> {
-    use romacs_renderer_wgpu::image_cache::SemanticImageSource;
+fn svg_head(source: &romacs_imaging::decode::SemanticImageSource) -> Option<Vec<u8>> {
+    use romacs_imaging::decode::SemanticImageSource;
     const HEAD: usize = 64 * 1024;
     match source {
         SemanticImageSource::File(path) => {
@@ -74,13 +74,13 @@ fn svg_head(source: &romacs_renderer_wgpu::image_cache::SemanticImageSource) -> 
     }
 }
 
-type Decoded = Result<romacs_renderer_wgpu::image_cache::SemanticImageDecoded, String>;
+type Decoded = Result<romacs_imaging::decode::SemanticImageDecoded, String>;
 
 /// A decode for the worker: the image id, its request, and its sequence's
 /// reservation, held from submission so a flush while it is queued fences
 /// it (it cannot repopulate the sequence cache).
-type Job = (u64, romacs_renderer_wgpu::image_cache::SemanticImageRequest,
-            romacs_renderer_wgpu::image_cache::SemanticImageSequenceReservation);
+type Job = (u64, romacs_imaging::decode::SemanticImageRequest,
+            romacs_imaging::decode::SemanticImageSequenceReservation);
 
 /// The decode worker's ends: jobs in, results out.
 struct Worker {
@@ -90,7 +90,7 @@ struct Worker {
 
 impl Worker {
     /// A thread decoding with DECODER, waking WAKE after each result.
-    fn spawn(decoder: std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoder>,
+    fn spawn(decoder: std::sync::Arc<romacs_imaging::decode::SemanticImageDecoder>,
              wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Worker> {
         let (jobs, inbox) = std::sync::mpsc::channel::<Job>();
         let (outbox, results) = std::sync::mpsc::channel();
@@ -127,7 +127,7 @@ impl Display {
     }
     /// The final facts of DECODED, image ID, its pixels kept for the
     /// renderer: LANDED when a frame may have drawn it pending.
-    fn decoded_facts(&mut self, id: u64, decoded: romacs_renderer_wgpu::image_cache::SemanticImageDecoded, landed: bool) -> romacs_vm::ImageFacts {
+    fn decoded_facts(&mut self, id: u64, decoded: romacs_imaging::decode::SemanticImageDecoded, landed: bool) -> romacs_vm::ImageFacts {
         let metadata = decoded.metadata();
         let (width, height) = metadata.reported.dimensions();
         let facts = romacs_vm::ImageFacts { id, width, height, mask: metadata.mask.has_clipping_mask(),
@@ -147,10 +147,10 @@ impl Display {
     }
     /// The image id, the decode request and its source for QUERY, or the
     /// error GNU's loader gives for bytes plainly of another type.
-    fn prepare(&mut self, query: romacs_vm::ImageQuery) -> Result<(u64, romacs_renderer_wgpu::image_cache::SemanticImageRequest), String> {
+    fn prepare(&mut self, query: romacs_vm::ImageQuery) -> Result<(u64, romacs_imaging::decode::SemanticImageRequest), String> {
         use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
         use romacs_display_protocol::{EncodedBytes, ImageAnimationPolicy, ImageSequenceId};
-        use romacs_renderer_wgpu::image_cache::{SemanticImageRequest, SemanticImageSource};
+        use romacs_imaging::decode::{SemanticImageRequest, SemanticImageSource};
         // The renderer's image ids are 32 bits; the VM's take the upper half,
         // apart from those the renderer allocates for itself (its toolbar).
         if self.next_image >= u64::from(u32::MAX >> 1) { return Err("too many images loaded".into()); }
@@ -162,8 +162,8 @@ impl Display {
                 (SemanticImageSource::File(path.clone()), ImageDiagnosticSubject::File(path))
             }
             romacs_vm::ImageSource::Data { bytes, base_uri } => {
-                let resources = base_uri.map_or(romacs_renderer_wgpu::SvgResourceContext::Isolated,
-                                                romacs_renderer_wgpu::SvgResourceContext::BaseUri);
+                let resources = base_uri.map_or(romacs_imaging::SvgResourceContext::Isolated,
+                                                romacs_imaging::SvgResourceContext::BaseUri);
                 (SemanticImageSource::Data { data: EncodedBytes::new(bytes), resources },
                  ImageDiagnosticSubject::Spec(format!("(image :type {} :data ...)", query.kind)))
             }
@@ -178,7 +178,7 @@ impl Display {
             }
             SemanticImageSource::Data { data, .. } => Some(data.as_slice()[..data.as_slice().len().min(512)].to_vec()),
         };
-        if let Some(found) = head.as_deref().and_then(sniff_image_format) && found != query.kind {
+        if let Some(found) = head.as_deref().and_then(romacs_imaging::image_probe::sniff_format) && found != query.kind {
             let diagnostic = romacs_display_protocol::image_diagnostic::ImageDiagnostic::NotAFormat {
                 format: ImageFormatName::from_lisp_type(&query.kind), subject: subject.clone() };
             return Err(diagnostic.message());
@@ -288,8 +288,8 @@ impl romacs_vm::DisplayHost for Display {
         Ok(self.decoded_facts(id, decoded, false))
     }
     fn begin_decode(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
-        use romacs_renderer_wgpu::image_cache::SemanticImageSource;
-        use romacs_renderer_wgpu::image_probe::{ImageProbeSource, admit, probe_image_reported, probe_svg_reported};
+        use romacs_imaging::decode::SemanticImageSource;
+        use romacs_imaging::image_probe::{ImageProbeSource, admit, probe_image_reported, probe_svg_reported};
         // Rasters size from their header, SVGs from their root tag; the
         // rest (XBM, XPM, PBM: small, and sized by Lisp-side data) decode
         // here, as before.
@@ -349,6 +349,9 @@ impl romacs_vm::DisplayHost for Display {
         }
         out
     }
+    fn image_header_size(&mut self, path: &str) -> Option<(u32, u32)> {
+        romacs_imaging::image_probe::probe_file_pixels(path)
+    }
     fn release_image(&mut self, id: u64) {
         // Still decoding: its result is dropped when it comes.
         if self.pending.contains(&id) { self.released.insert(id); }
@@ -359,23 +362,6 @@ impl romacs_vm::DisplayHost for Display {
             self.images.retire(romacs_display_protocol::ImageSequenceRetirement::One(sequence));
         }
     }
-}
-
-/// The image type BYTES plainly are, by their signature.
-fn sniff_image_format(bytes: &[u8]) -> Option<&'static str> {
-    let text = String::from_utf8_lossy(bytes);
-    Some(match bytes {
-        [0x89, b'P', b'N', b'G', ..] => "png",
-        [0xff, 0xd8, 0xff, ..] => "jpeg",
-        [b'G', b'I', b'F', b'8', ..] => "gif",
-        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "webp",
-        [b'I', b'I', 0x2a, 0, ..] | [b'M', b'M', 0, 0x2a, ..] => "tiff",
-        [b'P', b'1'..=b'6', ..] => "pbm",
-        _ if text.contains("/* XPM */") => "xpm",
-        _ if text.contains("<svg") => "svg",
-        _ if text.contains("#define") => "xbm",
-        _ => return None,
-    })
 }
 
 #[cfg(test)]
@@ -632,6 +618,33 @@ mod tests {
         printed(&mut vm, &format!(r#"(image-size '(image :type png :file "{}") t)"#, fixtures.join("plain.png").display()));
         vm.land_images().unwrap();
         assert_eq!(decoder.cached_size_bytes(), 0);
+    }
+
+
+    /// `romacs-image-header-size' answers what `image-size' does in pixels
+    /// for every fixture whose header gives its size, and nil for the rest,
+    /// without decoding.
+    #[test]
+    fn the_header_size_is_the_image_size() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("harness/fixtures/images");
+        let mut vm = displayed();
+        assert!(vm.open_display());
+        let mut rows = vec![];
+        let mut names: Vec<_> = std::fs::read_dir(&fixtures).unwrap().map(|e| e.unwrap().path()).collect();
+        names.sort();
+        for path in names {
+            let (file, kind) = (path.display().to_string(), path.extension().unwrap().to_string_lossy().replace("jpg", "jpeg"));
+            let probed = printed(&mut vm, &format!(r#"(romacs-image-header-size "{file}")"#));
+            let size = printed(&mut vm, &format!(r#"(image-size '(image :type {kind} :file "{file}") t)"#));
+            rows.push(format!("{} {probed} {size}", path.file_name().unwrap().to_string_lossy()));
+        }
+        assert_eq!(rows, [
+            "alpha.png (32 . 20) (32 . 20)", "anim.gif (16 . 12) (16 . 12)", "anim.webp (16 . 12) (16 . 12)",
+            "corrupt.png nil (30 . 30)", "current.svg (20 . 20) (20 . 20)", "dot.xpm nil (6 . 4)",
+            "photo.jpg (48 . 30) (48 . 30)", "plain.png (40 . 24) (40 . 24)", "sized.svg (60 . 30) (60 . 30)",
+            "star.svg (16 . 16) (16 . 16)", "star.xbm nil (8 . 4)", "viewbox.svg (120 . 40) (120 . 40)",
+        ]);
+        assert_eq!(printed(&mut vm, r#"(romacs-image-header-size "/nonexistent.png")"#), "nil");
     }
 
 }

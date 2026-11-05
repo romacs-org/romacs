@@ -26,7 +26,7 @@ mod patch;
 mod plan;
 mod sampler;
 
-pub(crate) use sampler::sample_shared as sample_svg_sequence;
+pub use sampler::sample_shared as sample_svg_sequence;
 
 /// Cheap pre-filter for animation elements in normalized XML bytes.
 ///
@@ -34,7 +34,7 @@ pub(crate) use sampler::sample_shared as sample_svg_sequence;
 /// learn it has nothing to animate. Inspect the local element name so XML
 /// namespace prefixes cannot hide animation. This remains an over-broad
 /// optimization; plan compilation decides whether the document animates.
-pub(crate) fn may_contain_animation(data: &[u8]) -> bool {
+pub fn may_contain_animation(data: &[u8]) -> bool {
     data.split(|byte| *byte == b'<').skip(1).any(|element| {
         let qualified = element
             .split(|byte| byte.is_ascii_whitespace() || matches!(*byte, b'/' | b'>'))

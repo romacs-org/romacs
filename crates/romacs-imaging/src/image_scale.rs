@@ -417,7 +417,7 @@ impl Accum {
 /// completes are written where they belong. [`Self::band_since`] hands back
 /// the rows built since a mark, in order and without gaps, which is exactly
 /// what one band of the decode is allowed to fill.
-pub(crate) struct RasterTarget {
+pub struct RasterTarget {
     native: ImageNativeExtent,
     raster: ImageRasterExtent,
     columns: Axis,
@@ -461,7 +461,7 @@ impl RasterTarget {
     /// with no pixels rather than a target that cannot be built, and for a
     /// raster larger than the source on either axis — a target that would have
     /// to invent pixels is not one this filter can be.
-    pub(crate) fn new(native: ImageNativeExtent, raster: ImageRasterExtent) -> Option<Self> {
+    pub fn new(native: ImageNativeExtent, raster: ImageRasterExtent) -> Option<Self> {
         let columns = Axis::new(native.width(), raster.width())?;
         let rows = Axis::new(native.height(), raster.height())?;
         Some(Self {
@@ -479,12 +479,12 @@ impl RasterTarget {
     }
 
     /// The raster this target fills.
-    pub(crate) fn raster(&self) -> ImageRasterExtent {
+    pub fn raster(&self) -> ImageRasterExtent {
         self.raster
     }
 
     /// How many output rows have been written; the fill level of the raster.
-    pub(crate) fn built(&self) -> u32 {
+    pub fn built(&self) -> u32 {
         self.built
     }
 
@@ -494,7 +494,7 @@ impl RasterTarget {
     /// expands each row to; anything else is a decode whose rows are not the
     /// extent its header named, and the raster it would produce would not be
     /// the raster its texture holds.
-    pub(crate) fn push_row(&mut self, row: &[u8]) {
+    pub fn push_row(&mut self, row: &[u8]) {
         assert_eq!(
             row.len(),
             self.native.width() as usize * 4,
@@ -576,7 +576,7 @@ impl RasterTarget {
     /// two of them reports; the band that follows starts where this one would
     /// have. `from` is a [`Self::built`] the caller read earlier, so the range
     /// is inside the raster by construction.
-    pub(crate) fn band_since(&self, from: u32) -> Option<RasterBand> {
+    pub fn band_since(&self, from: u32) -> Option<RasterBand> {
         let len = NonZeroU32::new(self.built.checked_sub(from)?)?;
         let rows = TextureRows::new(from, len);
         let stride = self.raster.width() as usize * 4;
@@ -592,7 +592,7 @@ impl RasterTarget {
     ///
     /// `None` before then, so a caller cannot publish a partial target as a
     /// finished image.
-    pub(crate) fn into_pixels(self) -> Option<Vec<u8>> {
+    pub fn into_pixels(self) -> Option<Vec<u8>> {
         (self.fed == self.native.height() && self.built == self.raster.height())
             .then_some(self.pixels)
     }

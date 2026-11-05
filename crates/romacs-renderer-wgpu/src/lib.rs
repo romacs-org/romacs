@@ -12,11 +12,8 @@ pub mod frame_post;
 pub mod glyph_atlas;
 #[cfg(feature = "video")]
 mod gpu_frame_timing;
-mod image_bands;
 pub mod image_cache;
-pub mod image_probe;
-mod image_scale;
-mod image_sequence;
+pub use romacs_imaging::{image_bands, image_probe, image_scale, image_sequence, svg, svg_animation, xbm, xpm};
 pub mod media_budget;
 pub mod model;
 #[cfg(target_os = "linux")]
@@ -26,8 +23,6 @@ mod root_gpu_timing;
 pub mod scene_graph;
 pub mod shader_surface;
 pub mod shader_surface_cache;
-mod svg;
-mod svg_animation;
 #[cfg(test)]
 #[path = "tests/texture_discipline_test.rs"]
 mod texture_discipline_test;
@@ -35,8 +30,6 @@ pub mod tooltip_layout;
 pub use image_bands::{BandPlacement, DecodedBand, RasterBand, RowRange, TextureRows};
 pub use svg::SvgResourceContext;
 pub mod vertex;
-pub mod xbm;
-pub mod xpm;
 
 #[cfg(feature = "video")]
 pub mod video_cache;

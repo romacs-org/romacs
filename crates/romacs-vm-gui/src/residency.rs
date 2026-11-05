@@ -7,7 +7,7 @@
 //! evicted, or lost with its GPU, goes again the next time a frame draws it.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_runtime::paint_host::PaintSender;
-use romacs_renderer_wgpu::image_cache::SemanticImageDecoded;
+use romacs_imaging::decode::SemanticImageDecoded;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -125,10 +125,10 @@ mod tests {
     fn decoded() -> SemanticImageDecoded {
         use romacs_display_protocol::image_diagnostic::{ImageDiagnosticSubject, ImageFormatName, ImageLoadIdentity};
         use romacs_display_protocol::*;
-        use romacs_renderer_wgpu::image_cache::{SemanticImageDecoder, SemanticImageRequest, SemanticImageSource};
+        use romacs_imaging::decode::{SemanticImageDecoder, SemanticImageRequest, SemanticImageSource};
         let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"/>"#.to_vec();
         SemanticImageDecoder::default().decode_pixels(SemanticImageRequest {
-            source: SemanticImageSource::Data { data: EncodedBytes::new(svg), resources: romacs_renderer_wgpu::SvgResourceContext::Isolated },
+            source: SemanticImageSource::Data { data: EncodedBytes::new(svg), resources: romacs_imaging::SvgResourceContext::Isolated },
             size: ImageSizeSpec::new(AxisSize::resolve(None, None), AxisSize::resolve(None, None)), rotation: ImageRotation::None,
             realization: ImageRealization::new(1.0, 1.0, 1.0), colors: ImageColorContext::from_pixels(0, 0xffffff),
             mask: ImageMaskPolicy::Preserve, animation: ImageAnimationPolicy::disabled(), frame: ImageFrameIndex::new(0),
