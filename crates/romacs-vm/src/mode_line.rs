@@ -17,11 +17,11 @@ pub(super) enum Target { Display, String, NoProp }
 /// `format-mode-line' string carries them all, and so does the status bar
 /// (`BandMarks' and its clicks read them, VM2-STATUS-BAR); a window's band
 /// none.
-const PROJECTED: [&str; 7] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
+const PROJECTED: [&str; 8] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text", "romacs-pill-modified"];
 
 /// The `:propertize' properties that make a construct one of the status
 /// bar's segments, which owns all it expands to (`Band::segments').
-const SEGMENT: [&str; 4] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-priority"];
+const SEGMENT: [&str; 5] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-pill-modified", "romacs-priority"];
 
 /// A piece's projected properties, by name.
 /// Each value is shared (`Rc'): a `:propertize''s values reach every piece
@@ -731,11 +731,11 @@ impl Vm {
                                 let segment = (band.target == Target::Display && !band.projected.is_empty()
                                                && plist_has(&plist, "romacs-segment"))
                                     .then(|| propertize_of(&plist, &SEGMENT)).flatten().map(|p| p.projected.clone());
-                                // The bar's painter lays out what follows a
-                                // `right-align' marker from the right edge and
+                                // The bar's painter lays out the zone a `centre-align'
+                                // or `right-align' marker starts on its own and
                                 // shows it whole: it gets its own columns, however
-                                // long the left side ran.
-                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(&**v, Form::Sym(v) if v == "right-align"))) {
+                                // long the zone before it ran.
+                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(&**v, Form::Sym(v) if v == "right-align" || v == "centre-align"))) {
                                     band.cols = 0;
                                 }
                                 n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.projected), risky)?;

@@ -146,7 +146,7 @@ fn the_bar_expands_the_mode_line_at_its_own_columns() {
     assert_eq!(eval(&mut vm, "(let ((noninteractive nil)) (format-mode-line mode-line-format))"), "\"*scratch* --\"");
     // A longer format is clipped at them.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
-    assert_eq!(shows(&mut vm), "x".repeat(121));
+    assert_eq!(shows(&mut vm), "x".repeat(119));
     // A window's `mode-line-format' parameter is its effective format.
     eval(&mut vm, "(set-window-parameter nil 'mode-line-format \"param %l\")");
     assert_eq!(bar(&mut vm).text.utf8, "param 1");
@@ -317,11 +317,13 @@ fn a_click_after_dashes_reaches_the_shown_element() {
 #[test]
 fn a_full_bar_drops_segments_by_priority() {
     let mut vm = romacs_lines();
+    // A name the bar does not cut in its middle.
+    eval(&mut vm, "(setq romacs-mode-line-buffer-name-width 200)");
     eval(&mut vm, &format!("(rename-buffer \"{}\")", "n".repeat(100)));
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"buffer") && !names.contains(&"major-mode"), "{names:?}");
-    assert!(shown.text.utf8.chars().count() <= 121, "{:?}", shown.text.utf8);
+    assert!(shown.text.utf8.chars().count() <= 119, "{:?}", shown.text.utf8);
     // A click reads the bar's text as it shows, segments dropped.
     let length = shown.text.utf8.chars().count();
     assert_eq!(eval(&mut vm, &format!("(length (nth 1 (romacs--status-bar-target {})))", length - 1)), length.to_string());
@@ -445,10 +447,11 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 }
 
 /// The bar's marks under Romacs's mode line (VM2-STATUS-BAR): its
-/// segments, the `right-align' marker, the buffer's pill on
-/// `romacs-mode-line-pill''s background, `%*' drawn as an icon while
-/// Romacs Icons is there; `romacs-status-bar-string' is what the bar
-/// shows, the right side flush with its right edge.
+/// segments, the `centre-align' and `right-align' markers, the buffer's
+/// pill on `romacs-mode-line-pill''s background, its text in
+/// `romacs-mode-line-modified' while the buffer is modified, `%*' drawn
+/// as an icon while Romacs Icons is there; `romacs-status-bar-string' is
+/// what the bar shows, the right side flush with its right edge.
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
@@ -460,26 +463,30 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\")");
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
-    for name in ["front", "buffer", "position", "right-align", "major-mode"] {
+    for name in ["buffer", "position", "centre-align", "right-align", "major-mode"] {
         assert!(names.contains(&name), "{name} in {names:?}");
     }
     // The default coding says nothing.
     assert!(!names.contains(&"encoding"), "{names:?}");
-    // The buffer has no pill, as doom-modeline's has none.
+    // The buffer's identity on its pill, in its own faces while unmodified.
+    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-modified nil :foreground \"#e0a030\")");
     let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
-    assert_eq!(buffer.pill, None);
+    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], None)));
     assert!(shown.text.utf8[buffer.bytes.clone()].contains("*scratch*"));
     // `%*' of the unmodified *scratch*: nothing, its `-' dropped.
     assert!(shown.marks.icons.is_empty(), "{:?}", shown.marks.icons);
     assert!(!shown.text.utf8[buffer.bytes.clone()].contains('-'), "{:?}", shown.text.utf8);
     eval(&mut vm, "(insert \"x\")");
     let shown = bar(&mut vm);
+    let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
+    assert_eq!(buffer.pill.and_then(|p| p.foreground), Some([0xe0, 0xa0, 0x30]), "modified");
     let (byte, icon) = shown.marks.icons[0];
     assert_eq!((&shown.text.utf8[byte..byte + 1], icon), ("*", '\u{FE001}'));
-    // The drawn text: the bar's 121 columns, the right side at the end.
+    // The drawn text: the bar's 119 columns, each marker's room in whole
+    // cells, the right side at the end.
     let drawn = eval(&mut vm, "(romacs-status-bar-string)");
     let drawn = drawn.trim_matches('"');
-    assert_eq!(drawn.chars().count(), 121, "{drawn}");
+    assert_eq!(drawn.chars().count(), 118, "{drawn}");
     let marker = shown.marks.right_align().unwrap();
     let right = shown.text.utf8[marker.end..].to_owned();
     assert!(drawn.ends_with(&right), "{drawn:?} ends with {right:?}");
@@ -555,8 +562,9 @@ fn a_strings_own_marks_reach_the_bar() {
 }
 
 /// `romacs-status-bar-string' is what the painter places: the host's
-/// advances right of the accent block, a long text clipped where the bar
-/// ends, a right side wider than the bar from its start.
+/// advances inside the bar's padding, a long text clipped where the bar
+/// ends, a right side wider than the bar from its start; a centred zone
+/// on the bar's middle, after the left zone where the room is short.
 #[test]
 fn the_bar_string_follows_the_painter() {
     let mut vm = session();
@@ -567,15 +575,22 @@ fn the_bar_string_follows_the_painter() {
     let shows = |vm: &mut Vm| { vm.frame_snapshot(120, 876).unwrap(); eval(vm, "(romacs-status-bar-string)") };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
     vm.load_file(&root).unwrap();
-    // 120 pixels less the 3-pixel accent: 11 cells of 10.
+    // 120 pixels less 12 of padding at either end: 9 cells of 10.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
-    assert_eq!(shows(&mut vm), format!("{:?}", "x".repeat(11)));
+    assert_eq!(shows(&mut vm), format!("{:?}", "x".repeat(9)));
     eval(&mut vm, "(setq mode-line-format (list \"L\" '(:propertize \" \" romacs-segment right-align) (make-string 30 ?R)))");
-    assert_eq!(shows(&mut vm), format!("{:?}", "R".repeat(11)));
+    assert_eq!(shows(&mut vm), format!("{:?}", "R".repeat(9)));
     eval(&mut vm, "(setq mode-line-format (list \"LL\" '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
-    assert_eq!(shows(&mut vm), format!("{:?}", format!("LL{}RRR", " ".repeat(6))));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("LL{}RRR", " ".repeat(4))));
     // A left side longer than the expansion keeps of it leaves the right
     // side whole.
     eval(&mut vm, "(setq mode-line-format (list (make-string 60 ?L) '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
-    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}RRR", "L".repeat(8))));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}RRR", "L".repeat(6))));
+    // The centre on the bar's middle; with no room for the gaps either
+    // side of it, after the left.
+    let zoned = |l: &str, c: &str, r: &str| format!("(setq mode-line-format (list {l:?} '(:propertize \" \" romacs-segment centre-align) {c:?} '(:propertize \" \" romacs-segment right-align) {r:?}))");
+    eval(&mut vm, &zoned("L", "C", "R"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "L   C   R"));
+    eval(&mut vm, &zoned("LLL", "CC", "RRR"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "LLLCC RRR"));
 }

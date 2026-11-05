@@ -149,14 +149,47 @@ mode line would be."
         (romacs-should (string-search ":run" (romacs-mode-line-test--format romacs-mode-line-format)))
         (romacs-should (= romacs-mode-line-test--runs 1))))))
 
-(romacs-deftest romacs-mode-line-has-one-space-at-the-right-align-marker ()
-  (let ((romacs-mode-line-left '("L")) (romacs-mode-line-right '("R")))
-    (romacs-mode-line-rebuild)
-    (unwind-protect
-        (romacs-should (equal (romacs-mode-line-test--format romacs-mode-line-format) "L R"))
-      (custom-reevaluate-setting 'romacs-mode-line-left)
-      (custom-reevaluate-setting 'romacs-mode-line-right)
-      (romacs-mode-line-rebuild))))
+(romacs-deftest romacs-mode-line-has-one-space-at-each-marker ()
+  (unwind-protect
+      (let ((romacs-mode-line-left '("L")) (romacs-mode-line-centre '("C")) (romacs-mode-line-right '("R")))
+        (romacs-mode-line-rebuild)
+        (romacs-should (equal (romacs-mode-line-test--format romacs-mode-line-format) "L C R")))
+    ;; Built again outside the bindings, from the lists' own values.
+    (romacs-mode-line-rebuild)))
+
+(romacs-deftest romacs-mode-line-says-the-mode-and-the-position-once ()
+  ;; Elisp's `/l' says the usual and goes; its `/d' stays.
+  (romacs-should (equal (romacs-mode-line--humanise '("Elisp" (lexical-binding (:propertize "/l") (:propertize "/d"))))
+                        '("Elisp" (lexical-binding "" (:propertize "/d")))))
+  (romacs-should (equal (romacs-mode-line--humanise "Org") "Org"))
+  (romacs-mode-line-test--with-mode
+    (with-current-buffer (get-buffer-create " *romacs-mode-line-says*")
+      ;; Shown in the selected window: `%l' and `%c' read its point.
+      (switch-to-buffer (current-buffer))
+      (setq mode-name '("Elisp" (lexical-binding (:propertize "/l") (:propertize "/d"))))
+      (setq-local lexical-binding t)
+      (romacs-mode-line--refresh-mode-name)
+      (dotimes (n 15) (insert (format "line %d\n" n)))
+      (goto-char (point-min)) (forward-line 11) (forward-char 3)
+      (let ((text (romacs-mode-line-test--format romacs-mode-line-format)))
+        (romacs-should (string-search " Elisp" text))
+        (romacs-should-not (string-search "/l" text))
+        (romacs-should (string-search "12:3" text)))
+      ;; With a line-number gutter, the column alone.
+      (setq-local display-line-numbers t)
+      (let ((text (romacs-mode-line-test--format romacs-mode-line-format)))
+        (romacs-should (string-search "C3" text))
+        (romacs-should-not (string-search "12:" text)))
+      (setq-local lexical-binding nil)
+      (romacs-should (string-search "Elisp/d" (romacs-mode-line-test--format romacs-mode-line-format)))
+      (set-buffer-modified-p nil)
+      (kill-buffer))))
+
+(romacs-deftest romacs-mode-line-cuts-a-long-name-in-its-middle ()
+  (romacs-should (equal (romacs-mode-line--middle-cut "short" 10) "short"))
+  (let ((cut (romacs-mode-line--middle-cut "abcdefghijklmnopqrstuvwxyz" 9)))
+    (romacs-should (equal cut "abcd…wxyz"))
+    (romacs-should (= (string-width cut) 9))))
 
 (romacs-deftest romacs-mode-line-keeps-owning-its-rebuilt-format ()
   (let ((gnu (default-value 'mode-line-format)))
