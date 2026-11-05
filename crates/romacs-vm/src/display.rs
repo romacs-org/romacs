@@ -2390,7 +2390,9 @@ impl Vm {
             let Some((_, form)) = projected.iter().find(|(name, _)| *name == "display") else { continue };
             let id = identity(self, form)?;
             match runs.last_mut() {
-                Some((last, _, last_id)) if last.end == range.start && *last_id == id => last.end = range.end,
+                // One rendering of one string: never across another element's.
+                Some((last, _, last_id)) if last.end == range.start && *last_id == id
+                    && band.element_starts.binary_search(&range.start).is_err() => last.end = range.end,
                 _ => runs.push((range.clone(), form, id)),
             }
         }

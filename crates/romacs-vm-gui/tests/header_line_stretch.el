@@ -25,3 +25,5 @@
 (progn (switch-to-buffer (get-buffer-create "w2")) (erase-buffer) (insert "\ttab") (setq header-line-format (list "x" (propertize " " 'display '(space :relative-width 2)) "y")) (probe-header (selected-window)))
 (progn (switch-to-buffer (get-buffer-create "w3")) (erase-buffer) (insert "\nline") (setq header-line-format (list "x" (propertize " " 'display '(space :relative-width 2)) "y")) (probe-header (selected-window)))
 (progn (switch-to-buffer (get-buffer-create "w4")) (erase-buffer) (setq header-line-format (list "x" (propertize " " 'display '(space :relative-width 2)) "y")) (probe-header (selected-window)))
+;; One display value in two adjacent strings, and one string twice: a stretch each, as each element seats its display again.
+(let* ((d '(space :width (30))) (s (propertize " " 'display d))) (switch-to-buffer (get-buffer-create "r2")) (setq header-line-format (list "x" (propertize " " 'display d) (propertize " " 'display d) "y" s s "z")) (probe-header (selected-window)))

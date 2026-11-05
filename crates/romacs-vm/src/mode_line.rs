@@ -74,6 +74,10 @@ pub(super) struct Band {
     /// restarts the count, as GNU's global does.
     pub elt: i64,
     pub elts: Vec<(Range<usize>, i64)>,
+    /// Where each string element's rendering starts in TEXT, ascending: a
+    /// display property is seated again at each (display_string), so a
+    /// stretch never spans two (`Vm::band_spaces').
+    pub element_starts: Vec<usize>,
     /// Columns already built, and the most that can ever be shown. GNU's
     /// display_string stops at the window's last visible column
     /// (`xdisp.c:30105`); text past it is never produced, so no field width
@@ -304,6 +308,7 @@ impl Band {
         self.props.extend(other.props.into_iter().map(|(r, v)| (moved(r), v)));
         self.segments.extend(other.segments.into_iter().map(|(r, v)| (moved(r), v)));
         self.elts.extend(other.elts.into_iter().map(|(r, v)| (moved(r), v)));
+        self.element_starts.extend(other.element_starts.into_iter().map(|start| at + start));
         self.text.push_str(&other.text);
     }
     /// The band without the bytes of DROP, disjoint ranges in order: its
@@ -590,7 +595,7 @@ impl Vm {
             Target::Display => &BAND,
             Target::NoProp => &[],
         };
-        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols };
+        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], element_starts: vec![], cols: 0, max_cols };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -620,6 +625,7 @@ impl Vm {
             }
             depth += 1;
             if let Some(s) = self.ml_string(&elt)? {
+                if band.element_starts.last() != Some(&band.text.len()) { band.element_starts.push(band.text.len()); }
                 let tab = self.ml_tab_width()?;
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
