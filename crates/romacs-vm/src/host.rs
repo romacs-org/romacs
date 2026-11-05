@@ -1627,6 +1627,25 @@ pub fn clock() -> SystemTime {
     SystemTime::now()
 }
 
+/// The processor time this process has used, user and system, as
+/// `getrusage (RUSAGE_SELF)` sums them (GNU sysdep.c
+/// `get-internal-run-time'); in build mode none, a per-process fact.
+pub fn run_time() -> io::Result<std::time::Duration> {
+    if refusing() {
+        p_read(Fact::Monotonic, "run time".into());
+        return Ok(std::time::Duration::ZERO);
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage writes the whole struct it is given.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: initialized by the successful call above.
+    let usage = unsafe { usage.assume_init() };
+    let part = |t: libc::timeval| std::time::Duration::new(t.tv_sec.max(0) as u64, (t.tv_usec.clamp(0, 999_999) as u32) * 1000);
+    Ok(part(usage.ru_utime) + part(usage.ru_stime))
+}
+
 /// The monotonic clock, for deadlines and measurement.
 pub fn monotonic() -> Instant {
     if building() {
