@@ -16,11 +16,12 @@
 ;; appears differs (DIVERGENCES.md VM2-PROJECT-ISOLATE).  Keys typed
 ;; meanwhile run their commands instead of waiting.
 ;;
-;; A worker is used only when it is already prepared and idle: a worker's
-;; boot (the world's adoption and the libraries' loading) costs about as
-;; much as the job, so a command that would have to start one runs GNU's
-;; definition instead, and warms a worker for the next command once the
-;; session idles.  `project-find-regexp' warms its worker while the user
+;; A worker is used only when it is already prepared and idle, or is the
+;; child of a zygote already preparing (rlisp/vm/isolate.el), which forks
+;; it once ready: a worker's boot (the world's adoption and the libraries'
+;; loading) costs about as much as the job, so a command that would have to
+;; start one runs GNU's definition instead, and warms a worker for the next
+;; command once the session idles.  `project-find-regexp' warms its worker while the user
 ;; types the regexp, so its first run normally finds the worker ready (a
 ;; regexp takes longer to type than the worker's half-second boot).  A ready
 ;; worker that will not take the job after all (its queue full, its process

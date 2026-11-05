@@ -478,19 +478,23 @@ rest of the session, its jobs running on pooled workers."
           (aset zygote 7 (nth 1 value))
           (aset zygote 3 'ready)
           ;; The pool's idle workers of these features are not needed now.
+          ;; A spare asked for while it prepared is forked now.
           (dolist (isolate (romacs--isolate-pooled))
             (when (and (eq (aref isolate 10) 'pool) (equal (aref isolate 4) (aref zygote 2)) (null (aref isolate 5)))
               (romacs--isolate-end isolate)))
-          (condition-case nil (aset zygote 4 (romacs--isolate-zygote-fork zygote)) (error nil)))
+          (unless (aref zygote 4)
+            (condition-case nil (aset zygote 4 (romacs--isolate-zygote-fork zygote)) (error nil))))
       (aset zygote 3 'refused)
       (aset zygote 6 (aref future 4))
       (romacs--isolate-end (aref zygote 1)))))
 
 (defun romacs--isolate-zygote-current-p (zygote)
-  "Whether nothing ZYGOTE's preparation read has changed since."
+  "Whether nothing ZYGOTE's preparation read has changed since; while it
+prepares, the files it loads are not known yet."
   (and (romacs--isolate-inputs-current-p (aref zygote 5))
        (eql (aref zygote 9) (romacs--isolate-stamp (aref zygote 8)))
-       (eql (aref zygote 7) (romacs--isolate-stamp (aref zygote 6)))))
+       (or (not (eq (aref zygote 3) 'ready))
+           (eql (aref zygote 7) (romacs--isolate-stamp (aref zygote 6))))))
 
 (defun romacs--isolate-zygote-retire (zygote)
   "Forget ZYGOTE and end it and its spare, without waiting."
@@ -545,13 +549,17 @@ jobs after this one."
       (when (and zygote (memq (aref zygote 3) '(preparing ready)) (romacs--isolate-gone-p (aref zygote 1)))
         (remhash require romacs--isolate-zygotes)
         (setq zygote nil))
-      (when (and zygote (eq (aref zygote 3) 'ready) (not (romacs--isolate-zygote-current-p zygote)))
+      (when (and zygote (memq (aref zygote 3) '(preparing ready)) (not (romacs--isolate-zygote-current-p zygote)))
         (romacs--isolate-zygote-retire zygote)
-        (setq zygote nil))
+        ;; Ending it may have resubmitted a queued child's job, which made
+        ;; its replacement.
+        (setq zygote (gethash require romacs--isolate-zygotes)))
       (cond ((null zygote)
              (when make (condition-case nil (romacs--isolate-zygote-make require) (error nil)))
              nil)
-            ((not (eq (aref zygote 3) 'ready)) nil)
+            ;; A zygote still preparing forks the child once it is ready:
+            ;; the job waits for the rest of its preparation, not the session.
+            ((not (memq (aref zygote 3) '(preparing ready))) nil)
             ((>= (romacs--isolate-busy-children) (isolate--pool-size)) nil)
             (t (aset zygote 10 (float-time))
                (when (and (aref zygote 4) (romacs--isolate-gone-p (aref zygote 4)))
@@ -1083,7 +1091,8 @@ cancellation sent behind a job cancels it before it runs."
     (romacs--isolate-interrupted-p)
     (romacs--isolate-run-forks)
     (romacs--isolate-run-queued)
-    (when (and romacs--isolate-serving (null romacs--isolate-deferred) (null romacs--isolate-forks))
+    (when (and romacs--isolate-serving (null romacs--isolate-deferred)
+               (or (null romacs--isolate-forks) (not romacs--isolate-zygote)))
       (romacs--isolate-wait nil)
       (romacs--isolate-serve-frames)))
   ;; A zygote told to end outlives its children's jobs (they die with it),
@@ -1098,7 +1107,8 @@ cancellation sent behind a job cancels it before it runs."
   "In a zygote: fork each child asked for.  In a child, return as a worker
 of the spawner's own, for one job, with nothing of the zygote's queue; a
 zygote that cannot fork ends, and its spawner forgets it."
-  (while romacs--isolate-forks
+  ;; Children asked for while it prepares wait until it is a zygote.
+  (while (and romacs--isolate-forks romacs--isolate-zygote)
     (let ((generation (pop romacs--isolate-forks)))
       ;; The child runs nothing until released, after its report.
       (unless (condition-case nil

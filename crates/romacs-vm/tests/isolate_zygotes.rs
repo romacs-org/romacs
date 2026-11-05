@@ -208,3 +208,25 @@ fn a_zygotes_warm_functions_fill_what_its_children_inherit() {
     assert_eq!(out, "(t nil)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn a_job_for_a_zygote_still_preparing_waits_for_it_not_the_spawner() {
+    let mut vm = vm();
+    // Handed out while its zygote prepares, the child is forked once the
+    // zygote is ready, and runs the job then.
+    let out = eval(&mut vm, "(let* ((z (romacs--isolate-zygote-make nil))
+                                    (f (isolate-spawn '(lambda () (emacs-pid)))))
+                               (list (aref z 3) (aref (isolate-future-isolate f) 10) (integerp (isolate-await f 20)) (aref z 3)))");
+    assert_eq!(out, "(preparing job t ready)");
+    eval(&mut vm, "(isolate-kill-all)");
+    // A zygote refused (its preparation left a timer) never forks the
+    // child: the job, never started, runs on a pooled worker instead.
+    let out = eval(&mut vm, "(let* ((isolate-zygote-warm-functions '((isolate . (lambda () (setq timer-list (cons 'zygote-test-timer timer-list))))))
+                                    (z (romacs--isolate-zygote-make '(isolate)))
+                                    (f (isolate-spawn '(lambda () 'ran) :require '(isolate)))
+                                    (child (isolate-future-isolate f))
+                                    (result (isolate-await f 20)))
+                               (list (aref child 10) result (aref z 3) (aref (isolate-future-isolate f) 10)))");
+    assert_eq!(out, "(job ran refused pool)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
