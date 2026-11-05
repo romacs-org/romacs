@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "4a5779ee6651b6315b92af3a438a29ced874070ddc3e6baa796801ab6d68e8c5",
+  "source_fingerprint": "5649c45ef9392048ced3cce7d36d872a38fba6fd5cb085112f5ae8f576feb921",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1376,
-  "parsed_vm2_only": 1376
+  "parsed_total": 1383,
+  "parsed_vm2_only": 1383
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -889,6 +889,11 @@
    "name": "clear-face-cache",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face.rs:907"
+  },
+  "clear-font-cache": {
+   "name": "clear-font-cache",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1318"
   },
   "clear-image-cache": {
    "name": "clear-image-cache",
@@ -1870,7 +1875,12 @@
   "font-at": {
    "name": "font-at",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1200"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1395"
+  },
+  "font-face-attributes": {
+   "name": "font-face-attributes",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1236"
   },
   "font-family-list": {
    "name": "font-family-list",
@@ -1882,10 +1892,25 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/font.rs:1038"
   },
+  "font-get-glyphs": {
+   "name": "font-get-glyphs",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1271"
+  },
+  "font-has-char-p": {
+   "name": "font-has-char-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1151"
+  },
   "font-info": {
    "name": "font-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1131"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1326"
+  },
+  "font-match-p": {
+   "name": "font-match-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1202"
   },
   "font-put": {
    "name": "font-put",
@@ -2628,7 +2653,7 @@
   "internal-char-font": {
    "name": "internal-char-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1173"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1368"
   },
   "internal-complete-buffer": {
    "name": "internal-complete-buffer",
@@ -3617,6 +3642,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/object_intervals.rs:4"
   },
+  "open-font": {
+   "name": "open-font",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1164"
+  },
   "optimize-char-table": {
    "name": "optimize-char-table",
    "implementation": "vm2",
@@ -4053,6 +4083,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Puthash",
    "registered_at": "crates/romacs-vm/src/lib.rs:724"
+  },
+  "query-font": {
+   "name": "query-font",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1143"
   },
   "query-fontset": {
    "name": "query-fontset",

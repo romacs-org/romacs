@@ -54,6 +54,11 @@ impl Registry {
         Arc::make_mut(&mut self.sets[id])
     }
 
+    /// What was resolved goes, the rules unchanged.
+    pub(crate) fn touch(&mut self) {
+        self.revision += 1;
+    }
+
     /// A new fontset named NAME.
     pub(crate) fn make(&mut self, name: &str) -> usize {
         self.sets.push(Arc::new(Fontset::new(name)));

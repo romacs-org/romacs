@@ -38,6 +38,17 @@ pub struct OpenedFont {
     pub otf: (OtfTable, OtfTable),
 }
 
+/// A glyph as text_extents measures it, in whole pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlyphMetrics {
+    pub code: u32,
+    pub width: i64,
+    pub lbearing: i64,
+    pub rbearing: i64,
+    pub ascent: i64,
+    pub descent: i64,
+}
+
 /// One OpenType layout table: each script's tag with its language systems
 /// (None the default), each with its feature tags.
 pub type OtfTable = Vec<(String, Vec<(Option<String>, Vec<String>)>)>;
@@ -91,6 +102,10 @@ pub trait DisplayHost {
     /// FACE's font, as painting resolves it, its weight, slant and width
     /// included; None when no font has CH.
     fn char_font(&mut self, face: &FaceFont, ch: char) -> Option<(OpenedFont, u32)>;
+    /// CH in FONT: its glyph code and metrics; None when FONT lacks it.
+    fn glyph_metrics(&mut self, _font: &OpenedFont, _ch: char) -> Option<GlyphMetrics> { None }
+    /// Forget every font opened (Fclear_font_cache).
+    fn clear_font_cache(&mut self) {}
     /// Adopt STATE: `char_font' answers by its rules from here on.
     fn set_fontsets(&mut self, _state: std::sync::Arc<romacs_layout_input::FontsetState>) {}
     /// The font a fontset's def was realized to, opened.

@@ -41,7 +41,6 @@ canvas-refresh	needed	lane builtins-b (fonts, coding, images, system, processes,
 ccl-execute	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 ccl-execute-on-string	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 check-coding-systems-region	absent	no shipped Lisp calls it and it is no command
-clear-font-cache	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 close-font	absent	no shipped Lisp calls it and it is no command
 color-gray-p	absent	no shipped Lisp calls it and it is no command
 combine-windows	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -103,12 +102,8 @@ encode-sjis-char	absent	no shipped Lisp calls it and it is no command
 event-convert-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
 file-attributes-lessp	absent	no shipped Lisp calls it and it is no command
 font-drive-otf	absent	no shipped Lisp calls it and it is no command
-font-face-attributes	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-font-get-glyphs	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 font-get-system-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 font-get-system-normal-font	absent	no shipped Lisp calls it and it is no command
-font-has-char-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-font-match-p	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 font-otf-alternates	absent	no shipped Lisp calls it and it is no command
 font-shape-gstring	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 font-variation-glyphs	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -246,7 +241,6 @@ network-interface-list	needed	lane builtins-b (fonts, coding, images, system, pr
 newline-cache-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
 next-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 open-dribble-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-open-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 open-termscript	absent	terminal frames: Romacs has none (GUI and batch only)
 other-window-for-scrolling	needed	lane A (editing, windows, frames, minibuffer readers, display)
 overlay-tree	absent	no shipped Lisp calls it and it is no command
@@ -267,7 +261,6 @@ posn-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display
 previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
-query-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-command	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-function	needed	lane A (editing, windows, frames, minibuffer readers, display)

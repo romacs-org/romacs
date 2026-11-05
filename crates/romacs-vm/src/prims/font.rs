@@ -1128,6 +1128,201 @@ fn font_xlfd_name(cx, font: Value; optional fold_wildcards: Value, _long_xlfds: 
     Ok(cx.string(&name))
 }}
 
+/// CHECK_FONT_GET_OBJECT.
+fn check_object(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<(), Fault> {
+    if font_kind(cx, font) == Some(Kind3::Object) { Ok(()) } else { Err(Fault::Wrong("font-object", font)) }
+}
+
+/// The OpenedFont a font-object is.
+fn opened_of(cx: &mut Leaf<'_>, font: Value) -> Option<OpenedFont> {
+    let entity = entity_of(cx, font)?;
+    let size = slot(cx, font, SIZE).integer_value()?;
+    cx.font_host()?.open_font(&entity, size)
+}
+
+defsubr! { name = "query-font", gnu = "font.c:5277", effect = Reads,
+fn query_font(cx, font_object: Value) {
+    check_object(cx, font_object)?;
+    let capability = slot(cx, font_object, CAPABILITY);
+    let items: Vec<Value> = [NAME, FILE, SIZE, MAX_WIDTH, ASCENT, DESCENT, SPACE_WIDTH, AVERAGE_WIDTH].iter().map(|&index| slot(cx, font_object, index)).chain([capability]).collect();
+    Ok(cx.vector(&items))
+}}
+
+defsubr! { name = "font-has-char-p", gnu = "font.c:5335", effect = Reads,
+fn font_has_char_p(cx, font: Value, ch: Value; optional frame: Value) {
+    check_font(cx, font)?;
+    let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
+    if frame != Value::NIL && cx.kind(frame) != Kind::Frame { return Err(Fault::Wrong("framep", frame)); }
+    let Some(object) = open(cx, font)? else { return Ok(Value::NIL) };
+    let Some(opened) = opened_of(cx, object) else { return Ok(Value::NIL) };
+    let found = char::from_u32(c as u32).and_then(|c| cx.font_host()?.glyph_metrics(&opened, c));
+    Ok(if found.is_some() { Value::TRUE } else { Value::NIL })
+}}
+
+// Fopen_font: at SIZE pixels, points when a float, or the entity's own; 0 is
+// 120, as in GNU.
+defsubr! { name = "open-font", gnu = "font.c:5242", effect = Reads,
+fn open_font(cx, font_entity: Value; optional size: Value, frame: Value) {
+    if font_kind(cx, font_entity) != Some(Kind3::Entity) { return Err(Fault::Wrong("font-entity", font_entity)); }
+    cx.face_frame(frame, true)?;
+    let pixels = if size == Value::NIL {
+        slot(cx, font_entity, SIZE).integer_value().unwrap_or(0)
+    } else if let Some(n) = size.integer_value() {
+        n
+    } else if let Ok(points) = cx.float_value(size) {
+        (points * 96.0 / 72.27 + 0.5) as i64
+    } else {
+        return Err(Fault::Wrong("numberp", size));
+    };
+    if !(i64::from(i32::MIN)..=i64::from(i32::MAX)).contains(&pixels) { return Err(Fault::Range(font_entity, size)); }
+    let pixels = if pixels == 0 { 120 } else { pixels };
+    let Some(entity) = entity_of(cx, font_entity) else { return Ok(Value::NIL) };
+    match cx.font_host().and_then(|host| host.open_font(&entity, pixels)) {
+        Some(opened) => make_object(cx, &opened),
+        None => Ok(Value::NIL),
+    }
+}}
+
+/// font_match_p's style and size test: FONT differs from SPEC in nothing
+/// SPEC names (font_score, zero).
+fn matches_spec(cx: &Leaf<'_>, spec: Value, font: Value) -> bool {
+    for index in [FOUNDRY, FAMILY, ADSTYLE, REGISTRY] {
+        let (want, have) = (slot(cx, spec, index), slot(cx, font, index));
+        if want != Value::NIL && have != Value::NIL && want != have { return false; }
+    }
+    for index in [WEIGHT, SLANT, WIDTH] {
+        let (want, have) = (slot(cx, spec, index), slot(cx, font, index));
+        if want != Value::NIL && want != have && have.integer_value().is_some()
+            && style_numeric(want) != style_numeric(have) { return false; }
+    }
+    let (want, have) = (pixel_size(cx, spec, 0), slot(cx, font, SIZE).integer_value().unwrap_or(0));
+    want <= 0 || have <= 0 || want == have
+}
+
+defsubr! { name = "font-match-p", gnu = "font.c:5492", effect = Reads,
+fn font_match_p(cx, spec: Value, font: Value) {
+    check_spec(cx, spec)?;
+    check_font(cx, font)?;
+    if !matches_spec(cx, spec, font) { return Ok(Value::NIL); }
+    let (mut extra, is_object) = (slot(cx, spec, EXTRA), font_kind(cx, font) == Some(Kind3::Object));
+    let script_table = super::fileio::var(cx, "script-representative-chars")?;
+    while let Some((pair, rest)) = cx.pair(extra) {
+        extra = rest;
+        let Some((key, value)) = cx.pair(pair) else { continue };
+        match name_of(cx, key).as_deref() {
+            Some(":lang") => return Ok(Value::NIL),
+            Some(":script") if is_object => {
+                let mut table = script_table;
+                while let Some((row, next)) = cx.pair(table) {
+                    table = next;
+                    let Some((script, mut chars)) = cx.pair(row) else { continue };
+                    if script != value { continue; }
+                    let Some(opened) = opened_of(cx, font) else { return Ok(Value::NIL) };
+                    while let Some((c, more)) = cx.pair(chars) {
+                        chars = more;
+                        let found = c.integer_value().and_then(|c| char::from_u32(c as u32)).and_then(|c| cx.font_host()?.glyph_metrics(&opened, c));
+                        if found.is_none() { return Ok(Value::NIL); }
+                    }
+                    break;
+                }
+            }
+            Some(":otf") if !is_object => return Ok(Value::NIL),
+            _ => {}
+        }
+    }
+    Ok(Value::TRUE)
+}}
+
+defsubr! { name = "font-face-attributes", gnu = "font.c:4278", effect = Reads,
+fn font_face_attributes(cx, font: Value; optional frame: Value) {
+    cx.face_frame(frame, true)?;
+    let font = if matches!(cx.kind(font), Kind::String | Kind::Bytes) {
+        let spec = make_font(cx, "font-spec", SPEC_SLOTS)?;
+        let text = cx.string_text(font)?;
+        if !parse_name(cx, text.as_bytes(), spec)? { return Err(signal_error(cx, "Invalid font name", font)); }
+        spec
+    } else if font_kind(cx, font).is_some() { font } else { return Err(signal_error(cx, "Invalid font object", font)); };
+    let mut items = Vec::new();
+    let family = slot(cx, font, FAMILY);
+    if family != Value::NIL {
+        items.push(cx.intern(":family"));
+        let name = name_of(cx, family).unwrap_or_default();
+        items.push(cx.string(&name));
+    }
+    let size = slot(cx, font, SIZE);
+    let height = if let Some(pixels) = size.integer_value() {
+        let dpi = slot(cx, font, DPI).integer_value().unwrap_or(96) as f64;
+        Some(((pixels * 10) as f64 * 72.27 / dpi + 0.5) as i64)
+    } else { cx.float_value(size).ok().map(|points| 10 * points as i64) };
+    if let Some(height) = height {
+        items.push(cx.intern(":height"));
+        items.push(Value::integer(height).map_err(Fault::Error)?);
+    }
+    for (key, index) in [(":weight", WEIGHT), (":slant", SLANT), (":width", WIDTH)] {
+        let value = slot(cx, font, index);
+        if value != Value::NIL && let Some(name) = style_name(cx, index, value) {
+            items.push(cx.intern(key));
+            items.push(cx.intern(&name));
+        }
+    }
+    Ok(cx.coding_list(&items))
+}}
+
+defsubr! { name = "font-get-glyphs", gnu = "font.c:5362", effect = Reads,
+fn font_get_glyphs(cx, font_object: Value, from: Value, to: Value; optional object: Value) {
+    check_object(cx, font_object)?;
+    let chars: Vec<i64> = if object == Value::NIL {
+        let span = cx.text_span(from, to, true)?;
+        String::from_utf8_lossy(&span.bytes).chars().map(|c| i64::from(u32::from(c))).collect()
+    } else {
+        let elements: Vec<Value> = if let Ok(values) = cx.vector_values(object) {
+            values
+        } else if let Ok(view) = cx.string_view(object) {
+            view.chars().map(|c| Value::integer(i64::from(c)).unwrap()).collect()
+        } else {
+            return Err(Fault::Wrong("arrayp", object));
+        };
+        // validate_subarray.
+        let size = elements.len() as i64;
+        let bound = |v: Value| -> std::result::Result<i64, Fault> {
+            let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+            Ok(if n < 0 { n + size } else { n })
+        };
+        let (start, end) = (bound(from)?, bound(to)?);
+        if !(0 <= start && start <= end && end <= size) { return Err(Fault::Range3(object, from, to)); }
+        let mut chars = Vec::with_capacity((end - start) as usize);
+        for &element in &elements[start as usize..end as usize] {
+            chars.push(element.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", element))?);
+        }
+        chars
+    };
+    if chars.is_empty() { return Ok(Value::NIL); }
+    let Some(opened) = opened_of(cx, font_object) else { return Ok(Value::NIL) };
+    let integer = |n: i64| Value::integer(n).unwrap();
+    let mut glyphs = Vec::with_capacity(chars.len());
+    for (index, &code) in chars.iter().enumerate() {
+        let metrics = char::from_u32(code as u32).and_then(|c| cx.font_host()?.glyph_metrics(&opened, c));
+        glyphs.push(match metrics {
+            None => Value::NIL,
+            Some(m) => {
+                let i = index as i64;
+                cx.vector(&[integer(i), integer(i), integer(code), integer(i64::from(m.code)), integer(m.width), integer(m.lbearing), integer(m.rbearing), integer(m.ascent), integer(m.descent), Value::NIL])
+            }
+        });
+    }
+    Ok(cx.vector(&glyphs))
+}}
+
+// Fclear_font_cache: the display forgets its fonts, and what was resolved
+// from them goes, as free_realized_fontsets.
+defsubr! { name = "clear-font-cache", gnu = "font.c:4576", effect = Global,
+fn clear_font_cache(cx) {
+    if let Some(host) = cx.font_host() { host.clear_font_cache(); }
+    cx.fontsets_mut().touch();
+    cx.note_fontset_change();
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "font-info", gnu = "font.c:5594", effect = Reads,
 fn font_info(cx, name: Value; optional frame: Value) {
     let is_font = font_kind(cx, name).is_some();

@@ -179,6 +179,25 @@ impl OpenedFace {
         }
     }
 
+    /// CH's left and right bearings, in whole pixels.
+    fn bearings(&self, ch: char) -> Option<(f32, f32)> {
+        let (_, advance) = self.glyph(ch)?;
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::FreeType(face) => {
+                let metrics = face.glyph().metrics();
+                let left = metrics.horiBearingX as f32 / 64.0;
+                Some((left.floor(), (left + metrics.width as f32 / 64.0).ceil()))
+            }
+            Self::Sfnt { data, index, pixel_size } => {
+                let face = ttf_parser::Face::parse(data, *index).ok()?;
+                let scale = pixel_size / f32::from(face.units_per_em());
+                let bounds = face.glyph_index(ch).and_then(|glyph| face.glyph_bounding_box(glyph));
+                Some(bounds.map_or((0.0, advance), |b| ((f32::from(b.x_min) * scale).floor(), (f32::from(b.x_max) * scale).ceil())))
+            }
+        }
+    }
+
     /// CH's advance and how far its ink rises above and falls below the
     /// baseline, in whole pixels (ftcrfont_glyph_extents: the ascent
     /// floored up from the bearing, the descent ceiled).
@@ -652,6 +671,23 @@ impl FontResolver {
     /// cannot be opened.
     pub fn glyph_in_font(&mut self, font: &ResolvedFont, ch: char) -> Option<(ResolvedGlyphId, f32)> {
         self.glyph_in(font, ch)
+    }
+
+    /// CH in the face FILE and SELECTOR name at PIXEL_SIZE: its glyph and,
+    /// as text_extents gives them, advance, left and right bearings, ascent
+    /// and descent; None when the face lacks it.
+    pub fn glyph_extents(&mut self, file: &str, selector: u32, pixel_size: f32, ch: char) -> Option<(ResolvedGlyphId, [f32; 5])> {
+        let face = self.opened_face(file, selector, pixel_size)?;
+        let (glyph, _) = face.glyph(ch)?;
+        let (advance, ascent, descent) = face.ink(ch)?;
+        let (left, right) = face.bearings(ch)?;
+        Some((glyph, [advance, left, right, ascent, descent]))
+    }
+
+    /// Forget the faces opened and every answer from them.
+    pub fn clear_fonts(&mut self) {
+        self.retire_answers();
+        self.opened.clear();
     }
 
     /// TEXT's extents in FONT (font->driver->text_extents), or None when

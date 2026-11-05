@@ -275,6 +275,15 @@ impl romacs_vm::DisplayHost for Display {
         self.chars.insert(key, found.clone());
         found
     }
+    fn glyph_metrics(&mut self, font: &OpenedFont, ch: char) -> Option<romacs_vm::GlyphMetrics> {
+        let (glyph, [width, lbearing, rbearing, ascent, descent]) = self.resolver.glyph_extents(&font.entity.file, font.entity.index, font.pixel_size as f32, ch)?;
+        Some(romacs_vm::GlyphMetrics { code: glyph.get(), width: width as i64, lbearing: lbearing as i64, rbearing: rbearing as i64, ascent: ascent as i64, descent: descent as i64 })
+    }
+    fn clear_font_cache(&mut self) {
+        self.resolver.clear_fonts();
+        self.opened.clear();
+        self.chars.clear();
+    }
     fn set_fontsets(&mut self, state: std::sync::Arc<romacs_font::FontsetState>) {
         self.resolver.set_fontsets(state);
         self.chars.clear();
