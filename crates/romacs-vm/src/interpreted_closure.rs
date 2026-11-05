@@ -378,6 +378,8 @@ impl Vm {
                         Binding {
                             reg: outer.len(),
                             cell: true,
+                            late: false,
+                            shadow: None,
                         },
                     );
                     values.insert(name, Value::reference(cell, 5));
@@ -391,6 +393,8 @@ impl Vm {
                     args,
                     names: names.clone(),
                     cells: vec![true; names.len()],
+                    lates: vec![false; names.len()],
+                    shadows: vec![None; names.len()],
                     local_specials: specials.clone(),
                     pending_specials: self.pending_specials.clone(),
                     dynamic_scope: a[2] == Value::NIL,
@@ -398,6 +402,7 @@ impl Vm {
                     file_level: false,
                     // GNU's interpreted closure evaluates the structure it holds.
                     evaluated: true,
+                    interpreting: false,
                 };
                 let function = self.install_function(Function {
                     capture_mutations: vec![true; names.len()],

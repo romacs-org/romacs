@@ -140,10 +140,19 @@ impl Vm {
                 self.mode_line_forms.clear();
                 Ok(if n == 0 { Value::NIL } else { self.stack[start] })
             }
-            Daemonp => Ok(Value::NIL),
-            DaemonInitialized => {
-                Err("This function can only be called if emacs is run as a daemon".into())
+            // emacs.c Fdaemonp: a server's name, as `--fg-daemon=NAME''s.
+            Daemonp => match crate::host::daemon() {
+                Some(name) => self.literal(&Form::String(name.to_owned())),
+                None => Ok(Value::NIL),
+            },
+            // emacs.c Fdaemon_initialized: a server is initialized once it
+            // listens, before any Lisp can call this.
+            DaemonInitialized => Err(if crate::host::daemon().is_some() {
+                "The daemon has already been initialized"
+            } else {
+                "This function can only be called if emacs is run as a daemon"
             }
+            .into()),
             LocateLibrary => self.eval_locate_library(start, n),
             _ => unreachable!(),
         }

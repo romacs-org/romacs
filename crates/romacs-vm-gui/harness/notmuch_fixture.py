@@ -20,8 +20,10 @@ import json
 import os
 from pathlib import Path
 import random
+import struct
 import subprocess
 import sys
+import zlib
 
 SEED = 'romacs-real-notmuch-1'
 OWNER = Address('Owner Example', 'owner', 'example.org')
@@ -45,8 +47,15 @@ TOPICS = ['Project notes for Friday', 'Lab rotation schedule', 'Ελληνικά
 WORDS = ('alpha beta gamma delta notes plan review draft schedule meeting result patch '
          'thread search index value table figure slide budget ticket weekend coffee').split()
 GREEK = 'Καλημέρα σε όλους, το πρόγραμμα αλλάζει την Πέμπτη.'
-PNG = bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
-                    '1f15c4890000000d49444154789c6360f8cf00000301010018dd8db00000000049454e44ae426082')
+
+
+def png_chunk(kind, data):
+    return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+
+# One opaque red pixel, a PNG any decoder takes.
+PNG = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
+       + png_chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00\xff')) + png_chunk(b'IEND', b''))
 
 
 def paragraph(rng, words=40):

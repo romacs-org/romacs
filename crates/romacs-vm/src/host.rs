@@ -2485,12 +2485,15 @@ pub fn take_terminate_quit() -> bool {
 }
 
 /// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
-/// standard input, this process's stderr. Its pid; the caller reaps.
+/// standard input, this process's stderr. Its standard output is null: a
+/// worker's Lisp is batch, but the output it would write (`ding''s BEL,
+/// `princ' to t) is no one's, and this process's may be a session's log.
+/// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
-    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
     Ok(command.spawn()?.id() as i32)
 }
 
@@ -2547,26 +2550,47 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// profiler.c's SIGPROF timer, as a thread that only counts: every
 /// INTERVAL nanoseconds it looks at the calling thread, and when that
 /// thread is running, adds one to TICKS. A late wake samples once: the
-/// thread's state over the intervals it missed is unknown. The evaluator takes them at its next
-/// call boundary, a moment later, under the stack that was running. A
-/// sample is never counted for a thread that waits, so like GNU's
-/// CLOCK_THREAD_CPUTIME_ID timer the samples measure the thread's CPU time,
-/// and no wait is charged with work done before it. (A thread CPU-time
-/// timer itself is not used: under a zero RLIMIT_RTTIME hard limit
-/// Linux kills a thread whose CPU timer fires.) Dropping the sender ends
-/// the thread.
+/// thread's state over the intervals it missed is unknown. The evaluator
+/// takes them at its next call boundary, a moment later, under the stack
+/// that was running. A sample is never counted for a thread that waits,
+/// so like GNU's CLOCK_THREAD_CPUTIME_ID timer the samples measure the
+/// thread's CPU time, and no wait is charged with work done before it.
+/// Running means on a CPU: the thread's CPU clock advances between two
+/// reads. Its scheduler state would not do, since `R' also holds while a
+/// woken thread waits for a CPU, and on a loaded host that wait follows
+/// every sleep. (A thread CPU-time timer itself
+/// is not used: under a zero RLIMIT_RTTIME hard limit Linux kills a
+/// thread whose CPU timer fires.) Dropping the sender ends the thread.
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
-    use std::os::unix::fs::FileExt;
     effect(|| "cpu profiler sampler".into())?;
+    let mut clock: libc::clockid_t = 0;
+    match unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) } {
+        0 => {}
+        error => return Err(io::Error::from_raw_os_error(error)),
+    }
+    let cpu_time = move || {
+        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+        (unsafe { libc::clock_gettime(clock, &mut time) } == 0).then_some((time.tv_sec, time.tv_nsec))
+    };
+    // A thread allowed only one CPU shares it with the sampler, which
+    // never sees it there: for it, runnable has to stand for running.
+    // Read once: an affinity changed later takes a profiler restart.
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    status(unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) })?;
+    let alone = unsafe { libc::CPU_COUNT(&cpus) } == 1;
     let stat = File::open("/proc/thread-self/stat")?;
     // stat's third field, after the parenthesized command name.
-    let running = move || {
+    let runnable = move || {
+        use std::os::unix::fs::FileExt;
         let mut text = [0u8; 512];
         let n = stat.read_at(&mut text, 0).ok()?;
         let close = text[..n].iter().rposition(|&b| b == b')')?;
         Some(text.get(close + 2) == Some(&b'R'))
     };
-    running().ok_or_else(|| io::Error::other("unreadable thread state"))?;
+    // A clock read is a system call, so a thread on a CPU has run between
+    // two of them; a waiting one has not.
+    let running = move || Some(cpu_time()? < cpu_time()? || alone && runnable()?);
+    running().ok_or_else(|| io::Error::other("unreadable thread CPU clock"))?;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let period = std::time::Duration::from_nanos(interval.max(100_000));
     std::thread::Builder::new().name("romacs-profiler".into()).stack_size(64 * 1024).spawn(move || {
@@ -2577,7 +2601,7 @@ pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::Atomi
                 _ => break,
             }
             due = next_sample(due, Instant::now(), period);
-            // The profiled thread is gone: its state no longer reads.
+            // The profiled thread is gone: its clock no longer reads.
             let Some(running) = running() else { break };
             if running {
                 ticks.fetch_add((period.as_nanos() as u64 / interval).max(1), std::sync::atomic::Ordering::Relaxed);
@@ -2614,6 +2638,20 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
+/// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
+/// for the whole process.
+static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_daemon(name: &str) {
+    let _ = DAEMON.set(name.to_owned());
+}
+
+/// The name `daemonp' answers, while this process is a server.
+pub fn daemon() -> Option<&'static str> {
+    DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.

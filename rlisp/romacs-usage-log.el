@@ -16,7 +16,9 @@
 ;;       input itself counts the wait);
 ;;   {"kind":"error","command":C,"mode":M,"error":"(SYMBOL . MESSAGE)"}
 ;;       an error the command loop reported, through `command-error-function',
-;;       M the current buffer's major mode;
+;;       M the current buffer's major mode; "user":true besides when it is
+;;       the user's own (`romacs-usage-log-user-error-p': a C-g, the
+;;       buffer's end, a refusing command);
 ;;   {"kind":"refusal","class":MESSAGE,"mode":M,"n":N}
 ;;       how often a displayed window's layout question in major mode M
 ;;       was answered by approximation where the host's measurement refused
@@ -51,6 +53,21 @@
 ;; A message can still hold text an error was given, such as a search's.
 
 ;;; Code:
+
+(defconst romacs-usage-log-user-conditions
+  '(beginning-of-buffer end-of-buffer quit minibuffer-quit user-error text-read-only buffer-read-only
+    mark-inactive)
+  "Error conditions an ordinary action of the user's raises (moving past
+the buffer's end, a C-g, a command refusing, typing into read-only text):
+no fault of the editor's.  Reports set them apart.")
+
+(defun romacs-usage-log-user-error-p (data)
+  "Whether error DATA, (SYMBOL . DATA), is one of `romacs-usage-log-user-conditions'."
+  (and (symbolp (car-safe data))
+       (let ((conditions (get (car data) 'error-conditions)))
+         (while (and conditions (not (memq (car conditions) romacs-usage-log-user-conditions)))
+           (setq conditions (cdr conditions)))
+         (and conditions t))))
 
 (defvar romacs-usage-log-file nil
   "The file this session logs its commands to, or nil when it does not.")
@@ -222,14 +239,15 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                           (equal (aref capture 0) kind) (eq (aref capture 1) (cdr-safe data))
                           (aref capture 2))))
         (setq romacs-usage-log--capture nil)
-        (if (not frames)
-            (romacs-usage-log--push :kind "error" :command command :mode (romacs-usage-log--name major-mode)
-                                    :error (romacs-usage-log--error-text data))
-          (puthash kind t romacs-usage-log--traced)
-          (remhash kind romacs-usage-log--captured)
-          (romacs-usage-log--push :kind "error" :command command :mode (romacs-usage-log--name major-mode)
-                                  :error (romacs-usage-log--error-text data)
-                                  :backtrace (vconcat frames))))
+        (let ((record (list :kind "error" :command command :mode (romacs-usage-log--name major-mode)
+                            :error (romacs-usage-log--error-text data))))
+          ;; The user's own, apart: `romacs-usage-log-user-error-p'.
+          (when (romacs-usage-log-user-error-p data) (setq record (append record (list :user t))))
+          (when frames
+            (puthash kind t romacs-usage-log--traced)
+            (remhash kind romacs-usage-log--captured)
+            (setq record (append record (list :backtrace (vconcat frames)))))
+          (apply #'romacs-usage-log--push record)))
     (error nil)))
 
 (defun romacs-usage-log--seconds ()

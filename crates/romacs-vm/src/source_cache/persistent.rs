@@ -139,6 +139,9 @@ impl Vm {
                     | Op::Global(_, s)
                     | Op::SetGlobal(s, _)
                     | Op::Bind(s, _)
+                    | Op::BindLate(s, _)
+                    | Op::ReadLate(_, _, s)
+                    | Op::WriteLate(_, _, s)
                     | Op::Define(s, _)
                     | Op::DefineMacro(s, _)
                     | Op::Sealed(_, s, _, _) => *s = slots[*s],
@@ -219,6 +222,10 @@ fn valid_artifact(a: &Artifact) -> bool {
                 Op::Move(d, x) | Op::ReadCell(d, x) | Op::WriteCell(d, x) => r(d) && r(x),
                 Op::Cell(d) | Op::Return(d) => r(d),
                 Op::Global(d, x) => r(d) && s(x),
+                Op::ReadLate(d, x, slot) | Op::WriteLate(d, x, slot) => r(d) && r(x) && s(slot),
+                Op::BindLate(slot, d) => s(slot) && r(d),
+                Op::UnbindLate(d) => r(d),
+                Op::LateForwarded(d, x) => r(d) && r(x),
                 Op::SetGlobal(x, d) | Op::Bind(x, d) | Op::Define(x, d) | Op::DefineMacro(x, d) => {
                     s(x) && r(d)
                 }
