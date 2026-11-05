@@ -1,6 +1,6 @@
-//! GNU xfaces.c's live face registry. The Lisp lface vectors are
-//! authoritative; attribute changes on a frame are mirrored into the display
-//! theme, which realizes them.
+//! GNU xfaces.c's live face registry. The Lisp lface vectors are the one
+//! copy of a face: the display realizes from them when it shows a face, and
+//! a change on a displayed frame only drops what it had realized.
 use super::*;
 use crate::prim::leaf::Kind;
 use crate::prim::FaceKeys;
@@ -29,8 +29,7 @@ pub(super) fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) ->
 
 /// Whether the display realizes faces from FRAME's: every frame but a child
 /// frame, which the display draws with its root frame's faces
-/// (DIVERGENCES.md VM2-CHILD-FRAME). A theme recomputes each face on every
-/// frame; mirroring only these keeps the display's work one frame's.
+/// (DIVERGENCES.md VM2-CHILD-FRAME).
 pub(super) fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
     Ok(!cx.windows().is_child_frame(frame)?)
 }
@@ -134,14 +133,10 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
         cx.vector_set(copy, index, value)?;
     }
     // A frame's realized faces follow its named faces (face_change).
-    let no_inherit = cx.intern("face-no-inherit");
-    if target != Value::NIL && displayed_faces(cx, target)? && cx.face_property(to, no_inherit)? == Value::NIL {
-        let name = cx.symbol_name(to)?;
-        for (index, keyword) in LFACE_ATTRIBUTES.iter().enumerate() {
-            let value = cx.vector_get(copy, Value::integer((index + 1) as i64).unwrap())?;
-            let mirrored = theme_value(cx, keyword, value, target)?;
-            cx.theme_face_attribute(&name, keyword, mirrored);
-        }
+    if target != Value::NIL && shows_changes(cx, to, target)? {
+        let height = cx.vector_get(copy, Value::integer(slot::HEIGHT as i64).unwrap())?;
+        note_height(cx, to, height, target)?;
+        cx.clear_face_cache();
     }
     Ok(to)
 }}
@@ -183,17 +178,12 @@ pub(super) fn merge_in_global(cx: &mut Leaf<'_>, face: Value, frame: Value) -> O
         if !cx.equal(old, value).map_err(|_| Fault::Circular(value))? { changes.push((index, value)); }
     }
     if changes.is_empty() { return Ok(Value::NIL); }
-    let no_inherit = cx.intern("face-no-inherit");
-    let mirror = displayed_faces(cx, frame)? && cx.face_property(resolved, no_inherit)? == Value::NIL;
-    let name = cx.symbol_name(resolved)?;
+    let shown = shows_changes(cx, resolved, frame)?;
     for (index, value) in changes {
         cx.vector_set(local, Value::integer(index as i64).unwrap(), value)?;
-        if mirror {
-            let keyword = LFACE_ATTRIBUTES[index - 1];
-            let mirrored = theme_value(cx, keyword, value, frame)?;
-            cx.theme_face_attribute(&name, keyword, mirrored);
-        }
+        if shown && index == slot::HEIGHT { note_height(cx, resolved, value, frame)?; }
     }
+    if shown { cx.clear_face_cache(); }
     Ok(Value::NIL)
 }
 
@@ -407,17 +397,26 @@ fn function_height(cx: &mut Leaf<'_>, function: Value, under: i64) -> std::resul
     Ok(cx.safe_call(function, &[Value::integer(under).unwrap()]).integer_value())
 }
 
-/// The theme holds data only (romacs-face): a function :height is mirrored
-/// as its value over the default face's height (DIVERGENCES.md VM2-FACEFN1).
-fn theme_value(cx: &mut Leaf<'_>, keyword: &str, value: Value, frame: Value) -> std::result::Result<Value, Fault> {
-    if keyword != ":height" || value.integer_value().is_some() || cx.kind(value) == Kind::Float { return Ok(value); }
-    let default = cx.intern("default");
-    let lface = cx.face_lookup(default, frame)?;
-    let under = if lface == Value::NIL { None } else { cx.vector_get(lface, Value::integer(4).unwrap())?.integer_value() };
-    Ok(match under {
-        Some(under) => function_height(cx, value, under)?.map_or(value, |h| Value::integer(h).unwrap()),
-        None => value,
-    })
+/// Whether a change to FACE on FRAME reaches the display: every frame but
+/// a child frame, which it draws with its root's faces (VM2-CHILD-FRAME),
+/// and every face but one GNU marks as changing nothing a redisplay shows.
+pub(super) fn shows_changes(cx: &mut Leaf<'_>, face: Value, frame: Value) -> std::result::Result<bool, Fault> {
+    let keys = cx.face_keys();
+    Ok(displayed_faces(cx, frame)? && cx.face_property(face, keys.face_no_inherit)? == Value::NIL)
+}
+
+/// Realising a face runs no Lisp, so a function `:height' is noted here as
+/// its value over the default face's height on FRAME when it is set
+/// (DIVERGENCES.md VM2-FACEFN1).
+pub(super) fn note_height(cx: &mut Leaf<'_>, face: Value, value: Value, frame: Value) -> std::result::Result<(), Fault> {
+    let name = cx.symbol_name(face)?;
+    let keys = cx.face_keys();
+    let lface = cx.face_lookup(keys.default, frame)?;
+    let under = if lface == Value::NIL { None } else { cx.vector_get(lface, Value::integer(slot::HEIGHT as i64).unwrap())?.integer_value() };
+    let height = if value.integer_value().is_some() || cx.kind(value) == Kind::Float || is_special(&keys, value) { None }
+        else { match under { Some(under) => function_height(cx, value, under)?, None => None } };
+    cx.note_face_height(name, height);
+    Ok(())
 }
 
 /// The lface slots, as LFACE_ATTRIBUTES orders them.
@@ -606,14 +605,6 @@ pub(super) fn slot_effects(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, inde
     Ok(())
 }
 
-/// FACE's slot INDEX on the display, its value resolved as the theme holds it.
-pub(super) fn mirror_slot(cx: &mut Leaf<'_>, name: &str, index: usize, value: Value, frame: Value) -> std::result::Result<(), Fault> {
-    let keyword = LFACE_ATTRIBUTES[index - 1];
-    let mirrored = theme_value(cx, keyword, value, frame)?;
-    cx.theme_face_attribute(name, keyword, mirrored);
-    Ok(())
-}
-
 pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut value: Value, frame: Value) -> Out {
     if cx.kind(face) != Kind::Symbol { return Err(Fault::Wrong("symbolp", face)); }
     if cx.kind(attr) != Kind::Symbol { return Err(Fault::Wrong("symbolp", attr)); }
@@ -657,9 +648,9 @@ pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Valu
     let old = cx.vector_get(lface, at)?;
     cx.vector_set(lface, at, value)?;
     let changed = !cx.equal(old, value).map_err(|_| Fault::Circular(value))?;
-    if !global && changed && displayed_faces(cx, frame)? && cx.face_property(face, keys.face_no_inherit)? == Value::NIL {
-        let face_name = cx.symbol_name(face)?;
-        mirror_slot(cx, &face_name, index, value, frame)?;
+    if !global && changed && shows_changes(cx, face, frame)? {
+        if index == slot::HEIGHT { note_height(cx, face, value, frame)?; }
+        cx.clear_face_cache();
     }
     if changed && !is_special(&keys, value) { slot_effects(cx, &keys, face, index, value, frame, global)?; }
     Ok(face)

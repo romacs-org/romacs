@@ -90,17 +90,17 @@ impl Vm {
         // Kept for a click, which reads it as a string (`status_bar_target').
         self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
         let table = self.display_faces()?;
-        let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
+        let base = self.named(&table, "mode-line-active").or_else(|| self.named(&table, "mode-line")).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
         let marks = self.band_marks(&text, &props, &segments, &table)?;
         // The bar's faces: its base face first, then those its runs use.
-        let mut faces = vec![table.faces[base.0 as usize].clone()];
+        let mut faces = vec![table.face(base)];
         let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
         let mut face_runs = vec![];
         for (bytes, name) in runs {
-            let Some(handle) = table.handle(&name) else { continue };
+            let Some(handle) = self.named(&table, &name) else { continue };
             let face = *local.entry(handle.0).or_insert_with(|| {
-                faces.push(table.faces[handle.0 as usize].clone());
+                faces.push(table.face(handle));
                 FaceHandle(faces.len() as u32 - 1)
             });
             face_runs.push(FaceRun { bytes, face });
@@ -248,7 +248,7 @@ impl Vm {
     /// The segment PROJECTED names over BYTES, if it names one.
     fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable) -> Option<Segment> {
         let value = |name: &str| projected.iter().find(|(n, _)| *n == name).and_then(|(_, form)| self.ml_form_name(form));
-        let face = |name: &str| value(name).and_then(|face| table.handle(&face)).map(|h| &table.faces[h.0 as usize]);
+        let face = |name: &str| value(name).and_then(|face| self.named(table, &face)).map(|h| table.face(h));
         let name = value("romacs-segment")?;
         let pill = face("romacs-pill").map(|f| Pill { background: f.background, radius: PILL_RADIUS,
                                                       foreground: face("romacs-pill-text").map(|t| t.foreground) });

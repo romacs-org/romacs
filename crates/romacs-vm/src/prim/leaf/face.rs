@@ -79,26 +79,11 @@ impl FaceKeys {
 }
 
 impl Vm {
-    pub(crate) fn register_declared_face(&mut self, face: Value, definition: romacs_face::FaceDef) -> crate::Result<()> {
-        use romacs_face::{Attribute, Datum};
-        let slots = romacs_face::registry::LFACE_ATTRIBUTES.iter().map(|name| {
-            if *name == ":inherit" {
-                definition.inherit().map_or("unspecified".to_owned(), |parents| {
-                    Datum::List(parents.iter().map(|name| Datum::symbol(name)).collect()).to_lisp()
-                })
-            } else {
-                Attribute::from_keyword(name).map_or("unspecified".to_owned(), |attribute| {
-                    definition.attrs().get(attribute).to_lisp()
-                })
-            }
-        }).collect::<Vec<_>>().join(" ");
-        let source = format!("[face {slots}]");
-        let global = self.read_source_raw(&source)?.ok_or("missing face vector")?.0;
-        let local = self.read_source_raw(&source)?.ok_or("missing face vector")?.0;
-        let frame = self.selected_frame_value()?;
+    /// `#:vm2-defface': FACE from SPEC, without faces.el.
+    pub(crate) fn declare_face(&mut self, face: Value, spec: Value) -> crate::Result<()> {
         let mut leaf = Leaf { vm: self };
-        leaf.face_insert(face, Value::NIL, global).map_err(|_| "cannot register declared face")?;
-        leaf.face_insert(face, frame, local).map_err(|_| "cannot register frame face")?;
+        crate::prim::prims::face_spec::declare(&mut leaf, face, spec).map_err(|_| "cannot declare face".to_owned())?;
+        self.display_state.faces_changed();
         Ok(())
     }
 
@@ -292,6 +277,8 @@ impl Leaf<'_> {
             self.cons(value, vector)
         } else { vector };
         self.vm.declaration_hash_put(table, face, value).map_err(Fault::Error)?;
+        // The display may have asked for this name while it was no face.
+        self.vm.display_state.faces_changed();
         Ok(vector)
     }
 

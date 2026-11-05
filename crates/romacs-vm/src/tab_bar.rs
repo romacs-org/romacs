@@ -39,17 +39,17 @@ impl Vm {
                 named.push((byte, self.ml_face_name(value)));
             }
         }
-        let base = table.handle("tab-bar").or_else(|| table.handle("default")).ok_or("tab-bar face required")?;
-        let mut faces = vec![table.faces[base.0 as usize].clone()];
+        let base = self.named(&table, "tab-bar").or_else(|| self.named(&table, "default")).ok_or("tab-bar face required")?;
+        let mut faces = vec![table.face(base)];
         let mut handles: Vec<(u32, FaceHandle)> = vec![];
         let mut face_runs = vec![];
         for (i, (start, name)) in named.iter().enumerate() {
             let end = named.get(i + 1).map_or(text.len(), |next| next.0);
-            let Some(handle) = name.as_deref().and_then(|name| table.handle(name)) else { continue };
+            let Some(handle) = name.as_deref().and_then(|name| self.named(&table, name)) else { continue };
             let local = match handles.iter().find(|(h, _)| *h == handle.0) {
                 Some((_, local)) => *local,
                 None => {
-                    faces.push(table.faces[handle.0 as usize].clone());
+                    faces.push(table.face(handle));
                     let local = FaceHandle(faces.len() as u32 - 1);
                     handles.push((handle.0, local));
                     local

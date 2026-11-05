@@ -789,7 +789,7 @@ fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
 #[test]
 fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
     for (change, color) in [("(internal-set-lisp-face-attribute 'reuse-face :foreground \"#ff0000\" nil)", [255, 0, 0]),
-                            ("(defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\")", [0, 255, 0])] {
+                            ("(progn (defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\") (put-text-property 1 2 'face 'reuse-new))", [0, 255, 0])] {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         vm.set_frame_geometry(800, 600, 24, 12).unwrap();

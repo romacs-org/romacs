@@ -124,8 +124,10 @@ thousandth a stack mark."
            (deftheme scaling-switch "N faces.")
            (apply #'custom-theme-set-faces 'scaling-switch
                   (mapcar (lambda (face) `(,face ((t :foreground "#a0b0c0" :weight bold)))) faces))
-           faces)
-  :body (progn (enable-theme 'scaling-switch) (disable-theme 'scaling-switch)))
+           (switch-to-buffer (get-buffer-create "scaling-switch")))
+  ;; None of the faces shows, so the step paints by typing.
+  :body (progn (enable-theme 'scaling-switch) (disable-theme 'scaling-switch)
+               (with-current-buffer it (insert "x"))))
 
 ;; A theme switch over N package faces no theme mentions, each with a
 ;; spec that depends on the background mode.
@@ -161,6 +163,51 @@ thousandth a stack mark."
            n)
   :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
 
+;; A face edit after N faces were realised: what the table held is dropped,
+;; and only the one face still shown is realised again.
+(scaling-probe faces-display-warm :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-warm" n))))
+           (dolist (face faces) (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (let ((buffer (get-buffer-create "scaling-warm")))
+             (with-current-buffer buffer
+               (dolist (face faces) (insert (propertize "x" 'face face))))
+             (switch-to-buffer buffer)
+             (redisplay t)
+             (with-current-buffer buffer
+               (erase-buffer)
+               (insert (propertize "x" 'face (car faces))))
+             (redisplay t)
+             (cons buffer faces)))
+  :body (progn (set-face-attribute (cadr it) nil :foreground "#102030")
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One shown face at the end of an inheritance chain of N: realising it walks
+;; the chain once, as GNU's merge_named_face does.
+(scaling-probe faces-inherit-chain :gui t :n 50 :steps 1
+  :setup (let* ((faces (mapcar #'intern (scaling--names "scaling-chain" n)))
+                (parent nil))
+           (dolist (face faces)
+             (custom-declare-face face `((t :inherit ,parent)) "A scaling face." :group 'scaling)
+             (setq parent face))
+           (let ((buffer (switch-to-buffer (get-buffer-create "scaling-chain"))))
+             (insert (propertize "x" 'face parent))
+             (cons buffer faces)))
+  :body (progn (set-face-attribute (cadr it) nil :foreground "#102030")
+               (with-current-buffer (car it) (insert "x"))))
+
+;; N shown faces inheriting one face, which an edit changes: each is
+;; realised again, once.
+(scaling-probe faces-shared-ancestor :gui t :n 50 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-shared" n))))
+           (custom-declare-face 'scaling-shared-parent '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling)
+           (dolist (face faces)
+             (custom-declare-face face '((t :inherit scaling-shared-parent)) "A scaling face." :group 'scaling))
+           (let ((buffer (switch-to-buffer (get-buffer-create "scaling-shared"))))
+             (dolist (face faces) (insert (propertize "x" 'face face)))
+             buffer))
+  :body (progn (set-face-attribute 'scaling-shared-parent nil :foreground "#102030")
+               (with-current-buffer it (insert "x"))))
+
 ;; `supports' over N distinct font queries: a query's fonts are listed once.
 (scaling-probe faces-supports-queries :gui t :n 50 :steps 1
   :setup (cons (switch-to-buffer (get-buffer-create "scaling-supports"))
@@ -179,10 +226,12 @@ thousandth a stack mark."
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
-           faces)
-  :body (dolist (face it)
-          (set-face-attribute face nil :foreground "red")
-          (face-attribute face :foreground)))
+           (cons (switch-to-buffer (get-buffer-create "scaling-edit")) faces))
+  ;; None of the faces shows, so the step paints by typing.
+  :body (progn (dolist (face (cdr it))
+                 (set-face-attribute face nil :foreground "red")
+                 (face-attribute face :foreground))
+               (with-current-buffer (car it) (insert "x"))))
 
 ;;;; Buffers, markers, overlays, text properties, undo
 

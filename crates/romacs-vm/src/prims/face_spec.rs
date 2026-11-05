@@ -4,7 +4,7 @@
 //! land where GNU's do; what goes is the Lisp around each write
 //! (DIVERGENCES.md VM2-FACE-ENGINE).
 use super::*;
-use super::face::{carries_effects, display_supports, graphic_record, make_lisp_face, mirror_slot, resolve, signal, slot, slot_effects, validate};
+use super::face::{carries_effects, display_supports, graphic_record, make_lisp_face, note_height, resolve, shows_changes, signal, slot, slot_effects, validate};
 use crate::prim::{FaceKeys, Kind};
 use romacs_face::registry::LFACE_VECTOR_SIZE;
 
@@ -67,15 +67,31 @@ fn window_system_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, options: Value, fra
         || (asks(cx, "x-toolkit") && featurep(cx, "x-toolkit")?))
 }
 
+/// Without romacs-frame.el's display record there is one display to answer
+/// for: the graphical truecolour one GNU's specs call pgtk, on a dark frame.
+fn bare_display_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, req: Value, options: Value) -> bool {
+    let asks = |cx: &mut Leaf<'_>, name: &str| { let option = cx.intern(name); memq(cx, option, options) };
+    if req == keys.type_condition {
+        return asks(cx, "romacs") || asks(cx, "pgtk") || asks(cx, "graphic") || asks(cx, "gtk");
+    }
+    if req == keys.class { return asks(cx, "color"); }
+    if req == keys.background { return asks(cx, "dark"); }
+    true
+}
+
 /// `face-spec-set-match-display'.
 fn display_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, display: Value, frame: Value) -> std::result::Result<bool, Fault> {
+    let record = cx.intern("romacs-display");
+    let bare = cx.variable_value(record)?.is_none();
     let mut conjuncts = if display == Value::TRUE { Value::NIL } else { display };
     let mut matched = true;
     while conjuncts != Value::NIL && matched {
         let (conjunct, rest) = uncons(cx, conjuncts)?;
         conjuncts = rest;
         let (req, options) = uncons(cx, conjunct)?;
-        matched = if req == keys.type_condition {
+        matched = if bare {
+            bare_display_matches(cx, keys, req, options)
+        } else if req == keys.type_condition {
             window_system_matches(cx, keys, options, frame)?
         } else if req == keys.min_colors {
             let cells = color_cells(cx)?;
@@ -184,52 +200,52 @@ fn split_family(cx: &mut Leaf<'_>, family: Value, foundry: Value) -> (Value, Val
     (cx.string(second), foundry)
 }
 
-/// The face and frame one replay writes, and what the display has not
-/// seen yet. Writes go straight to the vector; only the display mirror is
-/// held back, to one write per changed slot.
+/// The face and frame one replay writes.
 struct Replay {
     keys: FaceKeys,
     face: Value,
     frame: Value,
     lface: Value,
     effects: bool,
-    /// The face's name, when the display follows it.
-    name: Option<String>,
-    /// The vector as the display last saw it.
-    shown: [Value; LFACE_VECTOR_SIZE],
+    /// Whether the display shows this face on this frame.
+    shown: bool,
+    /// Whether what the display realized is gone since Lisp last ran: a
+    /// callback may realize faces from the vector as it stands.
+    invalidated: bool,
 }
 
 impl Replay {
-    /// Tell the display what changed: before Lisp can look, and at the end.
-    fn show(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
-        let Some(name) = self.name.take() else { return Ok(()) };
-        for index in 1..LFACE_VECTOR_SIZE {
-            let value = cx.vector_get(self.lface, slot_value(index))?;
-            if value != self.shown[index] && !cx.equal(value, self.shown[index]).map_err(|_| Fault::Circular(value))? {
-                mirror_slot(cx, &name, index, value, self.frame)?;
-            }
-            self.shown[index] = value;
+    /// Before a slot changes: every exit after a write has invalidated.
+    fn invalidate(&mut self, cx: &mut Leaf<'_>) {
+        if self.shown && !self.invalidated {
+            cx.clear_face_cache();
+            self.invalidated = true;
         }
-        self.name = Some(name);
-        Ok(())
     }
 
     fn store(&mut self, cx: &mut Leaf<'_>, index: usize, value: Value) -> std::result::Result<(), Fault> {
         let at = slot_value(index);
         let old = cx.vector_get(self.lface, at)?;
+        if old != value { self.invalidate(cx); }
         cx.vector_set(self.lface, at, value)?;
+        if self.shown && index == slot::HEIGHT {
+            note_height(cx, self.face, value, self.frame)?;
+            self.invalidated = false;
+        }
         if !self.effects || value == self.keys.unspecified || value == self.keys.ignore_defface || value == self.keys.reset { return Ok(()); }
         if cx.equal(old, value).map_err(|_| Fault::Circular(value))? { return Ok(()); }
-        self.show(cx)?;
-        slot_effects(cx, &self.keys, self.face, index, value, self.frame, false)
+        let done = slot_effects(cx, &self.keys, self.face, index, value, self.frame, false);
+        self.invalidated = false;
+        done
     }
 
     /// `internal-set-lisp-face-attribute' on the frame.
     fn write(&mut self, cx: &mut Leaf<'_>, attr: Value, value: Value) -> std::result::Result<(), Fault> {
-        // A function's :height runs Lisp in validation.
-        if attr == self.keys.keywords[slot::HEIGHT - 1] && value.integer_value().is_none() && cx.kind(value) != Kind::Float { self.show(cx)?; }
         let keys = self.keys;
-        match validate(cx, &keys, self.face, attr, value, self.frame, false)? {
+        let checked = validate(cx, &keys, self.face, attr, value, self.frame, false);
+        // A function's :height runs Lisp in validation.
+        if attr == keys.keywords[slot::HEIGHT - 1] { self.invalidated = false; }
+        match checked? {
             Some((index, value)) => self.store(cx, index, value),
             None => Ok(()),
         }
@@ -239,11 +255,16 @@ impl Replay {
     fn reset(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
         let keys = self.keys;
         if self.face != keys.default {
-            for index in RESET_SLOTS { cx.vector_set(self.lface, slot_value(index), keys.unspecified)?; }
+            for index in RESET_SLOTS {
+                if cx.vector_get(self.lface, slot_value(index))? != keys.unspecified { self.invalidate(cx); }
+                cx.vector_set(self.lface, slot_value(index), keys.unspecified)?;
+            }
             return Ok(());
         }
         let keyword = |index: usize| keys.keywords[index - 1];
-        if !graphic_record(cx)? {
+        // Before romacs-frame.el there is no terminal to take colours from.
+        let record = cx.intern("romacs-display");
+        if cx.variable_value(record)?.is_some() && !graphic_record(cx)? {
             let selected = cx.face_frame(Value::NIL, true)?;
             let reverse = cx.stored_frame_parameter(selected, keys.reverse) != Value::NIL;
             let name = cx.string("default");
@@ -270,14 +291,15 @@ impl Replay {
     /// through `set-face-attribute': family and foundry first.
     fn apply(&mut self, cx: &mut Leaf<'_>, plist: Value) -> std::result::Result<(), Fault> {
         let keys = self.keys;
-        let known = cx.variable_value(keys.face_x_resources)?.unwrap_or(Value::NIL);
+        // Without faces.el there is no list to filter by: every key is known.
+        let known = cx.variable_value(keys.face_x_resources)?;
         let mut pairs = Vec::with_capacity(8);
         let mut tail = plist;
         while tail != Value::NIL {
             let (attr, rest) = uncons(cx, tail)?;
             let (value, next) = uncons(cx, rest)?;
             tail = next;
-            let mut entries = known;
+            let Some(mut entries) = known else { pairs.push((attr, value)); continue };
             while let Some((entry, more)) = cx.pair(entries) {
                 if cx.pair(entry).is_some_and(|(name, _)| name == attr) { pairs.push((attr, value)); break; }
                 entries = more;
@@ -352,15 +374,25 @@ pub(super) fn recalc(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     if cx.frame_shares_faces(frame)? { return Ok(Value::NIL); }
     let mut lface = cx.face_lookup(face, frame)?;
     if lface == Value::NIL { lface = make_lisp_face(cx, face, frame)?; }
-    let displayed = super::face::displayed_faces(cx, frame)? && cx.face_property(face, keys.face_no_inherit)? == Value::NIL;
-    let name = if displayed { Some(cx.symbol_name(face)?) } else { None };
-    let mut shown = [Value::NIL; LFACE_VECTOR_SIZE];
-    for (index, value) in shown.iter_mut().enumerate() { *value = cx.vector_get(lface, slot_value(index))?; }
-    let mut replay = Replay { keys, face, frame, lface, effects: carries_effects(&keys, face), name, shown };
-    let done = replay.run(cx);
-    // A signal leaves the vector part way, and the display follows it.
-    replay.show(cx)?;
-    done.map(|()| Value::NIL)
+    let shown = shows_changes(cx, face, frame)?;
+    let mut replay = Replay { keys, face, frame, lface, effects: carries_effects(&keys, face), shown, invalidated: false };
+    replay.run(cx).map(|()| Value::NIL)
+}
+
+/// `defface' without faces.el (`#:vm2-defface'): the spec recorded and
+/// applied by the same replay, then kept as the default for new frames.
+pub(crate) fn declare(cx: &mut Leaf<'_>, face: Value, spec: Value) -> std::result::Result<(), Fault> {
+    let keys = cx.face_keys();
+    let frame = cx.face_frame(Value::NIL, true)?;
+    cx.face_put(face, keys.defface_spec, spec)?;
+    if cx.face_lookup(face, Value::NIL)? == Value::NIL { make_lisp_face(cx, face, Value::NIL)?; }
+    recalc(cx, face, frame)?;
+    let (local, global) = (cx.face_lookup(face, frame)?, cx.face_lookup(face, Value::NIL)?);
+    for index in 1..LFACE_VECTOR_SIZE {
+        let value = cx.vector_get(local, slot_value(index))?;
+        cx.vector_set(global, slot_value(index), value)?;
+    }
+    Ok(())
 }
 
 defsubr! { name = "romacs--face-spec-recalc", gnu = "romacs:faces", effect = Global,
