@@ -15,6 +15,7 @@
 (require 'romacs-mcp)
 (require 'cl-lib)
 (require 'seq)
+(require 'romacs-usage-log)
 
 (defvar romacs-mcp-session-secrets-function nil
   "A function of no arguments returning the credentials the session holds.
@@ -24,7 +25,11 @@ Every string an observation reports that contains one becomes \"<secret>\".")
   "Most characters of one observed row or *Messages* line.")
 
 (defvar romacs-mcp-session--last-error nil
-  "The last error the command loop reported, as a JSON object, or nil.")
+  "The last error the command loop reported that was a fault, not the
+user's own (`romacs-usage-log-user-error-p'), as a JSON object, or nil.")
+(defvar romacs-mcp-session--last-user-error nil
+  "The last of the user's own errors the command loop reported (a C-g, the
+buffer's end, a refusing command), as a JSON object, or nil.")
 (defvar romacs-mcp-session--error-count 0)
 (defvar romacs-mcp-session--last-backtrace nil)
 (defvar romacs-mcp-session--previous-command-error nil)
@@ -241,7 +246,8 @@ and at most LINES *Messages* lines."
                  "modified" (romacs-mcp-session--bool (buffer-modified-p))
                  "readOnly" (romacs-mcp-session--bool buffer-read-only)
                  "file" (if buffer-file-name (abbreviate-file-name buffer-file-name) :null)
-                 "directory" (abbreviate-file-name default-directory)))
+                 "directory" (abbreviate-file-name default-directory)
+                 "project" (or (romacs-mcp-session--project) :null)))
      "globalMinorModes" (romacs-mcp-session--minor-modes (bound-and-true-p global-minor-modes))
      "tree" (romacs-mcp-session--tree (frame-root-window) windows)
      "windows" (vconcat (cl-loop for w in windows for i from 0
@@ -260,21 +266,81 @@ and at most LINES *Messages* lines."
      "echo" (let ((message (current-message))) (if message (romacs-mcp-session--string message) :null))
      "messages" (romacs-mcp-session--messages (gethash "messagesFrom" arguments) lines)
      "lastError" (or romacs-mcp-session--last-error :null)
+     "lastUserError" (or romacs-mcp-session--last-user-error :null)
      "lastBacktrace" (or romacs-mcp-session--last-backtrace :null)
-     "buffers" (vconcat (seq-remove (lambda (name) (string-prefix-p " " name))
-                                    (mapcar #'buffer-name (buffer-list)))))))
+     "buffers" (romacs-mcp-session--buffers arguments))))
+
+(declare-function project-root "project" (project))
+
+(defun romacs-mcp-session--project ()
+  "The current buffer's project root, abbreviated, or nil."
+  (when (require 'project nil t)
+    (when-let* ((project (ignore-errors (project-current nil))))
+      (abbreviate-file-name (project-root project)))))
+
+(defconst romacs-mcp-session--private-kinds '("agent" "chat" "mail")
+  "Kinds of buffers whose names are someone's conversation: listed by name
+only when asked for.")
+
+(defun romacs-mcp-session--buffer-kind (buffer processes)
+  "BUFFER's kind: agent, chat, mail, file, directory, process or other;
+PROCESSES is the set of buffers a process has."
+  (with-current-buffer buffer
+    (cond ((or (derived-mode-p 'romacs-agent-chat-mode 'romacs-agents-mode)
+               (string-match-p "\\`\\*\\(agent\\|history\\): " (buffer-name)))
+           "agent")
+          ((or (derived-mode-p 'jabber-chat-mode 'jabber-roster-mode 'erc-mode 'rcirc-mode)
+               (string-prefix-p "*-jabber-" (buffer-name)))
+           "chat")
+          ((or (derived-mode-p 'message-mode 'mail-mode 'notmuch-show-mode 'notmuch-search-mode 'notmuch-tree-mode
+                               'notmuch-hello-mode 'gnus-group-mode 'gnus-summary-mode 'gnus-article-mode
+                               'rmail-mode 'mu4e-headers-mode 'mu4e-view-mode)
+               (string-prefix-p "*notmuch" (buffer-name)))
+           "mail")
+          (buffer-file-name "file")
+          ((derived-mode-p 'dired-mode) "directory")
+          ((gethash buffer processes) "process")
+          (t "other"))))
+
+(defun romacs-mcp-session--buffers (arguments)
+  "The buffers for ARGUMENTS: by default how many of each kind
+\=(`romacs-mcp-session--buffer-kind'); with buffers true their names,
+those of KIND (bufferKind) or matching bufferRegexp, conversations'
+\=(agent, chat, mail) only with private true or their kind asked for."
+  (let* ((kind (gethash "bufferKind" arguments))
+         (regexp (gethash "bufferRegexp" arguments))
+         (list (or (eq (gethash "buffers" arguments) t) kind regexp))
+         (private (or (eq (gethash "private" arguments) t) (member kind romacs-mcp-session--private-kinds)))
+         (counts (romacs-mcp--object)) (names nil)
+         ;; Each process's buffer, once: not a walk of them per buffer.
+         (processes (let ((table (make-hash-table :test #'eq)))
+                      (dolist (process (process-list) table)
+                        (when (buffer-live-p (process-buffer process)) (puthash (process-buffer process) t table))))))
+    (dolist (buffer (buffer-list))
+      (unless (string-prefix-p " " (buffer-name buffer))
+        (let ((this (romacs-mcp-session--buffer-kind buffer processes)))
+          (puthash this (1+ (gethash this counts 0)) counts)
+          (when (and list (or (null kind) (equal kind this))
+                     (or (null regexp) (string-match-p regexp (buffer-name buffer)))
+                     (or private (not (member this romacs-mcp-session--private-kinds))))
+            (push (buffer-name buffer) names)))))
+    (if list (vconcat (nreverse names))
+      (romacs-mcp--object "byKind" counts
+                          "hint" "buffers true lists names; bufferKind, bufferRegexp and private select"))))
 
 ;;; Errors
 
 (defun romacs-mcp-session--command-error (data context caller)
   "Record DATA, the error the command loop reports, then report it as before."
-  (setq romacs-mcp-session--last-error
-        (romacs-mcp--object
-         "serial" (cl-incf romacs-mcp-session--error-count)
-         "message" (romacs-mcp-session--string (error-message-string data))
-         "data" (romacs-mcp-session--print data)
-         "context" (if context (romacs-mcp-session--string context) :null)
-         "command" (romacs-mcp-session--print this-command)))
+  (let ((record (romacs-mcp--object
+                 "serial" (cl-incf romacs-mcp-session--error-count)
+                 "message" (romacs-mcp-session--string (error-message-string data))
+                 "data" (romacs-mcp-session--print data)
+                 "context" (if context (romacs-mcp-session--string context) :null)
+                 "command" (romacs-mcp-session--print this-command))))
+    (if (romacs-usage-log-user-error-p data)
+        (setq romacs-mcp-session--last-user-error record)
+      (setq romacs-mcp-session--last-error record)))
   (funcall (or romacs-mcp-session--previous-command-error #'command-error-default-function)
            data context caller))
 
@@ -430,8 +496,10 @@ At `timeout', answer with which of those had not happened."
      #'romacs-mcp-session--wait-idle (romacs-mcp--object "readOnlyHint" t))
     (romacs-mcp-register-tool
      "romacs_observe"
-     "The frame as shown: selected window and buffer, window tree, rows, mode and header lines, minibuffer, echo, *Messages* since messagesFrom, last error, modes."
-     (romacs-mcp--schema (list instance '("faces" . "boolean") '("maxRows" . "integer") '("messagesFrom" . "integer"))
+     "The frame as shown: selected window and buffer (its mode, point, project), window tree, rows, mode and header lines, minibuffer, echo, *Messages* since messagesFrom, last error (faults; the user's own apart, lastUserError), modes, and how many buffers of each kind. buffers true lists their names (bufferKind or bufferRegexp narrows it); conversations (agent, chat, mail) are named only with private true or their kind asked for."
+     (romacs-mcp--schema (list instance '("faces" . "boolean") '("maxRows" . "integer") '("messagesFrom" . "integer")
+                               '("buffers" . "boolean") '("bufferKind" . "string") '("bufferRegexp" . "string")
+                               '("private" . "boolean"))
                          nil)
      #'romacs-mcp-session--observe (romacs-mcp--object "readOnlyHint" t))))
 

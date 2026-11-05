@@ -91,9 +91,83 @@ fn romacs() -> Vec<String> {
 
 #[test]
 fn signals_enter_the_debugger_as_gnus_do() {
-    let (gnu, ours) = (oracle(), romacs());
-    assert_eq!(gnu.len(), CASES.len(), "GNU printed {gnu:?}");
-    let failures: Vec<String> = CASES.iter().zip(gnu.iter().zip(&ours))
+    compare(CASES, &oracle(), &romacs());
+}
+
+// The call boundary's hooks, against GNU byte-code (bytecode.c's call
+// opcode and Ffuncall): `debug-on-next-call' stops the next Lisp call with
+// `(lambda)' and flags it debug-on-exit; a flagged call that returns gives
+// the debugger `(exit VALUE)' and returns its value; one that a throw or an
+// error ends gives it nothing, and leaves no flag behind. GNU compiles the
+// functions, as Romacs's evaluator always does.
+const HOOK_SETUP: &str = r#"(progn
+  (defun h-target (n) (* n 2))
+  (defun h-throw () (throw 'h-out 'thrown))
+  (defun h-error () (car 1))
+  (defun h-flagged () (backtrace-debug 0 t 'h-flagged) 5)
+  (defun h-unflagged () (backtrace-debug 0 t 'h-unflagged) (backtrace-debug 0 nil 'h-unflagged) 6)
+  (defun h-let () (let ((debug-on-next-call t)) (h-target 3)))
+  (defun h-quoted () (setq debug-on-next-call t) (prog1 (funcall '(lambda () 42)) (setq debug-on-next-call nil)))
+  (defun h-plain (n) (if (> n 0) (h-plain (1- n)) (h-target 1)))
+  (defun h-armed (n) (if (> n 0) (h-armed (1- n)) (setq debug-on-next-call t) (prog1 (h-target 1) (setq debug-on-next-call nil))))
+  (defun h-limit () (let ((max-lisp-eval-depth 200) (n 0))
+    (while (condition-case nil (progn (h-plain n) t) (error nil)) (setq n (1+ n)))
+    (h-armed (1- n))))
+  (defun h-next (thunk) (setq debug-on-next-call t) (prog1 (funcall thunk) (setq debug-on-next-call nil)))
+  (defun h-exit-recorder (&rest args)
+    (push (list args inhibit-debugger debugger-may-continue debug-on-next-call) t-log)
+    (if (eq (car args) 'exit) (list 'replaced (car (cdr args))) nil))
+  (defun h-rearm-recorder (&rest args)
+    (push (list args inhibit-debugger debugger-may-continue debug-on-next-call) t-log)
+    (when (eq (car args) 'error) (setq debug-on-next-call t) (h-target 5) (setq debug-on-next-call nil))
+    nil)
+  (mapc #'byte-compile '(h-rearm-recorder h-target h-throw h-error h-flagged h-unflagged h-let h-quoted h-plain h-armed h-limit h-next h-exit-recorder)))"#;
+
+const HOOK_CASES: &[&str] = &[
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-next (lambda () (h-target 7)))))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (list (catch 'h-out (h-next #'h-throw)) (h-target 1))))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (list (condition-case nil (h-next #'h-error) (error 'caught)) (h-target 2))))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-let)))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-next (lambda () (h-target (+ 1 2))))))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (list (h-flagged) (h-target 4))))",
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-unflagged)))",
+    // A quoted lambda's activation, which the funcall made.
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-quoted)))",
+    // An error's debugger arms the next call again (debug.el's `d').
+    "(lambda () (let ((debugger #'h-rearm-recorder) (debug-on-error t)) (condition-case nil (h-error) ((debug error) 'caught))))",
+    // At the depth limit, both stops borrow the debugger's reserve.
+    "(lambda () (let ((debugger #'h-exit-recorder)) (h-limit)))",
+];
+
+fn hook_oracle() -> Vec<String> {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let cases: String = HOOK_CASES.iter().map(|case| format!("(princ {}) (terpri)", wrap(case))).collect();
+    let source = format!("(progn {SETUP} {HOOK_SETUP} (byte-compile 't-run) {cases})");
+    let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &source])
+        .env("LANG", "C.UTF-8").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap().lines().map(str::to_owned).collect()
+}
+
+fn hook_romacs() -> Vec<String> {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(SETUP).unwrap();
+    vm.eval_source(&HOOK_SETUP.replace("(mapc #'byte-compile", "(quote")).unwrap();
+    HOOK_CASES.iter().map(|case| match vm.eval_source(&wrap(case)).and_then(|v| v.display()) {
+        Ok(text) => serde_json::from_str::<String>(&text).unwrap_or(text),
+        Err(error) => format!("VM error: {error}"),
+    }).collect()
+}
+
+#[test]
+fn call_hooks_enter_the_debugger_as_gnus_byte_code_does() {
+    compare(HOOK_CASES, &hook_oracle(), &hook_romacs());
+}
+
+fn compare(cases: &[&str], gnu: &[String], ours: &[String]) {
+    assert_eq!(gnu.len(), cases.len(), "GNU printed {gnu:?}");
+    let failures: Vec<String> = cases.iter().zip(gnu.iter().zip(ours))
         .filter(|(_, (gnu, ours))| gnu != ours)
         .map(|(case, (gnu, ours))| format!("{case}\n  gnu:    {gnu}\n  romacs: {ours}"))
         .collect();

@@ -11,6 +11,9 @@ struct Bindings {
     mutated: Vec<bool>,
     children: Vec<Vec<(usize, usize)>>,
     unboxed: Vec<bool>,
+    /// A late binding's cell (`Op::BindLate'), which stays a cell: its
+    /// contents say whether it forwards to the dynamic value.
+    late: Vec<bool>,
 }
 
 impl Bindings {
@@ -23,10 +26,15 @@ impl Bindings {
             mutated: vec![false; regs],
             children: vec![Vec::new(); regs],
             unboxed: vec![false; regs],
+            late: vec![false; regs],
         };
         for &op in code {
             match op {
                 Op::WriteCell(reg, _) => index.mutated[reg] = true,
+                Op::BindLate(_, reg) | Op::WriteLate(reg, _, _) => {
+                    index.mutated[reg] = true;
+                    index.late[reg] = true;
+                }
                 Op::Closure(_, function, site) => {
                     for (capture, &source) in sites[site].iter().enumerate() {
                         index.children[source].push((function, capture));
@@ -69,8 +77,10 @@ impl Vm {
         let mut root = self.binding_summary(Bindings::index(&b.code, &b.sites, b.next));
         let mut pending = Vec::new();
         for &op in &b.code {
+            // A late binding no closure shares is unboxed too: the late ops
+            // then work on its register.
             if let Op::Cell(reg) = op
-                && (root.children[reg].is_empty() || !root.mutated[reg])
+                && (root.children[reg].is_empty() || (!root.mutated[reg] && !root.late[reg]))
             {
                 root.unboxed[reg] = true;
                 pending.extend(root.children[reg].iter().copied());

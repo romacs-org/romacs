@@ -106,8 +106,15 @@ def run(output):
         w = connect()
         discover = w.request("server/discover")["result"]
         record("current-discover", discover["resultType"] == "complete" and discover["ttlMs"] == 0, discover)
+        # The entry points, named for a client that defers tools until searched.
+        record("current-discover-instructions",
+               all(name in discover.get("instructions", "") for name in ("romacs_observe", "romacs_eval", "romacs_identity", "romacs_help"))
+               and len(discover["instructions"]) < 800, discover.get("instructions"))
         tools = w.request("tools/list")["result"]
-        record("current-native-tools", len(tools["tools"]) == 8 and tools["cacheScope"] == "private", tools)
+        record("current-native-tools", len(tools["tools"]) == 9 and tools["cacheScope"] == "private", tools)
+        helped = w.request("tools/call", {"name": "romacs_help", "arguments": {}})["result"]
+        record("current-help-groups", not helped["isError"] and "core:" in helped["content"][0]["text"]
+               and "romacs_eval" in helped["content"][0]["text"], helped)
         ping = w.request("ping")["result"]
         record("current-ping-complete", ping.get("resultType") == "complete", ping)
         identity = w.data("romacs_identity", {})
@@ -152,7 +159,7 @@ def run(output):
             legacy.sock.sendall(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
             listed = legacy.request("tools/list", modern=False)["result"]
             record("legacy-" + version + "-list-envelope",
-                   len(listed["tools"]) == 8 and "resultType" not in listed)
+                   len(listed["tools"]) == 9 and "resultType" not in listed)
             for name, meta in [("progress", {"progressToken": "wire-progress"}),
                                ("unrelated", {"example.com/context": "fixture"})]:
                 response = legacy.request("tools/call", {"name": "romacs_eval", "arguments": {
@@ -232,7 +239,7 @@ def run(output):
         # Preserve the predecessor eight-tool control before enabling the module.
         evaluate("(require 'romacs-mcp-editor) (romacs-mcp-enable-editor-tools)")
         read_tools = w.request("tools/list")["result"]["tools"]
-        record("optional-native-read-discovery", len(read_tools) == 10 and
+        record("optional-native-read-discovery", len(read_tools) == 11 and
                {"romacs_eval", "romacs_buffer_list", "romacs_buffer_read"} <=
                {tool["name"] for tool in read_tools})
         evaluate('(with-current-buffer (get-buffer-create "*MCP read fixture*") (erase-buffer) (insert (make-string 100000 ?x) "Ελλάδα\\n\\\"\\\\🙂") (goto-char 100005) (narrow-to-region 100003 100008) (setq native-mcp-read-state (list (point) (point-min) (point-max) (buffer-modified-tick) buffer-undo-list)))')
@@ -296,9 +303,10 @@ def run(output):
         legacy = connect()
         init = legacy.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "legacy-wire", "version": "1"}}, modern=False)
         record("legacy-version", init["result"]["protocolVersion"] == "2025-11-25", init)
+        record("legacy-initialize-instructions", "romacs_observe" in init["result"].get("instructions", ""), init)
         legacy.sock.sendall(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
         listed = legacy.request("tools/list", modern=False)
-        record("legacy-list-envelope", "resultType" not in listed["result"] and len(listed["result"]["tools"]) == 11, listed)
+        record("legacy-list-envelope", "resultType" not in listed["result"] and len(listed["result"]["tools"]) == 12, listed)
         client = executable.with_name("emacsclient" if executable.name.startswith("emacs") else "romacsclient")
         # Retire the endpoint while an active eval yields; old queued work must
         # not migrate to its successor. Active effects are not rolled back.
