@@ -10,7 +10,7 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         text: TextSlice { extends: vec![],
             raw: vec![],
             utf8: "Ωμέγα Hello\nΔ".into(),
@@ -421,4 +421,52 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
         FrameGlyph::Char { baseline, .. } => Some(*baseline), _ => None }).collect();
     assert_eq!(baselines.len(), 3);
     assert!(baselines.iter().all(|&b| b == baselines[0]), "{baselines:?}");
+}
+
+/// An image's slot and slice (produce_image_glyph): its body inside its
+/// margins, the slice as a fraction of the image, the row grown to its
+/// ascent and descent with the text on the same baseline, a relief's
+/// strips around the body, and an image that failed to load as an outline.
+#[test]
+fn images_take_their_slots_on_the_rows_baseline() {
+    use romacs_layout_input::InlineImage;
+    let mut snapshot = scene();
+    snapshot.text = TextSlice { extends: vec![], utf8: "a b\nc d\nz".into(), face_runs: vec![], raw: vec![] };
+    let image = InlineImage { byte: 1, image: 7, width: 48, ascent: 40, descent: 10, body_x: 4, body_y: 5,
+        source: (10, 0, 40, 40), full: (80, 40), relief: 2, relief_background: None };
+    snapshot.images = vec![image, InlineImage { byte: 5, image: 0, width: 30, ascent: 15, descent: 15, body_x: 0, body_y: 0,
+        source: (0, 0, 30, 30), full: (30, 30), relief: 0, relief_background: None }];
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let images: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Image { image_id, x, y, width, height, slot_rect, source_rect, .. } =>
+            Some((image_id.get(), *x, *y, *width, *height, (slot_rect.x, slot_rect.y, slot_rect.width, slot_rect.height), *source_rect)),
+        _ => None,
+    }).collect();
+    let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, baseline, .. } => Some((*char, *x, *baseline)),
+        _ => None,
+    }).collect();
+    let (a, b) = (chars[0], chars[1]);
+    assert_eq!(images.len(), 1, "a failed image draws no image: {images:?}");
+    let (id, x, y, width, height, slot, source) = images[0];
+    assert_eq!((id, width, height), (7, 40.0, 40.0));
+    // The slot after `a', its top the row's ascent less its own above the baseline.
+    let top = a.2 - 40.0;
+    assert_eq!(slot, (a.1 + frame.char_width, top, 48.0, 50.0));
+    assert_eq!((x, y), (slot.0 + 4.0, top + 5.0));
+    assert_eq!(source, romacs_display_protocol::image::ImageSourceRect::new(0.125, 0.0, 0.5, 1.0).unwrap());
+    // `b' after the slot, on the same baseline.
+    assert_eq!((b.0, b.1, b.2), ('b', slot.0 + 48.0, a.2));
+    // The relief: the face's background lighter above the body, darker
+    // below, two pixels each; no sides, as the slice has neither of the
+    // image's side edges.
+    let strips: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Stretch { x, y, width, height, bg, .. } if *width == 2.0 || *height == 2.0 => Some((*x, *y, *width, *height, *bg)),
+        _ => None,
+    }).collect();
+    assert_eq!(strips, [(x - 2.0, y - 2.0, 44.0, 2.0, Color::from_pixel(0x4c4c4c)), (x - 2.0, y + 40.0, 44.0, 2.0, Color::from_pixel(0x404040))]);
+    // The failed image on the next row: a one-pixel outline in the face's foreground.
+    let outline = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { bg, width, height, .. }
+        if *bg == Color::from_pixel(0xffffff) && (*width == 1.0 || *height == 1.0))).count();
+    assert_eq!(outline, 4);
 }

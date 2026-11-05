@@ -273,11 +273,6 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-icons" '("romacs-icon"))
 
 
-;;; Generated autoloads from romacs-image.el
-
-(register-definition-prefixes "romacs-image" '("romacs-"))
-
-
 ;;; Generated autoloads from romacs-install-command.el
 
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))

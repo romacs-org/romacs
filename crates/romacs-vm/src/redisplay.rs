@@ -493,7 +493,7 @@ impl Step {
 /// default first, so that laying it out costs the line rather than the
 /// face table. None for a snapshot whose rows number their lines.
 fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: usize) -> Option<romacs_layout_input::WindowSnapshot> {
-    use romacs_layout_input::{FaceHandle, FaceRun, Stretch, TextSlice, WindowChrome, WindowSnapshot};
+    use romacs_layout_input::{FaceHandle, FaceRun, InlineImage, Stretch, TextSlice, WindowChrome, WindowSnapshot};
     let text = &published.text.utf8;
     if point > text.len() || published.line_numbers.is_some() || !text.is_char_boundary(point) { return None; }
     let from = text[..point].rfind('\n').map_or(0, |at| at + 1);
@@ -507,6 +507,7 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
         .map(|r| FaceRun { bytes: r.bytes.start.max(from) - from..r.bytes.end.min(to) - from, face: handle(r.face) }).collect();
     let raw = published.text.raw.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let stretches = published.stretches.iter().filter(|s| (from..to).contains(&s.byte)).map(|s| Stretch { byte: s.byte - from, width: s.width }).collect();
+    let images = published.images.iter().filter(|i| (from..to).contains(&i.byte)).map(|i| InlineImage { byte: i.byte - from, ..*i }).collect();
     let wrap_flips = published.wrap_flips.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let faces = used.iter().map(|&f| published.faces.get(f as usize).cloned()).collect::<Option<Vec<_>>>()?;
     Some(WindowSnapshot { underline_rules: Default::default(),
@@ -514,7 +515,7 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
         text: TextSlice { extends: vec![], utf8: text[from..to].into(), face_runs, raw },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: published.hscroll, faces, tab_width: published.tab_width, wrap: published.wrap,
-        cursor_off: false, stretches, wrap_flips, line_numbers: None,
+        cursor_off: false, stretches, images, wrap_flips, line_numbers: None,
         // Only the fringes' widths place the row; their bitmaps' faces are not kept.
         chrome: WindowChrome { left_fringe: published.chrome.left_fringe, right_fringe: published.chrome.right_fringe,
             left_margin: published.chrome.left_margin, right_margin: published.chrome.right_margin, ..WindowChrome::default() },

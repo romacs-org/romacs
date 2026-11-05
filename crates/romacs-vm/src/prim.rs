@@ -145,6 +145,7 @@ pub(crate) struct PrimDesc {
 /// the `vm` field is private even to `prims::*` (a child of `prim` would
 /// otherwise see `prim`'s private fields): a leaf body cannot name `Vm`, so it
 /// cannot call `collect`, `execute` or `load`. Proven by compile-fail probe.
+pub(crate) use leaf::graphics::ImageEnv;
 mod leaf {
     use super::super::*;
     use super::Fault;
@@ -1759,6 +1760,7 @@ mod leaf {
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
     mod width;
+    pub(crate) mod graphics;
     mod coding_safe;
     mod coding_mule;
     mod display_motion;
@@ -1784,7 +1786,7 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
 
 /// The display elements WINDOW shows of its buffer from FROM, a line
 /// start, to TO, as a host paints them (Leaf::window_shown_elements).
-pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<Vec<Shown>, Fault> {
+pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<(Vec<Shown>, Vec<romacs_layout_input::InlineImage>), Fault> {
     Leaf::new(vm).window_shown_elements(window, from, to)
 }
 

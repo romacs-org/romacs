@@ -47,7 +47,6 @@ charset-id-internal	needed	lane builtins-b (fonts, coding, images, system, proce
 check-coding-systems-region	absent	no shipped Lisp calls it and it is no command
 clear-charset-maps	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 clear-font-cache	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-clear-image-cache	elsewhere	image lane (design/images.md)
 close-font	absent	no shipped Lisp calls it and it is no command
 color-distance	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 color-gray-p	absent	no shipped Lisp calls it and it is no command
@@ -184,15 +183,7 @@ haiku-set-mouse-absolute-pixel-position	absent	platform: Haiku build only
 haiku-write-node-attribute	absent	platform: Haiku build only
 handle-save-session	absent	no shipped Lisp calls it and it is no command
 handle-switch-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
-image-cache-size	elsewhere	image lane (design/images.md)
-image-flush	elsewhere	image lane (design/images.md)
-image-mask-p	elsewhere	image lane (design/images.md)
-image-metadata	elsewhere	image lane (design/images.md)
-image-size	elsewhere	image lane (design/images.md)
-image-transforms-p	elsewhere	image lane (design/images.md)
-imagemagick-types	elsewhere	image lane (design/images.md)
-imagep	elsewhere	image lane (design/images.md)
-init-image-library	elsewhere	image lane (design/images.md)
+imagemagick-types	absent	pinned GNU is built without ImageMagick: the type is not in image-types
 inotify-allocated-p	absent	inotify debugging helper with no shipped caller
 inotify-watch-list	absent	inotify debugging helper with no shipped caller
 insert-startup-screen	absent	no shipped Lisp calls it and it is no command
@@ -226,8 +217,6 @@ lcms-temp->white-point	absent	Little CMS colour management: not linked
 lcms-xyz->jch	absent	Little CMS colour management: not linked
 lcms2-available-p	absent	Little CMS colour management: not linked
 libxml-parse-xml-region	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-lookup-image	elsewhere	image lane (design/images.md)
-lookup-image-map	elsewhere	image lane (design/images.md)
 lread--substitute-object-in-subtree	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-byte-code	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 make-closure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)

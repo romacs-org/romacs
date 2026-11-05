@@ -15,6 +15,7 @@ mod lazy_tests;
 mod plist_tests;
 mod keymap;
 mod char_table;
+mod graphics;
 mod width_rule;
 mod map_keymap;
 #[cfg(test)]
@@ -50,6 +51,7 @@ pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
 pub use display_host::{DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
 pub use terminal_host::{DEFAULT_ANSI, TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -1257,6 +1259,9 @@ pub struct Vm {
     /// the expander's forms, by variable slot, while the value is the same
     /// object: cleared by every collection, which can move it.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
+    /// GNU's image caches (graphics.rs): facts of the images frames have
+    /// loaded, their pixels the display host's.
+    images: graphics::ImageCache,
     /// The closures `(lambda ...)' lists called as functions compiled to,
     /// by the list object (`Vm::lambda_list_closure'): cleared by every
     /// collection, which can move the lists and what their snapshots hold.
@@ -1662,6 +1667,7 @@ romacs_snapshot::snapshot_fields!(Vm {
 } at_rest {
     regexp_cache,
     mode_line_forms,
+    images,
     lambda_lists,
     status_bar_line,
     suspended_code,
@@ -1736,6 +1742,7 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             mode_line_forms: Default::default(),
+            images: Default::default(),
             lambda_lists: Default::default(),
             status_bar_line: None,
             execution_fatal: false,
