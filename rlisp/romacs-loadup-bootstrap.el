@@ -119,6 +119,8 @@
 (load "term/tty-colors.el" nil t t)
 ;; Romacs owns the display layer of frame.el and faces.el (VM2-DISPLAY1).
 (load "romacs-frame.el" nil t t)
+;; ... and `enable-theme' and `disable-theme' loop over faces natively.
+(load "romacs-custom.el" nil t t)
 ;; GNU computes the active keymaps in C; Romacs in Lisp.
 (load "romacs-keymap.el" nil t t)
 ;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.

@@ -1757,6 +1757,7 @@ mod leaf {
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
+    pub(crate) use face::FaceKeys;
     mod font;
     mod value_order;
     mod completion;
@@ -1789,7 +1790,7 @@ mod leaf {
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, FaceKeys, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {

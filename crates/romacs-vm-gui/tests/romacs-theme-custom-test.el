@@ -13,6 +13,17 @@
   (expand-file-name "../../romacs-face/tests/gnu/fixtures/" (file-name-directory load-file-name))
   "The GNU oracle's fixtures.")
 
+(romacs-deftest romacs-theme-the-face-engine-answers-to-gnu-s-names ()
+  ;; GNU's names reach the recalculation in Rust, and the theme functions
+  ;; are the ones whose loops are there, not custom.el's and faces.el's.
+  (dolist (name '(face-spec-recalc custom-theme-recalc-face face-spec-choose
+                  face-spec-set-match-display face-attr-match-p face-list))
+    (romacs-should (subrp (indirect-function name))))
+  (dolist (name '(enable-theme disable-theme))
+    (romacs-should (string-suffix-p "romacs-custom.el" (symbol-file name 'defun))))
+  (dolist (name '(face-set-after-frame-default frame-set-background-mode))
+    (romacs-should (string-suffix-p "romacs-frame.el" (symbol-file name 'defun)))))
+
 (romacs-deftest romacs-theme-the-modus-generator-is-modus-s ()
   ;; rlisp/romacs-theme-modus.el's generator, on the stock theme's
   ;; reference palette, answers as GNU with modus-themes 5.3.0 does, entry

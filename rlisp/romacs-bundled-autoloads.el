@@ -212,6 +212,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-custom.el
+
+(register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme"))
+
+
 ;;; Generated autoloads from romacs-defaults.el
 
 (register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
@@ -287,7 +292,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-frame.el
 
-(register-definition-prefixes "romacs-frame" '("color-" "defined-colors" "display-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
+(register-definition-prefixes "romacs-frame" '("color-" "custom-theme-recalc-face" "defined-colors" "display-" "face-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
 
 
 ;;; Generated autoloads from romacs-fzf.el

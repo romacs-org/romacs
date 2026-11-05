@@ -1350,6 +1350,8 @@ pub struct Vm {
     /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
     /// the evaluator's quit polls (quit.rs).
     quit_slots: [usize; 3],
+    /// The symbols face primitives compare against.
+    pub(crate) face_keys: crate::prim::FaceKeys,
     /// The slots of `debug-on-event' and of the user signal events, in
     /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
     debug_event_slots: [usize; 3],
@@ -1717,6 +1719,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     force_quit_count,
     redisplay_since_mark,
     quit_slots,
+    face_keys,
     debug_event_slots,
 } at_rest {
     regexp_cache,
@@ -1823,6 +1826,7 @@ impl Vm {
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
+            face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
@@ -1961,6 +1965,7 @@ impl Vm {
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
+        vm.face_keys = crate::prim::FaceKeys::new(&mut vm);
         let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
         vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);

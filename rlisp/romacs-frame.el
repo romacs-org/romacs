@@ -173,16 +173,48 @@ The value is (RED GREEN BLUE), each between 0 and 65535, or nil."
            'dark)
           (t 'light))))
 
-;; A child frame shows its parent's faces until something sets one on it
-;; alone (`romacs--frame-shares-faces-p', DIVERGENCES.md VM2-CHILD-FRAME):
-;; recomputing a face there would only repeat the parent's, so
-;; `face-spec-recalc' skips it, and a theme or a `defface' costs one
-;; frame's work however many layers are open.
-(defun romacs--face-spec-recalc-shared (_face frame)
-  "Non-nil when FRAME shows another frame's faces, which `face-spec-recalc'
-already recomputes there."
-  (romacs--frame-shares-faces-p frame))
-(advice-add 'face-spec-recalc :before-until #'romacs--face-spec-recalc-shared)
+;; Recalculating a face is the same writes in the same order as faces.el,
+;; in Rust (DIVERGENCES.md VM2-FACE-ENGINE).  A child frame shows its
+;; parent's faces until something sets one on it alone
+;; (`romacs--frame-shares-faces-p', VM2-CHILD-FRAME), so recomputing there
+;; is skipped, and a theme or a `defface' costs one frame's work however
+;; many layers are open.
+(defalias 'face-spec-recalc #'romacs--face-spec-recalc
+  "Reset the face attributes of FACE on FRAME according to its specs.")
+(defalias 'custom-theme-recalc-face #'romacs--custom-theme-recalc-face
+  "Set FACE according to currently enabled custom themes.")
+(defalias 'face-spec-choose #'romacs--face-spec-choose
+  "Return the proper attributes for FRAME, out of SPEC.")
+(defalias 'face-spec-set-match-display #'romacs--face-spec-set-match-display
+  "Non-nil if DISPLAY matches FRAME.")
+(defalias 'face-attr-match-p #'romacs--face-attr-match-p
+  "Return t if attributes of FACE match values in plist ATTRS.")
+(defalias 'face-list #'romacs--face-list
+  "Return a list of all defined faces.")
+
+;; `face-set-after-frame-default' with its loop over the faces in Rust.
+(defun face-set-after-frame-default (frame &optional parameters)
+  "Initialize the frame-local faces of FRAME.
+Calculate the face definitions using the face specs, custom theme
+settings, X resources, and `face--new-frame-defaults'.
+Finally, apply any relevant face attributes found amongst the
+frame parameters in PARAMETERS."
+  (romacs--recalc-all-faces frame)
+  ;; Apply attributes specified by frame parameters.
+  (let ((face-params '((foreground-color default :foreground)
+  		       (background-color default :background)
+                       (font default :font)
+  		       (border-color border :background)
+  		       (cursor-color cursor :background)
+  		       (scroll-bar-foreground scroll-bar :foreground)
+  		       (scroll-bar-background scroll-bar :background)
+  		       (mouse-color mouse :background))))
+    (dolist (param face-params)
+      (let* ((param-name (nth 0 param))
+  	     (value (cdr (assq param-name parameters))))
+  	(if value
+  	    (set-face-attribute (nth 1 param) frame
+				(nth 2 param) value))))))
 
 (defun frame-set-background-mode (frame &optional keep-face-specs)
   "Set up display-dependent faces on FRAME.
@@ -197,8 +229,7 @@ face specs for the new background mode."
 	   (old-bg-mode (frame-parameter frame 'background-mode))
 	   (old-display-type (frame-parameter frame 'display-type)))
       (unless (and (eq bg-mode old-bg-mode) (eq display-type old-display-type))
-	(let ((locally-modified-faces nil)
-	      ;; Prevent face-spec-recalc from calling this function
+	(let (;; Prevent face-spec-recalc from calling this function
 	      ;; again, resulting in a loop (bug#911).
 	      (inhibit-frame-set-background-mode t)
 	      (params (list (cons 'background-mode bg-mode)
@@ -208,17 +239,9 @@ face specs for the new background mode."
 	    ;; Faces that don't match their face-specs were modified on
 	    ;; FRAME; leave them alone.  A face not yet realized for FRAME
 	    ;; counts as mismatched, so face-spec-recalc realizes it.
-	    (dolist (face (face-list))
-	      (and (not (get face 'face-override-spec))
-		   (not (and (gethash face (frame--face-hash-table))
-                             (face-spec-match-p face
-                                                (face-user-default-spec face)
-                                                frame)))
-		   (push face locally-modified-faces)))
-	    (modify-frame-parameters frame params)
-	    (dolist (face (face-list))
-	      (unless (memq face locally-modified-faces)
-		(face-spec-recalc face frame)))))))))
+	    (let ((locally-modified-faces (romacs--faces-modified-on frame)))
+	      (modify-frame-parameters frame params)
+	      (romacs--recalc-faces-except frame locally-modified-faces))))))))
 
 ;; composite.c's `find-composition-internal'. VM2 builds no composition
 ;; glyph strings: where GNU would find a static composition, or an automatic

@@ -116,6 +116,66 @@ thousandth a stack mark."
            faces)
   :body (load-theme 'modus-operandi t))
 
+;; A theme switch over N faces the theme sets: `enable-theme' walks them
+;; once and recalculates each on the root frame.
+(scaling-probe faces-theme-switch :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-themed" n))))
+           (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
+           (deftheme scaling-switch "N faces.")
+           (apply #'custom-theme-set-faces 'scaling-switch
+                  (mapcar (lambda (face) `(,face ((t :foreground "#a0b0c0" :weight bold)))) faces))
+           faces)
+  :body (progn (enable-theme 'scaling-switch) (disable-theme 'scaling-switch)))
+
+;; A theme switch over N package faces no theme mentions, each with a
+;; spec that depends on the background mode.
+(scaling-probe faces-theme-unused :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-unused" n))))
+           (dolist (face faces)
+             (custom-declare-face face '((((background dark)) :foreground "#aabbcc") (t :foreground "#112233"))
+                                  "A package face." :group 'scaling))
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           faces)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; Nothing in a theme switch visits a buffer: text names faces.
+(scaling-probe faces-theme-buffers :gui t :n 100 :steps 1 :budget 0.3
+  :setup (progn
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           (dotimes (i n)
+             (with-current-buffer (get-buffer-create (format "scaling-text-%d" i))
+               (insert (propertize "some fontified text\n" 'face 'font-lock-keyword-face))))
+           n)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; A theme switch with N child frames open: they show the root's faces,
+;; so what the switch adds per frame is a check that it shares.
+(scaling-probe faces-theme-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           (unless (fboundp 'pgtk-register-dnd-targets) (defalias 'pgtk-register-dnd-targets #'ignore))
+           (dotimes (_ n) (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil))))
+           n)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; `supports' over N distinct font queries: a query's fonts are listed once.
+(scaling-probe faces-supports-queries :gui t :n 50 :steps 1
+  :setup (cons (switch-to-buffer (get-buffer-create "scaling-supports"))
+               (mapcar (lambda (name) (list :family name :weight 'bold)) (scaling--names "Scaling Family" n)))
+  :body (progn (dotimes (_ 2) (dolist (query (cdr it)) (display-supports-face-attributes-p query)))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; `face-spec-recalc' over N faces on one frame.
+(scaling-probe faces-recalc-defface :n 500
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-recalc" n))))
+           (dolist (face faces)
+             (custom-declare-face face '((((background dark)) :foreground "#aabbcc") (t :inherit bold)) "A scaling face." :group 'scaling))
+           faces)
+  :body (dolist (face it) (face-spec-recalc face (selected-frame))))
+
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
