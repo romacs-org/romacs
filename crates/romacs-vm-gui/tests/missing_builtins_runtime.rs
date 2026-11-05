@@ -39,6 +39,7 @@ const FORMS: &str = r###"
 (list (aref (face-attributes-as-vector "bold") 5) (aref (face-attributes-as-vector (list :height (lambda (_) 2.0))) 4) (commandp 'suspend-emacs))
 (let ((print-circle t) (print-gensym t) (print-continuous-numbering t) (print-number-table (make-hash-table :test 'eq)) (g (make-symbol "z"))) (print--preprocess g) (gethash g print-number-table))
 (progn (put 'romacs-test-alias 'face-alias 'bold) (let ((face-remapping-alist '((bold :foreground "red")))) (list (aref (face-attributes-as-vector 'romacs-test-alias) 9))))
+(progn (let ((prev 'bold)) (dotimes (i 12) (let ((name (intern (format "romacs-test-alias-%d" i)))) (put name 'face-alias prev) (setq prev name))) (let ((face-remapping-alist '((bold :foreground "red")))) (aref (face-attributes-as-vector prev) 9))))
 "###;
 
 #[test]

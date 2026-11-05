@@ -257,10 +257,10 @@ COLOR must be a valid color name."
 (defun romacs--resolve-face-name (face)
   "resolve_face_name: FACE, a name, through its `face-alias' properties."
   (let ((face (if (stringp face) (intern face) face))
-        (depth 0))
-    (while (and (symbolp face) (get face 'face-alias) (< depth 10))
-      (setq face (get face 'face-alias)
-            depth (1+ depth)))
+        (seen nil))
+    (while (and (symbolp face) (get face 'face-alias) (not (memq face seen)))
+      (push face seen)
+      (setq face (get face 'face-alias)))
     face))
 
 (defun romacs--merge-point-open-p (kind face merging)
@@ -395,8 +395,8 @@ FONT-SPEC names; the frame keeps its fontset."
                          (list key (if (eq key :family) (symbol-name value) value)))))
                    '(:family :weight :slant :width))
            ;; An integer size is pixels at the frame's 96 dpi, a float points.
-           (cond ((integerp size) (list :height (round (* size 7.5))))
-                 ((floatp size) (list :height (round (* size 10))))))))
+           (cond ((and (integerp size) (> size 0)) (list :height (round (* size 7.5))))
+                 ((and (floatp size) (> size 0)) (list :height (round (* size 10))))))))
     (when attributes
       (apply #'set-face-attribute 'default (or frame (selected-frame)) attributes))))
 

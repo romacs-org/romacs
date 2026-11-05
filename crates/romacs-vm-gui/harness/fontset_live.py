@@ -144,6 +144,10 @@ JOURNEY = r'''
            (override (font-get (car (internal-char-font nil ?Ж)) :family)))
        (set-fontset-font nil 'latin (font-spec :size 40))
        (redisplay t)
+       ;; A size of zero is no size.
+       (set-fontset-font nil 'latin (font-spec :size 0))
+       (set-fontset-font nil 'latin (font-spec :size 0.0))
+       (set-fontset-font nil 'latin "-*-*-*-*-*-*-0-*-*-*-*-*-iso10646-1")
        (list 'size (> (window-font-height) before)
              (eq override (font-get (car (internal-char-font nil ?Ж)) :family)))))))
 (defun journey-step ()
