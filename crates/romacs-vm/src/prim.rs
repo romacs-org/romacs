@@ -1716,6 +1716,7 @@ mod leaf {
     mod point_predicates;
     mod subst_char;
     mod translate_region;
+    mod transpose_regions;
     mod json;
     mod overlays;
     mod invisible;

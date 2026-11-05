@@ -1160,6 +1160,19 @@ impl Vm {
     /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
     /// unibyte string's bytes and ASCII text as they are; other text
     /// requires an explicit encoder.
+    /// A unibyte insertion of ARGS: their bytes, and each string's text
+    /// properties at its offset in them (insert_from_string_1 grafts them
+    /// onto the new text).
+    pub(crate) fn unibyte_insertion(&self, args: &[Value]) -> Result<(Vec<u8>, crate::bytes::ByteProperties)> {
+        let (mut bytes, mut properties) = (Vec::new(), crate::bytes::ByteProperties::new());
+        for &v in args {
+            if let Some(Object::String(s) | Object::RawString(s)) = self.object_if(v) {
+                for (at, values) in s.properties.to_map() { properties.insert(ByteOffset(bytes.len() + at.0), values); }
+            }
+            bytes.extend(self.unibyte_text(v)?);
+        }
+        Ok((bytes, properties))
+    }
     pub(crate) fn unibyte_text(&self, text: Value) -> Result<Vec<u8>> {
         if let Some(i) = text.integer_value() {
             return Ok(vec![u8::try_from(i).map_err(|_| "invalid octet")?]);
@@ -1184,12 +1197,11 @@ impl Vm {
             Some(Object::Marker(_)) => self.marker_position_value(v),
             _ => Ok(v),
         }).collect::<Result<Vec<Value>>>()?;
+        let mut grafted = Default::default();
         let inserted = if p == Insert {
-            let mut out = vec![];
-            for &v in &self.stack[start..start + n] {
-                out.extend(self.unibyte_text(v)?);
-            }
-            out
+            let (bytes, properties) = self.unibyte_insertion(&self.stack[start..start + n])?;
+            grafted = properties;
+            bytes
         } else if p == InsertFileBytes {
             let path = String::from_utf8(self.string_bytes(args[0])?)
                 .map_err(|_| "invalid filename")?;
@@ -1254,6 +1266,7 @@ impl Vm {
             Insert | InsertFileBytes => {
                 let at = b.point;
                 b.replace(at..at, &inserted)?;
+                b.graft_properties(at, grafted);
                 if p == InsertFileBytes {
                     b.point = at;
                     let count = Value::integer(inserted.len() as i64)?;

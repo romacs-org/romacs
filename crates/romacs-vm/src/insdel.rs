@@ -596,7 +596,10 @@ impl Vm {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
             Some(Object::Buffer(t)) => data::string_object(t.lisp_string(a..b).map_err(Fault::Error)?),
-            Some(Object::ByteBuffer(t)) => Object::Bytes(t.bytes.get(a.0..b.0).ok_or_else(|| Fault::Error("position out of range".into()))?.to_vec()),
+            Some(Object::ByteBuffer(t)) => {
+                if t.bytes.get(a.0..b.0).is_none() { return Err(Fault::Error("position out of range".into())); }
+                t.text_object(a..b)
+            }
             _ => return Err(Fault::Error("buffer required".into())),
         };
         Ok(self.allocate_object(object))
