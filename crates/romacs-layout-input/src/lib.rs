@@ -122,7 +122,8 @@ romacs_snapshot::snapshot_enum!(NoFont {
 /// and the window SELECTED's edge in FOCUS instead, and every other
 /// window's colours blended DIM of the way toward the frame background.
 /// INTERNAL_BORDER is the gap the windows are placed inside. The default
-/// (classic) draws none of it.
+/// (classic) draws none of it. CURSOR is the frame's `cursor-color',
+/// which every frame shows, classic ones too.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FrameChrome {
     pub internal_border: u32,
@@ -130,6 +131,7 @@ pub struct FrameChrome {
     pub dim: f32,
     pub focus: Option<[u8; 3]>,
     pub border: Option<[u8; 3]>,
+    pub cursor: Option<[u8; 3]>,
     pub selected: u64,
     pub minibuffer: u64,
 }

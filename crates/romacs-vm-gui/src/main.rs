@@ -400,6 +400,20 @@ mod frame_tests {
         assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
+    /// A frame differing only in its cursor's colour paints differently, for
+    /// the paint and the prompt host alike.
+    #[test]
+    fn a_cursor_colour_alone_repaints() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        let mut other = painted.snapshot.clone();
+        assert!(super::frames_alike(&painted.snapshot, &other));
+        other.chrome.cursor = Some([1, 2, 3]);
+        assert!(!super::frames_alike(&painted.snapshot, &other));
+    }
+
     /// Selecting the buffer a window already shows resets its end, though its
     /// frame stays equal; keeping the paint must keep `window-end' too.
     #[test]
@@ -409,7 +423,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         vm.eval_source("(erase-buffer) (let ((i 0)) (while (< i 300) (insert \"a long line of text\\n\") (setq i (1+ i)))) (goto-char 1)").unwrap();
         let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
-        let cursor = painted.selected.map(|id| (id, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+        let cursor = painted.selected.map(|id| (id, super::cursor_colour(&painted.snapshot)));
         let (_, ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&painted.snapshot, 1, cursor).unwrap();
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
@@ -449,6 +463,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
     a.font_selection == b.font_selection
         && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
+        && a.chrome.cursor == b.chrome.cursor
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
         && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
@@ -921,7 +936,7 @@ fn paint(
     }
     let layout_start = Instant::now();
     let (snapshot, selected) = (&shown.snapshot, shown.selected);
-    let cursor = selected.map(|selected| (selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+    let cursor = selected.map(|selected| (selected, cursor_colour(snapshot)));
     let (mut frame, mut ends) = engine.layout_frame(snapshot, presentation, cursor)?;
     let (mut children, child_ends) = engine.layout_children(snapshot, presentation, cursor)?;
     ends.extend(child_ends);
@@ -1065,6 +1080,12 @@ fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, childre
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
 /// evaluator is suspended in Lisp and redisplay already ran in its own engine.
+/// The cursor's colour: the frame's `cursor-color', which SNAPSHOT carries.
+fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_display_protocol::Color {
+    let [r, g, b] = snapshot.chrome.cursor.unwrap_or_default();
+    romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]))
+}
+
 fn paint_prompt(
     engine: &mut romacs_layout2::LayoutEngine,
     sender: &PaintSender,
@@ -1072,7 +1093,7 @@ fn paint_prompt(
     presentation: u64,
     frame: &romacs_vm::HostFrame,
 ) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
-    let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+    let cursor = Some((frame.selected, cursor_colour(&frame.frame)));
     let (mut glyphs, mut ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
     let (mut children, child_ends) = engine.layout_children(&frame.frame, presentation, cursor)?;
     ends.extend(child_ends);

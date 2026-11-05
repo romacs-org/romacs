@@ -692,15 +692,22 @@ impl Vm {
         let (focus, border) = if drawn {
             (Some(self.display_face("romacs-pane-focus")?.foreground), Some(self.display_face("romacs-pane-border")?.foreground))
         } else { (None, None) };
+        let cursor = self.frame_colour_parameter(frame, "cursor-color")?;
         let selected = self.status_bar_owner()?.0;
         let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
-        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, cursor, selected, minibuffer })
     }
     /// FRAME's parameter NAME, if it has one.
     pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
+    }
+    /// FRAME's parameter NAME when it names a colour.
+    fn frame_colour_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
+        let value = self.frame_parameter_of(frame, name)?;
+        let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
+        Ok(romacs_display_protocol::x11_colors::x11_color_value(&text).map(|(r, g, b)| [r, g, b]))
     }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {

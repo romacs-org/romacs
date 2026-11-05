@@ -390,6 +390,24 @@ fn without_romacs_chrome_no_pane_chrome_is_drawn() {
     assert!(!chrome(&mut vm).drawn());
 }
 
+/// The cursor shows the frame's `cursor-color', which the `cursor' face sets
+/// whatever the theme, on a classic frame too, a colour's name as well.
+#[test]
+fn the_cursor_follows_the_theme() {
+    let mut vm = themed_session();
+    let cursor = |vm: &mut Vm| vm.frame_snapshot(1216, 876).unwrap().chrome.cursor;
+    eval(&mut vm, r##"(progn (deftheme fc-cursor)
+                         (custom-theme-set-faces 'fc-cursor '(cursor ((t :background "#dc8a78"))))
+                         (enable-theme 'fc-cursor))"##);
+    assert_eq!(cursor(&mut vm), Some([0xdc, 0x8a, 0x78]));
+    eval(&mut vm, r##"(set-face-background 'cursor "#123456")"##);
+    assert_eq!(cursor(&mut vm), Some([0x12, 0x34, 0x56]));
+    eval(&mut vm, "(romacs-classic-chrome 1)");
+    assert_eq!(cursor(&mut vm), Some([0x12, 0x34, 0x56]), "classic chrome keeps the cursor's colour");
+    eval(&mut vm, r##"(set-face-background 'cursor "red")"##);
+    assert_eq!(cursor(&mut vm), Some([0xff, 0, 0]));
+}
+
 /// Under pane chrome a window's fringes are part of its pane: painted in
 /// its default background whatever the theme gives `fringe' (here a dimmer
 /// one); classic chrome paints the `fringe' face, as GNU.
