@@ -95,6 +95,8 @@ pub(crate) struct ImageKey {
     pub frame: u64,
     /// The resolved `:scale', as bits.
     pub scale: u64,
+    /// The device scale its pixels were decoded at, as bits.
+    pub device: u32,
     pub foreground: u32,
     pub background: u32,
     pub font_size: u32,
@@ -128,7 +130,7 @@ pub(crate) enum Dependency {
 pub(crate) struct ImageCache {
     entries: HashMap<ImageKey, ImageEntry>,
     /// The last lookup environment, under what it was computed from.
-    env: Option<([u64; 7], crate::prim::ImageEnv)>,
+    env: Option<([u64; 8], crate::prim::ImageEnv)>,
     /// The next id for `lookup-image' (GNU's cache slot index).
     ids: HashMap<ImageKey, u64>,
     next_id: u64,
@@ -138,10 +140,10 @@ impl ImageCache {
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub(crate) fn env(&self, stamp: &[u64; 7]) -> Option<crate::prim::ImageEnv> {
+    pub(crate) fn env(&self, stamp: &[u64; 8]) -> Option<crate::prim::ImageEnv> {
         self.env.as_ref().filter(|(s, _)| s == stamp).map(|(_, env)| env.clone())
     }
-    pub(crate) fn keep_env(&mut self, stamp: [u64; 7], env: crate::prim::ImageEnv) {
+    pub(crate) fn keep_env(&mut self, stamp: [u64; 8], env: crate::prim::ImageEnv) {
         self.env = Some((stamp, env));
     }
     pub(crate) fn get(&self, key: &ImageKey) -> Option<&ImageEntry> {

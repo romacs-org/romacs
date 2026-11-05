@@ -1335,7 +1335,9 @@ fn evaluate(
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
                 let event = command::unwrap_event(event);
                 command_start = Instant::now();
-                if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
+                if live && let InputEvent::WindowResize { width: w, height: h, scale_factor, .. } = event {
+                    // A HiDPI output: images decode at its device pixels.
+                    if vm.set_device_scale(scale_factor as f32) { live_presentation.changed(); }
                     if w > 0 && h > 0 && (width, height) != (w, h) {
                         width = w; height = h;
                         if let Some(server) = host.borrow_mut().server.as_mut() { server.size = (w, h); }

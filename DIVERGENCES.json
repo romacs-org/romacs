@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "89aff90c7342a9fa509c95adcdf27c79f587e2d04e3256d08f7a5d5f21d5491b",
+  "input_hash": "21b7ad664226075ada8c7c4216a019d191ba5b36bf57e22348a5a3b054a7f2ba",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -8296,7 +8296,7 @@
    "planned": false,
    "mechanism": "In-line images (`(image ...)` and `((slice ...) (image ...))` display specs)",
    "gnu": "xdisp.c's produce_image_glyph places an image glyph on the row's common baseline, as it does every glyph; the cursor on an image without a mask is a rectangle around it; a relief's corners are mitred and rounded (pgtk_draw_relief_rect); `:ascent center` centres on the font of the glyph's face.",
-   "romacs": "The image glyph, its margins, relief and slice, measure and paint as GNU's (`harness/images_live.py` display: `line-pixel-height`, `window-text-pixel-size`, `posn-at-point`, `vertical-motion`). The host aligns a row on one baseline only when it holds an image (or a box); a text-only row of mixed faces keeps each glyph at the row's top and the tallest glyph's height, measured the same way. The cursor on an image is drawn under it. A relief's sides are square. `:ascent center` centres on the default face's font. An image whose decode fails is GNU's hollow rectangle.",
+   "romacs": "The image glyph, its margins, relief and slice, measure and paint as GNU's (`harness/images_live.py` display: `line-pixel-height`, `window-text-pixel-size`, `posn-at-point`, `vertical-motion`). The host aligns a row on one baseline only when it holds an image (or a box); a text-only row of mixed faces keeps each glyph at the row's top and the tallest glyph's height, measured the same way. The cursor on an image is drawn under it. A relief's sides are square. `:ascent center` centres on the default face's font. An image whose decode fails is GNU's hollow rectangle. On a HiDPI output an image is decoded at the display's device scale and laid out in logical pixels, as GNU's pgtk does; a scale change that arrives while a prompt waits applies from the next one the command loop reads.",
    "why": "The Lisp-visible geometry of image rows follows pinned GNU; mixed-face text rows keep the host's existing layout, which motion must agree with.",
    "symbols": [
     "insert-image",

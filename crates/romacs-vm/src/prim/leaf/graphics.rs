@@ -78,6 +78,8 @@ pub(crate) struct ImageEnv {
     pub font_height: u32,
     pub font_width: u32,
     pub font_family: String,
+    /// The display's device scale: a decode's raster pixels per logical one.
+    pub device_scale: f32,
     /// The default face's font's ascent and descent (FONT_BASE,
     /// FONT_DESCENT), for `:ascent center'.
     pub font_ascent: i64,
@@ -208,7 +210,7 @@ impl Leaf<'_> {
         // a redisplay asks once for all the images it shows.
         let ws = &self.vm.window_state;
         let stamp = [self.vm.frame(frame).map_err(Fault::Error)?.id, self.vm.display_state.face_revision, self.vm.display_state.version,
-                     u64::from(ws.line), u64::from(ws.column), u64::from(ws.width), u64::from(ws.height)];
+                     u64::from(ws.line), u64::from(ws.column), u64::from(ws.width), u64::from(ws.height), u64::from(ws.device_scale.to_bits())];
         if let Some(env) = self.vm.images.env(&stamp) { return Ok(env); }
         let env = self.image_env_fresh(frame)?;
         self.vm.images.keep_env(stamp, env.clone());
@@ -243,7 +245,8 @@ impl Leaf<'_> {
         });
         let (font_ascent, font_descent) = font.map_or((i64::from(line), 0), |f| (f.ascent, f.descent));
         let frame = self.vm.frame(frame).map_err(Fault::Error)?.id;
-        Ok(ImageEnv { frame, foreground, background, font_size, font_height, font_width, font_family, font_ascent, font_descent,
+        let device_scale = self.vm.window_state.device_scale;
+        Ok(ImageEnv { frame, foreground, background, font_size, font_height, font_width, font_family, font_ascent, font_descent, device_scale,
                       column, line, frame_pixels })
     }
 
@@ -312,7 +315,7 @@ impl Leaf<'_> {
         let plist = spec.values.iter()
             .filter(|(k, _)| ![":animate-buffer", ":animate-tardiness", ":animate-position"].contains(&k.as_str()))
             .map(|(k, v)| (k.clone(), self.key_value(*v, 0))).collect();
-        ImageKey { plist, frame: env.frame, scale: scale.to_bits(), foreground: env.foreground, background: env.background,
+        ImageKey { plist, frame: env.frame, scale: scale.to_bits(), device: env.device_scale.to_bits(), foreground: env.foreground, background: env.background,
                    font_size: env.font_size, font_family: env.font_family.clone() }
     }
 
@@ -497,7 +500,7 @@ impl Leaf<'_> {
             } else { ImageSizeLimit::UNLIMITED }
         };
         let query = ImageQuery { kind: spec.kind.clone(), source, size, rotation,
-                                 realization: ImageRealization::new(scale as f32, 1.0, 1.0), colors, mask, frame, limit };
+                                 realization: ImageRealization::new(scale as f32, env.device_scale, 1.0), colors, mask, frame, limit };
         Ok(Ok((query, file)))
     }
 
