@@ -351,7 +351,7 @@ or a repeat."
 ;;; The header (hermes-chat--header-line's shape)
 
 (defun romacs-agent-ui--harness-icon (harness)
-  (let ((icon (pcase harness ('claude "✳") ('codex "◎") (_ "●"))))
+  (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) "●")))
     (if (char-displayable-p (aref icon 0)) icon (symbol-name harness))))
 
 (defun romacs-agent-ui--state-label (session)
@@ -610,9 +610,12 @@ harness's own transcript it was imported from, when it was."
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
           (romacs-agent-tools scratch) (make-hash-table :test #'equal)
           (romacs-agent-approvals scratch) (make-hash-table :test #'equal)
-          ;; Its replayed turn ends never send what waits for the live ones.
+          ;; Its replayed turn ends never send what waits for the live ones,
+          ;; nor does its replayed startup write to the harness.
           (romacs-agent-queue scratch) nil (romacs-agent-queue-tail scratch) nil
-          (romacs-agent-queue-length scratch) 0)
+          (romacs-agent-queue-length scratch) 0
+          (romacs-agent-connection scratch) nil (romacs-agent-caught-up scratch) nil
+          (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    ;; The scratch copy's turn data, for the footers it draws.

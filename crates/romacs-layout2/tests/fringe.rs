@@ -91,6 +91,22 @@ fn a_right_fringe_takes_the_truncation_glyph_and_shows_an_arrow() {
 }
 
 #[test]
+fn a_row_as_wide_as_the_window_shows_no_truncation_arrow() {
+    // window()'s text area holds a whole number of columns: a row of
+    // exactly that many characters fits, a longer one is truncated.
+    let fits = (0..200).map(|n| n.to_string()).collect::<String>();
+    let probe = lay_out(frame(window(&fits, LineWrap::Truncate), None));
+    let shown = chars(&probe, GlyphRowRole::Text).len();
+    let exact: String = fits.chars().take(shown).collect();
+    let painted = lay_out(frame(window(&format!("{exact}\nx"), LineWrap::Truncate), None));
+    assert_eq!(chars(&painted, GlyphRowRole::Text), format!("{exact}x"));
+    assert!(bitmaps(&painted).iter().all(|m| m.1 != FringeSide::Right), "{:?}", bitmaps(&painted));
+    let longer: String = fits.chars().take(shown + 1).collect();
+    let painted = lay_out(frame(window(&format!("{longer}\nx"), LineWrap::Truncate), None));
+    assert_eq!(bitmaps(&painted).iter().map(|m| (m.0, m.1)).collect::<Vec<_>>(), vec![(4, FringeSide::Right)]);
+}
+
+#[test]
 fn without_a_right_fringe_the_glyph_marks_the_break() {
     let mut snapshot = window("0123456789abcdef", LineWrap::Window);
     snapshot.chrome.right_fringe = 0;
