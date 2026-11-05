@@ -26,9 +26,9 @@
 ;;; Generated autoloads from romacs-agent.el
 
 (autoload 'romacs-agent-start "romacs-agent"
-"Start a session in CWD under instance PROVIDER (a name in
-`romacs-agent-providers', by default `romacs-agent-default-provider'),
-sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
+"Start a session working in the project directory CWD under instance
+PROVIDER (a name in `romacs-agent-providers', by default
+`romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 (its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
