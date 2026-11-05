@@ -362,7 +362,8 @@ impl Vm {
         let Some(laid) = self.window_layout(window)? else { return Ok(None) };
         // Every row is at least a frame line tall: this many lines above
         // point's fill the text area.
-        let lines = (laid.body_height / self.min_row_height() as f32).ceil() as i64 + 1;
+        let floor = { let table = self.window_faces(window)?; self.row_floor_of(&table) };
+        let lines = (laid.body_height / floor as f32).ceil() as i64 + 1;
         let margin = self.scroll_margin_px(window, laid.body_height)?;
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();

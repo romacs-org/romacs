@@ -738,7 +738,9 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             Replacement::Image(spec, text_area, slice) => {
                 let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
-                let Some(image) = self.leaf.image_glyph(&parsed, slice)? else { return Ok(()) };
+                let window = self.view.window;
+                let face = self.leaf.vm.remapped_default_face(window).map_err(Fault::Error)?;
+                let Some(image) = self.leaf.image_glyph(&parsed, slice, face.as_ref())? else { return Ok(()) };
                 let at = self.images.len() as u32;
                 self.images.push((image, spec));
                 let shape = Shape::Image { width: image.width, ascent: image.ascent, descent: image.descent, at };

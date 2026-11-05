@@ -247,6 +247,18 @@ impl Leaf<'_> {
                       column, line, frame_pixels })
     }
 
+    /// ENV for an image in FACE: its colours, family and realized font.
+    fn image_env_face(&mut self, env: &mut ImageEnv, face: &romacs_layout_input::Face) {
+        let pixel = |[r, g, b]: [u8; 3]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b);
+        (env.foreground, env.background, env.font_family) = (pixel(face.foreground), pixel(face.background), face.family.clone());
+        let request = crate::FaceFont { family: face.family.clone(), pixel_size: face.pixel_size, weight: face.weight, italic: face.italic, width: face.width };
+        if let Some((f, _)) = self.font_host().and_then(|host| host.char_font(&request, ' ')) {
+            let width = if f.average_width > 0 { f.average_width } else { f.space_width };
+            (env.font_size, env.font_height, env.font_width) = (f.pixel_size.max(1) as u32, (f.ascent + f.descent).max(1) as u32, width.max(1) as u32);
+            (env.font_ascent, env.font_descent) = (f.ascent, f.descent);
+        }
+    }
+
     /// GNU `image_compute_scale', and whether `image-scaling-factor' `auto'
     /// gave it.
     fn image_scale(&mut self, spec: &Spec, env: &ImageEnv) -> std::result::Result<(f64, bool), Fault> {
@@ -359,8 +371,12 @@ impl Leaf<'_> {
     /// showing part of it: its slot, ascent and descent (image_ascent),
     /// and where the slice's pixels sit in it.  None for an empty slice.
     /// A load that fails is its placeholder's size and no image (0).
-    pub(crate) fn image_glyph(&mut self, spec: &Spec, slice: Value) -> std::result::Result<Option<romacs_layout_input::InlineImage>, Fault> {
-        let env = self.image_env(Value::NIL)?;
+    /// FACE, when given, is the face the glyph shows in where the buffer's
+    /// `face-remapping-alist' remaps it (lookup_image's face): its font
+    /// sizes `em', `ch' and `cw', and its colours an image's.
+    pub(crate) fn image_glyph(&mut self, spec: &Spec, slice: Value, face: Option<&romacs_layout_input::Face>) -> std::result::Result<Option<romacs_layout_input::InlineImage>, Fault> {
+        let mut env = self.image_env(Value::NIL)?;
+        if let Some(face) = face { self.image_env_face(&mut env, face); }
         let (_, entry, _) = self.image_lookup(spec, &env)?;
         let (width, height) = (i64::from(entry.facts.width), i64::from(entry.facts.height));
         let (hmargin, vmargin) = (i64::from(entry.margins.0), i64::from(entry.margins.1));
