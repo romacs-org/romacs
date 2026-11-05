@@ -9,6 +9,9 @@
 (require 'romacs-attach)
 
 (defvar romacs-attach-test-helper)
+;; Org's options, bound with `let' below before org loads.
+(defvar org-yank-dnd-method)
+(defvar org-yank-image-save-method)
 
 (defconst romacs-attach-test--fixtures
   (expand-file-name "../harness/fixtures/images/" (file-name-directory load-file-name))
@@ -257,3 +260,49 @@ refused at take."
   (romacs-attach-view-quit)
   (romacs-should-not (and (keymapp overriding-terminal-local-map)
                           (memq romacs-attach-view-map (cdr overriding-terminal-local-map)))))
+
+(romacs-deftest romacs-attach-mail-and-org-take-attachments-inline ()
+  "Without a tray, the mode names the consumer: mail inserts its part."
+  (with-temp-buffer
+    (insert "To: a@example.org\nSubject: s\n--text follows this line--\n")
+    (message-mode)
+    (goto-char (point-max))
+    (romacs-should (equal (romacs-attach--here) '(message)))
+    (romacs-attach-file (romacs-attach-test--fixture "plain.png"))
+    (romacs-should (string-match-p "<#part type=\"image/png\" filename=\".*plain\\.png\" disposition=inline>"
+                                   (buffer-string)))
+    ;; A draft asks before it is killed.
+    (set-buffer-modified-p nil))
+  (with-temp-buffer
+    (romacs-should-not (romacs-attach--here))
+    (romacs-should-error (romacs-attach-file (romacs-attach-test--fixture "plain.png")))))
+
+
+(romacs-deftest romacs-attach-an-owned-file-moves-across-filesystems ()
+  "Staging on the runtime tmpfs, the save directory on disk: the move
+copies and then deletes the staged file."
+  (make-directory (romacs-attach-cache-directory) t)
+  (let* ((runtime (getenv "XDG_RUNTIME_DIR"))
+         (staged (and runtime (make-temp-file (expand-file-name "romacs-attach-move" runtime) nil ".png")))
+         (romacs-attach-save-directory (make-temp-file (expand-file-name "romacs-attach-saved" (romacs-attach-cache-directory)) t)))
+    (unwind-protect
+        (when (and staged (not (equal (file-attribute-device-number (file-attributes staged))
+                                      (file-attribute-device-number (file-attributes romacs-attach-save-directory)))))
+          (copy-file (romacs-attach-test--fixture "plain.png") staged t)
+          (let ((saved (romacs-attach--users (romacs-attach-item staged :owned t))))
+            (romacs-should (file-exists-p saved))
+            (romacs-should-not (file-exists-p staged))
+            (romacs-should (string-prefix-p (file-name-as-directory romacs-attach-save-directory) saved))))
+      (when (and staged (file-exists-p staged)) (delete-file staged))
+      (delete-directory romacs-attach-save-directory t))))
+
+(romacs-deftest romacs-attach-org-resolves-a-function-image-save-method ()
+  (romacs-attach-test--in-temp
+    (require 'org)
+    (let ((org-yank-dnd-method 'attach)
+          (org-yank-image-save-method (lambda () dir)))
+      (with-temp-buffer
+        (org-mode)
+        (romacs-attach--org-insert (romacs-attach-item (romacs-attach-test--fixture "plain.png")) nil)
+        (romacs-should (file-exists-p (expand-file-name "plain.png" dir)))
+        (romacs-should (string-match-p (regexp-quote (expand-file-name "plain.png" dir)) (buffer-string)))))))

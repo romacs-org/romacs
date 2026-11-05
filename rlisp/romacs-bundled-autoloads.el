@@ -110,7 +110,7 @@ installed until the first item arrives.
 (fn &key CONSUMER ANCHOR REDISPLAY)")
 (autoload 'romacs-attach-file "romacs-attach"
 "Attach FILE to the current buffer's tray, or insert it in an inline
-consumer's buffer.
+consumer's buffer (mail, org) at point.
 
 (fn FILE)" t)
 (autoload 'romacs-attach-edit "romacs-attach"
