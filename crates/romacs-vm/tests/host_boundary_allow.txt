@@ -16,11 +16,15 @@ crates/romacs-regex-engine/src/engine.rs:8620 std::env::var romacs-vm depends on
 crates/romacs-vm/src/autoload.rs:139 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:165 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:169 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/backtrace.rs:189 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:195 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:217 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/backtrace.rs:220 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
-crates/romacs-vm/src/backtrace.rs:226 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:267 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:273 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:298 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/backtrace.rs:333 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:335 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:341 dynamic:saved reads a later binding's saved value, the value of binding AT: a let's own, never the root's
+crates/romacs-vm/src/backtrace.rs:517 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+crates/romacs-vm/src/backtrace.rs:543 dynamic:saved backtrace-eval's unrewind swaps the saved value with the current one (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+crates/romacs-vm/src/backtrace.rs:553 dynamic:saved backtrace-eval's unrewind makes a binding whose buffer lost its local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
 crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
@@ -52,11 +56,11 @@ crates/romacs-vm/src/lib.rs:1902 slot:initial-environment declares the environme
 crates/romacs-vm/src/lib.rs:1902 slot:process-environment declares the environment specials by name; reads no slot
 crates/romacs-vm/src/lib.rs:1981 delayed-variable declares the variable; reads no slot
 crates/romacs-vm/src/lib.rs:3354 dynamic:saved unbind: restores the saved value as the binding ends
-crates/romacs-vm/src/prim.rs:986 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:996 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1008 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1017 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1117 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/prim.rs:999 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1009 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1021 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1030 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1130 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/prim/leaf/editor_mark.rs:41 delayed-variable reads through variable_value, which checks the fence
 crates/romacs-vm/src/subprocess.rs:495 std::net ProcessWatch's cancel pair: a socket pair private to this process that stops its own poll thread; it reaches no host fact
 crates/romacs-vm/src/variable_runtime.rs:137 dynamic:saved reads the bound variable, owner or flag, not the saved value

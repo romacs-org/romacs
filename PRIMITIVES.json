@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e85515a95d985f828741a16607806da848a9b57b06576573397369bc0085dafd",
+  "source_fingerprint": "35ec76488443ea1e9097e37be08c04467bfb263f3f272ddf15f87cab5f0c8d52",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1342,
-  "parsed_vm2_only": 1342
+  "parsed_total": 1346,
+  "parsed_vm2_only": 1346
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -364,10 +364,20 @@
    "variant": "Primitive::AutoloadDoLoad",
    "registered_at": "crates/romacs-vm/src/lib.rs:841"
   },
+  "backtrace--frames-and-locals": {
+   "name": "backtrace--frames-and-locals",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:49"
+  },
   "backtrace--locals": {
    "name": "backtrace--locals",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:30"
+  },
+  "backtrace-debug": {
+   "name": "backtrace-debug",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:43"
   },
   "backtrace-frame--internal": {
    "name": "backtrace-frame--internal",
@@ -4238,6 +4248,16 @@
    "name": "romacs--auto-saved-tick",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/autosave.rs:107"
+  },
+  "romacs--backtrace-rewind": {
+   "name": "romacs--backtrace-rewind",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:59"
+  },
+  "romacs--backtrace-unrewind": {
+   "name": "romacs--backtrace-unrewind",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/backtrace.rs:55"
   },
   "romacs--call-deadline": {
    "name": "romacs--call-deadline",

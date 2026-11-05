@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "31901bc2d3ee9c66a523c948447542878ca591fba8a07f1050a77fd1355cc875",
+    "input_hash": "2cef81d61724235d1ef51fc2784cd00c7c094d40da9a4c761d02ebeab8ad0c92",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8206
+    "vm2_universe": 8215
   },
   "schema": 2,
   "vm2": {
-    "count": 1350,
+    "count": 1354,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -80,7 +80,9 @@
       "atom",
       "autoload",
       "autoload-do-load",
+      "backtrace--frames-and-locals",
       "backtrace--locals",
+      "backtrace-debug",
       "backtrace-frame--internal",
       "backward-char",
       "backward-prefix-chars",
@@ -832,6 +834,8 @@
       "romacs--auto-save-done",
       "romacs--auto-save-failure-time",
       "romacs--auto-saved-tick",
+      "romacs--backtrace-rewind",
+      "romacs--backtrace-unrewind",
       "romacs--call-deadline",
       "romacs--call-process-run",
       "romacs--check-directory",
