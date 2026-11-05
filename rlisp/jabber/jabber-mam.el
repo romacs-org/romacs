@@ -109,6 +109,41 @@ starts, nil when it ends).")
   "Hook run after MAM stores messages for one or more peers.
 Each function receives one argument: a list of (ACCOUNT PEER TYPE) entries.")
 
+(defvar jabber-mam-query-failed-functions (list #'jabber-mam--report-failure)
+  "Abnormal hook run once when a query fails, with QUERY and its REASON.
+REASON is a string naming what went wrong; see `jabber-mam-archive-name'
+for the archive.  A cancelled query is no failure.")
+
+(defvar jabber-mam-stall-functions (list #'jabber-mam--log-stall)
+  "Abnormal hook run when the watchdog acts on a stalled QUERY.
+Each function receives QUERY, the ACTION taken (`request': the next page
+was overdue and never requested; `retry': the page went unanswered and
+is asked for again) and a plist of what the watchdog found.")
+
+;;; Paging and its watchdog
+
+(defvar jabber-mam-page-delay 0.1
+  "Seconds between a page's answer and the request for the next, or 0.
+At 0 the next page is requested from the answer itself; otherwise from a
+timer, which lets a session's input run between pages.")
+
+(defcustom jabber-mam-page-timeout 30
+  "Seconds a page may go unanswered before it is asked for again.
+A page silent that long twice fails its query, naming the archive.
+Results arriving count as an answer."
+  :type 'number
+  :group 'jabber)
+
+(defvar jabber-mam-stall-grace 2
+  "Seconds past its due time before the watchdog requests a next page itself.")
+
+(defvar jabber-mam--watchdog nil
+  "The one-shot timer of `jabber-mam-check-stalls' at the next deadline, or nil.
+It fires only when a query reaches a deadline: in steady paging, never.")
+
+(defvar jabber-mam--checked-at 0
+  "When incoming input last ran `jabber-mam-check-stalls'.")
+
 ;;; Internal state
 
 (defvar jabber-mam--syncing nil
@@ -229,17 +264,153 @@ Contain callback errors and quits so other queries can finish cleanup."
     (when-let* ((timer (plist-get query :timer)))
       (cancel-timer timer)
       (plist-put query :timer nil))
+    (unless jabber-mam--syncing
+      (jabber-mam--unwatch))
     (unwind-protect
         (condition-case err
             (jabber-mam--release-page query)
           ((error quit)
            (setq outcome 'failed)
            (signal (car err) (cdr err))))
+      (when (eq outcome 'failed)
+        (jabber-lifecycle--dispatch-contained
+         'jabber-mam-query-failed-functions query
+         (or (plist-get query :error) "the query failed")))
       (when-let* ((callback (plist-get query :callback)))
         (jabber-lifecycle--call-contained callback))
       (when-let* ((callback (plist-get query :result-callback)))
         (jabber-lifecycle--call-contained callback outcome)))
     (jabber-mam--redraw-dirty)))
+
+(defun jabber-mam--fail-query (query reason)
+  "Fail QUERY for REASON, a string the failure hook reports."
+  (plist-put query :error reason)
+  (jabber-mam--complete-query query 'failed))
+
+(defun jabber-mam-archive-name (query)
+  "A name for QUERY's archive: the room, the peer, or the personal archive."
+  (or (plist-get query :to)
+      (and (plist-get query :with) (format "chat with %s" (plist-get query :with)))
+      "personal archive"))
+
+(defun jabber-mam--report-failure (query reason)
+  "Say that QUERY failed for REASON, naming its archive."
+  (message "Jabber: sync failed for %s: %s" (jabber-mam-archive-name query) reason))
+
+(defun jabber-mam--log-stall (query action found)
+  "Log the watchdog's ACTION on QUERY and what it FOUND, without echoing."
+  (let ((inhibit-message t))
+    (message "Jabber: %s: %s %S" (jabber-mam-archive-name query)
+             (if (eq action 'request) "next page was never requested; requested it"
+               "page went unanswered; asked again")
+             found)))
+
+;;; The watchdog
+
+(defun jabber-mam--stall-action (query now)
+  "What the watchdog does about QUERY at NOW: nil, `request', `retry' or `fail'.
+`request': no page is in flight and the next one is overdue by more than
+`jabber-mam-stall-grace'.  `retry': the page in flight has gone unanswered
+for `jabber-mam-page-timeout' seconds; `fail': it has after a retry."
+  (if (not (plist-get query :page))
+      (let ((due (plist-get query :due-at)))
+        (and due (> now (+ due jabber-mam-stall-grace)) 'request))
+    (let ((heard (plist-get query :heard-at)))
+      (and heard (> (- now heard) jabber-mam-page-timeout)
+           (if (plist-get query :silent) 'fail 'retry)))))
+
+(defun jabber-mam--timer-state (timer)
+  "What the watchdog finds of a page TIMER: whether it is one and queued."
+  (list :timer (timerp timer)
+        :queued (and (timerp timer) (memq timer timer-list) t)
+        :triggered (and (timerp timer) (timer--triggered timer))))
+
+(defun jabber-mam-check-stalls (&optional now)
+  "Act on each registered query that stalled, as `jabber-mam--stall-action' says.
+A next page never requested is requested; a silent page is asked for once
+more, then its query fails.  NOW defaults to the current time.  Called by
+the watchdog timer at the next deadline, by incoming stanzas at most
+once a second (`jabber-mam--input-check'), and by a worker's own loop:
+a stall never waits on one timer alone."
+  (let ((now (or now (float-time))))
+    (dolist (query (copy-sequence jabber-mam--syncing))
+      (when (memq query jabber-mam--syncing)
+        (pcase (jabber-mam--stall-action query now)
+          ('request
+           (let ((found (jabber-mam--timer-state (plist-get query :timer))))
+             (when (timerp (plist-get query :timer))
+               (cancel-timer (plist-get query :timer)))
+             (plist-put query :timer nil)
+             (jabber-lifecycle--dispatch-contained
+              'jabber-mam-stall-functions query 'request found)
+             (jabber-mam--send-page query)))
+          ('retry
+           (jabber-mam--release-page query)
+           (plist-put query :silent t)
+           ;; The new attempt gets the page again: what the abandoned one
+           ;; received leaves the count, and its late results are told
+           ;; apart by their queryid (`jabber-mam--process-message').
+           (plist-put query :total (- (or (plist-get query :total) 0)
+                                      (or (plist-get query :received) 0)))
+           (plist-put query :retired-ids (cons (plist-get query :id)
+                                               (plist-get query :retired-ids)))
+           (plist-put query :id (jabber-mam--make-queryid))
+           (jabber-lifecycle--dispatch-contained
+            'jabber-mam-stall-functions query 'retry
+            (list :silent (- now (plist-get query :heard-at))))
+           (jabber-mam--send-page query))
+          ('fail
+           (jabber-mam--fail-query
+            query (format "no answer for %ss" jabber-mam-page-timeout))))))
+    (jabber-mam--watch)))
+
+(defun jabber-mam--deadline (query)
+  "When the watchdog must next look at QUERY, or nil.
+A page in flight: `jabber-mam-page-timeout' after it was last heard from.
+Between pages: `jabber-mam-stall-grace' after the next is due."
+  (if (plist-get query :page)
+      (when-let* ((heard (plist-get query :heard-at)))
+        (+ heard jabber-mam-page-timeout))
+    (when-let* ((due (plist-get query :due-at)))
+      (+ due jabber-mam-stall-grace))))
+
+(defun jabber-mam--watch ()
+  "Arm the watchdog for the registered queries' earliest deadline.
+An armed watchdog due no later stays; a lost one is armed again.  With
+no query registered, stop it."
+  (let ((next (seq-reduce (lambda (earliest query)
+                            (let ((deadline (jabber-mam--deadline query)))
+                              (if (and deadline (or (null earliest) (< deadline earliest)))
+                                  deadline earliest)))
+                          jabber-mam--syncing nil))
+        (armed jabber-mam--watchdog))
+    (cond
+     ((null jabber-mam--syncing) (jabber-mam--unwatch))
+     ((null next))
+     ((and (timerp armed) (memq armed timer-list)
+           (<= (float-time (timer--time armed)) next)))
+     (t
+      (jabber-mam--unwatch)
+      ;; A little past the deadline, so the check finds it passed.
+      (setq jabber-mam--watchdog
+            (run-at-time (max 0.01 (+ 0.05 (- next (float-time)))) nil
+                         #'jabber-mam-check-stalls))))))
+
+(defun jabber-mam--input-check (_jc _xml-data)
+  "Check for stalls as input arrives, at most once a second (a chain handler).
+Presence, messages and IQs keep arriving on a live session, so a stall
+is found even if every timer were lost."
+  (when jabber-mam--syncing
+    (let ((now (float-time)))
+      (when (> (- now jabber-mam--checked-at) 1)
+        (setq jabber-mam--checked-at now)
+        (jabber-mam-check-stalls now)))))
+
+(defun jabber-mam--unwatch ()
+  "Stop the watchdog."
+  (when (timerp jabber-mam--watchdog)
+    (cancel-timer jabber-mam--watchdog))
+  (setq jabber-mam--watchdog nil))
 
 (defun jabber-mam--build-query (queryid &optional with start after-id max
                                         before-id)
@@ -448,7 +619,15 @@ Malformed or failing results fail the page instead of being skipped."
          (qid (jabber-xml-get-attribute result 'queryid))
          (query (cl-find qid jabber-mam--syncing
                          :key (lambda (entry) (plist-get entry :id))
-                         :test #'equal)))
+                         :test #'equal))
+         (retired (and (not query) qid
+                       (cl-find-if (lambda (entry) (member qid (plist-get entry :retired-ids)))
+                                   jabber-mam--syncing))))
+    ;; A late result of an attempt the watchdog replaced: consumed, unused.
+    (when (and retired
+               (jabber-mam--valid-sender-p
+                jc (jabber-xml-get-attribute xml-data 'from) retired))
+      (setcdr (cdr xml-data) nil))
     (when (and query (plist-get query :page)
                (jabber-mam--valid-sender-p
                 jc (jabber-xml-get-attribute xml-data 'from) query))
@@ -461,6 +640,7 @@ Malformed or failing results fail the page instead of being skipped."
                   (jabber-mam--page-failed query)
                 (plist-put query :received (1+ (or (plist-get query :received) 0)))
                 (plist-put query :total (1+ (or (plist-get query :total) 0)))
+                (plist-put query :heard-at (float-time))
                 (jabber-mam--commit-result jc query (copy-tree xml-data)))
             ((error quit)
              (jabber-mam--page-failed query)
@@ -735,6 +915,7 @@ Return the owned query record."
                      :callback callback :result-callback result-callback
                      :page nil :timer nil :iq-id nil
                      :retried nil :failed nil :received 0
+                     :due-at nil :heard-at nil :silent nil :error nil :retired-ids nil
                      :account account :archive archive
                      :cursor-expected (car progress)
                      :coverage-start (if progress (cadr progress) start)
@@ -746,6 +927,17 @@ Return the owned query record."
     (jabber-mam--send-page query)
     query))
 
+(defun jabber-mam--schedule-page (query)
+  "Request QUERY's next page after `jabber-mam-page-delay' seconds.
+At 0, request it now.  It is due then; should the request never be
+made, the watchdog makes it (`jabber-mam-check-stalls')."
+  (plist-put query :due-at (+ (float-time) jabber-mam-page-delay))
+  (jabber-mam--watch)
+  (if (<= jabber-mam-page-delay 0)
+      (jabber-mam--send-page query)
+    (plist-put query :timer
+               (run-with-timer jabber-mam-page-delay nil #'jabber-mam--send-page query))))
+
 (defun jabber-mam--send-page (query)
   "Send the next page of QUERY only while its owner remains current."
   (when (and (memq query jabber-mam--syncing)
@@ -756,7 +948,10 @@ Return the owned query record."
       (let ((page (list nil)))
         (plist-put query :page page)
         (plist-put query :received 0)
+        (plist-put query :due-at nil)
+        (plist-put query :heard-at (float-time))
         (plist-put query :iq-id (jabber-mam--make-queryid))
+        (jabber-mam--watch)
         (condition-case err
             (progn
               (jabber-send-iq
@@ -772,13 +967,13 @@ Return the owned query record."
                  (and (eq page (plist-get query :page))
                       (jabber-mam--valid-sender-p
                        jc (jabber-xml-get-attribute xml 'from) query)))))
-          ((error quit)
-           (jabber-mam--complete-query
-            query (if (eq (car err) 'quit) 'cancelled 'failed))
-           (if (eq (car err) 'quit)
-               (signal (car err) (cdr err))
-             (message "MAM: query failed to send: %s"
-                      (error-message-string err)))))))))
+          (quit
+           (jabber-mam--complete-query query 'cancelled)
+           (signal (car err) (cdr err)))
+          (error
+           (jabber-mam--fail-query
+            query (format "the request could not be sent: %s"
+                          (error-message-string err)))))))))
 
 (defun jabber-mam--reply-query (jc xml-data closure)
   "Return the active query owned by JC for XML-DATA and CLOSURE."
@@ -795,13 +990,10 @@ Return the owned query record."
         (let* ((fin (jabber-mam--parse-fin xml-data))
                (last-id (plist-get fin :last)))
           (cond
-           ((or (not fin) (plist-get query :failed)
-                (and (> (or (plist-get query :received) 0) 0) (null last-id))
-                (and (not (plist-get fin :complete))
-                     (not (plist-get query :before))
-                     (or (null last-id) (equal last-id (plist-get query :after)))))
-            (jabber-mam--complete-query query 'failed))
+           ((jabber-mam--fin-problem query fin)
+            (jabber-mam--fail-query query (jabber-mam--fin-problem query fin)))
            (t
+            (plist-put query :silent nil)
             (jabber-mam--accept-page query last-id)
             (let ((before (plist-get query :before))
                   (limit (plist-get query :limit))
@@ -820,12 +1012,27 @@ Return the owned query record."
                       (plist-put query :before (plist-get fin :first))
                       (plist-put query :max (jabber-mam--catch-up-page-size (- limit total))))
                   (plist-put query :after last-id))
-                (plist-put query :timer
-                           (run-with-timer 0.1 nil #'jabber-mam--send-page query))))))))
+                (jabber-mam--schedule-page query)))))))
       ((error quit)
        (jabber-mam--page-failed query)
-       (jabber-mam--complete-query query 'failed)
+       (jabber-mam--fail-query query (format "its answer could not be read: %s"
+                                             (error-message-string err)))
        (signal (car err) (cdr err))))))
+
+(defun jabber-mam--fin-problem (query fin)
+  "Why QUERY cannot go on from its page's FIN, or nil when it can.
+FIN is `jabber-mam--parse-fin''s, nil for an answer without a valid one."
+  (let ((last-id (plist-get fin :last)))
+    (cond ((not fin) "the archive answered without a valid <fin>")
+          ((plist-get query :failed) "a result could not be stored")
+          ((and (> (or (plist-get query :received) 0) 0) (null last-id))
+           "a page of results came without an RSM <last>")
+          ((and (not (plist-get fin :complete)) (not (plist-get query :before))
+                (null last-id))
+           "an incomplete page came without an RSM <last>")
+          ((and (not (plist-get fin :complete)) (not (plist-get query :before))
+                (equal last-id (plist-get query :after)))
+           "the archive's cursor did not move"))))
 
 (defun jabber-mam--handle-error (jc xml-data closure)
   "Settle JC's failed page from XML-DATA and CLOSURE.
@@ -841,8 +1048,12 @@ Retry a stale forward cursor once without that cursor, preserving filters."
             (plist-put query :after nil)
             (plist-put query :retried t)
             (jabber-mam--send-page query))
-        (jabber-mam--complete-query query 'failed)
-        (message "MAM: query failed: %s" (jabber-sexp2xml xml-data))))))
+        (jabber-mam--fail-query
+         query (format "the archive answered %s"
+                       (or (ignore-errors
+                             (symbol-name (jabber-xml-node-name
+                                           (car (jabber-xml-node-children error-el)))))
+                           "an error")))))))
 
 ;;; Post-connect catch-up
 
@@ -1048,6 +1259,8 @@ When JC is nil, intentionally retire this room's queries on all accounts."
 (jabber-disco-advertise-feature jabber-mam-xmlns)
 
 (jabber-chain-add 'jabber-message-chain #'jabber-mam--process-message -10)
+(dolist (chain '(jabber-message-chain jabber-presence-chain jabber-iq-chain))
+  (jabber-chain-add chain #'jabber-mam--input-check 100))
 
 (add-hook 'jabber-post-connect-hooks #'jabber-mam-maybe-catchup)
 (add-hook 'jabber-pre-disconnect-hook #'jabber-mam--cleanup-all)

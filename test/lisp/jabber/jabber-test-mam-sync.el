@@ -544,5 +544,142 @@ personal archive one, in a single complete page."
       (jabber-db-close)
       (delete-directory dir t))))
 
+;;; Stalls in the worker
+
+(defvar jabber-test-mam-sync--pages 3
+  "Pages of two messages each in every archive `--paged-archive' serves.")
+
+(defvar jabber-test-mam-sync--misbehave nil
+  "Function of (ARCHIVE PAGE) naming how `--paged-archive' answers that
+page: nil as it should, `silent' not at all, `no-fin' without a fin.")
+
+(defvar jabber-test-mam-sync--requests nil
+  "Archive queries `--paged-archive' received, as (ARCHIVE PAGE), newest first.")
+
+(defun jabber-test-mam-sync--paged-archive (fsm stanza)
+  "Answer STANZA's archive query on FSM a page at a time, as RSM pages.
+A page's place comes from its <after>, \"ARCHIVE-N\" for the Nth message."
+  (let* ((id (jabber-xml-get-attribute stanza 'id))
+         (to (jabber-xml-get-attribute stanza 'to))
+         (query (car (jabber-xml-get-children stanza 'query)))
+         (queryid (jabber-xml-get-attribute query 'queryid))
+         (after (car (jabber-xml-node-children
+                      (car (jabber-xml-get-children
+                            (car (jabber-xml-get-children query 'set)) 'after)))))
+         (archive (or to "romeo@montague.net"))
+         (page (if after (/ (1+ (string-to-number (car (last (split-string after "-"))))) 2) 0))
+         (how (and jabber-test-mam-sync--misbehave
+                   (funcall jabber-test-mam-sync--misbehave archive page)))
+         (last-page (= page (1- jabber-test-mam-sync--pages))))
+    (push (list archive page) jabber-test-mam-sync--requests)
+    (unless (eq how 'silent)
+      (dotimes (i 2)
+        (let ((n (+ (* 2 page) i)))
+          (jabberd-send
+           fsm `(message ((from . ,archive) (to . "romeo@montague.net/Orchard"))
+                         (result ((xmlns . ,jabber-mam-xmlns) (queryid . ,queryid)
+                                  (id . ,(format "%s-%d" archive n)))
+                                 (forwarded ((xmlns . ,jabber-mam-forward-xmlns))
+                                            (delay ((xmlns . ,jabber-mam-delay-xmlns)
+                                                    (stamp . ,(format "2026-11-01T10:%02d:00Z" n))))
+                                            (message ((type . ,(if to "groupchat" "chat"))
+                                                      (from . ,(if to (concat to "/juliet")
+                                                                 "juliet@capulet.example/balcony"))
+                                                      (to . "romeo@montague.net")
+                                                      (id . ,(format "m-%s-%d" archive n)))
+                                                     (body () ,(format "Hello %d" n)))))))))
+      (jabberd-send
+       fsm `(iq ((type . "result") (id . ,id) ,@(when to `((from . ,to))))
+                ,@(unless (eq how 'no-fin)
+                    `((fin ((xmlns . ,jabber-mam-xmlns)
+                            (complete . ,(if last-page "true" "false")))
+                           (set ((xmlns . ,jabber-mam-rsm-xmlns))
+                                (first () ,(format "%s-%d" archive (* 2 page)))
+                                (last () ,(format "%s-%d" archive (1+ (* 2 page)))))))))))))
+
+(defmacro jabber-test-mam-sync--with-paged-server (&rest body)
+  "Run BODY against a virtual server whose archives answer by RSM pages.
+The room's cursor is seeded, so its catch-up pages forward from it."
+  (declare (indent 0) (debug t))
+  `(let* ((dir (make-temp-file "jabber-mam-sync" t))
+          (jabber-db-path (expand-file-name "test.sqlite" dir))
+          (jabber-db--connection nil)
+          (jabber-connections nil)
+          (jabber-virtual-server-function #'jabberd-handle)
+          (jabberd-iq-get-handlers
+           (cons (cons "http://jabber.org/protocol/disco#info" #'jabber-test-mam-sync--disco)
+                 jabberd-iq-get-handlers))
+          (jabberd-iq-set-handlers
+           (cons (cons jabber-mam-xmlns #'jabber-test-mam-sync--paged-archive)
+                 jabberd-iq-set-handlers))
+          (jabber-test-mam-sync--requests nil)
+          (room "room@conference.montague.net"))
+     (unwind-protect
+         (progn
+           (jabber-db-seed-mam-progress "romeo@montague.net" room nil
+                                        "before-room" "2026-10-01T00:00:00Z")
+           ,@body)
+       (jabber-db-close)
+       (delete-directory dir t))))
+
+(defun jabber-test-mam-sync--run-paged ()
+  "Run the worker over the personal archive and the room; return its summary."
+  (jabber-mam-sync-worker-run
+   '(:username "romeo" :server "montague.net" :resource "Orchard-sync-1"
+     :password "foo" :connection-type virtual)
+   '((:room nil :with nil :nick nil)
+     (:room "room@conference.montague.net" :with nil :nick "romeo"))))
+
+(ert-deftest jabber-test-mam-sync-worker-pages-without-timers ()
+  "The worker asks for each next page from the previous answer: no page
+timer stands between them that could be lost."
+  (jabber-test-mam-sync--with-paged-server
+    (let* ((timers 0)
+           (run (symbol-function 'run-with-timer))
+           (summary
+            (cl-letf (((symbol-function 'run-with-timer)
+                       (lambda (secs repeat function &rest args)
+                         (when (eq function #'jabber-mam--send-page) (cl-incf timers))
+                         (apply run secs repeat function args))))
+              (jabber-test-mam-sync--run-paged))))
+      (should (= 0 timers))
+      (should (equal `((nil "chat" success 6 nil) (,room "groupchat" success 6 nil))
+                     (plist-get summary :archives)))
+      (should (equal '(0 1 2) (sort (mapcar #'cadr (seq-filter (lambda (r) (equal (car r) room))
+                                                             jabber-test-mam-sync--requests))
+                                    #'<)))
+      (should-not (plist-get summary :stalls)))))
+
+(ert-deftest jabber-test-mam-sync-worker-fails-a-silent-archive-by-name ()
+  "A page the archive never answers is asked again, then fails that archive,
+named with why; the other archive completes."
+  (jabber-test-mam-sync--with-paged-server
+    (let* ((jabber-mam-page-timeout 0.3)
+           (jabber-test-mam-sync--misbehave
+            (lambda (archive page) (and (equal archive room) (= page 1) 'silent)))
+           (summary (jabber-test-mam-sync--run-paged)))
+      (should (equal `((nil "chat" success 6 nil)
+                       (,room "groupchat" failed 2 "no answer for 0.3s"))
+                     (plist-get summary :archives)))
+      ;; Page 1 asked twice: the request and the watchdog's retry.
+      (should (equal '((1) (1) (0)) (mapcar #'cdr (seq-filter (lambda (r) (equal (car r) room))
+                                                              jabber-test-mam-sync--requests))))
+      (should (equal `((,room retry)) (mapcar (lambda (s) (list (car s) (cadr s)))
+                                              (plist-get summary :stalls))))
+      (should (equal (format "Jabber: sync completed (8 messages in 2 chats); failed for %s" room)
+                     (jabber-mam-sync--toast-text summary nil)))
+      (should (eq 'error (jabber-mam-sync--toast-kind summary))))))
+
+(ert-deftest jabber-test-mam-sync-worker-names-an-answer-without-fin ()
+  "An archive answering a page without a fin fails, with that reason."
+  (jabber-test-mam-sync--with-paged-server
+    (let* ((jabber-test-mam-sync--misbehave
+            (lambda (archive page) (and (null (string-search "conference" archive))
+                                        (= page 2) 'no-fin)))
+           (summary (jabber-test-mam-sync--run-paged)))
+      (should (equal `((nil "chat" failed 6 "the archive answered without a valid <fin>")
+                       (,room "groupchat" success 6 nil))
+                     (plist-get summary :archives))))))
+
 (provide 'jabber-test-mam-sync)
 ;;; jabber-test-mam-sync.el ends here

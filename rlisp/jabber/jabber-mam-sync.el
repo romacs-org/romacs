@@ -347,6 +347,10 @@ Then start the account's follow-up job, if anything is pending."
     (jabber-mam-sync--put account :jobs jobs)
     (when-let* ((text (jabber-mam-sync--toast-text summary (= jobs 1))))
       (jabber-mam-sync--toast text (jabber-mam-sync--toast-kind summary)))
+    ;; What the worker's watchdog did, for the record, without echoing.
+    (dolist (stall (plist-get summary :stalls))
+      (let ((inhibit-message t))
+        (message "Jabber: sync watchdog: %s %s %S" (nth 0 stall) (nth 1 stall) (nth 2 stall))))
     (jabber-mam-sync--merge summary)
     (jabber-lifecycle--dispatch-contained
      'jabber-mam-sync-finished-functions account summary)))
@@ -635,16 +639,22 @@ It counts once its result's transaction commits."
                      (cons (car counts) (1+ (cdr counts))))
                jabber-mam-sync--stored))))
 
-(defvar jabber-mam-sync--errors nil
-  "In a worker: alist of archive JID to the error condition it answered.")
+(defvar jabber-mam-sync--failure nil
+  "In a worker: the reason the query that last failed gave.
+`jabber-mam-query-failed-functions' runs before the query's callbacks,
+so an archive's outcome takes it from here.")
 
-(defun jabber-mam-sync--note-error (_jc xml-data closure)
-  "Remember the condition of CLOSURE's query error XML-DATA (`:before')."
-  (let* ((query (car-safe closure))
-         (error-el (car (jabber-xml-get-children xml-data 'error)))
-         (condition (jabber-xml-node-name (car (jabber-xml-node-children error-el)))))
-    (when (and (consp query) condition)
-      (push (cons (plist-get query :to) (symbol-name condition)) jabber-mam-sync--errors))))
+(defun jabber-mam-sync--note-failure (_query reason)
+  "Keep REASON for the failed query's outcome (`jabber-mam-query-failed-functions')."
+  (setq jabber-mam-sync--failure reason))
+
+(defvar jabber-mam-sync--stalls nil
+  "In a worker: the watchdog's actions, as (ARCHIVE ACTION FOUND), newest first.")
+
+(defun jabber-mam-sync--note-stall (query action found)
+  "Record the watchdog's ACTION on QUERY and what it FOUND (`jabber-mam-stall-functions')."
+  (jabber-mam-sync--note-progress)
+  (push (list (jabber-mam-archive-name query) action found) jabber-mam-sync--stalls))
 
 (defun jabber-mam-sync--cpu-seconds ()
   "This process's user and system CPU seconds, or nil."
@@ -665,7 +675,11 @@ It counts once its result's transaction commits."
   "Catch up ARCHIVE on JC once disco says it has MAM; DONE gets the outcome."
   (let* ((room (plist-get archive :room))
          (with (plist-get archive :with))
-         (target (or room (jabber-connection-bare-jid jc))))
+         (target (or room (jabber-connection-bare-jid jc)))
+         (finish (lambda (outcome)
+                   (funcall done (if (eq outcome 'failed)
+                                     (cons 'failed (or jabber-mam-sync--failure "the query failed"))
+                                   outcome)))))
     (condition-case err
         (jabber-disco-get-info
          jc target nil
@@ -678,12 +692,12 @@ It counts once its result's transaction commits."
                                                  (jabber-mam-sync--condition result)))))
             ((member jabber-mam-xmlns (cadr result))
                (condition-case err
-                   (cond (room (jabber-mam--muc-catch-up jc room done))
+                   (cond (room (jabber-mam--muc-catch-up jc room finish))
                          (with
                           (let ((progress (jabber-db-mam-progress target target with)))
                             (jabber-mam--query jc (car progress) nil with (cadr progress)
-                                               nil nil nil nil done)))
-                         (t (jabber-mam--catch-up jc done)))
+                                               nil nil nil nil finish)))
+                         (t (jabber-mam--catch-up jc finish)))
                  (error (funcall done (cons 'failed (error-message-string err))))))
             (t (funcall done 'unsupported))))
          nil)
@@ -721,6 +735,13 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
          (jabber-mam-committed-functions (list #'jabber-mam-sync--committed))
          (jabber-mam-enable t)
          (jabber-mam-background nil)
+         ;; Each page is requested from the previous one's answer, with no
+         ;; timer between them; the loop below runs the watchdog too.
+         (jabber-mam-page-delay 0)
+         (jabber-mam-query-failed-functions (list #'jabber-mam-sync--note-failure))
+         (jabber-mam-stall-functions (list #'jabber-mam-sync--note-stall))
+         (jabber-mam-sync--failure nil)
+         (jabber-mam-sync--stalls nil)
          (jabber-db-busy-timeout (max jabber-db-busy-timeout 30000))
          (jabber-mam--room-nicks
           (let ((nicks (make-hash-table :test #'equal)))
@@ -728,7 +749,6 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
               (when (and (plist-get a :room) (plist-get a :nick))
                 (puthash (plist-get a :room) (plist-get a :nick) nicks)))))
          (jabber-mam-sync--refused nil)
-         (jabber-mam-sync--errors nil)
          (jabber-mam-sync--stored (make-hash-table :test #'equal))
          (jabber-mam-sync--progress-at start)
          (queue (copy-sequence archives))
@@ -754,7 +774,6 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
     (advice-add 'jabber-send-sexp--raw :before #'jabber-mam-sync--gate)
     (advice-add 'jabber-send-string :before #'jabber-mam-sync--gate-string)
     (advice-add 'jabber-db--insert-message :after #'jabber-mam-sync--count-insert)
-    (advice-add 'jabber-mam--handle-error :before #'jabber-mam-sync--note-error)
     (advice-add 'jabber-mam--commit-result :around #'jabber-mam-sync--without-collections)
     (advice-add 'jabber-mam--handle-fin :after #'jabber-mam-sync--note-progress)
     (jabber-db-share-writes 'defer)
@@ -777,7 +796,8 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
                          jabber-mam-sync-timeout)
                       (memq jc jabber-connections)
                       (or connected (< (- (float-time) start) 60)))
-            (accept-process-output nil 0.1))
+            (accept-process-output nil 0.1)
+            (jabber-mam-check-stalls))
           (jabber-mam-sync--summary
            account archives outcomes connected (- (float-time) start)
            (if (memq jc jabber-connections)
@@ -788,7 +808,6 @@ PEER TYPE STORED CHANGED)...) :refused WHAT :seconds S :pid PID :cpu S), with
       (advice-remove 'jabber-send-sexp--raw #'jabber-mam-sync--gate)
       (advice-remove 'jabber-send-string #'jabber-mam-sync--gate-string)
       (advice-remove 'jabber-db--insert-message #'jabber-mam-sync--count-insert)
-      (advice-remove 'jabber-mam--handle-error #'jabber-mam-sync--note-error)
       (advice-remove 'jabber-mam--commit-result #'jabber-mam-sync--without-collections)
       (advice-remove 'jabber-mam--handle-fin #'jabber-mam-sync--note-progress)
       (jabber-db-share-writes nil))))
@@ -801,7 +820,6 @@ Counts are of committed results only.  An archive with no outcome is
   (let* ((rooms (make-hash-table :test #'equal))
          (by-peer (make-hash-table :test #'equal))
          (settled (make-hash-table :test #'eq))
-         (errors (make-hash-table :test #'equal))
          (personal 0)
          (peers nil))
     (dolist (a archives)
@@ -809,8 +827,6 @@ Counts are of committed results only.  An archive with no outcome is
     ;; The first outcome and error recorded for each archive.
     (dolist (outcome (reverse outcomes))
       (unless (gethash (car outcome) settled) (puthash (car outcome) (cdr outcome) settled)))
-    (dolist (error (reverse jabber-mam-sync--errors))
-      (unless (gethash (car error) errors) (puthash (car error) (cdr error) errors)))
     (maphash (lambda (key counts)
                (push (append key (list (car counts) (cdr counts))) peers)
                (puthash (nth 1 key) (+ (car counts) (gethash (nth 1 key) by-peer 0)) by-peer)
@@ -827,8 +843,7 @@ Counts are of committed results only.  An archive with no outcome is
                 (with (plist-get archive :with))
                 (outcome (gethash archive settled 'incomplete))
                 (reason (cond ((consp outcome) (cdr outcome))
-                              ((eq outcome 'incomplete) unsettled)
-                              (t (gethash room errors))))
+                              ((eq outcome 'incomplete) unsettled)))
                 (outcome (if (consp outcome) (car outcome) outcome)))
            (list (or room with) (if room "groupchat" "chat") outcome
                  (cond (room (gethash room by-peer 0))
@@ -839,6 +854,7 @@ Counts are of committed results only.  An archive with no outcome is
       :peers peers
       :account (concat (plist-get account :username) "@" (plist-get account :server))
       :refused (reverse jabber-mam-sync--refused)
+      :stalls (reverse jabber-mam-sync--stalls)
       :seconds seconds
       :pid (emacs-pid)
       :cpu (jabber-mam-sync--cpu-seconds)))))

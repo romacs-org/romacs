@@ -1701,8 +1701,9 @@ ROOM is the archive JID.  COMPLETE marks the last page."
                       (last () ,(format "archive-%06d" index))))))))
 
 (defun jabber-test-mam--wait-for (predicate)
-  "Run timers until PREDICATE returns non-nil or two seconds pass."
-  (let ((deadline (+ (float-time) 2)))
+  "Run timers until PREDICATE returns non-nil or ten seconds pass.
+Generous for a loaded host; a passing wait ends as soon as it holds."
+  (let ((deadline (+ (float-time) 10)))
     (while (and (not (funcall predicate)) (< (float-time) deadline))
       (accept-process-output nil 0.05))
     (funcall predicate)))
@@ -1749,10 +1750,13 @@ ROOM is the archive JID.  COMPLETE marks the last page."
             (jabber-test-mam--room-page jc (car sent) room 2 t)
             (should-not (jabber-mam-syncing-p))
             (should-not (buffer-local-value 'jabber-chat-mam-syncing buffer))
+            ;; The refresh runs in budgeted ticks, newest first: wait for
+            ;; both messages before counting.
             (should (jabber-test-mam--wait-for
                      (lambda ()
                        (with-current-buffer buffer
-                         (string-search "Message 2" (buffer-string))))))
+                         (and (string-search "Message 2" (buffer-string))
+                              (string-search "Message 1" (buffer-string)))))))
             (with-current-buffer buffer
               (let ((text (buffer-string)))
                 (should (= 1 (cl-count-if
@@ -1997,9 +2001,13 @@ display and so is not asserted to keep the anchor."
                          (lambda () (= 3 (length sent)))))
                 (jabber-test-mam--room-page jc (car sent) room 17 t)
                 (should-not (jabber-mam-syncing-p))
+                ;; The refresh runs in budgeted ticks.
+                (should (jabber-test-mam--wait-for
+                         (lambda ()
+                           (with-current-buffer buffer
+                             (and (string-search "Message 16" (buffer-string))
+                                  (string-search "Message 17" (buffer-string)))))))
                 (with-current-buffer buffer
-                  (should (string-search "Message 16" (buffer-string)))
-                  (should (string-search "Message 17" (buffer-string)))
                   (should (equal "draft survives"
                                  (buffer-substring-no-properties
                                   jabber-point-insert (point-max)))))))
@@ -2260,6 +2268,178 @@ fails, so its row is never displayed and page 1 stays visible."
         (should (equal (list peer "chat" nil) (car calls)))
         (should-not jabber-mam--peer-syncing)
         (should-not (jabber-mam-syncing-p))))))
+
+;;; Stalls: the watchdog, answers without a usable fin
+
+(defmacro jabber-test-mam--watching (&rest body)
+  "Run BODY in a native session whose watchdog acts fast.
+FAILURES and STALLS collect what the hooks report, newest first."
+  (declare (indent 0) (debug t))
+  `(jabber-test-mam--with-native
+     (let* ((failures nil) (stalls nil)
+            (jabber-mam-stall-grace 0.1)
+            (jabber-mam-query-failed-functions
+             (list (lambda (query reason)
+                     (push (list (jabber-mam-archive-name query) reason) failures))))
+            (jabber-mam-stall-functions
+             (list (lambda (_query action found) (push (cons action found) stalls)))))
+       ,@body)))
+
+(defun jabber-test-mam--answer (jc request room &rest fin)
+  "Answer REQUEST from ROOM through JC with FIN's elements as the IQ's children."
+  (fsm-send-sync
+   jc `(:stanza (iq ((type . "result") (from . ,room)
+                     (id . ,(jabber-xml-get-attribute request 'id)))
+                    ,@fin))))
+
+(defun jabber-test-mam--fin (complete &rest rsm)
+  "A <fin> with COMPLETE, nil for no attribute, and RSM elements in its <set>.
+RSM `none' leaves the <set> out."
+  `(fin ((xmlns . ,jabber-mam-xmlns) ,@(when complete `((complete . ,complete))))
+        ,@(unless (equal rsm '(none))
+            `((set ((xmlns . ,jabber-mam-rsm-xmlns)) ,@rsm)))))
+
+(ert-deftest jabber-test-mam-watchdog-requests-a-lost-next-page ()
+  "A page answered whose next request never goes out is requested in seconds.
+The installed session stalled so: the page released, the query still
+registered, its next-page timer gone, nothing in flight."
+  (jabber-test-mam--watching
+    (let* ((room "room@example.com")
+           (jabber-mam-page-delay 0.05)
+           (query (progn (jabber-test-mam--seed-cursor jc room "archive-000001")
+                         (jabber-mam--query jc "archive-000001" nil nil nil room))))
+      (jabber-test-mam--room-message jc (car sent) room 2)
+      (jabber-test-mam--room-fin jc (car sent) room "archive-000002" "archive-000002" nil)
+      ;; The loss: the next page's timer never fires.
+      (cancel-timer (plist-get query :timer))
+      (should (jabber-test-mam--wait-for (lambda () (= 2 (length sent)))))
+      (should (equal '("50" "archive-000002" nil) (jabber-test-mam--rsm (car sent))))
+      (should (equal '((request :timer t :queued nil :triggered nil)) stalls))
+      ;; The rescued page goes on as any other.
+      (jabber-test-mam--room-message jc (car sent) room 3)
+      (jabber-test-mam--room-fin jc (car sent) room "archive-000003" "archive-000003" t)
+      (should-not (jabber-mam-syncing-p))
+      (should-not failures)
+      (should-not jabber-mam--watchdog))))
+
+(ert-deftest jabber-test-mam-next-page-without-delay-needs-no-timer ()
+  "With no page delay the next page is asked for from the answer itself."
+  (jabber-test-mam--watching
+    (let ((room "room@example.com") (jabber-mam-page-delay 0) (timers 0))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room)
+      (cl-letf* ((run (symbol-function 'run-with-timer))
+                 ((symbol-function 'run-with-timer)
+                  (lambda (secs repeat function &rest args)
+                    (when (eq function #'jabber-mam--send-page) (cl-incf timers))
+                    (apply run secs repeat function args))))
+        (jabber-test-mam--room-message jc (car sent) room 2)
+        (jabber-test-mam--room-fin jc (car sent) room "archive-000002" "archive-000002" nil)
+        (should (= 2 (length sent)))
+        (should (equal "archive-000002" (nth 1 (jabber-test-mam--rsm (car sent)))))
+        (should (= 0 timers))))))
+
+(ert-deftest jabber-test-mam-watchdog-retries-then-fails-a-silent-page ()
+  "An unanswered page is asked for once more, then its query fails, named.
+The first request's late answer is no answer to the second."
+  (jabber-test-mam--watching
+    (let* ((room "room@example.com")
+           (jabber-mam-page-timeout 0.2))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room)
+      (let ((first (car sent)))
+        (should (jabber-test-mam--wait-for (lambda () (= 2 (length sent)))))
+        (should (equal (jabber-test-mam--rsm first) (jabber-test-mam--rsm (car sent))))
+        (should (eq 'retry (car (car stalls))))
+        (let ((query (car jabber-mam--syncing)) (heard nil))
+          (setq heard (plist-get query :heard-at))
+          ;; The abandoned attempt's late result and fin: neither counts.
+          (jabber-test-mam--room-message jc first room 9)
+          (should (= 0 (plist-get query :received)))
+          (should (equal heard (plist-get query :heard-at)))
+          (should-not (caar (sqlite-select (jabber-db-ensure-open)
+                                           "SELECT 1 FROM message WHERE body = 'Message 9'"))))
+        (jabber-test-mam--room-fin jc first room "archive-000009" "archive-000009" t)
+        (should (jabber-mam-syncing-p))
+        (should (jabber-test-mam--wait-for (lambda () failures)))
+        (should (equal `((,room "no answer for 0.2s")) failures))
+        (should-not (jabber-mam-syncing-p))
+        (should (= 2 (length sent)))))))
+
+(ert-deftest jabber-test-mam-retried-page-counts-once ()
+  "A bounded history page asked for again counts its replayed results once,
+so the history does not end short of its limit."
+  (jabber-test-mam--watching
+    (let ((room "room@example.com") (jabber-mam-page-timeout 0.2))
+      (jabber-mam--query jc nil nil nil nil room t nil nil nil 2)
+      (let ((first (car sent)))
+        (should (equal '("2" nil t) (jabber-test-mam--rsm first)))
+        (jabber-test-mam--room-message jc first room 9)
+        (should (jabber-test-mam--wait-for (lambda () (= 2 (length sent)))))
+        ;; The archive answers the new attempt with the same newest message.
+        (jabber-test-mam--room-message jc (car sent) room 9)
+        (jabber-test-mam--room-fin jc (car sent) room "archive-000009" "archive-000009" nil)
+        (should (jabber-test-mam--wait-for (lambda () (= 3 (length sent)))))
+        (should (equal '("1" nil "archive-000009") (jabber-test-mam--rsm (car sent))))
+        (should (jabber-mam-syncing-p))))))
+
+(ert-deftest jabber-test-mam-results-keep-a-slow-page-alive ()
+  "Results arriving are an answer: a page that streams slowly is no silence."
+  (jabber-test-mam--watching
+    (let ((room "room@example.com") (jabber-mam-page-timeout 0.3))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room)
+      (dotimes (i 6)
+        (jabber-test-mam--room-message jc (car sent) room (+ 2 i))
+        (let ((deadline (+ (float-time) 0.1)))
+          (while (< (float-time) deadline) (accept-process-output nil 0.02))))
+      (should (= 1 (length sent)))
+      (should-not stalls))))
+
+(ert-deftest jabber-test-mam-odd-answers-fail-or-page-as-rsm-says ()
+  "Answers without a usable fin or cursor fail, naming the archive and why;
+the forms RSM allows page on or complete."
+  (dolist (case `((1 ,(jabber-test-mam--fin "false" 'none)
+                     "a page of results came without an RSM <last>")
+                  (0 ,(jabber-test-mam--fin "false")
+                     "an incomplete page came without an RSM <last>")
+                  (1 ,(jabber-test-mam--fin "false" '(last () "archive-000001"))
+                     "the archive's cursor did not move")
+                  (1 ,(jabber-test-mam--fin "maybe" '(last () "archive-000002"))
+                     "the archive answered without a valid <fin>")
+                  (1 ,(jabber-test-mam--fin "false" '(last () ""))
+                     "the archive answered without a valid <fin>")
+                  (0 nil "the archive answered without a valid <fin>")
+                  (1 ,(jabber-test-mam--fin "1" '(last () "archive-000002")) complete)
+                  (0 ,(jabber-test-mam--fin "true" 'none) complete)
+                  (0 ,(jabber-test-mam--fin nil '(count () "0")) failed)
+                  (1 ,(jabber-test-mam--fin "false" '(first ((index . "0")) "archive-000002")
+                                            '(last () "archive-000002") '(count () "9"))
+                     continues)))
+    (jabber-test-mam--watching
+      (let ((room "room@example.com") (jabber-mam-page-delay 0))
+        (jabber-test-mam--seed-cursor jc room "archive-000001")
+        (jabber-mam--query jc "archive-000001" nil nil nil room)
+        (when (= 1 (nth 0 case))
+          (jabber-test-mam--room-message jc (car sent) room 2))
+        (apply #'jabber-test-mam--answer jc (car sent) room (delq nil (list (nth 1 case))))
+        (pcase (nth 2 case)
+          ('complete (should-not (jabber-mam-syncing-p)) (should-not failures))
+          ('continues (should (= 2 (length sent))) (should-not failures))
+          ('failed (should failures) (should-not (jabber-mam-syncing-p)))
+          (reason (should (equal `((,room ,reason)) failures))
+                  (should-not (jabber-mam-syncing-p))))))))
+
+(ert-deftest jabber-test-mam-two-fins-are-no-valid-fin ()
+  "An answer with two fins is refused, naming the archive."
+  (jabber-test-mam--watching
+    (let ((room "room@example.com"))
+      (jabber-test-mam--seed-cursor jc room "archive-000001")
+      (jabber-mam--query jc "archive-000001" nil nil nil room)
+      (jabber-test-mam--answer jc (car sent) room
+                               (jabber-test-mam--fin "true" '(last () "archive-000002"))
+                               (jabber-test-mam--fin "true" '(last () "archive-000003")))
+      (should (equal `((,room "the archive answered without a valid <fin>")) failures)))))
 
 (provide 'jabber-test-mam)
 
