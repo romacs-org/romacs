@@ -18,6 +18,11 @@
 //! The socket speaks lines: the server's first is `{"attach":{"from":N,
 //! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness.
 //!
+//! `--note JSON` journals `{"seq":N,"t":SECS,"note":JSON}` as the run's
+//! first record, before anything the harness writes: never written to
+//! the harness, it marks where this run starts (a server folding a
+//! harness's startup state from the journal starts over there).
+//!
 //! `--input FILE` gives a harness that reads its whole stdin (one run per
 //! turn, its prompt on stdin) FILE as that input: journaled as an `"in"`
 //! record, written, and the stdin closed, with no server needed; FILE is
@@ -32,30 +37,32 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] -- PROGRAM [ARG...]";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--note JSON] -- PROGRAM [ARG...]";
 
 struct Config {
     dir: PathBuf,
     socket: PathBuf,
     input: Option<PathBuf>,
+    note: Option<Json>,
     argv: Vec<String>,
 }
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
-    let (mut dir, mut socket, mut input) = (None, None, None);
+    let (mut dir, mut socket, mut input, mut note) = (None, None, None, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
             "--socket" => socket = args.next().map(PathBuf::from),
             "--input" => input = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
+            "--note" => note = Some(args.next().and_then(|text| serde_json::from_str::<Json>(&text).ok()).ok_or(USAGE)?),
             "--" => break,
             _ => return Err(USAGE.into()),
         }
     }
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
-        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, argv }),
+        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -214,6 +221,12 @@ fn run(config: Config) -> Result<i32, String> {
     let stdout = child.stdout.take().ok_or("harness stdout")?;
     let mut stdin = child.stdin.take();
     let mut shared = Shared { seq, journal, path, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
+    // The run's first record: its output is read only from here on.
+    if let Some(note) = &config.note {
+        shared.seq += 1;
+        let entry = json!({"seq": shared.seq, "t": now(), "note": note}).to_string();
+        shared.append(&entry, true);
+    }
     if let Some(file) = &config.input {
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         shared.seq += 1;
@@ -350,5 +363,8 @@ mod tests {
         let config = parse(["--dir", "d", "--socket", "/s", "--", "claude", "-p"].map(String::from).to_vec()).unwrap();
         assert_eq!(config.argv, ["claude", "-p"]);
         assert!(parse(["--dir", "d", "--socket", "relative", "--", "x"].map(String::from).to_vec()).is_err());
+        let noted = parse(["--dir", "d", "--socket", "/s", "--note", r#"{"type":"run"}"#, "--", "x"].map(String::from).to_vec()).unwrap();
+        assert_eq!(noted.note, Some(json!({"type": "run"})));
+        assert!(parse(["--dir", "d", "--socket", "/s", "--note", "not json", "--", "x"].map(String::from).to_vec()).is_err());
     }
 }
