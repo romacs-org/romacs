@@ -650,6 +650,12 @@ no key waits behind the rendering of a message.")
 (defvar jabber-chat-backlog-patience 1.0
   "Seconds backlog ticks wait for a typing pause before working between keys.")
 
+(defvar jabber-chat-backlog-at-once nil
+  "Non-nil while a refresh works its whole backlog in one tick.
+A background sync's refresh binds it (`jabber-chat-buffer-refresh' with
+ATOMIC), so redisplay sees the old transcript or the new one, never an
+emptied or partial one.  It runs only when the user is idle.")
+
 (defvar-local jabber-chat--backlog-waiting nil
   "When this buffer's backlog ticks began to wait for the user, or nil.")
 
@@ -668,7 +674,7 @@ command, or in batch) a tick works."
                      (and idle (< (float-time idle) jabber-chat-backlog-idle)
                           (< (- now since) jabber-chat-backlog-patience)))))
       (setq jabber-chat--backlog-waiting (and wait since))
-      wait)))
+      (and wait (not jabber-chat-backlog-at-once)))))
 
 (defun jabber-chat-insert-backlog-entry (msg-plist)
   "Insert backlog MSG-PLIST at beginning of buffer."
@@ -741,11 +747,13 @@ refresh has started and this insert sequence should abort."
             (count 0))
 	(jabber-chat-buffer--call-with-transcript
          (lambda ()
-           (while (and rest (< count jabber-chat-backlog-chunk-size)
-                       (or (= count 0)
-                           (and (< (- (float-time) start)
-                                   jabber-chat-backlog-chunk-budget)
-                                (not (input-pending-p)))))
+           (while (and rest
+                       (or jabber-chat-backlog-at-once
+                           (and (< count jabber-chat-backlog-chunk-size)
+                                (or (= count 0)
+                                    (and (< (- (float-time) start)
+                                            jabber-chat-backlog-chunk-budget)
+                                         (not (input-pending-p)))))))
              (jabber-chat-insert-backlog-entry (pop rest))
              (setq count (1+ count)))))
 	(if rest

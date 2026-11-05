@@ -556,6 +556,50 @@ WHERE stanza_id = 'stanza-000001'"))))
 WHERE stanza_id = 'stanza-000001'"))))))
 
 
+;; An encrypted message decrypts once; a catch-up overlapping what was
+;; read (the newest messages are fetched first) brings it again.
+(ert-deftest jabber-test-mam-replayed-undecryptable-stored-message-keeps-its-page ()
+  "A result stored readable before that no longer decrypts does not fail
+its page, and keeps its text; one never stored readable still does."
+  (jabber-test-mam-with-db
+    (let* ((jc (jabber-test-mam--make-fake-jc "me@example.com"))
+           (query (list :id jabber-test-mam-queryid :jc jc
+                        :current-p (jabber-mam--session-predicate jc)
+                        :to nil :page (list nil) :transaction nil
+                        :account "me@example.com" :archive "me@example.com"))
+           (jabber-mam--syncing (list query))
+           (jabber-muc-participants nil))
+      (jabber-mam--process-message jc (jabber-test-mam--make-message 1))
+      (cl-letf (((symbol-function 'jabber-chat--decrypt-if-needed)
+                 (lambda (_jc inner)
+                   (jabber-chat--set-body inner "[OMEMO: could not decrypt]"))))
+        (jabber-mam--process-message jc (jabber-test-mam--make-message 1))
+        (should-not (plist-get query :failed))
+        (jabber-mam--process-message jc (jabber-test-mam--make-message 2))
+        (should (plist-get query :failed)))
+      (should (equal '(("Message 1"))
+                     (sqlite-select (jabber-db-ensure-open)
+                                    "SELECT body FROM message WHERE stanza_id = 'stanza-000001'"))))))
+
+
+(ert-deftest jabber-test-mam-stored-readable-follows-the-archive-occurrence ()
+  "A row is found readable by its archive occurrence, whatever its server
+ID (a room message's own stanza ID), and not when its text is a placeholder."
+  (jabber-test-mam-with-db
+    (let ((db (jabber-db-ensure-open)))
+      (dolist (row '(("uid-1" "kept" "sid-1") ("uid-2" "[OMEMO: could not decrypt]" "sid-2")))
+        (sqlite-execute db "INSERT INTO message (account, peer, direction, type, body, timestamp, server_id) \
+VALUES ('me@example.com', 'room@conference.example.com', 'in', 'groupchat', ?, 1, ?)"
+                        (list (nth 1 row) (nth 2 row)))
+        (sqlite-execute db "INSERT INTO message_archive VALUES ('me@example.com', \
+'room@conference.example.com', ?, (SELECT max(id) FROM message))" (list (car row))))
+      (should (jabber-mam--stored-readable-p "me@example.com" "room@conference.example.com"
+                                             "room@conference.example.com" "uid-1"))
+      (should-not (jabber-mam--stored-readable-p "me@example.com" "room@conference.example.com"
+                                                 "room@conference.example.com" "uid-2"))
+      (should-not (jabber-mam--stored-readable-p "me@example.com" "room@conference.example.com"
+                                                 "room@conference.example.com" "uid-3")))))
+
 ;;; Group 10: stanza mutation guard
 
 (ert-deftest jabber-test-mam-body-stanza-stripped ()

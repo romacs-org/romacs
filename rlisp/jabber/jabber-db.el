@@ -1318,9 +1318,12 @@ WHERE account = ? AND peer = ? AND type = ? AND thread_id = ?"
     (list account peer type thread-id))))
 
 (defun jabber-db--ensure-message-thread
-    (account peer type timestamp stanza-id server-id thread)
+    (account peer type timestamp stanza-id server-id thread &optional message-id)
   "Register THREAD after storing a message for ACCOUNT, PEER, and TYPE.
-TIMESTAMP, STANZA-ID, and SERVER-ID identify its first observed root."
+TIMESTAMP, STANZA-ID, and SERVER-ID identify its first observed root.
+A thread's root is its oldest message: archives are read out of order
+\(newest pages first, time slices side by side), so a message older than
+the stored root, MESSAGE-ID's row, becomes the root."
   (when-let* ((thread-id (plist-get thread :thread-id))
               (db (jabber-db-ensure-open)))
     (let* ((new-p (not (jabber-db--message-thread-stored-p
@@ -1339,7 +1342,15 @@ ORDER BY id DESC LIMIT 1"
       (jabber-db--register-message-thread
        account peer type thread-id parent-id stanza-id server-id timestamp
        root-message-id
-       (or (equal type "groupchat") parent-id)))))
+       (or (equal type "groupchat") parent-id))
+      (when (and (not new-p) message-id)
+        (sqlite-execute
+         db
+         "UPDATE message_thread SET root_message_id = ?, root_stanza_id = ?, \
+root_server_id = ?, created_at = ? \
+WHERE account = ? AND peer = ? AND type = ? AND thread_id = ? AND created_at > ?"
+         (list message-id stanza-id server-id timestamp
+               account peer type thread-id timestamp))))))
 
 (defun jabber-db-mam-progress (account archive with)
   "Return durable (UID START) for ACCOUNT, exact ARCHIVE and WITH filter.
@@ -1462,11 +1473,25 @@ AND (room_id IS NOT NULL OR (server_id IS NULL AND stanza_id = ?))"
                      (jabber-db--identity-compatible-p
                       db id stanza-id server-id origin room resource occupant-id))
                    candidates)))
+    ;; The archive occurrence is the result's own row, when compatible.  A
+    ;; row of the same message (sender and IDs but its server ID) held under
+    ;; another UID of the same archive is another copy the archive kept,
+    ;; not a conflict; any other row is.
     (when (and occurrence
-               (not (and (equal matches (list occurrence))
-                         (equal candidates (list occurrence)))))
+               (not (and (memq occurrence matches)
+                         (seq-every-p
+                          (lambda (id)
+                            (or (eql id occurrence)
+                                (and (sqlite-select db "SELECT 1 FROM message_archive
+WHERE account = ? AND archive = ? AND message_id = ? AND uid != ?"
+                                                    (list account archive id uid))
+                                     (jabber-db--identity-compatible-p
+                                      db id stanza-id nil origin room resource occupant-id))))
+                          candidates))))
       (error "Conflicting archive occurrence"))
-    (and (= (length candidates) 1) (= (length matches) 1) (car matches))))
+    (if occurrence
+        occurrence
+      (and (= (length candidates) 1) (= (length matches) 1) (car matches)))))
 
 (defun jabber-db--enrich-message-identity (db id account identity)
   "Append compatible IDENTITY to exact ID in DB for ACCOUNT.
@@ -1536,7 +1561,7 @@ Return the canonical message row ID."
         (jabber-db--enrich-message-identity db message-id account identity))
       (jabber-db--backfill-thread-fields db message-id thread)
       (jabber-db--ensure-message-thread
-       account peer type stored-timestamp stanza-id server-id thread)
+       account peer type stored-timestamp stanza-id server-id thread message-id)
       (when-let* ((thread-id (plist-get thread :thread-id)))
         (run-hook-with-args
          'jabber-db-message-thread-stored-functions

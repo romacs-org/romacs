@@ -1452,6 +1452,14 @@ thousandth a stack mark."
     (setq jabber-connections (list jc))
     jc))
 
+;; N distinct nicknames rendered on one background, each twice: the
+;; colour cache (jabber-muc.el) computes each once.  kN stays under its
+;; bound (`jabber-muc-nick-colors-limit', 4096), past which it starts over.
+(defvar jabber-muc--nick-colors)
+(scaling-probe jabber-nick-colors :n 1000
+  :setup (progn (scaling--jabber) (clrhash jabber-muc--nick-colors) (scaling--names "nick" n))
+  :body (dotimes (_ 2) (dolist (nick it) (jabber-muc--nick-face nick))))
+
 ;; N rooms requested for one account's background catch-up.
 (scaling-probe jabber-sync-requests :n 400
   :setup (let ((jc (scaling--jabber))) (clrhash jabber-mam-sync--accounts) (cons jc (scaling--names "room" n)))

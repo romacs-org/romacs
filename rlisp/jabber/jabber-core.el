@@ -1245,24 +1245,51 @@ Call this function after disconnection."
 (defvar jabber-core--filtering nil
   "Re-entrance guard for `jabber-pre-filter'.")
 
+(defvar-local jabber-filter--continuing nil
+  "Non-nil in a process buffer while a parse continuation is queued.
+Output arriving meanwhile is only appended: the continuation parses it,
+in its turn, so a burst of output chunks never parses back to back.")
+
 (defun jabber-pre-filter (process string fsm)
-  "Append STRING from PROCESS to FSM's parse buffer."
+  "Append STRING from PROCESS to FSM's parse buffer.
+An empty STRING is a parse continuation (`jabber-filter-continue')."
   (when (eq process (plist-get (fsm-get-state-data fsm) :connection))
     (with-current-buffer (process-buffer process)
       ;; Append new data only from the transport that owns this stream.
       (goto-char (point-max))
       (insert string)
-
-      (unless jabber-core--filtering
+      (when (equal string "")
+        (if jabber-core--filtering
+            ;; Another stream is parsing (a nested wait): retry later
+            ;; rather than drop this one's tail.
+            (jabber-filter-continue process fsm)
+          (setq jabber-filter--continuing nil)))
+      (unless (or jabber-core--filtering jabber-filter--continuing)
         (let ((jabber-core--filtering t))
           (jabber-filter process fsm))))))
 
+(defvar jabber-filter-budget 0.005
+  "Seconds one `jabber-filter' call parses before it lets others run.
+A burst of output (a room's presence flood) holds hundreds of stanzas; past
+this budget, once a stanza was parsed, the rest stays in the process
+buffer and parsing continues in a later event (`jabber-filter-continue'),
+so input and other work run between.  Nil parses all at once.")
+
+(defun jabber-filter-continue (process fsm)
+  "Have FSM parse on in PROCESS's buffer in a later event.
+The event is an ordinary empty `:filter', so the owning state parses it,
+behind `jabber-pre-filter''s transport check, after what is queued."
+  (setq jabber-filter--continuing t)
+  (fsm-send fsm (list :filter process "")))
+
 (defun jabber-filter (process fsm)
-  "Parse complete XML stanzas from PROCESS buffer and dispatch to FSM."
+  "Parse complete XML stanzas from PROCESS buffer and dispatch to FSM.
+Past `jabber-filter-budget' the rest waits for a later event."
   (with-current-buffer (process-buffer process)
     ;; Start from the beginning
     (goto-char (point-min))
-    (let (xml-data)
+    (let (xml-data
+          (start (float-time)))
       (cl-loop
        do
        ;; Skip whitespace
@@ -1315,7 +1342,12 @@ Call this function after disconnection."
 
        (fsm-send fsm (list :stanza
 			   (jabber-xml-resolve-namespace-prefixes
-			    (car xml-data) nil jabber-namespace-prefixes)))))))
+			    (car xml-data) nil jabber-namespace-prefixes)))
+       (when (and jabber-filter-budget
+                  (> (- (float-time) start) jabber-filter-budget)
+                  (< (point-min) (point-max)))
+         (jabber-filter-continue process fsm)
+         (cl-return))))))
 
 
 (defun jabber-process-stream-error (xml-data state-data)
