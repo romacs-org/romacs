@@ -39,7 +39,7 @@ The run fails when
   * `C-g' during a long cycle takes more than --quit-limit to end it.
 
 usage: theme_live.py --binary PATH --output DIR [--themes default,modus-vivendi,tango-dark]
-                     [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 4]
+                     [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 40]
                      [--tools DIR:DIR]
 """
 import argparse
@@ -160,7 +160,7 @@ def main():
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
     ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)
-    ap.add_argument('--rounds', type=int, default=4, help='passes through --themes in the cycled measure')
+    ap.add_argument('--rounds', type=int, default=40, help='passes through --themes in the cycled measure: one M-: costs ten switches and varies by more')
     ap.add_argument('--quit-limit', type=float, default=.25, help='seconds from C-g to the end of a long cycle, key delivery included')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)

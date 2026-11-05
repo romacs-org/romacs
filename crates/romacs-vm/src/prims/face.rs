@@ -162,7 +162,10 @@ pub(super) fn merge_in_global(cx: &mut Leaf<'_>, face: Value, frame: Value) -> O
     // comparing here, ahead of that frame's own turn, would give it a copy
     // for a difference about to vanish, on every theme switch.
     if cx.frame_shares_faces(frame)? { return Ok(Value::NIL); }
-    let (unspecified, ignore) = (cx.intern("unspecified"), cx.intern(":ignore-defface"));
+    let keys = cx.face_keys();
+    let (unspecified, ignore) = (keys.unspecified, keys.ignore_defface);
+    // Most faces have no defaults of their own for new frames.
+    if cx.vector_slots(global).is_some_and(|slots| slots[1..].iter().all(|&value| value == unspecified)) { return Ok(Value::NIL); }
     let mut wanted = Vec::new();
     for index in 1..LFACE_VECTOR_SIZE {
         let value = cx.vector_get(global, Value::integer(index as i64).unwrap())?;

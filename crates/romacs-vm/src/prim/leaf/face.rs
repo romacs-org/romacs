@@ -38,10 +38,30 @@ pub(crate) struct FaceKeys {
     pub graphic: Value,
     /// The lface vector's attribute keywords, by slot less one.
     pub keywords: [Value; LFACE_VECTOR_SLOTS],
+    /// The symbol slots of the registries and the display record; DEFAULTS
+    /// is 0 until first used.
+    pub frame_tables: usize,
+    pub defaults: usize,
+    pub display_record: usize,
+    pub memos: usize,
+    /// What a memo holds for a slot the replay did not write.
+    pub unwritten: Value,
 }
-romacs_snapshot::snapshot_struct!(FaceKeys { unspecified, ignore_defface, reset, normal, bold, italic, default, scroll_bar, border, cursor, mouse, face_alias, face_no_inherit, theme_face, defface_spec, override_spec, customized_face, saved_face, bold_key, italic_key, background_mode, display_type, reverse, face_x_resources, type_condition, min_colors, class, background, supports, graphic, keywords });
+romacs_snapshot::snapshot_struct!(FaceKeys { unspecified, ignore_defface, reset, normal, bold, italic, default, scroll_bar, border, cursor, mouse, face_alias, face_no_inherit, theme_face, defface_spec, override_spec, customized_face, saved_face, bold_key, italic_key, background_mode, display_type, reverse, face_x_resources, type_condition, min_colors, class, background, supports, graphic, keywords, frame_tables, defaults, display_record, memos, unwritten });
 
 pub(crate) const LFACE_VECTOR_SLOTS: usize = romacs_face::registry::LFACE_VECTOR_SIZE - 1;
+
+/// What `face-spec-recalc' reads of a face's symbol, in one walk of its plist.
+#[derive(Clone, Copy)]
+pub(crate) struct FaceProps {
+    pub alias: Value,
+    pub no_inherit: Value,
+    pub theme_face: Value,
+    pub defface: Value,
+    pub over: Value,
+    pub customized: Value,
+    pub saved: Value,
+}
 
 impl FaceKeys {
     /// Nil keys, for a VM that has not interned any yet.
@@ -53,11 +73,16 @@ impl FaceKeys {
         background_mode: Value::NIL, display_type: Value::NIL, reverse: Value::NIL, face_x_resources: Value::NIL,
         type_condition: Value::NIL, min_colors: Value::NIL, class: Value::NIL, background: Value::NIL,
         supports: Value::NIL, graphic: Value::NIL, keywords: [Value::NIL; LFACE_VECTOR_SLOTS],
+        frame_tables: 0, defaults: 0, display_record: 0, memos: 0, unwritten: Value::NIL,
     };
 
     pub(crate) fn new(vm: &mut Vm) -> FaceKeys {
+        let frame_tables = vm.slot("#:vm2-frame-face-tables");
+        let display_record = vm.slot("romacs-display");
+        let memos = vm.slot("#:vm2-frame-face-memos");
         let mut key = |name: &str| vm.property_key_symbol(name);
         FaceKeys {
+            frame_tables, defaults: 0, display_record, memos, unwritten: key("#:vm2-face-unwritten"),
             unspecified: key("unspecified"), ignore_defface: key(":ignore-defface"), reset: key("reset"),
             normal: key("normal"), bold: key("bold"), italic: key("italic"), default: key("default"),
             scroll_bar: key("scroll-bar"), border: key("border"), cursor: key("cursor"), mouse: key("mouse"),
@@ -100,6 +125,81 @@ impl Vm {
 
 impl Leaf<'_> {
     pub(crate) fn face_keys(&self) -> FaceKeys { self.vm.face_keys }
+
+    /// FACE's properties as `get' finds them: the first of each.
+    pub(crate) fn face_props(&self, face: Value) -> std::result::Result<FaceProps, Fault> {
+        let keys = &self.vm.face_keys;
+        let mut props = FaceProps { alias: Value::NIL, no_inherit: Value::NIL, theme_face: Value::NIL, defface: Value::NIL,
+                                    over: Value::NIL, customized: Value::NIL, saved: Value::NIL };
+        let mut seen = 0u8;
+        let mut tail = self.vm.symbol_plist(face).map_err(Fault::Error)?;
+        // A plist is short; this bounds one that is circular.
+        for _ in 0..4096 {
+            let Some((key, rest)) = self.pair(tail) else { break };
+            let Some((value, next)) = self.pair(rest) else { break };
+            let (bit, slot) = if key == keys.theme_face { (1, &mut props.theme_face) }
+                else if key == keys.defface_spec { (2, &mut props.defface) }
+                else if key == keys.override_spec { (4, &mut props.over) }
+                else if key == keys.face_alias { (8, &mut props.alias) }
+                else if key == keys.face_no_inherit { (16, &mut props.no_inherit) }
+                else if key == keys.customized_face { (32, &mut props.customized) }
+                else if key == keys.saved_face { (64, &mut props.saved) }
+                else { tail = next; continue };
+            if seen & bit == 0 { seen |= bit; *slot = value; }
+            tail = next;
+        }
+        Ok(props)
+    }
+
+    /// The vector's slots, read in place.
+    pub(crate) fn vector_slots(&self, vector: Value) -> Option<&[Value]> {
+        match self.vm.object_if(vector) {
+            Some(data::Object::Vector(slots)) => Some(&slots[..]),
+            _ => None,
+        }
+    }
+
+    /// Whether romacs-frame.el's display record is missing: GNU's Lisp is
+    /// not in this VM.
+    pub(crate) fn display_record_missing(&self) -> bool {
+        self.vm.slots[self.vm.face_keys.display_record].value == Value::UNBOUND
+    }
+
+    /// FRAME's memo table, made if CREATE (see `face_spec::recalc').
+    pub(crate) fn face_memos(&mut self, frame: Value, create: bool) -> super::super::Out {
+        let root = self.vm.face_keys.memos;
+        let mut table = self.vm.slots[root].value;
+        if table == Value::UNBOUND || table == Value::NIL {
+            if !create { return Ok(Value::NIL); }
+            table = self.face_table_new(hash::Weakness::Key);
+            self.vm.slots[root].value = table;
+        }
+        if let Some(local) = self.vm.eq_hash_get(table, frame) { return Ok(local); }
+        if !create { return Ok(Value::NIL); }
+        let local = self.face_table_new(hash::Weakness::None);
+        self.vm.declaration_hash_put(table, frame, local).map_err(Fault::Error)?;
+        Ok(local)
+    }
+
+    /// TABLE's entry for FACE: a memo, or a frame's lface; nil for none.
+    pub(crate) fn face_memo(&self, table: Value, face: Value) -> Value {
+        self.vm.eq_hash_get(table, face).unwrap_or(Value::NIL)
+    }
+
+    pub(crate) fn face_memo_put(&mut self, memos: Value, face: Value, memo: Value) -> std::result::Result<(), Fault> {
+        self.vm.declaration_hash_put(memos, face, memo).map(|_| ()).map_err(Fault::Error)
+    }
+
+    /// FRAME's own lface of FACE, nil for none; None while FRAME shows
+    /// another frame's faces.
+    pub(crate) fn owned_lface(&mut self, face: Value, frame: Value) -> std::result::Result<Option<Value>, Fault> {
+        let table = self.face_table(frame, false)?;
+        if table == Value::NIL {
+            if self.vm.frame(frame).map_or(Value::NIL, |f| f.parent) != Value::NIL { return Ok(None); }
+            return Ok(Some(Value::NIL));
+        }
+        Ok(Some(self.vm.eq_hash_get(table, face).unwrap_or(Value::NIL)))
+    }
 
     /// calln (FUNCTION, ARGS...) from a face write: an exit from FUNCTION
     /// goes on through the caller, as GNU's call1 lets it.
@@ -166,9 +266,9 @@ impl Leaf<'_> {
     /// Nil denotes the global registry. Frame registries are ephemeron values:
     /// a dead frame cannot be kept alive by its own face attributes.
     pub(crate) fn face_table(&mut self, frame: Value, create: bool) -> super::super::Out {
-        let root_name = if frame == Value::NIL { "face--new-frame-defaults" }
-            else { "#:vm2-frame-face-tables" };
-        let root = self.vm.slot(root_name);
+        // The defaults' symbol makes its table when first named, so not at startup.
+        if frame == Value::NIL && self.vm.face_keys.defaults == 0 { self.vm.face_keys.defaults = self.vm.slot("face--new-frame-defaults"); }
+        let root = if frame == Value::NIL { self.vm.face_keys.defaults } else { self.vm.face_keys.frame_tables };
         if frame == Value::NIL {
             let table = self.vm.variable_value(root).map_err(Fault::Error)?;
             return if self.kind(table) == Kind::HashTable { Ok(table) }
