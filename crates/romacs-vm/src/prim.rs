@@ -1609,6 +1609,28 @@ mod leaf {
             let symbol = self.intern(name);
             self.variable_set(symbol, value)
         }
+        /// The one string naming font NAME: GNU's font-object holds its name,
+        /// and face-font and query-font answer that very string, which
+        /// display-fill-column-indicator.el compares with eq.
+        pub fn font_name_string(&mut self, name: &str) -> super::Out {
+            const NAMES: &str = "#:vm2-font-names";
+            let table = match self.hidden_value(NAMES) {
+                Value::NIL => {
+                    let table = self.vm.allocate_object(data::Object::HashTable(Box::new(crate::hash::HashTable::new(crate::hash::Test::Equal, crate::hash::Weakness::None, 0))));
+                    self.set_hidden_value(NAMES, table);
+                    table
+                }
+                table => table,
+            };
+            let text = self.string(name);
+            match self.vm.declaration_hash_get(table, text).map_err(Fault::Error)? {
+                Some(shared) => Ok(shared),
+                None => {
+                    self.vm.declaration_hash_put(table, text, text).map_err(Fault::Error)?;
+                    Ok(text)
+                }
+            }
+        }
         /// SYMBOL, an alias, made plain and void.
         pub fn delete_variable_alias(&mut self, symbol: Value) {
             if let Some(slot) = symbol.index_if(7).and_then(|n| n.checked_sub(1)) { self.vm.delete_variable_alias(slot); }

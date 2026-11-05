@@ -77,6 +77,12 @@ FORMS = r'''
 (let ((object (car (internal-char-font nil ?a)))) (list (font-match-p (font-spec :family (symbol-name (font-get object :family))) object) (font-match-p (font-spec :family "No Such") object) (font-match-p (font-spec :registry "iso10646-1") object) (font-match-p (font-spec :registry "koi8-r") object) (font-match-p (font-spec :script 'latin) object) (font-match-p (font-spec :lang 'ja) object) (condition-case e (font-match-p 3 object) (error e)) (condition-case e (font-match-p (font-spec) 3) (error e))))
 (list (font-face-attributes "Foo-12") (font-face-attributes "Foo Bar:bold:italic") (font-face-attributes (font-spec :family "X" :size 20 :dpi 96 :weight 'bold :slant 'italic :width 'condensed)) (font-face-attributes (font-spec :size 12.5)) (condition-case e (font-face-attributes 3) (error e)))
 (let* ((object (car (internal-char-font nil ?a))) (glyphs (font-get-glyphs object 0 2 "ab")) (g (aref glyphs 0))) (list (length glyphs) (length g) (aref g 0) (aref g 1) (aref g 2) (natnump (aref g 3)) (natnump (aref g 4)) (aref g 9) (aref (font-get-glyphs object 0 1 (vector #x10ffff)) 0) (font-get-glyphs object 0 0 "ab") (condition-case e (font-get-glyphs object 0 9 "ab") (error (car e))) (condition-case e (font-get-glyphs 3 0 1 "a") (error e)) (condition-case e (font-get-glyphs object 0 1 'x) (error e)) (with-temp-buffer (insert "xy") (length (font-get-glyphs object 1 3)))))
+(eq (aref (query-font (car (internal-char-font nil ?a))) 0) (face-font 'default))
+(list (font-match-p (font-spec :size 0) (font-spec :size 20)) (font-match-p (font-spec :size 20) (font-spec :size 20)) (font-match-p (font-spec) (font-spec :size 20)))
+(let ((object (car (internal-char-font nil ?a)))) (list (font-match-p (font-spec :otf '(zzzz nil (kern))) object) (font-match-p (font-spec :otf '(zzzz)) object) (font-match-p (font-spec :script 'latin) (car (list-fonts (font-spec :family (symbol-name (font-get object :family))))))))
+(list (font-face-attributes (font-spec :slant 'i :weight 'unspecified)) (font-face-attributes (font-spec :weight 'book)))
+(let ((entity (car (list-fonts (font-spec :family (symbol-name (font-get (car (internal-char-font nil ?a)) :family))))))) (natnump (aref (query-font (open-font entity)) 2)))
+(let ((object (car (internal-char-font nil ?a)))) (with-temp-buffer (set-buffer-multibyte nil) (insert "\351a") (list (aref (aref (font-get-glyphs object 2 3) 0) 2) (let ((g (aref (font-get-glyphs object 1 2) 0))) (and g (aref g 2))))))
 (clear-font-cache)
 '''
 

@@ -224,7 +224,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
         char::from_u32(code as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
     };
     let name = cx.symbol_name(resolved)?;
-    Ok(match super::font::face_font(cx, &name, ch)? { Some(font) => cx.string(&font), None => Value::NIL })
+    Ok(match super::font::face_font(cx, &name, ch)? { Some(font) => cx.font_name_string(&font)?, None => Value::NIL })
 }}
 
 /// Whether romacs-frame.el's display record, `romacs-display', is graphic.

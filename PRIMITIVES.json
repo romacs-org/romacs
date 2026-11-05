@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5649c45ef9392048ced3cce7d36d872a38fba6fd5cb085112f5ae8f576feb921",
+  "source_fingerprint": "3245c1cba6c8a33aec64bfb24f86cbf567e864434c54f4de305b69bad0bd2216",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -893,7 +893,7 @@
   "clear-font-cache": {
    "name": "clear-font-cache",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1318"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1368"
   },
   "clear-image-cache": {
    "name": "clear-image-cache",
@@ -1824,7 +1824,7 @@
   "find-font": {
    "name": "find-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1095"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1104"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -1875,62 +1875,62 @@
   "font-at": {
    "name": "font-at",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1395"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1445"
   },
   "font-face-attributes": {
    "name": "font-face-attributes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1236"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1282"
   },
   "font-family-list": {
    "name": "font-family-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1104"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1113"
   },
   "font-get": {
    "name": "font-get",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1038"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1047"
   },
   "font-get-glyphs": {
    "name": "font-get-glyphs",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1271"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1317"
   },
   "font-has-char-p": {
    "name": "font-has-char-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1151"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1160"
   },
   "font-info": {
    "name": "font-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1326"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1376"
   },
   "font-match-p": {
    "name": "font-match-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1202"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1229"
   },
   "font-put": {
    "name": "font-put",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1060"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1069"
   },
   "font-spec": {
    "name": "font-spec",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1011"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1020"
   },
   "font-xlfd-name": {
    "name": "font-xlfd-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1113"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1122"
   },
   "fontp": {
    "name": "fontp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1000"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1009"
   },
   "fontset-font": {
    "name": "fontset-font",
@@ -2653,7 +2653,7 @@
   "internal-char-font": {
    "name": "internal-char-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1368"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1418"
   },
   "internal-complete-buffer": {
    "name": "internal-complete-buffer",
@@ -2959,7 +2959,7 @@
   "list-fonts": {
    "name": "list-fonts",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1078"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1087"
   },
   "list-system-processes": {
    "name": "list-system-processes",
@@ -3645,7 +3645,7 @@
   "open-font": {
    "name": "open-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1164"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1173"
   },
   "optimize-char-table": {
    "name": "optimize-char-table",
@@ -4087,7 +4087,7 @@
   "query-font": {
    "name": "query-font",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/font.rs:1143"
+   "registered_at": "crates/romacs-vm/src/prims/font.rs:1152"
   },
   "query-fontset": {
    "name": "query-fontset",
