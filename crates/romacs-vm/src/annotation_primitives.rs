@@ -874,12 +874,11 @@ impl Vm {
             InsertBeforeMarkers => {
                 let index = self.buffer_index()?;
                 if matches!(self.objects[index], Object::ByteBuffer(_)) {
-                    let mut bytes = Vec::new();
-                    for &v in args {
-                        bytes.extend(self.unibyte_text(v)?);
-                    }
+                    let (bytes, properties) = self.unibyte_insertion(args)?;
                     let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+                    let at = b.point;
                     b.insert_before_markers(&bytes)?;
+                    b.graft_properties(at, properties);
                     self.display_state.version += 1;
                     return Ok(Value::NIL);
                 }

@@ -4722,6 +4722,7 @@ dependencies = [
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "foldhash",
  "icu_casemap",
  "icu_locale_core",
@@ -4754,7 +4755,6 @@ dependencies = [
  "twox-hash",
  "unicode-bidi",
  "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]

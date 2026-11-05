@@ -146,6 +146,9 @@ pub enum Fact<'a> {
     /// between processes, so each process asks again, as GNU's
     /// `num-processors' does.
     Processors,
+    /// The machine's live load: memory and load averages change at every
+    /// read, so no world is keyed on them.
+    Machine,
     /// Files, the user database, the machine and every other query.
     Other,
     /// A write, child, socket, lock or terminal.
@@ -173,6 +176,9 @@ pub const P_ENV: [&str; 17] = [
 /// The baked site, (file suffix, form head): `emacs-build-time` is the time
 /// the world was built, as a dumped GNU's is its dump time.
 const BAKED: (&str, &str) = ("/version.el", "(defconst emacs-build-time");
+/// jit-lock.el's default for `jit-lock-stealth-load' only asks whether
+/// `load-average' works, and a dumped GNU keeps the dump's answer.
+const BAKED_LOAD: (&str, &str) = ("/jit-lock.el", "(defcustom jit-lock-stealth-load");
 
 /// Load-time forms outside startup that GNU evaluates in each process and
 /// restore re-seeds (`romacs--world-reseed`): (file suffix, form head, the P
@@ -336,7 +342,8 @@ pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
         Fact::Env(name) => if P_ENV.iter().any(|p| p.as_bytes() == name) { Class::P } else { Class::K },
         Fact::Clock if site.is_some_and(|s| s.at(BAKED)) => Class::B,
-        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors => Class::P,
+        Fact::Machine if site.is_some_and(|s| s.at(BAKED_LOAD)) => Class::B,
+        Fact::Environment | Fact::CurrentDir | Fact::Pid | Fact::Clock | Fact::Monotonic | Fact::Seed | Fact::Processors | Fact::Machine => Class::P,
         Fact::Other => Class::K,
         Fact::Effect => Class::F,
     }
@@ -1581,6 +1588,24 @@ pub fn boot_clock() -> Option<std::time::Duration> {
     let mut t: libc::timespec = unsafe { std::mem::zeroed() };
     let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
     ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+}
+
+/// sysinfo(2)'s RAM and swap totals and free amounts, in bytes:
+/// (total RAM, free RAM, total swap, free swap).
+pub fn memory_info() -> Option<[u64; 4]> {
+    p_read(Fact::Machine, "memory-info".into());
+    let mut si: libc::sysinfo = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sysinfo(&mut si) } != 0 { return None; }
+    let unit = u64::from(si.mem_unit);
+    Some([si.totalram as u64 * unit, si.freeram as u64 * unit, si.totalswap as u64 * unit, si.freeswap as u64 * unit])
+}
+
+/// getloadavg(3): the 1, 5 and 15 minute averages it has, None on failure.
+pub fn load_average() -> Option<Vec<f64>> {
+    p_read(Fact::Machine, "load-average".into());
+    let mut loads = [0f64; 3];
+    let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
+    (n >= 0).then(|| loads[..n as usize].to_vec())
 }
 
 /// The memory page size in bytes (`getpagesize`).

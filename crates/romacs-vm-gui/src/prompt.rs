@@ -65,6 +65,7 @@ pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
     pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub images: crate::fonts::residency::Shared,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
     /// The process descriptors the next wait also watches.
     pub processes: Vec<(std::os::fd::RawFd, i16)>,
@@ -260,7 +261,7 @@ impl HostInput for GuiHost {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
                 && *selected == frame.selected && crate::frames_alike(painted, &frame.frame)
-                && *animations == frame.text_animations {
+                && *animations == frame.text_animations && !self.images.borrow().must_repaint(self.sender.as_ref()) {
                 return Ok(ends.clone());
             }
         }
@@ -271,7 +272,7 @@ impl HostInput for GuiHost {
             shared.presentation
         };
         let laying = std::time::Instant::now();
-        let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, presentation, &frame)?;
+        let (glyphs, ends) = crate::paint_prompt(&mut self.engine.borrow_mut(), &self.sender, &self.images, presentation, &frame)?;
         let submitted = std::time::Instant::now();
         // Synchronous, like the oracle path: the prompt is on screen before
         // the evaluator blocks for its key. A window the compositor does not

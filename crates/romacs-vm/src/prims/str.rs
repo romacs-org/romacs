@@ -335,6 +335,18 @@ fn sxhash_equal(cx, value: Value) { Ok(cx.sxhash(value)) }}
 
 defsubr! { name = "sxhash-eq", gnu = "fns.c:5617", effect = Reads,
 fn sxhash_eq(cx, value: Value) { cx.sxhash_eq(value) }}
+// sxhash_eql: numbers `eql' compares by value hash by value, the rest by
+// identity.
+defsubr! { name = "sxhash-eql", gnu = "fns.c:5627", effect = Reads,
+fn sxhash_eql(cx, value: Value) {
+    if matches!(cx.kind(value), Kind::Float | Kind::Bignum) { Ok(cx.sxhash(value)) } else { cx.sxhash_eq(value) }
+}}
+// The contract is that `equal-including-properties' objects hash alike.
+// GNU also mixes each string interval's plist into the hash, which breaks
+// that contract for equal plists in another order or split; the `equal'
+// hash keeps it, and hash values are never comparable across Emacsen.
+defsubr! { name = "sxhash-equal-including-properties", gnu = "fns.c:5649", effect = Pure,
+fn sxhash_equal_including_properties(cx, value: Value) { Ok(cx.sxhash(value)) }}
 defsubr! { name = "fillarray", gnu = "fns.c:3308", effect = MutatesArgs,
 fn fillarray(cx, array: Value, item: Value) {
     if cx.kind(array) == Kind::Vector {
@@ -368,3 +380,73 @@ fn byte_to_string(cx, byte: Value) {
     let b = u8::try_from(b).map_err(|_| Fault::Error("Invalid byte".into()))?;
     Ok(cx.make_string(vec![b], false))
 }}
+
+/// get-byte's value of C, a character of multibyte text: its byte if it
+/// is ASCII or a raw byte, else GNU's error.
+fn byte_of_char(c: i64) -> Out {
+    let raw = i64::from(crate::lstring::BYTE8_OFFSET);
+    if (0..0x80).contains(&c) { Ok(Value::integer(c).unwrap()) }
+    else if (raw + 0x80..=raw + 0xff).contains(&c) { Ok(Value::integer(c - raw).unwrap()) }
+    else { Err(Fault::Error(format!("Not an ASCII nor an 8-bit character: {c}"))) }
+}
+
+fn args_out_of_range(cx: &mut Leaf<'_>, items: &[Value]) -> Fault {
+    let data = items.iter().rev().fold(Value::NIL, |list, &v| cx.cons(v, list));
+    Fault::Signal(cx.intern("args-out-of-range"), data)
+}
+
+// character.c:898: the byte of the character at POSITION (point) of the
+// current buffer, or at index POSITION (0) of STRING. Unibyte text gives
+// its byte; multibyte text an ASCII or raw-byte character's.
+defsubr! { name = "get-byte", gnu = "character.c:898", effect = Reads,
+fn get_byte(cx; optional position: Value, string: Value) -> Step {
+    if string != Value::NIL {
+        let view = cx.string_view(string)?;
+        let index = if position == Value::NIL { 0 } else {
+            let n = position.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", position))?;
+            if n as usize >= view.len() { return Err(args_out_of_range(cx, &[string, position])); }
+            n as usize
+        };
+        // GNU reads the terminating NUL of an empty string.
+        let Some(c) = view.chars().nth(index) else { return Ok(Step::Done(Value::integer(0).unwrap())) };
+        if !view.is_multibyte() { return Ok(Step::Done(Value::integer(i64::from(view.bytes()[index])).unwrap())); }
+        return byte_of_char(i64::from(c)).map(Step::Done);
+    }
+    let (point, begv, zv) = cx.point_extent()?;
+    if position == Value::NIL && point == zv {
+        // PT_ADDR past a narrowing reads the text after it, at the true end
+        // the terminating NUL.
+        let buffer = cx.current_buffer()?;
+        let Ok(next) = cx.buffer_region_text(buffer, point, point + 1) else { return Ok(Step::Done(Value::integer(0).unwrap())) };
+        let view = cx.string_view(next)?;
+        let byte = match (view.is_multibyte(), view.chars().next()) {
+            (_, None) => Ok(Value::integer(0).unwrap()),
+            (false, Some(_)) => Ok(Value::integer(i64::from(view.bytes()[0])).unwrap()),
+            (true, Some(c)) => byte_of_char(i64::from(c)),
+        };
+        return byte.map(Step::Done);
+    }
+    let at = if position == Value::NIL { point } else {
+        let n = match (position.integer_value(), cx.marker_position(position)) {
+            (Some(n), _) => n,
+            (None, Some(Some(n))) => n,
+            (None, Some(None)) => return Err(Fault::Error("Marker does not point anywhere".into())),
+            (None, None) => match cx.bigint_value(position) {
+                // fix_position clips a bignum to the fixnum range.
+                Some(n) if n.sign() == num_bigint::Sign::Minus => i64::MIN,
+                Some(_) => i64::MAX,
+                None => return Err(Fault::Wrong("integer-or-marker-p", position)),
+            },
+        };
+        if !(begv <= n && n < zv) { return Err(args_out_of_range(cx, &[position, Value::integer(begv).unwrap(), Value::integer(zv).unwrap()])); }
+        n
+    };
+    let f = cx.intern("char-after");
+    Ok(Step::Call { f, args: vec![Value::integer(at).unwrap()], then: got_byte, saved: vec![] })
+}}
+
+fn got_byte(cx: &mut Leaf<'_>, c: Value, _: &[Value]) -> Next {
+    let Some(c) = c.integer_value() else { return Ok(Step::Done(Value::integer(0).unwrap())) };
+    if !cx.buffer_multibyte()? { return Ok(Step::Done(Value::integer(c).unwrap())); }
+    byte_of_char(c).map(Step::Done)
+}

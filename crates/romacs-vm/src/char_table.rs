@@ -134,6 +134,7 @@ mod tests {
     #[test]
     fn retained_leaf_payload_is_forwarded_by_existing_collector() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         run(&mut vm, "(make-vector 100 nil)");
         run(&mut vm, "(setq ct-leaf (make-char-table nil)) (aset ct-leaf 65537 (list (copy-sequence \"leaf-payload\")))");
         let table_value = vm.slots[vm.names["ct-leaf"]].value;
@@ -192,6 +193,7 @@ mod tests {
     #[test]
     fn parent_and_range_referents_survive_moving_collection() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         assert_eq!(vm.heap_stats().live_objects, 0, "character tables must not allocate at startup");
         run(&mut vm, "(make-vector 100 nil)");
         run(&mut vm, "(setq ct-chain (make-char-table nil)) (set-char-table-parent ct-chain (make-char-table nil)) (set-char-table-range (char-table-parent ct-chain) '(128 . 4194303) (list (copy-sequence \"range-payload\")))");
@@ -240,6 +242,7 @@ mod tests {
     #[test]
     fn extra_slots_move_and_reclaim_without_retention() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         // Startup allocation counts are guarded by the existing GC suites.
         run(&mut vm, "(put 'ct-purpose 'char-table-extra-slots 3)");
         // Dead prefix ensures both the table and its sole-owned referent move.
@@ -308,10 +311,8 @@ impl Vm {
         }) else { return; };
         // Realize GNU's predefined plist on first symbol access, not Vm::new.
         let property = self.intern("char-table-extra-slots");
-        let tail = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(count).unwrap(), Value::NIL));
-        let plist = Value::reference(self.conses.len(), 3);
-        self.conses.push((property, tail));
+        let tail = self.alloc_cons(Value::integer(count).unwrap(), Value::NIL);
+        let plist = self.alloc_cons(property, tail);
         self.slots[slot].plist = plist;
     }
 
@@ -565,6 +566,45 @@ pub(super) fn visit_char_table_node_values(
     }
 }
 
+/// INDEX's value in the table of ROOT, ASCII and DEFAULT (the default for
+/// nil) and the inclusive character range of its slot.
+fn span(root: &CharTableNodeHandle, ascii: &CharTableSlot, default: Value, index: usize) -> Result<(Value, usize, usize)> {
+    if index >= CharTable::LEN { return Err("index out of range".into()); }
+    let (value, from, to) = match ascii {
+        _ if index >= 128 => {
+            let (value, from, to) = CharTableNode::checked_span(root, index)?;
+            (value, from.max(128), to)
+        }
+        CharTableSlot::Value(value) => (*value, 0, 127),
+        CharTableSlot::Node(node) => {
+            let node = node.lock().unwrap();
+            if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
+            match node.slots.get(index) {
+                Some(CharTableSlot::Value(value)) => (*value, index, index),
+                _ => return Err("invalid ASCII sub-char-table".into()),
+            }
+        }
+    };
+    Ok((if value == Value::NIL { default } else { value }, from, to))
+}
+
+/// A char-table's own values, read without the VM, for the length of one
+/// scan: its nodes are shared, not copied.  `WidthRule` reads
+/// `char-width-table` through these, its parents' after it.
+#[derive(Clone)]
+pub(crate) struct CharTableView {
+    root: CharTableNodeHandle,
+    ascii: CharTableSlot,
+    default: Value,
+}
+
+impl CharTableView {
+    /// INDEX's value, the default for nil (nil out of range).
+    pub(crate) fn get(&self, index: usize) -> Value {
+        span(&self.root, &self.ascii, self.default, index).map_or(Value::NIL, |(value, ..)| value)
+    }
+}
+
 pub(super) struct CharTable {
     pub purpose: Value,
     pub(super) root: CharTableNodeHandle,
@@ -665,23 +705,11 @@ impl CharTable {
     /// reads the table's own ASCII slot, which a literal may detach from the
     /// root; the root's range for a higher character starts above it.
     pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
-        if index >= Self::LEN { return Err("index out of range".into()); }
-        let (value, from, to) = match &self.ascii {
-            _ if index >= 128 => {
-                let (value, from, to) = CharTableNode::checked_span(&self.root, index)?;
-                (value, from.max(128), to)
-            }
-            CharTableSlot::Value(value) => (*value, 0, 127),
-            CharTableSlot::Node(node) => {
-                let node = node.lock().unwrap();
-                if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
-                match node.slots.get(index) {
-                    Some(CharTableSlot::Value(value)) => (*value, index, index),
-                    _ => return Err("invalid ASCII sub-char-table".into()),
-                }
-            }
-        };
-        Ok((if value == Value::NIL { self.default } else { value }, from, to))
+        span(&self.root, &self.ascii, self.default, index)
+    }
+    /// A read view of this table's own values that shares its nodes.
+    pub(crate) fn view(&self) -> CharTableView {
+        CharTableView { root: self.root.clone(), ascii: self.ascii.clone(), default: self.default }
     }
     pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
         self.set_range(index, index, value)

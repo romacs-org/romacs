@@ -96,6 +96,22 @@ impl Leaf<'_> {
         }
         self.named_charset_id(if c <= crate::lstring::MAX_5_BYTE_CHAR { "emacs" } else { "eight-bit" })
     }
+    /// charset.c Fsplit_char: CH's charset by priority (CHAR_CHARSET), then
+    /// ENCODE_CHAR's code as one byte per dimension, most significant first.
+    pub fn split_char(&mut self, ch: Value) -> super::super::Out {
+        let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
+            .ok_or(Fault::Wrong("characterp", ch))? as u32;
+        let id = self.char_charset_id(c)?;
+        let i = self.vm.charsets.ids[id];
+        let mut code = self.charset_encode(i, c)?.ok_or_else(|| Fault::Error("split-char: CH has no code in its charset".into()))?;
+        let mut list = Value::NIL;
+        for _ in 0..self.vm.charsets.records[i].dimension {
+            list = self.cons(Value::integer(i64::from(code & 0xff)).unwrap(), list);
+            code >>= 8;
+        }
+        let name = self.charset_id_name(id);
+        Ok(self.cons(name, list))
+    }
     fn charset_id_name(&self, id: usize) -> Value {
         self.vm.charsets.records[self.vm.charsets.ids[id]].attrs[1]
     }

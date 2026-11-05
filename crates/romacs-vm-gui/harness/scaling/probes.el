@@ -500,6 +500,145 @@ thousandth a stack mark."
           (unless (get-text-property 0 'local-map s) (error "The shared keymap is not projected"))
           s))
 
+;; A key grid of N entries: one tall group of N/2 and N/2 more in groups
+;; of four, laid out in bands; linear, each row one `aref' per block.
+(scaling-probe menu-key-grid :gui t :n 400 :steps 1
+  :setup (let ((entry (lambda (i) (cons (format "k%d" i) (format "command %d" i)))))
+           (cons (switch-to-buffer (get-buffer-create "scaling-grid"))
+                 (cons (cons "Tall" (mapcar entry (number-sequence 1 (/ n 2))))
+                       (seq-map-indexed (lambda (_ g) (cons (format "G%d" g) (mapcar entry (number-sequence 1 4))))
+                                        (make-list (/ n 8) nil)))))
+  :body (progn (romacs-popup-key-grid (cdr it) 160)
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One `set-transient-map' activation and exit at depth 1 with N other
+;; maps registered (retained by the setup): the hints' registration and
+;; reconcile do the same work whatever N is.
+(scaling-probe menu-hints-activate :gui t :n 100 :steps 10
+  :setup (let ((maps (mapcar (lambda (_) (define-keymap "a" #'ignore)) (make-list n nil))))
+           (dolist (map maps) (funcall (set-transient-map map)))
+           (cons (switch-to-buffer (get-buffer-create "scaling-hints")) maps))
+  :body (progn (funcall (set-transient-map (define-keymap "b" #'ignore)))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a map of N bindings whose sparse child rebinds or
+;; unbinds half of them: one traversal, a seen-key hash, no lookup per key.
+(scaling-probe menu-hints-keys :gui t :n 400 :steps 1
+  :setup (let ((parent (make-sparse-keymap)) (child (make-sparse-keymap)))
+           (dotimes (i n) (define-key parent (vector (+ #x1000 i)) #'ignore))
+           (dotimes (i (/ n 2)) (define-key child (vector (+ #x1000 (* 2 i))) (and (cl-oddp i) #'forward-char)))
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-keys")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Hint entries for a child of N character ranges over a parent of 2N
+;; keys inside and beside them and a grandparent of N ranges overlapping
+;; them all: each interval painted once over the sorted bounds, never a
+;; scan of the keys per range.
+(scaling-probe menu-hints-ranges :gui t :n 200 :steps 1
+  :setup (let ((grand (make-keymap)) (parent (make-sparse-keymap)) (child (make-keymap)))
+           (dotimes (i n)
+             (let ((lo (+ #x1000 (* 10 i))))
+               (set-char-table-range (nth 1 child) (cons lo (+ lo 3)) (if (cl-oddp i) #'forward-char #'backward-char))
+               (define-key parent (vector (+ lo 1)) #'ignore)
+               (define-key parent (vector (+ lo 5)) #'ignore)
+               (set-char-table-range (nth 1 grand) (cons (+ lo 2) (+ lo 7)) (if (cl-oddp i) #'undo #'redo))))
+           (set-keymap-parent parent grand)
+           (set-keymap-parent child parent)
+           (cons (switch-to-buffer (get-buffer-create "scaling-hint-ranges")) child))
+  :body (progn (romacs-popup--hint-entries (cdr it))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; The hint target after N panels shown and their buffers killed: a
+;; killed panel leaves the registry, so the target asks about none.
+(scaling-probe popup-panels-cycle :gui t :n 20 :steps 10
+  :setup (progn (dotimes (i n)
+                  (let ((buffer (get-buffer-create (format " scaling-panel-%d" i))))
+                    (with-current-buffer buffer (insert "x"))
+                    (romacs-popup-show 'panel buffer :lines 1)
+                    (kill-buffer buffer)))
+                (set-transient-map (define-keymap "a" #'ignore) t)
+                (switch-to-buffer (get-buffer-create "scaling-panels")))
+  :body (progn (romacs-popup--hint-target)
+               (with-current-buffer it (insert "x"))))
+
+;; A key-hint card for a prefix of N bindings over M active minor-mode
+;; maps that bind under it and R which-key replacements: one traversal of
+;; each map, one replacement pass per entry, one layout; linear in each.
+(scaling-probe key-card-bindings :gui t :n 100 :steps 1
+  :setup (let ((map (make-sparse-keymap)))
+           (dotimes (i n) (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char))
+           (use-local-map map)
+           (switch-to-buffer (get-buffer-create "scaling-card")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
+(scaling-probe key-card-maps :gui t :n 20 :steps 1
+  :setup (progn
+           (dotimes (i n)
+             (let ((map (make-sparse-keymap)) (mode (intern (format "scaling-card-mode-%d" i))))
+               (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char)
+               (set mode t)
+               (push (cons mode map) minor-mode-map-alist)))
+           (switch-to-buffer (get-buffer-create "scaling-card-maps")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
+(scaling-probe key-card-replacements :gui t :n 50 :steps 1
+  :setup (progn
+           (require 'which-key)
+           (let ((map (make-sparse-keymap)))
+             (dotimes (i 40) (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char))
+             (use-local-map map))
+           (dotimes (i n) (which-key-add-key-based-replacements (format "<f11> %d" i) "scaling"))
+           (switch-to-buffer (get-buffer-create "scaling-card-repl")))
+  :body (progn (romacs-popup--card-layout [f12]) (with-current-buffer it (insert "x"))))
+
+;; One more package entry written to a `mode-line-modes' of N: the
+;; watcher rebuilds the extras once per write, linear in the entries,
+;; and nothing per key or redisplay.
+(scaling-probe mode-line-modes-writes :gui t :n 50 :steps 10
+  :setup (let ((saved (default-value 'mode-line-modes)))
+           (dotimes (i n) (add-to-list 'mode-line-modes (list t (format "[p%d] " i)) t))
+           (cons (switch-to-buffer (get-buffer-create "scaling-modes")) saved))
+  :body (progn (setq-default mode-line-modes (cons (list t (format "[w%d] " i)) (cdr (default-value 'mode-line-modes))))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One of N panels kept shown hidden and shown again: the panel registry
+;; adds and removes it in O(1), the hint target stops at the first shown.
+(scaling-probe popup-panels-kept :gui t :n 10 :steps 10
+  :setup (let (buffers)
+           (dotimes (i n)
+             (let ((buffer (get-buffer-create (format " scaling-kept-panel-%d" i))))
+               (with-current-buffer buffer (insert "x"))
+               (romacs-popup-show 'panel buffer :lines 1)
+               (push buffer buffers)))
+           ;; An active map, so the hint target asks about the panels.
+           (set-transient-map (define-keymap "a" #'ignore) t)
+           (cons (switch-to-buffer (get-buffer-create "scaling-kept-panels")) (car (last buffers))))
+  :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
+               (with-current-buffer (car it) (insert "x"))))
+
+;; Clearing N toasts (the echo area's clearing at the next command) with N
+;; more layers kept hidden: each toast hidden once, no restacking per
+;; toast, its layer found without a walk over the kept ones.
+(scaling-probe toasts-clear :gui t :n 20 :steps 1
+  :setup (progn (dotimes (i n) (romacs-layer--frame (get-buffer-create (format " scaling-layer-%d" i))))
+                (setq romacs-layer-toast-max n romacs-layer-toast-timeout 600)
+                (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
+                n)
+  :body (romacs-layer-toast-clear))
+
+;; N toasts following the selection between two windows, with N more
+;; layers kept hidden: one restack of N toasts per change, for the root
+;; frame only, never one per child frame's own window change.
+(scaling-probe toasts-follow :gui t :n 10 :steps 10
+  :setup (progn (dotimes (i n) (romacs-layer--frame (get-buffer-create (format " scaling-layer-%d" i))))
+                (delete-other-windows) (split-window-right)
+                (setq romacs-layer-toast-max n romacs-layer-toast-timeout 600 romacs-layer-toast-position 'window)
+                (dotimes (i n) (romacs-layer-toast (format "toast %d" i)))
+                n)
+  :body (select-window (next-window)))
+
 ;; `face-font' for N faces each asking a distinct font (size, weight,
 ;; slant), then the same N again: the display's per-request font caches
 ;; grow by one entry per request and answer the repeats from the cache.
@@ -593,6 +732,26 @@ thousandth a stack mark."
 ;; One event to each of N sessions.
 (scaling-probe agent-dispatch :n 200
   :setup (progn (scaling--agent)
+                (clrhash romacs-agent--sessions)
+                (mapcar (lambda (id) (let ((s (romacs-agent--make :id id :harness 'claude :title id)))
+                                       (puthash id s romacs-agent--sessions) s))
+                        (scaling--names "scaling-session" n)))
+  :body (let ((record (json-parse-string "{\"seq\": 1, \"out\": {\"type\": \"result\", \"total_cost_usd\": 0}}"
+                                         :object-type 'hash-table :null-object :null :false-object :false)))
+          (dolist (session it) (romacs-agent--record (romacs-agent-get (romacs-agent-id session)) record))))
+
+;; The same with 50 more harness drivers defined ahead of Claude Code's: a
+;; record reaches its session's driver through the session, never a
+;; registry lookup.
+(scaling-probe agent-dispatch-drivers :n 200
+  :setup (progn (scaling--agent)
+                (setq romacs-agent--drivers
+                      (append (cl-loop for i below 50
+                                       collect (list (intern (format "scaling-driver-%d" i))
+                                                     :lifetime 'persistent
+                                                     :config-variable (format "SCALING_DRIVER_%d_HOME" i)))
+                              (cl-remove-if (lambda (d) (string-prefix-p "scaling-driver-" (symbol-name (car d))))
+                                            romacs-agent--drivers)))
                 (clrhash romacs-agent--sessions)
                 (mapcar (lambda (id) (let ((s (romacs-agent--make :id id :harness 'claude :title id)))
                                        (puthash id s romacs-agent--sessions) s))
@@ -827,6 +986,95 @@ thousandth a stack mark."
           (clrhash romacs-agent-history--descriptions)
           (romacs-agent-history-list)))
 
+;; N harness drivers defined, then each defined again, oldest first (the
+;; farthest from the registry's head): each by its name's cell, never by
+;; a walk of the registry.
+(scaling-probe agent-define-harness :n 2000
+  :setup (progn (scaling--agent) (mapcar #'intern (scaling--names "scaling-rdriver" n)))
+  :body (progn
+          (dolist (name it) (romacs-agent-define-harness name :lifetime 'persistent))
+          (dolist (name it) (romacs-agent-define-harness name :lifetime 'per-turn))))
+
+;; A harness's environment, with N harness drivers defined (each a
+;; configuration variable and one it sets for its children) and N other
+;; variables in the editor's: one membership test per variable, linear.
+(scaling-probe agent-environment :n 500
+  :setup (progn (scaling--agent)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-edriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_EDRIVER_%d_HOME" i)
+                                               :scrub (list (format "SCALING_EDRIVER_%d_CHILD" i))))
+                (append (cl-loop for i below n collect (format "SCALING_KEPT_%d=value" i))
+                        (cl-loop for i below n collect (format "SCALING_EDRIVER_%d_CHILD=parent" i))
+                        process-environment))
+  :body (let ((process-environment it)) (dotimes (_ 5) (romacs-agent--harness-environment))))
+
+;; The transcripts no session continues, among 200 listed and 200
+;; sessions, of a harness defined before N others: each row's identity
+;; finds its harness by name, never by a walk of the registry.
+(scaling-probe agent-history-items-drivers :n 400 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-history)
+                ;; Defined first: the N after it stand between it and the head.
+                (romacs-agent-define-harness 'scaling-hlast :lifetime 'persistent :config-variable "SCALING_HLAST_HOME"
+                                             :config-default "/scaling/home")
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-hdriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_HDRIVER_%d_HOME" i)))
+                (clrhash romacs-agent--sessions)
+                (dotimes (i 200)
+                  (let ((id (format "%08x-0000-4000-8000-%012x" i i)))
+                    (puthash id (romacs-agent--make :id id :harness 'scaling-hlast :title id :harness-session id)
+                             romacs-agent--sessions)))
+                (setq romacs-agent-history--listing
+                      (cl-loop for i below 200
+                               collect (list :harness 'scaling-hlast :id (format "%08x-0000-4000-8000-%012x" (* 2 i) i)
+                                             :path (format "/scaling/%d.jsonl" i) :mtime i :config-dir nil)))
+                nil)
+  :body (dotimes (_ 5) (romacs-agent-history-items)))
+
+;; A tool result of N characters, Unicode text: its check is native, so
+;; one character costs no Lisp call.
+(scaling-probe mcp-result-text :n 20000
+  :setup (progn (require 'romacs-mcp) (make-string n ?é))
+  :body (dotimes (_ 20) (romacs-mcp--result it nil t)))
+
+;; The usage log's work per command (a caught signal's backtrace, its
+;; error record, its slow count) with N kinds already in its slow, traced
+;; and captured tables and N timers pending: a fixed 200 commands, so any
+;; scan of them shows.
+(scaling-probe usage-log-command :n 2000 :budget 0.5
+  :setup (progn (require 'romacs-usage-log)
+                (define-error 'scaling-usage-error "Scaling usage error")
+                (setq romacs-usage-log-file (make-temp-file "scaling-usage-" nil ".jsonl"))
+                (dotimes (i n)
+                  (puthash (format "command-%d fundamental-mode" i) (vector 1 60 60 0) romacs-usage-log--slow)
+                  (puthash (format "command-%d error" i) t romacs-usage-log--traced)
+                  (puthash (format "command-%d scaling-usage-error" i) 0 romacs-usage-log--captured))
+                (dotimes (_ n) (run-at-time 3600 nil #'ignore))
+                (mapcar #'intern (scaling--names "scaling-usage" 200)))
+  :body (let ((signal-hook-function #'romacs-usage-log--signal) (romacs-usage-log-slow-loop-ms 0))
+          (setq romacs-usage-log--pending nil)
+          (dolist (command it)
+            (let ((kind (format "%s scaling-usage-error" command)))
+              (remhash kind romacs-usage-log--traced)
+              (remhash kind romacs-usage-log--captured))
+            (let ((real-this-command command) (this-command command))
+              (romacs-usage-log--pre-command)
+              (condition-case data (signal 'scaling-usage-error nil)
+                (error (romacs-usage-log--command-error data nil nil)))
+              (romacs-usage-log--post-command)
+              (romacs-usage-log--settled)))))
+
+;; A server's start prunes the session records: N kept because their
+;; processes live (pid 1), each looked at once.
+(scaling-probe usage-log-prune :n 500
+  :setup (let ((root (make-temp-file "scaling-sessions-" t)))
+           (require 'romacs-usage-log)
+           (dotimes (i n) (make-directory (expand-file-name (format "20200101T%06d-1" i) root)))
+           root)
+  :body (romacs-usage-log--prune it 50))
+
 ;; The endpoint sweep over N sessions, N routes of sessions gone, N ended
 ;; editors' sockets and N earlier builds' directories: one pass each.
 (defvar romacs-mcp--socket)
@@ -859,6 +1107,70 @@ thousandth a stack mark."
                 (cl-loop for i below n collect (cons (format "claude-%d" i) (format "/tmp/claude-config-%d" i))))
   :body (let ((romacs-agent-providers it)) (romacs-agent-history--places)))
 
+;; The instances of N Lisp entries and T3's settings of N instances: one
+;; read of the file, one name table, linear; read again (as after the file
+;; changed) or kept from the last read.
+(defun scaling--t3-instances (n)
+  (scaling--agent)
+  (require 'romacs-agent-t3)
+  (let ((file (make-temp-file "scaling-t3-" nil ".json"))
+        (instances (make-hash-table :test #'equal)))
+    (dotimes (i n)
+      (puthash (format "claudeAgent_%d" i)
+               (romacs-mcp--object "driver" "claudeAgent" "displayName" (format "Claude %d" i)
+                                   "config" (romacs-mcp--object "homePath" (format "/tmp/t3-claude-%d" i)
+                                                                "launchArgs" "--chrome --x 'a b'"))
+               instances))
+    (with-temp-file file (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+    (cons (list 't3 :settings file)
+          (cl-loop for i below n collect (cons (format "claude-lisp-%d" i) (format "/tmp/claude-config-%d" i))))))
+
+(scaling-probe agent-instances :n 1000
+  :setup (scaling--t3-instances n)
+  :body (let ((romacs-agent-providers it))
+          (setq romacs-agent-t3--read nil)
+          (romacs-agent-instances t)))
+
+;; N drivers, each a T3 driver name, and T3's settings of N instances of
+;; them, read anew: each instance's harness by an index built once.
+(scaling-probe agent-instances-drivers :n 500
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-t3)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-tdriver-%d" i)) :lifetime 'persistent
+                                               :t3-driver (format "tdriver%d" i)
+                                               :config-variable (format "SCALING_TDRIVER_%d_HOME" i)
+                                               :config-default (format "/tmp/tdriver-%d" i)))
+                (let ((file (make-temp-file "scaling-t3d-" nil ".json"))
+                      (instances (make-hash-table :test #'equal)))
+                  ;; The first defined is the farthest from the registry's head.
+                  (dotimes (i n)
+                    (puthash (format "t%d" i) (romacs-mcp--object "driver" (format "tdriver%d" (- n 1 i))
+                                                                  "displayName" (format "T %d" i))
+                             instances))
+                  (with-temp-file file (insert (json-serialize (romacs-mcp--object "providerInstances" instances))))
+                  (list (list 't3 :settings file))))
+  :body (let ((romacs-agent-providers it))
+          (setq romacs-agent-t3--read nil)
+          (romacs-agent-instances t)))
+
+(scaling-probe agent-instances-kept :n 1000
+  ;; Read once here: the body resolves with the file's read kept.
+  :setup (let ((providers (scaling--t3-instances n)))
+           (let ((romacs-agent-providers providers)) (romacs-agent-instances t))
+           providers)
+  :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
+
+;; N entries naming no harness Romacs runs, with N drivers defined: each a
+;; short reason; the harnesses there are listed once.
+(scaling-probe agent-instances-invalid :n 500
+  :setup (progn (scaling--agent)
+                (dotimes (i n)
+                  (romacs-agent-define-harness (intern (format "scaling-idriver-%d" i)) :lifetime 'persistent
+                                               :config-variable (format "SCALING_IDRIVER_%d_HOME" i)))
+                (cl-loop for i below n collect (list (format "nosuch-%d" i) :harness (intern (format "nosuch-%d" i)))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent-instances t)))
+
 ;; The home page over N transcripts beside a session per project.
 (scaling-probe agent-home-history :n 200
   :setup (let ((dir (scaling--history n)))
@@ -881,6 +1193,78 @@ thousandth a stack mark."
                        (format "{\"message\":{\"id\":\"b%d\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One **file**.\"}]},\"type\":\"assistant\",\"timestamp\":\"2026-11-03T10:00:05Z\"}\n" i))))
            (list :path file :id "scaling-view" :harness 'claude :provider "claude" :cwd "/tmp" :title "view"))
   :body (kill-buffer (romacs-agent-history-open it)))
+
+;; A chat of N characters over a fixed 100 turns.
+(defun scaling--big-chat (n)
+  (scaling--agent)
+  (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :title "big"
+                                     :dir temporary-file-directory))
+        (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
+    (romacs-agent-show session)
+    (dotimes (i 100)
+      (let ((seq (* 10 i)) (id (format "m%d" i)))
+        (romacs-agent-ui--render session (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
+        (romacs-agent-ui--render session (list :type 'delta :text reply :message id :seq (+ seq 2) :last t))
+        (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
+    (romacs-agent-buffer session)))
+
+;; Composer updates with N messages queued: the count is kept, not taken.
+(scaling-probe agent-chat-queue :n 2000
+  :setup (let ((session (progn (scaling--agent) (romacs-agent--make :id "scaling-queue-chat" :harness 'claude :title "queue"
+                                            :dir temporary-file-directory :state 'running))))
+           (romacs-agent-show session)
+           (dotimes (i n) (romacs-agent-send-later session (format "message %d" i)))
+           (romacs-agent-buffer session))
+  :body (with-current-buffer it (dotimes (_ 200) (romacs-agent-ui--composer-update))))
+
+;; M-p through a history of N prompts, then M-n back: each step one cell.
+(scaling-probe agent-chat-history :n 2000
+  :setup (let ((session (progn (scaling--agent) (romacs-agent--make :id "scaling-history-chat" :harness 'claude :title "history"
+                                            :dir temporary-file-directory))))
+           (romacs-agent-show session)
+           (with-current-buffer (romacs-agent-buffer session)
+             (setq romacs-agent-ui--history (scaling--names "prompt" n))
+             (goto-char (point-max))
+             (current-buffer)))
+  :body (with-current-buffer it
+          (dotimes (_ n) (romacs-agent-chat-history-previous))
+          (dotimes (_ n) (romacs-agent-chat-history-next))))
+
+;; A resize of that chat refits its 100 rules: flat in the transcript's size.
+(scaling-probe agent-chat-refit :n 100000 :k 10
+  :setup (scaling--big-chat n)
+  :body (with-current-buffer it
+          (dolist (width '(61 62 63 64 65))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; A resize of a chat of N turns refits its N rules once each: linear.
+(scaling-probe agent-chat-refit-rules :n 200
+  :setup (progn (scaling--agent)
+                (let ((session (romacs-agent--make :id "scaling-rules-chat" :harness 'claude :title "rules"
+                                                   :dir temporary-file-directory)))
+                  (romacs-agent-show session)
+                  (dotimes (i n)
+                    (romacs-agent-ui--render session (list :type 'input :text "p" :seq (+ (* 10 i) 1) :last t))
+                    (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ (* 10 i) 2) :last t)))
+                  (romacs-agent-buffer session)))
+  :body (with-current-buffer it
+          (dolist (width '(61 62 60 63 59))
+            (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () width)))
+              (romacs-agent-ui--refit-rules)))))
+
+;; Keys typed into that chat's composer (with the post-command hook): flat.
+(scaling-probe agent-chat-typing :n 100000 :k 10
+  :setup (with-current-buffer (scaling--big-chat n) (goto-char (point-max)) (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (_ 50)
+            (let ((last-command-event ?a) (this-command 'romacs-agent-chat-self-insert))
+              (call-interactively #'romacs-agent-chat-self-insert)
+              (run-hooks 'post-command-hook)))
+          (dotimes (_ 10)
+            (let ((this-command 'romacs-agent-chat-backward-kill-word))
+              (call-interactively #'romacs-agent-chat-backward-kill-word)
+              (run-hooks 'post-command-hook)))))
 
 ;; A chat of N whole turns: the prompt, a streamed reply, its Markdown, the footer.
 (scaling-probe agent-chat-turns :n 100
@@ -1206,6 +1590,71 @@ thousandth a stack mark."
            (cons (list :username "romeo" :server "montague.net")
                  (cons (list :room nil :with nil :nick nil) archives)))
   :body (jabber-mam-sync--summary (car it) (cdr it) (mapcar (lambda (a) (cons a 'success)) (cdr it)) t 1.0))
+
+;;;; Images (prim/leaf/graphics.rs: the semantic image cache)
+
+;; N distinct images, each measured, then all N again from the cache: a
+;; lookup is one hash of the spec's copied plist, so the work is linear
+;; in the images and a lookup never scans the cache.
+(defun scaling--image-specs (n)
+  "N distinct SVG image specs, a size each."
+  (let (specs)
+    (dotimes (i n)
+      (push (list 'image :type 'svg
+                  :data (format "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"8\"/>" (1+ i)))
+            specs))
+    (nreverse specs)))
+
+(defun scaling--image-buffer (n)
+  "A buffer of N lines, each showing its own image beside text; return it."
+  (switch-to-buffer (get-buffer-create "scaling-images")) (erase-buffer)
+  (let ((i 0))
+    (dolist (spec (scaling--image-specs n))
+      (insert (format "line %d " i))
+      (insert-image spec)
+      (insert " text\n")
+      (setq i (1+ i))))
+  (goto-char (point-min))
+  (current-buffer))
+
+;; N lines each with its own image, shown a window at a time: a step's
+;; redisplay decodes and lays out the images it shows, so the work is in
+;; the window's lines, not the buffer's images.
+(scaling-probe images-in-buffer :gui t :n 200 :steps 10
+  :setup (progn (clear-image-cache t) (scaling--image-buffer n))
+  :body (with-current-buffer it (forward-line 15) (recenter)))
+
+(scaling-probe images :gui t :n 100 :steps 1
+  :setup (progn (clear-image-cache t) (scaling--image-specs n))
+  ;; The message is the step's visible change, so the host paints it.
+  :body (let (size) (dotimes (_ 2) (dolist (spec it) (setq size (image-size spec t)))) (message "%S" size)))
+
+;;;; Collection
+
+(defvar scaling--keeper nil
+  "The cons each `gc-free-lists' round keeps above its garbage.")
+
+(defun scaling--churn (n)
+  "Garbage in every table: N conses, N/2 vectors and N/100 strings, N/10
+closures over a mutable variable (each a closure and a cell)."
+  (make-list n nil)
+  (dotimes (_ (/ n 2)) (make-vector 1 nil))
+  (dotimes (_ (/ n 100)) (make-string 16 ?x))
+  (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
+
+(scaling-probe gc-free-lists :n 200000
+  ;; Rounds of: garbage in every table, a cons, closure, cell and string
+  ;; kept above it, a collection, then as much garbage again.  The sweep leaves free
+  ;; entries in proportion to N below the kept ones and the allocation
+  ;; takes them all back, so the work is linear in N; an allocation that
+  ;; scanned a free list, a sweep that listed an entry twice or a table
+  ;; never cut back would make it grow faster.
+  :setup nil
+  :body (dotimes (_ 4)
+          (scaling--churn n)
+          (setq scaling--keeper (let ((y 0)) (list n (lambda () (setq y (1+ y))) (make-string 16 ?y))))
+          (garbage-collect)
+          (scaling--churn n)))
 
 ;;;; Running
 

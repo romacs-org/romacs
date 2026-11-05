@@ -60,3 +60,55 @@ fn url_retrieve_through_the_connection_pool_matches_pinned_gnu() {
     assert_eq!((actual.0, &actual.1), (expected.0, &expected.1), "Romacs stderr: {}", actual.2);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// "served gzip\n", gzip-compressed (mtime 0).
+const GZIPPED: [u8; 32] = [31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 43, 78, 45, 42, 75, 77, 81, 72, 175, 202, 44, 224, 2, 0, 22, 8, 165, 63, 12, 0, 0, 0];
+
+/// Answer one request: gzip-encoded when it accepts gzip, else plain.
+fn serve_encoded(listener: TcpListener) {
+    let Ok((stream, _)) = listener.accept() else { return };
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut writer = stream;
+    let (mut line, mut gzip) = (String::new(), false);
+    while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" {
+        gzip |= line.to_ascii_lowercase().starts_with("accept-encoding:") && line.contains("gzip");
+        line.clear();
+    }
+    let (encoding, body): (&str, &[u8]) = if gzip { ("Content-Encoding: gzip\r\n", &GZIPPED) } else { ("", b"plain\n") };
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{encoding}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    let _ = writer.write_all(head.as_bytes()).and_then(|()| writer.write_all(body));
+}
+
+/// url-vars.el asks for gzip when `zlib-available-p' says so, and url-http
+/// decompresses the body with `zlib-decompress-region' (decompress.c).
+#[test]
+fn url_retrieve_decompresses_a_gzip_body_as_pinned_gnu() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-url-gzip-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |binary: &str| {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || serve_encoded(listener));
+        let form = format!(
+            "(progn (require 'url)
+             (let ((url-proxy-services nil))
+               (with-current-buffer (url-retrieve-synchronously \"http://127.0.0.1:{port}/z\" t t 10)
+                 (goto-char (point-min))
+                 (re-search-forward \"\\n\\n\")
+                 (princ (format \"%S|%s\" url-mime-encoding-string (buffer-substring (point) (point-max)))))))");
+        let output = Command::new(binary).args(["-Q", "--batch", "--eval", &form]).current_dir(&dir)
+            .env("HOME", &dir).env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("ROMACS_WORLD", "off")
+            .output().unwrap();
+        server.join().unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(),
+         String::from_utf8_lossy(&output.stderr).lines().last().unwrap_or_default().to_owned())
+    };
+    let expected = run(&gnu);
+    assert_eq!(expected.1, "\"gzip\"|served gzip\n", "pinned GNU: {expected:?}");
+    let actual = run(romacs);
+    assert_eq!((actual.0, &actual.1), (expected.0, &expected.1), "Romacs stderr: {}", actual.2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

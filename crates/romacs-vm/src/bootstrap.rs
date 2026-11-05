@@ -138,12 +138,11 @@ impl Vm {
                 // data.c defalias: LOADHIST_ATTACH ((defun . SYMBOL)), which
                 // `symbol-file' reads.
                 let defun = self.intern("defun");
-                self.conses.push((defun, a[0]));
-                let entry = Value::reference(self.conses.len() - 1, 3);
+                let entry = self.alloc_cons(defun, a[0]);
                 let history = self.slot("current-load-list");
                 let old = self.variable_value(history)?;
-                self.conses.push((entry, old));
-                self.set_variable_value(history, Value::reference(self.conses.len() - 1, 3))?;
+                let cons = self.alloc_cons(entry, old);
+                self.set_variable_value(history, cons)?;
                 self.defalias_documentation(&a)?;
                 Ok(a[0])
             }

@@ -146,8 +146,7 @@ impl Vm {
         if !present {
             let slot = self.slot("features");
             let old = self.slots[slot].value;
-            self.conses.push((feature, old));
-            self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+            self.slots[slot].value = self.alloc_cons(feature, old);
         }
         if subfeature != Value::NIL {
             let key = self.intern("subfeatures");
@@ -277,8 +276,7 @@ impl Vm {
                 if !present {
                     let slot = self.slot("features");
                     let old = self.slots[slot].value;
-                    self.conses.push((args[0], old));
-                    self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+                    self.slots[slot].value = self.alloc_cons(args[0], old);
                 }
                 if subfeature != Value::NIL {
                     let key = self.intern("subfeatures");
@@ -403,8 +401,10 @@ impl Vm {
             value
         } else {
             self.seed_file_specials = true;
+            self.file_level_request = true;
             let compiled = self.expanding_for_load(|vm| vm.compile_request(form).map(|(function, _)| function));
             self.seed_file_specials = false;
+            self.file_level_request = false;
             let compiled = match compiled {
                 Ok(function) => Ok(function),
                 Err(error) => Err(self.eager_expansion_failure(error)),
@@ -459,8 +459,8 @@ impl Vm {
     fn eager_expansion_failure(&mut self, error: String) -> String {
         let (condition, object) = match self.propagated_escape {
             Some(threaded::Escape::Signal(condition, data)) => {
-                self.conses.push((condition, data));
-                (condition, Value::reference(self.conses.len() - 1, 3))
+                let cons = self.alloc_cons(condition, data);
+                (condition, cons)
             }
             Some(threaded::Escape::Error { condition, object, .. }) => (condition, object),
             _ => return error,

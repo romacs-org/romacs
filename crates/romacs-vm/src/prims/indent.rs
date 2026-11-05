@@ -12,23 +12,30 @@ defsubr! { name = "insert-char", gnu = "editfns.c:1444", effect = Global,
 fn insert_char(cx, character: Value; optional count: Value, inherit: Value) -> Step {
     let c = character.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
         .ok_or(Fault::Wrong("characterp", character))? as u32;
-    let count = if count == Value::NIL { 1 } else { fixnum(count)? };
-    if count <= 0 { return Ok(Step::Done(Value::NIL)); }
     let mut unit = [0; 5];
     let width = crate::lstring::char_string(c, &mut unit);
-    // GNU inserts from a 4000-byte buffer, each full one a change of its own.
+    insert_copies(cx, &unit[..width], true, count, inherit)
+}}
+
+/// COUNT (nil: 1) copies of UNIT, text of MULTIBYTE, inserted as
+/// insert-char does: GNU fills a 4000-byte buffer, each full one a change
+/// of its own.
+fn insert_copies(cx: &mut Leaf<'_>, unit: &[u8], multibyte: bool, count: Value, inherit: Value) -> Next {
+    let count = if count == Value::NIL { 1 } else { fixnum(count)? };
+    if count <= 0 { return Ok(Step::Done(Value::NIL)); }
+    let width = unit.len();
     let per_chunk = (4000 - 4000 % width) / width;
     let total = count as usize;
     let full = (total - 1) / per_chunk;
     let mut args = Vec::with_capacity(full + 1);
     if full > 0 {
-        let chunk = cx.make_string(unit[..width].repeat(per_chunk), true);
+        let chunk = cx.make_string(unit.repeat(per_chunk), multibyte);
         args.resize(full, chunk);
     }
-    args.push(cx.make_string(unit[..width].repeat(total - full * per_chunk), true));
+    args.push(cx.make_string(unit.repeat(total - full * per_chunk), multibyte));
     let f = cx.intern(if inherit == Value::NIL { "insert" } else { "insert-and-inherit" });
     Ok(Step::Call { f, args, then: done, saved: vec![Value::NIL] })
-}}
+}
 
 defsubr! { name = "current-indentation", gnu = "indent.c:997", effect = Reads,
 fn current_indentation(cx) {
@@ -111,4 +118,24 @@ fn split_tab_return(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 defsubr! { name = "line-number-display-width", gnu = "indent.c:2150", effect = Reads,
 fn line_number_display_width(cx; optional pixelwise: Value) {
     cx.line_number_display_width(pixelwise)
+}}
+
+// editfns.c:1521: BYTE as a character (its raw-byte character in a
+// multibyte buffer), inserted by insert-char.
+defsubr! { name = "insert-byte", gnu = "editfns.c:1521", effect = Global,
+fn insert_byte(cx, byte: Value, count: Value; optional inherit: Value) -> Step {
+    let b = fixnum(byte)?;
+    if !(0..=255).contains(&b) {
+        let tail = cx.cons(Value::integer(255).unwrap(), Value::NIL);
+        let tail = cx.cons(Value::integer(0).unwrap(), tail);
+        let data = cx.cons(byte, tail);
+        return Err(Fault::Signal(cx.intern("args-out-of-range"), data));
+    }
+    if !cx.buffer_multibyte()? {
+        // insert-char's character B stored in unibyte text is the byte B.
+        return insert_copies(cx, &[b as u8], false, count, inherit);
+    }
+    let c = if b >= 128 { b + i64::from(crate::lstring::BYTE8_OFFSET) } else { b };
+    let insert = crate::prim::subr_named("insert-char").expect("insert-char subr");
+    Ok(Step::Call { f: insert, args: vec![Value::integer(c).unwrap(), count, inherit], then: done, saved: vec![Value::NIL] })
 }}

@@ -29,13 +29,14 @@ pub(super) enum Shape {
     /// A character glyph WIDTH columns wide; a newline is zero wide.
     Glyph { c: u32, width: i64 },
     /// A character the host lays out as one glyph WIDTH pixels wide in a
-    /// row at least HEIGHT pixels tall; a newline is zero wide.
-    Pixel { c: u32, width: i64, height: i64 },
+    /// row at least HEIGHT pixels tall, ASCENT of them above the baseline;
+    /// a newline is zero wide.
+    Pixel { c: u32, width: i64, height: i64, ascent: i64 },
     Tab,
     /// A TAB the host lays out as a stretch to the next tab stop in its
     /// pixels, SPACE being its face's space width, in a row at least
     /// HEIGHT pixels tall (romacs_layout_input::tab_advance).
-    PixelTab { space: i64, height: i64 },
+    PixelTab { space: i64, height: i64, ascent: i64 },
     Stretch { width: i64, zero_ok: bool },
     /// `:align-to', TARGET columns from the text area's left edge.
     Align { target: i64 },
@@ -52,7 +53,11 @@ pub(super) enum Shape {
     /// (romacs_layout_input::stretch_advance).
     /// UNNUMBERED, when given, is its width while the row's line number is
     /// not yet produced (calc_pixel_width_or_height counts it only then).
-    PixelStretch { width: romacs_layout_input::StretchWidth, unnumbered: Option<romacs_layout_input::StretchWidth>, height: i64 },
+    PixelStretch { width: romacs_layout_input::StretchWidth, unnumbered: Option<romacs_layout_input::StretchWidth>, height: i64, ascent: i64 },
+    /// An image's glyph (produce_image_glyph): its slot's width, ascent
+    /// and descent; what the host paints in it and its spec are the
+    /// source's image AT (Source::image), so elements stay small.
+    Image { width: i64, ascent: i64, descent: i64, at: u32 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,10 +122,10 @@ pub(super) struct It {
     pub current_y: i64,
     pub vpos: i64,
     pub hpos: i64,
-    /// max_ascent + max_descent of the row so far.
-    pub max_h: i64,
-    /// ascent + descent of the last element produced.
-    pub h: i64,
+    /// max_ascent and max_descent of the row so far.
+    pub max_h: Rise,
+    /// ascent and descent of the last element produced.
+    pub h: Rise,
     pub continuation_lines_width: i64,
     pub wrap_prefix_width: i64,
     pub pixel_width: i64,
@@ -138,6 +143,9 @@ pub(super) struct It {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Ctx {
+    /// The x the hscroll hides each line's text before (first_visible_x):
+    /// a glyph counts in a row's hpos only when it ends past it.
+    pub first_visible_x: i64,
     pub last_visible_x: i64,
     pub wrap: Wrap,
     pub tab_width: i64,
@@ -209,16 +217,38 @@ fn valid_after_move<E: Elements>(src: &mut E, it: &It) -> R<(bool, bool)> {
     })
 }
 
+/// An element's or a row's extent about the baseline: GNU's ascent and
+/// descent, a row's the largest of its elements' (max_ascent, max_descent),
+/// and its tallest element's height.  The host aligns a row's elements on
+/// one baseline only once it holds an image (SETTLED); other rows it lays
+/// out each element from the row's top, its tallest element's height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Rise { pub ascent: i64, pub descent: i64, pub tallest: i64, pub settled: bool }
+
+impl Rise {
+    pub(super) fn height(self) -> i64 {
+        if self.settled { (self.ascent + self.descent).max(self.tallest) } else { self.tallest }
+    }
+    pub(super) fn max(self, other: Rise) -> Rise {
+        Rise { ascent: self.ascent.max(other.ascent), descent: self.descent.max(other.descent),
+               tallest: self.tallest.max(other.tallest), settled: self.settled || other.settled }
+    }
+    fn of(height: i64, ascent: i64) -> Rise { Rise { ascent, descent: height - ascent, tallest: height, settled: false } }
+    /// How far below the row's top an element of OWN ascent sits.
+    pub(super) fn drop(self, own: Rise) -> i64 { if self.settled || own.settled { (self.ascent - own.ascent).max(0) } else { 0 } }
+}
+
 /// produce_glyphs (term.c) and produce_stretch_glyph.
 fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
     let from_prefix = it.prefix.is_some();
-    let mut height = 1;
+    // A terminal's line is one row tall.
+    let mut rise = Rise::of(1, 1);
     let (width, glyphs) = match e.shape {
         Shape::Glyph { c: 10, .. } => (0, 0),
-        Shape::Pixel { c, width, height: h } => { height = h; if c == 10 { (0, 0) } else { (width, 1) } }
+        Shape::Pixel { c, width, height, ascent } => { rise = Rise::of(height, ascent); if c == 10 { (0, 0) } else { (width, 1) } }
         Shape::Glyph { width, .. } | Shape::Glyphless { width, .. } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
-        Shape::PixelTab { space, height: h } => { height = h; (pixel_tab(cx, it, space), 1) }
+        Shape::PixelTab { space, height, ascent } => { rise = Rise::of(height, ascent); (pixel_tab(cx, it, space), 1) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),
         Shape::RelativeStretch { .. } => (0, 0),
         Shape::Stretch { width, zero_ok } => stretch(cx, it, e, width, zero_ok),
@@ -226,8 +256,12 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
             let x = it.current_x + if it.align_visually { 0 } else { it.continuation_lines_width };
             stretch(cx, it, e, (target - x).max(0), true)
         }
-        Shape::PixelStretch { width, unnumbered, height: h } => {
-            height = h;
+        Shape::Image { width, ascent, descent, .. } => {
+            rise = Rise { ascent, descent, tallest: ascent + descent, settled: true };
+            (width, 1)
+        }
+        Shape::PixelStretch { width, unnumbered, height, ascent } => {
+            rise = Rise::of(height, ascent);
             let width = pixel_stretch(cx, it, e, if it.lnum_x > 0 { width } else { unnumbered.unwrap_or(width) });
             (width, i64::from(width > 0))
         }
@@ -238,8 +272,8 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
         it.current_x += width;
         if it.continuation_lines_width != 0 && from_prefix { it.wrap_prefix_width = it.current_x; }
     }
-    it.h = height;
-    it.max_h = it.max_h.max(height);
+    it.h = rise;
+    it.max_h = it.max_h.max(rise);
 }
 
 /// The spaces a TAB at the iterator's x takes to the next tab stop.
@@ -329,13 +363,20 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
     let mut may_wrap = false;
     let mut subject = 0u8;
     let reached = |e: &Elem| op.pos && e.reaches() && e.charpos >= to;
+    // A line number for a row whose text starts left of the window's first
+    // visible x (hscrolled) waits for the first glyph that shows.
+    let mut lnum_pending = false;
     if it.hpos == 0 {
-        // maybe_produce_line_number, unless moving to x 0 (GNU tests
-        // `op && MOVE_TO_X').
+        // maybe_produce_line_number, unless moving to the first visible x
+        // (GNU tests `op && MOVE_TO_X').
         let moving = op.pos || op.x || op.y || op.vpos;
-        if let Some(lnum) = cx.lnum && !(moving && to_x == 0) && it.current_x == 0 {
-            let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
-            (it.current_x, it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (x, glyphs, x, x, glyphs);
+        if let Some(lnum) = cx.lnum && !(moving && to_x == cx.first_visible_x) {
+            if it.current_x == cx.first_visible_x {
+                let (glyphs, x) = lnum.prefix(src.line_at(it.index)?);
+                (it.current_x, it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (it.current_x + x, glyphs, x, x, glyphs);
+            } else {
+                lnum_pending = it.current_x < cx.first_visible_x;
+            }
         }
         if it.prefix.is_none() { handle_line_prefix(src, it)?; }
         subject = u8::from(it.prefix.is_some());
@@ -409,7 +450,17 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
                     }
                     if atpos_it.is_none() { let mut a = *it; (a.current_x, a.max_h) = (x, max_h); atpos_it = Some(a); }
                 }
-                if new_x > 0 { it.hpos += 1; }
+                if new_x > cx.first_visible_x {
+                    if lnum_pending && let Some(lnum) = cx.lnum {
+                        // The row's first visible glyph: its number shows
+                        // at the first visible x, the text after it.
+                        lnum_pending = false;
+                        let (glyphs, width) = lnum.prefix(src.line_at(it.index)?);
+                        it.current_x = cx.first_visible_x + width + new_x - cx.first_visible_x;
+                        (it.hpos, it.lnum_x, it.lnum_last, it.lnum_hpos) = (it.hpos + glyphs, width, width, it.hpos + glyphs);
+                    }
+                    it.hpos += 1;
+                }
                 x = new_x;
             }
             if result != Move::Undefined { break; }
@@ -448,7 +499,7 @@ pub(super) fn move_in_line<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: 
     Ok(result)
 }
 
-struct ContinueAt { i: i64, x: i64, new_x: i64, x0: i64, hpos_before: i64, max_h: i64 }
+struct ContinueAt { i: i64, x: i64, new_x: i64, x0: i64, hpos_before: i64, max_h: Rise }
 
 /// The branch of move_it_in_display_line_to for a glyph that does not fit
 /// a continued line. A terminal has no fringe, so a newline after the last
@@ -515,7 +566,7 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
             let line_backup = (cx.wrap == Wrap::Word).then_some(*it);
             let mut reached = false;
             skip = move_in_line(src, cx, it, to, if op.x { to_x } else { 0 }, Op { x: true, pos: op.pos, ..Op::default() })?;
-            let in_line = |it: &It| to_y >= it.current_y && to_y < it.current_y + it.max_h;
+            let in_line = |it: &It| to_y >= it.current_y && to_y < it.current_y + it.max_h.height();
             if skip == Move::PosMatchOrZv {
                 reached = true;
             } else if skip == Move::XReached {
@@ -596,9 +647,9 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
         it.hpos = 0;
         it.lnum_x = 0;
         it.lnum_hpos = 0;
-        it.current_y += it.max_h;
+        it.current_y += it.max_h.height();
         it.vpos += 1;
-        it.max_h = 0;
+        it.max_h = Rise::default();
     }
     Ok(max_x)
 }
@@ -732,16 +783,16 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
         if at == end {
             x += it.pixel_width;
             if m.ignore_line_at_end {
-                if it.current_y < end_y { doff = it.max_h.max(it.h); }
+                if it.current_y < end_y { doff = it.max_h.max(it.h).height(); }
             } else {
                 it.max_h = it.max_h.max(it.h);
             }
         } else if at > end && wrap(&cx, &it) == Wrap::Truncate && it.current_x >= cx.last_visible_x {
-            it.current_y += it.max_h.max(it.h);
+            it.current_y += it.max_h.max(it.h).height();
         }
     }
     if it.current_y > 0 { start_x = 0; }
-    let y = it.current_y + doff + if m.ignore_line_at_end { 0 } else { it.max_h };
+    let y = it.current_y + doff + if m.ignore_line_at_end { 0 } else { it.max_h.height() };
     Ok((x, start_x, y))
 }
 

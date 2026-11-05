@@ -4,6 +4,7 @@
 //! (`MODE_LINE_STRING`, `MODE_LINE_NOPROP`). The format is converted to an owned `Form` before
 //! expansion. Executable object constants own collector-traced roots across
 //! collecting `:eval` forms; window and buffer are re-read from rooted slots.
+use crate::width_rule::WidthRule;
 use crate::*;
 use std::ops::Range;
 
@@ -70,6 +71,8 @@ pub(super) struct Band {
     /// can make the band allocate more than this.
     cols: usize,
     max_cols: usize,
+    /// How many columns a character takes (width_rule.rs), read once.
+    pub(super) rule: WidthRule,
 }
 
 /// What `decode_mode_spec` reads from the window and its buffer, taken once
@@ -107,18 +110,6 @@ pub(super) const ELT_RESTARTED: &str = "#:vm2-mode-line-elt-no";
 /// GNU `lots_of_dashes` (`xdisp.c:29426`).
 const LOTS_OF_DASHES: usize = 140;
 
-/// GNU `char_width` as `c_string_width` uses it (`character.h`
-/// `ASCII_CHAR_WIDTH`): TAB is `tab-width` columns, other control characters
-/// and DEL 2 (`ctl-arrow` t, VM2's `^X` form), newline 0.
-fn char_width(c: char, tab: usize) -> usize {
-    match c {
-        '\t' => tab,
-        '\n' => 0,
-        '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
-        _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
-    }
-}
-
 /// The first `max` characters of `s` (GNU `store_mode_line_string`'s
 /// precision, which counts SCHARS).
 fn char_prefix(s: &str, max: usize) -> &str {
@@ -131,10 +122,10 @@ fn chars(s: &str) -> i64 {
 
 /// Longest prefix of `s` no wider than `max` columns (GNU `c_string_width`
 /// selecting a format string's literal run).
-fn prefix(s: &str, max: usize, tab: usize) -> &str {
+fn prefix<'s>(s: &'s str, max: usize, rule: &WidthRule) -> &'s str {
     let mut used = 0;
     for (at, c) in s.char_indices() {
-        let w = char_width(c, tab);
+        let w = rule.width(c as u32);
         if used + w > max {
             return &s[..at];
         }
@@ -383,7 +374,7 @@ impl Band {
         for c in s.chars() {
             let (shown, w) = match c {
                 '\u{0}'..='\u{1f}' | '\u{7f}' => ([Some('^'), Some(char::from((c as u8) ^ 0x40))], 2),
-                _ => ([Some(c), None], unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)),
+                _ => ([Some(c), None], self.rule.width(c as u32)),
             };
             if self.cols + w > self.max_cols {
                 self.cols = self.max_cols;
@@ -401,14 +392,6 @@ fn own_at(own: &[(usize, Own)], k: usize) -> Option<&Own> {
 }
 
 impl Vm {
-    /// GNU `SANE_TAB_WIDTH (current_buffer)`: `tab-width` if in 1..=1000, else 8.
-    fn ml_tab_width(&mut self) -> Result<usize> {
-        Ok(match self.ml_symbol_value("tab-width")? {
-            Some(Form::Int(n)) if (1..=1000).contains(&n) => n as usize,
-            _ => 8,
-        })
-    }
-
     fn ml_form_symbol_value(&mut self, symbol: &Form) -> Result<Option<Form>> {
         let slot = match symbol {
             Form::Sym(name) => return self.ml_symbol_value(name),
@@ -579,7 +562,7 @@ impl Vm {
             Target::Display if state.marks => &PROJECTED,
             Target::Display | Target::NoProp => &[],
         };
-        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols };
+        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols, rule: self.width_rule()? };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -609,7 +592,6 @@ impl Vm {
             }
             depth += 1;
             if let Some(s) = self.ml_string(&elt)? {
-                let tab = self.ml_tab_width()?;
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
@@ -635,7 +617,7 @@ impl Vm {
                         let segment = &rest[..percent];
                         // `c_string_width` selects by columns; the selected
                         // substring then counts its characters (`xdisp.c` MODE_LINE_STRING).
-                        let shown = if precision > 0 { prefix(segment, (precision - n) as usize, tab) } else { segment };
+                        let shown = if precision > 0 { prefix(segment, (precision - n) as usize, &band.rule) } else { segment };
                         n += chars(shown);
                         match &own {
                             // The segment's first character's index in S.

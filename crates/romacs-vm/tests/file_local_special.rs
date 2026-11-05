@@ -155,3 +155,108 @@ fn the_memory_cache_tells_a_file_local_special_from_a_global_one() {
     assert_eq!(first, "(unbound 43)");
     assert_eq!(after, alone, "flq.el reused flp.el's file-local compilation");
 }
+
+/// time.el declares its `display-time-string-forms' variables inside a
+/// top-level call, `(with-no-warnings (defvar now) ...)': GNU's Fdefvar
+/// adds the name to the environment it is evaluated in, the file's while
+/// the file's own forms run, so the declaration lasts for the rest of the
+/// file and `display-time-update''s `let*' binds `now' dynamically for the
+/// forms it `eval's.  What counts is what evaluation reaches: a call's
+/// arguments and a macro's expansion declare, an untaken branch and a
+/// `let' with a lexical binding do not.
+const FNW: &str = ";;; fnw.el --- -*- lexical-binding: t -*-
+(defun fnw-get (s) (if (boundp s) (symbol-value s) 'unbound))
+(defmacro fnw-declare (name) (list 'with-no-warnings (list 'defvar name)))
+(with-no-warnings (defvar fnw-a) (defvar fnw-b))
+(let ((x 1)) (defvar fnw-c) x)
+(if nil (defvar fnw-d))
+(ignore (defvar fnw-e))
+(fnw-declare fnw-f)
+(defun fnw-late ()
+  (list (let ((fnw-a 1)) (fnw-get 'fnw-a)) (let ((fnw-b 2)) (fnw-get 'fnw-b)) (let ((fnw-c 3)) (fnw-get 'fnw-c))
+        (let ((fnw-d 4)) (fnw-get 'fnw-d)) (let ((fnw-e 5)) (fnw-get 'fnw-e)) (let ((fnw-f 6)) (fnw-get 'fnw-f))))
+(setq fnw-r (list (fnw-late) (special-variable-p 'fnw-a)))
+";
+
+/// Loaded after FNW: the same declaring form's text, which the eager
+/// regime's source cache hands back compiled, declares in this file too.
+const FNX: &str = ";;; fnx.el --- -*- lexical-binding: t -*-
+(ignore (defvar fnw-e))
+(defun fnx-late () (let ((fnw-e 7)) (fnw-get 'fnw-e)))
+(defun fnx-early-a () (let ((fnw-a 8)) (fnw-get 'fnw-a)))
+(setq fnx-r (list (fnx-late) (fnx-early-a)))
+";
+
+/// GNU 32.0.50: ((1 2 unbound unbound 5 6) nil) and (7 unbound), lazy and
+/// eager alike.
+#[test]
+fn a_defvar_evaluated_at_a_files_level_is_special_for_the_rest_of_it() {
+    for (name, eager) in [("nested-lazy", false), ("nested-eager", true)] {
+        let dir = scratch(name);
+        std::fs::write(dir.join("fnw.el"), FNW).unwrap();
+        std::fs::write(dir.join("fnx.el"), FNX).unwrap();
+        let mut vm = Vm::new();
+        vm.set_load_path(std::slice::from_ref(&dir)).unwrap();
+        // byte-run.el's and subr.el's, which a bare VM lacks: functions, so
+        // their arguments are evaluated.
+        vm.eval_source("(defalias 'with-no-warnings (lambda (&rest _body) nil))").unwrap();
+        vm.eval_source("(defalias 'ignore (lambda (&rest _args) nil))").unwrap();
+        if eager {
+            vm.eval_source("(defalias 'internal-macroexpand-for-load (lambda (form _full) form))").unwrap();
+        }
+        assert_eq!(eval_display(&mut vm, "(progn (load \"fnw\") (load \"fnx\") (list fnw-r fnx-r))"),
+                   "(((1 2 unbound unbound 5 6) nil) (7 unbound))", "{name}");
+    }
+}
+
+/// The same text as a file's form and as an ordinary evaluation compiles
+/// apart: evaluated first, it must not hand the file a compilation that
+/// declares nothing; loaded first, it must not hand the evaluation one that
+/// declares for a file.  GNU: 9, then nil.
+#[test]
+fn a_file_level_declaration_and_an_evaluation_do_not_share_a_compilation() {
+    let dir = scratch("cache-apart");
+    std::fs::write(dir.join("fnv.el"), ";;; fnv.el --- -*- lexical-binding: t -*-
+(ignore (defvar fnv-x))
+(defun fnv-late () (let ((fnv-x 9)) (if (boundp 'fnv-x) fnv-x 'unbound)))
+(setq fnv-r (fnv-late))
+").unwrap();
+    let fresh = || {
+        let mut vm = Vm::new();
+        vm.set_load_path(std::slice::from_ref(&dir)).unwrap();
+        vm.eval_source("(defalias 'ignore (lambda (&rest _args) nil))").unwrap();
+        vm.eval_source("(defalias 'internal-macroexpand-for-load (lambda (form _full) form))").unwrap();
+        vm
+    };
+    // Evaluated first, outside any file.
+    let mut vm = fresh();
+    vm.eval_source("(ignore (defvar fnv-x))\n").unwrap();
+    assert_eq!(eval_display(&mut vm, "(progn (load \"fnv\") fnv-r)"), "9", "evaluated, then loaded");
+    // Loaded first, in a VM that has evaluated nothing: the evaluation
+    // declares nothing for a file.
+    let mut vm = fresh();
+    assert_eq!(eval_display(&mut vm, "(progn (load \"fnv\") fnv-r)"), "9");
+    vm.eval_source("(setq macroexp--dynvars nil)").unwrap();
+    vm.eval_source("(ignore (defvar fnv-x))\n").unwrap();
+    assert_eq!(eval_display(&mut vm, "macroexp--dynvars"), "nil", "loaded, then evaluated");
+}
+
+/// A load form whose macro fails to expand until the form is reached (the
+/// lazy regime defers it, as GNU's interpreter expands at its reach) still
+/// declares for the file what its expansion declares.  GNU, without
+/// `internal-macroexpand-for-load': 9.
+#[test]
+fn a_deferred_load_form_declares_for_the_rest_of_its_file() {
+    let dir = scratch("deferred");
+    std::fs::write(dir.join("fny.el"), ";;; fny.el --- -*- lexical-binding: t -*-
+(defun fny-get (s) (if (boundp s) (symbol-value s) 'unbound))
+(defvar fny-ready nil)
+(defmacro fny-m () (if fny-ready '(defvar fny-z) (error \"not yet\")))
+(if t (progn (setq fny-ready t) (fny-m)))
+(defun fny-late () (let ((fny-z 9)) (fny-get 'fny-z)))
+(setq fny-r (fny-late))
+").unwrap();
+    let mut vm = Vm::new();
+    vm.set_load_path(std::slice::from_ref(&dir)).unwrap();
+    assert_eq!(eval_display(&mut vm, "(progn (load \"fny\") fny-r)"), "9");
+}

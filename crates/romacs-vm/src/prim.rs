@@ -145,6 +145,7 @@ pub(crate) struct PrimDesc {
 /// the `vm` field is private even to `prims::*` (a child of `prim` would
 /// otherwise see `prim`'s private fields): a leaf body cannot name `Vm`, so it
 /// cannot call `collect`, `execute` or `load`. Proven by compile-fail probe.
+pub(crate) use leaf::graphics::ImageEnv;
 mod leaf {
     use super::super::*;
     use super::Fault;
@@ -233,6 +234,8 @@ mod leaf {
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
         pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
+        pub(crate) fn redisplay_since_mark(&self) -> Option<Option<u64>> { self.vm.redisplay_since_mark }
+        pub(crate) fn set_redisplay_since_mark(&mut self, mark: Option<Option<u64>>) { self.vm.redisplay_since_mark = mark; }
         pub(crate) fn set_idle_since(&mut self, since: Option<std::time::Instant>) {
             self.vm.idle_since = since;
             crate::compiled_lisp::note_idle(since);
@@ -293,6 +296,12 @@ mod leaf {
         pub(crate) fn trapped_variable(&self, symbol: Value) -> std::result::Result<bool, Fault> {
             let slot = self.symbol_slot(symbol)?;
             Ok(self.vm.variable_trapped(self.vm.indirect_variable(slot)))
+        }
+        /// xfaces.c clear_face_cache with face_change: realize every face
+        /// afresh and republish every window.
+        pub(crate) fn clear_face_cache(&mut self) {
+            self.vm.display_state.faces_changed();
+            self.vm.display_state.free_realized_faces();
         }
         pub(crate) fn request_redisplay(&mut self) {
             self.vm.display_state.free_realized_faces();
@@ -448,9 +457,7 @@ mod leaf {
         }
         #[inline(always)]
         pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
-            let i = self.vm.conses.len();
-            self.vm.conses.push((car, cdr));
-            Value::reference(i, 3)
+            self.vm.alloc_cons(car, cdr)
         }
         /// ENCODE_FILE: the host bytes of the file name VALUE.
         pub fn file_name_bytes(&self, value: Value) -> std::result::Result<Vec<u8>, Fault> {
@@ -521,7 +528,9 @@ mod leaf {
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
         }
-        pub(crate) fn casing_multibyte(&mut self) -> std::result::Result<bool, Fault> {
+        /// Whether the current buffer's text is multibyte (a unibyte buffer
+        /// is a byte buffer), as `enable-multibyte-characters' says.
+        pub(crate) fn buffer_multibyte(&mut self) -> std::result::Result<bool, Fault> {
             let i = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(matches!(self.vm.objects[i], data::Object::Buffer(_)))
         }
@@ -1485,6 +1494,7 @@ mod leaf {
                     Some(data::Object::ByteBuffer(_)) => Kind::ByteBuffer,
                     Some(data::Object::HashTable(_)) => Kind::HashTable,
                     Some(data::Object::Obarray(_)) => Kind::Obarray,
+                    Some(data::Object::Free) => Kind::Invalid,
                     Some(data::Object::SyntaxTable(_)) => Kind::SyntaxTable,
                     Some(data::Object::CharTable(_)) => Kind::CharTable,
                     Some(data::Object::SubCharTable(_)) => Kind::SubCharTable,
@@ -1709,6 +1719,7 @@ mod leaf {
     mod point_predicates;
     mod subst_char;
     mod translate_region;
+    mod transpose_regions;
     mod json;
     mod overlays;
     mod invisible;
@@ -1749,6 +1760,7 @@ mod leaf {
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
     mod width;
+    pub(crate) mod graphics;
     mod coding_safe;
     mod coding_mule;
     mod display_motion;
@@ -1774,7 +1786,7 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
 
 /// The display elements WINDOW shows of its buffer from FROM, a line
 /// start, to TO, as a host paints them (Leaf::window_shown_elements).
-pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<Vec<Shown>, Fault> {
+pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<(Vec<Shown>, Vec<romacs_layout_input::InlineImage>), Fault> {
     Leaf::new(vm).window_shown_elements(window, from, to)
 }
 

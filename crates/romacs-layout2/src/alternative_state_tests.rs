@@ -8,7 +8,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
     let mut engine = LayoutEngine::new().unwrap();
     let mut snapshot = FrameSnapshot {
         font_selection: FontSelectionState::default(),
-        font_alternatives: FontAlternativeState::default(),
+        font_alternatives: FontAlternativeState::default(), no_font: Default::default(),
         background_alpha: 1.0,
         width: 400,
         height: 300,
@@ -29,7 +29,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                 },
                 mode_line: None,
                 mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-                vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+                vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
                 faces: vec![Face { decor: Default::default(),
                     foreground: [255; 3],
                     background: [0; 3],

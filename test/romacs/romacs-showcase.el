@@ -3,7 +3,6 @@
 (require 'cl-lib)
 (require 'romacs-webkit nil t)
 (require 'romacs-video nil t)
-(require 'romacs-image nil t)
 
 (defvar showcase--log-file "/tmp/romacs-showcase.log"
   "Path to the log file.")

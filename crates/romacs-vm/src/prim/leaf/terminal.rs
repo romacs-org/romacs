@@ -141,7 +141,8 @@ impl Leaf<'_> {
 
     /// SESSION's state, as a plist: `:running', `:alternate',
     /// `:bracketed-paste', `:application-cursor', `:following' (the
-    /// selected window's, when it shows the terminal), and, once the
+    /// selected window's, when it shows the terminal), `:shell-foreground'
+    /// (the shell, not a program it runs, has the terminal), and, once the
     /// terminal has published, `:cursor' and `:screen-start' as positions
     /// in its buffer.
     pub(crate) fn terminal_state(&mut self, session: i64) -> Out {
@@ -155,7 +156,7 @@ impl Leaf<'_> {
         let flag = |on: bool| if on { Value::TRUE } else { Value::NIL };
         let mut items = Vec::new();
         for (key, on) in [(":running", state.running), (":alternate", state.alternate_screen), (":bracketed-paste", state.bracketed_paste),
-                          (":application-cursor", state.application_cursor), (":following", following)] {
+                          (":application-cursor", state.application_cursor), (":following", following), (":shell-foreground", state.shell_foreground)] {
             items.push(self.intern(key));
             items.push(flag(on));
         }

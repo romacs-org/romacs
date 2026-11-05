@@ -124,8 +124,7 @@ impl Vm {
             let mut entries = vec![];
             for key in ["composition", "syntax-table", "display"] {
                 let key = Value::reference(self.slot(key) + 1, 7);
-                let value = Value::reference(self.conses.len(), 3);
-                self.conses.push((key, Value::TRUE));
+                let value = self.alloc_cons(key, Value::TRUE);
                 entries.push(value);
             }
             self.slots[slot].value = self.list_value(&entries);
@@ -144,8 +143,8 @@ impl Vm {
             ] {
                 let key = Value::reference(self.slot(key) + 1, 7);
                 let function = Value::reference(self.slot(function) + 1, 7);
-                entries.push(Value::reference(self.conses.len(), 3));
-                self.conses.push((key, function));
+                let entry = self.alloc_cons(key, function);
+                entries.push(entry);
             }
             self.slots[slot].value = self.list_value(&entries);
         }
@@ -164,8 +163,7 @@ impl Vm {
             );
             self.macros = macros;
             let (function, _) = compiled.expect("valid built-in annotation function");
-            let value = Value::reference(self.closures.len(), 4);
-            self.closures.push(Closure {
+            let value = self.alloc_closure(Closure {
                 function,
                 captures: vec![],
                 metadata: vec![], document: Value::NIL,
@@ -205,8 +203,7 @@ impl Vm {
                     if max == 0 {
                         return Err("positive kill-ring-max required".into());
                     }
-                    let ring = Value::reference(self.conses.len(), 3);
-                    self.conses.push((string, old));
+                    let ring = self.alloc_cons(string, old);
                     if values.len() >= max {
                         let mut tail = ring;
                         for _ in 1..max {
@@ -625,24 +622,25 @@ impl Vm {
     /// sticky properties around it, before the markers there with BEFORE.
     pub(crate) fn annotation_insert_inherit(&mut self, start: usize, n: usize, before: bool) -> Result<Value> {
         let index = self.buffer_index()?;
+        if matches!(self.objects[index], Object::ByteBuffer(_)) {
+            return self.unibyte_insert_inherit(index, start, n, before);
+        }
         let Object::Buffer(t) = &self.objects[index] else {
             return Err("text buffer required".into());
         };
+        // The neighbours are the whole text's, a narrowing's edges
+        // included, as offset_intervals sees them.
         let at = t.point;
-        let c = t.char_of_byte(at)?.0;
-        let same_run = at > t.accessible().start
-            && at < t.accessible().end
-            && t.properties.same_run_state(ByteOffset(at.0 - 1), at);
-        let left = if at > t.accessible().start {
-            self.annotation_raw(self.slots[self.buffer_slot].value, c)?
+        let end = ByteOffset(t.len_bytes());
+        let same_run = at.0 > 0 && at < end && t.properties.same_run_state(ByteOffset(at.0 - 1), at);
+        let owned = |pairs: Vec<(&str, Value)>| pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect::<Vec<_>>();
+        let left = if at.0 > 0 {
+            let before = t.byte_of_char(CharOffset(t.char_of_byte(at)?.0 - 1))?;
+            owned(t.properties.properties_at(before))
         } else {
             vec![]
         };
-        let right = if at < t.accessible().end {
-            self.annotation_raw(self.slots[self.buffer_slot].value, c + 1)?
-        } else {
-            vec![]
-        };
+        let right = if at < end { owned(t.properties.properties_at(at)) } else { vec![] };
         let inherited = self.annotation_inherited(left, right, same_run)?;
         self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
         let Object::Buffer(t) = &mut self.objects[index] else {
@@ -650,6 +648,28 @@ impl Vm {
         };
         let end = t.point;
         t.properties.inherit_inserted(at..end, &inherited);
+        Ok(Value::NIL)
+    }
+    /// annotation_insert_inherit in unibyte buffer INDEX, whose bytes are
+    /// its characters: the sticky properties of the bytes around point
+    /// win over the inserted strings' own.
+    fn unibyte_insert_inherit(&mut self, index: usize, start: usize, n: usize, before: bool) -> Result<Value> {
+        let Object::ByteBuffer(b) = &self.objects[index] else { unreachable!("unibyte buffer") };
+        // The neighbours are the whole text's, a narrowing's edges included.
+        let (at, end) = (b.point, b.bytes.len());
+        let same_run = at.0 > 0 && at.0 < end && b.properties.get(&ByteOffset(at.0 - 1)) == b.properties.get(&at);
+        let pairs = |p: usize| b.properties.get(&ByteOffset(p)).map(|m| m.iter().map(|(k, &v)| (k.clone(), v)).collect()).unwrap_or_default();
+        let left: Vec<(String, Value)> = if at.0 > 0 { pairs(at.0 - 1) } else { vec![] };
+        let right: Vec<(String, Value)> = if at.0 < end { pairs(at.0) } else { vec![] };
+        let inherited = self.annotation_inherited(left, right, same_run)?;
+        self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
+        let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+        if !inherited.is_empty() {
+            for p in at.0..b.point.0 {
+                let values = b.properties.entry(ByteOffset(p)).or_default();
+                values.extend(inherited.iter().cloned());
+            }
+        }
         Ok(Value::NIL)
     }
     fn annotation_symbol_name(&self, value: Value) -> Result<&str> {
@@ -842,8 +862,7 @@ impl Vm {
         }
         let mut out = tail;
         for car in cars.into_iter().rev() {
-            let cell = Value::reference(self.conses.len(), 3);
-            self.conses.push((car, out));
+            let cell = self.alloc_cons(car, out);
             out = cell;
         }
         out
@@ -1117,6 +1136,7 @@ mod tests {
     #[test]
     fn category_plist_values_are_compacted_roots_and_keep_identity() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         vm.allocate_object(Object::Bytes(vec![0]));
         let before = run(
             &mut vm,

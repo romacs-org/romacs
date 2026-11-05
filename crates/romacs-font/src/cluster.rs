@@ -3,24 +3,7 @@
 //! Layout and rendering must make the same choice, so the policy lives here,
 //! below both of them.
 
-/// A zero-width *composition joiner / selector*: a format character that the
-/// generic glyphless-char check would skip, but which actually binds an emoji
-/// or text composition together and so must be absorbed into the active
-/// cluster instead (GNU consumes these via `composition_it`). Covers ZWJ/ZWNJ,
-/// variation selectors (incl. the supplement), and tag characters (subdivision
-/// flag tag sequences). Deliberately EXCLUDES bidi controls (LRM/RLM), spaces
-/// (ZWSP/ZWNBSP), line/paragraph separators, and C1 controls — those stay
-/// glyphless so they still display as their own replacement glyph.
-pub fn is_composition_joiner(ch: char) -> bool {
-    matches!(
-        ch as u32,
-        0x200C | 0x200D            // ZERO WIDTH NON-JOINER / JOINER
-            | 0xFE00..=0xFE0F      // variation selectors 1-16
-            | 0xE0001              // language tag
-            | 0xE0020..=0xE007F    // tag characters (tag sequences)
-            | 0xE0100..=0xE01EF    // variation selectors supplement
-    )
-}
+pub use romacs_layout_input::cluster::is_composition_joiner;
 
 /// The character that decides which font a cluster resolves through.
 ///

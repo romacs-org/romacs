@@ -38,6 +38,7 @@ forwarded.rs notify_unbind_forwarded notify_watchers 1 rooted  # OLD and OWNER a
 forwarded.rs notify_unbind_forwarded notify_watchers_at 2 rooted  # OLD and OWNER are read from the caller's frame before each call
 gc.rs assert_no_retention_growth collect 1 collector  # a test helper collecting with no engine running
 handle.rs collect collect_until_key 1 collector  # every collection: the caller's roots are traced and forwarded
+handle.rs collect_compacting collect 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs collect_garbage collect 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs collect_garbage_until_key collect_until_key 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs eval_form eval_form_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
@@ -229,7 +230,7 @@ variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a fram
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 1 held  # a legacy primitive: its engine is not suspended
+variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended; the file-local defvar returns its symbol, which never moves
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
@@ -237,4 +238,4 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
 world/layer.rs timer_count eval_source_raw 1 clean  # no Values before the call; its value is a fixnum, read at once
 world/layer.rs world_layer_load eval_source_raw 3 boundary  # a layer build's top-level requests: the builder holds no Values, and each result is dropped or only matched
-world/store.rs publish_world collect_garbage 1 collector  # a build's end: no engine runs, and the VM is all the image holds
+world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds

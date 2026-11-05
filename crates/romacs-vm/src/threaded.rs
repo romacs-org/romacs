@@ -202,6 +202,7 @@ mod control_tests {
     #[test]
     fn suspended_caller_regions_are_exclusive_forwarded_roots() {
         let mut vm = Vm::new();
+        vm.set_gc_moving(true);
         for _ in 0..20 {
             vm.conses.push((Value::NIL, Value::NIL));
         }
@@ -1149,8 +1150,7 @@ impl RestStack {
         // Arena pushes do not collect; collection is only at explicit strand
         // wait points. No Value copy survives a safepoint in this routine.
         for i in (rest.start..rest.end).rev() {
-            vm.conses.push((self.values[i], tail));
-            tail = Value::reference(vm.conses.len() - 1, 3);
+            tail = vm.alloc_cons(self.values[i], tail);
         }
         tail
     }
@@ -1246,6 +1246,7 @@ impl Engine<'_> {
 #[cfg(test)]
 pub(super) fn assert_opaque_rest_compaction() {
     let mut vm = Vm::new();
+    vm.set_gc_moving(true);
     // The opaque stack is the ONLY owner of these payloads; stale caller
     // registers must not accidentally make an omitted root traversal pass.
     for _ in 0..20 {
@@ -1872,8 +1873,7 @@ fn closure_arity_error(e: &mut Engine<'_>, function: usize, argc: usize) -> Valu
     let f = &e.vm.functions[function];
     let min = Value::integer(f.required as i64).unwrap();
     let max = Value::integer(f.arity as i64).unwrap();
-    e.vm.conses.push((min, max));
-    let arity = Value::reference(e.vm.conses.len() - 1, 3);
+    let arity = e.vm.alloc_cons(min, max);
     raise(e, "wrong-number-of-arguments", &[arity, Value::integer(argc as i64).unwrap()])
 }
 /// GNU eval.c funcall_general: a function cell that resolves to nothing is
@@ -4117,27 +4117,7 @@ unsafe fn nconc2(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        let index = e.vm.conses.len();
-        if index == e.vm.conses.capacity() {
-            return grow_cons(e, r, pc);
-        }
-        e.vm.conses
-            .as_mut_ptr()
-            .add(index)
-            .write((*r.add(i.d), *r.add(i.d + 1)));
-        e.vm.conses.set_len(index + 1);
-        *r.add(i.a) = Value::reference(index, 3);
-        advance(e, r, pc)
-    }
-}
-#[cold]
-#[inline(never)]
-unsafe fn grow_cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let i = &*pc;
-        let index = e.vm.conses.len();
-        e.vm.conses.push((*r.add(i.d), *r.add(i.d + 1)));
-        *r.add(i.a) = Value::reference(index, 3);
+        *r.add(i.a) = e.vm.alloc_cons(*r.add(i.d), *r.add(i.d + 1));
         advance(e, r, pc)
     }
 }
@@ -4161,8 +4141,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
         let outcome = (|| -> Result<()> {
             match (*pc).op {
                 Op::Cell(reg) => {
-                    let index = e.vm.cells.len();
-                    e.vm.cells.push(*r.add(reg));
+                    let index = e.vm.alloc_cell(*r.add(reg));
                     *r.add(reg) = Value::reference(index, 5);
                 }
                 Op::Global(reg, slot) => {
@@ -4290,9 +4269,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         .iter()
                         .map(|&reg| *r.add(reg))
                         .collect();
-                    let index = e.vm.closures.len();
-                    e.vm.closures.push(Closure { function, captures, metadata: vec![], document: Value::NIL });
-                    *r.add(reg) = Value::reference(index, 4);
+                    *r.add(reg) = e.vm.alloc_closure(Closure { function, captures, metadata: vec![], document: Value::NIL });
                 }
                 Op::DeclareSpecial(slot) => {
                     e.vm.specials.insert(e.vm.symbol_names[slot].clone());

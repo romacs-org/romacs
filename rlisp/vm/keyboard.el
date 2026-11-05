@@ -541,12 +541,30 @@ the maps before it moved by its change of length, or nil."
 event is read and before it is looked up: a choice of keymaps made here
 holds for the whole sequence, whatever arrives between its keys.")
 
+(defvar romacs--key-read-functions nil
+  "Functions called with each event `romacs--read-key-sequence' reads, as
+it reads it.  They only observe: what the read reads, records and
+returns is as without them (key hints hide on the next key).")
+
+(defvar romacs--prefix-help-functions nil
+  "Functions offered a prefix's unbound help key in a command read, each
+called with the prefix (the sequence before it, translated) and the
+event; one returning non-nil has taken it: the read goes on with the
+prefix pending, as if the key had not come.  Offered only where taking
+it changes nothing else (`romacs--read-key-sequence').")
+
+(defun romacs--help-event-p (event)
+  "keyboard.c help_char_p of EVENT_HEAD (EVENT): `help-char' or a member
+of `help-event-list'."
+  (let ((head (if (consp event) (car event) event)))
+    (or (eql head help-char) (memq head help-event-list))))
+
 (defvar romacs--sequence-end-functions nil
   "Functions run with no arguments when a read whose sequence started
 ends, normally or not: a choice made at its start is undone here, so a
 read nested in another's restores the outer one's.")
 
-(defun romacs--read-key-sequence (dont-downcase-last)
+(defun romacs--read-key-sequence (dont-downcase-last &optional command)
   "keyboard.c read_key_sequence: read a complete key sequence.
 Return its events as a vector, or nil at the end of an executing
 keyboard macro. Set `romacs--key-sequence-command' to its binding in the
@@ -557,8 +575,12 @@ As GNU does, `input-decode-map' translates every sequence,
 one (`romacs--translate-keys'), and the sequence is then reread from its
 start, so a translation's events pass through the maps after it. An
 unbound upper-case or shifted key is looked up without its shift, and
-`this-command-keys-shift-translated' says when that was used."
-  (let ((started nil))
+`this-command-keys-shift-translated' says when that was used.
+An unbound help key after a prefix ends the sequence with
+`prefix-help-command' (keyboard.c's fallback), unless COMMAND, the
+command loop's own read, offers it to `romacs--prefix-help-functions'
+and one takes it."
+  (let ((started nil) (checkpoint nil) (clean nil) (help-command nil))
    (unwind-protect
   (let* ((keys-start (length romacs--command-keys))
          (indec (romacs--keyremap (and (boundp 'input-decode-map) input-decode-map)))
@@ -573,7 +595,9 @@ unbound upper-case or shifted key is looked up without its shift, and
     (setq romacs--single-command-key-start keys-start)
     (while (eq state 'replay)
       ;; replay_sequence: the record and the active maps start over.
-      (setq state 'read n 0 first-unbound most-positive-fixnum binding '(keymap)
+      ;; A replay rereads translated or shifted events: none of them is a
+      ;; raw event this read took, so no checkpoint stands for them.
+      (setq state 'read n 0 first-unbound most-positive-fixnum binding '(keymap) checkpoint nil
             last-nonmenu-event nil
             romacs--command-keys (romacs--subvector romacs--command-keys 0 keys-start))
       ;; Read while the sequence is a prefix, or unbound with a translation
@@ -592,17 +616,29 @@ unbound upper-case or shifted key is looked up without its shift, and
             (while again
               (setq again nil romacs--command-keys local-keys)
               (cond ((< n mock)
-                     (setq key (aref keys n))
+                     (setq key (aref keys n) checkpoint nil)
                      (romacs--add-command-key key))
                     ((and executing-kbd-macro (romacs--at-end-of-macro-p)
                           (not unread-command-events))
                      (setq state 'end))
                     ;; A C-g read here is a key: read_key_sequence clears
                     ;; the `quit-flag' it set (keyboard.c:11352).
-                    (t (setq key (romacs--read-char)
+                    (t ;; A command read keeps what an event after the first
+                       ;; read would undo, should a prefix help key be taken.
+                       (when (and command (> n 0) romacs--prefix-help-functions)
+                         (setq checkpoint (list n mock binding first-unbound (copy-sequence indec)
+                                                (copy-sequence fkey) (copy-sequence keytran) upper
+                                                shift-translated fake-prefixed last-nonmenu-event
+                                                romacs--command-keys romacs--single-command-key-start raw
+                                                (and defining-kbd-macro romacs--kbd-macro-events))
+                               clean (not (or unread-command-events executing-kbd-macro
+                                              (and (boundp 'inhibit--record-char) inhibit--record-char)))))
+                       (setq key (romacs--read-char)
                              quit-flag nil
                              raw (vconcat raw (list key))
                              keys (vconcat keys (list key)))
+                       (when romacs--key-read-functions
+                         (run-hook-with-args 'romacs--key-read-functions key))
                        ;; Once per sequence, after its first event is read
                        ;; and before it is looked up; replays of the
                        ;; sequence do not run it again.
@@ -629,6 +665,37 @@ unbound upper-case or shifted key is looked up without its shift, and
                 (cond
                  ;; mock_input = diff + max (t, mock_input): all of NEW.
                  (new (setq keys new mock (length new) state 'replay))
+                 ;; keyboard.c's integer upcase/shift fallback comes first.
+                 ((and (null binding) (>= (aref keytran 2) n) lower (integerp key))
+                  (aset keys (1- n) lower)
+                  (setq upper (cons (1- n) key) mock (max n mock)
+                        shift-translated t state 'replay))
+                 ;; `not_upcase:' an unbound help key after a prefix.
+                 ((and (null binding) (> n 1) (romacs--help-event-p key))
+                  ;; Taken only in the clean case: the raw event this read
+                  ;; took, no translation part-way or producing it.
+                  (if (and checkpoint clean (= (car checkpoint) (1- n)) (<= mock n)
+                           (>= (aref indec 2) n) (>= (aref fkey 2) n) (>= (aref keytran 2) n)
+                           (run-hook-with-args-until-success 'romacs--prefix-help-functions
+                                                             (romacs--subvector keys 0 (1- n)) key))
+                      ;; Taken: the read goes on as before the key came; the
+                      ;; macro being defined forgets the entry this read stored.
+                      (pcase-let ((`(,n0 ,mock0 ,binding0 ,unbound0 ,indec0 ,fkey0 ,keytran0 ,upper0 ,shift0
+                                    ,fake0 ,nonmenu0 ,ckeys0 ,cstart0 ,raw0 ,macro0)
+                                   checkpoint))
+                        (when (and defining-kbd-macro (eq (cdr romacs--kbd-macro-events) macro0)
+                                   (eq (car romacs--kbd-macro-events) key))
+                          (setq romacs--kbd-macro-events macro0))
+                        (setq n n0 mock mock0 binding binding0 first-unbound unbound0
+                              keys (romacs--subvector keys 0 n0) upper upper0 shift-translated shift0
+                              fake-prefixed fake0 last-nonmenu-event nonmenu0
+                              romacs--command-keys ckeys0 romacs--single-command-key-start cstart0 raw raw0)
+                        (dotimes (i 4) (aset indec i (aref indec0 i)) (aset fkey i (aref fkey0 i))
+                                 (aset keytran i (aref keytran0 i))))
+                    ;; GNU: the sequence ends, its command `prefix-help-command'
+                    ;; (read_key_sequence_cmd); its binding stays nil, so the
+                    ;; final shift restoration runs as GNU's does.
+                    (setq help-command (list prefix-help-command) state 'help)))
                  ((and (null binding) (>= (aref keytran 2) n) lower)
                   (aset keys (1- n) lower)
                   (setq upper (cons (1- n) key) mock (max n mock)
@@ -640,6 +707,7 @@ unbound upper-case or shifted key is looked up without its shift, and
                     (aset keytran 2 0) (aset keytran 3 0))))))))))
     (if (eq state 'end)
         (setq keys nil)
+      (when (eq state 'help) (setq state 'read))
       (when (and upper (= (car upper) (1- n)) (or dont-downcase-last (null binding)))
         (aset keys (car upper) (cdr upper))
         (setq shift-translated nil))
@@ -651,9 +719,10 @@ unbound upper-case or shifted key is looked up without its shift, and
         (setq n (1+ n)))
       (setq keys (romacs--subvector keys 0 n)))
     (setq romacs--raw-command-keys raw
-          romacs--key-sequence-command (and keys binding)
+          romacs--key-sequence-command (and keys (if help-command (car help-command) binding))
           romacs--key-sequence-remapped
-          (and keys (symbolp binding) binding (command-remapping binding)))
+          (let ((command (if help-command (car help-command) binding)))
+            (and keys (symbolp command) command (command-remapping command))))
     keys)
      ;; A read whose sequence started ends it, normally or not.
      (when started (run-hooks 'romacs--sequence-end-functions)))))
@@ -732,7 +801,7 @@ idle timers and redisplay see `this-command' nil."
 run its command between `pre-command-hook' and `post-command-hook'.
 Return the keys read, nil at the end of an executing keyboard macro."
   (romacs--command-loop-top)
-  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil)))
+  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil t)))
         cmd previous-buffer previous-tick)
     (set-buffer (window-buffer (selected-window)))
     (setq num-input-keys (1+ num-input-keys))
