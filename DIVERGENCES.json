@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "81616ca52401d7a453962ba0ff7eb57a35999bd056d4290dd5afd318c2f498b4",
+  "input_hash": "2b404db379fa0ce764527c8417ef71ae1c9e94ec3da9fa27b31de9cf6725c3d6",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 359,
-  "symbols": 1091,
+  "symbols": 1092,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -2830,6 +2830,9 @@
   "romacs-precompile-stop": [
    142
   ],
+  "romacs-project-inline-threshold": [
+   23
+  ],
   "romacs-restart": [
    25
   ],
@@ -4110,11 +4113,12 @@
    "planned": false,
    "mechanism": "`project-find-file`, `project-find-regexp`",
    "gnu": "Enumerate (`project-files`) and search (`xref-matches-in-files`) synchronously; the session blocks until the prompt or the xref buffer appears.",
-   "romacs": "When a worker of the session's own world stands prepared and idle, the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run normally finds it ready; a worker that will not take the job after all (queue full, process gone) is passed over the same way. The commands never wait for a worker's boot. Without a world (a source boot, batch) nothing is warmed.",
+   "romacs": "When a worker of the session's own world stands prepared and idle, the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run normally finds it ready; a worker that will not take the job after all (queue full, process gone) is passed over the same way. The commands never wait for a worker's boot. `project-find-file` enumerates in the session, as GNU's does, when the enumeration is expected within `romacs-project-inline-threshold` (the larger of the project's last enumeration and its Git index's size at the rate last measured), since a worker's dispatch and delivery would cost more. Without a world (a source boot, batch) nothing is warmed.",
    "why": "The candidate list and the matches are the worker's `project-files` and `xref-matches-in-files` over the same project; only the timing of the prompt differs. The continuation ends as GNU's command does: `xref-show-xrefs` leaves its window selected and `*xref*` at the head of the buffer list; the progress note it shows meanwhile is echoed, not logged. Live journey: `crates/romacs-vm-gui/harness/isolates_live.py`.",
    "symbols": [
     "project-find-file",
-    "project-find-regexp"
+    "project-find-regexp",
+    "romacs-project-inline-threshold"
    ],
    "symbols_derived": false
   },

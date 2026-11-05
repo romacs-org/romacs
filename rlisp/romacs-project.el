@@ -36,6 +36,69 @@
 t: when this session restored from a world; `source': also when it booted
 from source (the worker then boots from source too, seconds); nil: never.")
 
+(defcustom romacs-project-inline-threshold 0.03
+  "Seconds of file enumeration within which `project-find-file' enumerates
+in the session rather than in a worker.  The estimate is the larger of the
+project's last enumeration and its Git index's size at the rate last
+measured; with neither, a worker is used.  An inline enumeration blocks
+the session while it runs, so keep this within the per-key budget."
+  :type 'number
+  :group 'project)
+
+(defvar romacs-project--enumerations (make-hash-table :test 'equal)
+  "Project root to the seconds its last enumeration took.")
+
+(defvar romacs-project--seconds-per-index-byte 1e-7
+  "Enumeration seconds per byte of a Git index, as last measured.")
+
+(defvar romacs-project--timing nil
+  "The root of the project whose `project-files' call is being timed.")
+
+(defun romacs-project--index-bytes (root)
+  "The size of ROOT's Git index, or nil: in its .git directory, or in the
+directory its .git file names (a linked worktree)."
+  (let* ((dot (expand-file-name ".git" root))
+         (dir (cond ((file-directory-p dot) dot)
+                    ((file-regular-p dot)
+                     (with-temp-buffer
+                       (insert-file-contents dot)
+                       (and (re-search-forward "^gitdir: \\(.*\\)$" nil t)
+                            (expand-file-name (match-string 1) root))))))
+         (attributes (and dir (file-attributes (expand-file-name "index" dir)))))
+    (and attributes (file-attribute-size attributes))))
+
+(defun romacs-project--enumeration-estimate (root)
+  "The seconds enumerating ROOT's files is expected to take, or nil."
+  (let* ((last (gethash root romacs-project--enumerations))
+         (bytes (romacs-project--index-bytes root))
+         (guess (and bytes (* bytes romacs-project--seconds-per-index-byte))))
+    (if (and last guess) (max last guess) (or last guess))))
+
+(defun romacs-project--inline-p (project)
+  "Whether PROJECT's files are expected to enumerate within
+`romacs-project-inline-threshold': a worker's dispatch and delivery would
+cost more than they save."
+  (let ((estimate (romacs-project--enumeration-estimate (project-root project))))
+    (and estimate (<= estimate romacs-project-inline-threshold))))
+
+(defun romacs-project--record (root seconds &optional calibrate)
+  "ROOT's files took SECONDS to enumerate; with CALIBRATE, a measure of the
+enumeration alone, which sets the rate per index byte."
+  (puthash root seconds romacs-project--enumerations)
+  (let ((bytes (and calibrate (romacs-project--index-bytes root))))
+    (when (and bytes (> bytes 0))
+      (setq romacs-project--seconds-per-index-byte (/ seconds bytes)))))
+
+(defun romacs-project--time-files (files project &rest args)
+  "Around `project-files': time the enumeration of the project being timed."
+  (if (not (and romacs-project--timing (equal (project-root project) romacs-project--timing)))
+      (apply files project args)
+    (let ((root romacs-project--timing)
+          (romacs-project--timing nil)
+          (start (float-time)))
+      (prog1 (apply files project args)
+        (romacs-project--record root (- (float-time) start) t)))))
+
 (defun romacs-project--isolate-available-p (project)
   "Whether PROJECT's enumeration and search may run in a worker."
   (and romacs-project-isolate
@@ -135,18 +198,27 @@ buffer list, and the keys read next are looked up in that buffer."
 and visit.  ORIGINAL runs as GNU's does with INCLUDE-ALL, or without a
 ready worker, which is then warmed for the next time."
   (let* ((project (project-current t))
-         (worker (and (not include-all) (romacs-project--worker project)))
+         ;; A small project enumerates faster in the session than a worker
+         ;; could take the job and give the list back.
+         (inline (and (not include-all) (romacs-project--inline-p project)))
+         (worker (and (not include-all) (not inline) (romacs-project--worker project)))
          (suggested (and worker (thing-at-point 'filename)))
          (dirs (list (project-root project)))
          (buffer (current-buffer))
          (window (selected-window))
+         (start (float-time))
          (future (and worker (romacs-project--spawn project worker romacs-project--files-job project dirs))))
     (if (null future)
-        (prog1 (funcall original include-all)
-          (unless include-all (romacs-project--warm-when-idle project)))
+        (prog1 (let ((romacs-project--timing (and (not include-all) (project-root project))))
+                 (funcall original include-all))
+          (unless (or include-all inline) (romacs-project--warm-when-idle project)))
       (let ((note (romacs-project--note "Finding files in %s..." (project-root project))))
         (isolate-on-done future
                          (lambda (future)
+                           ;; Dispatch and delivery included: never less than inline.
+                           ;; A failed job measured nothing.
+                           (when (eq (aref future 3) 'done)
+                             (romacs-project--record (project-root project) (- (float-time) start)))
                            (romacs-project--find-file-continue future project suggested note buffer window))))
       nil)))
 
@@ -219,7 +291,13 @@ ready worker, which is then warmed for the next time."
   (with-eval-after-load 'project
     (advice-add 'project--read-regexp :before #'romacs-project--warm-at-prompt)
     (advice-add 'project-find-file :around #'romacs-project-find-file)
+    (advice-add 'project-files :around #'romacs-project--time-files)
     (advice-add 'project-find-regexp :around #'romacs-project-find-regexp)))
+
+;; A worker's vc-git asks Git its version once per session; its zygote
+;; asks for all its children.
+(when (boundp 'isolate-zygote-warm-functions)
+  (add-to-list 'isolate-zygote-warm-functions '(vc-git . vc-git--program-version)))
 
 (provide 'romacs-project)
 ;;; romacs-project.el ends here

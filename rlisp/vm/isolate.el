@@ -60,6 +60,12 @@ forks: each job gets a fresh child of it in milliseconds, which runs that
 one job and exits.  t: always; nil: never (jobs run on spawned, reused
 workers); `world': when this VM restored from a world, as a session does.")
 
+(defvar isolate-zygote-warm-functions nil
+  "Alist of (FEATURE . FUNCTION): a zygote whose features include FEATURE
+calls FUNCTION once before it forks, so its children inherit what FUNCTION
+caches for the session (a program's version, say) instead of each child
+computing it again.  An error in FUNCTION is ignored.")
+
 (defvar isolate-zygote-limit 4
   "How many zygotes may live at once; the least recently used one goes first.")
 
@@ -450,9 +456,16 @@ copied (`setenv' changes an entry in place)."
                          directories stamp (float-time))))
     (aset isolate 10 'zygote)
     (puthash require zygote romacs--isolate-zygotes)
-    (isolate-on-done (romacs--isolate-submit isolate 'romacs--isolate-become-zygote nil nil nil nil)
+    (isolate-on-done (romacs--isolate-submit isolate 'romacs--isolate-become-zygote
+                                             (list (romacs--isolate-warm-functions require)) nil nil nil)
                      (lambda (future) (romacs--isolate-zygote-ready zygote future)))
     zygote))
+
+(defun romacs--isolate-warm-functions (require)
+  "The `isolate-zygote-warm-functions' of REQUIRE's features, in order."
+  (let (functions)
+    (dolist (entry isolate-zygote-warm-functions (nreverse functions))
+      (when (memq (car entry) require) (push (cdr entry) functions)))))
 
 (defun romacs--isolate-zygote-ready (zygote future)
   "ZYGOTE's preparation ended as FUTURE says: ready, with a spare forked,
@@ -1101,11 +1114,14 @@ zygote that cannot fork ends, and its spawner forgets it."
               romacs--isolate-cancelled nil romacs--isolate-retired nil
               romacs--isolate-zygote nil romacs--isolate-job-worker t)))))
 
-(defun romacs--isolate-become-zygote ()
+(defun romacs--isolate-become-zygote (warm)
   "In a prepared worker: become the zygote of its features, a process that
-only forks a child per job (worker-vms design §2.2).  Refused while its
+only forks a child per job (worker-vms design §2.2).  The functions WARM
+run first, filling the caches the children inherit.  Refused while its
 preparation left a subprocess, a timer or a thread behind, which a child
 would share or lose.  The files the preparation loaded and their stamp."
+  (dolist (function warm)
+    (condition-case nil (funcall function) (error nil)))
   (let ((refusal (or (and (fboundp 'process-list) (process-list) "a subprocess")
                      (romacs--isolate-new-timer)
                      (romacs--isolate-fork-refusal))))

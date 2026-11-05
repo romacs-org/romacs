@@ -164,6 +164,8 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
     let (scratch, project) = fixture_project("ready");
     // The commands remember the project; the list stays in the private HOME.
     let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
+      ;; The worker path, whatever the fixture's size.
+      (setq romacs-project-inline-threshold 0)
       (setq project-list-file (expand-file-name \"projects.eld\" (getenv \"HOME\")))
       (let* ((pr (project-current nil {dir:?}))
              (worker (romacs-project--warm pr))
@@ -183,6 +185,37 @@ fn a_ready_worker_that_will_not_take_the_job_gives_way_to_the_original() {
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(ready t full ((original-file nil) (original-regexp \"x\")) still-ready t dead ((original-file nil) (original-regexp \"x\")) live nil)", "{err}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn a_small_project_enumerates_in_the_session_and_its_time_is_recorded() {
+    // Within `romacs-project-inline-threshold' (the estimate: the last
+    // enumeration, else the Git index's size at the measured rate) the
+    // files are listed in the session: GNU's definition runs, and its
+    // `project-files' call is timed for the next decision. (The threshold
+    // is set, not let-bound: it is special only once the module loads.)
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let (scratch, project) = fixture_project("inline");
+    let script = format!("(progn {PREAMBLE} (require 'project) (load {module:?}) (setq romacs-project-isolate 'source)
+      (setq project-list-file (expand-file-name \"projects.eld\" (getenv \"HOME\")))
+      (let* ((pr (project-current nil {dir:?}))
+             (root (project-root pr))
+             (original (lambda (&optional all) (list 'original all (length (project-files (project-current nil {dir:?})))))))
+        (prin1 (list 'index (> (romacs-project--index-bytes root) 0)
+                     'small (progn (setq romacs-project-inline-threshold 10) (romacs-project--inline-p pr))
+                     'none (progn (setq romacs-project-inline-threshold 0) (romacs-project--inline-p pr))
+                     'unrecorded (gethash root romacs-project--enumerations)
+                     'inline (progn (setq romacs-project-inline-threshold 10)
+                                     (car (romacs-project-find-file original)))
+                     'recorded (numberp (gethash root romacs-project--enumerations))
+                     'slow (progn (puthash root 10.0 romacs-project--enumerations)
+                                  (setq romacs-project-inline-threshold 1) (romacs-project--inline-p pr))
+                     'live (isolate-list)))
+        (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("rlisp/romacs-project.el").display().to_string());
+    let (ok, out, err) = batch(&script, &project);
+    assert!(ok, "batch failed: {err}");
+    assert_eq!(out.trim(), "(index t small t none nil unrecorded nil inline original recorded t slow nil live nil)", "{err}");
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

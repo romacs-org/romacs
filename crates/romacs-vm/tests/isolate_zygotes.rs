@@ -189,3 +189,22 @@ fn a_child_its_zygote_never_reported_runs_nothing() {
     let _ = std::fs::remove_file(&file);
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn a_zygotes_warm_functions_fill_what_its_children_inherit() {
+    let mut vm = vm();
+    // The zygote calls the warm functions of its features before it forks;
+    // a child reads the value they left instead of computing it.
+    let out = eval(&mut vm, "(let ((isolate-zygote-warm-functions '((isolate . (lambda () (setq zygote-warmed (emacs-pid))))
+                                                                    (absent . (lambda () (setq zygote-absent t)))))
+                                   (end (+ (float-time) 20)))
+                               (isolate-zygote '(isolate))
+                               (while (and (not (eq (nth 1 (isolate-zygote '(isolate))) 'ready)) (< (float-time) end))
+                                 (romacs--isolate-pump 0.02))
+                               (let ((zygote (nth 2 (isolate-zygote '(isolate))))
+                                     (child (isolate-await (isolate-spawn '(lambda () (list zygote-warmed (boundp 'zygote-absent)))
+                                                                          :require '(isolate)) 10)))
+                                 (list (equal (car child) zygote) (nth 1 child))))");
+    assert_eq!(out, "(t nil)");
+    eval(&mut vm, "(isolate-kill-all)");
+}
