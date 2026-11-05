@@ -127,6 +127,34 @@ INIT = r'''
   (set-window-dedicated-p journey-text-window t)
   (redisplay t)
   (list (buffer-name) major-mode))
+(defvar journey-profile-callees '(vertical-motion line-pixel-height posn-at-point
+                                   jabber-muc--nick-color jabber-chat-pp--muc-notice)
+  "Functions whose callers (up to three frames) the profile dump lists.")
+(defun journey-profile-dump (file)
+  "Write the CPU profile since `profiler-start' to FILE: self, cumulative,
+and the callers of `journey-profile-callees'."
+  (let ((log (profiler-cpu-log)) (self (make-hash-table :test #'eq))
+        (cum (make-hash-table :test #'eq)) (callers (make-hash-table :test #'equal)) (total 0))
+    (profiler-stop)
+    (maphash (lambda (backtrace count)
+               (setq total (+ total count))
+               (let ((frames (delq nil (append backtrace nil))) (seen nil))
+                 (when frames (puthash (car frames) (+ count (gethash (car frames) self 0)) self))
+                 (dolist (f frames)
+                   (unless (memq f seen) (push f seen) (puthash f (+ count (gethash f cum 0)) cum)))
+                 (let ((tail (seq-some (lambda (f) (memq f frames)) journey-profile-callees)))
+                   (when tail
+                     (let ((key (seq-take tail 4)))
+                       (puthash key (+ count (gethash key callers 0)) callers))))))
+             (if (hash-table-p log) log (car log)))
+    (with-temp-file file
+      (insert (format ";; total %d\n;; self\n" total))
+      (dolist (table (list self cum callers))
+        (let (rows)
+          (maphash (lambda (k v) (push (cons v k) rows)) table)
+          (dolist (row (seq-take (sort rows (lambda (a b) (> (car a) (car b)))) 80))
+            (insert (format "%7d %S\n" (car row) (cdr row)))))
+        (insert (if (eq table cum) ";; callers\n" ";; cumulative\n"))))))
 (defun journey-window-buffers ()
   (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list nil 'never)))
 (defun journey--dump (file rows)
@@ -579,6 +607,8 @@ def main():
     parser.add_argument('--wait', type=float, default=600, help='seconds to wait for the catch-up after typing')
     parser.add_argument('--slow', type=float, default=.016)
     parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--profile', action='store_true',
+                        help='CPU-profile the session from connecting to the end (profile.txt)')
     parser.add_argument('--chats', choices=('open', 'send'),
                         help='every third window switch, show the next chat (F7); with send, also send '
                              'a message from it (F8, fixture only)')
@@ -640,6 +670,8 @@ def main():
         time.sleep(2)
         pid = engine.process.pid
         stat = evaluator_stat(pid)
+        if args.profile:
+            engine.ask("(progn (profiler-start 'cpu) t)")
         connect_at = time.time()
         if args.variant != 'none':
             engine.ask('(progn (jabber-connect-all) t)', timeout=60)
@@ -705,6 +737,8 @@ def main():
                 report['problems'].append(f'duplicates after the handover: {report["chats"]}')
         report['evaluator_cpu_total_s'] = round(cpu_seconds(stat), 3)
         report['window_buffers'] = engine.ask('(journey-window-buffers)')
+        if args.profile:
+            engine.ask(f'(journey-profile-dump {lisp_string(str(args.output / "profile.txt"))})', timeout=120)
         engine.ask(f'(journey-dump {lisp_string(str(args.output))})', timeout=60)
     finally:
         engine.stop()

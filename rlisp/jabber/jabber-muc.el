@@ -2262,17 +2262,35 @@ Return nil if X-MUC is nil."
 			 (jabber-xml-node-attributes
 			  (car (jabber-xml-get-children x-muc 'item))))))
 
+(defvar jabber-muc--nick-colors (make-hash-table :test #'equal)
+  "(NICKNAME . BACKGROUND) to the nickname's colour on that background.
+The colour is a function of the nickname's XEP-0392 components and the
+background it must read on; rendering a room's messages asks for it once
+per message.")
+
+(defvar jabber-muc-nick-colors-limit 4096
+  "Entries `jabber-muc--nick-colors' holds before it starts over.")
+
+(defun jabber-muc--cached-nick-color (nickname background)
+  "NICKNAME's colour on BACKGROUND, computed once."
+  (let ((key (cons nickname background)))
+    (or (gethash key jabber-muc--nick-colors)
+        (progn
+          (when (>= (hash-table-count jabber-muc--nick-colors) jabber-muc-nick-colors-limit)
+            (clrhash jabber-muc--nick-colors))
+          (puthash key
+                   (pcase-let ((`(,_base-hue ,display-hue ,saturation ,variation)
+                                (jabber-muc--nick-color-components nickname)))
+                     (jabber-muc--nick-color display-hue saturation variation background))
+                   jabber-muc--nick-colors)))))
+
 (defun jabber-muc--nick-face (nickname)
   "Return the face for foreign MUC NICKNAME."
   (if (null jabber-muc-colorize-nicks)
       '((:weight semi-bold) jabber-chat-nick-foreign-plaintext)
-    (pcase-let ((`(,_base-hue ,display-hue ,saturation ,variation)
-                 (jabber-muc--nick-color-components nickname)))
-      (list :weight 'semi-bold
-            :foreground
-            (jabber-muc--nick-color
-             display-hue saturation variation
-             (jabber-muc--default-background))))))
+    (list :weight 'semi-bold
+          :foreground
+          (jabber-muc--cached-nick-color nickname (jabber-muc--default-background)))))
 
 (defun jabber-muc-print-prompt (msg &optional local dont-print-nick-p)
   "Print MUC prompt for message plist MSG.
