@@ -379,7 +379,10 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
             run.push((frame.glyphs.len() - 1, from, to - from, band_box));
         }
     };
-    let context = |byte: usize| band.marks.segments.iter().any(|s| s.name == "context" && s.bytes.contains(&byte));
+    // The context segments, swept with the characters in byte order.
+    let mut contexts: Vec<&std::ops::Range<usize>> = band.marks.segments.iter().filter(|s| band_box.is_some() && s.name == "context").map(|s| &s.bytes).collect();
+    contexts.sort_by_key(|bytes| bytes.start);
+    let mut contexts = contexts.into_iter().peekable();
     let mut filled = bounds.x + band.accent.map_or(0.0, |_| STATUS_BAR_ACCENT);
     for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
@@ -388,7 +391,11 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         let left = bounds.x + x;
         fill(frame, &mut run, filled, left, background);
         let own = faces[index].decor.boxed;
-        if own.is_none() { fill(frame, &mut run, left, left + width, if context(byte) { band.faces[index].background } else { background }); }
+        if own.is_none() && band_box.is_some() {
+            while contexts.next_if(|bytes| bytes.end <= byte).is_some() {}
+            let context = contexts.peek().is_some_and(|bytes| bytes.contains(&byte));
+            fill(frame, &mut run, left, left + width, if context { band.faces[index].background } else { background });
+        }
         let at = match glyphless.get(index, shown) {
             Some(glyph) => {
                 let at = glyphless.paint(frame, index, glyph, left, bounds.y, (ascent, height), ids[i], true, 0.0)?;
