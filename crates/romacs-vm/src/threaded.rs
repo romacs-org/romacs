@@ -3079,6 +3079,7 @@ unsafe fn take_step(
             Ok(prim::Step::Collect) => {
                 leave_native(e);
                 if e.vm.may_collect(1) {
+                    e.vm.collection_log.explicit = true;
                     poll_collect(e);
                     let statistics = e.vm.garbage_collect_statistics();
                     // garbage_collect's run_finalizers, before it returns.

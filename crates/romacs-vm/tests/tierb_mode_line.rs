@@ -526,6 +526,7 @@ fn reviewed_exact_reproductions() {
 #[test]
 fn reviewed_eval_object_constants_survive_collection() {
     let mut vm = probe();
+    vm.set_gc_stress(1);
     eval(&mut vm, r#"(setq fn (lambda () "OK")) (put 'reviewed-format 'risky-local-variable t)"#);
     eval(&mut vm, r#"(setq reviewed-format (list "<" (list :eval (list 'funcall fn)) ">")) t"#);
     assert_eq!(band(&mut vm, "reviewed-format"), "<OK>", "GNU evaluates original function constants");

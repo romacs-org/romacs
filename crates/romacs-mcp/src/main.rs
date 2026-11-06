@@ -34,7 +34,7 @@ fn main() {
 /// socket is served off its evaluator, so this answers while MCP cannot.
 #[cfg(unix)]
 fn inspect(args: &[String]) -> i32 {
-    use std::io::{Read, Write};
+    use std::io::Write;
     let mut socket = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -48,21 +48,28 @@ fn inspect(args: &[String]) -> i32 {
         eprintln!("usage: romacs-mcp --inspect (--socket ABSOLUTE-PATH | --server NAME)");
         return 2;
     };
-    let answer = (|| -> std::io::Result<Vec<u8>> {
-        let mut stream = std::os::unix::net::UnixStream::connect(socket.with_file_name("inspect.sock"))?;
-        // Past the session's own bound, for a client served after another.
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(8)))?;
-        stream.write_all(b"inspect\n")?;
-        let mut answer = Vec::new();
-        stream.read_to_end(&mut answer)?;
-        Ok(answer)
-    })();
+    let answer = inspect_answer(&socket);
     match answer {
         Ok(answer) if !answer.is_empty() => { let _ = std::io::stdout().write_all(&answer); 0 }
         Ok(_) => { eprintln!("romacs-mcp: the session gave no answer"); 1 }
         Err(error) => { eprintln!("romacs-mcp: {error}"); 1 }
     }
+}
+
+/// What the session beside SOCKET says about its call stack. Bounded by
+/// the session's own deadlines, and past them by these.
+#[cfg(unix)]
+pub(crate) fn inspect_answer(socket: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Write};
+    // Beside the socket itself: SOCKET may be a route, retargeted at any time.
+    let socket = std::fs::canonicalize(socket)?;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket.with_file_name("inspect.sock"))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(8)))?;
+    stream.write_all(b"inspect\n")?;
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer)?;
+    Ok(answer)
 }
 
 /// The native socket of the Romacs server NAME (rlisp/romacs-server.el):

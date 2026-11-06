@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -128,6 +129,188 @@ class Memory(unittest.TestCase):
         self.assertEqual(seen, [7])
 
 
+class GnuEngine(unittest.TestCase):
+    def fake(self, directory, commit):
+        path = Path(directory) / 'emacs'
+        path.write_text(f'#!/bin/sh\necho \'noise\'\necho \'("32.0.50" {commit} t)\'\n')
+        path.chmod(0o755)
+        return str(path)
+
+    def test_the_build_records_what_an_upgrade_would_move(self):
+        self.addCleanup(setattr, pb, 'package_of', pb.package_of)
+        pb.package_of = lambda _: 'emacs-x 1-1'
+        with tempfile.TemporaryDirectory() as directory:
+            build = pb.gnu_build(self.fake(directory, '"abc"'))
+        self.assertEqual((build['version'], build['commit'], build['native'], build['package']),
+                         ('32.0.50', 'abc', True, 'emacs-x 1-1'))
+        self.assertEqual(len(build['sha256']), 64)
+
+    def test_a_build_with_no_commit_or_package_is_still_read(self):
+        self.addCleanup(setattr, pb, 'package_of', pb.package_of)
+        pb.package_of = lambda _: None
+        with tempfile.TemporaryDirectory() as directory:
+            build = pb.gnu_build(self.fake(directory, 'nil'))
+        self.assertIsNone(build['commit'])
+        meta = {'gnu_build': build, 'fixtures': {'commit': 'b' * 40}}
+        self.assertIn('the installed GNU Emacs 32.0.50, natively compiled', readme.gnu_engine(meta))
+
+    def test_the_header_names_engine_commit_package_and_the_pinned_inputs(self):
+        meta = {'gnu_build': {'version': '32.0.50', 'commit': 'c' * 40, 'package': 'emacs-x 1-1', 'native': True},
+                'fixtures': {'commit': 'b' * 40}}
+        text = readme.gnu_engine(meta)
+        for part in ('32.0.50', '~cccccccc~', 'emacs-x 1-1', 'natively compiled', 'inputs are pinned at ~bbbbbbbb~'):
+            self.assertIn(part, text)
+
+    def test_a_run_from_before_keeps_its_pinned_wording(self):
+        self.assertEqual(readme.gnu_engine({'fixtures': {'commit': 'b' * 40}}), 'pinned GNU Emacs ~bbbbbbbb~')
+
+    def test_a_missing_package_manager_is_no_failure(self):
+        self.addCleanup(setattr, pb.subprocess, 'run', pb.subprocess.run)
+
+        def absent(*_, **__):
+            raise FileNotFoundError('pacman')
+        pb.subprocess.run = absent
+        self.assertIsNone(pb.package_of('/usr/bin/emacs'))
+
+
+class Session(unittest.TestCase):
+    def test_a_row_that_fails_costs_that_row_and_leaves_the_session_usable(self):
+        sent = []
+        session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(sent.append), 'name': 'gnu'}),
+                                 'stopped': None, 'ask': staticmethod(lambda *_: True)})
+
+        def fail():
+            raise TimeoutError('no result')
+        got = pb.session_row(session, 'session x', fail)
+        self.assertEqual((got['wall'], got['block']), (None, None))
+        self.assertIn('no result', got['failed'])
+        self.assertEqual(len(sent), 3)
+        self.assertIsNone(session.stopped)
+
+    def test_a_failed_row_runs_its_cleanup(self):
+        asked = []
+        session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'gnu'}),
+                                 'stopped': None, 'ask': staticmethod(lambda form, *_: asked.append(form))})
+
+        def fail():
+            raise TimeoutError('no result')
+        pb.session_row(session, 'session M-x shell', fail, 'shell')
+        self.assertEqual(asked, ['(perfbench-session-abort (quote shell))'])
+
+    def test_a_dead_engine_stops_the_session_without_losing_the_group(self):
+        def dead(*_):
+            raise RuntimeError('editor exited')
+        session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'romacs'}),
+                                 'stopped': None, 'ask': staticmethod(dead)})
+        got = pb.session_row(session, 'session x', dead)
+        self.assertIn('editor exited', got['failed'])
+        self.assertIn('stopped answering in x', session.stopped)
+
+    def test_a_refusal_and_a_lisp_error_are_a_row_failing_not_the_group(self):
+        session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'gnu'}),
+                                 'stopped': None, 'ask': staticmethod(lambda *_: None)})
+        for error in (pb.Refused('rounds differ'), pb.parity_live.LispError('gnu', 'form', 'void')):
+            def fail():
+                raise error
+            self.assertIn('not run', pb.session_row(session, 'session x', fail)['failed'])
+
+    def test_rounds_that_made_different_things_are_no_sample(self):
+        samples = [{'wall': 1.0, 'block': 1.0, 'instructions': 1}] * 3
+        self.assertEqual(pb.session_medians(samples, [2000, 2000, 2000])['check'], 2000)
+        with self.assertRaises(pb.Refused):
+            pb.session_medians(samples, [0, 0, 2000])
+
+    def test_a_thread_name_cut_mid_character_is_read(self):
+        session = pb.Session.__new__(pb.Session)
+        session.ask = lambda *_: None
+        session.engine = type('E', (), {'process': type('P', (), {'pid': 1})})
+        real = pb.subprocess.Popen
+
+        def popen(argv, **kwargs):
+            line = rb"import sys,time; sys.stderr.buffer.write(b'caf\xd2-1,12,,instructions:u,5,100.00,,\n'); time.sleep(5)"
+            return real(['python3', '-c', line.decode()], **kwargs)
+        self.addCleanup(setattr, pb.subprocess, 'Popen', real)
+        pb.subprocess.Popen = popen
+        instructions, _ = session.counted(lambda: None, 1)
+        self.assertEqual(instructions, 12)
+
+    def test_a_failed_act_still_stops_the_counter(self):
+        real = pb.subprocess.Popen
+        started = []
+
+        def popen(*args, **kwargs):
+            started.append(real(['sleep', '30'], stderr=subprocess.PIPE, text=True))
+            return started[-1]
+        self.addCleanup(setattr, pb.subprocess, 'Popen', real)
+        pb.subprocess.Popen = popen
+        session = pb.Session.__new__(pb.Session)
+        session.ask = lambda *_: None
+        session.engine = type('E', (), {'process': type('P', (), {'pid': 1})})
+
+        def fail():
+            raise TimeoutError('no result')
+        with self.assertRaises(TimeoutError):
+            session.counted(fail, 1)
+        self.assertIsNotNone(started[0].poll())
+
+    def test_a_session_that_stops_answering_costs_the_rows_after_it_at_once(self):
+        def silent(*_):
+            raise TimeoutError('no answer')
+        session = type('S', (), {'engine': type('E', (), {'keys': staticmethod(lambda _: None), 'name': 'romacs'}),
+                                 'stopped': None, 'ask': staticmethod(silent)})
+        pb.session_row(session, 'session x', silent)
+        self.assertIn('stopped answering in x', session.stopped)
+        ran = []
+        got = pb.session_row(session, 'session y', lambda: ran.append(1))
+        self.assertEqual(ran, [])
+        self.assertIn('stopped answering in x', got['failed'])
+
+    def test_load_refuses_block_with_wall(self):
+        made = pb.row('session x', 'session', 'run', {'wall': 1.0, 'block': .5}, {'wall': 2.0, 'block': .1}, 3)
+        made['load'] = 12
+        pb.gate_walls([made], 8)
+        self.assertIsNone(made['romacs'].get('block'))
+        self.assertEqual(made['romacs']['block_refused'], .1)
+
+    def rows(self):
+        made = [pb.row('session vc-dir', 'session', 'run', {'wall': 1.0, 'block': 1.0, 'instructions': 100},
+                       {'wall': .5, 'block': .1, 'instructions': 500}, 3)]
+        return results(made)
+
+    def test_a_block_ratio_is_given(self):
+        self.assertEqual(self.rows()['rows'][0]['block_ratio'], .1)
+
+    def test_a_session_win_is_read_by_wall_and_block_not_instructions(self):
+        got = list(readme.wins(self.rows()))
+        self.assertEqual((got[0][1], got[0][2], got[0][3], got[0][4]), ('GNU', 5.0, .5, .1))
+
+    def test_a_session_row_slower_on_wall_is_no_win_whatever_its_block(self):
+        made = results([pb.row('session vc-dir', 'session', 'run', {'wall': 1.0, 'block': 1.0}, {'wall': 2.0, 'block': .1}, 3)])
+        self.assertEqual(list(readme.wins(made)), [])
+
+    def test_its_table_is_its_own(self):
+        made = self.rows()
+        made['rows'].append(pb.row('startup', 'batch', 'run', {'wall': 1.0}, {'wall': 1.0}, 3))
+        pb.with_ratios(made['rows'], None)
+        self.assertNotIn('vc-dir', readme.section(made))
+        text = readme.session_section(made)
+        self.assertIn('| vc-dir | run |', text)
+        self.assertNotIn('startup', text)
+        self.assertEqual(readme.selector(made['rows'][0]), 'session')
+
+    def test_every_key_row_and_command_has_a_distinct_name(self):
+        names = [c[0] for c in pb.SESSION_COMMANDS] + [k[0] for k in pb.SESSION_KEYS]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue(all(n.startswith('session ') for n in names))
+
+
+class Source(unittest.TestCase):
+    def test_no_function_is_defined_twice(self):
+        # A later definition silently replaces an earlier one, and only a live run shows it.
+        names = re.findall(r'^def (\w+)\(', Path(pb.__file__).read_text(), re.M)
+        self.assertEqual(sorted({n for n in names if names.count(n) > 1}), [])
+
+
 class Ratio(unittest.TestCase):
     def test_a_count_swallowed_by_its_floor_has_no_ratio(self):
         self.assertEqual(pb.ratio(1, 2), .5)
@@ -181,6 +364,7 @@ class Neomacs(unittest.TestCase):
         class Ctx(pb.Context):
             def __init__(self, directory):
                 self.quick, self.runs, self.cache, self.store = False, 1, Path(directory), None
+                self.gnu_build = {'sha256': 'f' * 64}
                 self.engines = {'gnu': 'g', 'romacs': 'r', 'neomacs': 'n'}
                 self.compared = tuple(self.engines)
                 self.log = lambda *_: None
@@ -270,6 +454,25 @@ class Batch(unittest.TestCase):
                                  {'instructions': count, 'wall': 1.0, 'check': 1, 'samples': []})
             self.assertIsNone(made['romacs']['instructions'])
             self.assertIn('not above the setup run', made['note'])
+
+
+class FirstUse(unittest.TestCase):
+    def test_what_a_first_use_compiled_is_said_and_is_outside_the_figures(self):
+        batch = pb.Batch.__new__(pb.Batch)
+        batch.ctx = type('Ctx', (), {'runs': 1, 'store': Path('/s')})
+        made = []
+
+        def once(engine, workload, skip=False, extra=None):
+            made.append(skip)
+            first = len(made) == 1
+            return {'instructions': 10 ** 9 if first else 100 if not skip else 40, 'seconds': 1.0, 'check': 1,
+                    'published': 25 if first else 0, 'loaded': [], 'compiled': set()}
+        batch.once = once
+        figures = batch.figures('romacs', 'eshell-commands')
+        self.assertEqual((figures['instructions'], figures['first_use']), (60, 25))
+        made.clear()
+        self.assertEqual(batch.figures('gnu', 'eshell-commands')['first_use'], 0)
+        self.assertEqual(len(made), 2)
 
 
 class Ert(unittest.TestCase):

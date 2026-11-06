@@ -498,6 +498,11 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
 
 
+;;; Generated autoloads from romacs-sasl-scram.el
+
+(register-definition-prefixes "romacs-sasl-scram" '("sasl-scram-"))
+
+
 ;;; Generated autoloads from romacs-server.el
 
 (autoload 'romacs-server-start "romacs-server"

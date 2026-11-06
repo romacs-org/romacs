@@ -34,6 +34,15 @@
 ;;       loops' total, their redisplays' total and the longest of the two
 ;;       together, written with the counts.  A redisplay is charged to its
 ;;       command at the next command's start, or at a write after it ran.
+;;   {"kind":"collection","collection":K,"pause_ms":MS,"met":M,"command":C}
+;;       a garbage collection MS long, K `idle' (the idle pass's or a
+;;       prompt's), `explicit' (`garbage-collect') or `automatic', written
+;;       with the counts.  M, when there is one, says who waited at most
+;;       MS: "command", C being the command it ran in or at the end of;
+;;       "key", a key press queued as it ended; or "redisplay", in a
+;;       prompt's redisplay, where no key can be seen and any pressed waits.
+;;       {"kind":"collection","dropped":N} counts those beyond what a
+;;       session keeps between writes.
 ;; An error record of a kind (its command and its error symbol) not yet
 ;; seen this session also has "backtrace": the names of the functions
 ;; its signal went through, innermost first (no arguments, no text).
@@ -258,6 +267,19 @@ The first of its kind carries the backtrace its signal left, if one was taken."
 (defun romacs-usage-log--event (event)
   (romacs-usage-log--push :kind "session" :event event :seconds (romacs-usage-log--seconds)))
 
+(defun romacs-usage-log--collections ()
+  "The lines of the collections since the last call, oldest first."
+  (when (fboundp 'romacs--take-collections)
+    (let ((taken (romacs--take-collections)))
+      (nconc
+       (mapcar (lambda (record)
+                 (let ((met (nth 2 record)) (command (nth 3 record)))
+                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record))
+                                           (and met (list :met (symbol-name met)))
+                                           (and command (list :command command))))))
+               (cdr taken))
+       (and (> (car taken) 0) (list (json-serialize (list :kind "collection" :dropped (car taken)))))))))
+
 (defun romacs-usage-log-flush ()
   "Append the queued lines and the counts since the last write to the log."
   (when romacs-usage-log-file
@@ -285,7 +307,7 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                          counts)))
                romacs-usage-log--slow)
       (clrhash romacs-usage-log--slow)
-      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts))))
+      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts) (romacs-usage-log--collections))))
         (setq romacs-usage-log--pending nil)
         (when lines (romacs-usage-log--append lines))))))
 
