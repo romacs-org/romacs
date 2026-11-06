@@ -2021,10 +2021,22 @@ closures over a mutable variable (each a closure and a cell)."
                 (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
            (list environment directories
                  (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
-                         expanded (romacs--isolate-stamp expanded) 0)))
+                         expanded (romacs--isolate-stamp expanded) 0 nil nil isolate-job-memory-headroom nil)))
   :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
           (dotimes (_ 10)
             (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
+;; The room check at each pooled dispatch (rlisp/vm/isolate.el): one pass
+;; over the isolates.  The waiting queue is bounded by `isolate-queue-limit'.
+(scaling-probe isolate-room-check :n 2000
+  :setup (let ((zygote (record 'isolate-zygote nil nil 'ready nil nil nil nil nil nil 0 nil nil 0 nil))
+               isolates)
+           (dotimes (i n)
+             (push (record 'isolate i nil 'live nil (and (zerop (% i 2)) '((1 . nil))) nil nil nil nil 'job zygote) isolates))
+           isolates)
+  :body (let ((romacs--isolates it) (isolate-pool-size 1000000)
+              (isolate-pool-memory-limit most-positive-fixnum) (isolate-job-memory-headroom 0))
+          (dotimes (_ 10) (romacs--isolate-room-p))))
 
 ;; The project commands' record of enumeration times (rlisp/romacs-project.el):
 ;; one entry per project root, each decision one lookup and one stat of the
@@ -2091,9 +2103,9 @@ closures over a mutable variable (each a closure and a cell)."
 ;; compiled, lowered by a call and dropped in each step; the host's idle
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
-;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
-;; and shows a startup message, so the probe supplies the one and clears
-;; the other.  A step with no collection after the last ends the session,
+;; A session no key has reached has no `romacs--idle-collect' (the lazy
+;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; the one and clears the other.  A step with no collection after the last ends the session,
 ;; which fails the measure.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
@@ -2114,6 +2126,14 @@ closures over a mutable variable (each a closure and a cell)."
             (insert (format "step %d\n" i)))
           (message nil)
           (setq scaling--retire-collections gcs-done)))
+
+;; The collections a usage log reads (gc.rs `Vm::note_collection'): N
+;; collections, past what the log keeps at 4N, then its read.  A record
+;; costs the same however many were kept, and past the limit only a count.
+(scaling-probe gc-collection-log :n 100
+  :setup (romacs--take-collections)
+  :body (progn (dotimes (_ n) (garbage-collect))
+               (romacs--take-collections)))
 
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a

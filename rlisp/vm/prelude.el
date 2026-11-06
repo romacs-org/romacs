@@ -613,6 +613,19 @@ the current buffer's major mode."
         (funcall function)))
     nil))
 
+(defun romacs--pre-redisplay (windows)
+  "xdisp.c prepare_menu_bars's call of `pre-redisplay-function' on WINDOWS,
+as safe_call makes it."
+  (let ((inhibit-redisplay t)
+        (inhibit-quit t))
+    (condition-case err
+        (funcall pre-redisplay-function windows)
+      (error (message "Error during redisplay: %S" err)))))
+
+(defun romacs--native-region (_start _end _window _overlay)
+  "`redisplay-highlight-region-function' while Romacs draws the region itself."
+  nil)
+
 (defun insert-buffer-substring (buffer &optional start end)
   "Insert before point a substring of the contents of BUFFER.
 BUFFER may be a buffer or a buffer name.

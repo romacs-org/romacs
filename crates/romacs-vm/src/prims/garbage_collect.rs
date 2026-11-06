@@ -49,6 +49,13 @@ fn collected(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
     Ok(Step::Done(Value::TRUE))
 }
 
+// The collections since the last call, for the usage log: (DROPPED RECORD...),
+// each RECORD (KIND MS MET COMMAND) (`Vm::take_collections').
+defsubr! { name = "romacs--take-collections", gnu = "alloc.c:6004", effect = Global,
+fn take_collections(cx) {
+    Ok(cx.take_collections())
+}}
+
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,
 fn make_finalizer(cx, function: Value) {
     if !super::vars::function_p(cx, function)? { return Err(Fault::Wrong("functionp", function)); }
