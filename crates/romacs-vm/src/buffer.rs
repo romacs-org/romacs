@@ -1435,6 +1435,7 @@ mod tests {
             had_intervals: false,
             per_buffer: Default::default(),
             held: None,
+            mirror: None,
         };
         b.properties
             .entry(ByteOffset(1))
@@ -1617,6 +1618,7 @@ mod tests {
         // This form's literal string is also rooted by compiled code. Retire
         // those legitimate roots before asserting unreachable graph reclamation.
         vm.functions.clear();
+        vm.caches.clear();
         vm.execution = Default::default();
         vm.collect(&mut []);
         assert_eq!(vm.heap_objects(), 0);

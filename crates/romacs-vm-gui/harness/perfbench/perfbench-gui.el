@@ -12,6 +12,12 @@
 (defvar perfbench-gui--started nil "When the running command began.")
 (defvar perfbench-gui-latencies nil "Seconds from each command's start to the next idle moment.")
 
+(load (expand-file-name "perfbench-loaded.el" (file-name-directory load-file-name)) nil t t)
+
+(defun perfbench-gui-write-loaded (file)
+  "Write `perfbench-loaded' to FILE."
+  (with-temp-file file (prin1 (perfbench-loaded) (current-buffer))))
+
 (defun perfbench-gui-reset ()
   (setq perfbench-gui-latencies nil perfbench-gui--started nil)
   t)

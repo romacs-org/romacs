@@ -1243,6 +1243,14 @@ thousandth a stack mark."
           (setq romacs-agent-t3--read nil)
           (romacs-agent-instances t)))
 
+;; The start palette of N instances, each with the harness's catalogue:
+;; rows by instance, one table of shown names.
+(scaling-probe agent-picker-rows :n 1000
+  :setup (progn (scaling--agent)
+                (cl-loop for i below n collect (list (format "claude-%d" i) :display "Claude"
+                                                     :config-dir (format "/tmp/claude-config-%d" i))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent--picker-rows)))
+
 ;; N drivers, each a T3 driver name, and T3's settings of N instances of
 ;; them, read anew: each instance's harness by an index built once.
 (scaling-probe agent-instances-drivers :n 500
@@ -1905,6 +1913,34 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; A zygote's validity check before each dispatch (rlisp/vm/isolate.el,
+;; worker-vms design §2.4): the inherited variables compared, then the
+;; files it loaded and the `load-path' directories stamped.  Linear in
+;; each, and in nothing else.
+(scaling-probe isolate-zygote-check :n 200
+  :setup (let* ((environment (scaling--names "SCALING_VARIABLE=value" (* 10 n)))
+                (directories (scaling--names "/nonexistent/scaling-lisp" n))
+                (files (scaling--names "/nonexistent/scaling-library.el" n))
+                (inputs (let ((process-environment environment) (load-path directories))
+                          (romacs--isolate-inputs)))
+                (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
+           (list environment directories
+                 (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
+                         expanded (romacs--isolate-stamp expanded) 0)))
+  :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
+          (dotimes (_ 10)
+            (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
+;; The project commands' record of enumeration times (rlisp/romacs-project.el):
+;; one entry per project root, each decision one lookup and one stat of the
+;; root's Git index.
+(scaling-probe romacs-project-enumerations :n 2000
+  :setup (progn (require 'romacs-project) (scaling--names "/nonexistent/scaling-project" n))
+  :body (progn
+          (dolist (root it) (romacs-project--record root 0.01))
+          (dolist (root it) (romacs-project--enumeration-estimate root))
+          (dolist (root it) (remhash root romacs-project--enumerations))))
+
 ;; A child's environment (rlisp/vm/subprocess.el romacs--environment-block):
 ;; N distinct names in `process-environment', each first definition kept.
 (scaling-probe process-environment-block :n 2000
@@ -1956,6 +1992,34 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+;; Code retirement (request_code.rs, Program::retire_code): N functions
+;; compiled, lowered by a call and dropped in each step; the host's idle
+;; pass between steps collects at the top level, the only place request
+;; code retires, and the next step takes their sites and cache slots back.
+;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
+;; and shows a startup message, so the probe supplies the one and clears
+;; the other.  A step with no collection after the last ends the session,
+;; which fails the measure.  Retirement that scanned its free lists, or
+;; rebuilt tables per function, would grow faster than N.
+(defvar scaling--retire-collections 0
+  "`gcs-done' when the last `gc-retired-code' step ended.")
+
+(scaling-probe gc-retired-code :gui t :n 1000 :steps 4 :gap 1.0
+  :setup (progn
+           (defalias 'romacs--idle-collect (lambda (&optional _in-lisp) t))
+           (setq scaling--retire-collections gcs-done)
+           (switch-to-buffer (get-buffer-create "*scaling-retire*")))
+  :body (progn
+          (when (and (> i 0) (<= gcs-done scaling--retire-collections))
+            (kill-emacs 3))
+          (dotimes (k n)
+            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k)) t)))
+          (with-current-buffer (window-buffer (selected-window))
+            (goto-char (point-max))
+            (insert (format "step %d\n" i)))
+          (message nil)
+          (setq scaling--retire-collections gcs-done)))
+
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
 ;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
@@ -1964,6 +2028,22 @@ closures over a mutable variable (each a closure and a cell)."
 (defun scaling--bt-frames (n)
   (let ((scaling--bt-depth n))
     (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+;; A snapshot of the stack (`romacs--inspect-frames') walks within a work
+;; budget: the time is flat in the size of an argument, and in the depth of
+;; the stack past the frames it keeps.
+(defun scaling--inspect-value (_value) (romacs--inspect-frames))
+(defun scaling--inspect-deep (n)
+  (if (> n 0) (list (scaling--inspect-deep (1- n))) (romacs--inspect-frames)))
+(scaling-probe inspect-value :n 20000 :k 8
+  :setup (make-list n 'x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-string :n 100000 :k 8
+  :setup (make-string n ?x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-stack :n 1000 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 100) (scaling--inspect-deep n)))
+
 (scaling-probe backtrace-frames :n 200 :k 4
   :setup (progn (require 'backtrace) (require 'romacs-backtrace)
                 (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))

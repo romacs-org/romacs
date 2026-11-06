@@ -86,6 +86,30 @@ session records its instance's directory, and resumes there."
 the first of `romacs-agent-providers'."
   :type '(choice (const nil) string) :group 'romacs-agent)
 
+(defcustom romacs-agent-models
+  '((claude ("claude-opus-5-5" :label "Opus 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
+             :default-effort "medium")
+            ("claude-sonnet-5-5" :label "Sonnet 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
+             :default-effort "high")
+            ("claude-fable-5-1" :label "Fable 5.1" :efforts ("low" "medium" "high" "xhigh" "max")
+             :default-effort "medium")
+            ("claude-haiku-5-5" :label "Haiku 5.5" :efforts ("low" "medium" "high" "xhigh" "max")
+             :default-effort "medium"))
+    (codex ("gpt-6.1-sol" :label "GPT-6.1 Sol" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
+            :default-effort "low")
+           ("gpt-6-astra" :label "GPT-6 Astra" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
+            :default-effort "medium")
+           ("gpt-6.1-terra" :label "GPT-6.1 Terra" :efforts ("low" "medium" "high" "xhigh" "max" "ultra")
+            :default-effort "low")
+           ("gpt-6-luna" :label "GPT-6 Luna" :efforts ("low" "medium" "high" "xhigh" "max")
+            :default-effort "medium")))
+  "The models each harness offers, as (HARNESS ROW...), a ROW being
+\(ID :label LABEL :efforts EFFORTS :default-effort EFFORT).  What a harness
+reports of itself goes before these, and an instance's own :models before
+that (`romacs-agent--models').  Starting one names its ID to the harness;
+no model named leaves the choice to the harness's configuration."
+  :type '(alist :key-type symbol :value-type (repeat sexp)) :group 'romacs-agent)
+
 (defcustom romacs-agent-reply-timeout 120
   "Seconds a session's relay waits for a tool call's answer while the
 editor is busy before it withdraws the call (`not executed' when it had
@@ -144,7 +168,7 @@ not started, `outcome unknown' when it had)."
   ;; not yet journaled back, whether the records seen are the live ones
   ;; (the supervisor's replay acknowledged), and the lines written to the
   ;; harness so far, every run's (request ids count on from them).
-  driver-state startup-pending caught-up (inputs 0))
+  driver-state startup-pending caught-up (inputs 0) models-request)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -391,6 +415,8 @@ instances) is derived again when it changes.")
       session's): no harness Romacs runs inherits them;
   :lifetime   `persistent' (one process reading lines) or `per-turn'
       (one run per turn, its prompt on stdin);
+  :refresh-models (SESSION) optional: ask a new session's harness for its
+                           models, `romacs-agent--keep-models' taking them
   :argv (SESSION RESUME)   its command line, RESUME going on with its
       conversation;
   :input (SESSION TEXT)   the object a persistent harness reads as the
@@ -446,8 +472,8 @@ Defining it again replaces it."
 (defun romacs-agent--provider (entry)
   "ENTRY of `romacs-agent-providers', (NAME . DIRECTORY) or (NAME . PLIST),
 as an instance: a plist of :name :display :harness :config-dir :key
-:enabled :program :arguments :model :effort :options :source (and :t3-id
-for one of T3's)."
+:enabled :program :arguments :model :effort :models :options :source
+\(and :t3-id for one of T3's)."
   (let* ((name (car entry))
          (options (if (listp (cdr entry)) (cdr entry) (list :config-dir (cdr entry))))
          (harness (or (plist-get options :harness) (romacs-agent--harness-of name)))
@@ -465,7 +491,7 @@ for one of T3's)."
           :arguments (if (plist-member options :arguments) (plist-get options :arguments)
                        (symbol-value (plist-get known :arguments-option)))
           :model (plist-get options :model) :effort (plist-get options :effort)
-          :options (plist-get options :options)
+          :models (plist-get options :models) :options (plist-get options :options)
           :source (or (plist-get options :source) 'lisp) :t3-id (plist-get options :t3-id)
           :t3-store (plist-get options :t3-store))))
 
@@ -560,13 +586,174 @@ whatever the editor's own environment and the user manager's say."
       (plist-get (cl-find-if (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)) :name)
       (user-error "No agent provider: `romacs-agent-providers' names no enabled instance")))
 
-(defun romacs-agent--read-provider ()
-  "An instance's name: asked for when more than one is enabled."
-  (let ((names (cl-loop for i in (romacs-agent-instances) when (plist-get i :enabled) collect (plist-get i :name))))
-    (if (cdr names)
-        (completing-read (format-prompt "Provider" (romacs-agent--default-provider))
-                         names nil t nil nil (romacs-agent--default-provider))
-      (romacs-agent--default-provider))))
+;;; Models
+
+(defun romacs-agent--models-file (name)
+  "Where the models instance NAME's harness reported are kept."
+  (expand-file-name (concat "models/" (replace-regexp-in-string "[^[:alnum:]_.-]" "_" name) ".json")
+                    (romacs-agent--state-root)))
+
+(defun romacs-agent--models-stamp (instance)
+  "What models kept for INSTANCE hold for: its program, resolved, and
+that file's time.  Nil when it is not found."
+  (when-let* ((found (executable-find (plist-get instance :program))))
+    (let ((path (file-truename found)))
+      (format "%s %s" path (format-time-string "%s.%N" (file-attribute-modification-time (file-attributes path)))))))
+
+(defun romacs-agent--models-kept (instance)
+  "The rows INSTANCE's harness reported, if its present program did."
+  (when-let* ((kept (romacs-agent--read-json (romacs-agent--models-file (plist-get instance :name))))
+              ((hash-table-p kept))
+              ((equal (gethash "stamp" kept) (romacs-agent--models-stamp instance)))
+              ((vectorp (gethash "models" kept))))
+    (mapcar (lambda (row)
+              (cons (gethash "id" row)
+                    (list :label (gethash "label" row) :efforts (append (gethash "efforts" row) nil))))
+            (gethash "models" kept))))
+
+(defun romacs-agent--keep-models (session rows)
+  "Keep ROWS, what SESSION's harness reports, for its instance."
+  (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+         (file (romacs-agent--models-file (plist-get instance :name))))
+    (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
+      (make-directory (file-name-directory file) t)
+      (romacs-agent--write-json
+       file (romacs-mcp--object
+             "stamp" stamp
+             "models" (vconcat (mapcar (lambda (row)
+                                         (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
+                                                             "efforts" (vconcat (plist-get (cdr row) :efforts))))
+                                       rows)))))))
+
+(defun romacs-agent--refresh-models (session)
+  "Ask SESSION's harness for its models, when its driver can and its
+instance has none kept for this program."
+  (when-let* ((ask (romacs-agent--harness-get session :refresh-models))
+              ((not (romacs-agent--models-kept
+                     (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))))
+    (funcall ask session)))
+
+(defun romacs-agent--models (instance)
+  "The models INSTANCE offers, each (ID . PLIST): its own :models, what
+its harness reported, then `romacs-agent-models'.  The rows of one id
+merge, the earlier's fields winning, and a default effort the efforts
+that won do not hold is none."
+  (let ((seen (make-hash-table :test #'equal)) (rows nil))
+    (dolist (row (append (plist-get instance :models) (romacs-agent--models-kept instance)
+                         (alist-get (plist-get instance :harness) romacs-agent-models)))
+      (if-let* ((known (gethash (car row) seen)))
+          (setcdr known (append (cdr known) (cdr row)))
+        (push (puthash (car row) (cons (car row) (cdr row)) seen) rows)))
+    (dolist (row rows)
+      (let ((default (plist-get (cdr row) :default-effort)))
+        (when (and default (not (member default (plist-get (cdr row) :efforts))))
+          (setcdr row (append (list :default-effort nil) (cdr row))))))
+    (nreverse rows)))
+
+(defun romacs-agent--effort-fits-p (instance model effort)
+  "Whether MODEL, as INSTANCE knows it, takes EFFORT: true of a model it
+does not know, or of none named."
+  (let ((row (and model (assoc model (romacs-agent--models instance)))))
+    (or (null row) (member effort (plist-get (cdr row) :efforts)))))
+
+;;; Choosing what a session runs on
+
+(defun romacs-agent--instance-rows (instance label default)
+  "The picker's rows of INSTANCE, called LABEL, the instance DEFAULT:
+each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
+:group HEADING :note NOTE).  The first takes the instance's own defaults."
+  (let* ((models (romacs-agent--models instance))
+         (model (plist-get instance :model)) (effort (plist-get instance :effort))
+         (own (cdr (assoc model models)))
+         (dir (or (plist-get instance :config-dir)
+                  (plist-get (romacs-agent--driver-of (plist-get instance :harness)) :config-default)))
+         (missing (and (plist-get instance :config-dir) (not (file-directory-p (expand-file-name dir)))
+                       "dir missing"))
+         (group (format "%s  %s%s" label (abbreviate-file-name dir) (if default "  default" "")))
+         (common (list :provider (plist-get instance :name) :group group)))
+    (cons (append (list (format "%s · default" label)
+                        :efforts (if own (plist-get own :efforts)
+                                   (delete-dups (cl-loop for row in models
+                                                         append (copy-sequence (plist-get (cdr row) :efforts)))))
+                        :default-effort (plist-get own :default-effort)
+                        :note (or missing (if (or model effort)
+                                              (mapconcat #'identity (delq nil (list model effort)) " · ")
+                                            "harness's own")))
+                  common)
+          (mapcar (lambda (row)
+                    (let ((efforts (plist-get (cdr row) :efforts)))
+                      (append (list (format "%s · %s" label (or (plist-get (cdr row) :label) (car row)))
+                                    :model (car row) :efforts efforts
+                                    :default-effort (plist-get (cdr row) :default-effort)
+                                    :note (or missing
+                                              (and efforts (format "effort %s…%s" (car efforts) (car (last efforts))))
+                                              ""))
+                              common)))
+                  models))))
+
+(defun romacs-agent--picker-rows ()
+  "Every enabled instance's rows (`romacs-agent--instance-rows'), the
+default instance's first."
+  (let* ((default (plist-get (romacs-agent--configured (romacs-agent--default-provider)) :name))
+         (labels (make-hash-table :test #'equal))
+         (enabled (cl-remove-if-not (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)))
+         (first-p (lambda (i) (equal (plist-get i :name) default))))
+    (cl-loop for instance in (append (cl-remove-if-not first-p enabled) (cl-remove-if first-p enabled))
+             for display = (plist-get instance :display)
+             ;; Two instances may be shown alike: rows must differ.
+             for label = (if (gethash display labels) (format "%s (%s)" display (plist-get instance :name)) display)
+             do (puthash display t labels)
+             append (romacs-agent--instance-rows instance label (equal (plist-get instance :name) default)))))
+
+(defun romacs-agent--ordered-table (candidates &rest metadata)
+  "A completion table of CANDIDATES in their order, with METADATA."
+  (lambda (string predicate action)
+    (if (eq action 'metadata)
+        `(metadata (display-sort-function . identity) (cycle-sort-function . identity) ,@metadata)
+      (complete-with-action action candidates string predicate))))
+
+(defun romacs-agent--pick-row (rows)
+  "One of ROWS (`romacs-agent--picker-rows'), asked for: grouped by
+instance, the first the default."
+  (let ((by-text (make-hash-table :test #'equal)) (default (caar rows)))
+    (dolist (row rows) (puthash (car row) (cdr row) by-text))
+    (let ((text (completing-read
+                 (format-prompt "Agent" default)
+                 (romacs-agent--ordered-table
+                  rows
+                  (cons 'group-function
+                        (lambda (text transform)
+                          (if transform text (plist-get (gethash text by-text) :group))))
+                  (cons 'affixation-function
+                        (lambda (texts)
+                          (mapcar (lambda (text)
+                                    (list text "" (propertize (concat "  " (plist-get (gethash text by-text) :note))
+                                                              'face 'completions-annotations)))
+                                  texts))))
+                 nil t nil nil default)))
+      (cons text (gethash text by-text)))))
+
+(defun romacs-agent--read-effort (efforts default)
+  "One of EFFORTS, asked for, DEFAULT first; nil for none."
+  (let ((answer (completing-read (format-prompt "Effort" default) (romacs-agent--ordered-table efforts)
+                                 nil t nil nil default)))
+    (and (not (string-empty-p answer)) answer)))
+
+(defun romacs-agent--read-selection (ask-effort)
+  "What a new session runs on, as (PROVIDER . OPTIONS): asked for when
+more than one instance is enabled, or ASK-EFFORT.  Its effort is asked for
+with ASK-EFFORT, or when nothing gives the chosen model one."
+  (let* ((rows (romacs-agent--picker-rows))
+         ;; Rows come by instance: its first and last differ with several.
+         (several (not (equal (plist-get (cdar rows) :provider) (plist-get (cdar (last rows)) :provider))))
+         (fields (cdr (if (or ask-effort several) (romacs-agent--pick-row rows) (car rows))))
+         (provider (plist-get fields :provider))
+         (model (plist-get fields :model))
+         (efforts (plist-get fields :efforts))
+         (own (plist-get (romacs-agent--configured provider) :effort))
+         (effort (when (and efforts (or ask-effort (and model (not own) (not (plist-get fields :default-effort)))))
+                   (romacs-agent--read-effort efforts (if (member own efforts) own (plist-get fields :default-effort))))))
+    (cons provider (append (and model (list :model model)) (and effort (list :effort effort))))))
 
 ;;; Writing to a harness
 
@@ -1108,6 +1295,12 @@ configuration directory comes from its instance, never from here."
   (let ((project (project-current nil)))
     (if project (project-root project) default-directory)))
 
+(defun romacs-agent--start-arguments (directory)
+  "`romacs-agent-start''s arguments, asked for, DIRECTORY offered."
+  (let* ((cwd (read-directory-name "Project directory: " directory))
+         (selection (romacs-agent--read-selection current-prefix-arg)))
+    (list cwd (read-string "Prompt (empty for none): ") nil (car selection) (cdr selection))))
+
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
   "Start a session working in the project directory CWD under instance
@@ -1116,9 +1309,7 @@ PROVIDER (a name in `romacs-agent-providers', by default
 the harness, :role, :parent (the delegating session's id) and :request
 \(its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session."
-  (interactive (let* ((cwd (read-directory-name "Project directory: " (romacs-agent--project-default)))
-                      (provider (romacs-agent--read-provider)))
-                 (list cwd (read-string "Prompt (empty for none): ") nil provider)))
+  (interactive (romacs-agent--start-arguments (romacs-agent--project-default)))
   (let* ((name (or provider (romacs-agent--default-provider)))
          (instance (or (romacs-agent--configured name)
                        (user-error "No agent provider %s; configured: %s" name
@@ -1138,6 +1329,8 @@ with the session before its harness starts.  Return the session."
                      :options (append (and (not (plist-get options :model)) (plist-get instance :model)
                                            (list :model (plist-get instance :model)))
                                       (and (not (plist-get options :effort)) (plist-get instance :effort)
+                                           (romacs-agent--effort-fits-p instance (plist-get options :model)
+                                                                        (plist-get instance :effort))
                                            (list :effort (plist-get instance :effort)))
                                       options)
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
@@ -1153,8 +1346,9 @@ with the session before its harness starts.  Return the session."
                  (when prompt (romacs-agent-send session prompt)))
         (romacs-agent--launch session (romacs-agent--argv session nil))
         (romacs-agent--attach session 50)
-        (when prompt
-          (romacs-agent--when-attached session (lambda () (romacs-agent-send session prompt))))))
+        (romacs-agent--when-attached session (lambda ()
+                                               (romacs-agent--refresh-models session)
+                                               (when prompt (romacs-agent-send session prompt))))))
     (when (called-interactively-p 'any) (romacs-agent-show session))
     session))
 

@@ -40,6 +40,22 @@ fn backtrace_frame_internal(cx, function: Value, nframes: Value, base: Value) ->
     Ok(Step::Call { f: function, args, then: frame_result, saved: vec![] })
 }}
 fn frame_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+defsubr! { name = "romacs--inspect-frames", gnu = "romacs:inspect", effect = Reads,
+fn romacs_inspect_frames(cx) {
+    Ok(cx.inspect_frames())
+}}
+defsubr! { name = "romacs--inspect-listen", gnu = "romacs:inspect", effect = Global,
+fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
+    let directory = cx.string_text(directory)?;
+    let store = if store == Value::NIL { None } else { Some(cx.string_text(store)?) };
+    crate::host::inspect_listen(&directory, store.as_deref()).map_err(|error| Fault::Error(format!("inspect listener: {error}")))?;
+    Ok(Value::NIL)
+}}
+defsubr! { name = "romacs--inspect-stop", gnu = "romacs:inspect", effect = Global,
+fn romacs_inspect_stop(_cx) {
+    crate::host::inspect_stop();
+    Ok(Value::NIL)
+}}
 defsubr! { name = "backtrace-debug", gnu = "eval.c:4035", effect = Global,
 fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) {
     cx.backtrace_debug(level, flag, base)

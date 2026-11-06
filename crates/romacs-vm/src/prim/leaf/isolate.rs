@@ -40,7 +40,9 @@ impl Leaf<'_> {
 
     pub(crate) fn isolate_reap(&mut self, id: u64) -> Out {
         match self.vm.isolate_reap(id).map_err(Fault::Error)? {
-            Some(status) => Value::integer(i64::from(status)).map_err(Fault::Error),
+            Some(crate::isolate::Exit::Status(status)) => Value::integer(i64::from(status)).map_err(Fault::Error),
+            // Dead, its status known to its zygote alone.
+            Some(crate::isolate::Exit::Unknown) => Ok(Value::TRUE),
             None => Ok(Value::NIL),
         }
     }
@@ -102,5 +104,60 @@ impl Leaf<'_> {
     pub(crate) fn isolate_executable(&mut self) -> Out {
         let exe = crate::host::current_exe().map_err(|e| Fault::Error(e.to_string()))?;
         Ok(self.vm.make_lisp_string(exe.display().to_string().into_bytes(), true))
+    }
+
+    pub(crate) fn isolate_fork_request(&mut self, zygote: u64) -> Out {
+        let id = self.vm.isolate_fork_request(zygote).map_err(Fault::Error)?;
+        Value::integer(id as i64).map_err(Fault::Error)
+    }
+
+    pub(crate) fn isolate_fork(&mut self, generation: u64) -> Out {
+        match self.vm.isolate_fork(generation).map_err(Fault::Error)? {
+            Some(pid) => Value::integer(i64::from(pid)).map_err(Fault::Error),
+            None => Ok(Value::NIL),
+        }
+    }
+
+    pub(crate) fn isolate_release(&mut self, generation: u64) -> Out {
+        self.vm.isolate_release(generation).map_err(Fault::Error)?;
+        Ok(Value::NIL)
+    }
+
+    pub(crate) fn isolate_fork_refusal(&mut self) -> Out {
+        Ok(match self.vm.isolate_fork_refusal() {
+            Some(reason) => self.vm.make_lisp_string(reason.into_bytes(), true),
+            None => Value::NIL,
+        })
+    }
+
+    pub(crate) fn isolate_compact_next(&mut self) {
+        self.vm.isolate_compact_next();
+    }
+
+    pub(crate) fn isolate_reserve(&mut self, needed: usize) {
+        self.vm.isolate_reserve(needed);
+    }
+
+    pub(crate) fn isolate_stamp(&mut self, files: Value) -> Out {
+        use std::hash::{Hash, Hasher};
+        use std::os::unix::fs::MetadataExt;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for file in self.vm.list_values(files).map_err(Fault::Error)? {
+            let name = String::from_utf8_lossy(self.string_view(file)?.bytes()).into_owned();
+            let stamp = crate::host::metadata(&name).ok().map(|m| (m.len(), m.ctime(), m.ctime_nsec(), m.mtime_nsec(), m.ino(), m.dev()));
+            (name, stamp).hash(&mut hasher);
+        }
+        // A fixnum: the digest's top bits dropped.
+        Value::integer((hasher.finish() >> 3) as i64).map_err(Fault::Error)
+    }
+
+    pub(crate) fn isolate_name_process(&mut self, name: Value) -> Out {
+        let name = String::from_utf8_lossy(self.string_view(name)?.bytes()).into_owned();
+        crate::host::set_process_name(&name).map_err(|e| Fault::Error(e.to_string()))?;
+        Ok(Value::NIL)
+    }
+
+    pub(crate) fn isolate_forked(&self) -> usize {
+        self.vm.isolate_forked()
     }
 }

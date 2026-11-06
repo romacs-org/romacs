@@ -17,7 +17,7 @@ fn obarray_compiled_call_retains_symbol_slot() {
         let id = vm.compile(&Form::Int(0)).unwrap();
         let function = Arc::get_mut(&mut vm.functions[id]).unwrap();
         function.code = vec![op];
-        vm.caches.push(Cache { version: 0, target: Value::NIL });
+        if kind == 2 { vm.caches.push(Cache { version: 0, target: Value::NIL }); }
         let index = vm.closures.len();
         vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![], document: Value::NIL });
         let mut roots = [Value::reference(index, 4)];

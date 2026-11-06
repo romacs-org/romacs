@@ -808,6 +808,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x0 = gutter(byte).0;
             (x, y, row_height, hpos) = (x0, y + row_height, metrics[0].1, 0);
             if starting { (drawing, starting, y) = (true, false, top); }
+            // Continued past the last row, this character is not shown.
+            if drawing && y >= body_height { end_byte = byte; }
             advance_px = width(frame, x0, x0 + continued, x0) + lead + trail;
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }

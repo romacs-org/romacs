@@ -65,12 +65,67 @@ pub(crate) struct ByteBuffer {
     /// insert-file-contents holds it unibyte to decide the coding
     /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
     pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
+    /// What a window shows of these bytes (`shown'), once one has.
+    pub(crate) mirror: Option<Box<Mirror>>,
 }
-romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held });
+romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held } at_rest { mirror });
+
+/// The text of a unibyte buffer as display reads it: each byte one
+/// character, so its positions are the buffer's, a byte above 127 the
+/// raw-byte character GNU shows as an escape. Rebuilt when the bytes change.
+#[derive(Clone)]
+pub(crate) struct Mirror {
+    modiff: u64,
+    text: crate::annotations::AnnotatedBuffer,
+}
 /// A unibyte buffer's or insertion's text properties, by byte.
 pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
 
 impl ByteBuffer {
+    /// Bring the mirror to the bytes, narrowing and point now.
+    pub(crate) fn mirror_now(&mut self) -> Result<()> {
+        if self.mirror.as_ref().is_none_or(|m| m.modiff != self.state.modiff) {
+            let text = crate::text::Text::new(&crate::text::octets_to_multibyte(&self.bytes))?;
+            self.mirror = Some(Box::new(Mirror { modiff: self.state.modiff, text: text.into() }));
+        }
+        let (restriction, point, state) = (self.restriction.clone(), self.point, self.state.clone());
+        let Some(mirror) = &mut self.mirror else { unreachable!("just built") };
+        mirror.text.state = state;
+        let byte = |text: &crate::annotations::AnnotatedBuffer, at: ByteOffset| text.byte_of_char(crate::coordinates::CharOffset(at.0));
+        let view = (byte(&mirror.text, restriction.start)?..byte(&mirror.text, restriction.end)?, byte(&mirror.text, point)?);
+        mirror.text.set_view(view.0, view.1);
+        Ok(())
+    }
+    /// The first byte after AT, at most END, whose properties differ from
+    /// AT's (`next_change' of a text buffer's).
+    pub(crate) fn next_property_change(&self, at: ByteOffset, end: ByteOffset) -> ByteOffset {
+        if at >= end { return end; }
+        let here = self.properties.get(&at);
+        let mut expected = at.0 + 1;
+        for (&p, values) in self.properties.range(ByteOffset(at.0 + 1)..end) {
+            if p.0 != expected && here.is_some() { return ByteOffset(expected); }
+            if Some(values) != here { return p; }
+            expected = p.0 + 1;
+        }
+        if here.is_some() { ByteOffset(expected).min(end) } else { end }
+    }
+    /// The last byte before AT, at least START, where the properties of the
+    /// byte before it differ from those of the byte before AT.
+    pub(crate) fn previous_property_change(&self, at: ByteOffset, start: ByteOffset) -> ByteOffset {
+        if at <= start { return start; }
+        let here = self.properties.get(&ByteOffset(at.0 - 1));
+        let mut expected = at.0 - 1;
+        for (&p, values) in self.properties.range(start..ByteOffset(at.0 - 1)).rev() {
+            if p.0 + 1 != expected && here.is_some() { return ByteOffset(expected); }
+            if Some(values) != here { return ByteOffset(p.0 + 1); }
+            expected = p.0;
+        }
+        if here.is_some() { ByteOffset(expected).max(start) } else { start }
+    }
+    /// The mirror, while it holds these bytes.
+    pub(crate) fn shown(&self) -> Option<&crate::annotations::AnnotatedBuffer> {
+        self.mirror.as_ref().filter(|m| m.modiff == self.state.modiff).map(|m| &m.text)
+    }
     /// PROPERTIES, by offset from AT, onto the bytes just inserted there.
     pub(crate) fn graft_properties(&mut self, at: ByteOffset, properties: ByteProperties) {
         self.had_intervals |= !properties.is_empty();
@@ -93,7 +148,7 @@ impl ByteBuffer {
         ByteBuffer {
             state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4], local_keymap: Value::NIL,
             point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), anchors: AnchorTree::new(0),
-            properties: Default::default(), had_intervals: false, per_buffer, held: None,
+            properties: Default::default(), had_intervals: false, per_buffer, held: None, mirror: None,
         }
     }
     pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {

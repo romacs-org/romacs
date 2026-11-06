@@ -170,8 +170,8 @@ impl Leaf<'_> {
     }
 
     fn text_pixel_size(&mut self, area: &TextArea, buffer: Value, args: &TextSizeArgs) -> super::super::Out {
-        let (begv, zv) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?)
@@ -265,22 +265,30 @@ impl Leaf<'_> {
     }
 
     /// Settle each live window's start as the next layout will
-    /// (`Vm::redisplay_point_visibility_now'), and record the end it will
-    /// show as `window-end' UPDATE measures it, so `window-end' without
-    /// UPDATE (isearch's `window-group-end') answers the new display too.
+    /// (`Vm::redisplay_point_visibility_now'), and record the end that
+    /// layout will show, so `window-end' without UPDATE (isearch's
+    /// `window-group-end') answers the new display too.
     pub(crate) fn redisplay_point_visibility_now(&mut self) -> std::result::Result<(), Fault> {
         if !self.vm.has_layout_host() { return Ok(()); }
         self.vm.redisplay_point_visibility_now().map_err(Fault::Error)?;
         for w in self.vm.leaf_windows().map_err(Fault::Error)? {
             let shown = matches!(self.vm.object_if(w), Some(Object::Window(x)) if x.live() && !x.mini && x.height > 0);
             if !shown { continue; }
-            // A window the measurement cannot follow keeps its last end.
-            let Some(end) = self.window_end(w, Value::TRUE).ok().and_then(|v| v.integer_value()) else { continue };
+            // A window not laid out yet ends where motion reaches; one
+            // the measurement cannot follow keeps its last end.
+            let laid = self.vm.window_layout(w).map_err(Fault::Error)?.map(|laid| laid.end);
+            let walked = if laid.is_none() { self.window_end(w, Value::TRUE).ok().and_then(|v| v.integer_value()) } else { None };
             let buffer = self.vm.window(w).map_err(Fault::Error)?.buffer;
-            let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { continue };
+            let Ok(b) = self.vm.shown_text(buffer) else { continue };
+            let end = match (laid, walked) {
+                (Some(byte), _) => b.char_of_byte(coordinates::ByteOffset(byte)).map_err(Fault::Error)?.0 as i64 + 1,
+                (None, Some(end)) => end,
+                (None, None) => continue,
+            };
             let distance = (b.len_chars() as i64 + 1 - end).max(0) as usize;
             let index = w.index(0).map_err(Fault::Error)? - 1;
             if let Object::Window(x) = &mut self.vm.objects[index] { x.end_distance = distance; }
+            if laid.is_some() { self.vm.record_end_laid(w).map_err(Fault::Error)?; }
         }
         Ok(())
     }
@@ -318,8 +326,8 @@ impl Leaf<'_> {
         if interactive && cur_col != Value::NIL { number(self, cur_col)?; }
         let cols = cols.filter(|_| interactive);
         let buffer = self.current_buffer_value()?;
-        let (begv, zv, pt) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv, pt) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?, pos(b.point)?)
@@ -378,7 +386,7 @@ impl Leaf<'_> {
     /// accessible text (its end past the last line), and the lines moved:
     /// vertical motion where every buffer line is one screen line.
     fn buffer_line_motion(&mut self, pt: i64, lines: i64) -> std::result::Result<(i64, i64), Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
@@ -409,8 +417,8 @@ impl Leaf<'_> {
         let area = self.windows().text_area(window, "line-pixel-height")?;
         let buffer = area.buffer;
         let height = self.with_buffer(buffer, |leaf| {
-            let (begv, zv, pt) = match leaf.vm.object_if(buffer) {
-                Some(Object::Buffer(b)) => {
+            let (begv, zv, pt) = match leaf.vm.shown_text(buffer).ok() {
+                Some(b) => {
                     let r = b.accessible();
                     let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                     (pos(r.start)?, pos(r.end)?, pos(b.point)?)
@@ -464,7 +472,9 @@ impl Leaf<'_> {
     /// end the last layout recorded.
     pub(crate) fn window_end(&mut self, window: Value, update: Value) -> super::super::Out {
         let (w, recorded, top) = self.windows().window_end(window)?;
-        if update == Value::NIL || !self.vm.display_state.hosted { return Value::integer(recorded).map_err(Fault::Error); }
+        if update == Value::NIL || !self.vm.display_state.hosted || self.vm.window_end_current(w).map_err(Fault::Error)? {
+            return Value::integer(recorded).map_err(Fault::Error);
+        }
         let area = self.windows().text_area(w, "window-end")?;
         let end = self.with_buffer(area.buffer, |leaf| {
             let measured = if area.vscroll != 0 { Err(unsupported("UPDATE of a vertically scrolled window's end")) } else {
@@ -837,7 +847,7 @@ impl Leaf<'_> {
     }
     /// BUFFER's accessible text's first and last positions.
     pub(crate) fn accessible_positions(&self, buffer: Value) -> std::result::Result<(i64, i64), Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(unsupported("in a unibyte buffer")) };
+        let Ok(b) = self.vm.shown_text(buffer) else { return Err(unsupported("in a unibyte buffer")) };
         let r = b.accessible();
         let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
         Ok((pos(r.start)?, pos(r.end)?))
@@ -846,12 +856,13 @@ impl Leaf<'_> {
     fn point_position(&mut self) -> std::result::Result<i64, Fault> {
         match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => Ok(b.char_of_byte(b.point).map_err(Fault::Error)?.0 as i64 + 1),
+            Some(Object::ByteBuffer(b)) => Ok(b.point.0 as i64 + 1),
             _ => Err(unsupported("in a unibyte buffer")),
         }
     }
     /// The number of lines before POS's in the accessible text.
     pub(super) fn line_index(&mut self, pos: i64) -> std::result::Result<i64, Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
@@ -927,6 +938,7 @@ impl Leaf<'_> {
         let border = i64::from(!area.rightmost);
         let zv_after_newline = match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
+            Some(Object::ByteBuffer(b)) => b.restriction.end.0 > 0 && b.bytes[b.restriction.end.0 - 1] == b'\n',
             _ => false,
         };
         // The host paints a display table's glyphs for characters and its
@@ -1004,8 +1016,8 @@ impl<'a> Leaf<'a> {
     /// continuation line (start_display).
     fn hosted_from(&mut self, area: &TextArea, top: i64) -> std::result::Result<(Hosted<'_, 'a>, Ctx, It), Fault> {
         let buffer = self.vm.slots[self.vm.buffer_slot].value;
-        let (begv, zv) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?)
