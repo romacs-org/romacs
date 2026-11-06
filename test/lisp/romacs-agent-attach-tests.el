@@ -190,17 +190,175 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (should (eq (lookup-key romacs-agent-chat-mode-map (kbd "C-c C-a")) #'romacs-agent-chat-attach))
   (should-not (fboundp 'romacs-agent-chat-respond)))
 
-(ert-deftest romacs-agent-attach-puts-a-token-in-the-composer ()
+(ert-deftest romacs-agent-attach-keeps-images-out-of-the-text ()
   (romacs-agent-attach-tests--with-chat session
     (romacs-agent-ui--insert "transcript\n")
-    (goto-char (point-min))
+    (goto-char (point-max))
+    (insert "look")
     (romacs-agent-chat-attach "/tmp/shot one.png")
-    (should (equal (romacs-agent-ui--composer-text) "[image: /tmp/shot one.png]"))
-    (should (= (point) (point-max)))
-    ;; Typed text goes on after it, and a second image too.
-    (insert "look ")
     (romacs-agent-chat-attach "/tmp/b.png")
-    (should (equal (romacs-agent-ui--composer-text) "[image: /tmp/shot one.png] look [image: /tmp/b.png]"))))
+    (should (equal (romacs-agent-ui--composer-text) "look"))
+    (should (equal romacs-agent-ui--draft-images '("/tmp/shot one.png" "/tmp/b.png")))))
+
+(ert-deftest romacs-agent-message-is-text-then-tokens ()
+  (should (equal (romacs-agent-ui--message "see" '("/a.png" "/b.png")) "see\n\n[image: /a.png] [image: /b.png]"))
+  (should (equal (romacs-agent-ui--message "" '("/a.png")) "[image: /a.png]"))
+  (should (equal (romacs-agent-ui--message "see" nil) "see"))
+  (should (equal (romacs-agent-ui--message "" nil) "")))
+
+(ert-deftest romacs-agent-send-carries-the-images-and-clears-them ()
+  (romacs-agent-attach-tests--with-chat session
+    (let ((sent nil))
+      (romacs-agent-chat-attach "/tmp/a.png")
+      ;; An image alone is a message.
+      (cl-letf (((symbol-function 'romacs-agent-send) (lambda (_ text &rest _) (push text sent))))
+        (goto-char (point-max))
+        (romacs-agent-chat-return)
+        (should (equal sent '("[image: /tmp/a.png]")))
+        (should-not romacs-agent-ui--draft-images))
+      ;; A send that fails keeps the draft.
+      (romacs-agent-chat-attach "/tmp/b.png")
+      (insert "text")
+      (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (user-error "Gone"))))
+        (should-error (romacs-agent-chat-return) :type 'user-error))
+      (should (equal romacs-agent-ui--draft-images '("/tmp/b.png")))
+      (should (equal (romacs-agent-ui--composer-text) "text")))))
+
+(ert-deftest romacs-agent-remove-image-takes-the-last-or-the-nth ()
+  (romacs-agent-attach-tests--with-chat session
+    (dolist (file '("/a.png" "/b.png" "/c.png")) (romacs-agent-chat-attach file))
+    (romacs-agent-chat-remove-image nil)
+    (should (equal romacs-agent-ui--draft-images '("/a.png" "/b.png")))
+    (romacs-agent-chat-remove-image 1)
+    (should (equal romacs-agent-ui--draft-images '("/b.png")))
+    (should-error (romacs-agent-chat-remove-image 5) :type 'user-error)
+    (romacs-agent-chat-remove-image nil)
+    (should-error (romacs-agent-chat-remove-image nil) :type 'user-error)))
+
+(ert-deftest romacs-agent-tray-text-says-how-to-remove ()
+  (should (string-match-p "2 images" (romacs-agent-images--tray-text '("a" "b") 80)))
+  (should (string-match-p "\\`1 image " (romacs-agent-images--tray-text '("a") 80)))
+  (should (<= (string-width (romacs-agent-images--tray-text '("a") 12)) 12)))
+
+(ert-deftest romacs-agent-tray-never-covers-the-composer ()
+  ;; Room below: it sits there, past a composer of many rows too.
+  (let ((y (romacs-agent-images--tray-y 0 1000 50 50 20 100)))
+    (should (>= y 90))
+    (should (<= (+ y 100) 1000)))
+  (should (>= (romacs-agent-images--tray-y 0 1000 100 260 20 100) 280))
+  ;; None below, as with the composer at the window's bottom: above it.
+  (should (= (romacs-agent-images--tray-y 0 1000 950 950 20 100) 818))
+  ;; A tall draft with room for neither: no tray.
+  (should-not (romacs-agent-images--tray-y 0 300 100 260 20 100))
+  (should-not (romacs-agent-images--tray-y 0 120 50 50 20 100)))
+
+(ert-deftest romacs-agent-tray-knows-which-side-of-the-composer-is-gone ()
+  ;; Its start scrolled above the window, its tail seen: nothing fits, as
+  ;; going above would cover the draft.
+  (let ((extent (romacs-agent-images--tray-extent 0 300 nil 260)))
+    (should (equal extent '(0 . 260)))
+    (should-not (romacs-agent-images--tray-y 0 300 (car extent) (cdr extent) 20 100)))
+  ;; Its tail below the window: above its start, when that fits.
+  (let ((extent (romacs-agent-images--tray-extent 0 300 200 nil)))
+    (should (equal extent '(200 . 300)))
+    (should (= (romacs-agent-images--tray-y 0 300 (car extent) (cdr extent) 20 100) 68)))
+  ;; All out of view, the transcript being read: the window's bottom.
+  (should (equal (romacs-agent-images--tray-extent 0 300 nil nil) '(300 . 300))))
+
+(ert-deftest romacs-agent-copy-leaves-out-the-image-rows ()
+  (with-temp-buffer
+    (insert "see [image: /a.png]\n"
+            (propertize " \n \n" 'romacs-agent-strip t)
+            "the reply\n")
+    (should (equal (romacs-agent-ui--text-of (point-min) (point-max)) "see [image: /a.png]\nthe reply\n"))))
+
+(ert-deftest romacs-agent-adjacent-tables-both-refit ()
+  (romacs-agent-attach-tests--with-chat session
+    (romacs-agent-ui--helpers)
+    (let ((table "| A | B |\n|---|---|\n| one | a rather long cell of text to wrap |\n"))
+      (let ((width 70))
+        (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))
+          (dolist (id '("m1" "m2"))
+            (romacs-agent-ui--draw session (list :type 'delta :text table :message id :seq 1) (current-buffer))
+            (romacs-agent-ui--draw session (list :type 'message-end :message id :seq 2) (current-buffer)))
+          (let ((inhibit-read-only t) (wide (buffer-string)))
+            (setq width 24)
+            (romacs-agent-ui--refit-tables)
+            (let ((narrow (buffer-string)))
+              (should-not (equal narrow wide))
+              (setq width 70)
+              (romacs-agent-ui--refit-tables)
+              (should (equal (buffer-string) wide)))))))))
+
+(ert-deftest romacs-agent-recall-brings-text-and-images-back ()
+  (romacs-agent-attach-tests--with-chat session
+    (setq romacs-agent-ui--history '("sent\n\n[image: /a.png] [image: /b.png]"))
+    (goto-char (point-max))
+    (insert "draft")
+    (romacs-agent-chat-attach "/c.png")
+    (romacs-agent-chat-history-previous)
+    (should (equal (romacs-agent-ui--composer-text) "sent"))
+    (should (equal romacs-agent-ui--draft-images '("/a.png" "/b.png")))
+    ;; M-n gives the draft back whole.
+    (romacs-agent-chat-history-next)
+    (should (equal (romacs-agent-ui--composer-text) "draft"))
+    (should (equal romacs-agent-ui--draft-images '("/c.png")))))
+
+(ert-deftest romacs-agent-desktop-keeps-the-draft-s-images ()
+  (romacs-agent-attach-tests--with-chat session
+    (romacs-agent-chat-attach "/a.png")
+    (let ((saved (plist-get (romacs-agent-ui--desktop-save nil) :draft)))
+      (should (equal saved "[image: /a.png]"))
+      (romacs-agent-ui--set-draft "")
+      (should-not romacs-agent-ui--draft-images)
+      (romacs-agent-ui--set-draft saved)
+      (should (equal romacs-agent-ui--draft-images '("/a.png"))))))
+
+(ert-deftest romacs-agent-tray-follows-the-selected-chat ()
+  ;; It reads the selected window, whatever buffer a hook runs in, and an
+  ;; unchanged tray is not shown again.
+  (let ((romacs-agent-images--tray-shown nil) (shows 0) (hides 0) (files '("/a.png")) (selected 'chat))
+    (cl-letf (((symbol-function 'romacs-agent-images--tray-files) (lambda (_) (and (eq selected 'chat) files)))
+              ((symbol-function 'romacs-agent-images--tray-anchor) (lambda (&rest _) '(10 . 20)))
+              ((symbol-function 'romacs-agent-images--tray-draw) #'ignore)
+              ((symbol-function 'romacs-popup-show) (lambda (&rest _) (cl-incf shows)))
+              ((symbol-function 'romacs-layer-hide) (lambda (&rest _) (cl-incf hides))))
+      (romacs-agent-images-tray-sync)
+      (romacs-agent-images-tray-sync)
+      (should (= shows 1))
+      (setq selected 'other)
+      (romacs-agent-images-tray-sync)
+      (should (= hides 1))
+      (should-not romacs-agent-images--tray-shown)
+      ;; Nothing shown and nothing to show: no work at all.
+      (romacs-agent-images-tray-sync)
+      (should (= hides 1)))))
+
+(ert-deftest romacs-agent-table-is-a-grid-and-refits ()
+  (romacs-agent-attach-tests--with-chat session
+    (romacs-agent-ui--helpers)
+    (let ((body "Before\n\n| Where | Cost |\n|---|---|\n| notmuch | a long description of what costs the time |\n\nAfter")
+          (width 70))
+      (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))
+        (romacs-agent-ui--draw session (list :type 'delta :text body :message "m1" :seq 1) (current-buffer))
+        (romacs-agent-ui--draw session (list :type 'message-end :message "m1" :seq 2) (current-buffer))
+        (let ((text (buffer-string)))
+          (should-not (string-match-p "|---" text))
+          (should (string-match-p "Where" text))
+          (should (string-match-p "Before" text))
+          (should (string-match-p "After" text)))
+        (should (text-property-any (point-min) (point-max) 'romacs-agent-table
+                                   (get-text-property (text-property-not-all (point-min) (point-max) 'romacs-agent-table nil)
+                                                      'romacs-agent-table)))
+        (let ((wide (buffer-string)) (inhibit-read-only t))
+          (setq width 30)
+          (romacs-agent-ui--refit-tables)
+          (should-not (equal (buffer-string) wide))
+          (should (string-match-p "After" (buffer-string)))
+          ;; Refitting again at the same width changes nothing.
+          (let ((narrow (buffer-string)))
+            (romacs-agent-ui--refit-tables)
+            (should (equal (buffer-string) narrow))))))))
 
 (ert-deftest romacs-agent-attach-prefers-the-clipboard ()
   (romacs-agent-attach-tests--with-chat session
@@ -212,10 +370,10 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                  (with-temp-file (cadr destination) (insert "PNG"))
                  0)))
       (call-interactively #'romacs-agent-chat-attach))
-    (let ((text (romacs-agent-ui--composer-text)))
-      (should (string-match "\\`\\[image: \\(.*/attachments/clipboard-.*\\.png\\)\\]\\'" text))
-      (should (string-prefix-p (expand-file-name dir) (match-string 1 text)))
-      (should (file-exists-p (match-string 1 text))))))
+    (let ((file (car romacs-agent-ui--draft-images)))
+      (should (string-match-p "/attachments/clipboard-.*\\.png\\'" file))
+      (should (string-prefix-p (expand-file-name dir) file))
+      (should (file-exists-p file)))))
 
 (ert-deftest romacs-agent-attach-prefix-and-no-clipboard-use-the-picker ()
   (romacs-agent-attach-tests--with-chat session
@@ -228,7 +386,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                 ((symbol-function 'romacs-agent-images-pick) (lambda (_) (cl-incf picked) "/tmp/y.png")))
         (call-interactively #'romacs-agent-chat-attach))
       (should (= picked 2))
-      (should (equal (romacs-agent-ui--composer-text) "[image: /tmp/x.png] [image: /tmp/y.png]")))))
+      (should (equal romacs-agent-ui--draft-images '("/tmp/x.png" "/tmp/y.png"))))))
 
 (ert-deftest romacs-agent-attach-browse-and-empty-directory-read-a-file ()
   (romacs-agent-attach-tests--with-chat session
@@ -243,7 +401,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                 ((symbol-function 'read-file-name) (lambda (&rest _) (cl-incf asked) "/tmp/w.png")))
         (call-interactively #'romacs-agent-chat-attach))
       (should (= asked 2))
-      (should (equal (romacs-agent-ui--composer-text) "[image: /tmp/z.png] [image: /tmp/w.png]")))))
+      (should (equal romacs-agent-ui--draft-images '("/tmp/z.png" "/tmp/w.png"))))))
 
 (ert-deftest romacs-agent-attach-cancel-adds-nothing ()
   (romacs-agent-attach-tests--with-chat session
@@ -252,14 +410,14 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (cl-letf (((symbol-function 'romacs-agent-ui--clipboard-image-type) #'ignore)
                 ((symbol-function 'romacs-agent-images-pick) (lambda (_) 'cancel)))
         (should (eq (condition-case nil (call-interactively #'romacs-agent-chat-attach) (quit 'quit)) 'quit))))
-    (should (equal (romacs-agent-ui--composer-text) ""))))
+    (should-not romacs-agent-ui--draft-images)))
 
 (ert-deftest romacs-agent-attach-refuses-a-name-no-token-can-hold ()
   (romacs-agent-attach-tests--with-chat session
     (should-error (romacs-agent-chat-attach "/tmp/shot [1].png") :type 'user-error)
     (should-error (romacs-agent-chat-attach "/tmp/a\nb.png") :type 'user-error)
     (should-error (romacs-agent-chat-attach "/tmp/shot,one.png") :type 'user-error)
-    (should (equal (romacs-agent-ui--composer-text) ""))))
+    (should-not romacs-agent-ui--draft-images)))
 
 (ert-deftest romacs-agent-comma-in-a-typed-token-reaches-no-harness-as-an-image ()
   (romacs-agent-attach-tests--with-chat session
@@ -308,19 +466,30 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                 ((symbol-function 'romacs-agent--codex-mcp-words) #'ignore))
         (should-not (member "--image" (romacs-agent--codex-argv session t)))))))
 
-(ert-deftest romacs-agent-transcript-shows-attached-images ()
+(ert-deftest romacs-agent-transcript-shows-images-as-rows-below-the-prompt ()
   (romacs-agent-attach-tests--with-chat session
     (let ((image (expand-file-name "a.png" dir)))
       (write-region "x" nil image nil 'silent)
       (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
-                ((symbol-function 'create-image) (lambda (file &rest _) (list 'image :file file))))
+                ((symbol-function 'create-image) (lambda (file &rest _) (list 'image :file file)))
+                ((symbol-function 'image-size) (lambda (&rest _) '(100 . 50)))
+                ((symbol-function 'default-line-height) (lambda () 20)))
         (romacs-agent-ui--draw session (list :type 'input :seq 1 :text (format "see [image: %s] and [image: /gone/b.png]" image))
                                (current-buffer)))
       (goto-char (point-min))
+      ;; The token is hidden, its text kept, and one that loads nothing shown.
       (search-forward "[image: /")
-      (should (equal (get-text-property (1- (point)) 'display) (list 'image :file image)))
+      (should (eq (get-text-property (1- (point)) 'invisible) 'romacs-agent-token))
       (search-forward "/gone/b.png")
-      (should-not (get-text-property (1- (point)) 'display))
-      ;; The text stays beneath: the turn can be copied and edited.
-      (should (string-match-p (regexp-quote (format "see [image: %s] and" image))
-                              (buffer-substring-no-properties (point-min) (point-max)))))))
+      (should-not (get-text-property (1- (point)) 'invisible))
+      ;; Below the prompt, the image as rows outside the turn's text.
+      (forward-line 1)
+      (should (= (count-lines (point) romacs-agent-ui--end) 3))
+      (let ((display (get-text-property (point) 'display)))
+        (should (equal (car display) '(slice 0 0 100 20)))
+        (should (equal (cadr display) (list 'image :file image))))
+      ;; A strip per line, the last what is left.
+      (forward-line 2)
+      (should (equal (car (get-text-property (point) 'display)) '(slice 0 40 100 10)))
+      (forward-line -2)
+      (should-not (get-text-property (point) 'romacs-agent-turn)))))

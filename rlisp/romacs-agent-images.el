@@ -21,6 +21,7 @@
 (require 'romacs-popup)
 (require 'romacs-agent)
 
+(defvar romacs-agent-ui--end)
 (defconst romacs-agent-images--rows 9 "Rows shown at once.")
 (defconst romacs-agent-images--list-columns 52 "The list's width, in columns.")
 (defconst romacs-agent-images--thumbnail-height 48 "A thumbnail's height, in pixels.")
@@ -229,6 +230,100 @@ frame too small for the cards browses, at once or when it shrinks."
           (remove-hook 'window-size-change-functions follow)
           (romacs-layer-hide buffer)
           (romacs-layer-hide preview))))))
+
+;;; The tray
+
+(defconst romacs-agent-images--tray-thumbnail 40 "A tray thumbnail's height, in pixels.")
+
+(defun romacs-agent-images--tray-text (names columns)
+  "The tray's hint line for NAMES within COLUMNS."
+  (truncate-string-to-width
+   (format "%d image%s · C-c C-w removes the last, N C-c C-w the Nth"
+           (length names) (if (cdr names) "s" ""))
+   columns nil nil "…"))
+
+(defun romacs-agent-images--tray-draw (files columns)
+  "Fill the current buffer, the tray, from FILES within COLUMNS."
+  (let ((inhibit-read-only t) (index 0)
+        (name-width (max 8 (- (/ columns (max 1 (length files))) 12))))
+    (erase-buffer)
+    (insert (propertize (romacs-agent-images--tray-text files columns) 'face 'shadow) "\n")
+    (dolist (file files)
+      (setq index (1+ index))
+      (insert (propertize (format "%d " index) 'face 'minibuffer-prompt))
+      (romacs-agent-images--insert-image file (* 2 romacs-agent-images--tray-thumbnail)
+                                         romacs-agent-images--tray-thumbnail)
+      (insert " " (truncate-string-to-width (file-name-nondirectory file) name-width nil nil "…") "  "))
+    (goto-char (point-min))))
+
+(defvar romacs-agent-images--tray-shown nil
+  "What the tray shows: (FILES COLUMNS ANCHOR), or nil when hidden.")
+
+(defun romacs-agent-images--tray-y (top bottom composer last line height)
+  "Where a card of HEIGHT goes in a window from TOP to BOTTOM, whose composer
+starts at COMPOSER and whose last row, LINE tall, starts at LAST: below it,
+else above it and the rule over it, else nil: it never covers the composer."
+  (let ((above (- composer line height romacs-agent-images--gap))
+        (below (+ last (* 2 line) romacs-agent-images--gap)))
+    (cond ((<= (+ below height) bottom) below)
+          ((>= above top) above))))
+
+(defun romacs-agent-images--tray-extent (top bottom start last)
+  "The composer's rows as (START-Y . LAST-Y) in a window from TOP to BOTTOM,
+START and LAST their seen y, nil when out of view.  A start out of view with
+its last row seen is above the window; a last row out of view is below it."
+  (cons (or start (if last top bottom)) (or last bottom)))
+
+(defun romacs-agent-images--tray-anchor (window lines)
+  "Where a tray of LINES goes by the current buffer's composer in WINDOW;
+by its bottom when the composer is out of view; nil when it does not fit."
+  (let* ((root (romacs-layer--root-frame))
+         (edges (window-edges window t nil t))
+         (padding (* 2 (plist-get (alist-get 'card romacs-popup-look) :padding)))
+         (height (+ padding (* lines (frame-char-height root))))
+         (y-of (lambda (position)
+                 (let ((seen (pos-visible-in-window-p position window t)))
+                   (and seen (+ (nth 1 edges) (cadr seen))))))
+         (extent (romacs-agent-images--tray-extent (nth 1 edges) (nth 3 edges)
+                                                   (funcall y-of romacs-agent-ui--end)
+                                                   (funcall y-of (point-max))))
+         (y (romacs-agent-images--tray-y (nth 1 edges) (nth 3 edges) (car extent) (cdr extent)
+                                         (default-line-height) height)))
+    (and y (cons (+ (nth 0 edges) romacs-agent-images--gap) y))))
+
+(defun romacs-agent-images--tray-files (window)
+  "The images of the chat WINDOW shows, if it shows one."
+  (let ((buffer (window-buffer window)))
+    (and (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-chat-mode)
+         (buffer-local-value 'romacs-agent-ui--draft-images buffer))))
+
+(defun romacs-agent-images-tray-sync (&rest _)
+  "Make the one tray show the selected chat's images, or hide it.  It reads
+the selected window, not its caller, so hooks may run in any order; and what
+is shown already costs one comparison, as this runs after every key in a chat."
+  (let* ((window (selected-window))
+         (files (romacs-agent-images--tray-files window)))
+    (when (or files romacs-agent-images--tray-shown)
+      (let* ((buffer (get-buffer-create " *romacs-agent-tray*"))
+             (columns (- (window-body-width window) 4))
+             (lines (ceiling (+ (default-line-height) romacs-agent-images--tray-thumbnail) (frame-char-height)))
+             (anchor (and files (with-current-buffer (window-buffer window)
+                                  (romacs-agent-images--tray-anchor window lines))))
+             (shown romacs-agent-images--tray-shown))
+        (cond ((not anchor)
+               (romacs-layer-hide buffer)
+               (setq romacs-agent-images--tray-shown nil))
+              ((not (and shown (eq (nth 0 shown) files) (eql (nth 1 shown) columns) (equal (nth 2 shown) anchor)))
+               (with-current-buffer buffer
+                 (setq mode-line-format nil cursor-type nil truncate-lines t)
+                 (unless (and shown (eq (nth 0 shown) files) (eql (nth 1 shown) columns))
+                   (romacs-agent-images--tray-draw files columns)))
+               (romacs-popup-show 'card buffer :anchor anchor :columns columns :lines lines)
+               (setq romacs-agent-images--tray-shown (list files columns anchor))))))))
+
+;; Selecting, or replacing, a window's buffer moves the keyboard off a chat.
+(add-hook 'window-selection-change-functions #'romacs-agent-images-tray-sync)
+(add-hook 'window-buffer-change-functions #'romacs-agent-images-tray-sync)
 
 (provide 'romacs-agent-images)
 

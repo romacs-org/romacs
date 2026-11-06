@@ -75,6 +75,8 @@
   "Marker at the transcript's end; the composer follows it.")
 (defvar-local romacs-agent-ui--tool-lines nil
   "Tool use id to the marker at its row's mark.")
+(defvar-local romacs-agent-ui--draft-images nil
+  "The image files of the message being written, in order.")
 (defvar-local romacs-agent-ui--tasks nil
   "A delegated task's id to the marker of its card's state chip.")
 (defvar-local romacs-agent-ui--messages nil
@@ -162,19 +164,45 @@ is always taken after its own text is in."
       (match-string 1 name)
     (or name "tool")))
 
+(defun romacs-agent-ui--image-strips (file)
+  "FILE as rows of a sliced image, a string, or nil when it will not load:
+moving and scrolling step through it, as through text.  Each strip but the
+last is one line tall, in pixels, so it fills its row: the display has no `line-height'
+to let a shorter row through, and a shorter strip would leave a seam.
+Centred on the line, a strip's row measures as it draws, one line tall."
+  (ignore-errors
+    (let* ((image (create-image file nil nil :max-width 480 :max-height 270 :ascent 'center))
+           (size (image-size image t))
+           (line (default-line-height))
+           (strips nil))
+      (dotimes (row (ceiling (cdr size) line))
+        (let ((y (* row line)))
+          (push (propertize (concat (propertize " " 'display `((slice 0 ,y ,(car size) ,(min line (- (cdr size) y))) ,image)
+                                                'rear-nonsticky '(display))
+                                    "\n")
+                            'romacs-agent-strip t)
+                strips)))
+      (apply #'concat (nreverse strips)))))
+
 (defun romacs-agent-ui--show-images (start end)
-  "Show each [image: FILE] token between START and END as its image.  The
-text stays beneath it, for copying and editing the turn; a file that is
-gone stays text."
+  "Show the images of the [image: FILE] tokens between START and END below
+them, at the transcript's end, each token hidden.  Its text stays beneath,
+for copying and editing the turn; a token that loads nothing stays text."
   (when (display-images-p)
-    (save-excursion
-      (goto-char start)
-      (while (re-search-forward romacs-agent-image-token end t)
-        (when (romacs-agent-image-file-p (match-string 1))
-          ;; A prompt may only quote a token: what will not load stays text.
-          (let ((inhibit-read-only t)
-                (image (ignore-errors (create-image (match-string 1) nil nil :max-width 480 :max-height 270))))
-            (when image (put-text-property (match-beginning 0) (match-end 0) 'display image))))))))
+    (let ((strips nil))
+      (save-excursion
+        (goto-char start)
+        (while (re-search-forward romacs-agent-image-token end t)
+          (when (romacs-agent-image-file-p (match-string 1))
+            (let ((rows (romacs-agent-ui--image-strips (match-string 1))) (inhibit-read-only t))
+              (when rows
+                (push rows strips)
+                ;; With the blank lines a message puts before its images.
+                (let ((from (save-excursion (goto-char (match-beginning 0))
+                                            (skip-chars-backward " \n" start)
+                                            (point))))
+                  (put-text-property from (match-end 0) 'invisible 'romacs-agent-token)))))))
+      (dolist (rows (nreverse strips)) (romacs-agent-ui--insert-at romacs-agent-ui--end rows)))))
 
 (defun romacs-agent-ui--delegation (name input)
   "What a card shows for tool NAME's INPUT, (TITLE DETAIL), or nil when
@@ -319,6 +347,43 @@ delegation's row is a card (`romacs-agent-ui--tool-text')."
                                     'face 'romacs-agent-dim 'romacs-agent-output id
                                     'invisible 'romacs-agent-output))))))))))
 
+(defun romacs-agent-ui--table-width ()
+  "Columns a table may take, as hermes-chat--table-window-width counts them:
+the window's pixels in the fixed-pitch font's width, less two for the line's
+end.  Hidden, the rule's width."
+  (let ((window (get-buffer-window (current-buffer) t)))
+    (max 20 (- (if window
+                   (/ (window-body-width window t) (max 1 (window-font-width window 'fixed-pitch)))
+                 (romacs-agent-ui--rule-width))
+               2))))
+
+(defun romacs-agent-ui--markdown (body width)
+  "BODY as the transcript shows it: fontified, each pipe table a grid within
+WIDTH that keeps its source in `romacs-agent-table', for a later width."
+  (let* ((text (hermes-chat--fontify-markdown-string body)) (end (length text)) (start 0) (parts nil))
+    (while (< start end)
+      (let ((next (next-single-property-change start 'hermes-chat-table text end))
+            (table (get-text-property start 'hermes-chat-table text)))
+        (push (if table
+                  (propertize (hermes-chat--format-table table width) 'romacs-agent-table table)
+                (substring text start next))
+              parts)
+        (setq start next)))
+    (apply #'concat (nreverse parts))))
+
+(defun romacs-agent-ui--refit-tables ()
+  "Draw each rendered table again at the window's width.  They are found by
+their source property: a resize is rare, and no record of them can go stale."
+  (let ((width (romacs-agent-ui--table-width)) (at (point-min)))
+    (while (< at romacs-agent-ui--end)
+      (let ((source (get-text-property at 'romacs-agent-table))
+            (end (next-single-property-change at 'romacs-agent-table nil (+ 0 romacs-agent-ui--end))))
+        (if (not source) (setq at end)
+          (let ((grid (propertize (hermes-chat--format-table source width) 'romacs-agent-table source)))
+            (delete-region at end)
+            (romacs-agent-ui--insert-at at grid)
+            (setq at (+ at (length grid)))))))))
+
 (defun romacs-agent-ui--message-end (id)
   "Render message ID's text, whole now, as Markdown, in place: exactly the
 range its deltas wrote."
@@ -329,7 +394,7 @@ range its deltas wrote."
         (romacs-agent-ui--helpers)
         (let* ((inhibit-read-only t)
                (body (string-trim-right (buffer-substring-no-properties start end)))
-               (fontified (hermes-chat--fontify-markdown-string body)))
+               (fontified (romacs-agent-ui--markdown body (romacs-agent-ui--table-width))))
           (save-excursion
             (goto-char start)
             (delete-region start (+ start (length body)))
@@ -388,7 +453,8 @@ already that wide is left alone."
                                 (propertize (make-string (- fill (- end start)) ?─)
                                             'face 'romacs-agent-rule 'romacs-agent-rule-fill t))))
                       ((< fill (- end start))
-                       (delete-region (+ start fill) end)))))))
+                       (delete-region (+ start fill) end)))))
+            (romacs-agent-ui--refit-tables)))
         (romacs-agent-ui--composer-update)))))
 
 (defun romacs-agent-ui--render (session event)
@@ -412,8 +478,9 @@ or a repeat."
              (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
              (let ((start (+ 0 romacs-agent-ui--end)))
                (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
-               (romacs-agent-ui--show-images start (+ 0 romacs-agent-ui--end)))
-             (romacs-agent-ui--insert "\n")))
+               (let ((end (+ 0 romacs-agent-ui--end)))
+                 (romacs-agent-ui--insert "\n")
+                 (romacs-agent-ui--show-images start end)))))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
@@ -618,6 +685,7 @@ or a repeat."
     (define-key map (kbd "C-c C-q") #'romacs-agent-chat-queue)
     (define-key map (kbd "C-c C-s") #'romacs-agent-chat-steer)
     (define-key map (kbd "C-c C-a") #'romacs-agent-chat-attach)
+    (define-key map (kbd "C-c C-w") #'romacs-agent-chat-remove-image)
     (define-key map (kbd "C-c C-d") #'romacs-agent-chat-deny)
     (define-key map (kbd "C-c C-o") #'romacs-agent-chat-actions-map-popup)
     (define-key map (kbd "C-c C-/") #'romacs-agent-chat-show-commands)
@@ -645,7 +713,7 @@ or a repeat."
   "An agent session's transcript and composer."
   (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header-line)))
-  (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
+  (setq-local buffer-invisibility-spec (list 'romacs-agent-output 'romacs-agent-token))
   ;; Wrapped at words, C-k still killing to the line's end.
   (setq-local truncate-lines nil word-wrap t)
   ;; New turns scroll the chat just enough, the composer at the bottom.
@@ -654,6 +722,8 @@ or a repeat."
   (add-hook 'post-command-hook #'romacs-agent-ui--composer-update nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
+  ;; The composer moves as text arrives: the tray goes with it.
+  (add-hook 'post-command-hook #'romacs-agent-ui--tray nil t)
   ;; Shown again while its turn runs: the live rule ticks again.
   (add-hook 'window-buffer-change-functions #'romacs-agent-ui--shown-again nil t))
 
@@ -707,9 +777,9 @@ and a running turn's live rule ticks."
 ;; (desktop.el, warm-restart.el) carries only which session it shows and
 ;; the composer's unsent text; the transcript replays from the journal.
 (defun romacs-agent-ui--desktop-save (_dirname)
-  "The session this chat shows and its composer's unsent text."
+  "The session this chat shows and its unsent message."
   (list :session (romacs-agent-id romacs-agent-ui--session)
-        :draft (and (markerp romacs-agent-ui--end) (romacs-agent-ui--composer-text))))
+        :draft (and (markerp romacs-agent-ui--end) (romacs-agent-ui--draft-message))))
 
 (defun romacs-agent-ui-desktop-restore (_file _name misc)
   "The chat of MISC's session, made anew from its journal, with its draft."
@@ -720,8 +790,7 @@ and a running turn's live rule ticks."
       (with-current-buffer buffer
         (when-let* ((draft (plist-get misc :draft)))
           (unless (string-empty-p draft)
-            (goto-char (point-max))
-            (insert draft))))
+            (romacs-agent-ui--set-draft draft))))
       buffer)))
 
 (add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-ui-desktop-restore))
@@ -762,12 +831,7 @@ harness's own transcript it was imported from, when it was."
   (interactive)
   (if (not (romacs-agent-ui--in-composer-p))
       (romacs-agent-chat-toggle)
-    (let ((text (romacs-agent-ui--composer-text)))
-      (unless (string-empty-p text)
-        (romacs-agent-send romacs-agent-ui--session text)
-        (push text romacs-agent-ui--history)
-        (romacs-agent-ui--history-reset)
-        (delete-region romacs-agent-ui--end (point-max))))))
+    (romacs-agent-ui--deliver (lambda (text) (romacs-agent-send romacs-agent-ui--session text)))))
 
 (defun romacs-agent-ui--composer-plain (beg end _length)
   "Text typed or yanked into the composer is plain: whatever it inherited
@@ -892,12 +956,14 @@ PROPERTY: the previous one is the run point is in, past its start."
 (defun romacs-agent-ui--deliver (send)
   "Call SEND with the composer's text, then empty the composer into its
 history; when SEND fails, the draft stays.  Nothing when it is empty."
-  (let ((text (romacs-agent-ui--composer-text)))
+  (let ((text (romacs-agent-ui--draft-message)))
     (unless (string-empty-p text)
       (funcall send text)
       (push text romacs-agent-ui--history)
       (romacs-agent-ui--history-reset)
       (delete-region romacs-agent-ui--end (point-max))
+      (setq romacs-agent-ui--draft-images nil)
+      (romacs-agent-ui--tray)
       (romacs-agent-ui--composer-update))))
 
 (defun romacs-agent-chat-newline ()
@@ -936,10 +1002,6 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 (defun romacs-agent-ui--history-reset ()
   (setq romacs-agent-ui--history-at nil romacs-agent-ui--history-back nil))
 
-(defun romacs-agent-ui--show-history (text)
-  (delete-region romacs-agent-ui--end (point-max))
-  (goto-char (point-max))
-  (insert text))
 
 (defun romacs-agent-chat-history-previous ()
   "Put the previous prompt in the composer; the draft is kept for M-n."
@@ -947,18 +1009,18 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   (let ((next (if romacs-agent-ui--history-at (cdr romacs-agent-ui--history-at) romacs-agent-ui--history)))
     (when next
       (unless romacs-agent-ui--history-at
-        (setq romacs-agent-ui--history-draft (buffer-substring-no-properties romacs-agent-ui--end (point-max))))
+        (setq romacs-agent-ui--history-draft (romacs-agent-ui--draft-message)))
       (push romacs-agent-ui--history-at romacs-agent-ui--history-back)
       (setq romacs-agent-ui--history-at next)
-      (romacs-agent-ui--show-history (car next)))))
+      (romacs-agent-ui--set-draft (car next)))))
 
 (defun romacs-agent-chat-history-next ()
   "Put the next prompt in the composer; past the newest, the draft."
   (interactive)
   (when romacs-agent-ui--history-at
     (setq romacs-agent-ui--history-at (pop romacs-agent-ui--history-back))
-    (romacs-agent-ui--show-history (if romacs-agent-ui--history-at (car romacs-agent-ui--history-at)
-                                     (or romacs-agent-ui--history-draft "")))))
+    (romacs-agent-ui--set-draft (if romacs-agent-ui--history-at (car romacs-agent-ui--history-at)
+                                  (or romacs-agent-ui--history-draft "")))))
 
 (defun romacs-agent-ui--turn-bounds ()
   "The turn at point: (START . END), from its prompt to the next one's."
@@ -969,11 +1031,21 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
                               (if (romacs-agent-ui--move-to 'romacs-agent-turn 1) (point) romacs-agent-ui--end))))
     (cons start (min end romacs-agent-ui--end))))
 
+(defun romacs-agent-ui--text-of (start end)
+  "The text between START and END, without the rows that only draw images."
+  (let ((parts nil) (at start))
+    (while (< at end)
+      (let ((next (next-single-property-change at 'romacs-agent-strip nil end)))
+        (unless (get-text-property at 'romacs-agent-strip)
+          (push (buffer-substring-no-properties at next) parts))
+        (setq at next)))
+    (apply #'concat (nreverse parts))))
+
 (defun romacs-agent-chat-copy ()
   "Copy the region, else the turn at point (its prompt and reply)."
   (interactive)
   (pcase-let ((`(,start . ,end) (if (use-region-p) (cons (region-beginning) (region-end)) (romacs-agent-ui--turn-bounds))))
-    (kill-new (string-trim (buffer-substring-no-properties start end)))
+    (kill-new (string-trim (romacs-agent-ui--text-of start end)))
     (message "Copied")))
 
 (defun romacs-agent-chat-edit-turn ()
@@ -982,9 +1054,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   (let* ((start (car (romacs-agent-ui--turn-bounds)))
          (end (or (next-single-property-change start 'romacs-agent-turn nil romacs-agent-ui--end) romacs-agent-ui--end))
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
-    (delete-region romacs-agent-ui--end (point-max))
-    (goto-char (point-max))
-    (insert prompt)))
+    (romacs-agent-ui--set-draft prompt)))
 
 (defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
   "Where `romacs-agent-chat-attach' offers images from."
@@ -1023,8 +1093,8 @@ named when it holds none or the user asks to browse."
       (_ choice))))
 
 (defun romacs-agent-chat-attach (file)
-  "Put image FILE in the composer as an [image: FILE] token: the harness
-reads the file, and the transcript shows it.  Interactively the clipboard's
+  "Add image FILE to the message being written; the tray above the
+composer shows what it carries.  Interactively the clipboard's
 image, saved with the session; with a prefix argument, or when the
 clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
   (interactive
@@ -1033,9 +1103,54 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
              (romacs-agent-ui--read-image-file)))))
   (when (string-match-p "[],\n]" file)
     (user-error "An image's file name cannot hold ], a comma or a newline: %s" file))
-  (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
-  (insert (format "[image: %s] " file))
-  (romacs-agent-ui--composer-update))
+  (setq romacs-agent-ui--draft-images (append romacs-agent-ui--draft-images (list file)))
+  (romacs-agent-ui--tray))
+
+(defun romacs-agent-chat-remove-image (n)
+  "Take the Nth image off the message being written; the last, by default."
+  (interactive "P")
+  (let* ((images romacs-agent-ui--draft-images)
+         (index (if n (1- (prefix-numeric-value n)) (1- (length images)))))
+    (unless (and images (>= index 0) (< index (length images)))
+      (user-error "No such image in this message"))
+    (setq romacs-agent-ui--draft-images (append (seq-take images index) (nthcdr (1+ index) images)))
+    (romacs-agent-ui--tray)))
+
+(defun romacs-agent-ui--message (text images)
+  "The message of composer TEXT and IMAGES: each image a token, which the
+harness's driver and the transcript read."
+  (mapconcat #'identity
+             (delq nil (list (and (not (string-empty-p text)) text)
+                             (and images (mapconcat (lambda (file) (format "[image: %s]" file)) images " "))))
+             "\n\n"))
+
+(defun romacs-agent-ui--split-message (message)
+  "MESSAGE as (TEXT . IMAGES): `romacs-agent-ui--message' undone."
+  (let ((images nil) (start 0))
+    (while (string-match romacs-agent-image-token message start)
+      (push (match-string 1 message) images)
+      (setq start (match-end 0)))
+    (cons (string-trim (replace-regexp-in-string romacs-agent-image-token "" message t t))
+          (nreverse images))))
+
+(defun romacs-agent-ui--draft-message ()
+  "The message being written, its images with it."
+  (romacs-agent-ui--message (romacs-agent-ui--composer-text) romacs-agent-ui--draft-images))
+
+(defun romacs-agent-ui--set-draft (message)
+  "Make MESSAGE the one being written: its text in the composer, its images
+in the tray, in place of what was there."
+  (pcase-let ((`(,text . ,images) (romacs-agent-ui--split-message message)))
+    (delete-region romacs-agent-ui--end (point-max))
+    (goto-char (point-max))
+    (insert text)
+    (setq romacs-agent-ui--draft-images images)
+    (when images (require 'romacs-agent-images))
+    (romacs-agent-ui--tray)))
+
+(defun romacs-agent-ui--tray (&rest _)
+  "Bring the tray up to date."
+  (when (featurep 'romacs-agent-images) (romacs-agent-images-tray-sync)))
 
 (defun romacs-agent-chat-quote-region ()
   "Quote the region in the composer, each line after \"> \"."
@@ -1115,6 +1230,7 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
   :group "Compose"
   "RET" ("Send" romacs-agent-chat-return)
   "A" ("Attach image" romacs-agent-chat-attach)
+  "W" ("Remove image" romacs-agent-chat-remove-image :inapt-if (lambda () (not romacs-agent-ui--draft-images)))
   "Q" ("Quote region" romacs-agent-chat-quote-region :inapt-if (lambda () (not (use-region-p))))
   "e" ("Edit turn at point" romacs-agent-chat-edit-turn)
   "w" ("Copy turn or region" romacs-agent-chat-copy)
