@@ -213,9 +213,6 @@ message-box	needed	lane A (editing, windows, frames, minibuffer readers, display
 message-or-box	absent	no shipped Lisp calls it and it is no command
 module-function-p	elsewhere	help, in the in-Romacs session
 module-load	absent	dynamic modules: Romacs loads no native modules
-mouse-pixel-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-mouse-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-mouse-position-in-root-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 move-point-visually	needed	lane A (editing, windows, frames, minibuffer readers, display)
 msdos-downcase-filename	absent	platform: MS-DOS build only
 msdos-long-file-names	absent	platform: MS-DOS build only
@@ -250,7 +247,6 @@ pgtk-font-name	absent	no shipped Lisp calls it and it is no command
 pgtk-get-page-setup	absent	no shipped Lisp calls it and it is no command
 pgtk-page-setup-dialog	absent	no shipped Lisp calls it and it is no command
 pgtk-print-frames-dialog	absent	GTK print dialog: Romacs draws no GTK dialogs
-pgtk-register-dnd-targets	needed	lane A (editing, windows, frames, minibuffer readers, display)
 pgtk-set-monitor-scale-factor	absent	no shipped Lisp calls it and it is no command
 pgtk-set-resource	absent	no shipped Lisp calls it and it is no command
 pgtk-update-drop-status	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -281,8 +277,6 @@ set-input-interrupt-mode	absent	terminal frames: Romacs has none (GUI and batch 
 set-input-mode	needed	lane A (editing, windows, frames, minibuffer readers, display)
 set-message-beep	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-minibuffer-window	needed	lane A (editing, windows, frames, minibuffer readers, display)
-set-mouse-pixel-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-set-mouse-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
 set-network-process-option	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-output-flow-control	absent	terminal frames: Romacs has none (GUI and batch only)
 set-process-datagram-address	absent	no shipped Lisp calls it and it is no command

@@ -49,10 +49,10 @@ version_at_least() {
 
 check_platform() {
     [ "$(uname -s)" = Linux ] || die "Romacs needs Linux; this is $(uname -s)."
-    [ "$(uname -m)" = x86_64 ] || die "releases are x86_64 only; this is $(uname -m). See README.org to build from source."
+    [ "$(uname -m)" = x86_64 ] || die "releases are x86_64 only; this is $(uname -m). See README.md to build from source."
     local glibc
     glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}') || true
-    [ -n "$glibc" ] || die "releases need glibc; this system has another C library. See README.org to build from source."
+    [ -n "$glibc" ] || die "releases need glibc; this system has another C library. See README.md to build from source."
     version_at_least "$glibc" "$min_glibc" ||
         die "releases need glibc $min_glibc or newer; this system has $glibc (Ubuntu 24.04, Debian 13 or newer work)."
 }

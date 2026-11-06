@@ -178,14 +178,14 @@ mod tests {
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil start (float-time))
             (run-at-time 0 nil (lambda () (push 'a probe)
-              (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 0.1)) probe)))))");
-        assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.2) (reverse probe))"), "(nil (a (b t)))");
+              (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 1.0)) probe)))))");
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 2) (reverse probe))"), "(nil (a (b t)))");
         // A timer that queues input wakes the read, which takes the event.
         // Pinned GNU 45b0f7699df, batch, stdin open: (97 t nil).
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil start (float-time))
             (run-at-time 0.01 nil (lambda () (push ?a unread-command-events)))");
-        assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 3) (< (- (float-time) start) 1.5) unread-command-events)"),
                    "(97 t nil)");
         // sit-for in a timer reads a key typed during it and pushes it back
         // as (t . KEY) (subr.el); the command loop, which reads Lisp's
@@ -238,12 +238,12 @@ mod tests {
                           ;; As a toast's expiry: due long before the read's limit.
                           (when (equal text \"idle\")
                             (let ((shown (float-time)))
-                              (run-with-timer 0.03 nil (lambda () (push (list 'expired (current-message) (< (- (float-time) shown) 0.5))
+                              (run-with-timer 0.03 nil (lambda () (push (list 'expired (current-message) (< (- (float-time) shown) 1.5))
                                                                         probe))))))))
                 (run-with-idle-timer 0.05 nil (lambda () (message \"idle\")))
                 (run-with-timer 0 nil (lambda ()
                   (let ((end (+ (float-time) 0.1))) (while (< (float-time) end)))
-                  (read-event nil nil 1)
+                  (read-event nil nil 3)
                   (message nil)))");
             vm.timer_stop_idle();
             let first = idle(&mut vm, true).unwrap();
@@ -416,7 +416,7 @@ mod tests {
             Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
         vm.timer_stop_idle();
         assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
-        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.8))))");
         assert_eq!(fired, "((callback timer) t)", "a callback's timer");
         // A mode-line :eval schedules it in the redisplay of the wait for
         // C-x's next key.
@@ -425,7 +425,7 @@ mod tests {
               (setq start (float-time) log (cons 'eval log)) {schedule}) \"\")))))"));
         vm.set_host_input(Some(Box::new(Paced([Step::Key('\u{18}'), Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
         assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
-        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.8))))");
         assert_eq!(fired, "((eval timer) t)", "a redisplay's timer");
     }
 

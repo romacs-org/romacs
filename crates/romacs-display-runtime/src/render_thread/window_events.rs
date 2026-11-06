@@ -634,7 +634,8 @@ impl RenderApp {
                 }
             }
 
-            WindowEvent::PointerMoved { position, .. } => {
+            // A pointer that enters and stays sends no motion.
+            WindowEvent::PointerMoved { position, .. } | WindowEvent::PointerEntered { position, .. } => {
                 self.handle_cursor_moved(window_id, position);
             }
 

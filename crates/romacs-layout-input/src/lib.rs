@@ -922,6 +922,9 @@ pub struct Measured {
     pub ascents: Vec<u32>,
     /// Each face's ascent, beside FACE_HEIGHTS.
     pub face_ascents: Vec<u32>,
+    /// Beside GLYPHS, each in a font of other metrics than its face's: its
+    /// row sets it on the row's baseline, as paint does.
+    pub fallback: Vec<bool>,
 }
 
 #[cfg(test)]

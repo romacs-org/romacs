@@ -1,14 +1,7 @@
 //! The snapshot-safety contract (`world::safe`): what a world image may
-//! hold is checked by the compiler, field by field, and a VM holding a
-//! resource of its process is refused at capture.
+//! hold is checked by the compiler, field by field (tests/compile_boundaries.rs),
+//! and a VM holding a resource of its process is refused at capture.
 use romacs_vm::Vm;
-
-#[test]
-fn snapshot_safety_is_enforced_by_the_compiler() {
-    let t = trybuild::TestCases::new();
-    t.pass("tests/snapshot_safe/pass/*.rs");
-    t.compile_fail("tests/snapshot_safe/fail/*.rs");
-}
 
 fn refusal(vm: &mut Vm) -> Option<String> {
     vm.world_normalize();
