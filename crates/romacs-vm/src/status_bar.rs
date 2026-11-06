@@ -11,7 +11,7 @@ use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, S
 /// What the bar's expansion depends on (`Vm::bar_key').
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BarKey {
-    epoch: u64, collections: u64, faces: u64, columns: usize, focused: bool,
+    epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
     lines: Vec<LineKey>,
 }
@@ -72,7 +72,7 @@ impl Vm {
         let (owner, focused) = self.status_bar_owner()?;
         let window = self.window(owner)?.id;
         let [width, height] = self.window_state.text_area;
-        let columns = (width / self.window_state.column.max(1)) as usize;
+        let columns = StatusBarSnapshot::columns(width, self.window_state.column);
         let border = self.host_border();
         // At the top the bar ends where the root window starts; at the
         // bottom it starts above the mini-window.
@@ -86,13 +86,24 @@ impl Vm {
         if let Some((known, bar)) = &self.display_state.bar_cache && *known == key {
             return Ok(Some(place(bar.clone())));
         }
+        // Whether the owner's buffer is modified, read before its line's Lisp
+        // runs: that may collect, which moves windows (`owner' is not rooted).
+        let buffer = self.window(owner)?.buffer;
+        // The owner's buffer's faces: its `face-remapping-alist' remaps the
+        // bar's faces as it would the window's own mode line.
+        let table = self.window_faces(owner)?;
+        let modified = matches!(self.object(buffer)?, Object::Buffer(b) if b.state.modified());
         let band = self.status_bar_band(owner, columns)?;
         // Kept for a click, which reads it as a string (`status_bar_target').
         self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
-        let table = self.display_faces()?;
         let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
-        let marks = self.band_marks(&text, &props, &segments, &table)?;
+        // The owner's line leads the bar, where it has one; its pills read
+        // whether its buffer is modified (`romacs-pill-modified').
+        let owner_chars = self.display_state.bar_parts.first().filter(|(_, id)| *id == window).map_or(0, |(chars, _)| chars.end);
+        let owner_chars = self.display_state.bar_kept.as_ref().map_or(owner_chars, |kept| kept.partition_point(|&i| i < owner_chars));
+        let owner_end = text.char_indices().nth(owner_chars).map_or(text.len(), |(at, _)| at);
+        let marks = self.band_marks(&text, &props, &segments, &table, if modified { owner_end } else { 0 })?;
         // The bar's faces: its base face first, then those its runs use.
         let mut faces = vec![table.faces[base.0 as usize].clone()];
         let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
@@ -124,7 +135,8 @@ impl Vm {
         let [level, origin] = ["romacs--minibuf-level", "romacs--minibuf-selected-window"].map(|name| self.slot(name));
         Ok(BarKey {
             epoch: self.display_state.mode_line_epoch, collections: self.gc_stats.collections,
-            faces: self.display_state.face_revision, columns, focused,
+            // The owner's table changes with its buffer's remapping too.
+            faces: (self.display_state.face_revision, self.window_faces(owner)?.id), columns, focused,
             minibuffer: (self.variable_value(level)?.0, self.variable_value(origin)?.0, self.selected_window_value()?.0),
             lines,
         })
@@ -147,11 +159,14 @@ impl Vm {
     /// and from strings that carry `romacs-segment' (PROPS), each a pill on
     /// the background of its `romacs-pill' face, its text in the foreground
     /// of its `romacs-pill-text' face; and each character a `romacs-icon'
-    /// alist names, drawn as that icon (`icon_index').
+    /// alist names, drawn as that icon (`icon_index'). A pill that starts
+    /// before MODIFIED, a byte, has its text in the foreground of its
+    /// `romacs-pill-modified' face where it names one: the bar's own
+    /// line, whose buffer is modified.
     pub(super) fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
-                  segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable) -> Result<BandMarks> {
+                  segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable, modified: usize) -> Result<BandMarks> {
         let mut marks = BandMarks::default();
-        let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table)).collect();
+        let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table, bytes.start < modified)).collect();
         // A string's segment inside a construct of the same name is that
         // construct's: each name's ranges, ordered, searched per run.
         let mut by_name: std::collections::HashMap<&str, Vec<std::ops::Range<usize>>> = std::collections::HashMap::new();
@@ -163,7 +178,7 @@ impl Vm {
         });
         let mut icons: Option<std::collections::HashMap<u64, char>> = None;
         for (bytes, projected) in props {
-            if let Some(segment) = self.segment_of(bytes, projected, table) && !contained(&segment.name, bytes) {
+            if let Some(segment) = self.segment_of(bytes, projected, table, bytes.start < modified) && !contained(&segment.name, bytes) {
                 match marks.segments.last_mut() {
                     // One segment's pieces are adjacent runs of its name.
                     Some(last) if last.name == segment.name && last.bytes.end == segment.bytes.start && last.pill == segment.pill => {
@@ -245,13 +260,15 @@ impl Vm {
         if merged.is_empty() { return Ok(None); }
         Ok(Some(band.drop_ranges(&merged)))
     }
-    /// The segment PROJECTED names over BYTES, if it names one.
-    fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable) -> Option<Segment> {
+    /// The segment PROJECTED names over BYTES, if it names one; its pill's
+    /// text in its `romacs-pill-modified' face when MODIFIED.
+    fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable, modified: bool) -> Option<Segment> {
         let value = |name: &str| projected.iter().find(|(n, _)| *n == name).and_then(|(_, form)| self.ml_form_name(form));
         let face = |name: &str| value(name).and_then(|face| table.handle(&face)).map(|h| &table.faces[h.0 as usize]);
         let name = value("romacs-segment")?;
         let pill = face("romacs-pill").map(|f| Pill { background: f.background, radius: PILL_RADIUS,
-                                                      foreground: face("romacs-pill-text").map(|t| t.foreground) });
+                                                      foreground: modified.then(|| face("romacs-pill-modified")).flatten()
+                                                          .or_else(|| face("romacs-pill-text")).map(|t| t.foreground) });
         Some(Segment { bytes: bytes.clone(), name, pill })
     }
     /// What the bar shows now, as `romacs-status-bar-string' gives it.
@@ -377,12 +394,13 @@ impl Vm {
         }
         Ok(bar)
     }
-    /// LINE, a context's, with its `right-align' markers plain text: the
-    /// bar's alignment is the selected line's. A marker is a segment and a
-    /// projected property, a `:propertize''s symbol or a string's own
-    /// value: none stays.
+    /// LINE, a context's, with its `centre-align' and `right-align' markers
+    /// plain text: the bar's zones are the selected line's. A marker is a
+    /// segment and a projected property, a `:propertize''s symbol or a
+    /// string's own value: none stays.
     fn plain_markers(&self, mut line: mode_line::Band) -> mode_line::Band {
-        let marker = |(name, value): &(&'static str, std::rc::Rc<Form>)| *name == "romacs-segment" && self.ml_form_name(value).as_deref() == Some("right-align");
+        let marker = |(name, value): &(&'static str, std::rc::Rc<Form>)| *name == "romacs-segment"
+            && matches!(self.ml_form_name(value).as_deref(), Some("right-align" | "centre-align"));
         line.segments.retain(|(_, projected)| !projected.iter().any(marker));
         for (_, projected) in line.props.iter_mut() {
             if projected.iter().any(marker) {

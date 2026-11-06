@@ -21,7 +21,8 @@
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
-;;   :gap    a GUI probe's seconds between steps (default 0.1).
+;;   :gap    how often, in seconds, a GUI probe looks for its step's
+;;           redisplay (default 0.1).
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -384,6 +385,60 @@ thousandth a stack mark."
              (push (intern (format "bar-probe-%d" i)) romacs-mode-line-right))
            (romacs-mode-line-rebuild)
            (switch-to-buffer (scaling--lines-buffer "scaling-bar" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; A header line of N columns, each its own face run then a `(space
+;; :align-to ...)' (VM2-MODE-LINE-STRETCH), redisplayed after each key in
+;; the buffer under it: the band's stretches resolve with the window's
+;; geometry read once, not once per stretch, and the face runs once each.
+(scaling-probe header-line-stretches :gui t :n 40 :steps 20
+  :setup (let ((buffer (scaling--lines-buffer "scaling-header" 50)))
+           (switch-to-buffer buffer)
+           (setq header-line-format
+                 (cl-loop for i below n append
+                          (list (propertize (format "c%d" i) 'face (if (cl-oddp i) 'bold 'italic))
+                                (propertize " " 'display `(space :align-to ,(* 3 (1+ i)))))))
+           buffer)
+  :body (with-current-buffer it (insert "x")))
+
+;; A buffer whose `face-remapping-alist' remaps N faces, shown in the
+;; status bar and its window, redisplayed after each key in it: its
+;; remapped face table is realized once and found again per redisplay
+;; (`display_faces_for'), for the window's text and bands and for the
+;; bar's cache key (VM2-FACE-REMAP).
+(scaling-probe face-remap-bands :gui t :n 32 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (let ((buffer (scaling--lines-buffer "scaling-remap" 50)))
+             (switch-to-buffer buffer)
+             (setq header-line-format "remapped")
+             (setq-local face-remapping-alist
+                         (cl-loop for i below n
+                                  collect (let ((face (intern (format "remap-probe-face-%d" i))))
+                                            (make-face face)
+                                            (list face (list :foreground (format "#%02x6080" (% (* 7 i) 256)))))))
+             (push '(mode-line-active (:background "#203040")) face-remapping-alist)
+             buffer))
+  :body (with-current-buffer it (insert "x")))
+
+;; The same remapping in the selected window, the bar's owner, while the
+;; keys go to a buffer in the other: the bar's line is unchanged, so each
+;; request finds its last expansion by its key, which reads the remapping
+;; again (`bar_key').
+(scaling-probe face-remap-bar-unchanged :gui t :n 256 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (let ((other (scaling--lines-buffer "scaling-remap-other" 50)))
+             (switch-to-buffer (scaling--lines-buffer "scaling-remap-still" 50))
+             (setq-local face-remapping-alist
+                         (cl-loop for i below n
+                                  collect (let ((face (intern (format "remap-still-face-%d" i))))
+                                            (make-face face)
+                                            (list face (list :foreground (format "#%02x6080" (% (* 7 i) 256)))))))
+             (set-window-buffer (split-window-below) other)
+             other))
   :body (with-current-buffer it (insert "x")))
 
 ;; N pills on one pill face, each a different character in its own text
@@ -1964,8 +2019,9 @@ scaling_live.py --record profiles a probe's body alone this way."
 (defun scaling-gui-start (name n out)
   "Run GUI probe NAME at size N in this session, then exit.
 Once the session is idle, set the probe up; then run its steps from a chain
-of timers, the host laying out each step's change as the command loop
-returns; count the instructions from before the first step to after the
+of timers, each after the host's redisplay of the step before: a paint still
+being drawn holds the next one back, so no fixed time means the step was
+laid out.  Count the instructions from before the first step to after the
 last step's layout; write (:name :n :instructions) to OUT as JSON and kill
 Emacs.  Stderr marks the start, each step and the end among the paint
 diagnostics, so the harness can check a paint was submitted after each
@@ -1986,11 +2042,15 @@ step, before the next step or the count's end."
         (lambda ()
           (scaling--mark (list :scaling "start"))
           (setq start (romacs-instructions))
-          (let ((step nil) (i 0))
+          (let ((step nil) (laid-out nil) (i 0))
+            (setq laid-out (lambda ()
+                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))
-                                    (funcall body n it i) (setq i (1+ i)) (run-with-timer gap nil step))
+                                    (funcall body n it i) (setq i (1+ i))
+                                    (romacs--redisplay-since-mark t)
+                                    (run-with-timer gap nil laid-out))
                            (let ((end (romacs-instructions)))
                              (scaling--mark (list :scaling "end"))
                              (with-temp-file out
