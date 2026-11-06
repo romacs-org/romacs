@@ -1222,6 +1222,19 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
       (call-interactively command nil keys)
       (setq last-command command))))
 
+;;;; The window title
+
+(defun romacs--title-format-static-p (format)
+  "Whether the mode-line FORMAT reads only `%b', `%%', the symbols of GNU's
+default, and fixed text: its expansion moves only with what
+`Vm::frame_title_key' covers."
+  (cond ((stringp format) (not (string-match-p "%[^b%]" format)))
+        ((consp format) (and (not (keywordp (car format)))
+                             (romacs--title-format-static-p (car format))
+                             (romacs--title-format-static-p (cdr format))))
+        ((integerp format) t)
+        (t (memq format '(nil t multiple-frames system-name)))))
+
 ;;;; Word motion through `find-word-boundary-function-table'
 
 (defun romacs--word-at-p (position)

@@ -1487,10 +1487,10 @@ fn evaluate(
                 let snapshot_ns = if !live {
                     let snapshot_start = Instant::now();
                     let next = frame(&mut vm, g1, width, height)?;
+                    title::consider(&mut vm, sender, &host);
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
-                    title::consider(&mut vm, sender, &host);
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -1571,6 +1571,7 @@ fn evaluate(
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
                 let next = frame(&mut vm, g1, width, height)?;
+                title::consider(&mut vm, sender, &host);
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
@@ -1581,7 +1582,6 @@ fn evaluate(
                 };
                 let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
-                title::consider(&mut vm, sender, &host);
                 // The evaluator's part: the frame's snapshot, layout and
                 // submission; the render thread draws it meanwhile.
                 vm.redisplay_done(snapshot_start.elapsed());
@@ -1669,12 +1669,12 @@ fn evaluate(
         // An evaluation may mutate before signalling; its error must not hide that paint.
         vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
+        title::consider(&mut vm, sender, &host);
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {
             let presentation = next_presentation(&host)?;
             previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
-            title::consider(&mut vm, sender, &host);
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,
