@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "b60ce325df9d49213eefd8652effca91e966ef4a3f34eae330f10ff49aabd8be",
+  "source_fingerprint": "578775e2952a566f459d0337c6d24fc8bce2d508e1c346ad3d15ae19176e62a0",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -235,7 +235,7 @@
   "abort-recursive-edit": {
    "name": "abort-recursive-edit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:156"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:157"
   },
   "abs": {
    "name": "abs",
@@ -664,12 +664,12 @@
   "call-last-kbd-macro": {
    "name": "call-last-kbd-macro",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:334"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:335"
   },
   "cancel-kbd-macro-events": {
    "name": "cancel-kbd-macro-events",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:344"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:345"
   },
   "capitalize": {
    "name": "capitalize",
@@ -783,7 +783,7 @@
   "char-resolve-modifiers": {
    "name": "char-resolve-modifiers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:547"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:548"
   },
   "char-syntax": {
    "name": "char-syntax",
@@ -888,7 +888,7 @@
   "clear-this-command-keys": {
    "name": "clear-this-command-keys",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:244"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:245"
   },
   "closurep": {
    "name": "closurep",
@@ -949,7 +949,7 @@
   "command-error-default-function": {
    "name": "command-error-default-function",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:145"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:146"
   },
   "command-modes": {
    "name": "command-modes",
@@ -1117,7 +1117,7 @@
   "current-idle-time": {
    "name": "current-idle-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:347"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:348"
   },
   "current-indentation": {
    "name": "current-indentation",
@@ -1127,7 +1127,7 @@
   "current-input-mode": {
    "name": "current-input-mode",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:462"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:463"
   },
   "current-kill": {
    "name": "current-kill",
@@ -1392,7 +1392,7 @@
   "ding": {
    "name": "ding",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:286"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:287"
   },
   "directory-file-name": {
    "name": "directory-file-name",
@@ -1417,7 +1417,7 @@
   "discard-input": {
    "name": "discard-input",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:319"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:320"
   },
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",
@@ -1493,7 +1493,7 @@
   "end-kbd-macro": {
    "name": "end-kbd-macro",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:329"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:330"
   },
   "end-of-line": {
    "name": "end-of-line",
@@ -1577,12 +1577,12 @@
   "execute-kbd-macro": {
    "name": "execute-kbd-macro",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:125"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:126"
   },
   "exit-recursive-edit": {
    "name": "exit-recursive-edit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:153"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:154"
   },
   "exp": {
    "name": "exp",
@@ -2516,7 +2516,7 @@
   "input-pending-p": {
    "name": "input-pending-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:453"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:454"
   },
   "insert": {
    "name": "insert",
@@ -2618,7 +2618,7 @@
   "internal-event-symbol-parse-modifiers": {
    "name": "internal-event-symbol-parse-modifiers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:519"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:520"
   },
   "internal-get-lisp-face-attribute": {
    "name": "internal-get-lisp-face-attribute",
@@ -4049,12 +4049,12 @@
   "read-char": {
    "name": "read-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:180"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:181"
   },
   "read-char-exclusive": {
    "name": "read-char-exclusive",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:186"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:187"
   },
   "read-coding-system": {
    "name": "read-coding-system",
@@ -4064,7 +4064,7 @@
   "read-event": {
    "name": "read-event",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:174"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:175"
   },
   "read-from-minibuffer": {
    "name": "read-from-minibuffer",
@@ -4079,12 +4079,12 @@
   "read-key-sequence": {
    "name": "read-key-sequence",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:159"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:160"
   },
   "read-key-sequence-vector": {
    "name": "read-key-sequence-vector",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:166"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:167"
   },
   "read-string": {
    "name": "read-string",
@@ -4124,7 +4124,7 @@
   "recursive-edit": {
    "name": "recursive-edit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:130"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:131"
   },
   "redirect-frame-focus": {
    "name": "redirect-frame-focus",
@@ -4272,7 +4272,7 @@
   "romacs--call-deadline": {
    "name": "romacs--call-deadline",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:544"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:545"
   },
   "romacs--call-process-run": {
    "name": "romacs--call-process-run",
@@ -4863,7 +4863,7 @@
   "romacs--record-input": {
    "name": "romacs--record-input",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:280"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:281"
   },
   "romacs--redisplay-since-mark": {
    "name": "romacs--redisplay-since-mark",
@@ -4898,12 +4898,12 @@
   "romacs--run-host-command": {
    "name": "romacs--run-host-command",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:135"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:136"
   },
   "romacs--run-special-event": {
    "name": "romacs--run-special-event",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:140"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:141"
   },
   "romacs--rust-definition": {
    "name": "romacs--rust-definition",
@@ -4943,7 +4943,7 @@
   "romacs--set-idle": {
    "name": "romacs--set-idle",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:432"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:433"
   },
   "romacs--set-local-toplevel-cell": {
    "name": "romacs--set-local-toplevel-cell",
@@ -4998,7 +4998,7 @@
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:444"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:445"
   },
   "romacs--term-close": {
    "name": "romacs--term-close",
@@ -5053,12 +5053,12 @@
   "romacs--timer-next": {
    "name": "romacs--timer-next",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:406"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:407"
   },
   "romacs--timer-time": {
    "name": "romacs--timer-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:397"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:398"
   },
   "romacs--treesit-detach": {
    "name": "romacs--treesit-detach",
@@ -5298,7 +5298,7 @@
   "set--this-command-keys": {
    "name": "set--this-command-keys",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:254"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:255"
   },
   "set-advertised-calling-convention": {
    "name": "set-advertised-calling-convention",
@@ -5441,7 +5441,7 @@
   "set-input-meta-mode": {
    "name": "set-input-meta-mode",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:470"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:471"
   },
   "set-keyboard-coding-system-internal": {
    "name": "set-keyboard-coding-system-internal",
@@ -5835,12 +5835,12 @@
   "start-kbd-macro": {
    "name": "start-kbd-macro",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:324"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:325"
   },
   "store-kbd-macro-event": {
    "name": "store-kbd-macro-event",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:339"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:340"
   },
   "string": {
    "name": "string",
@@ -6170,22 +6170,22 @@
   "this-command-keys": {
    "name": "this-command-keys",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:215"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:216"
   },
   "this-command-keys-vector": {
    "name": "this-command-keys-vector",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:221"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:222"
   },
   "this-single-command-keys": {
    "name": "this-single-command-keys",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:227"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:228"
   },
   "this-single-command-raw-keys": {
    "name": "this-single-command-raw-keys",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:236"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:237"
   },
   "throw": {
    "name": "throw",
@@ -6221,7 +6221,7 @@
   "top-level": {
    "name": "top-level",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:150"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:151"
   },
   "translate-region-internal": {
    "name": "translate-region-internal",
