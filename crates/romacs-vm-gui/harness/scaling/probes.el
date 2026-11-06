@@ -1854,6 +1854,22 @@ closures over a mutable variable (each a closure and a cell)."
 (defun scaling--bt-frames (n)
   (let ((scaling--bt-depth n))
     (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+;; A snapshot of the stack (`romacs--inspect-frames') walks within a work
+;; budget: the time is flat in the size of an argument, and in the depth of
+;; the stack past the frames it keeps.
+(defun scaling--inspect-value (_value) (romacs--inspect-frames))
+(defun scaling--inspect-deep (n)
+  (if (> n 0) (list (scaling--inspect-deep (1- n))) (romacs--inspect-frames)))
+(scaling-probe inspect-value :n 20000 :k 8
+  :setup (make-list n 'x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-string :n 100000 :k 8
+  :setup (make-string n ?x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-stack :n 1000 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 100) (scaling--inspect-deep n)))
+
 (scaling-probe backtrace-frames :n 200 :k 4
   :setup (progn (require 'backtrace) (require 'romacs-backtrace)
                 (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))

@@ -1946,6 +1946,9 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
+    // Before the debugger and collection: an inspection changes nothing and
+    // answers from any engine, nested or not.
+    if crate::host::inspect_pending() { e.vm.inspect_capture(); }
     if e.vm.profiler.debug_call {
         return unsafe { debug_on_call(e, r, pc) };
     }
