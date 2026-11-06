@@ -64,6 +64,11 @@ class Server:
         (self.home / '.config/romacs').mkdir()
         (self.home / '.config/romacs/init.el').write_text(INIT)
         self.env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14', **(env_extra or {}))
+        # The real GPU, when asked for: the compositor stays private.
+        wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
+        if wlr:
+            self.env.update(wlr)
+            self.env.pop('WGPU_BACKEND', None)
         for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
             if os.environ.get(key):
                 self.env[key] = os.environ[key]

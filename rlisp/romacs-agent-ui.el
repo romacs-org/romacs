@@ -890,8 +890,8 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive)
-  (let ((default-directory (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session))))
-    (call-interactively #'romacs-agent-start)))
+  (apply #'funcall-interactively #'romacs-agent-start
+         (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session)))))
 
 (defun romacs-agent-chat-switch (buffer)
   "Switch to another session's chat BUFFER."
@@ -1113,7 +1113,9 @@ row point was on stays under point."
             (dolist (item shown) (insert (romacs-agent-ui--history-row item width)))
             (when (> (length items) (length shown))
               (insert (propertize (format "  ◇ %d more  (h shows all)\n" (- (length items) (length shown)))
-                                  'face 'romacs-agent-dim 'romacs-agents-more t))))
+                                  'face 'romacs-agent-dim 'romacs-agents-more t)))
+            ;; `c' anywhere in it starts a session here.
+            (put-text-property header (point) 'romacs-agents-project cwd))
           (insert "\n")))
       (insert (propertize "RET open  c new  i interrupt  k stop  r resume  h history  g refresh  n/p move\n"
                           'face 'romacs-agent-dim))
@@ -1143,8 +1145,8 @@ row point was on stays under point."
 (defvar romacs-agents-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'romacs-agents-open)
-    (define-key map "c" #'romacs-agent-start)
-    (define-key map "+" #'romacs-agent-start)
+    (define-key map "c" #'romacs-agents-new)
+    (define-key map "+" #'romacs-agents-new)
     (define-key map "i" #'romacs-agents-interrupt)
     (define-key map "k" #'romacs-agents-stop)
     (define-key map "r" #'romacs-agents-resume)
@@ -1245,6 +1247,14 @@ its newest; on \"more\", every transcript."
                    ((romacs-agent-get newest) (romacs-agent-show (romacs-agent-get newest)))
                    (t (romacs-agent-ui--home) (user-error "That session is gone; the page is redrawn")))))
           (t (romacs-agents--at-point)))))
+(defun romacs-agents-new ()
+  "Start a new session, by default in the project at point."
+  (interactive)
+  (let ((project (get-text-property (line-beginning-position) 'romacs-agents-project)))
+    (apply #'funcall-interactively #'romacs-agent-start
+           (romacs-agent--start-arguments (if project (file-name-as-directory project)
+                                            (romacs-agent--project-default))))))
+
 (defun romacs-agents-interrupt () "Interrupt this session." (interactive) (romacs-agent-interrupt (romacs-agents--at-point)))
 (defun romacs-agents-stop ()
   "Stop this session."
