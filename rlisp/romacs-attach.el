@@ -25,6 +25,7 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
+(require 'romacs-truncate)
 (require 'seq)
 (require 'subr-x)
 (require 'romacs-popup)
@@ -464,10 +465,11 @@ cached until its items or plan change; nil without items."
   (if (<= (string-width name) width) name
     (let* ((extension (file-name-extension name t))
            (stem (file-name-sans-extension name))
-           (room (max 2 (- width (string-width extension) 1)))
-           (head (truncate-string-to-width stem (ceiling room 2)))
-           (tail (romacs-attach--tail stem (/ room 2))))
-      (concat head "…" tail extension))))
+           (dots (truncate-string-ellipsis))
+           (room (- width (string-width extension) (string-width dots))))
+      (if (< room 2) (romacs-truncate name width)
+        (concat (truncate-string-to-width stem (ceiling room 2)) dots
+                (romacs-attach--tail stem (/ room 2)) extension)))))
 
 (defun romacs-attach--tail (string width)
   "The end of STRING in at most WIDTH columns."

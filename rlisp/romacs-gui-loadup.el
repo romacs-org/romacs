@@ -16,6 +16,11 @@
 ;; session takes on its display.  They supersede the batch steps the chain
 ;; took (`romacs-batch-startup'): a VM restored from a world takes these
 ;; instead (`romacs-startup-function', `romacs-world-restart').
+(defun romacs-gui--startup-ellipsis ()
+  "Truncate with three dots: Iosevka paints `…' two cells wide, where
+`string-width' counts one, so every column after it would shift."
+  (setq truncate-string-ellipsis "..."))
+
 (defun romacs-gui-startup ()
   "Take the per-process startup steps of an interactive session on this display.
 The session leaves batch and has *Messages*, finds its per-user directory,
@@ -28,6 +33,7 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; The session is interactive from here: GNU's C sets `noninteractive'
         ;; from the command line, and only batch keeps it.
         (setq noninteractive nil)
+        (romacs-gui--startup-ellipsis)
         ;; emacs.c main (emacs.c:2213) logs an empty message, so every session
         ;; starts with *Messages*, which `kill-buffer' and `other-buffer' may
         ;; fall back on; normal-top-level (startup.el:736) puts it in
