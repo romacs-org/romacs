@@ -900,12 +900,17 @@ pub(super) fn vertical_motion<E: Lines>(src: &mut E, cx: &Ctx, pt: i64, lines: i
 /// Fwindow_end's motion (window.c:1782) from IT at a window's start:
 /// move_it_vertically down the text area's height DY, then, when the row
 /// reached starts inside the window, move_it_past_eol over it.
-pub(super) fn window_end<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, dy: i64) -> R<i64> {
+pub(super) fn window_end<E: Lines>(src: &mut E, cx: &Ctx, mut it: It, dy: i64) -> R<i64> {
     move_to(src, cx, &mut it, cx.zv, -1, dy, -1, Op { pos: true, y: true, ..Op::default() })?;
     let at = charpos(src, &it)?;
-    // At ZV, move_it_by_lines (IT, 0) and the move past its line's end
-    // come back to ZV.
-    if at == cx.zv || it.current_y >= dy { return Ok(at); }
+    // At a ZV after no newline, move_it_vertically moves back to its
+    // screen line's start: below the window, where text hidden to ZV
+    // begins; inside it, the move past its line's end comes back to ZV.
+    if at == cx.zv {
+        if it.current_y < dy || cx.zv_after_newline || at <= src.begv() { return Ok(at); }
+        return src.line_start_before(at);
+    }
+    if it.current_y >= dy { return Ok(at); }
     if move_in_line(src, cx, &mut it, cx.zv, 0, POS)? == Move::NewlineOrCr { advance(src, &mut it); }
     charpos(src, &it)
 }

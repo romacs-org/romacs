@@ -76,7 +76,7 @@ impl Vm {
         // Only a truncated row needs scrolling: a window that continues its
         // lines and is not scrolled has none.
         if hscroll == 0 && self.window_line_wrap(window, buffer)? != romacs_layout_input::LineWrap::Truncate { return Ok(false); }
-        let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(false) };
         let accessible = b.accessible();
         let point_byte = b.byte_of_char(CharOffset((point.max(1) - 1) as usize))?.0.clamp(accessible.start.0, accessible.end.0);
         let line = published.and_then(|(snapshot, at)| point_line_snapshot(snapshot, at));
@@ -151,9 +151,10 @@ impl Vm {
         if rows == 0 {
             return Ok(());
         }
+        self.mirror_shown(buffer)?;
         let point = self.window_point_value(window)?.as_integer()? as usize;
         let start = self.marker_position_value(start_marker)?.integer_value().unwrap_or(1) as usize;
-        let Object::Buffer(b) = self.object(buffer)? else {
+        let Ok(b) = self.shown_text(buffer) else {
             return Ok(());
         };
         let accessible = b.accessible();
@@ -177,7 +178,7 @@ impl Vm {
                 if clamped != start { self.set_marker_object(start_marker, Value::integer(clamped as i64)?, buffer)?; }
                 return Ok(());
             }
-            let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+            let Ok(b) = self.shown_text(buffer) else { return Ok(()) };
             let text = b.as_str();
             let point_line = text[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
             // Point below the start but in the top scroll margin scrolls
@@ -196,7 +197,7 @@ impl Vm {
             let distance = match distance {
                 Some(distance) => distance,
                 None => {
-                    let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+                    let Ok(b) = self.shown_text(buffer) else { return Ok(()) };
                     let text = b.as_str().as_bytes();
                     match below {
                         false => text[point_line.min(start_byte)..start_byte].iter().filter(|&&c| c == b'\n').count(),
@@ -208,7 +209,7 @@ impl Vm {
             let minimal = conservative > 100 || (conservative > 0 && distance <= conservative);
             let back = recenter_rows(text_height, line);
             if let Some(chosen) = self.start_from_rows(window, point_byte, measured, (minimal, below, conservative > 100))? {
-                let Object::Buffer(b) = self.object(buffer)? else { return Ok(()) };
+                let Ok(b) = self.shown_text(buffer) else { return Ok(()) };
                 let position = Value::integer((b.char_of_byte(ByteOffset(chosen))?.0 + 1) as i64)?;
                 return self.set_marker_object(start_marker, position, buffer).map(drop);
             }
@@ -218,7 +219,7 @@ impl Vm {
                 return Ok(());
             }
         }
-        let Object::Buffer(b) = self.object(buffer)? else {
+        let Ok(b) = self.shown_text(buffer) else {
             return Ok(());
         };
         let text = b.as_str();
@@ -298,7 +299,7 @@ impl Vm {
         let rows: Vec<_> = end.rows.iter().filter(|r| r.y < body).copied().collect();
         let Some(first) = rows.first() else { return Ok(None) };
         let point = self.window_point_value(window)?.as_integer()?;
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let point_byte = b.byte_of_char(CharOffset((point.max(1) - 1) as usize))?.0;
         let shown_end = shown.buffer_byte(end.end);
         let reached_end = shown.at_zv && end.end >= shown.text.utf8.len();
@@ -316,7 +317,7 @@ impl Vm {
             }
         };
         let row = rows.iter().find(|r| r.y + r.height >= new_vpos).unwrap_or(&rows[rows.len() - 1]);
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let position = Value::integer((b.char_of_byte(ByteOffset(shown.buffer_byte(row.start)))?.0 + 1) as i64)?;
         self.set_window_point_position(window, position)?;
         Ok(Some(true))
@@ -330,6 +331,7 @@ impl Vm {
     /// text, logical lines, which never show less. None when it shows no
     /// text.
     pub(crate) fn displayed_range(&mut self, window: Value, text_height: u32) -> Result<Option<(usize, usize)>> {
+        self.mirror_shown(self.slots[self.buffer_slot].value)?;
         let w = self.window(window)?;
         let (rows, start) = (self.window_rows(text_height.saturating_add(w.vscroll_px)).1, w.start);
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1).max(1) as usize;
@@ -340,7 +342,7 @@ impl Vm {
                 .then(|| crate::prim::hosted_rows_end(self, window, start as i64, rows as i64).ok())
                 .flatten(),
         };
-        let Object::Buffer(b) = self.object(self.slots[self.buffer_slot].value)? else {
+        let Ok(b) = self.shown_text(self.slots[self.buffer_slot].value) else {
             return Ok(None);
         };
         let accessible = b.accessible();
@@ -377,7 +379,7 @@ impl Vm {
         if self.window(window)?.vscroll_px != 0 { return Ok(None); }
         let Some(laid) = self.window_layout(window)? else { return Ok(None) };
         let margin = self.scroll_margin_px(window, laid.body_height)?;
-        let begv = { let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) }; b.accessible().start.0 };
+        let begv = { let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) }; b.accessible().start.0 };
         let rows = match measured.filter(|rows| rows.first().is_some_and(|r| r.0 <= begv) || above_point(rows, point_byte).0 >= laid.body_height) {
             Some(rows) => rows,
             None => match self.rows_above(window, point_byte, (laid.body_height, 0), begv)? { Some(rows) => rows, None => return Ok(None) },
@@ -385,7 +387,7 @@ impl Vm {
         if !minimal {
             // Each row and whether it starts a line, as the recentring's
             // motion back by lines needs.
-            let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+            let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
             let text = b.as_str().as_bytes();
             let rows: Vec<_> = rows.iter().map(|&(start, height, _)| (start, height, start <= begv || text[start - 1] == b'\n')).collect();
             let line = self.window_state.line.max(1) as f32;
@@ -538,7 +540,7 @@ impl Vm {
         let floor = { let table = self.window_faces(window)?; self.row_floor_of(&table) };
         let mut lines = ((reach / floor as f32).ceil() as i64).max(count as i64) + 1;
         loop {
-            let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+            let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
             let accessible = b.accessible();
             let (begv, zv) = (accessible.start.0, accessible.end.0);
             let stop = crate::prim::line_beginning(b.body(), begv, zv, stop.clamp(begv, point_byte), 0);
@@ -571,7 +573,7 @@ impl Vm {
         if point_byte >= start_byte { return Ok((Some(0), None)); }
         let mut lines = limit as i64 + 1;
         loop {
-            let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok((None, None)) };
+            let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok((None, None)) };
             let accessible = b.accessible();
             let (begv, zv) = (accessible.start.0, accessible.end.0);
             let (line, start_line) = (crate::prim::line_beginning(b.body(), begv, zv, point_byte, 0), crate::prim::line_beginning(b.body(), begv, zv, start_byte, 0));
@@ -771,7 +773,7 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
     let images = published.images.iter().filter(|i| (from..to).contains(&i.byte)).map(|i| InlineImage { byte: i.byte - from, ..*i }).collect();
     let wrap_flips = published.wrap_flips.iter().filter(|&&b| (from..to).contains(&(b as usize))).map(|&b| b - from as u32).collect();
     let faces = used.iter().map(|&f| published.faces.get(f as usize).cloned()).collect::<Option<Vec<_>>>()?;
-    Some(WindowSnapshot { underline_rules: Default::default(),
+    Some(WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: published.id, width: published.width, height: 1 << 24, start_byte: 0, point_byte: point - from, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: text[from..to].into(), face_runs, raw },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),

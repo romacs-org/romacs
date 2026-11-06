@@ -207,7 +207,7 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     fn text(&self) -> &crate::annotations::AnnotatedBuffer {
-        match self.leaf.vm.object_if(self.view.buffer) { Some(Object::Buffer(b)) => b, _ => unreachable!("checked text buffer") }
+        match self.leaf.vm.shown_text(self.view.buffer) { Ok(b) => b, _ => unreachable!("checked text buffer") }
     }
     fn char_at(&self, byte: usize) -> u32 {
         // The flat text's scalar, then the raw-byte listing (empty for
@@ -776,6 +776,30 @@ impl<'l, 'a> Source<'l, 'a> {
         }
     }
 
+    /// SPEC's stretch in a header or mode line (`Leaf::band_stretches'): a
+    /// `(space ...)' as the text's stretch is, but that it reads no buffer
+    /// character: a `:relative-width' counts a column, the band's space;
+    /// None for another display.
+    pub(super) fn band_stretch(&mut self, spec: Value) -> R<Option<romacs_layout_input::StretchWidth>> {
+        use romacs_layout_input::StretchWidth;
+        let s = self.syms;
+        if self.leaf.pair(spec).is_none_or(|(car, _)| car != s.space) { return Ok(None); }
+        let plist = self.leaf.pair(spec).map_or(Value::NIL, |(_, p)| p);
+        let column = self.view.column;
+        if self.plist_get(plist, s.width) == Value::NIL
+            && let Some(factor) = self.leaf.number_value(self.plist_get(plist, s.relative_width)).filter(|&f| f > 0.0) {
+            return Ok(Some(StretchWidth::Width { width: (factor * column as f64) as i64, zero_ok: false }));
+        }
+        let origin = Origin { charpos: self.view.begv, string: Value::NIL, strpos: None, from_display: true, text_area: true, whitespace_under: false };
+        Ok(Some(match self.stretch_shape(spec, origin) {
+            Ok(Shape::Stretch { width, zero_ok }) => StretchWidth::Width { width, zero_ok },
+            Ok(Shape::Align { target }) => StretchWidth::AlignTo(target),
+            // What the text's stretches refuse (a height of its own, physical
+            // units) shows as one column, as GNU's default width is.
+            Ok(_) | Err(_) => StretchWidth::Width { width: column, zero_ok: false },
+        }))
+    }
+
     /// produce_stretch_glyph's width, before it depends on the x position.
     /// In pixels, a height other than the face's is refused: the host
     /// makes a stretch as tall as its face.
@@ -1008,7 +1032,7 @@ impl Leaf<'_> {
             return Ok(true);
         }
         let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras.is_empty() => Some(look.glyphless), _ => None };
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
         let text = &b.as_str()[from.min(b.as_str().len())..to.min(b.as_str().len())];
         let mut special = vec![];
         for (at, ch) in text.char_indices() {
@@ -1065,7 +1089,7 @@ impl Syms {
 impl Leaf<'_> {
     /// The byte of character position POS (1-based) in text buffer BUFFER.
     pub(super) fn buffer_byte(&self, buffer: Value, pos: i64) -> R<usize> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(fault("text buffer required")) };
+        let Ok(b) = self.vm.shown_text(buffer) else { return Err(fault("text buffer required")) };
         Ok(b.byte_of_char(CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0)
     }
     pub(crate) fn number_value(&self, v: Value) -> Option<f64> {

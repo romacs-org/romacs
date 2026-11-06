@@ -1,5 +1,10 @@
 use super::*;
 impl Leaf<'_> {
+    /// The call stack as bounded JSON (`inspect.rs').
+    pub(crate) fn inspect_frames(&mut self) -> Value {
+        let text = self.vm.inspect_snapshot();
+        self.make_string(text.into_bytes(), true)
+    }
     pub(crate) fn backtrace_first(&self, base: Value) -> std::result::Result<Option<usize>, Fault> {
         Ok(self
             .vm

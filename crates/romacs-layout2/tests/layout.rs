@@ -1,7 +1,7 @@
 use romacs_display_protocol::{Color, FrameGlyph};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 fn scene() -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1,
         width: 400,
         height: 300,
@@ -387,6 +387,42 @@ fn a_boxed_mode_line_is_one_run_to_its_band_s_end() {
     let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine))
         .filter_map(|g| g.box_vertical_edges()).collect();
     assert_eq!(band, [BoxVerticalEdges::Left, BoxVerticalEdges::Neither, BoxVerticalEdges::Neither, BoxVerticalEdges::Right]);
+}
+
+/// A band's stretch in a boxed mode line is in the run: blank, its width
+/// kept (IT_APPLY_FACE_BOX), between the first character's left edge and
+/// the fill's right.
+#[test]
+fn a_band_stretch_in_a_boxed_mode_line_stays_in_its_run() {
+    use romacs_display_protocol::BoxVerticalEdges;
+    use romacs_layout_input::{BandStretches, BoxLine, Decor, Stretch, StretchWidth};
+    let mut snapshot = scene();
+    snapshot.faces.push(Face { decor: Decor { boxed: Some(BoxLine { vertical: -1, horizontal: -1, color: None, style: 1 }), ..Default::default() }, ..snapshot.faces[0].clone() });
+    snapshot.mode_line = Some(TextSlice { utf8: "a b".into(), face_runs: vec![], raw: vec![], extends: vec![] });
+    snapshot.mode_line_face = FaceHandle(2);
+    snapshot.band_stretches = BandStretches { header_line: vec![], mode_line: vec![Stretch { byte: 1, width: StretchWidth::Width { width: 30, zero_ok: false } }] };
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine))
+        .filter_map(|g| Some((g.box_vertical_edges()?, matches!(g, FrameGlyph::Stretch { .. })))).collect();
+    assert_eq!(band, [(BoxVerticalEdges::Left, false), (BoxVerticalEdges::Neither, true), (BoxVerticalEdges::Neither, false), (BoxVerticalEdges::Right, true)]);
+    let x_of = |c| frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char, x, width, .. } if *char == c => Some((*x, *width)), _ => None }).unwrap();
+    let ((a, a_width), (b, _)) = (x_of('a'), x_of('b'));
+    let stretch = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Stretch { x, width, .. } if *x == a + a_width => Some(*width), _ => None }).expect("the stretch after a");
+    assert!(stretch > 0.0 && (a + a_width + stretch - b).abs() < 0.01, "b follows the stretch: {stretch} {a} {b}");
+    // A stretch that opens a run under a box with sides owns its left edge
+    // and keeps its width: no side spacer pads it.
+    snapshot.faces[2].decor.boxed = Some(BoxLine { vertical: 2, horizontal: -1, color: None, style: 1 });
+    snapshot.mode_line = Some(TextSlice { utf8: " b".into(), face_runs: vec![], raw: vec![], extends: vec![] });
+    snapshot.band_stretches.mode_line = vec![Stretch { byte: 0, width: StretchWidth::Width { width: 30, zero_ok: false } }];
+    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let mode_line = Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine);
+    let (x, width, edge) = frame.glyphs.iter().filter(|g| g.row_role() == mode_line).find_map(|g| match g {
+        FrameGlyph::Stretch { x, width, box_vertical_edges, .. } => Some((*x, *width, *box_vertical_edges)),
+        _ => None,
+    }).expect("the opening stretch");
+    assert_eq!((width, edge), (30.0, BoxVerticalEdges::Left));
+    let b = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'b', x, .. } => Some(*x), _ => None }).unwrap();
+    assert!((b - x - 30.0).abs() < 0.01, "b right after the stretch's 30 pixels: {x} {b}");
 }
 
 /// A TAB in a boxed run is in the run (its stretch carries the run's

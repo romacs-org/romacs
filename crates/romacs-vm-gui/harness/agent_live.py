@@ -53,6 +53,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  start_picker  a session started by real keys through the palette of
+             instances and models, with an effort; the first session's
+             models kept once.
   environment  a harness sees none of the editor's own launch variables.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
@@ -2316,6 +2319,120 @@ def home_keys(args, base):
         a.close()
 
 
+def start_picker(args, base):
+    """Starting a session by real keys through the palette: C-u c on the
+    home page, the directory of the project at point, a row found by typing
+    (its instance's group, the harness's reported model among the catalogue's),
+    the effort, the prompt.  The fake harnesses record what they were given.
+    The first session of an instance asks its models once and keeps only
+    their rows; with one enabled instance no palette is asked."""
+    a = Agents(args, base, 'pk')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        # A repository's subdirectory: `c' there offers it, not the root.
+        (a.root / 'repository/.git').mkdir(parents=True)
+        other = a.root / 'repository/other'
+        other.mkdir()
+        a.codex_instance()
+        kept = a.home / '.local/state/romacs/agents/models/claude.json'
+
+        first = a.start('say one')
+        until(lambda: kept.exists(), 30, 'models kept')
+        a.idle(first)
+        second = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(other)} "say two"))').strip('"')
+        a.idle(second)
+        result = {'asked': sum(1 for e in a.logged() if e.get('control') == 'initialize'),
+                  'kept': kept.read_text()}
+        kept_ok = 'claude-fake-1' in result['kept'] and 'someone@example.org' not in result['kept']
+
+        a.eval('(progn (delete-other-windows) (romacs-agents) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def prompt():
+            return parity_live.read_sexp(a.eval(
+                '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(substring-no-properties (minibuffer-prompt))))')) or ''
+
+        def contents():
+            return parity_live.read_sexp(a.eval(
+                '(with-current-buffer (window-buffer (active-minibuffer-window)) (minibuffer-contents-no-properties))'))
+
+        def asked(text):
+            until(lambda: text in prompt(), 15, f'{text} asked')
+
+        def on_project(path):
+            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+                   f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
+
+        def pick(project, typed, effort, text):
+            """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
+            on_project(project)
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+            a.keys('c')
+            asked('Project directory')
+            directory = contents()
+            a.keys('-k', 'Return')
+            asked('Agent')
+            a.keys(typed)
+            time.sleep(.5)
+            a.keys('-k', 'Return')
+            asked('Effort')
+            a.keys(effort)
+            time.sleep(.5)
+            a.keys('-k', 'Return')
+            asked('Prompt')
+            a.keys(text)
+            a.keys('-k', 'Return')
+            return directory
+
+        # The palette, as drawn.
+        on_project(other)
+        a.keys('c')
+        asked('Project directory')
+        a.keys('-k', 'Return')
+        asked('Agent')
+        time.sleep(1)
+        rows = parity_live.read_sexp(a.eval(
+            '(mapcar (function car) (romacs-agent--picker-rows))'))
+        shot = base / 'start-picker.png'
+        subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
+        result['screenshot'] = str(shot)
+        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: not prompt(), 15, 'palette closed')
+
+        result['directory'] = pick(other, 'son', 'high', 'say sonnet')
+        until(lambda: any(e.get('argv') and '--model' in e['argv'] for e in a.logged()), 30, 'claude started')
+        claude_argv = next(e['argv'] for e in a.logged() if e.get('argv') and '--model' in e['argv'])
+        pick(other, 'cod luna', 'low', 'say luna')
+        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'codex ran')
+        codex_argv = next(r['argv'] for r in a.codex_runs() if 'gpt-6-luna' in r['argv'])
+        result.update(claude_argv=claude_argv, codex_argv=codex_argv, rows=rows)
+
+        # One enabled instance: from the directory straight to the prompt.
+        a.eval('(progn (setq romacs-agent-providers (list (cons "claude" "~/.claude"))) t)')
+        on_project(other)
+        a.keys('c')
+        asked('Project directory')
+        a.keys('-k', 'Return')
+        asked('Prompt')
+        result['single'] = prompt()
+        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+
+        after = lambda argv, flag: argv[argv.index(flag) + 1] if flag in argv else None
+        result['ok'] = (result['asked'] == 1 and kept_ok
+                        and Path(result['directory'].rstrip('/')).name == other.name
+                        and after(claude_argv, '--model') == 'claude-sonnet-5-5'
+                        and after(claude_argv, '--effort') == 'high'
+                        and after(codex_argv, '-m') == 'gpt-6-luna'
+                        and 'model_reasoning_effort="low"' in codex_argv
+                        and rows[0] == 'Claude · default' and 'Claude · Fake 1' in rows
+                        and 'Codex · GPT-6.1 Sol' in rows and 'Prompt' in result['single'])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -2373,7 +2490,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

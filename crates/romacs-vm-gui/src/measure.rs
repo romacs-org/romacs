@@ -33,13 +33,17 @@ mod tests {
 
     struct Hosted { vm: Vm, engine: Rc<RefCell<romacs_layout2::LayoutEngine>>, width: u32, height: u32 }
 
-    fn hosted() -> Hosted {
+    fn hosted() -> Hosted { hosted_with(None) }
+
+    /// `hosted', on a frame of SIZE pixels where given, else 60 columns by
+    /// 20 lines.
+    fn hosted_with(size: Option<(u32, u32)>) -> Hosted {
         let engine = Rc::new(RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
         let mut vm = Vm::new();
         crate::startup::initialize(&mut vm).unwrap();
         // As the GUI does after startup Lisp chose the default face.
         let (line, column) = romacs_layout2::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
-        let (width, height) = (column * 60, line * 20);
+        let (width, height) = size.unwrap_or((column * 60, line * 20));
         vm.set_frame_geometry(width, height, line, column).unwrap();
         vm.set_layout_host(Some(Box::new(Host { engine: engine.clone() })));
         vm.eval_source(r#"(progn
@@ -544,6 +548,59 @@ mod tests {
             assert_eq!(update, h.eval("(window-end)"), "{insert}");
         }
         h.eval("(widen)");
+    }
+
+    /// A header line's `(space ...)' displays land where pinned GNU X11's
+    /// do (tests/header_line_stretch.el and .gnu): its text from the
+    /// window's left edge, over the fringe; an `:align-to' target, columns,
+    /// pixels or a window element, counted from the text area's left edge,
+    /// a left margin included; a `:width' in pixels; a target the text
+    /// passed, no room. tabulated-list.el's columns land over its rows'.
+    #[test]
+    fn header_line_stretches_land_where_gnus_do() {
+        // GNU's frame: 1216 by 876 pixels.
+        let mut h = hosted_with(Some((1216, 876)));
+        let probes: Vec<&str> = include_str!("../tests/header_line_stretch.el").lines()
+            .filter(|l| !l.is_empty() && !l.starts_with(';')).collect();
+        let gnu: Vec<&str> = include_str!("../tests/header_line_stretch.gnu").lines().filter(|l| !l.starts_with(';')).collect();
+        assert_eq!(probes.len(), gnu.len());
+        // GNU's metrics: 10-pixel columns and 8-pixel fringes (the rows'
+        // height is not compared).
+        assert_eq!(gnu[2], "(10 25 (8 8 nil nil))");
+        // A window system's frame, whose windows have fringes.
+        h.vm.set_display_host(Some(Box::new(crate::fonts::Display::new().unwrap())));
+        assert!(h.vm.open_display());
+        h.eval("(modify-frame-parameters nil '((left-fringe . 8) (right-fringe . 8)))");
+        assert_eq!(h.eval("(list (frame-char-width) (window-fringes))"), "(10 (8 8 nil nil))");
+        // posn-at-x-y is GNU's only: the band is read from the paint.
+        // One window across the frame, as GNU's.
+        h.eval("(delete-other-windows-internal)");
+        assert_eq!(h.eval("(window-pixel-width)"), "1216");
+        // No GNU faces.el: the header line's face is the default's, no box.
+        h.eval("(progn (defun probe-header (_) nil) (unless (fboundp (quote posn-x-y)) (defun posn-x-y (position) (nth 2 position))))");
+        // Each GNU entry `("C" X)': its character and x, but a stretch's
+        // (` '), which paints no glyph here.
+        let glyphs_of = |answer: &str| -> Vec<(char, i64)> {
+            answer.split("(\"").skip(1).filter_map(|entry| {
+                let (ch, rest) = entry.split_once("\" ")?;
+                let x = rest.split(')').next()?.parse().ok()?;
+                Some((ch.chars().next()?, x)).filter(|(c, _)| *c != ' ')
+            }).collect()
+        };
+        for (index, probe) in probes.iter().enumerate() {
+            // The real tabulated-list.el needs GNU's Lisp; its explicit twin follows it.
+            if index < 3 || probe.contains("(tabulated-list-mode)") { continue; }
+            let answer = h.eval(probe);
+            let painted: Vec<(char, i64)> = h.paint().glyphs.iter().filter(|g| g.5 == GlyphRowRole::HeaderLine)
+                .map(|g| (g.0, g.1 as i64)).collect();
+            assert_eq!(painted, glyphs_of(gnu[index]), "{probe}");
+            // A tabulated list's rows: their columns, which posn-at-point
+            // gives from the text area as GNU's does.
+            if gnu[index].starts_with("(((") {
+                let rows = &gnu[index][gnu[index].rfind('(').unwrap()..gnu[index].len() - 1];
+                assert_eq!(answer, format!("(nil {rows})"), "{probe}");
+            }
+        }
     }
 
     /// A header line paints above the text, and pos-visible-in-window-p

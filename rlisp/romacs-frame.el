@@ -336,7 +336,7 @@ active one, so even with FORCE it stays (VM2-WIN5)."
   "Stop Emacs and return to the superior process.
 Run `suspend-hook' first and `suspend-resume-hook' after the process
 continues.  STUFFSTRING has nowhere to go: Romacs has no terminal input."
-  (interactive)
+  (interactive "")
   (when stuffstring (unless (stringp stuffstring) (signal 'wrong-type-argument (list 'stringp stuffstring))))
   (run-hooks 'suspend-hook)
   (signal-process 0 'SIGTSTP)

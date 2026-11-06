@@ -6,7 +6,7 @@ session (private HOME/XDG/TMPDIR, headless labwc, keys typed with wtype
 into that compositor only) on the same grid and font, show two buffers
 whose text is partly invisible: a notmuch-show thread over the
 synthetic store (notmuch_fixture.py) with every other message
-collapsed (a thread without an image part), and an Org buffer with every
+collapsed (a thread with an image part), and an Org buffer with every
 other subtree folded, its faces one height.  Under
 `scroll-conservatively' 101, with `scroll-margin' 0 and 3, each types
 C-n from the top to the end and C-p back, one key at a time; a
@@ -33,13 +33,11 @@ import notmuch_fixture
 
 ANCHOR = int(time.time()) // 60 * 60
 
-# Records that differ from GNU's for reasons other than scrolling, by
-# scene and margin.  Held keys must still never scroll back there.
-KNOWN = {
-    ('notmuch', 0): 'GNU lays the row holding a collapsed message (hidden body, then its summary line) out 28 px tall, Romacs 25: rows below it end lower, so GNU scrolls a key sooner',
-    ('notmuch', 3): 'as notmuch 0',
-    ('org', 3): 'at the end of an Org buffer GNU lets point into the first bottom-margin row and scrolls with it there; plain, continued and truncated text in point_visibility.rs scroll as Romacs does',
-}
+# Records known to differ from GNU's, by scene and margin.  Keys must
+# still never scroll back there.
+END_MARGIN = ('near the end of a buffer GNU lets point into the first bottom-margin row and scrolls with it there; '
+              'plain, continued and truncated text in point_visibility.rs scroll as Romacs does')
+KNOWN = {('notmuch', 3): END_MARGIN, ('org', 3): END_MARGIN}
 
 SCENES = r'''
 (require 'cl-lib)
@@ -57,10 +55,9 @@ SCENES = r'''
         (setq pos next)))
     lines))
 (defun si-notmuch ()
-  ;; The longest thread none of whose messages has an image part.
-  (let* ((threads (notmuch-call-notmuch-sexp "search" "--format=sexp" "--format-version=5" "--output=summary" "not mimetype:image/png"))
-         (whole (cl-remove-if-not (lambda (thread) (eql (plist-get thread :matched) (plist-get thread :total))) threads))
-         (thread (car (sort whole (lambda (a b) (> (plist-get a :total) (plist-get b :total)))))))
+  ;; The longest thread with an image part.
+  (let* ((threads (notmuch-call-notmuch-sexp "search" "--format=sexp" "--format-version=5" "--output=summary" "mimetype:image/png"))
+         (thread (car (sort threads (lambda (a b) (> (plist-get a :total) (plist-get b :total)))))))
     (notmuch-show (concat "thread:" (plist-get thread :thread)))
     (let ((n 0))
       (notmuch-show-mapc (lambda () (notmuch-show-message-visible (notmuch-show-get-message-properties) (cl-evenp (cl-incf n))))))

@@ -176,7 +176,8 @@ nil or a list) of the selected window, clear of `scroll-margin'."
            ;; GNU's pixel branches, where a host lays the window out.
            (start (or (and (or center (< iarg 0))
                            (romacs--recenter-start (and (not center) iarg) margin ht))
-                      (save-excursion (vertical-motion (- line) window) (point)))))
+                      ;; Short of lines, the iterator ends at BEGV, shown or not.
+                      (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point))))))
       ;; optional_new_start: redisplay keeps it while point shows.
       (set-window-start window start t)
       ;; Zero in lines or pixels alike; VM2 keeps it in pixels.
