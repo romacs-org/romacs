@@ -456,6 +456,7 @@ buffer, for SESSION: its end, from a prompt on."
 (define-derived-mode romacs-agent-history-mode romacs-agent-chat-mode "Agent history"
   "A harness's own transcript, read-only: \\[romacs-agent-history-resume-this] goes on with it.
 \\{romacs-agent-history-mode-map}"
+  :interactive nil
   (setq-local desktop-save-buffer nil)
   (setq buffer-read-only t))
 
@@ -503,7 +504,7 @@ with it, when there is one, attached or resumed."
 
 (defun romacs-agent-history-resume-this ()
   "Go on with this transcript as a Romacs session."
-  (interactive)
+  (interactive nil romacs-agent-history-mode)
   (let ((item romacs-agent-history--item) (view (current-buffer)))
     (romacs-agent-history-resume item)
     (kill-buffer view)))

@@ -630,6 +630,13 @@ fn romacs_theme_author_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
 }
 
+/// rlisp's commands declare where they apply and its key hints come from
+/// bindings (tests/romacs-idioms-test.el).
+#[test]
+fn romacs_idioms_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-idioms-test.el");
+}
+
 /// `omarchy-mode' over a fake Omarchy state directory
 /// (tests/romacs-omarchy-test.el).
 #[test]

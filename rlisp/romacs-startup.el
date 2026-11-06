@@ -44,11 +44,14 @@
     (define-key map [7] 'romacs-gui-answer-no)
     (use-local-map map))
   (romacs-gui-echo
-   (if (eq action 'save)
-       "File changed on disk; overwrite it? (y/n; C-g cancels)"
-     (if (and (fboundp 'romacs-term-any-running-p) (romacs-term-any-running-p))
-         "Running terminals exist; close processes and discard changes? (y/n; C-g cancels)"
-       "Modified file buffers exist; discard unsaved changes? (y/n; C-g cancels)"))))
+   (substitute-command-keys
+    (concat
+     (if (eq action 'save)
+         "File changed on disk; overwrite it?"
+       (if (and (fboundp 'romacs-term-any-running-p) (romacs-term-any-running-p))
+           "Running terminals exist; close processes and discard changes?"
+         "Modified file buffers exist; discard unsaved changes?"))
+     " (\\`y'/\\`n'; \\`C-g' cancels)"))))
 (defun romacs-gui-answer-no ()
   (interactive)
   (when romacs-gui-pending
@@ -277,3 +280,13 @@ and no window shows it yet.  A file the visitor refuses gives the
     (if (verify-visited-file-modtime (current-buffer))
         (romacs-gui-write-visited-buffer)
       (romacs-gui-confirm 'save))))
+;; The workspace's keys, which a session with GNU's Lisp binds to GNU's
+;; commands, and a confirmation's two answers: M-x has GNU's names for the
+;; first, and nothing to answer for the second.
+(let ((commands '(romacs-gui-answer-yes romacs-gui-answer-no romacs-gui-quit romacs-gui-kill-buffer
+                  romacs-gui-other-window romacs-gui-split-below romacs-gui-split-right
+                  romacs-gui-delete-window romacs-gui-delete-other-windows romacs-gui-next-line
+                  romacs-gui-previous-line romacs-gui-save-buffer)))
+  (while commands
+    (put (car commands) 'completion-predicate 'ignore)
+    (setq commands (cdr commands))))

@@ -225,7 +225,7 @@ their buffers' names, or with `wait' once every one is done."
     (if (and buffers (eq (gethash "wait" params) t))
         (progn
           (romacs-server--wait (romacs-mcp-hold) peer buffers)
-          (message "When done with a buffer, type C-x #")
+          (message "%s" (substitute-command-keys "When done with a buffer, type \\[server-edit]"))
           nil)
       (romacs-mcp--object "buffers" (vconcat (mapcar #'buffer-name buffers))))))
 
@@ -339,7 +339,9 @@ beside its build.json), or nil."
 (defun romacs-server-build-notice (true)
   "What the server says when the build at TRUE was installed."
   (let ((label (romacs-server--build-label true))
-        (switch (if (fboundp 'romacs-restart) "M-x romacs-restart to switch" "quit and relaunch to switch")))
+        (switch (if (fboundp 'romacs-restart)
+                    (substitute-command-keys "\\[romacs-restart] to switch")
+                  "quit and relaunch to switch")))
     (if label (format "Romacs %s installed; %s" label switch)
       (format "A newer Romacs build is installed; %s" switch))))
 
