@@ -19,6 +19,8 @@ its tools as a real harness does, and answers control requests.  Its
   ask COMMAND        ask the host to approve Bash COMMAND (can_use_tool) and
                      report its answer
   later SECONDS CMD  run CMD after SECONDS
+  agent SECONDS TEXT run a subagent of the harness's own (the Agent tool)
+                     described by TEXT for SECONDS
   spawn FILE         start a detached grandchild that appends to FILE every
                      0.2 s (the unit's cgroup must end it)
 
@@ -89,6 +91,7 @@ class Harness:
         self.mcp = self.connect(argument('--mcp-config')) if argument('--mcp-config') else None
         self.inbox = queue.Queue()
         self.interrupted = threading.Event()
+        self.busy = False
         self.approvals = {}
         self.turn = 0
 
@@ -189,6 +192,17 @@ class Harness:
             log(approval=request_id, answer=answer)
             self.stream(f"approval {answer.get('behavior')}")
             return self.result(json.dumps(answer))
+        if verb == 'agent':
+            seconds, _, description = rest.partition(' ')
+            use = f'toolu_{os.getpid()}_{time.time_ns()}'
+            emit({'type': 'assistant', 'parent_tool_use_id': None,
+                  'message': {'id': use, 'content': [{'type': 'tool_use', 'id': use, 'name': 'Agent', 'input': {
+                      'description': description, 'subagent_type': 'general-purpose', 'prompt': description}}]}})
+            time.sleep(float(seconds))
+            emit({'type': 'user', 'parent_tool_use_id': None,
+                  'message': {'content': [{'type': 'tool_result', 'tool_use_id': use, 'content': 'finished'}]}})
+            self.stream('agent done')
+            return self.result('agent done')
         if verb == 'later':
             seconds, _, command = rest.partition(' ')
             time.sleep(float(seconds))
@@ -229,7 +243,15 @@ class Harness:
             message = json.loads(line)
             if message.get('type') == 'control_request':
                 subtype = message['request'].get('subtype')
-                log(control=subtype)
+                selecting = subtype in ('set_model', 'apply_flag_settings')
+                log(control=subtype, request=message['request'], busy=self.busy)
+                how = os.environ.get('FAKE_SELECT') if selecting else None
+                if how == 'silent':
+                    continue
+                if how == 'error':
+                    emit({'type': 'control_response', 'response': {'subtype': 'error', 'error': 'refused',
+                                                                   'request_id': message['request_id']}})
+                    continue
                 answer = INITIALIZED if subtype == 'initialize' else {'still_queued': []}
                 emit({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': message['request_id'],
                                                                'response': answer}})
@@ -251,8 +273,10 @@ class Harness:
             text = self.inbox.get()
             if text is None:
                 return 0
+            self.busy = True
             self.init()
             self.run(text)
+            self.busy = False
 
 
 if __name__ == '__main__':

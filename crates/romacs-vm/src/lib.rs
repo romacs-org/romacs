@@ -1280,6 +1280,9 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
+    /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
+    /// Off in redisplay, which never unwinds half done.
+    motion_quit: bool,
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -1580,6 +1583,8 @@ pub struct Vm {
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
     doomed_finalizers: Vec<Value>,
+    /// A collection ended since `post-gc-hook' last ran (`Vm::post_gc_runs').
+    post_gc_due: bool,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1619,6 +1624,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     display_state,
     window_state,
     world_version,
+    motion_quit,
     #[cfg(test)] variable_read_probes,
     #[cfg(test)] speculative_hits,
     #[cfg(test)] inline_hits,
@@ -1723,6 +1729,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     external_roots,
     finalizers,
     doomed_finalizers,
+    post_gc_due,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1803,6 +1810,7 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
+            motion_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]
@@ -1944,6 +1952,7 @@ impl Vm {
             external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: vec![],
+            post_gc_due: false,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -3477,6 +3486,11 @@ impl Vm {
         let slot = self.slot(prim::ECHO_AREA_MESSAGE);
         self.slots[slot].value = value;
     }
+    /// Whether the echo area shows a message for `current-message'.
+    pub fn echo_area_message_shown(&mut self) -> bool {
+        let slot = self.slot(prim::ECHO_AREA_MESSAGE);
+        self.slots[slot].value != Value::NIL
+    }
     /// Unwinding pops every binding; one whose restore signals keeps its
     /// value, as GNU's popped entry does. That signal is dropped and the
     /// escape already in flight kept (see `unbind_one`).
@@ -3782,6 +3796,10 @@ impl Vm {
                 data::Object::Bignum(n) => Ok(n.to_string()),
                 data::Object::BoolVector(v) => Ok(v.printed()),
                 data::Object::String(s) => Ok(serde_json::to_string(s.as_str()).unwrap()),
+                data::Object::RawString(s) if !s.is_multibyte() => Ok(format!(
+                    "#u8({})",
+                    s.bytes().iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
+                )),
                 data::Object::RawString(_) => Err("not-unicode-string: JSON display".into()),
                 data::Object::Buffer(_) => Ok("#<buffer>".into()),
                 data::Object::Window(w) => Ok(format!("#<window {}>", w.id)),

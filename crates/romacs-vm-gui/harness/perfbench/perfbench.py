@@ -69,8 +69,9 @@ Workloads (--quick runs those marked q):
              (kill, yank, undo, isearch, Org); then, with Romacs's shipped
              defaults on, what README's lead quotes: find-file of xdisp.c and of
              a generated 15 MB header to the window's final faces,
-             vc-print-root-log over the whole history (limit lifted in both;
-             commits, complete, first screen, median key while it streams),
+             vc-print-root-log over upstream master's whole history (limit
+             lifted in both; commits, complete, first screen, median key while
+             it streams),
              and a theme switch among each engine's own shipped themes, cycled
              and on first visit, none being shipped by both.  Wall runs
              from the key to the result; block is the longest gap between ticks
@@ -145,6 +146,9 @@ import readme  # noqa: E402
 import real_init  # noqa: E402
 
 PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
+# Upstream master: the whole-history row counts GNU's commits and no others,
+# and PIN carries a branch's on top of them.
+UPSTREAM = 'b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b'
 TREE = f'emacs-{PIN[:8]}'
 PINNED = {'src/fileio.c': '0705ed5b4f93c71a45937d7de737bb54d4ae3c5cef1e565da779f4875f560c92',
           'lisp/subr.el': '55f8319dc1689044b128768c3372db6664397d61afda284bac941c687130bf32',
@@ -1060,8 +1064,11 @@ def session_repo(ctx):
     header = ctx.work / 'generated.h'
     header.write_text(generated_header(HEADER_LINES))
     ctx.header_bytes = header.stat().st_size
-    ctx.history_commits = int(git('rev-list', '--count', 'HEAD', cwd=repo))
-    return repo, agenda, header
+    history = ctx.work / 'session-history'
+    git('clone', '-q', '--shared', '--no-checkout', str(ctx.fixtures / TREE), str(history))
+    git('-c', 'advice.detachedHead=false', 'checkout', '-q', UPSTREAM, cwd=history)
+    ctx.history_commits = int(git('rev-list', '--count', 'HEAD', cwd=history))
+    return repo, agenda, header, history
 
 
 def generated_header(lines):
@@ -1129,7 +1136,7 @@ def session_medians(samples, checks):
 
 def session_start(session, ctx, engine, inputs, comparing):
     """SESSION with its Lisp loaded and its inputs set; COMPARING, in fido-vertical."""
-    repo, agenda, header = inputs
+    repo, agenda, header, history = inputs
     cycle, visits = SESSION_THEMES[engine]
     symbols = lambda names: f"'({' '.join(names)})"  # noqa: E731
     session.ask(f'(progn (load {parity_live.lisp_string(str(SESSION_LISP))} nil t t)'
@@ -1137,6 +1144,7 @@ def session_start(session, ctx, engine, inputs, comparing):
                 f' perfbench-session-directory {parity_live.lisp_string(str(ctx.fixtures / "d5000") + "/")}'
                 f' perfbench-session-agenda {parity_live.lisp_string(str(agenda))}'
                 f' perfbench-session-header {parity_live.lisp_string(str(header))}'
+                f' perfbench-session-history {parity_live.lisp_string(str(history))}'
                 f' perfbench-session-cycle {symbols(cycle)} perfbench-session-visits {symbols(visits)}'
                 ' auto-save-default nil create-lockfiles nil make-backup-files nil)'
                 f' {FIDO + " (setq icomplete-compute-delay 0)" if comparing else ""} (blink-cursor-mode -1) t)')
@@ -1889,6 +1897,7 @@ def main():
     meta['elb_native'] = ctx.elb_native
     meta['header_bytes'] = ctx.header_bytes
     meta['history_commits'] = ctx.history_commits
+    meta['history_commit'] = UPSTREAM
     previous = previous_results(out_root, args.previous, run_dir)
     meta['previous'] = str(previous) if previous else None
     results = {'meta': meta, 'skipped': ctx.skipped,

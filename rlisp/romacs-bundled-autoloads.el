@@ -145,6 +145,8 @@ they are typed: any other key closes it and runs as usual.
 (fn THING &key SIBLINGS CONTEXT)")
 (autoload 'romacs-attach-test-host "romacs-attach"
 "Show a composer-shaped buffer that takes attachments." t)
+(put 'romacs-attach-file 'completion-predicate (lambda (_symbol buffer) (with-current-buffer buffer (or (bound-and-true-p romacs-attach--tray) (derived-mode-p 'message-mode 'org-mode)))))
+(put 'romacs-attach-edit 'completion-predicate (lambda (_symbol buffer) (with-current-buffer buffer (bound-and-true-p romacs-attach-items))))
 (register-definition-prefixes "romacs-attach" '("romacs-attach-"))
 
 
@@ -236,7 +238,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-defaults.el
 
-(register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
+(register-definition-prefixes "romacs-defaults" '("romacs-defaults-" "vc-log-show-limit"))
 
 
 ;;; Generated autoloads from romacs-dired.el
@@ -356,6 +358,11 @@ This function is part of the `fzf' completion style.
 ;;; Generated autoloads from romacs-install-command.el
 
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
+
+
+;;; Generated autoloads from romacs-key-hint.el
+
+(register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))
 
 
 ;;; Generated autoloads from romacs-keymap.el

@@ -16,9 +16,11 @@
 //! unless it steals the attachment.
 //!
 //! The socket speaks lines: the server's first is `{"attach":{"from":N,
-//! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness. With
-//! `"journal":LINE` beside it, that line is journaled in its place: a message
-//! carrying image bytes is kept as a reference, as a replay reads every record.
+//! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness and
+//! `{"note":OBJECT}` for a record of the server's own: journaled in its
+//! place among the harness's lines, never written to it. With `"journal":LINE`
+//! beside a write, that line is journaled in its place: a message carrying
+//! image bytes is kept as a reference, as a replay reads every record.
 //!
 //! `--note JSON` journals `{"seq":N,"t":SECS,"note":JSON}` as the run's
 //! first record, before anything the harness writes: never written to
@@ -116,6 +118,16 @@ impl Shared {
         }
     }
 
+    /// Journal the attached server ID's NOTE; a server whose attachment
+    /// was stolen journals nothing more.
+    fn note(&mut self, id: u64, note: &Json) -> bool {
+        if self.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return false; }
+        self.seq += 1;
+        let entry = json!({"seq": self.seq, "t": now(), "note": note}).to_string();
+        self.append(&entry, false);
+        true
+    }
+
     fn output(&mut self, line: &str) {
         self.seq += 1;
         let sync = line.contains("\"type\":\"result\"");
@@ -185,7 +197,12 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream) {
     let Some(Ok(first)) = lines.next() else { return };
     let Some(id) = serde_json::from_str::<Json>(&first).ok().and_then(|r| attach(&shared, stream, &r)) else { return };
     for line in lines.map_while(Result::ok) {
-        let Some((text, journaled)) = serde_json::from_str::<Json>(&line).ok().as_ref().and_then(lines_of) else { continue };
+        let Ok(request) = serde_json::from_str::<Json>(&line) else { continue };
+        if let Some(note) = request.get("note") {
+            if !shared.lock().unwrap_or_else(|e| e.into_inner()).note(id, note) { return; }
+            continue;
+        }
+        let Some((text, journaled)) = lines_of(&request) else { continue };
         // The harness's stdin first, then the journal briefly: lines are
         // journaled in the order they are written, and a writer blocked on
         // a full stdin never holds the journal (the output, the exit).
@@ -406,6 +423,26 @@ mod tests {
         let kept: Json = serde_json::from_str(&input_record(3, text, None)).unwrap();
         assert_eq!(kept["in"]["prompt"], json!(text));
         assert_eq!(kept["in"]["images"], json!([]));
+    }
+
+    #[test]
+    fn a_note_is_journaled_for_the_attached_server_alone() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-note-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let journal = OpenOptions::new().append(true).open(&path).unwrap();
+        let (server, ours) = UnixStream::pair().unwrap();
+        let mut shared = Shared { seq: 4, journal, path: path.clone(), attached: Some((1, server)), next_attachment: 1,
+                                  stdin: Arc::new(Mutex::new(None)) };
+        let note = json!({"type": "selection"});
+        assert!(shared.note(1, &note));
+        assert!(!shared.note(2, &note), "a stolen attachment notes nothing");
+        let seen: Json = serde_json::from_str(&BufReader::new(ours).lines().next().unwrap().unwrap()).unwrap();
+        assert_eq!((seen["seq"].as_u64(), &seen["note"]), (Some(5), &note));
+        assert_eq!(last_seq(&path), 5);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

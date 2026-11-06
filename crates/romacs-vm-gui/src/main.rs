@@ -24,6 +24,7 @@ mod eval_last_sexp;
 mod presentation;
 mod latency;
 mod echo;
+mod title;
 mod prompt;
 mod terminal_service;
 mod terminal_wait;
@@ -1339,6 +1340,7 @@ fn evaluate(
         paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
+    title::consider(&mut vm, sender, &host);
     let mut live_presentation = presentation::Presentation::new();
     if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
         // Not drawn (hidden as it starts): the loop waits for it, stalled.
@@ -1485,6 +1487,7 @@ fn evaluate(
                 let snapshot_ns = if !live {
                     let snapshot_start = Instant::now();
                     let next = frame(&mut vm, g1, width, height)?;
+                    title::consider(&mut vm, sender, &host);
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
@@ -1568,6 +1571,7 @@ fn evaluate(
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
                 let next = frame(&mut vm, g1, width, height)?;
+                title::consider(&mut vm, sender, &host);
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
@@ -1665,6 +1669,7 @@ fn evaluate(
         // An evaluation may mutate before signalling; its error must not hide that paint.
         vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
+        title::consider(&mut vm, sender, &host);
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {

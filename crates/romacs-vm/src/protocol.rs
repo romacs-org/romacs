@@ -129,6 +129,7 @@ impl Vm {
                 }
                 data::Object::Bignum(n) => Ok(json!({"type":"bignum","value":n.to_string()})),
                 data::Object::String(s) => Ok(json!({"type":"string","value":s.as_str()})),
+                data::Object::RawString(s) if !s.is_multibyte() => Ok(json!({"type":"bytes","value":s.bytes()})),
                 data::Object::RawString(_) => Err("not-unicode-string: JSON value".into()),
                 data::Object::Bytes(b) => Ok(json!({"type":"bytes","value":b})),
                 data::Object::BoolVector(b) => Ok(json!({"type":"bool-vector","length":b.len,"bytes":b.bytes})),

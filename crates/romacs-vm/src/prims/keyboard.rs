@@ -16,7 +16,8 @@ use crate::prim::leaf::Kind;
 /// (prims/minibuf.rs), whose recursive edit is this command loop, and
 /// window.c's window change functions, which the loop's redisplays run
 /// (host_input.rs).
-const LISP_HALF: [&str; 3] = [
+const LISP_HALF: [&str; 4] = [
+    super::HOOKS_LISP,
     include_str!("../../../../rlisp/vm/keyboard.el"),
     include_str!("../../../../rlisp/vm/minibuf.el"),
     include_str!("../../../../rlisp/vm/window-change.el"),

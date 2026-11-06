@@ -106,6 +106,12 @@ pub trait HostInput {
     fn native_window(&mut self, _action: NativeWindow) -> Option<bool> {
         None
     }
+
+    /// Where the pointer is over the host frame, in pixels: GNU's
+    /// `mouse_position_hook'.  None with no pointer there, or no display.
+    fn pointer(&mut self) -> Option<(i32, i32)> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -184,8 +190,9 @@ impl Vm {
             }
             HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
-                let quit = self.intern("quit");
-                self.propagated_escape = Some(threaded::Escape::Signal(quit, Value::NIL));
+                // Its data tells it from a C-g's (`romacs--host-event').
+                let (quit, closed) = (self.intern("quit"), self.intern("frame-closed"));
+                self.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
                 Err("quit: frame closed while reading input".into())
             }
         }

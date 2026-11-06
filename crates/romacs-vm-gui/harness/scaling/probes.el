@@ -119,6 +119,12 @@ thousandth a stack mark."
 ;; N Omarchy themes Romacs does not ship, made one after another, the first
 ;; made again: Custom's theme list and `features' grow by one each.  Sessions
 ;; meet tens of them.
+;; Each distinct hint made once, then found again, the oldest first.
+(scaling-probe key-hint-entries :n 2000
+  :setup (progn (require 'romacs-key-hint) (scaling--names "\\`C-x' hint" n))
+  :body (progn (dolist (text it) (romacs-key-hint text))
+               (dolist (text it) (romacs-key-hint text))))
+
 (scaling-probe omarchy-generated-themes :n 40
   :setup (progn
            (require 'romacs-omarchy)
@@ -530,6 +536,50 @@ thousandth a stack mark."
           (length (buffer-list))
           (dolist (name it) (kill-buffer name))))
 
+;; Output arriving at the end of a large displayed buffer, as a process
+;; filter inserts it, redisplayed after each insertion: what the display
+;; reads of the text costs what it shows, not the buffer's size.
+(scaling-probe display-appended-text :gui t :n 20000 :k 8 :steps 20 :budget 0.1
+  :setup (switch-to-buffer (scaling--lines-buffer "scaling-appended" n))
+  :body (with-current-buffer it
+          (save-excursion (goto-char (point-max)) (insert "an appended line\n"))
+          ;; Point moves, so each step paints.
+          (forward-char 1)))
+
+;; The same with the window at the end, its lines numbered.
+(scaling-probe display-appended-tail :gui t :n 20000 :k 8 :steps 20 :budget 0.1
+  :setup (let ((buffer (scaling--lines-buffer "scaling-appended-tail" n)))
+           (switch-to-buffer buffer)
+           (display-line-numbers-mode 1)
+           (goto-char (point-max))
+           (forward-line -30)
+           buffer)
+  :body (with-current-buffer it
+          (save-excursion (goto-char (point-max)) (insert "an appended line\n"))
+          (forward-char 1)))
+
+;; `vertical-motion' up N lines, as `recenter' does to place point: each
+;; line walked once, not once for each line stepped back.
+(scaling-probe vertical-motion-up :gui t :n 200 :k 8 :steps 1
+  :setup (switch-to-buffer (scaling--lines-buffer "scaling-motion" (* 2 n)))
+  :body (with-current-buffer it
+          (goto-char (point-max))
+          (vertical-motion (- n))))
+
+;; The same over long lines a display property hides, one row each.
+(scaling-probe vertical-motion-up-hidden :gui t :n 100 :k 8 :steps 1
+  :setup (with-current-buffer (get-buffer-create "scaling-motion-hidden")
+           (erase-buffer)
+           (dotimes (_ (* 2 n))
+             (let ((start (point)))
+               (insert (make-string 400 ?x))
+               (put-text-property (1+ start) (point) 'display "")
+               (insert "\n")))
+           (switch-to-buffer (current-buffer)))
+  :body (with-current-buffer it
+          (goto-char (point-max))
+          (vertical-motion (- n))))
+
 (scaling-probe markers :n 2000
   :setup (with-current-buffer (scaling--lines-buffer " scaling-markers" 200) (current-buffer))
   :body (with-current-buffer it
@@ -783,6 +833,20 @@ thousandth a stack mark."
           (dotimes (i n) (push (run-with-timer (+ 3600 i) nil #'ignore) timers))
           (dotimes (_ 20) (sit-for 0))
           (mapc #'cancel-timer timers)))
+
+;;;; Input methods (rlisp/vm/keyboard.el `romacs--read-char')
+
+;; One key whose method returns N events: they queue on
+;; `unread-post-input-method-events' and drain one command each, to the
+;; end of a keyboard macro.
+(scaling-probe input-method-events :n 2000
+  :setup (let ((buffer (get-buffer-create " *scaling-input*")))
+           (with-current-buffer buffer (buffer-disable-undo))
+           (set-window-buffer (selected-window) buffer)
+           buffer)
+  :body (let ((input-method-function (lambda (_) (make-list n ?x))))
+          (execute-kbd-macro "a")
+          (cl-assert (= (buffer-size it) n))))
 
 ;;;; Mode line (rlisp/romacs-mode-line.el)
 
@@ -1784,6 +1848,24 @@ thousandth a stack mark."
                 (cl-loop for i below n collect (list (format "claude-%d" i) :display "Claude"
                                                      :config-dir (format "/tmp/claude-config-%d" i))))
   :body (let ((romacs-agent-providers it)) (romacs-agent--picker-rows)))
+
+;; What runs under a session of N delegated tasks: rows and a summary, made
+;; once per batch of their events, however many arrive.
+(scaling-probe agent-children :n 1000
+  :setup (progn (scaling--agent) (require 'romacs-agent-ui)
+                (let ((parent (romacs-agent--make :id "scaling-parent" :harness 'claude :provider "claude")))
+                  (puthash "scaling-parent" parent romacs-agent--sessions)
+                  (dotimes (i n)
+                    (let ((child (romacs-agent--make :id (format "scaling-child-%d-%d" n i) :harness 'codex
+                                                     :provider "codex" :state 'running
+                                                     :options '(:parent "scaling-parent"))))
+                      (puthash (romacs-agent-id child) child romacs-agent--sessions)
+                      (romacs-agent--index child)))
+                  (romacs-agent-children parent)))
+  :body (progn
+          (dolist (child it)
+            (romacs-agent-ui--track-children child (list :type 'done)))
+          (romacs-agent-ui--children-flush)))
 
 ;; N drivers, each a T3 driver name, and T3's settings of N instances of
 ;; them, read anew: each instance's harness by an index built once.

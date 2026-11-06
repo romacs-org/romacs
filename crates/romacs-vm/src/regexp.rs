@@ -747,7 +747,7 @@ impl Vm {
                     if aa < t.restriction.start.0 || bb > t.restriction.end.0 || aa > bb {
                         return Err(fail());
                     }
-                    Object::Bytes(t.bytes[aa..bb].to_vec())
+                    data::unibyte_object(t.bytes[aa..bb].to_vec())
                 }
                 _ => unreachable!("buffer_index validates"),
             }
@@ -1153,11 +1153,22 @@ thread_local! {
     /// The user signals `debug-on-event' named when that search began
     /// (`Vm::debug_event_mask`): no Lisp runs inside a match to change it.
     static REGEXP_DEBUG_EVENTS: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    /// For the search's extent, what an inspection reads: the matcher touches
+    /// neither, and the search runs no Lisp.
+    static REGEXP_FRAMES: std::cell::Cell<Option<(*const crate::backtrace::Backtrace, *const Vec<String>)>> = const { std::cell::Cell::new(None) };
 }
 
 /// The matcher's quit probe (romacs_regex_engine::host): a C-g the host
 /// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
+    // An inspection leaves the match alone: only a real quit stops it.
+    if crate::host::inspect_pending() && let Some((backtrace, symbols)) = REGEXP_FRAMES.with(std::cell::Cell::get) {
+        let generation = crate::host::inspect_generation();
+        // SAFETY: set for the extent of one search by the VM that owns them
+        // (`ArmedQuit`); nothing changes them while it matches.
+        let json = unsafe { crate::inspect::snapshot_names(&*backtrace, &*symbols, "regexp") };
+        crate::host::inspect_publish(generation, json);
+    }
     // SAFETY: set only for the extent of one search by the VM that owns the
     // signal (`ArmedQuit`), which outlives the search.
     REGEXP_QUIT.with(|signal| { let signal = signal.get(); !signal.is_null() && unsafe { (*signal).due() } })
@@ -1171,6 +1182,7 @@ impl Drop for ArmedQuit {
         if self.0 {
             REGEXP_QUIT.with(|signal| signal.set(std::ptr::null()));
             REGEXP_DEBUG_EVENTS.with(|events| events.set(0));
+            REGEXP_FRAMES.with(|frames| frames.set(None));
         }
     }
 }
@@ -1182,14 +1194,16 @@ impl Vm {
     /// `quit'. A C-g only while `inhibit-quit' is nil; a debug event
     /// whatever it is, since handle_user_signal clears it.
     fn arm_regexp_quit(&self) -> ArmedQuit {
-        let reached = self.quit.busy() && self.compile_depth == 0 && self.expanding.is_empty();
+        let reached = self.native_quit_reached();
         let presses = reached && std::sync::Arc::strong_count(&self.quit) > 1 && self.quit_variables()[1] == Value::NIL;
         let debug = if reached { self.debug_event_mask() } else { 0 };
-        let armed = presses || debug != 0;
+        let inspected = crate::host::inspect_enabled();
+        let armed = presses || debug != 0 || inspected;
         if armed {
             let quit = if presses { std::sync::Arc::as_ptr(&self.quit) } else { std::ptr::null() };
             REGEXP_QUIT.with(|signal| signal.set(quit));
             REGEXP_DEBUG_EVENTS.with(|events| events.set(debug));
+            if inspected { REGEXP_FRAMES.with(|frames| frames.set(Some((&raw const self.backtrace, &raw const self.symbol_names)))); }
             regex::host::set_quit_probe(Some(regexp_quit_probe));
         }
         ArmedQuit(armed)

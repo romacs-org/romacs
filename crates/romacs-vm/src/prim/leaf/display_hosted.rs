@@ -22,6 +22,12 @@ use romacs_layout_input::StretchWidth;
 
 /// The elements one host measurement covers past the first it needs.
 const CHUNK: usize = 4096;
+/// The reach of the measurement after a reset's first.
+const FIRST_REACH: usize = 128;
+/// The elements measured at once past any line end: faces and layout run
+/// with no poll, so a huge single line goes in batches. Each batch shapes
+/// apart, one seam per BATCH elements of such a line.
+const BATCH: usize = 16384;
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
 /// Whether FAULT is such a refusal: what the display iterator cannot yet
@@ -183,7 +189,11 @@ pub(super) struct Hosted<'l, 'a> {
     /// The host's advance and own row height for the elements from BASE
     /// on, by index since the last reset.
     base: usize,
-    glyphs: Vec<(i64, i64, i64)>,
+    glyphs: Vec<(i64, i64, i64, bool)>,
+    /// The elements the next measurement reaches at least: CHUNK, for each
+    /// measurement has a fixed cost, but none past the line after motion
+    /// reseats, as it walks a line at a time, then doubling to CHUNK.
+    reach: usize,
     /// The default face's row height, which every host row reaches, and
     /// its ascent.
     pub default_height: i64,
@@ -192,43 +202,45 @@ pub(super) struct Hosted<'l, 'a> {
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, base: 0, glyphs: vec![], default_height: 0, default_ascent: 0 }
+        Hosted { source, base: 0, glyphs: vec![], reach: CHUNK, default_height: 0, default_ascent: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
-        (self.base, self.glyphs) = (0, vec![]);
+        (self.base, self.glyphs, self.reach) = (0, vec![], CHUNK);
         self.source.reset(start)
     }
     /// The host's advance and own height for element INDEX.
     pub(super) fn glyph(&mut self, index: usize) -> R<(i64, i64)> {
-        self.glyph_rise(index).map(|(w, h, _)| (w, h))
+        self.glyph_rise(index).map(|(w, h, ..)| (w, h))
     }
     /// The host's advance, own height and ascent for element INDEX.
-    fn glyph_rise(&mut self, index: usize) -> R<(i64, i64, i64)> {
+    fn glyph_rise(&mut self, index: usize) -> R<(i64, i64, i64, bool)> {
         if index < self.base || index >= self.base + self.glyphs.len() { self.measure(index)?; }
         self.glyphs.get(index - self.base).copied().ok_or_else(|| Fault::Error("host measurement misses an element".into()))
     }
     /// Ask the host for the elements from INDEX through the end of the
-    /// line CHUNK elements on, or up to the first the iterator refuses,
+    /// line `reach' elements on, or up to the first the iterator refuses,
     /// which refuses when the motion reaches it.
     fn measure(&mut self, index: usize) -> R<()> {
         let mut shown = vec![];
         for at in index.. {
             let slot = match self.source.slot(at) {
                 Ok(slot) => slot,
-                Err(refused) if at == index => return Err(refused),
+                // A refusal past the first ends the batch; a quit ends the motion.
+                Err(fault) if at == index || !refused(&fault) => return Err(fault),
                 Err(_) => break,
             };
             let Some(e) = slot.elem else { break };
             let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
             shown.push((c, face_key(&e)));
-            if at - index >= CHUNK && c == '\n' { break; }
+            if at - index >= self.reach && c == '\n' || at - index >= BATCH { break; }
         }
+        self.reach = (self.reach * 2).clamp(FIRST_REACH, CHUNK);
         let window = self.source.window();
         let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
         self.base = index;
-        self.glyphs = measured.glyphs.iter().zip(&measured.ascents).map(|(&(w, h), &a)| (i64::from(w), i64::from(h), i64::from(a))).collect();
+        self.glyphs = measured.glyphs.iter().zip(&measured.ascents).zip(&measured.fallback).map(|((&(w, h), &a), &f)| (i64::from(w), i64::from(h), i64::from(a), f)).collect();
         (self.default_height, self.default_ascent) = (i64::from(measured.face_heights[0]), i64::from(measured.face_ascents[0]));
         Ok(())
     }
@@ -242,20 +254,21 @@ impl<'l, 'a> Hosted<'l, 'a> {
 }
 
 impl Elements for Hosted<'_, '_> {
+    fn poll(&mut self) -> R<()> { self.source.poll() }
     fn line_at(&mut self, index: usize) -> R<i64> { self.source.line_at(index) }
     fn slot(&mut self, index: usize) -> R<Slot> {
         let slot = self.source.slot(index)?;
         let Some(e) = slot.elem else { return Ok(slot) };
         let Some(c) = host_char(&mut self.source, &e)? else { return Ok(slot) };
         if c.is_none() { return Err(not_as_gnu()); }
-        let (width, height, ascent) = self.glyph_rise(index)?;
+        let (width, height, ascent, fallback) = self.glyph_rise(index)?;
         // Every host row reaches the default face's ascent and descent.
         let (ascent, descent) = (ascent.max(self.default_ascent), (height - ascent).max(self.default_height - self.default_ascent));
         let height = ascent + descent;
         let shape = match e.shape {
             Shape::Glyphless { .. } => Shape::PixelStretch {
                 width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height, ascent },
-            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent },
+            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent, fallback },
             // Its own size, not the placeholder's.
             shape @ Shape::Image { .. } => shape,
             Shape::Tab => Shape::PixelTab { space: width, height, ascent },
@@ -276,7 +289,12 @@ impl Elements for Hosted<'_, '_> {
 }
 
 impl Lines for Hosted<'_, '_> {
-    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn reseat(&mut self, start: i64) -> R<()> {
+        self.reset(start)?;
+        self.reach = 0;
+        Ok(())
+    }
+    fn delivered(&mut self, index: usize) -> R<Slot> { self.source.slot(index) }
     fn line_start_before(&mut self, pos: i64) -> R<i64> { self.source.visible_line_start(pos) }
     fn begv(&self) -> i64 { self.source.begv() }
 }

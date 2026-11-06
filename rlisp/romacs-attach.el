@@ -30,6 +30,7 @@
 (require 'subr-x)
 (require 'romacs-popup)
 (require 'romacs-icons)
+(require 'romacs-key-hint)
 
 (declare-function mailcap-extension-to-mime "mailcap" (extn))
 
@@ -746,8 +747,10 @@ else call FALLBACK, the host's own DEL command."
                               (plist-get item :path))
                       'face 'romacs-popup-dim)))
 
-(defconst romacs-attach--view-keys "n/p next · +/- zoom · o open · w copy path · q close"
-  "The viewer's key row.")
+(defun romacs-attach--view-keys ()
+  "The viewer's key row."
+  (romacs-key-hint "\\<romacs-attach-view-map>\\[romacs-attach-view-next]/\\[romacs-attach-view-previous] next · \\[romacs-attach-view-zoom-in]/\\[romacs-attach-view-zoom-out] zoom · \\[romacs-attach-view-open] open · \\[romacs-attach-view-copy-path] copy path · \\[romacs-attach-view-quit] close"
+                   'romacs-popup-dim))
 
 (defun romacs-attach--fit (pixels width height zoom)
   "PIXELS (W . H) fitted inside WIDTH by HEIGHT, never enlarged, then
@@ -781,7 +784,7 @@ first `romacs-attach-view-text-bytes' of a text file, or a card."
             (insert-file-contents (plist-get item :path) nil 0 romacs-attach-view-text-bytes)
             (goto-char (point-max)))
            (t (romacs-attach--card item) (insert "\n")))
-          (insert (propertize romacs-attach--view-keys 'face 'romacs-popup-dim)))
+          (insert (romacs-attach--view-keys)))
         (setq-local mode-line-format nil cursor-type nil)
         (setq buffer-read-only t)
         (goto-char (point-min))))
@@ -801,7 +804,7 @@ less the title and key rows."
          (pixels (plist-get (romacs-attach--thing (plist-get romacs-attach--view :thing)) :pixels))
          (fitted (and pixels (romacs-attach--fit pixels (car box) (cdr box) zoom))))
     (romacs-popup-show 'viewer buffer
-                       :columns (and fitted (max (1+ (string-width romacs-attach--view-keys))
+                       :columns (and fitted (max (1+ (string-width (romacs-attach--view-keys)))
                                                  (ceiling (car fitted) (frame-char-width))))
                        :lines (and fitted (+ 2 (ceiling (cdr fitted) (frame-char-height)))))))
 
@@ -867,6 +870,12 @@ less the title and key rows."
   "-" #'romacs-attach-view-zoom-out "0" #'romacs-attach-view-zoom-reset
   "o" #'romacs-attach-view-open "w" #'romacs-attach-view-copy-path
   "q" #'romacs-attach-view-quit "C-g" #'romacs-attach-view-quit "RET" #'romacs-attach-view-quit)
+
+;; The keys its row names, of those that do the same.
+(put 'romacs-attach-view-next :advertised-binding [?n])
+(put 'romacs-attach-view-previous :advertised-binding [?p])
+(put 'romacs-attach-view-zoom-in :advertised-binding [?+])
+(put 'romacs-attach-view-quit :advertised-binding [?q])
 
 ;;;###autoload
 (cl-defun romacs-attach-view (thing &key siblings context)
@@ -995,7 +1004,7 @@ do), attaching by `org-attach-method'.  An owned file becomes the user's
 
 (defun romacs-attach-test-host-delete-backward ()
   "`DEL' in the test host: edit mode at the draft's start with chips."
-  (interactive)
+  (interactive nil romacs-attach-test-host-mode)
   (romacs-attach-delete-backward #'delete-backward-char))
 
 (defvar-keymap romacs-attach-test-host-mode-map
@@ -1012,6 +1021,29 @@ do), attaching by `org-attach-method'.  An owned file becomes the user's
   (interactive)
   (pop-to-buffer-same-window (get-buffer-create "*attach test*"))
   (unless (derived-mode-p 'romacs-attach-test-host-mode) (romacs-attach-test-host-mode)))
+
+;; Edit mode's and the viewer's keys are a transient map, which M-x would
+;; leave: they are only ever typed.
+(dolist (command '( romacs-attach-edit-next romacs-attach-edit-previous romacs-attach-edit-move-right
+                    romacs-attach-edit-move-left romacs-attach-edit-remove romacs-attach-edit-undo
+                    romacs-attach-edit-caption romacs-attach-edit-view romacs-attach-edit-open
+                    romacs-attach-edit-quit romacs-attach-view-next romacs-attach-view-previous
+                    romacs-attach-view-zoom-in romacs-attach-view-zoom-out romacs-attach-view-zoom-reset
+                    romacs-attach-view-open romacs-attach-view-copy-path romacs-attach-view-quit))
+  (put command 'completion-predicate #'ignore))
+
+;; With the autoloads, so M-x does not offer them before this file loads,
+;; and does not load it to ask.  `romacs-attach--here' says the same.
+;;;###autoload
+(put 'romacs-attach-file 'completion-predicate
+     (lambda (_symbol buffer)
+       (with-current-buffer buffer
+         (or (bound-and-true-p romacs-attach--tray) (derived-mode-p 'message-mode 'org-mode)))))
+
+;;;###autoload
+(put 'romacs-attach-edit 'completion-predicate
+     (lambda (_symbol buffer)
+       (with-current-buffer buffer (bound-and-true-p romacs-attach-items))))
 
 (provide 'romacs-attach)
 ;;; romacs-attach.el ends here

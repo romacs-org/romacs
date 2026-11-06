@@ -538,3 +538,19 @@ fn terminal_base_colours_follow_the_ansi_color_faces() {
     vm.eval_source("(internal-set-lisp-face-attribute 'ansi-color-red :foreground \"#604020\" nil)").unwrap();
     assert_eq!(foreground(&mut vm),[0x60,0x40,0x20],"A_FACE_CHANGE_RECOLOURS_THE_TERMINAL");
 }
+
+#[test]
+fn terminal_commands_declare_their_mode_and_its_hints_show_real_keys() {
+    let (mut vm,_)=setup(); open(&mut vm);
+    assert_eq!(printed(&mut vm,"(mapcar #'command-modes '(romacs-term-interrupt romacs-term-send-key romacs-term-yank romacs-term))"),
+               "((romacs-term-mode) (romacs-term-mode) (romacs-term-mode) nil)","ENTRY_POINT_STAYS_GLOBAL");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c C-c interrupt  C-c C-j leave\")"),"t");
+    assert_eq!(printed(&mut vm,"(let ((text (romacs-term--hint))) (list (get-text-property 0 'face text) (get-text-property 8 'face text)))"),
+               "((help-key-binding romacs-term-dim) romacs-term-dim)","KEYS_IN_THEIR_FACE_OVER_THE_DIM_TEXT");
+    assert_eq!(printed(&mut vm,"(let ((first (romacs-term--hint))) (eq first (romacs-term--hint)))"),"t","NO_LOOKUP_PER_REDISPLAY");
+    vm.eval_source("(define-key romacs-term-mode-map [3 3] nil) (define-key romacs-term-mode-map [3 11] nil)
+                    (define-key romacs-term-mode-map [3 105] 'romacs-term-interrupt)").unwrap();
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c i interrupt  C-c C-j leave\")"),"t","A_REBINDING_SHOWS");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--away-keys)) \"C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history\")"),"t");
+    assert_eq!(printed(&mut vm,"(get-text-property 0 'face (romacs-term--away-keys))"),"help-key-binding");
+}

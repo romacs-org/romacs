@@ -134,6 +134,11 @@ and its comparison policy in its docstring:
   session per theme, PNGs plus one sheet per scene stacking the themes;
   `--gnu` puts pinned GNU under the reference Rum configuration first.
   For judging a theme by eye, not a gate.
+* `input_method_live.py`: input methods by real keys against pinned GNU:
+  greek-polytonic's dead keys and C-\\, a pending sequence's overlay, C-g and
+  DEL, bulgarian-phonetic, TeX, chinese-py's candidates and completions,
+  korean-hangul, `describe-input-method`, INHERIT-INPUT-METHOD, C-q,
+  `read-passwd`, isearch and keyboard macros.
 * `command_errors_live.py`: the command loop and the session's end on a
   plain init: command errors' echo area, *Messages* and bells, the
   debugger's *Backtrace* from M-: and from a `debug-on-error` command,
@@ -350,7 +355,7 @@ The workloads, and how each is counted, are in the script's docstring:
   isearch and Org editing.  Then, in a session with Romacs's shipped defaults
   on, the rows README's lead quotes: find-file of `xdisp.c` and of a generated
   15 MB header to the window's final faces (every visible character
-  `fontified`), `vc-print-root-log` over the whole history with
+  `fontified`), `vc-print-root-log` over upstream master's whole history with
   `vc-log-show-limit` 0 (commits, complete, first screen, median key while it
   streams, the buffer's hash compared across engines), and a theme switch,
   cycled and on first visit, among each engine's own shipped themes, since
@@ -397,16 +402,16 @@ python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --qu
 ```
 
 After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
-"Romacs and GNU Emacs compared" tables in README.org from that run, keeping every
-row: the editor workloads between `# perfbench-table-begin` and
-`# perfbench-table-end`, and the elisp-benchmarks members between
-`# perfbench-elb-begin` and `# perfbench-elb-end`.  A block the run did not
-measure is left as it was.  `perfbench/lead.org` is README's lead: each `{{name}}`
-in it is filled from the run and written between `# perfbench-lead-begin` and
-`# perfbench-lead-end`.  A name with no value fails the run and stops `readme.py`
-with README.org untouched, and a wall time refused for load counts as none, so
+"Romacs and GNU Emacs compared" tables in the top-level README.md from that run, keeping every
+row: the editor workloads between `<!-- perfbench-table-begin -->` and
+`<!-- perfbench-table-end -->`, and the elisp-benchmarks members between
+`<!-- perfbench-elb-begin -->` and `<!-- perfbench-elb-end -->`.  A block the run did not
+measure is left as it was.  `perfbench/lead.md` is README's lead: each `{{name}}`
+in it is filled from the run and written between `<!-- perfbench-lead-begin -->` and
+`<!-- perfbench-lead-end -->`.  A name with no value fails the run and stops `readme.py`
+with that README untouched, and a wall time refused for load counts as none, so
 the lead takes a quiet run.  A whole run also rewrites the headlines between
-`# perfbench-headlines-begin` and `# perfbench-headlines-end`: every row where
+`<!-- perfbench-headlines-begin -->` and `<!-- perfbench-headlines-end -->`: every row where
 Romacs is 0.80x or better against a rival on every metric measured, with build
 and rerun command.  It names on standard error any headline the run lost.
 

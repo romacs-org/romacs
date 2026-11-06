@@ -83,10 +83,18 @@ pub(super) struct Window {
     pub cursor_off: bool,
     pub end_distance: usize,
     pub end_valid: bool,
+    /// How many times the window's buffer changed: what a record of its
+    /// display compares, as a collection moves the buffer's Value.
+    pub(crate) shows: u64,
     pub force_start: bool,
 }
-romacs_snapshot::snapshot_struct!(Window { id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, min_hscroll, suspend_auto_hscroll, old_point, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
+romacs_snapshot::snapshot_struct!(Window { shows, id, frame, combination_limit, buffer, point, start, parent, children, horizontal, dead, mini, x, y, width, height, new_pixel, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, pending_vscroll, hscroll, min_hscroll, suspend_auto_hscroll, old_point, parameters, display_table, prev_buffers, next_buffers, dedicated, new_total, new_normal, normal_lines, normal_cols, use_time, cursor_off, end_distance, end_valid, force_start });
 impl Window {
+    /// BUFFER is what the window shows now.
+    pub(crate) fn show(&mut self, buffer: Value) {
+        if self.buffer != buffer { self.shows += 1; }
+        self.buffer = buffer;
+    }
     fn new(id: u64, buffer: Value) -> Self {
         Self {
             id,
@@ -129,6 +137,7 @@ impl Window {
             cursor_off: false,
             end_distance: 0,
             end_valid: false,
+            shows: 0,
             force_start: false,
         }
     }
@@ -465,7 +474,7 @@ impl Vm {
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
-        w.buffer = buffer;
+        w.show(buffer);
         w.end_distance = 0;
         w.end_valid = false;
         self.display_state.version += 1;

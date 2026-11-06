@@ -448,7 +448,9 @@ impl Vm {
             private
         } else {
             let bytes = self.string_value(value)?.as_bytes().to_vec();
-            self.make_lisp_string(bytes, true)
+            // A literal's kind is the reader's rule (`str_view').
+            let multibyte = !bytes.is_ascii();
+            self.make_lisp_string(bytes, multibyte)
         };
         copies.insert(value.0, private);
         Ok(private)
@@ -708,6 +710,29 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
 mod image_alias_tests {
     use super::*;
     /// A code image published after a sweep: the free entries keep their
+    /// A literal's kind survives an image, mapped and copied: ASCII is
+    /// unibyte, as `bindat-unpack' asks of it.
+    #[test]
+    fn image_literals_keep_their_kind() {
+        let path = std::env::temp_dir().join(format!("image-kinds-{}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        let mut source = Vm::new();
+        source.set_gc_stress(0);
+        source.set_gc_verify(false);
+        source.eval_source("(setq image-texts (list \"ab\" \"é\"))").unwrap();
+        source.clear_source_cache();
+        source.collect_garbage();
+        let entry = source.compile(&Form::Sym("image-texts".into())).unwrap();
+        let key = source.publish_code_image(&path, entry, [65; 32]).unwrap();
+        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let (mut loaded, _) = Vm::from_code_image(image, [65; 32]).unwrap();
+        let kinds = loaded.eval_source("(list (multibyte-string-p (car image-texts)) (multibyte-string-p (car (cdr image-texts))))").unwrap();
+        assert_eq!(kinds.display().unwrap(), "(nil t)");
+        let copied = loaded.eval_source("(progn (setcar image-texts (copy-sequence (car image-texts))) (multibyte-string-p (car image-texts)))").unwrap();
+        assert_eq!(copied.display().unwrap(), "nil");
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     /// positions as unreachable placeholders and every reference holds.
     #[test]
     fn an_image_published_after_a_sweep_keeps_positions() {

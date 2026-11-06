@@ -170,7 +170,7 @@
 (defun dired-revert (&optional ignore-auto noconfirm)
   "Refresh this directory, preserving the selected path if it still exists.
 Enumeration failure leaves the old listing and path mapping unchanged."
-  (interactive)
+  (interactive nil dired-mode)
   (let* ((selected (dired-get-filename nil t))
          (listing (romacs-dired-listing dired-directory))
          (inhibit-read-only t))
@@ -236,7 +236,7 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
 
 (defun dired-next-line (&optional count)
   "Move COUNT rows forward, clamped to the available directory entries."
-  (interactive "p")
+  (interactive "p" dired-mode)
   (let* ((current (romacs-dired-current-row)) (rows romacs-dired-rows)
          (index 0) (position 0))
     (while rows
@@ -248,7 +248,7 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
 
 (defun dired-previous-line (&optional count)
   "Move COUNT rows backward within this directory."
-  (interactive "p")
+  (interactive "p" dired-mode)
   (dired-next-line (- (or count 1))))
 
 (defun romacs-dired-entry-attributes (file)
@@ -262,7 +262,7 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
 
 (defun dired-find-file ()
   "Open the exact entry at point, refusing removed entries and dangling links."
-  (interactive)
+  (interactive nil dired-mode)
   (let* ((file (dired-get-filename))
          (attributes (romacs-dired-entry-attributes file)))
     (unless attributes
@@ -273,7 +273,7 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
 
 (defun dired-up-directory ()
   "Visit the lexical parent and select the child directory just departed."
-  (interactive)
+  (interactive nil dired-mode)
   (let* ((child (if (equal dired-directory "/") "/" (substring dired-directory 0 -1)))
          (parent (or (file-name-directory child) "/")))
     (dired parent)
@@ -281,7 +281,7 @@ SWITCHES, remote names and non-UTF-8 filenames are unsupported."
 
 (defun dired-quit-window ()
   "Return to the entry buffer without killing it or the directory buffer."
-  (interactive)
+  (interactive nil dired-mode)
   (let ((target romacs-dired-return-buffer))
     (unless (and (buffer-live-p target) (not (eq target (current-buffer))))
       (setq target (romacs-buffer-default))

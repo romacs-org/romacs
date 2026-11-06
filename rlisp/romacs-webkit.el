@@ -302,26 +302,32 @@ Optional WIDTH and HEIGHT override stored dimensions."
   "Keymap for `romacs-webkit-mode'.
 Press 'i' to enter input mode for typing in web forms.")
 
+(defface romacs-webkit-mode-line '((t :inherit mode-line-buffer-id))
+  "The page's title and loading state in a WebKit buffer's mode line.")
+
 (defvar romacs-webkit-mode-line-format
   '(:eval (romacs-webkit--mode-line-string))
   "Mode line format for WebKit buffers.")
 
 (defun romacs-webkit--mode-line-string ()
   "Generate mode line string for WebKit buffer."
-  (if romacs-webkit-buffer-view-id
-      (let ((title (romacs-webkit-get-title romacs-webkit-buffer-view-id))
-            (progress (romacs-webkit-get-progress romacs-webkit-buffer-view-id))
-            (loading (romacs-webkit-loading-p romacs-webkit-buffer-view-id)))
-        (format " [%s%s]"
-                (or title "WebKit")
-                (if loading
-                    (format " %.0f%%" (* 100 (or progress 0)))
-                  "")))
-    " [WebKit]"))
+  (propertize
+   (if romacs-webkit-buffer-view-id
+       (let ((title (romacs-webkit-get-title romacs-webkit-buffer-view-id))
+             (progress (romacs-webkit-get-progress romacs-webkit-buffer-view-id))
+             (loading (romacs-webkit-loading-p romacs-webkit-buffer-view-id)))
+         (format " [%s%s]"
+                 (or title "WebKit")
+                 (if loading
+                     (format " %.0f%%" (* 100 (or progress 0)))
+                   "")))
+     " [WebKit]")
+   'face 'romacs-webkit-mode-line))
 
 (define-derived-mode romacs-webkit-mode special-mode "WebKit"
   "Major mode for browsing the web with WebKit.
 \\{romacs-webkit-mode-map}"
+  :interactive nil
   (setq buffer-read-only t)
   (setq mode-line-format
         (list "%e" mode-line-front-space
@@ -331,26 +337,26 @@ Press 'i' to enter input mode for typing in web forms.")
 
 (defun romacs-webkit-mode-reload ()
   "Reload the current page."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-reload romacs-webkit-buffer-view-id)
     (message "Reloading...")))
 
 (defun romacs-webkit-mode-back ()
   "Go back in history."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-go-back romacs-webkit-buffer-view-id)))
 
 (defun romacs-webkit-mode-forward ()
   "Go forward in history."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-go-forward romacs-webkit-buffer-view-id)))
 
 (defun romacs-webkit-mode-quit ()
   "Close the WebKit browser buffer."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-floating-clear romacs-webkit-buffer-view-id)
     (romacs-webkit-close romacs-webkit-buffer-view-id)
@@ -359,7 +365,7 @@ Press 'i' to enter input mode for typing in web forms.")
 
 (defun romacs-webkit-mode-open (url)
   "Open URL in the current WebKit view."
-  (interactive "sURL: ")
+  (interactive "sURL: " romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-load-uri romacs-webkit-buffer-view-id url)
     (message "Loading: %s" url)))
@@ -369,7 +375,7 @@ Press 'i' to enter input mode for typing in web forms.")
 
 (defun romacs-webkit-mode-mouse-click (event)
   "Handle mouse click EVENT in WebKit view."
-  (interactive "e")
+  (interactive "e" romacs-webkit-mode)
   (when (and romacs-webkit-buffer-view-id romacs-webkit--floating-position)
     (let* ((pos (posn-x-y (event-start event)))
            (click-x (car pos))
@@ -383,7 +389,7 @@ Press 'i' to enter input mode for typing in web forms.")
 
 (defun romacs-webkit-mode-scroll-up (event)
   "Handle scroll up EVENT in WebKit view."
-  (interactive "e")
+  (interactive "e" romacs-webkit-mode)
   (when (and romacs-webkit-buffer-view-id romacs-webkit--floating-position)
     (let* ((pos (posn-x-y (event-start event)))
            (float-x (nth 0 romacs-webkit--floating-position))
@@ -394,7 +400,7 @@ Press 'i' to enter input mode for typing in web forms.")
 
 (defun romacs-webkit-mode-scroll-down (event)
   "Handle scroll down EVENT in WebKit view."
-  (interactive "e")
+  (interactive "e" romacs-webkit-mode)
   (when (and romacs-webkit-buffer-view-id romacs-webkit--floating-position)
     (let* ((pos (posn-x-y (event-start event)))
            (float-x (nth 0 romacs-webkit--floating-position))
@@ -411,11 +417,12 @@ Press 'i' to enter input mode for typing in web forms.")
 (defun romacs-webkit-mode-toggle-input ()
   "Toggle input mode for typing in web forms.
 When enabled, most keys are forwarded to the WebKit view."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (setq romacs-webkit--input-mode (not romacs-webkit--input-mode))
   (if romacs-webkit--input-mode
       (progn
-        (message "WebKit input mode ON - type to enter text, C-c C-c to exit")
+        (message "%s" (substitute-command-keys
+                       "WebKit input mode ON - type to enter text, \\<romacs-webkit-input-mode-map>\\[romacs-webkit-mode-toggle-input] to exit"))
         (romacs-webkit--enable-input-mode))
     (message "WebKit input mode OFF")
     (romacs-webkit--disable-input-mode)))
@@ -483,7 +490,7 @@ When enabled, most keys are forwarded to the WebKit view."
 
 (defun romacs-webkit-input-self-insert ()
   "Forward current key to WebKit as text input."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (let* ((char last-command-event)
            (keysym (romacs-webkit--char-to-keysym char))
@@ -494,28 +501,28 @@ When enabled, most keys are forwarded to the WebKit view."
 
 (defun romacs-webkit-input-return ()
   "Send Return/Enter to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff0d 36 t 0)  ; XK_Return
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff0d 36 nil 0)))
 
 (defun romacs-webkit-input-backspace ()
   "Send Backspace to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff08 22 t 0)  ; XK_BackSpace
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff08 22 nil 0)))
 
 (defun romacs-webkit-input-tab ()
   "Send Tab to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff09 23 t 0)  ; XK_Tab
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff09 23 nil 0)))
 
 (defun romacs-webkit-input-escape ()
   "Send Escape to WebKit and exit input mode."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff1b 9 t 0)  ; XK_Escape
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff1b 9 nil 0))
@@ -523,28 +530,28 @@ When enabled, most keys are forwarded to the WebKit view."
 
 (defun romacs-webkit-input-arrow-up ()
   "Send Up arrow to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff52 111 t 0)
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff52 111 nil 0)))
 
 (defun romacs-webkit-input-arrow-down ()
   "Send Down arrow to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff54 116 t 0)
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff54 116 nil 0)))
 
 (defun romacs-webkit-input-arrow-left ()
   "Send Left arrow to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff51 113 t 0)
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff51 113 nil 0)))
 
 (defun romacs-webkit-input-arrow-right ()
   "Send Right arrow to WebKit."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff53 114 t 0)
     (romacs-webkit-send-key romacs-webkit-buffer-view-id #xff53 114 nil 0)))
@@ -576,7 +583,7 @@ When enabled, most keys are forwarded to the WebKit view."
 
 (defun romacs-webkit-mode-show-fullscreen ()
   "Show WebKit view as fullscreen floating overlay."
-  (interactive)
+  (interactive nil romacs-webkit-mode)
   (when romacs-webkit-buffer-view-id
     (let* ((frame (selected-frame))
            (width (frame-pixel-width frame))
@@ -698,11 +705,12 @@ URL, WIDTH, HEIGHT, and LOAD-P are passed to `romacs-insert-webkit'."
 Activated when entering input mode on a WebKit character.
 Press ESC, C-g, or C-c C-c to exit."
   :lighter " WebKit-Input"
+  :interactive nil
   (if romacs-webkit-interaction-mode
       (progn
         (romacs-webkit--log "input ON for view %s" romacs-webkit--input-view-id)
-        (message "WebKit input active (view %s) — ESC to exit"
-                 romacs-webkit--input-view-id))
+        (message "WebKit input active (view %s) — %s to exit" romacs-webkit--input-view-id
+                 (substitute-command-keys "\\<romacs-webkit-interaction-mode-map>\\[romacs-webkit-interaction-quit]")))
     (romacs-webkit--log "input OFF (was view %s)" romacs-webkit--input-view-id)
     (setq romacs-webkit--input-view-id nil)
     (message "WebKit input off")))
@@ -728,6 +736,12 @@ Press ESC, C-g, or C-c C-c to exit."
     (setq romacs-webkit--deactivation-timer nil))
   (romacs-webkit-interaction-mode -1))
 
+(defun romacs-webkit--command-p (_symbol buffer)
+  "Whether BUFFER has a WebKit view at point."
+  (with-current-buffer buffer (get-text-property (point) 'romacs-webkit-id)))
+
+(put 'romacs-webkit-enter-input-mode 'completion-predicate #'romacs-webkit--command-p)
+
 (defun romacs-webkit-enter-input-mode ()
   "Enter input mode for the WebKit view at point.
 Reads the `romacs-webkit-id' text property to determine which view."
@@ -742,7 +756,7 @@ Reads the `romacs-webkit-id' text property to determine which view."
 
 (defun romacs-webkit-interaction-self-insert ()
   "Forward character to the focused inline WebKit view."
-  (interactive)
+  (interactive nil romacs-webkit-interaction-mode)
   (when romacs-webkit--input-view-id
     (let* ((char last-command-event)
            (keysym (romacs-webkit--char-to-keysym char)))
@@ -756,36 +770,36 @@ Reads the `romacs-webkit-id' text property to determine which view."
     (romacs-webkit-send-key romacs-webkit--input-view-id keysym keycode nil 0)))
 
 (defun romacs-webkit-interaction-return ()
-  "Send Return to WebKit." (interactive)
+  "Send Return to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff0d 36))
 
 (defun romacs-webkit-interaction-backspace ()
-  "Send Backspace to WebKit." (interactive)
+  "Send Backspace to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff08 22))
 
 (defun romacs-webkit-interaction-tab ()
-  "Send Tab to WebKit." (interactive)
+  "Send Tab to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff09 23))
 
 (defun romacs-webkit-interaction-arrow-up ()
-  "Send Up to WebKit." (interactive)
+  "Send Up to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff52 111))
 
 (defun romacs-webkit-interaction-arrow-down ()
-  "Send Down to WebKit." (interactive)
+  "Send Down to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff54 116))
 
 (defun romacs-webkit-interaction-arrow-left ()
-  "Send Left to WebKit." (interactive)
+  "Send Left to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff51 113))
 
 (defun romacs-webkit-interaction-arrow-right ()
-  "Send Right to WebKit." (interactive)
+  "Send Right to WebKit." (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit-interaction--send #xff53 114))
 
 (defun romacs-webkit-interaction-quit ()
   "Exit WebKit interaction mode."
-  (interactive)
+  (interactive nil romacs-webkit-interaction-mode)
   (romacs-webkit--deactivate-input))
 
 ;;; Post-command hook — click-to-activate and auto-deactivate

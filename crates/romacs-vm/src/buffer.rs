@@ -559,7 +559,7 @@ impl Vm {
                 let w = self.window_mut(window)?;
                 // replace_buffer_in_windows_safely undedicates the window.
                 w.dedicated = Value::NIL;
-                w.buffer = replacement;
+                w.show(replacement);
                 w.end_distance = 0;
                 w.end_valid = false;
                 w.vscroll_px = 0;
@@ -975,11 +975,12 @@ impl Vm {
         Ok(args)
     }
     pub(crate) fn byte_string(&mut self, bytes: &[u8]) -> Value {
-        self.allocate_object(Object::Bytes(bytes.to_vec()))
+        self.allocate_object(data::unibyte_object(bytes.to_vec()))
     }
     pub(crate) fn bytes_value(&self, v: Value) -> Result<&[u8]> {
         match self.object(v)? {
             Object::Bytes(b) => Ok(b),
+            Object::String(s) | Object::RawString(s) if !s.is_multibyte() => Ok(s.bytes()),
             _ => Err("bytes required".into()),
         }
     }
@@ -996,7 +997,7 @@ impl Vm {
                 .iter()
                 .map(|v| u8::try_from(v.as_integer()?).map_err(|_| "invalid octet".into()))
                 .collect::<Result<Vec<_>>>()?;
-            return Ok(self.allocate_object(Object::Bytes(b)));
+            return Ok(self.allocate_object(data::unibyte_object(b)));
         }
         if n != if p == BufferString { 0 } else { 1 } {
             return Err("wrong primitive arity".into());
@@ -1029,14 +1030,14 @@ impl Vm {
                 }
                 bytes
             };
-            return Ok(self.allocate_object(Object::Bytes(b)));
+            return Ok(self.allocate_object(data::unibyte_object(b)));
         }
         let index = self.buffer_index()?;
         if p == BufferString {
             let o = match &self.objects[index] {
                 Object::Buffer(t) => data::string_object(t.lisp_string(t.accessible())?),
                 Object::ByteBuffer(b) => {
-                    Object::Bytes(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
+                    data::unibyte_object(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
                 }
                 _ => unreachable!(),
             };
@@ -1166,7 +1167,8 @@ impl Vm {
                 continue;
             }
             match self.object(v)? {
-                Object::String(s) | Object::RawString(s) if s.is_multibyte() => {
+                // ASCII is the same bytes either way.
+                Object::String(s) | Object::RawString(s) if s.is_multibyte() || s.bytes().is_ascii() => {
                     properties.copy_into(ByteOffset(bytes.len()), &s.properties);
                     bytes.extend_from_slice(s.bytes());
                 }
@@ -1321,7 +1323,7 @@ impl Vm {
             Substring => {
                 let r = region(args[0], args[1])?;
                 let bytes = b.bytes[r.start.0..r.end.0].to_vec();
-                Ok(self.allocate_object(Object::Bytes(bytes)))
+                Ok(self.allocate_object(data::unibyte_object(bytes)))
             }
             Narrow => {
                 let a = pos(args[0])?;
