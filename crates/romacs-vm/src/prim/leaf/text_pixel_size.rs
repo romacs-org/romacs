@@ -170,8 +170,8 @@ impl Leaf<'_> {
     }
 
     fn text_pixel_size(&mut self, area: &TextArea, buffer: Value, args: &TextSizeArgs) -> super::super::Out {
-        let (begv, zv) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?)
@@ -279,7 +279,7 @@ impl Leaf<'_> {
             let laid = self.vm.window_layout(w).map_err(Fault::Error)?.map(|laid| laid.end);
             let walked = if laid.is_none() { self.window_end(w, Value::TRUE).ok().and_then(|v| v.integer_value()) } else { None };
             let buffer = self.vm.window(w).map_err(Fault::Error)?.buffer;
-            let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { continue };
+            let Ok(b) = self.vm.shown_text(buffer) else { continue };
             let end = match (laid, walked) {
                 (Some(byte), _) => b.char_of_byte(coordinates::ByteOffset(byte)).map_err(Fault::Error)?.0 as i64 + 1,
                 (None, Some(end)) => end,
@@ -326,8 +326,8 @@ impl Leaf<'_> {
         if interactive && cur_col != Value::NIL { number(self, cur_col)?; }
         let cols = cols.filter(|_| interactive);
         let buffer = self.current_buffer_value()?;
-        let (begv, zv, pt) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv, pt) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?, pos(b.point)?)
@@ -386,7 +386,7 @@ impl Leaf<'_> {
     /// accessible text (its end past the last line), and the lines moved:
     /// vertical motion where every buffer line is one screen line.
     fn buffer_line_motion(&mut self, pt: i64, lines: i64) -> std::result::Result<(i64, i64), Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
@@ -417,8 +417,8 @@ impl Leaf<'_> {
         let area = self.windows().text_area(window, "line-pixel-height")?;
         let buffer = area.buffer;
         let height = self.with_buffer(buffer, |leaf| {
-            let (begv, zv, pt) = match leaf.vm.object_if(buffer) {
-                Some(Object::Buffer(b)) => {
+            let (begv, zv, pt) = match leaf.vm.shown_text(buffer).ok() {
+                Some(b) => {
                     let r = b.accessible();
                     let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                     (pos(r.start)?, pos(r.end)?, pos(b.point)?)
@@ -847,7 +847,7 @@ impl Leaf<'_> {
     }
     /// BUFFER's accessible text's first and last positions.
     pub(crate) fn accessible_positions(&self, buffer: Value) -> std::result::Result<(i64, i64), Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(unsupported("in a unibyte buffer")) };
+        let Ok(b) = self.vm.shown_text(buffer) else { return Err(unsupported("in a unibyte buffer")) };
         let r = b.accessible();
         let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
         Ok((pos(r.start)?, pos(r.end)?))
@@ -856,12 +856,13 @@ impl Leaf<'_> {
     fn point_position(&mut self) -> std::result::Result<i64, Fault> {
         match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => Ok(b.char_of_byte(b.point).map_err(Fault::Error)?.0 as i64 + 1),
+            Some(Object::ByteBuffer(b)) => Ok(b.point.0 as i64 + 1),
             _ => Err(unsupported("in a unibyte buffer")),
         }
     }
     /// The number of lines before POS's in the accessible text.
     pub(super) fn line_index(&mut self, pos: i64) -> std::result::Result<i64, Fault> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else {
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
@@ -937,6 +938,7 @@ impl Leaf<'_> {
         let border = i64::from(!area.rightmost);
         let zv_after_newline = match self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) {
             Some(Object::Buffer(b)) => b.as_str()[..b.accessible().end.0].ends_with('\n'),
+            Some(Object::ByteBuffer(b)) => b.restriction.end.0 > 0 && b.bytes[b.restriction.end.0 - 1] == b'\n',
             _ => false,
         };
         // The host paints a display table's glyphs for characters and its
@@ -1014,8 +1016,8 @@ impl<'a> Leaf<'a> {
     /// continuation line (start_display).
     fn hosted_from(&mut self, area: &TextArea, top: i64) -> std::result::Result<(Hosted<'_, 'a>, Ctx, It), Fault> {
         let buffer = self.vm.slots[self.vm.buffer_slot].value;
-        let (begv, zv) = match self.vm.object_if(buffer) {
-            Some(Object::Buffer(b)) => {
+        let (begv, zv) = match self.vm.shown_text(buffer).ok() {
+            Some(b) => {
                 let r = b.accessible();
                 let pos = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
                 (pos(r.start)?, pos(r.end)?)
