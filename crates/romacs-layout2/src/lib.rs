@@ -213,17 +213,23 @@ fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: 
         let advance = advance(frame, id, ch, cell);
         let background = color(tab_bar.faces[index].background);
         if index != face { frame.add_background(x, 0.0, advance, bounds.height, background); }
-        match glyphless.get(index, ch) {
-            Some(shown) => { glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true, 0.0)?; }
+        let at = match glyphless.get(index, ch) {
+            Some(shown) => {
+                let cell = glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true, 0.0)?;
+                // Its blank character is there for a click, no cell of a run.
+                if boxed(index) { set_glyph_box_edges(frame, cell + 1, edges(false, false)); }
+                cell
+            }
             None => {
                 frame.add_char(ch, x, 0.0, advance, height, ascent, false);
                 *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
+                frame.glyphs.len() - 1
             }
-        }
+        };
         // Boxed characters side by side are one box run (IT_APPLY_FACE_BOX).
         let next = byte + ch.len_utf8();
         let ends = next >= text.utf8.len() || !boxed(face_at(text, next, face));
-        if boxed(index) { set_box_edges(frame, edges(!box_open, ends)); }
+        if boxed(index) { set_glyph_box_edges(frame, at, edges(!box_open, ends)); }
         box_open = boxed(index) && !ends;
         x += advance;
     }

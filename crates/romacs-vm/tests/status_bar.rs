@@ -178,6 +178,18 @@ fn a_face_that_sets_nothing_leaves_the_bars_colours() {
     assert_eq!(shown.faces[run.face.0 as usize].foreground, [0, 0, 255]);
 }
 
+/// The tab bar publishes each distinct face once, however many runs use it.
+#[test]
+fn each_distinct_face_in_the_tab_bar_is_published_once() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (defface tab-one '((t :foreground "#010101")) "1") (defface tab-two '((t :foreground "#020202")) "2")
+                             (setq row (concat (propertize "a" 'face 'tab-one) (propertize "b" 'face 'tab-two) (propertize "c" 'face 'tab-one)))
+                             (defalias 'romacs--tab-bar-string (lambda () row))
+                             (modify-frame-parameters nil '((tab-bar-lines . 1))))"##);
+    let tabs = snapshot(&mut vm).tab_bar.expect("a tab bar");
+    assert_eq!((tabs.text.face_runs.len(), tabs.faces.len()), (3, 3), "the bar's face and the two");
+}
+
 /// A face over the bar takes what it leaves unset from the bar, not from
 /// `default' (xdisp.c face_at_string_position's base face): bold text on a
 /// light bar over a dark frame stays dark.

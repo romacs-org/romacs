@@ -413,18 +413,32 @@ thousandth a stack mark."
           (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
           (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
 
-;; A tab bar of N characters, each in a face of its own: realised on the
-;; first step, found on the others, each run once.
+;; A tab bar of N characters, each in a face of its own colour, so N rows
+;; (each_distinct_face_in_the_tab_bar_is_published_once): found on each step, and made
+;; again on each step after a face change.
+(defun scaling--tab-bar (n)
+  "A tab bar of N distinct faces, and a buffer to type in."
+  (let* ((faces (mapcar #'intern (scaling--names "scaling-tab" n)))
+         (row (let ((i 0))
+                (mapconcat
+                 (lambda (face)
+                   (setq i (1+ i))
+                   (custom-declare-face face `((t :foreground ,(format "#%06x" (* 7 i)))) "A scaling face." :group 'scaling)
+                   (propertize "x" 'face face))
+                 faces ""))))
+    (defalias 'romacs--tab-bar-string (lambda () row))
+    (modify-frame-parameters nil '((tab-bar-lines . 1)))
+    (switch-to-buffer (get-buffer-create "scaling-tab"))))
+
 (scaling-probe tab-bar-faces :gui t :n 100 :steps 4
-  :setup (let* ((faces (mapcar #'intern (scaling--names "scaling-tab" n)))
-                (row (progn
-                       (dolist (face faces)
-                         (custom-declare-face face '((t :weight bold)) "A scaling face." :group 'scaling))
-                       (mapconcat (lambda (face) (propertize "x" 'face face)) faces ""))))
-           (defalias 'romacs--tab-bar-string (lambda () row))
-           (modify-frame-parameters nil '((tab-bar-lines . 1)))
-           (switch-to-buffer (get-buffer-create "scaling-tab")))
+  :setup (scaling--tab-bar n)
   :body (with-current-buffer it (insert "x")))
+
+(scaling-probe tab-bar-faces-made :gui t :n 100 :steps 4
+  :setup (scaling--tab-bar n)
+  :body (with-current-buffer it
+          (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
+          (insert "x")))
 
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1
