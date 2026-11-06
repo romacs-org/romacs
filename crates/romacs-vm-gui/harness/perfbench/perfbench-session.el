@@ -18,6 +18,7 @@
 (require 'cl-lib)
 
 (defvar perfbench-session-repo nil "A private clone of the Emacs tree, with src/xdisp.c changed.")
+(defvar perfbench-session-history nil "A clone of the Emacs tree at upstream master, with its history.")
 (defvar perfbench-session-directory nil "The 5,000 files.")
 (defvar perfbench-session-agenda nil "An Org file of scheduled items.")
 (defvar perfbench-session-header nil "A large generated C header.")
@@ -99,7 +100,7 @@ so that comes second."
     (open-header . ,(perfbench-session--open (lambda () perfbench-session-header) "generated.h"))
     (vc-history
      :setup ,(lambda () (require 'vc) (require 'vc-git) (require 'log-view))
-     :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-repo))
+     :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-history))
                             (vc-log-show-limit 0)
                             ;; The key runs from *scratch*, which has no backend of its own.
                             (vc-deduce-backend-nonvc-modes t))
