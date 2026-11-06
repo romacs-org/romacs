@@ -806,6 +806,31 @@ fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
     }
 }
 
+/// A remapping makes another face table with no change of face: a band's
+/// handle indexes the table it was published with, so it is not reused
+/// with another, and the window is published afresh.
+#[test]
+fn a_remapping_added_after_a_paint_makes_a_band_new() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface band-face '((t (:foreground "#0000ff"))) "b")
+                           (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'band-face))))"##);
+    let first = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    vm.display_apply_layout(&[whole(&first)]).unwrap();
+    assert!(first.mode_line.is_some(), "the band is shown");
+    run(&mut vm, r##"(set (make-local-variable 'face-remapping-alist) '((default :foreground "#00ff00")))"##);
+    let window = vm.selected_window_value().unwrap();
+    let (band, face) = vm.painted_band(window, false).unwrap();
+    let table = vm.window_faces(window).unwrap();
+    assert!((face.0 as usize) < table.len(), "the handle indexes the table a layout will read");
+    assert!(band.is_some_and(|band| band.face_runs.iter().all(|run| (run.face.0 as usize) < table.len())), "so do its runs");
+    let changed = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    assert_eq!(changed.faces[0].foreground, [0, 255, 0], "the window shows the new table");
+}
+
 /// The header line takes the mode line's shortcut: a redisplay that keeps
 /// a window's text, faces and start evaluates its header line again, as
 /// display_mode_lines builds both bands; a header line the window starts

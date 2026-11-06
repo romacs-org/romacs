@@ -47,7 +47,7 @@ impl FaceTable {
     fn add(&self, face: Face) -> FaceHandle {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (face.foreground, face.background, &face.family, face.pixel_size.to_bits(), face.weight, face.italic, face.width).hash(&mut hasher);
+        (face.foreground, face.background, &face.family, face.pixel_size.to_bits(), face.weight, face.italic, face.width, face.decor).hash(&mut hasher);
         let mut merged = self.merged.borrow_mut();
         let bucket = merged.entry(hasher.finish()).or_default();
         let mut faces = self.faces.borrow_mut();
@@ -471,11 +471,14 @@ struct Shown {
     /// The published text's length, and whether it reaches ZV.
     len: usize,
     at_zv: bool,
+    /// The face table its handles index: a remapping changes the table with
+    /// no change of face.
+    table: u64,
     /// The window laid out from its start under a key: by its last paint
     /// under KEY, or by redisplay since under the key then (`window_layout`).
     laid: Option<(ShownKey, Laid)>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, table, laid });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -1331,7 +1334,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, table: table.id, laid: None });
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1345,7 +1348,7 @@ impl Vm {
     /// and its face: the last painted band while it still has one, else one
     /// row of the band's face, else none (CURRENT_MODE_LINE_HEIGHT,
     /// CURRENT_HEADER_LINE_HEIGHT).
-    fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle)> {
+    pub(crate) fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle)> {
         let w = self.window(window)?;
         let id = w.id;
         let wants = if header {
@@ -1353,14 +1356,16 @@ impl Vm {
         } else {
             self.window_wants_mode_line(window)?
         };
-        let shown = self.display_state.previous.get(&id)
+        // Its handles index the table it was published with.
+        let table = self.window_faces(window)?;
+        let current = self.display_state.shown.get(&id).is_some_and(|shown| shown.table == table.id);
+        let shown = self.display_state.previous.get(&id).filter(|_| current)
             .map(|p| if header { (p.header_line.clone(), p.header_line_face) } else { (p.mode_line.clone(), p.mode_line_face) });
         Ok(match (wants, shown) {
             (false, shown) => (None, shown.map_or(FaceHandle(0), |(_, face)| face)),
             (true, Some((Some(band), face))) => (Some(band), face),
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
-                let table = self.window_faces(window)?;
                 let face = self.named(&table, &name).ok_or("band face required")?;
                 (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
             }
@@ -1916,10 +1921,8 @@ impl Vm {
         // two unchanged windows repainted the frame every time.
         let id = snapshot.id;
         if let Some(previous) = self.display_state.previous.get(&id) {
-            // Compared with the version aside, not by copying the previous.
-            let version = std::mem::replace(&mut snapshot.buffer_version, previous.buffer_version);
-            let changed = *previous != snapshot;
-            snapshot.buffer_version = version;
+            // A table grows as other windows show faces: that changes nothing here.
+            let changed = !previous.lays_out_like(&snapshot) || previous.cursor_off != snapshot.cursor_off;
             if changed {
                 self.display_state.version += 1;
             }
@@ -2048,6 +2051,9 @@ impl Vm {
         }
         let (face, header_face) = (self.mode_line_face_name(window)?, self.header_line_face_name(window)?);
         let table = self.window_faces(window)?;
+        // A remapping changes the table with no change of face: the
+        // reused text's handles index the table it was published with.
+        if self.display_state.shown.get(&id).map(|shown| shown.table) != Some(table.id) { return Ok(None); }
         snapshot.mode_line = bands.mode_line.map(|band| band_slice(self, &table, band));
         snapshot.mode_line_face = self.named(&table, &face).ok_or("mode-line face required")?;
         snapshot.header_line = bands.header_line.map(|band| band_slice(self, &table, band));
@@ -2675,9 +2681,6 @@ impl Vm {
     pub(crate) fn display_faces(&mut self) -> Result<std::rc::Rc<FaceTable>> {
         if let Some(table) = &self.display_state.face_table {
             if table.len() < FACE_TABLE_LIMIT { return Ok(table.clone()); }
-            // Handles of the old table live on in `previous'.
-            self.display_state.faces_changed();
-            self.display_state.free_realized_faces();
         }
         self.display_state.table_ids += 1;
         let id = self.display_state.table_ids;
@@ -2700,8 +2703,10 @@ impl Vm {
         let parameters = remap.filter_parameters();
         let values: Vec<Option<romacs_face::Datum>> = parameters.iter().map(|name| self.window_parameter_datum(window, name)).collect();
         let revision = self.display_state.face_revision;
-        if let Some(table) = self.display_state.remapped.iter().find(|(r, d, v, _)| *r == revision && *d == datum && *v == values).map(|e| e.3.clone()) {
-            return Ok(table);
+        if let Some(at) = self.display_state.remapped.iter().position(|(r, d, v, _)| *r == revision && *d == datum && *v == values) {
+            let table = self.display_state.remapped[at].3.clone();
+            if table.len() < FACE_TABLE_LIMIT { return Ok(table); }
+            self.display_state.remapped.remove(at);
         }
         // evaluate_face_filter compares with EQ: only a symbol, a fixnum, nil or
         // t can be the window's own value; a string or list never is (another

@@ -223,6 +223,40 @@ thousandth a stack mark."
           (dolist (face (cdr it)) (face-spec-recalc face frame))
           (with-current-buffer (car it) (insert "x"))))
 
+;; N faces differing only in an underline's colour, merged for text.
+(scaling-probe faces-merged-decor :gui t :n 200 :steps 1
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
+           (dotimes (i n)
+             (insert (propertize "x" 'face (list :underline (list :color (format "#%06x" (* 7 (1+ i))))))))
+           buffer)
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; Typing in one window after N faces were shown in another: what a table
+;; remembers must not make every key pay for it.
+(scaling-probe faces-publish-history :gui t :n 200 :steps 4
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-history" n)))
+               (buffer (get-buffer-create "scaling-history")))
+           (dolist (face faces) (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (with-current-buffer buffer (dolist (face faces) (insert (propertize "x" 'face face))))
+           (switch-to-buffer buffer)
+           (redisplay t)
+           (let ((typing (get-buffer-create "scaling-typing")))
+             (select-window (split-window))
+             (switch-to-buffer typing)
+             (with-current-buffer buffer (erase-buffer) (insert "x"))
+             typing))
+  :body (with-current-buffer it (insert "x")))
+
+;; Distinct anonymous faces in a buffer with a remapping, past the size a
+;; table is kept to.
+(scaling-probe faces-remapped-churn :gui t :n 1500 :steps 1
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-remapped"))))
+           (setq-local face-remapping-alist '((default :height 1.5)))
+           (dotimes (i n)
+             (insert (propertize "x" 'face (list :foreground (format "#%06x" (* 3 (1+ i)))))))
+           buffer)
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
 ;; `supports' over N distinct font queries: a query's fonts are listed once.
 (scaling-probe faces-supports-queries :gui t :n 50 :steps 1
   :setup (cons (switch-to-buffer (get-buffer-create "scaling-supports"))

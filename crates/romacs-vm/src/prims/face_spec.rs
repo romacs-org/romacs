@@ -78,25 +78,19 @@ pub(super) struct Class {
 }
 
 fn frame_class(cx: &mut Leaf<'_>, keys: &FaceKeys, frame: Value) -> std::result::Result<Class, Fault> {
+    // Without romacs-frame.el's display record there is one display to
+    // answer for: the graphical truecolour one GNU's specs call pgtk, dark.
+    if cx.display_record_missing() {
+        let (system, display_type, background) = (cx.intern("pgtk"), cx.intern("color"), cx.intern("dark"));
+        return Ok(Class { bare: true, system, cells: Value::integer(1 << 24).unwrap(), display_type, background });
+    }
     Ok(Class {
-        bare: cx.display_record_missing(),
+        bare: false,
         system: cx.windows().window_system(frame)?,
         cells: color_cells(cx)?,
         display_type: cx.stored_frame_parameter(frame, keys.display_type),
         background: cx.stored_frame_parameter(frame, keys.background_mode),
     })
-}
-
-/// Without romacs-frame.el's display record there is one display to answer
-/// for: the graphical truecolour one GNU's specs call pgtk, on a dark frame.
-fn bare_display_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, req: Value, options: Value) -> bool {
-    let asks = |cx: &mut Leaf<'_>, name: &str| { let option = cx.intern(name); memq(cx, option, options) };
-    if req == keys.type_condition {
-        return asks(cx, "romacs") || asks(cx, "pgtk") || asks(cx, "graphic") || asks(cx, "gtk");
-    }
-    if req == keys.class { return asks(cx, "color"); }
-    if req == keys.background { return asks(cx, "dark"); }
-    true
 }
 
 /// `face-spec-set-match-display'.
@@ -107,10 +101,9 @@ fn display_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, display: V
         let (conjunct, rest) = uncons(cx, conjuncts)?;
         conjuncts = rest;
         let (req, options) = uncons(cx, conjunct)?;
-        matched = if class.bare {
-            bare_display_matches(cx, keys, req, options)
-        } else if req == keys.type_condition {
-            window_system_matches(cx, keys, options, class.system)?
+        matched = if req == keys.type_condition {
+            let gtk = cx.intern("gtk");
+            (class.bare && memq(cx, gtk, options)) || window_system_matches(cx, keys, options, class.system)?
         } else if req == keys.min_colors {
             let (cells, least) = (number(cx, class.cells)?, uncons(cx, options)?.0);
             cells >= number(cx, least)?
@@ -119,7 +112,7 @@ fn display_matches(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, display: V
         } else if req == keys.background {
             memq(cx, class.background, options)
         } else if req == keys.supports {
-            display_supports(cx, options, frame)? != Value::NIL
+            class.bare || display_supports(cx, options, frame)? != Value::NIL
         } else {
             let template = cx.string("Unknown req `%S' with options `%S'");
             let text = cx.format_message(template, &[req, options])?;

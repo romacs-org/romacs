@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "3d2a88cc7fca2c5eac8e3f149a2ac7b226d9b71b90336ebd9d883b6d2bf2bdb6",
+  "source_fingerprint": "6aa455211c16425026893335e06d155a825b4f041a31690072d1e263ecce24ec",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -4332,7 +4332,7 @@
   "romacs--custom-theme-recalc-face": {
    "name": "romacs--custom-theme-recalc-face",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:586"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:579"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
@@ -4362,32 +4362,32 @@
   "romacs--face-attr-match-p": {
    "name": "romacs--face-attr-match-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:784"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:777"
   },
   "romacs--face-list": {
    "name": "romacs--face-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:791"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:784"
   },
   "romacs--face-spec-choose": {
    "name": "romacs--face-spec-choose",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:746"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:739"
   },
   "romacs--face-spec-recalc": {
    "name": "romacs--face-spec-recalc",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:567"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:560"
   },
   "romacs--face-spec-set-match-display": {
    "name": "romacs--face-spec-set-match-display",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:754"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:747"
   },
   "romacs--faces-modified-on": {
    "name": "romacs--faces-modified-on",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:701"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:694"
   },
   "romacs--frame-shares-faces-p": {
    "name": "romacs--frame-shares-faces-p",
@@ -4828,12 +4828,12 @@
   "romacs--recalc-all-faces": {
    "name": "romacs--recalc-all-faces",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:655"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:648"
   },
   "romacs--recalc-faces-except": {
    "name": "romacs--recalc-faces-except",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:724"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:717"
   },
   "romacs--record-input": {
    "name": "romacs--record-input",
@@ -5023,12 +5023,12 @@
   "romacs--theme-disable-faces": {
    "name": "romacs--theme-disable-faces",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:631"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:624"
   },
   "romacs--theme-enable-faces": {
    "name": "romacs--theme-enable-faces",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:608"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:601"
   },
   "romacs--timer-next": {
    "name": "romacs--timer-next",
