@@ -4,7 +4,7 @@
  "effect": "reads",
  "gnu_files": ["editfns.c", "sysdep.c"],
  "gnu_def": "editfns.c:1283",
- "rust": "src/prims/sysname.rs:14",
+ "rust": "src/prims/sysname.rs:11",
  "args": [],
  "probes": [
   "(list (boundp 'system-name) (fboundp 'system-name) (functionp #'system-name) (eq system-name (system-name)) (eq system-name (funcall #'system-name)) (multibyte-string-p (system-name)))",

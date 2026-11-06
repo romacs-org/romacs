@@ -264,6 +264,27 @@ fn frozen_values_compare_and_print_as_private_ones() {
     assert_eq!(eval(&mut vm, "(let ((f (freeze (list 1 2 3)))) (list (length f) (nth 2 f) (memq 2 f) (mapcar #'1+ f) (apply #'+ f) (append f nil) (delq nil (mapcar (lambda (x) (and (= 1 (% x 2)) x)) f)) (string-match \"b\" (freeze (copy-sequence \"abc\")))))").replace("(2 3)", "(2 3)"), "(3 3 (2 3) (2 3 4) 6 (1 2 3) (1 3) 1)");
 }
 
+/// The byte-op kernels read frozen operands as private ones and leave every
+/// write to the primitive that refuses it.
+#[test]
+fn kernels_read_frozen_operands_and_refuse_writes() {
+    let mut vm = vm();
+    vm.eval_source("(defvar frozen-data (freeze (list 1.5 (vector 1 2) (list 1 2) \"text\" (expt 2 70))))
+                    (defun fk-add (a b) (+ a b))
+                    (defun fk-less (a b) (< a b))
+                    (defun fk-equal (a b) (equal a b))
+                    (defun fk-length (a) (length a))
+                    (defun fk-member (a b) (member a b))
+                    (defun fk-nthcdr (a b) (nthcdr a b))
+                    (defun fk-aset (a b c) (aset a b c))").unwrap();
+    assert_eq!(eval(&mut vm, "(list (fk-add (car frozen-data) 1) (fk-add 1 (car frozen-data)) (fk-less (car frozen-data) 2)
+        (fk-equal (nth 2 frozen-data) (list 1 2)) (fk-equal frozen-data (list 1.5 (vector 1 2) (list 1 2) \"text\" (expt 2 70))) (fk-length (nth 2 frozen-data))
+        (fk-member 2 (nth 2 frozen-data)) (fk-nthcdr 1 (nth 2 frozen-data)) (fk-add (nth 4 frozen-data) 1))"),
+        "(2.5 2.5 t t t 2 (2) (2) 1180591620717411303425)");
+    assert!(caught(&mut vm, "(fk-aset (nth 1 frozen-data) 0 9)").contains("signalled"));
+    assert_eq!(eval(&mut vm, "(aref (nth 1 frozen-data) 0)"), "1");
+}
+
 #[test]
 fn gc_stress_moves_nothing_frozen() {
     let mut vm = vm();

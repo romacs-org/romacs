@@ -9,7 +9,7 @@
     "fns.c"
   ],
   "gnu_def": "fns.c:3742",
-  "rust": "src/loader.rs:104",
+  "rust": "src/prims/provide.rs:4",
   "args": [
     "nil",
     "nil"

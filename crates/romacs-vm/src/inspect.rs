@@ -247,6 +247,45 @@ mod tests {
         assert!(crate::prim::window_shown_elements(&mut vm, window, 1, 20001).is_err(), "a Lisp-called motion did not quit");
     }
 
+    /// An inspection a loop answers inside a leaf a site runs with no
+    /// activation shows the leaf's frame, and leaves nothing behind.
+    #[test]
+    fn an_inspection_inside_a_site_leaf_shows_its_frame() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source("(progn (insert (make-string 8000 ?x)) (put-text-property 1 8000 'display \"d\")
+          (let ((i 1)) (while (< i 8000) (put-text-property i (1+ i) 'face (if (= 0 (% i 2)) 'bold 'italic)) (setq i (1+ i))))
+          (defun walk-display () (next-single-char-property-change 1 'display)))").unwrap();
+        let depth = vm.backtrace.frames.len();
+        crate::host::inspect_request();
+        vm.eval_source("(walk-display)").unwrap();
+        assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
+        let answer = crate::host::inspect_answer().expect("an answer");
+        assert!(answer.contains(r#""fn":"next-single-char-property-change""#), "{answer}");
+        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+    }
+
+    /// The matcher answers an inspection without a VM to record on: a search
+    /// a leaf reaches records the leaf's frame first.
+    #[test]
+    fn an_inspection_inside_a_leafs_search_shows_its_frame() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.eval_source("(progn (setq font-encoding-alist '((\"[bc]\" . hit)))
+          (setq long-name (make-string 300000 ?a))
+          (defun font-of (name) (romacs--font-encoding name)))").unwrap();
+        let depth = vm.backtrace.frames.len();
+        crate::host::inspect_enable(true);
+        crate::host::inspect_request();
+        let found = vm.eval_source("(font-of long-name)");
+        crate::host::inspect_enable(false);
+        assert!(found.is_ok());
+        assert!(!crate::host::inspect_pending(), "the search left the inspection unanswered");
+        let answer = crate::host::inspect_answer().expect("an answer");
+        assert!(answer.contains(r#""fn":"romacs--font-encoding""#), "{answer}");
+        assert_eq!((vm.backtrace.frames.len(), vm.site_leaf), (depth, (0, 0)));
+    }
+
     /// A display span's end is found past every other run inside it: the walk
     /// polls, for a motion that wants a quit and for an inspection.
     #[test]

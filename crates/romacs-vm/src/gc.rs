@@ -207,6 +207,7 @@ pub(crate) struct UnwindMark {
     handlers: usize,
     backtrace: usize,
     eval_depth: usize,
+    site_leaf: (usize, usize),
 }
 
 impl Drop for UnwindMark {
@@ -223,6 +224,7 @@ impl Drop for UnwindMark {
         vm.running_engines = self.engines;
         vm.gc_holds = self.holds;
         vm.rooted_write = self.rooted_write;
+        vm.site_leaf = self.site_leaf;
         if self.stack_empty {
             vm.stack = Vec::new();
         }
@@ -401,6 +403,7 @@ impl Vm {
             handlers: self.signal_handlers.len(),
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
+            site_leaf: self.site_leaf,
             vm: self,
         }
     }

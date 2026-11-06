@@ -188,8 +188,10 @@ threaded.rs hook_debugger execute_raw 1 clean  # inside nested_then's call_suspe
 threaded.rs hook_debugger nested_then 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
 threaded.rs checked_unbind unbind_one 1 suspended  # inside watched_write
 threaded.rs checked_unbind watched_write 1 suspended  # the engine is suspended when any variable is watched
-threaded.rs cold_step bind_special 2 suspended  # the value is read from its register; nothing is reused after; a late binding (BindLate, UnbindLate) the same way
-threaded.rs cold_step checked_unbind 2 suspended  # see checked_unbind; a late binding (BindLate, UnbindLate) the same way
+threaded.rs bind_step bind_special 1 suspended  # the value is read from its register; nothing is reused after
+threaded.rs unbind_step checked_unbind 1 suspended  # see checked_unbind
+threaded.rs cold_step bind_special 1 suspended  # a late binding (BindLate): the value is read from its cell, which is written again after, through the engine
+threaded.rs cold_step checked_unbind 1 suspended  # see checked_unbind; a late binding (UnbindLate) the same way
 threaded.rs set_global set_variable_value 1 suspended  # inside watched_write; the value is read again from its register
 threaded.rs set_global watched_write 1 suspended  # the engine is suspended when the variable is watched
 threaded.rs execute execute_args 1 clean  # no arguments

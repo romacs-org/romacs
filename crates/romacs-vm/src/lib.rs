@@ -1324,6 +1324,10 @@ pub struct Vm {
     /// An escape leaving a reentrant `eval`'s engine, re-raised by the caller's
     /// engine. Traced by the collector while present.
     propagated_escape: Option<threaded::Escape>,
+    /// The instruction and registers of the leaf a site is running with no
+    /// activation, as addresses; (0, 0) otherwise. Lisp that leaf reaches
+    /// records the activation first (`Vm::record_site_leaf`).
+    site_leaf: (usize, usize),
     signal_handlers: Vec<threaded::SignalHandler>,
     backtrace: backtrace::Backtrace,
     /// profiler.c's CPU and memory profilers (`profiler.rs`).
@@ -1752,6 +1756,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     face_keys,
     debug_event_slots,
 } at_rest {
+    site_leaf,
     regexp_cache,
     mode_line_forms,
     images,
@@ -1843,6 +1848,7 @@ impl Vm {
             eval_depth: 0,
             dynamic_scope: false,
             propagated_escape: None,
+            site_leaf: (0, 0),
             signal_handlers: Vec::new(),
             backtrace: backtrace::Backtrace::default(),
             profiler: profiler::Profiler::default(),

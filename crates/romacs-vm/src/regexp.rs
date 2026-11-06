@@ -457,7 +457,9 @@ impl Vm {
             }
             Ok(found.map(|(at, registers)| (input, at, registers)))
         };
-        run(self).map_err(|fault| self.regexp_fault(fault))
+        // A leaf reaches this search, and the matcher answers inspections.
+        let found = if crate::host::inspect_enabled() { self.with_site_leaf(run) } else { run(self) };
+        found.map_err(|fault| self.regexp_fault(fault))
     }
 
     fn regexp_fault(&mut self, fault: Fault) -> prim::Fault {

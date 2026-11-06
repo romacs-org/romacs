@@ -16,13 +16,7 @@ impl Vm {
                 if n != 2 {
                     return Err("wrong primitive arity".into());
                 }
-                Ok(
-                    if self.eval_data_equal(self.stack[start], self.stack[start + 1])? {
-                        Value::TRUE
-                    } else {
-                        Value::NIL
-                    },
-                )
+                Ok(if self.equal_text(self.stack[start], self.stack[start + 1])? { Value::TRUE } else { Value::NIL })
             }
             Min => {
                 if n == 0 {
@@ -62,55 +56,6 @@ impl Vm {
             }
             _ => unreachable!("eval data dispatch"),
         }
-    }
-
-    fn eval_data_equal(&self, a: Value, b: Value) -> Result<bool> {
-        // Iterative worklist also handles cyclic conses/vectors without keeping
-        // a Rust recursive borrow or imposing a limit on long flat lists.
-        let mut pending = vec![(a, b)];
-        let mut seen = HashSet::default();
-        while let Some((a, b)) = pending.pop() {
-            if a == b || !seen.insert((a.0, b.0)) {
-                continue;
-            }
-            if let (Some(x), Some(y)) = (self.str_view(a), self.str_view(b)) {
-                if x.len() != y.len() || x.bytes() != y.bytes() { return Ok(false); }
-                continue;
-            }
-            if a.tag() == 3 && b.tag() == 3 {
-                let (ac, ad) = self.cons_pair(a)?;
-                let (bc, bd) = self.cons_pair(b)?;
-                pending.push((ad, bd));
-                pending.push((ac, bc));
-                continue;
-            }
-            match (self.object_if(a), self.object_if(b)) {
-                (Some(data::Object::Bignum(x)), Some(data::Object::Bignum(y))) if x == y => {}
-                (Some(data::Object::Float(x)), Some(data::Object::Float(y))) if x.to_bits() == y.to_bits() => {}
-                (Some(data::Object::Bytes(x)), Some(data::Object::Bytes(y))) if x == y => {}
-                (Some(data::Object::BoolVector(x)), Some(data::Object::BoolVector(y))) if x == y => {}
-                // fns.c internal_equal: treesit_node_eq.
-                (Some(data::Object::Treesit(x)), Some(data::Object::Treesit(y)))
-                    if matches!((&**x, &**y), (crate::treesit::Object::Node(m), crate::treesit::Object::Node(n)) if m.node.same(n.node)) => {}
-                (Some(data::Object::Vector(x)), Some(data::Object::Vector(y)))
-                | (Some(data::Object::Record(x)), Some(data::Object::Record(y)))
-                    if x.len() == y.len() =>
-                {
-                    pending.extend(x.iter().copied().zip(y.iter().copied()))
-                }
-                // ASCII unibyte and multibyte strings compare equal in GNU.
-                (Some(data::Object::Bytes(x)), _)
-                    if self
-                        .source_string_if(b)
-                        .is_some_and(|y| x.is_ascii() && x == y.as_bytes()) => {}
-                (_, Some(data::Object::Bytes(y)))
-                    if self
-                        .source_string_if(a)
-                        .is_some_and(|x| y.is_ascii() && x.as_bytes() == y) => {}
-                _ => return Ok(false),
-            }
-        }
-        Ok(true)
     }
 
     /// VALUE printed for a caller that cannot call Lisp: an unreadable

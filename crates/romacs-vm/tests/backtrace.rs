@@ -139,6 +139,59 @@ fn t2_primitive_origin_and_callback_are_real_frames() {
     );
 }
 
+/// A leaf runs with no activation, and has one the moment it fails: what a
+/// signal hook sees is GNU's frame, through a compiled call, `funcall' and
+/// `apply'.
+#[test]
+fn a_failing_leaf_shows_its_frame() {
+    compare(
+        "failing_leaf",
+        r#"(progn
+      (defvar bt-seen nil)
+      (fset 'bt-record (bt-compile (lambda (&rest _)
+        (let (found)
+          (mapbacktrace (lambda (evaluated function arguments flags)
+            (if (memq function '(symbol-name bt-leaf bt-through bt-spread))
+                (setq found (cons (list evaluated function arguments flags) found)))))
+          (setq bt-seen (cons (nreverse found) bt-seen))))))
+      (fset 'bt-leaf (bt-compile (lambda (x) (symbol-name x))))
+      (fset 'bt-through (bt-compile (lambda (x) (funcall 'symbol-name x))))
+      (fset 'bt-spread (bt-compile (lambda (x) (apply 'symbol-name x))))
+      (fset 'bt-drive (bt-compile (lambda (f x)
+        (condition-case nil
+            (let ((signal-hook-function 'bt-record)) (funcall f x))
+          (error nil)))))
+      (bt-drive 'bt-leaf 1)
+      (bt-drive 'bt-through 1)
+      (bt-drive 'bt-spread '(1))
+      (list bt-seen (length (bt-leaf 'ok)) (length (bt-through 'ok)) (length (bt-spread '(ok)))))"#,
+    );
+}
+
+/// A primitive that reads the stack sees its own frame, and a reader's
+/// callback sees `read'.
+#[test]
+fn stack_readers_and_reader_callbacks_keep_their_frames() {
+    compare(
+        "stack_readers",
+        r#"(progn
+      (defvar bt-chars (append "(a)" nil))
+      (defvar bt-seen nil)
+      (fset 'bt-frame (bt-compile (lambda ()
+        (let (found)
+          (mapbacktrace (lambda (evaluated function arguments flags)
+            (if (memq function '(read bt-stream bt-frame))
+                (setq found (cons (list evaluated function) found)))))
+          found))))
+      (fset 'bt-stream (bt-compile (lambda (&optional unread)
+        (if unread
+            (setq bt-chars (cons unread bt-chars))
+          (or bt-seen (setq bt-seen (bt-frame)))
+          (prog1 (car bt-chars) (setq bt-chars (cdr bt-chars)))))))
+      (list (read 'bt-stream) bt-seen))"#,
+    );
+}
+
 #[test]
 fn eval_and_load_reentry_retain_parent_activations() {
     compare(

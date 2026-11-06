@@ -492,6 +492,24 @@ impl Vm {
         if let Some(referrers) = &mut self.referrers { referrers.list(index, &self.objects[index]); }
         Value::reference(index + 1, 0)
     }
+    /// Store VALUE at index AT of the private vector or record ARRAY, and
+    /// say whether that was the whole of its `aset'.
+    #[inline(never)]
+    pub(super) fn aset_kernel(&mut self, array: Value, at: Value, value: Value) -> bool {
+        let Some(at) = at.integer_value().and_then(|n| usize::try_from(n).ok()) else { return false };
+        match self.object_mut_quiet(array) {
+            Some(Object::Vector(items) | Object::Record(items)) => items.get_mut(at).map(|slot| *slot = value).is_some(),
+            _ => false,
+        }
+    }
+    /// The private object ARRAY names, with no refusal left pending.
+    fn object_mut_quiet(&mut self, array: Value) -> Option<&mut Object> {
+        let index = array.index_if(0)?;
+        if index & crate::image::IMAGE != 0 {
+            return None;
+        }
+        self.objects.get_mut(index.checked_sub(1)?)
+    }
     /// A new cons (CAR . CDR), as `allocate_object' makes an object.
     #[inline]
     pub(super) fn alloc_cons(&mut self, car: Value, cdr: Value) -> Value {
@@ -766,11 +784,14 @@ impl Vm {
         }
         // Bootstrap Fset uses the Leaf cell writer. Preserve its complete GNU
         // condition data instead of the dispatcher's lossy text fallback.
-        let (condition, values) = if error == "Marker does not point anywhere" {
+        let (condition, values) = if error == "Marker does not point anywhere" || error == "Stack overflow in equal" {
             let message = self.make_lisp_string(error.as_bytes().to_vec(), true);
             ("error", vec![message])
         } else if error == "arithmetic error" {
             ("arith-error", vec![])
+        } else if p == Primitive::Member && error == "circular list" {
+            let tails::TailEnd::Circular(tail) = self.gnu_tails(y) else { return None };
+            ("circular-list", vec![tail])
         } else if matches!(p, Primitive::Provide | Primitive::Featurep)
             && error == "wrong primitive arity"
         {
@@ -825,7 +846,7 @@ impl Vm {
                 Load => ("stringp", x),
                 Require | Provide | Featurep => ("symbolp", x),
                 Car | Cdr => ("listp", x),
-                Memq | Assq => ("listp", y),
+                Memq | Assq | Member => ("listp", y),
                 Nth if self.bigint_value(x).is_none() => ("integerp", x),
                 Nth => {
                     // nthcdr errors blame the original list; a final car error
@@ -848,8 +869,8 @@ impl Vm {
                 {
                     ("arrayp", x)
                 }
-                Aref | Aset if matches!(self.object_if(x), Some(Object::Record(_))) => ("fixnump", y),
-                Aref | Aset => ("integerp", y),
+                Aref | Aset if error == "character index required" => ("characterp", y),
+                Aref | Aset => ("fixnump", y),
                 CharAfter | OverlaysAt | NextOverlayChange => ("integer-or-marker-p", x),
                 OverlaysIn => ("integer-or-marker-p", if self.scalar_position(x).is_ok() { y } else { x }),
                 BufferSize => ("bufferp", x),
@@ -906,7 +927,12 @@ impl Vm {
         };
         match p {
             Aref | Aset => {
-                let index = usize::try_from(y.as_integer()?).map_err(|_| "index out of range")?;
+                let index = y.as_integer()?;
+                // data.c Faref, Faset: a char-table's index is a character.
+                if matches!(self.object_if(x), Some(Object::CharTable(_))) && !(0..=crate::lstring::MAX_CHAR as i64).contains(&index) {
+                    return Err("character index required".into());
+                }
+                let index = usize::try_from(index).map_err(|_| "index out of range")?;
                 if Self::image_string(x) {
                     if p == Aset {
                         return Err(self.refuse_read_only(x));

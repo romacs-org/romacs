@@ -114,6 +114,67 @@ impl Vm {
     }
 }
 
+impl Vm {
+    /// The length of the proper list LIST, else UNBOUND: a dotted or
+    /// circular list is the primitive's to report.
+    #[inline(never)]
+    pub(super) fn list_length_kernel(&self, list: Value) -> Value {
+        let (mut tail, mut length, limit) = (list, 0usize, self.list_limit());
+        while let Some((_, next)) = pair(self, tail) {
+            tail = next;
+            length += 1;
+            if length > limit {
+                return Value::UNBOUND;
+            }
+        }
+        if tail == Value::NIL { Value::integer(length as i64).unwrap_or(Value::UNBOUND) } else { Value::UNBOUND }
+    }
+    /// `nthcdr' of a count below GNU's SMALL_LIST_LEN_MAX on a plain walk,
+    /// else UNBOUND.
+    #[inline(never)]
+    pub(super) fn nthcdr_kernel(&self, count: Value, list: Value) -> Value {
+        let Some(count) = count.integer_value().filter(|&n| n <= 127) else { return Value::UNBOUND };
+        let mut tail = list;
+        for _ in 0..count.max(0) {
+            match pair(self, tail) {
+                Some((_, next)) => tail = next,
+                None if tail == Value::NIL => return Value::NIL,
+                None => return Value::UNBOUND,
+            }
+        }
+        tail
+    }
+    /// `member' over a proper list, else UNBOUND.
+    #[inline(never)]
+    pub(super) fn member_kernel(&self, element: Value, list: Value) -> Value {
+        let (mut tail, mut steps, limit) = (list, 0usize, self.list_limit());
+        while let Some((item, next)) = pair(self, tail) {
+            match self.equal_kernel(element, item) {
+                Value::TRUE => return tail,
+                Value::UNBOUND => return Value::UNBOUND,
+                _ => {}
+            }
+            tail = next;
+            steps += 1;
+            if steps > limit {
+                return Value::UNBOUND;
+            }
+        }
+        if tail == Value::NIL { Value::NIL } else { Value::UNBOUND }
+    }
+    /// `get' of an ordinary property, else UNBOUND: a fence observes the
+    /// read, and the condition properties live in the registry.
+    #[inline(never)]
+    pub(super) fn get_kernel(&self, symbol: Value, property: Value) -> Value {
+        let registry = property.index_if(7).and_then(|i| i.checked_sub(1)).and_then(|slot| self.symbol_names.get(slot))
+            .is_some_and(|name| name == "error-conditions" || name == "error-message");
+        if registry || self.fence.is_some() {
+            return Value::UNBOUND;
+        }
+        self.symbol_property(symbol, property).unwrap_or(Value::UNBOUND)
+    }
+}
+
 // Keep error formatting and image-authentication stack addresses out of the
 // tail-threaded handler. Even a cold address escape can inhibit LLVM tail calls.
 #[inline(never)]
@@ -201,8 +262,33 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
     }
 }
 
+/// `car' or `cdr' of a private cons or nil, with no stack frame: tag bits
+/// alone say cons, the image bit puts an index past the arena, and whatever
+/// else arrives leaves by tail call.
+macro_rules! half {
+    ($name:ident, $general:ident, $field:tt) => {
+        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let x = *r.add(i.d);
+                if x.0 & 7 == 3 {
+                    let index = (x.0 >> 3) as usize;
+                    if index < e.vm.conses.len() {
+                        *r.add(i.a) = e.vm.conses.get_unchecked(index).$field;
+                        return advance(e, r, pc);
+                    }
+                } else if x == Value::NIL {
+                    *r.add(i.a) = Value::NIL;
+                    return advance(e, r, pc);
+                }
+                $general(e, r, pc)
+            }
+        }
+    };
+}
 macro_rules! handler {
-    ($name:ident, $p:ident) => {
+    ($(#[$attribute:meta])* $name:ident, $p:ident) => {
+        $(#[$attribute])*
         pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
@@ -217,8 +303,11 @@ macro_rules! handler {
         }
     };
 }
-handler!(car, Car);
-handler!(cdr, Cdr);
+// Never inlined into `car' and `cdr': their calls would give those a frame.
+handler!(#[inline(never)] mapped_car, Car);
+handler!(#[inline(never)] mapped_cdr, Cdr);
+half!(car, mapped_car, 0);
+half!(cdr, mapped_cdr, 1);
 handler!(null, Null);
 handler!(eq, Eq);
 handler!(memq, Memq);

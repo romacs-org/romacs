@@ -48,6 +48,32 @@ mod control_tests {
         }
     }
 
+    /// Rows left to the primitive, on purpose: each does its work in the
+    /// buffer, in text or by allocating, so a kernel saves little of a call.
+    /// A new row needs a kernel or a place here.
+    const GENERIC_BYTE_OPS: &[&str] = &[
+        "current-column", "current-buffer", "widen", "end-of-line", "forward-char", "forward-line",
+        "following-char", "preceding-char", "eolp", "eobp", "bolp", "bobp", "symbol-value", "set-buffer",
+        "forward-word", "char-syntax", "nreverse", "skip-chars-forward", "skip-chars-backward", "set",
+        "fset", "substring", "move-marker", "set-marker", "match-beginning", "match-end", "upcase",
+        "downcase", "string=", "string<", "string-equal", "string-lessp", "elt", "rplaca", "rplacd",
+        "buffer-substring", "delete-region", "narrow-to-region", "concat", "indent-to-column",
+        "indent-to", "cdr-safe", "not",
+    ];
+
+    #[test]
+    fn every_sealed_row_has_a_kernel_or_is_named_generic() {
+        for (name, min, max) in crate::sealed::rows() {
+            if GENERIC_BYTE_OPS.contains(&name) {
+                continue;
+            }
+            let covered = (min..=max.min(3)).any(|argc| {
+                kernel(crate::sealed::target(name, argc).expect("a row's own count"), argc).is_some()
+            });
+            assert!(covered, "{name} has no kernel and is not named generic");
+        }
+    }
+
     #[test]
     fn inline_side_table_tracks_release_and_compaction() {
         let vm = Vm::new();
@@ -133,6 +159,7 @@ mod control_tests {
             escape: None,
             escape_hooked: false,
             failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
             propagate: false,
             controls: vec![],
@@ -249,6 +276,7 @@ mod control_tests {
             escape: None,
             escape_hooked: false,
             failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
             propagate: false,
             controls: vec![Control {
@@ -1214,6 +1242,8 @@ pub(super) struct Engine<'a> {
     pub(super) escape: Option<Escape>,
     escape_hooked: bool,
     failed_eval_depth: Option<usize>,
+    /// A site leaf's fault, on its way to `leaf_failed'.
+    leaf_fault: Option<prim::Fault>,
     /// Lowest native stack address at which an activation may start (R193).
     native_floor: usize,
     /// This engine runs an `eval` form: an escape reaching its outermost frame
@@ -1318,6 +1348,7 @@ pub(super) fn assert_opaque_rest_compaction() {
         escape: None,
         escape_hooked: false,
         failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
         propagate: false,
         controls: vec![],
@@ -1368,16 +1399,58 @@ impl Vm {
         } else {
             vec![function, self.list_value(args)]
         };
-        self.suspend_stack();
-        self.propagated_escape = None;
-        self.propagated_escape_hooked = false;
-        self.propagated_eval_depth = None;
-        self.propagate_next = true;
-        let result = execute_args(self, trampoline, &registers);
-        self.propagate_next = false;
-        self.resume_stack();
-        self.end_nested_execution();
+        // A leaf's Lisp comes here, by pending variables, `safe_call' and
+        // watchers: it sees the leaf's frame, whichever way it came.
+        self.with_site_leaf(|vm| {
+            vm.suspend_stack();
+            vm.propagated_escape = None;
+            vm.propagated_escape_hooked = false;
+            vm.propagated_eval_depth = None;
+            vm.propagate_next = true;
+            let result = execute_args(vm, trampoline, &registers);
+            vm.propagate_next = false;
+            vm.resume_stack();
+            vm.end_nested_execution();
+            result
+        })
+    }
+    /// BODY, with the activation recorded of any leaf a site is running with
+    /// none: what BODY runs or publishes sees that frame.
+    pub(crate) fn with_site_leaf<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
+        let site = std::mem::replace(&mut self.site_leaf, (0, 0));
+        let mark = self.record_site_leaf(site);
+        let result = body(self);
+        if let Some(mark) = mark {
+            self.trace_leave(mark);
+        }
+        self.site_leaf = site;
         result
+    }
+    /// The activation `trace_call' would have made for the leaf at SITE.
+    fn record_site_leaf(&mut self, site: (usize, usize)) -> Option<usize> {
+        let (pc, r) = (site.0 as *const Inst, site.1 as *mut Value);
+        if pc.is_null() {
+            return None;
+        }
+        // SAFETY: `leaf_call' set SITE and is still running: the instruction
+        // and its registers are live, and nothing has widened them.
+        unsafe {
+            let (function, resolved, start, argc) = match (*pc).op {
+                Op::Direct(_, slot, _, start, argc) => (Value::reference(slot + 1, 7), self.slots[slot].function, start, argc),
+                Op::Sealed(_, slot, start, argc) => (Value::reference(slot + 1, 7), (*pc).value, start, argc),
+                Op::Call(_, function, start, argc) => {
+                    let function = *r.add(function);
+                    (function, self.backtrace_resolve(function).unwrap_or(function), start, argc)
+                }
+                _ => return None,
+            };
+            let args = backtrace::Arguments::Registers {
+                stack: self.suspended_stacks.len(),
+                offset: r.add(start).offset_from(self.stack.as_ptr()) as usize,
+                count: argc,
+            };
+            Some(self.backtrace.enter(function, resolved, args, self.dynamic.len()))
+        }
     }
     /// The permanent function a native call of N arguments enters:
     /// `(lambda (f a1 .. aN) (funcall f a1 .. aN))`, or for more than
@@ -1527,6 +1600,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         escape: None,
         escape_hooked: false,
         failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: eval_depth::native_stack_floor(),
         propagate: vm_propagate,
         controls: Vec::new(),
@@ -1670,6 +1744,12 @@ fn lower_function(
                 inst
             })
             .collect();
+        // Branches hold their distance, so they need no code table.
+        for (at, inst) in code[id].iter_mut().enumerate() {
+            if let Op::Jump(to) | Op::Unless(_, to) = inst.op {
+                inst.c = (to as isize - at as isize) as usize;
+            }
+        }
     }
     Ok(())
 }
@@ -1707,9 +1787,34 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = kernel(i.value, e).unwrap_or(sealed_call);
         }
         Op::Global(a, b) => {
-            i.handler = global;
+            // Two plain-looking variables whose value is the buffer's.
+            i.handler = if b == vm.multibyte_slot || b == vm.truncate_lines_slot { cold } else { global };
             i.a = a;
             i.b = b;
+        }
+        Op::Cell(a) => {
+            i.handler = cell;
+            i.a = a;
+        }
+        Op::Closure(a, b, c) => {
+            i.handler = closure;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
+        Op::SetGlobal(a, b) => {
+            i.handler = assign_global;
+            i.a = a;
+            i.b = b;
+        }
+        Op::Bind(a, b) => {
+            i.handler = bind;
+            i.a = a;
+            i.b = b;
+        }
+        Op::Unbind(a) => {
+            i.handler = unbind;
+            i.a = a;
         }
         Op::ReadCell(a, b) => {
             i.handler = read_cell;
@@ -1802,6 +1907,10 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("nconc", 2) => Some(nconc2),
             ("plist-get", 2) => Some(traversal::plist_get),
             ("symbol-function", 1) => Some(symbol_function),
+            (">", 2) => Some(greater),
+            ("<=", 2) => Some(less_equal),
+            (">=", 2) => Some(greater_equal),
+            ("nthcdr", 2) => Some(nthcdr),
             _ => None,
         };
     }
@@ -1823,12 +1932,21 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
         (Primitive::Less, 2) => less,
         (Primitive::Equal, 2) => equal,
         (Primitive::Cons, 2) => cons,
+        (Primitive::Div, 2) => divide,
+        (Primitive::Max, 2) => max,
+        (Primitive::Min, 2) => min,
+        (Primitive::Aset, 3) => aset,
+        (Primitive::DeepEqual, 2) => deep_equal,
+        (Primitive::Member, 2) => member,
+        (Primitive::Get, 2) => get,
+        (Primitive::List, _) => list,
         (Primitive::Consp, 1) => consp,
         (Primitive::Symbolp, 1) => symbolp,
         (Primitive::Stringp, 1) => stringp,
         (Primitive::Integerp, 1) => integerp,
         (Primitive::CarSafe, 1) => car_safe,
-        (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
+        (Primitive::Aref, 2) => sequence_read,
+        (Primitive::Length, 1) => length,
         (Primitive::CharAfter, 0 | 1)
         | (Primitive::Point | Primitive::PointMin | Primitive::PointMax | Primitive::BufferSize, 0)
         | (Primitive::GotoChar, 1) => buffer_read,
@@ -2056,10 +2174,7 @@ fn poll_collect_unless_key(e: &mut Engine<'_>, until_key: bool) -> bool {
 unsafe fn global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if i.b == e.vm.multibyte_slot
-            || i.b == e.vm.truncate_lines_slot
-            || e.vm.variable_redirects.get(i.b) != Some(&Some(VariableRedirect::Plain))
-        {
+        if e.vm.variable_redirects.get(i.b) != Some(&Some(VariableRedirect::Plain)) {
             return cold(e, r, pc);
         }
         let value = e.vm.slots[i.b].value;
@@ -2147,7 +2262,7 @@ unsafe fn write_cell(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Valu
 )]
 unsafe fn jump(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
-        let to = e.code.get_unchecked(e.function).as_ptr().add((*pc).a);
+        let to = pc.offset((*pc).c as isize);
         if to <= pc {
             e.budget -= 1;
             if e.budget < 0 {
@@ -2164,7 +2279,7 @@ unsafe fn jump(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
 unsafe fn unless(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         if *r.add((*pc).a) == Value::NIL {
-            next(e, r, e.code.get_unchecked(e.function).as_ptr().add((*pc).b))
+            next(e, r, pc.offset((*pc).c as isize))
         } else {
             advance(e, r, pc)
         }
@@ -2498,7 +2613,6 @@ unsafe fn direct(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         direct_generic(e, r, pc)
     }
 }
-#[cold]
 unsafe fn direct_generic(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
@@ -2549,8 +2663,13 @@ unsafe fn invoke(
     unsafe {
         if target.tag() != 4 {
             let entry = *e.entries.get_unchecked((*pc).site);
-            if entry.target == target && entry.primitive.is_some() {
-                return cached_primitive(e, r, pc, target, start, argc);
+            if entry.target == target {
+                if entry.primitive.is_some() {
+                    return cached_primitive(e, r, pc, target, start, argc);
+                }
+                if entry.simple_arity == LEAF_ENTRY + argc {
+                    return leaf_call(e, r, pc, target, start, argc);
+                }
             }
             return resolve_entry(e, r, pc, target, start, argc);
         }
@@ -2626,7 +2745,6 @@ unsafe fn invoke(
         enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
-#[cold]
 #[inline(never)]
 unsafe fn resolve_entry(
     e: &mut Engine<'_>,
@@ -2707,8 +2825,20 @@ unsafe fn resolve_entry(
             };
             return invoke(e, r, pc, target, start, argc);
         }
-        if prim::generated(target).is_some() {
-            return enter_generated(e, r, pc, target, start, argc);
+        if let Some(d) = prim::generated(target) {
+            let Some(leaf) = prim::site_leaf(d, argc) else {
+                return enter_generated(e, r, pc, target, start, argc);
+            };
+            e.inline_bodies[(*pc).site] = None;
+            *e.entries.get_unchecked_mut((*pc).site) = EntryCache {
+                world_version: 0,
+                target,
+                function: leaf as usize,
+                entry: std::ptr::null(),
+                simple_arity: LEAF_ENTRY + argc,
+                primitive: None,
+            };
+            return leaf_call(e, r, pc, target, start, argc);
         }
         if target.tag() == 6 {
             let Some(p) = prim::legacy(target) else {
@@ -3644,6 +3774,72 @@ fn primitive_value(
         }
     }
 }
+/// `EntryCache::simple_arity' of a leaf site, plus its argument count; the
+/// leaf's body is in `function' (`prim::site_leaf').
+const LEAF_ENTRY: usize = usize::MAX / 2;
+/// A leaf through its site: no activation unless it fails, as nothing can see
+/// one while it runs. Whatever watches calls keeps the full path. Six
+/// register arguments, for the reason `cached_primitive' gives.
+unsafe fn leaf_call(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Value {
+    unsafe {
+        if e.native_mark.is_some() || e.apply_mark.is_some() || e.vm.profiler.active
+            || e.vm.backtrace.observing() || e.vm.fence.is_some()
+        {
+            return enter_generated(e, r, pc, target, start, argc);
+        }
+        let leaf: prim::LeafBody = std::mem::transmute(e.entries.get_unchecked((*pc).site).function);
+        e.vm.site_leaf = (pc as usize, r as usize);
+        let value = e.vm.leaf_value(leaf, r.add(start), argc, &mut e.leaf_fault);
+        e.vm.site_leaf = (0, 0);
+        if value == Value::UNBOUND && e.leaf_fault.is_some() {
+            return leaf_failed(e, r, pc, target, start, argc);
+        }
+        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) {
+            e.budget = 0;
+        }
+        *r.add((*pc).a) = value;
+        advance(e, r, pc)
+    }
+}
+/// The call a failed leaf made, recorded now: its arguments are where they
+/// were, and the fault is reported once, as if the activation had been there.
+#[cold]
+#[inline(never)]
+unsafe fn leaf_failed_step(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Continue {
+    unsafe {
+        enter_native(e, r, pc, target, start, argc);
+        let fault = e.leaf_fault.take().expect("a failed leaf's fault");
+        let step = e.vm.leaf_step(fault);
+        take_step(e, r, pc, step)
+    }
+}
+unsafe fn leaf_failed(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Value {
+    unsafe {
+        let to = leaf_failed_step(e, r, pc, target, start, argc);
+        continue_at(e, to)
+    }
+}
 /// A primitive through the site's entry cache, which holds its call. Six
 /// register arguments: a seventh on the stack would stop every caller from
 /// tail-calling it, so each funcall or apply of a primitive kept a frame.
@@ -4082,16 +4278,38 @@ unsafe fn reentrant_step(
     }
 }
 
+/// A kernel's case with an operand that is no fixnum: `Vm::float_kernel',
+/// else the primitive. A handler of its own, so a kernel's fixnum path needs
+/// no stack frame.
+#[inline(never)]
+unsafe fn not_fixnums<const KERNEL: u8>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let x = *r.add(i.d);
+        let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
+        let value = e.vm.float_kernel(KERNEL, x, y);
+        if value == Value::UNBOUND {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+// Binary by default: the kernel table gives each handler one argument count.
 macro_rules! numeric {
-    ($name:ident,$body:expr) => {
+    ($name:ident,$kernel:expr,$body:expr) => {
+        numeric!($name, $kernel, $body, |r: *mut Value, i: &Inst| *r.add(i.d + 1));
+    };
+    ($name:ident,$kernel:expr,$body:expr,$second:expr) => {
         #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), unsafe(link_section = concat!(".text.vm2.", stringify!($name))))]
         unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
-                let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
-                if x.tag() != 1 || y.tag() != 1 {
-                    return sealed_call(e, r, pc);
+                let y: Value = ($second)(r, i);
+                // Both tags at once: a fixnum less one has clear low bits.
+                if (x.0.wrapping_sub(1) | y.0.wrapping_sub(1)) & 3 != 0 {
+                    return not_fixnums::<{ $kernel }>(e, r, pc);
                 }
                 let result: Option<Value> = ($body)(x, y);
                 match result {
@@ -4105,33 +4323,95 @@ macro_rules! numeric {
         }
     };
 }
-numeric!(mul, |x: Value, y: Value| ((x.0 as i64) >> 2)
+numeric!(mul, numbers::op::MUL, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_mul((y.0 as i64) >> 2)
     .and_then(|n| Value::fixnum(n)));
-numeric!(add, |x: Value, y: Value| (x.0 as i64)
+numeric!(add, numbers::op::ADD, |x: Value, y: Value| (x.0 as i64)
     .checked_add((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
-numeric!(sub, |x: Value, y: Value| (x.0 as i64)
+numeric!(sub, numbers::op::SUB, |x: Value, y: Value| (x.0 as i64)
     .checked_sub((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
-numeric!(inc, |x: Value, _y: Value| (x.0 as i64)
+numeric!(inc, numbers::op::ADD, |x: Value, _y: Value| (x.0 as i64)
     .checked_add(4)
-    .map(|n| Value(n as u64)));
-numeric!(dec, |x: Value, _y: Value| (x.0 as i64)
+    .map(|n| Value(n as u64)), |_, _| Value(5));
+numeric!(dec, numbers::op::SUB, |x: Value, _y: Value| (x.0 as i64)
     .checked_sub(4)
-    .map(|n| Value(n as u64)));
-numeric!(less, |x: Value, y: Value| Some(
-    if (x.0 as i64) < (y.0 as i64) {
-        Value::TRUE
-    } else {
-        Value::NIL
+    .map(|n| Value(n as u64)), |_, _| Value(5));
+fn boolean(holds: bool) -> Option<Value> {
+    Some(if holds { Value::TRUE } else { Value::NIL })
+}
+numeric!(less, numbers::op::LESS, |x: Value, y: Value| boolean((x.0 as i64) < (y.0 as i64)));
+numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| boolean((x.0 as i64) > (y.0 as i64)));
+numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) <= (y.0 as i64)));
+numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) >= (y.0 as i64)));
+numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| boolean(x == y));
+// A zero divisor and the one quotient past the fixnums are the primitive's.
+numeric!(divide, numbers::op::DIV, |x: Value, y: Value| ((x.0 as i64) >> 2)
+    .checked_div((y.0 as i64) >> 2)
+    .and_then(Value::fixnum));
+/// A kernel whose work is one `Vm' call of its operands, UNBOUND leaving the
+/// call to the primitive.
+macro_rules! through {
+    ($name:ident, |$vm:ident, $x:ident, $y:ident| $body:expr) => {
+        unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let ($x, $y) = (*r.add(i.d), *r.add(i.d + 1));
+                let $vm = &mut *e.vm;
+                let value = $body;
+                if value == Value::UNBOUND {
+                    return sealed_call(e, r, pc);
+                }
+                *r.add(i.a) = value;
+                advance(e, r, pc)
+            }
+        }
+    };
+}
+through!(deep_equal, |vm, x, y| vm.equal_kernel(x, y));
+through!(member, |vm, x, y| vm.member_kernel(x, y));
+through!(get, |vm, x, y| vm.get_kernel(x, y));
+through!(nthcdr, |vm, x, y| vm.nthcdr_kernel(x, y));
+through!(max, |_vm, x, y| if x.0 & 3 != 1 || y.0 & 3 != 1 { Value::UNBOUND } else if (y.0 as i64) > (x.0 as i64) { y } else { x });
+through!(min, |_vm, x, y| if x.0 & 3 != 1 || y.0 & 3 != 1 { Value::UNBOUND } else if (y.0 as i64) < (x.0 as i64) { y } else { x });
+unsafe fn aset(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let value = *r.add(i.d + 2);
+        if !e.vm.aset_kernel(*r.add(i.d), *r.add(i.d + 1), value) {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
     }
-));
-numeric!(equal, |x: Value, y: Value| Some(if x == y {
-    Value::TRUE
-} else {
-    Value::NIL
-}));
+}
+unsafe fn length(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let x = *r.add(i.d);
+        if x != Value::NIL && x.0 & 7 != 3 {
+            return sequence_read(e, r, pc);
+        }
+        let value = e.vm.list_length_kernel(x);
+        if value == Value::UNBOUND {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+unsafe fn list(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let mut tail = Value::NIL;
+        for at in (0..i.e).rev() {
+            tail = e.vm.alloc_cons(*r.add(i.d + at), tail);
+        }
+        *r.add(i.a) = tail;
+        advance(e, r, pc)
+    }
+}
 unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
@@ -4322,11 +4602,11 @@ macro_rules! predicate {
         }
     };
 }
-predicate!(consp, |_vm, x| x.tag() == 3);
-predicate!(listp, |_vm, x| x == Value::NIL || x.tag() == 3);
-predicate!(symbolp, |_vm, x| x == Value::NIL || x == Value::TRUE || x.tag() == 7 && x != Value::UNBOUND);
-predicate!(integerp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_))));
-predicate!(numberp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_) | data::Object::Float(_))));
+predicate!(consp, |_vm, x| x.0 & 7 == 3);
+predicate!(listp, |_vm, x| x == Value::NIL || x.0 & 7 == 3);
+predicate!(symbolp, |_vm, x| x == Value::NIL || x == Value::TRUE || x.0 & 7 == 7 && x != Value::UNBOUND);
+predicate!(integerp, |vm, x| x.0 & 3 == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_))));
+predicate!(numberp, |vm, x| x.0 & 3 == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_) | data::Object::Float(_))));
 predicate!(stringp, |vm, x| is_string(vm, x));
 /// Out of line, returning a register-sized value: a wide or address-taken
 /// result in the handler keeps a native frame across its dispatch (the
@@ -4423,7 +4703,9 @@ unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         advance(e, r, pc)
     }
 }
+// Never inlined: its call would give every handler that leaves here a frame.
 #[cold]
+#[inline(never)]
 unsafe fn cold(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         if cold_step(e, r, pc) {
@@ -4432,6 +4714,74 @@ unsafe fn cold(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             Value::UNBOUND
         }
     }
+}
+unsafe fn cell(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let reg = (*pc).a;
+        let index = e.vm.alloc_cell(*r.add(reg));
+        *r.add(reg) = Value::reference(index, 5);
+        advance(e, r, pc)
+    }
+}
+#[inline(never)]
+unsafe fn make_closure(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
+    unsafe {
+        let i = &*pc;
+        let captures = e.vm.functions[e.function].sites[i.c].iter().map(|&reg| *r.add(reg)).collect();
+        *r.add(i.a) = e.vm.alloc_closure(Closure { function: i.b, captures, metadata: vec![], document: Value::NIL });
+    }
+}
+unsafe fn closure(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        make_closure(e, r, pc);
+        advance(e, r, pc)
+    }
+}
+/// A step's outcome as dispatch wants it: an error or an escape stops.
+fn stepped(e: &mut Engine<'_>, outcome: Result<()>) -> bool {
+    match outcome {
+        Ok(()) => e.escape.is_none(),
+        Err(error) => {
+            e.error = Some(error);
+            false
+        }
+    }
+}
+#[inline(never)]
+unsafe fn assign_global_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool {
+    unsafe {
+        let outcome = set_global(e, (*pc).a, r, (*pc).b);
+        stepped(e, outcome)
+    }
+}
+#[inline(never)]
+unsafe fn bind_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool {
+    unsafe {
+        let outcome = bind_special(e, (*pc).a, *r.add((*pc).b));
+        stepped(e, outcome)
+    }
+}
+#[inline(never)]
+unsafe fn unbind_step(e: &mut Engine<'_>, pc: *const Inst) -> bool {
+    unsafe {
+        let n = (*pc).a;
+        if n > e.vm.dynamic.len() - e.dynamic {
+            return stepped(e, Err("invalid image dynamic binding depth".into()));
+        }
+        if let Some(signal) = checked_unbind(e, n) {
+            e.escape = Some(signal);
+        }
+        e.escape.is_none()
+    }
+}
+unsafe fn assign_global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if assign_global_step(e, r, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
+}
+unsafe fn bind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if bind_step(e, r, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
+}
+unsafe fn unbind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if unbind_step(e, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
 }
 // Owned result/error/control payloads must be dropped before tail dispatch.
 // Keeping them in `cold` retains one native frame per cold instruction even
@@ -4442,13 +4792,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
     unsafe {
         let outcome = (|| -> Result<()> {
             match (*pc).op {
-                Op::Cell(reg) => {
-                    let index = e.vm.alloc_cell(*r.add(reg));
-                    *r.add(reg) = Value::reference(index, 5);
-                }
                 Op::Global(reg, slot) => *r.add(reg) = global_value(e, slot)?,
-                Op::SetGlobal(slot, reg) => set_global(e, slot, r, reg)?,
-                Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
                 // A late binding (Op::BindLate): dynamic when its symbol is
                 // special now, its cell then forwarding to the dynamic value.
                 Op::BindLate(slot, cell) => {
@@ -4477,15 +4821,6 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         set_global(e, slot, r, reg)?;
                     } else {
                         late_set(e, r, cell, *r.add(reg));
-                    }
-                }
-                Op::Unbind(n) => {
-                    if n > e.vm.dynamic.len() - e.dynamic {
-                        return Err("invalid image dynamic binding depth".into());
-                    }
-                    if let Some(signal) = checked_unbind(e, n) {
-                        e.escape = Some(signal);
-                        return Ok(());
                     }
                 }
                 Op::Catch(dest, tag, target) => {
@@ -4562,13 +4897,6 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         release_control(e, &control);
                     }
                 }
-                Op::Closure(reg, function, site) => {
-                    let captures = e.vm.functions[e.function].sites[site]
-                        .iter()
-                        .map(|&reg| *r.add(reg))
-                        .collect();
-                    *r.add(reg) = e.vm.alloc_closure(Closure { function, captures, metadata: vec![], document: Value::NIL });
-                }
                 Op::DeclareSpecial(slot) => {
                     e.vm.specials.insert(e.vm.symbol_names[slot].clone());
                 }
@@ -4583,6 +4911,11 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 }
                 Op::Const(..)
                 | Op::Move(..)
+                | Op::Cell(..)
+                | Op::SetGlobal(..)
+                | Op::Bind(..)
+                | Op::Unbind(..)
+                | Op::Closure(..)
                 | Op::ReadCell(..)
                 | Op::WriteCell(..)
                 | Op::LateForwarded(..)

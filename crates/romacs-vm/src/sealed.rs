@@ -154,6 +154,12 @@ fn table() -> &'static rustc_hash::FxHashMap<&'static str, Sealed> {
             .collect()
     })
 }
+/// Every row's name and the argument counts it takes, for the kernel table's
+/// coverage test.
+#[cfg(test)]
+pub(crate) fn rows() -> impl Iterator<Item = (&'static str, usize, usize)> {
+    ROWS.iter().map(|r| (r.name, r.min, r.max))
+}
 /// The primitive a call of NAME with ARGC arguments compiles to, when GNU
 /// compiles that call to a byte code and Romacs has the primitive.
 /// Out of line: the compiler's recursion runs on a bounded native stack.

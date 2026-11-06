@@ -158,7 +158,7 @@ impl Vm {
     /// counts only while `inhibit-quit' is nil, a debug event whatever it
     /// is, as handle_user_signal clears it.
     pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
-        if crate::host::inspect_pending() { self.inspect_capture(); }
+        if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.motion_quit || !self.native_quit_reached() { return Ok(()); }
         let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
         if !press && !crate::host::user_signal_waiting(self.debug_event_mask()) { return Ok(()); }
