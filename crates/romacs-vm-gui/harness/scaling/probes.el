@@ -309,6 +309,49 @@ thousandth a stack mark."
               (treesit-query-capture (treesit-parser-root-node parser) "(identifier) @i"
                                      (line-beginning-position) (line-end-position))))))
 
+;; The same buffer parsed, then a hundred more parsers of it, each like
+;; c-ts-mode's `for-each' one: a first parse copies the tree, so none costs
+;; anything in N.
+(scaling-probe treesit-twin-parser :n 2000 :budget 0.1
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-twin")
+           (dotimes (i n)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (treesit-parser-root-node (treesit-parser-create 'rust))
+           (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (i 100)
+            (treesit-parser-root-node
+             (treesit-parser-create 'rust nil nil (intern (format "twin-%d" i)))))))
+
+;; The same buffer's first parse on another thread: what reaches the
+;; evaluating thread is the tree, so its parser and a hundred more cost
+;; nothing in N.
+(scaling-probe treesit-early-parse :n 2000 :budget 0.1
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-early")
+           (dotimes (i n)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (romacs--treesit-parse-early 'rust)
+           (current-buffer))
+  :body (with-current-buffer it
+          (treesit-parser-root-node (treesit-parser-create 'rust))
+          (dotimes (i 100)
+            (treesit-parser-root-node
+             (treesit-parser-create 'rust nil nil (intern (format "twin-%d" i)))))))
+
+;; Edits made while it runs, which its tree catches up with: linear in the
+;; edits, nothing in the text.
+(scaling-probe treesit-early-edits :n 200
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-early-edits")
+           (dotimes (i 2000)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (romacs--treesit-parse-early 'rust)
+           (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (i n)
+            (goto-char (* 40 (1+ i)))
+            (insert "x"))
+          (treesit-parser-root-node (treesit-parser-create 'rust))))
+
 ;;;; Windows
 
 (scaling-probe windows :n 6
@@ -727,6 +770,16 @@ thousandth a stack mark."
            (cons (switch-to-buffer (get-buffer-create "scaling-kept-panels")) (car (last buffers))))
   :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
                (with-current-buffer (car it) (insert "x"))))
+
+;; Typing at the end of N numbered lines: a label comes from the text's line
+;; index, not from counting the lines before it.
+(scaling-probe line-numbers-at-end :gui t :n 20000 :steps 20 :budget 0.5
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-line-numbers"))))
+           (dotimes (_ n) (insert "a line of the buffer\n"))
+           (setq display-line-numbers t)
+           (goto-char (point-max))
+           buffer)
+  :body (with-current-buffer it (insert "x")))
 
 ;; Clearing N toasts (the echo area's clearing at the next command) with N
 ;; more layers kept hidden: each toast hidden once, no restacking per

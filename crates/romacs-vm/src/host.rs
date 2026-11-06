@@ -887,7 +887,10 @@ impl Input {
             return captured.take(usize::try_from(limit).unwrap_or(usize::MAX)).map(<[u8]>::to_vec);
         }
         self.0.seek(SeekFrom::Start(offset))?;
-        let mut bytes = Vec::new();
+        // Sized for the file: growing by doubling copies it and faults its
+        // pages in again.
+        let size = self.0.metadata().map_or(0, |m| m.len()).saturating_sub(offset).min(limit);
+        let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
         (&mut self.0).take(limit).read_to_end(&mut bytes)?;
         Ok(bytes)
     }

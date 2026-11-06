@@ -79,16 +79,16 @@ pub(crate) struct ShownText {
 /// The labels LABELS gives the lines starting at STARTS, (display byte,
 /// buffer byte) in TEXT, whose accessible part starts at BEGV; none for
 /// the empty line at the end of a text of LEN bytes reaching ZV.
-fn line_numbers(table: &FaceTable, text: &str, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
+fn line_numbers(table: &FaceTable, text: &crate::text::TextBody, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
     -> romacs_layout_input::LineNumbers {
     let face = table.handle("line-number").unwrap_or(FaceHandle(0));
     let current = table.handle("line-number-current-line").unwrap_or(face);
-    let (mut from, mut line) = (begv, 0i64);
+    let line_of = |byte| text.line_of_byte(crate::coordinates::ByteOffset(byte)).unwrap_or(0) as i64;
+    let first = line_of(begv);
     let mut out = vec![];
     for (display, buffer) in starts {
         if display == len && at_zv { break; }
-        line += text.as_bytes()[from.min(buffer)..buffer].iter().filter(|&&c| c == b'\n').count() as i64;
-        from = from.max(buffer);
+        let line = line_of(buffer) - first;
         out.push((display, labels.label(line), line == labels.point_line));
     }
     romacs_layout_input::LineNumbers { columns: (labels.width + 2) as u32, face, current, labels: out }
@@ -1898,7 +1898,7 @@ impl Vm {
             let merged = sources.merged;
             let line_numbers = labels.map(|labels| {
                 let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
-                line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
+                line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
             return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
                 segments: None, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers });
@@ -1962,7 +1962,7 @@ impl Vm {
         segments.push(mini_window::Segment { display: utf8.len(), buffer: shown.end, len: 1, string: false });
         let len = utf8.len();
         let merged = sources.merged;
-        let line_numbers = labels.map(|labels| line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, len, at_zv));
+        let line_numbers = labels.map(|labels| line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, len, at_zv));
         // produce_stretch_glyph: FACTOR times the glyph's pixel width.
         for (byte, face, c, factor) in relative {
             let input = romacs_layout_input::MeasureInput {
@@ -2381,6 +2381,9 @@ impl Vm {
         if self.variable_value(functions)? == Value::NIL {
             return Ok(true);
         }
+        if self.treesit_parse_pending(root, buffer_slot)? {
+            return Ok(true);
+        }
         let mut range = self.displayed_range(self.slots[root].value, text_height)?;
         let mut tries = 1;
         while let Some((start, end)) = range {
@@ -2409,6 +2412,41 @@ impl Vm {
             };
         }
         Ok(true)
+    }
+    /// Whether the first parse of the buffer in BUFFER_SLOT has not landed,
+    /// so that redisplay shows the window in ROOT plain and leaves its faces
+    /// to the frame the landing wakes (`land_treesit'): fontifying now would
+    /// wait for the parse.
+    fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<bool> {
+        if self.process_jobs.wake().is_none() {
+            return Ok(false);
+        }
+        let buffer = self.slots[buffer_slot].value;
+        let base = match self.object(buffer)? {
+            Object::Buffer(b) if b.base != Value::NIL => b.base,
+            Object::Buffer(_) => buffer,
+            _ => return Ok(false),
+        };
+        let Object::Buffer(text) = self.object_mut(base)? else { return Ok(false) };
+        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
+        if pending {
+            let id = self.window(self.slots[root].value)?.id;
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+        }
+        Ok(pending)
+    }
+    /// Whether a parse landed with windows left plain: they are laid out
+    /// again, as an unchanged window is not, and fontify if theirs was it.
+    pub fn land_treesit(&mut self) -> bool {
+        let landed = !self.treesit_plain.is_empty() && crate::treesit::take_early_landed();
+        if landed {
+            for id in std::mem::take(&mut self.treesit_plain) {
+                self.display_state.repaint_window(id);
+            }
+        }
+        landed
     }
     /// What decides the rows a live window shows: its buffer's edits
     /// (MODIFF, which property changes advance), its character edits
@@ -2684,7 +2722,7 @@ impl Vm {
             begv: char_at(begv_byte)?,
             zv: char_at(zv_byte)?,
             z: b.len_chars() + 1,
-            line: text.as_bytes()[begv_byte..point_byte].iter().filter(|&&c| c == b'\n').count() + 1,
+            line: b.line_of_byte(ByteOffset(point_byte))? - b.line_of_byte(accessible.start)? + 1,
             column,
             modified: b.state.modified(),
             frame_cols,
