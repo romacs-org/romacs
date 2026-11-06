@@ -1,7 +1,8 @@
 //! pos-bol, pos-eol, buffer-base-buffer and line-number-display-width
 //! against pinned GNU (editfns.c, buffer.c, indent.c): counts, clipping,
 //! narrowing, bignums, fields ignored, buffers without a base, and the
-//! width with `display-line-numbers' off, absolute, relative and of a set least.
+//! width with `display-line-numbers' off, absolute, relative and of a set least,
+//! and `current-column' across a unibyte buffer's raw bytes.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -11,6 +12,7 @@ const CASES: &str = r###"
 (let ((b (get-buffer-create " rt-base"))) (list (buffer-base-buffer) (buffer-base-buffer b) (progn (kill-buffer b) (buffer-base-buffer b)) (condition-case e (buffer-base-buffer 'x) (error e)) (condition-case e (buffer-base-buffer "rt-none") (error e))))
 (list (line-number-display-width) (line-number-display-width 'columns) (line-number-display-width t) (with-temp-buffer (line-number-display-width 'columns)))
 (with-current-buffer (window-buffer) (dotimes (i 150) (insert "x\n")) (list (progn (setq display-line-numbers t) (list (line-number-display-width) (line-number-display-width 'columns) (line-number-display-width t))) (progn (setq display-line-numbers 'relative) (line-number-display-width)) (progn (setq display-line-numbers-width 6) (line-number-display-width)) (progn (set-window-start nil 200) (setq display-line-numbers-width nil) (line-number-display-width))))
+(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 195 169 10 65 195 9 169)) (mapcar (lambda (at) (goto-char at) (current-column)) '(1 2 3 4 5 6 7 8)))
 "###;
 
 #[test]
@@ -33,18 +35,4 @@ fn line_and_buffer_queries_match_pinned_gnu() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-/// Point inside a UTF-8 sequence of a unibyte buffer: `current-column'
-/// reads only point's line, and still refuses the split character
-/// instead of slicing through it.
-#[test]
-fn current_column_inside_a_unibyte_sequence_signals() {
-    let mut vm = Vm::new();
-    vm.install_lisp_prelude().unwrap();
-    let printed = vm
-        .eval_source("(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 195 169)) (goto-char 2) (condition-case nil (current-column) (error 'refused)))")
-        .and_then(|v| v.display())
-        .unwrap();
-    assert_eq!(printed, "refused");
 }

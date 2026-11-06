@@ -45,10 +45,7 @@ impl Vm {
     }
     pub(super) fn install_code(&mut self, function: Function) -> usize {
         // The function's code now owns the cache slots its builder took.
-        let caches: Vec<usize> = function.code.iter().filter_map(|op| match *op {
-            Op::Direct(_, _, cache, _, _) => Some(cache),
-            _ => None,
-        }).collect();
+        let caches: Vec<usize> = owned_caches(&function).collect();
         self.claim_caches(&caches);
         self.install_slot(function, self.request_code.compiling)
     }
@@ -283,10 +280,10 @@ impl Vm {
         functions: impl IntoIterator<Item = Function>,
         caches: usize,
     ) -> (Vec<usize>, Vec<usize>) {
-        // Request-owned placeholders: they still hold the artifact's own cache
-        // ordinals, not slots, so installing them claims nothing. The slots
-        // stay unclaimed until the caller has rewritten and stored the
-        // functions that use them (`claim_caches'). No state is changed and
+        // Request-owned placeholders holding no code, so installing them
+        // claims nothing and a failed install leaves nothing naming a slot.
+        // The slots stay unclaimed until the caller has rewritten and stored
+        // the functions that use them (`claim_caches'). No state is changed and
         // restored here, so an unwinding failure leaves only unreachable
         // placeholders and unclaimed slots, which a collection reclaims.
         let ids = functions
@@ -336,26 +333,8 @@ impl Vm {
     pub(super) fn release_request_entry(&mut self, id: usize) {
         // A compiled-Lisp entry whose run failed before its first call still
         // holds its body pending, and the caches that body names.
-        let function = &self.functions[id];
-        let caches: Vec<usize> = function.code.iter()
-            .filter_map(|op| match *op { Op::Direct(_, _, cache, _, _) => Some(cache), _ => None })
-            .chain(function.pending.iter().flat_map(|body| body.caches.iter().copied()))
-            .collect();
-        for cache in caches {
-            self.caches[cache] = Cache {
-                version: 0,
-                target: Value::UNBOUND,
-            };
-            self.request_code.free_caches.push(cache);
-        }
-        let f = Arc::get_mut(&mut self.functions[id]).expect("request entry is private");
-        f.code = Vec::new();
-        f.sites = Vec::new();
-        f.capture_mutations = Vec::new();
-        f.pending = None;
         self.uncount_code(id);
-        self.request_code.live[id] = false;
-        self.request_code.free.push(id);
+        self.drop_request_function(id);
         for program in self.programs_mut() {
             program.release_entry(id);
         }
@@ -403,51 +382,58 @@ impl Vm {
             self.caches[id] = Cache { version: 0, target: Value::UNBOUND };
             self.request_code.free_caches.push(id);
         }
-        // With no request code dead, no cache becomes free: skip rescanning
-        // every live body.
-        if !(0..marks.len()).any(|id| !marks[id] && self.request_code.live[id]) {
-            return;
-        }
-        let mut used_caches = vec![false; self.caches.len()];
-        // Undecoded image bodies still own their original cache ordinals.
-        used_caches[..self.request_code.image_caches].fill(true);
-        for (id, &marked) in marks.iter().enumerate() {
-            if !self.request_code.live[id] {
-                continue;
-            }
-            if marked {
-                for op in &self.functions[id].code {
-                    if let Op::Direct(_, _, cache, _, _) = *op {
-                        used_caches[cache] = true;
-                    }
-                }
-                for &cache in self.functions[id].pending.iter().flat_map(|body| &body.caches) {
-                    used_caches[cache] = true;
-                }
-            } else {
-                let f = Arc::get_mut(&mut self.functions[id])
-                    .expect("request code is private at a wait point");
-                f.code = Vec::new();
-                f.sites = Vec::new();
-                f.capture_mutations = Vec::new();
-                // An unreachable lazy or pending body is garbage with its function.
-                f.lazy = None;
-                f.pending = None;
-                self.request_code.live[id] = false;
-                self.request_code.free.push(id);
+        // The work follows what died, not what lives.
+        for id in 0..marks.len() {
+            if !marks[id] && self.request_code.live[id] {
+                self.drop_request_function(id);
             }
         }
-        self.request_code.free_caches.clear();
-        for (id, used) in used_caches.into_iter().enumerate() {
-            if !used {
-                self.caches[id] = Cache {
-                    version: 0,
-                    target: Value::UNBOUND,
-                };
-                self.request_code.free_caches.push(id);
-            }
+        if self.gc_stress.verify {
+            self.verify_cache_owners();
         }
     }
+    /// Free request function ID and what only it owns: its code, any lazy
+    /// or pending body, and its cache slots. A slot has one owner
+    /// (`claim_caches'); image ordinals stay reserved for undecoded bodies.
+    fn drop_request_function(&mut self, id: usize) {
+        let caches: Vec<usize> = owned_caches(&self.functions[id]).collect();
+        for cache in caches {
+            if cache >= self.request_code.image_caches {
+                self.caches[cache] = Cache { version: 0, target: Value::UNBOUND };
+                self.request_code.free_caches.push(cache);
+            }
+        }
+        let f = Arc::get_mut(&mut self.functions[id]).expect("request code is private at a wait point");
+        f.code = Vec::new();
+        f.sites = Vec::new();
+        f.capture_mutations = Vec::new();
+        f.lazy = None;
+        f.pending = None;
+        self.request_code.live[id] = false;
+        self.request_code.free.push(id);
+    }
+    /// `ROMACS_GC_VERIFY': every cache slot past the image's has exactly
+    /// one owner, a live function or the free list.
+    fn verify_cache_owners(&self) {
+        let mut owners = vec![0u32; self.caches.len()];
+        let live = self.functions.iter().zip(&self.request_code.live).filter(|&(_, &live)| live);
+        for cache in live.flat_map(|(function, _)| owned_caches(function)).chain(self.request_code.free_caches.iter().copied()) {
+            owners[cache] += 1;
+        }
+        let image = self.request_code.image_caches;
+        if let Some(cache) = (image..owners.len()).find(|&cache| owners[cache] != 1) {
+            panic!("cache slot {cache} has {} owners", owners[cache]);
+        }
+    }
+}
+
+/// The cache slots FUNCTION's code, compiled or pending, names.
+fn owned_caches(function: &Function) -> impl Iterator<Item = usize> + '_ {
+    let direct = function.code.iter().filter_map(|op| match *op {
+        Op::Direct(_, _, cache, _, _) => Some(cache),
+        _ => None,
+    });
+    direct.chain(function.pending.iter().flat_map(|body| body.caches.iter().copied()))
 }
 
 /// Test-only failure points in persistent artifact installation.
@@ -741,6 +727,30 @@ mod tests {
         assert!(vm.functions.len() < 2500, "{} function slots after 5000 redefinitions", vm.functions.len());
         assert_eq!(vm.eval_form_raw(&form(r#"["funcall","redef-keeper"]"#)).unwrap().as_integer().unwrap(), 0);
         assert_eq!(vm.eval_form_raw(&form(r#"["redef-probe"]"#)).unwrap().as_integer().unwrap(), 4999);
+    }
+    /// Retiring code frees its sites and cache slots where they are: rounds
+    /// of dropped definitions take them back, the tables stay flat, and a
+    /// function that lives through it keeps its code and its warm call.
+    #[test]
+    fn retired_code_gives_its_sites_and_caches_back() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.eval_source_raw("(defun retire-callee (x) (1+ x)) (defun retire-keeper (x) (retire-callee x))").unwrap();
+        let mut sizes = vec![];
+        for round in 0..6 {
+            for i in 0..200 {
+                let value = 1000 * round + i;
+                vm.eval_source_raw(&format!("(defun retire-probe (x) (retire-callee (+ x {value}))) (retire-probe 0)")).unwrap();
+            }
+            assert_eq!(vm.eval_source_raw("(retire-keeper 1)").unwrap().as_integer().unwrap(), 2);
+            vm.collect(&mut []);
+            sizes.push((vm.execution.sites(), vm.caches.len()));
+        }
+        // Natural collections land anywhere in a round; kept code would add 200 caches a round.
+        assert!(sizes[5].0 < sizes[1].0 * 2 && sizes[5].1 < sizes[1].1 * 2, "sites and caches grew across rounds: {sizes:?}");
+        assert_eq!(vm.eval_source_raw("(retire-keeper 2)").unwrap().as_integer().unwrap(), 3);
+        vm.gc_stress.verify = true;
+        vm.collect(&mut []);
     }
     /// A native call into Lisp (a macro expander, a reader hook, a watcher)
     /// enters a permanent trampoline: no call installs a function, and a

@@ -21,7 +21,8 @@
 ;;   :budget the largest exponent allowed (default 1.25: n log n).
 ;;   :known  a ticket naming a known super-linear cost: the probe still
 ;;           runs and reports, but over budget it is debt, not a failure.
-;;   :gap    a GUI probe's seconds between steps (default 0.1).
+;;   :gap    how often, in seconds, a GUI probe looks for its step's
+;;           redisplay (default 0.1).
 ;;   :stack  also report how much native stack the body keeps
 ;;           (`romacs-native-stack-room' at `scaling-stack-mark' calls).
 ;;
@@ -106,15 +107,70 @@ thousandth a stack mark."
             (setq k (1+ k)))))
 
 ;; A theme application over N more package faces: loading and enabling
-;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
-;; the theme file; nearly flat in the faces, which only the root frame
+;; catppuccin-latte in a -Q window, most of it loading the theme file; nearly flat in the faces, which only the root frame
 ;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
              (custom-declare-face face '((t :inherit font-lock-keyword-face)) "A package face." :group 'scaling))
            faces)
-  :body (load-theme 'modus-operandi t))
+  :body (load-theme 'catppuccin-latte t))
+
+;; N Omarchy themes Romacs does not ship, made one after another, the first
+;; made again: Custom's theme list and `features' grow by one each.  Sessions
+;; meet tens of them.
+(scaling-probe omarchy-generated-themes :n 40
+  :setup (progn
+           (require 'romacs-omarchy)
+           (cons (mapcar #'intern (scaling--names "omarchy-scaling" n))
+                 '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                   (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))))
+  :body (let ((palette (cdr it)))
+          (dolist (theme (car it)) (omarchy--define theme "scaling" palette))
+          (omarchy--define (car (car it)) "scaling" palette)))
+
+;; Registering N bundled themes, as a load of romacs-theme.el does: a property
+;; each, no scan of the table per theme.
+(scaling-probe theme-bundled-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme)
+           (mapcar (lambda (name) (list (intern name) 'dark (intern (concat name "-family"))))
+                   (scaling--names "scaling-theme" n)))
+  :body (romacs-theme--register it))
+
+;; A theme's role resolution over N more palette rows: an index, not a scan
+;; per name.
+(scaling-probe theme-palette-rows :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (append '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                     (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))
+                   (mapcar (lambda (name) (list (intern name) "#123456")) (scaling--names "scaling-slot" n))))
+  :body (romacs-theme-roles-resolve it))
+
+;; The floor pass and its merge over N face rows, a tenth of them failing on
+;; one pair: each pair is computed once, each row merged once.
+(scaling-probe theme-floor-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (mapcar (lambda (name)
+                     (list (intern name) (list (list t :foreground (if (string-suffix-p "1" name) "#333333" "#eeeeee")))))
+                   (scaling--names "scaling-floor" n)))
+  :body (let ((moves (romacs-theme-roles-floors it '((bg . "#101418")))))
+          (romacs-theme--apply-delta it (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) moves))))
+
+;; The floor pass over an `:inherit' chain N deep: each ancestor is read once.
+(scaling-probe theme-inherit-depth :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (let ((names (mapcar #'intern (scaling--names "scaling-inherit" n))) (rows nil) (parent nil))
+             (dolist (name names (nreverse rows))
+               (push (list name (list (if parent
+                                          (list t :inherit parent :background "#101418")
+                                        (list t :foreground "#eeeeee"))))
+                     rows)
+               (setq parent name))))
+  :body (romacs-theme-roles-floors it '((bg . "#101418"))))
 
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
@@ -427,6 +483,60 @@ thousandth a stack mark."
              (push (intern (format "bar-probe-%d" i)) romacs-mode-line-right))
            (romacs-mode-line-rebuild)
            (switch-to-buffer (scaling--lines-buffer "scaling-bar" 50)))
+  :body (with-current-buffer it (insert "x")))
+
+;; A header line of N columns, each its own face run then a `(space
+;; :align-to ...)' (VM2-MODE-LINE-STRETCH), redisplayed after each key in
+;; the buffer under it: the band's stretches resolve with the window's
+;; geometry read once, not once per stretch, and the face runs once each.
+(scaling-probe header-line-stretches :gui t :n 40 :steps 20
+  :setup (let ((buffer (scaling--lines-buffer "scaling-header" 50)))
+           (switch-to-buffer buffer)
+           (setq header-line-format
+                 (cl-loop for i below n append
+                          (list (propertize (format "c%d" i) 'face (if (cl-oddp i) 'bold 'italic))
+                                (propertize " " 'display `(space :align-to ,(* 3 (1+ i)))))))
+           buffer)
+  :body (with-current-buffer it (insert "x")))
+
+;; A buffer whose `face-remapping-alist' remaps N faces, shown in the
+;; status bar and its window, redisplayed after each key in it: its
+;; remapped face table is realized once and found again per redisplay
+;; (`display_faces_for'), for the window's text and bands and for the
+;; bar's cache key (VM2-FACE-REMAP).
+(scaling-probe face-remap-bands :gui t :n 32 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (let ((buffer (scaling--lines-buffer "scaling-remap" 50)))
+             (switch-to-buffer buffer)
+             (setq header-line-format "remapped")
+             (setq-local face-remapping-alist
+                         (cl-loop for i below n
+                                  collect (let ((face (intern (format "remap-probe-face-%d" i))))
+                                            (make-face face)
+                                            (list face (list :foreground (format "#%02x6080" (% (* 7 i) 256)))))))
+             (push '(mode-line-active (:background "#203040")) face-remapping-alist)
+             buffer))
+  :body (with-current-buffer it (insert "x")))
+
+;; The same remapping in the selected window, the bar's owner, while the
+;; keys go to a buffer in the other: the bar's line is unchanged, so each
+;; request finds its last expansion by its key, which reads the remapping
+;; again (`bar_key').
+(scaling-probe face-remap-bar-unchanged :gui t :n 256 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (let ((other (scaling--lines-buffer "scaling-remap-other" 50)))
+             (switch-to-buffer (scaling--lines-buffer "scaling-remap-still" 50))
+             (setq-local face-remapping-alist
+                         (cl-loop for i below n
+                                  collect (let ((face (intern (format "remap-still-face-%d" i))))
+                                            (make-face face)
+                                            (list face (list :foreground (format "#%02x6080" (% (* 7 i) 256)))))))
+             (set-window-buffer (split-window-below) other)
+             other))
   :body (with-current-buffer it (insert "x")))
 
 ;; N pills on one pill face, each a different character in its own text
@@ -1186,6 +1296,14 @@ thousandth a stack mark."
           (setq romacs-agent-t3--read nil)
           (romacs-agent-instances t)))
 
+;; The start palette of N instances, each with the harness's catalogue:
+;; rows by instance, one table of shown names.
+(scaling-probe agent-picker-rows :n 1000
+  :setup (progn (scaling--agent)
+                (cl-loop for i below n collect (list (format "claude-%d" i) :display "Claude"
+                                                     :config-dir (format "/tmp/claude-config-%d" i))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent--picker-rows)))
+
 ;; N drivers, each a T3 driver name, and T3's settings of N instances of
 ;; them, read anew: each instance's harness by an index built once.
 (scaling-probe agent-instances-drivers :n 500
@@ -1848,6 +1966,34 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; A zygote's validity check before each dispatch (rlisp/vm/isolate.el,
+;; worker-vms design §2.4): the inherited variables compared, then the
+;; files it loaded and the `load-path' directories stamped.  Linear in
+;; each, and in nothing else.
+(scaling-probe isolate-zygote-check :n 200
+  :setup (let* ((environment (scaling--names "SCALING_VARIABLE=value" (* 10 n)))
+                (directories (scaling--names "/nonexistent/scaling-lisp" n))
+                (files (scaling--names "/nonexistent/scaling-library.el" n))
+                (inputs (let ((process-environment environment) (load-path directories))
+                          (romacs--isolate-inputs)))
+                (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
+           (list environment directories
+                 (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
+                         expanded (romacs--isolate-stamp expanded) 0)))
+  :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
+          (dotimes (_ 10)
+            (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
+;; The project commands' record of enumeration times (rlisp/romacs-project.el):
+;; one entry per project root, each decision one lookup and one stat of the
+;; root's Git index.
+(scaling-probe romacs-project-enumerations :n 2000
+  :setup (progn (require 'romacs-project) (scaling--names "/nonexistent/scaling-project" n))
+  :body (progn
+          (dolist (root it) (romacs-project--record root 0.01))
+          (dolist (root it) (romacs-project--enumeration-estimate root))
+          (dolist (root it) (remhash root romacs-project--enumerations))))
+
 ;; A child's environment (rlisp/vm/subprocess.el romacs--environment-block):
 ;; N distinct names in `process-environment', each first definition kept.
 (scaling-probe process-environment-block :n 2000
@@ -1899,6 +2045,34 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+;; Code retirement (request_code.rs, Program::retire_code): N functions
+;; compiled, lowered by a call and dropped in each step; the host's idle
+;; pass between steps collects at the top level, the only place request
+;; code retires, and the next step takes their sites and cache slots back.
+;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
+;; and shows a startup message, so the probe supplies the one and clears
+;; the other.  A step with no collection after the last ends the session,
+;; which fails the measure.  Retirement that scanned its free lists, or
+;; rebuilt tables per function, would grow faster than N.
+(defvar scaling--retire-collections 0
+  "`gcs-done' when the last `gc-retired-code' step ended.")
+
+(scaling-probe gc-retired-code :gui t :n 1000 :steps 4 :gap 1.0
+  :setup (progn
+           (defalias 'romacs--idle-collect (lambda (&optional _in-lisp) t))
+           (setq scaling--retire-collections gcs-done)
+           (switch-to-buffer (get-buffer-create "*scaling-retire*")))
+  :body (progn
+          (when (and (> i 0) (<= gcs-done scaling--retire-collections))
+            (kill-emacs 3))
+          (dotimes (k n)
+            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k)) t)))
+          (with-current-buffer (window-buffer (selected-window))
+            (goto-char (point-max))
+            (insert (format "step %d\n" i)))
+          (message nil)
+          (setq scaling--retire-collections gcs-done)))
+
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
 ;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
@@ -1907,6 +2081,22 @@ closures over a mutable variable (each a closure and a cell)."
 (defun scaling--bt-frames (n)
   (let ((scaling--bt-depth n))
     (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+;; A snapshot of the stack (`romacs--inspect-frames') walks within a work
+;; budget: the time is flat in the size of an argument, and in the depth of
+;; the stack past the frames it keeps.
+(defun scaling--inspect-value (_value) (romacs--inspect-frames))
+(defun scaling--inspect-deep (n)
+  (if (> n 0) (list (scaling--inspect-deep (1- n))) (romacs--inspect-frames)))
+(scaling-probe inspect-value :n 20000 :k 8
+  :setup (make-list n 'x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-string :n 100000 :k 8
+  :setup (make-string n ?x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-stack :n 1000 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 100) (scaling--inspect-deep n)))
+
 (scaling-probe backtrace-frames :n 200 :k 4
   :setup (progn (require 'backtrace) (require 'romacs-backtrace)
                 (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))
@@ -2017,8 +2207,9 @@ scaling_live.py --record profiles a probe's body alone this way."
 (defun scaling-gui-start (name n out)
   "Run GUI probe NAME at size N in this session, then exit.
 Once the session is idle, set the probe up; then run its steps from a chain
-of timers, the host laying out each step's change as the command loop
-returns; count the instructions from before the first step to after the
+of timers, each after the host's redisplay of the step before: a paint still
+being drawn holds the next one back, so no fixed time means the step was
+laid out.  Count the instructions from before the first step to after the
 last step's layout; write (:name :n :instructions) to OUT as JSON and kill
 Emacs.  Stderr marks the start, each step and the end among the paint
 diagnostics, so the harness can check a paint was submitted after each
@@ -2039,11 +2230,15 @@ step, before the next step or the count's end."
         (lambda ()
           (scaling--mark (list :scaling "start"))
           (setq start (romacs-instructions))
-          (let ((step nil) (i 0))
+          (let ((step nil) (laid-out nil) (i 0))
+            (setq laid-out (lambda ()
+                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
             (setq step (lambda ()
                          (if (< i steps)
                              (progn (scaling--mark (list :scaling "step" :i i))
-                                    (funcall body n it i) (setq i (1+ i)) (run-with-timer gap nil step))
+                                    (funcall body n it i) (setq i (1+ i))
+                                    (romacs--redisplay-since-mark t)
+                                    (run-with-timer gap nil laid-out))
                            (let ((end (romacs-instructions)))
                              (scaling--mark (list :scaling "end"))
                              (with-temp-file out

@@ -9,8 +9,9 @@ impl Leaf<'_> {
             .filter(|n| (1..=1000).contains(n)).unwrap_or(8) as usize)
     }
     /// Point's line within the accessible text, point's byte offset in it,
-    /// and the line's absolute byte start.
-    fn line_text(&mut self) -> std::result::Result<(String, usize, usize), Fault> {
+    /// the line's absolute byte start, and how a character of it advances
+    /// in the buffer: by its own bytes, or in a unibyte buffer by one.
+    fn line_text(&mut self) -> std::result::Result<(String, usize, usize, fn(char) -> usize), Fault> {
         use crate::text::Newlines as _;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let (text, start, point, raw) = match &self.vm.objects[index] {
@@ -25,9 +26,10 @@ impl Leaf<'_> {
                 let (r, point) = (b.restriction.start.0..b.restriction.end.0, b.point.0);
                 let start = b.bytes.previous_newline(point, r.start).map_or(r.start, |at| at + 1);
                 let end = b.bytes.next_newline(point, r.end).unwrap_or(r.end);
-                let text = std::str::from_utf8(&b.bytes[start..end])
-                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?;
-                (std::borrow::Cow::Borrowed(text), start, point, vec![])
+                // Each byte a character; above 127, as a raw byte shows.
+                let line: String = b.bytes[start..end].iter().map(|&byte| if byte < 128 { char::from(byte) } else { '\u{80}' }).collect();
+                let at = line.char_indices().nth(point - start).map_or(line.len(), |(at, _)| at);
+                return Ok((line, at, start, |_| 1));
             }
             _ => unreachable!(),
         };
@@ -38,7 +40,7 @@ impl Leaf<'_> {
         let line: String = text.char_indices()
             .map(|(at, c)| if raw.binary_search(&((start + at) as u32)).is_ok() { '\u{80}' } else { c })
             .collect();
-        Ok((line, point - start, start))
+        Ok((line, point - start, start, char::len_utf8))
     }
     pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
@@ -63,7 +65,7 @@ impl Leaf<'_> {
     /// spaces and tabs, and characters of category `\s'.
     pub fn current_indentation(&mut self) -> super::super::Out {
         let tab = self.tab_width()?;
-        let (line, _, _) = self.line_text()?;
+        let (line, ..) = self.line_text()?;
         let table = self.current_category_table()?;
         let mut column = 0;
         for c in line.chars() {
@@ -82,14 +84,14 @@ impl Leaf<'_> {
     /// last character, with that character.
     pub fn scan_to_column(&mut self, goal: usize) -> std::result::Result<(usize, usize, usize, Option<char>), Fault> {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
-        let (line, _, low) = self.line_text()?;
+        let (line, _, low, width) = self.line_text()?;
         let (mut column, mut at) = (0, 0);
         let (mut prev_at, mut prev_column, mut prev_char) = (0, 0, None);
         for c in line.chars() {
             if column >= goal { break; }
             (prev_at, prev_column, prev_char) = (at, column, Some(c));
             column += rule.columns(c as u32, column);
-            at += c.len_utf8();
+            at += width(c);
         }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         match &mut self.vm.objects[index] {
@@ -101,7 +103,7 @@ impl Leaf<'_> {
     }
     pub fn native_current_column(&mut self) -> super::super::Out {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
-        let (line, point, _) = self.line_text()?;
+        let (line, point, ..) = self.line_text()?;
         let column = line[..point].chars().fold(0, |column, c| column + rule.columns(c as u32, column));
         Value::integer(column as i64).map_err(Fault::Error)
     }

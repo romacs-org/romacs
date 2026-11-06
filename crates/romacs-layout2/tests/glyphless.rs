@@ -17,7 +17,7 @@ fn slice(text: &str) -> TextSlice {
 }
 
 fn window(text: &str, faces: Vec<Face>) -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(), id: 1, width: 400, height: 100, start_byte: 0, point_byte: 0, buffer_version: 1,
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id: 1, width: 400, height: 100, start_byte: 0, point_byte: 0, buffer_version: 1,
         mode_line: Some(slice(&format!("m{NONE}l"))), mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![],
         line_numbers: None, chrome: Default::default(), text: slice(text), faces }
@@ -129,7 +129,7 @@ fn the_bars_clicks_find_one_glyph_per_character() {
     assert_eq!(tabs.len(), text.chars().count(), "{tabs:?}");
     assert!(tabs[1].1 > tabs[0].1 && tabs[2].0 >= tabs[1].0 + tabs[1].1, "the box's extent lies between its neighbours': {tabs:?}");
     let (extents, marker) = romacs_layout2::status_bar_extents(&painted, &bar);
-    assert_eq!((extents.len(), marker), (text.chars().count(), Some(3)));
+    assert_eq!((extents.len(), marker), (text.chars().count(), vec![3]));
     assert!(extents.iter().all(Option::is_some), "{extents:?}");
 }
 

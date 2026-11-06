@@ -20,7 +20,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
         continuation: [Some(bitmap(7)), Some(bitmap(8))],
         ..Indicators::default()
     };
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 100, height: 200, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
@@ -159,9 +159,9 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
     let (extents, marker) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     let shown = chars(&painted, GlyphRowRole::StatusBar);
     assert!(shown.len() < 16 && "abcdefghijklmnop".starts_with(&shown), "{shown}");
-    assert_eq!((extents.len(), marker), (16, None));
-    assert_eq!(extents[0].unwrap().0, 4.0 + 3.0, "right of the accent block");
-    assert!(extents[shown.len() - 1].is_some_and(|(x, w)| x + w <= 4.0 + 108.0));
+    assert_eq!((extents.len(), marker), (16, vec![]));
+    assert_eq!(extents[0].unwrap().0, 4.0 + 12.0, "inside the padding");
+    assert!(extents[shown.len() - 1].is_some_and(|(x, w)| x + w <= 4.0 + 108.0 - 12.0));
     assert!(extents[shown.len()..].iter().all(Option::is_none));
     assert_eq!(painted.status_bar.map(|r| (r.x, r.y, r.width, r.height)), Some((4.0, 150.0, 108.0, 20.0)));
     // A run's face keeps the bar's background, as a window's band does.
@@ -170,6 +170,29 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
         _ => None,
     }).unwrap();
     assert_eq!(painted.faces[&face].background, romacs_display_protocol::Color::from_pixel(0x1e2832));
+}
+
+/// A band's own overline is a rule across it, in the line's colour, not only
+/// over its text; a band without one has none.
+#[test]
+fn the_status_bar_s_overline_runs_across_it() {
+    let bar = |line: Option<romacs_layout_input::Line>| {
+        let mut bar_face = face([0; 3], [30, 40, 50]);
+        bar_face.decor.overline = line;
+        let mut snapshot = frame(window("x", LineWrap::Window), None);
+        snapshot.status_bar = Some(StatusBarSnapshot {
+            x: 4, y: 150, width: 108, height: 20,
+            text: TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            face: FaceHandle(0), faces: vec![bar_face], window: 1, focused: true, marks: Default::default(),
+        });
+        lay_out(snapshot).glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Background { bounds, color } if bounds.height == 1.0 => Some((bounds.x, bounds.y, bounds.width, *color)),
+            _ => None,
+        }).collect::<Vec<_>>()
+    };
+    let line = romacs_layout_input::Line { style: 1, color: Some([0x2e, 0x29, 0x22]), position: None };
+    assert_eq!(bar(Some(line)), [(4.0, 150.0, 108.0, romacs_display_protocol::Color::from_pixel(0x2e2922))]);
+    assert_eq!(bar(None), []);
 }
 
 /// The status bar's marks (VM2-STATUS-BAR): the part after the
@@ -194,10 +217,10 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     let painted = lay_out(snapshot.clone());
     let (extents, index) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     assert_eq!(chars(&painted, GlyphRowRole::StatusBar), "abcdxyz");
-    assert_eq!(index, Some(4));
+    assert_eq!(index, vec![4]);
     let (right_x, right_w) = extents[7].unwrap();
-    assert!((right_x + right_w - 116.0).abs() < 0.01, "{extents:?}");
-    assert_eq!(extents[0].unwrap().0, 3.0, "right of the accent block");
+    assert!((right_x + right_w - (116.0 - 12.0)).abs() < 0.01, "{extents:?}");
+    assert_eq!(extents[0].unwrap().0, 12.0, "inside the padding");
     let (gap_x, gap_w) = extents[4].unwrap();
     assert!((gap_x + gap_w - extents[5].unwrap().0).abs() < 0.01);
     // A left side too long for the room is clipped where the right starts.
@@ -234,6 +257,31 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     let accent = painted.glyphs.iter().filter_map(|g| match g { FrameGlyph::Background { bounds, .. } => Some(*bounds), _ => None })
         .find(|b| b.y == 150.0 && b.width == 3.0);
     assert!(accent.is_some());
+}
+
+/// The status bar's centred zone (modeline.md §14): the characters after
+/// the `centre-align' marker centred on the bar, its marker's and the
+/// `right-align' marker's room no click, each zone's glyphs in text order.
+#[test]
+fn the_status_bar_centres_its_middle_zone() {
+    let marker = |at: usize, name: &str| Segment { bytes: at..at + 1, name: name.into(), pill: None };
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 0, y: 150, width: 116, height: 20,
+        text: TextSlice { extends: vec![], utf8: "a m z".into(), face_runs: vec![], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([200; 3], [30, 40, 50])], window: 1, focused: true,
+        marks: BandMarks { segments: vec![marker(1, "centre-align"), marker(3, "right-align")], icons: vec![] },
+    });
+    let painted = lay_out(snapshot.clone());
+    let (extents, markers) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    assert_eq!(chars(&painted, GlyphRowRole::StatusBar), "amz");
+    assert_eq!(markers, vec![1, 3]);
+    let (mx, mw) = extents[2].unwrap();
+    assert!((mx + mw / 2.0 - 58.0).abs() < 0.51, "centred on the bar: {extents:?}");
+    let (zx, zw) = extents[4].unwrap();
+    assert!((zx + zw - 104.0).abs() < 0.01, "flush inside the padding: {extents:?}");
+    assert!((extents[1].unwrap().0 - (extents[0].unwrap().0 + extents[0].unwrap().1)).abs() < 0.01);
+    assert!((extents[3].unwrap().0 - (mx + mw)).abs() < 0.01 && (extents[3].unwrap().0 + extents[3].unwrap().1 - zx).abs() < 0.01);
 }
 
 /// An icon in buffer text is one column, as in a band, and measuring the
@@ -295,7 +343,7 @@ fn every_window_but_the_mini_window_is_a_pane() {
     snapshot.windows.push(PlacedWindowSnapshot { x: 8, y: 0, snapshot: mini });
     assert!(lay_out(snapshot.clone()).panes.is_empty(), "GNU_LOOK_DRAWS_NO_PANES");
     snapshot.chrome = romacs_layout_input::FrameChrome { internal_border: 6, radius: 6, dim: 0.12, focus: Some([212, 138, 32]),
-                                                         border: Some([40, 40, 40]), selected: 1, minibuffer: 3 };
+                                                         border: Some([40, 40, 40]), cursor: None, selected: 1, minibuffer: 3, style: Default::default() };
     let panes = lay_out(snapshot).panes;
     let accent = romacs_display_protocol::Color::from_pixel(0xd48a20);
     let line = romacs_display_protocol::Color::from_pixel(0x282828);

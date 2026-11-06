@@ -2,7 +2,7 @@ use romacs_display_protocol::{Color, FrameGlyph, GlyphRowRole};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
 fn scene() -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1,
         width: 100,
         height: 60,
@@ -254,4 +254,32 @@ fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
     let header_faces: Vec<_> = chars.iter().filter(|c| c.1 == GlyphRowRole::HeaderLine).map(|c| c.4).collect();
     assert!(chars.iter().filter(|c| c.3 == 2).all(|c| !header_faces.contains(&c.4)));
     assert!(chars.iter().all(|c| frame.faces.contains_key(&c.4)));
+}
+
+/// A band's stretch (VM2-MODE-LINE-STRETCH): its `:align-to' counted from
+/// the text area's left edge, past the left fringe; blank, but a face's
+/// underline runs across it as a stretch glyph of its width.
+#[test]
+fn a_band_stretch_aligns_from_the_text_area_and_keeps_its_lines() {
+    use romacs_layout_input::{BandStretches, Decor, Line, Stretch, StretchWidth};
+    let mut s = scene();
+    s.width = 300;
+    s.chrome.left_fringe = 8;
+    s.mode_line = Some(TextSlice { extends: vec![], utf8: "a b".into(), face_runs: vec![], raw: vec![] });
+    s.band_stretches = BandStretches { header_line: vec![], mode_line: vec![Stretch { byte: 1, width: StretchWidth::AlignTo(100) }] };
+    s.faces[1].decor = Decor { underline: Some(Line { style: 1, color: None, position: None }), overline: None, strike: None, boxed: None };
+    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let band: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, row_role: GlyphRowRole::ModeLine, x, .. } => Some((*char, *x)),
+        _ => None,
+    }).collect();
+    let a = band.iter().find(|g| g.0 == 'a').unwrap().1;
+    let b = band.iter().find(|g| g.0 == 'b').unwrap().1;
+    assert_eq!(band.len(), 2, "the stretch paints no character: {band:?}");
+    assert!((b - a - 108.0).abs() < 0.01, "{band:?}: b at the text area's 100th pixel");
+    let stretch = frame.glyphs.iter().find_map(|g| match g {
+        FrameGlyph::Stretch { row_role: GlyphRowRole::ModeLine, x, width, .. } if (*x - a).abs() > 0.5 => Some((*x, *width)),
+        _ => None,
+    }).expect("the stretch's underline");
+    assert!((stretch.0 + stretch.1 - b).abs() < 0.01, "{stretch:?} ends where b starts at {b}");
 }

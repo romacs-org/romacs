@@ -9,12 +9,12 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
-pub(crate) use mini_window::buffer_of;
+pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
 };
-use romacs_layout_input::{Face, FaceHandle, FaceRun, StatusBarSnapshot, TextSlice, WindowSnapshot};
+use romacs_layout_input::{BandStretches, Face, FaceHandle, FaceRun, StatusBarSnapshot, Stretch, StretchWidth, TextSlice, WindowSnapshot};
 
 /// The face table a snapshot publishes: `default' first, then the theme's
 /// other faces, realized once per theme revision rather than per frame.
@@ -319,12 +319,13 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
-    /// Window END.id's last publication was painted as END reports.
-    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
+    /// Window END.id's last publication was painted as END reports, ending
+    /// at buffer byte BYTE.
+    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
         let base = self.base(end.id);
         let segments = self.segments.get(&end.id).cloned();
         if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv, segments.as_deref())));
+            shown.laid = Some((shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -473,8 +474,11 @@ struct Shown {
     /// The window laid out from its start under a key: by its last paint
     /// under KEY, or by redisplay since under the key then (`window_layout`).
     laid: Option<(ShownKey, Laid)>,
+    /// The key the recorded end was laid out under when redisplay recorded
+    /// it since the last paint (`record_end_laid'), else KEY's.
+    ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -483,32 +487,46 @@ struct Bands {
     header_line: Option<mode_line::Band>,
 }
 
-/// A mode-line band as a text slice whose faces index TABLE.
-fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
-    let (utf8, runs) = shown_band(&band.text, band.runs);
-    TextSlice { extends: vec![],
+/// A mode-line band as a text slice whose faces index TABLE, and the
+/// stretches its runs of SPACES make (`Vm::band_spaces').
+fn band_slice(table: &FaceTable, band: mode_line::Band, spaces: &[(std::ops::Range<usize>, StretchWidth)]) -> (TextSlice, Vec<Stretch>) {
+    let (utf8, runs, stretches) = shown_band(&band.text, band.runs, spaces);
+    (TextSlice { extends: vec![],
         face_runs: runs.into_iter()
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
         utf8,
         raw: vec![],
-    }
+    }, stretches)
 }
 
 /// A band's text as the display shows it, with its face runs moved to
 /// match: a C0 control character or DEL as `^X` (`ctl-arrow'), a C1 one as
-/// its octal escape, as GNU's display of a mode or header line shows them.
-/// `format-mode-line' keeps them; a subject with a control character in a
-/// header line is drawn, never refused.
-fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>) -> (String, Vec<(std::ops::Range<usize>, T)>) {
-    if !text.chars().any(char::is_control) {
-        return (text.to_owned(), runs);
+/// its octal escape, as GNU's display of a mode or header line shows them;
+/// each run of SPACES, the characters a `(space ...)' display replaces, as
+/// one placeholder space, the stretch at its byte. `format-mode-line'
+/// keeps them; a subject with a control character in a header line is
+/// drawn, never refused.
+fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>, spaces: &[(std::ops::Range<usize>, StretchWidth)])
+                 -> (String, Vec<(std::ops::Range<usize>, T)>, Vec<Stretch>) {
+    if spaces.is_empty() && !text.chars().any(char::is_control) {
+        return (text.to_owned(), runs, vec![]);
     }
     // (old byte, new byte) at each character, then the end.
     let mut map = Vec::with_capacity(text.len() + 1);
     let mut shown = String::with_capacity(text.len() + 8);
+    let mut stretches = vec![];
+    let mut spaces = spaces.iter().peekable();
     for (at, c) in text.char_indices() {
         map.push((at, shown.len()));
+        while spaces.peek().is_some_and(|(bytes, _)| bytes.end <= at) { spaces.next(); }
+        if let Some((bytes, width)) = spaces.peek().filter(|(bytes, _)| bytes.contains(&at)) {
+            if at == bytes.start {
+                stretches.push(Stretch { byte: shown.len(), width: *width });
+                shown.push(' ');
+            }
+            continue;
+        }
         match c {
             '\u{0}'..='\u{1f}' | '\u{7f}' => { shown.push('^'); shown.push(char::from((c as u8) ^ 0x40)); }
             c if c.is_control() => shown.push_str(&format!("\\{:o}", c as u32)),
@@ -518,7 +536,7 @@ fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>) -> (String,
     map.push((text.len(), shown.len()));
     let moved = |byte: usize| map[map.partition_point(|&(old, _)| old < byte)].1;
     let runs = runs.into_iter().map(|(bytes, face)| (moved(bytes.start)..moved(bytes.end), face)).collect();
-    (shown, runs)
+    (shown, runs, stretches)
 }
 
 struct Graph<'a>(&'a Vm);
@@ -636,7 +654,7 @@ impl Vm {
         let (buffer, marker) = (w.buffer, w.start);
         let window_rows = w.height / self.window_state.line.max(1);
         let window_start = self.marker_position_value(marker)?.integer_value().unwrap_or(1);
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("buffer required".into()) };
         let byte = |pos: i64| -> Result<usize> {
             let pos = (pos.max(1) as usize - 1).min(b.len_chars());
             Ok(b.byte_of_char(coordinates::CharOffset(pos))?.0)
@@ -692,15 +710,38 @@ impl Vm {
         let (focus, border) = if drawn {
             (Some(self.display_face("romacs-pane-focus")?.foreground), Some(self.display_face("romacs-pane-border")?.foreground))
         } else { (None, None) };
+        let cursor = self.frame_colour_parameter(frame, "cursor-color")?;
+        let style = self.frame_style(frame)?;
         let selected = self.status_bar_owner()?.0;
         let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
-        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, cursor, selected, minibuffer , style})
     }
     /// FRAME's parameter NAME, if it has one.
     pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
+    }
+    /// FRAME's material (`romacs-style'), a vector of its numbers
+    /// (`romacs-style--wire'), else the `flat' style.
+    fn frame_style(&mut self, frame: Value) -> Result<romacs_layout_input::Style> {
+        let value = self.frame_parameter_of(frame, "romacs-style")?;
+        let Some(Object::Vector(slots)) = value.and_then(|v| self.object_if(v)) else { return Ok(Default::default()) };
+        let &[layer, band, reach, drop, opacity, glow_reach, glow_opacity] = &slots[..] else { return Ok(Default::default()) };
+        let number = |v: Value| match self.object_if(v) {
+            Some(Object::Float(f)) => Some(*f as f32),
+            _ => v.integer_value().map(|n| n as f32),
+        };
+        let numbers = [layer, band, reach, drop, opacity, glow_reach, glow_opacity].map(number);
+        let [Some(layer_radius), Some(band_radius), Some(reach), Some(drop), Some(opacity), Some(glow_reach), Some(glow_opacity)] = numbers
+        else { return Ok(Default::default()) };
+        Ok(romacs_layout_input::Style { layer_radius, band_radius, shadow: [reach, drop, opacity], glow: [glow_reach, glow_opacity] })
+    }
+    /// FRAME's parameter NAME when it names a colour.
+    fn frame_colour_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
+        let value = self.frame_parameter_of(frame, name)?;
+        let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
+        Ok(romacs_display_protocol::x11_colors::x11_color_value(&text).map(|(r, g, b)| [r, g, b]))
     }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
@@ -714,6 +755,9 @@ impl Vm {
     /// their ids: a window's redisplay runs Lisp, which may collect and
     /// move them, or delete one.
     fn child_frame_snapshots(&mut self) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
+        let root = self.host_frame_peek();
+        let style = self.frame_style(root)?;
+        let by_style = self.intern("t");
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let ids: Vec<u64> = self.child_frames_bottom_up().into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
         let mut children = vec![];
@@ -728,8 +772,12 @@ impl Vm {
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
             let border_color = if edge.background == default.background { default.foreground } else { edge.background };
-            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
-                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+            // A number is the layer's own; `t' is the style's, whichever is
+            // in force now.
+            let radius = match self.frame_parameter_of(frame, "romacs-layer-radius")? {
+                Some(value) if value == by_style => style.layer_radius as u32,
+                value => value.and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0),
+            };
             // A glass layer (one with rounded corners) takes its colours
             // from faces: its background from `romacs-layer-glass', or the
             // face its `romacs-layer-face' parameter names (a toast's), and
@@ -942,6 +990,22 @@ impl Vm {
         else if let Some(text) = self.str_view(method).and_then(|view| view.as_str().map(str::to_owned)) { NoFont::Acronym(text) }
         else { NoFont::EmptyBox }
     }
+    /// BUFFER's text as display reads it, a unibyte buffer's through its
+    /// mirror (`mirror_shown' brings that up to date).
+    pub(crate) fn shown_text(&self, buffer: Value) -> Result<&crate::annotations::AnnotatedBuffer> {
+        match self.object(buffer)? {
+            Object::Buffer(b) => Ok(b),
+            Object::ByteBuffer(b) => b.shown().ok_or_else(|| "unibyte buffer not mirrored".into()),
+            _ => Err("buffer required".into()),
+        }
+    }
+    /// What must run before display reads BUFFER's text.
+    pub(crate) fn mirror_shown(&mut self, buffer: Value) -> Result<()> {
+        match self.object_mut(buffer)? {
+            Object::ByteBuffer(b) => b.mirror_now(),
+            _ => Ok(()),
+        }
+    }
     pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
     }
@@ -953,10 +1017,10 @@ impl Vm {
         } else {
             v
         };
-        if matches!(self.object_if(v), Some(Object::Buffer(b)) if b.state.live) {
-            Ok(v)
-        } else {
-            Err("live Unicode buffer required".into())
+        match self.object_if(v) {
+            Some(Object::Buffer(b)) if b.state.live => Ok(v),
+            Some(Object::ByteBuffer(b)) if b.state.live => Ok(v),
+            _ => Err("live buffer required".into()),
         }
     }
     pub(super) fn display_primitive(
@@ -1234,7 +1298,7 @@ impl Vm {
         let Some(Object::Marker(mark)) = self.object_if(marker) else { return Ok(None); };
         if mark.buffer != buffer { return Ok(None); }
         let Some(mark) = self.marker_position_value(marker)?.integer_value() else { return Ok(None); };
-        let Object::Buffer(b) = self.object(buffer)? else { return Ok(None); };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(None); };
         let accessible = b.accessible();
         let mark = b.byte_of_char(crate::coordinates::CharOffset((mark - 1).max(0) as usize))?.0
             .clamp(accessible.start.0, accessible.end.0);
@@ -1326,6 +1390,7 @@ impl Vm {
         } else {
             (utf8, face_runs, raw, extends, start_byte, point_byte)
         };
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
         let snapshot = WindowSnapshot {
             id,
             width,
@@ -1334,9 +1399,9 @@ impl Vm {
             point_byte,
             buffer_version: self.display_state.version,
             text: TextSlice { extends, utf8, face_runs, raw },
-            mode_line: bands.mode_line.map(|band| band_slice(&table, band)),
+            mode_line,
             mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
-            header_line: bands.header_line.map(|band| band_slice(&table, band)),
+            header_line,
             header_line_face: table.handle(&header_face).ok_or("header-line face required")?,
             vscroll_px: self.window(window)?.vscroll_px,
             hscroll: self.window_hscroll_px(window, buffer)?,
@@ -1350,12 +1415,13 @@ impl Vm {
             line_numbers,
             chrome: self.text_chrome(window, &table, base, at_zv)?,
             underline_rules: self.buffer_underline_rules(buffer),
+            band_stretches,
         };
         let len = snapshot.text.utf8.len();
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None, ended: None });
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1369,7 +1435,7 @@ impl Vm {
     /// and its face: the last painted band while it still has one, else one
     /// row of the band's face, else none (CURRENT_MODE_LINE_HEIGHT,
     /// CURRENT_HEADER_LINE_HEIGHT).
-    fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle)> {
+    fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle, Vec<Stretch>)> {
         let w = self.window(window)?;
         let id = w.id;
         let wants = if header {
@@ -1378,14 +1444,15 @@ impl Vm {
             self.window_wants_mode_line(window)?
         };
         let shown = self.display_state.previous.get(&id)
-            .map(|p| if header { (p.header_line.clone(), p.header_line_face) } else { (p.mode_line.clone(), p.mode_line_face) });
+            .map(|p| if header { (p.header_line.clone(), p.header_line_face, p.band_stretches.header_line.clone()) }
+                     else { (p.mode_line.clone(), p.mode_line_face, p.band_stretches.mode_line.clone()) });
         Ok(match (wants, shown) {
-            (false, shown) => (None, shown.map_or(FaceHandle(0), |(_, face)| face)),
-            (true, Some((Some(band), face))) => (Some(band), face),
+            (false, shown) => (None, shown.map_or(FaceHandle(0), |(_, face, _)| face), vec![]),
+            (true, Some((Some(band), face, stretches))) => (Some(band), face, stretches),
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
                 let face = self.window_faces(window)?.handle(&name).ok_or("band face required")?;
-                (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
+                (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face, vec![])
             }
         })
     }
@@ -1402,9 +1469,33 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
-        let laid = laid(&end, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        let byte = shown.base + end.end;
+        let b = self.shown_text(self.window(window)?.buffer)?;
+        let byte = shown.segments.as_ref().map_or(byte, |segments| shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)));
+        let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
         if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
         Ok(Some(laid))
+    }
+    /// Whether the end recorded for WINDOW still holds (GNU's Fwindow_end
+    /// asks `window_end_valid', `clip_changed' and `window_outdated'):
+    /// nothing it showed has changed since, and no `force-window-update'
+    /// waits. Point may have moved.
+    pub(crate) fn window_end_current(&mut self, window: Value) -> Result<bool> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        Ok(w.end_valid && self.display_state.previous.contains_key(&w.id)
+            && self.display_state.shown.get(&w.id).is_some_and(|shown| shown.ended.as_ref().unwrap_or(&shown.key).same_display(&key)))
+    }
+    /// Redisplay recorded WINDOW's end from `window_layout' before any
+    /// paint: it holds for what the window shows now.
+    pub(crate) fn record_end_laid(&mut self, window: Value) -> Result<()> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.ended = Some(key); }
+        self.window_mut(window)?.end_valid = true;
+        Ok(())
     }
     /// WINDOW laid out from its start as `window_layout' lays it out, every
     /// row, and the text it showed; not recorded.
@@ -1415,14 +1506,15 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if shown.key.faces != self.display_state.face_revision || !self.has_layout_host() { return Ok(None); }
         if !self.display_state.previous.contains_key(&id) { return Ok(None) }
-        let (mode_line, mode_line_face) = self.painted_band(window, false)?;
-        let (header_line, header_line_face) = self.painted_band(window, true)?;
+        let (mode_line, mode_line_face, mode_stretches) = self.painted_band(window, false)?;
+        let (header_line, header_line_face, header_stretches) = self.painted_band(window, true)?;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
         let shown = self.window_text(window, height, None)?;
         // Laying rows out reads the fringes' widths, not their bitmaps.
         let table = self.window_faces(window)?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let band_stretches = BandStretches { header_line: header_stretches, mode_line: mode_stretches };
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
             hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
             stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -1520,7 +1612,7 @@ impl Vm {
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
         let margin = self.scroll_margin_px(window, end.body_height)?;
         if margin == 0.0 { return Ok(None); }
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let begv = b.accessible().start.0;
         let at_bob = shown.buffer_byte(shown.start_byte) <= begv;
         let body = end.body_height;
@@ -1540,7 +1632,7 @@ impl Vm {
     /// pixels puts it.
     pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32, usize)>>> {
         let Some((end, shown)) = self.lay_out_lines(window, from, to, true)? else { return Ok(None) };
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let (text, shown_text) = (b.as_str().as_bytes(), shown.text.utf8.as_bytes());
         let start = |at: usize| match at.checked_sub(1).filter(|&i| shown_text.get(i) == Some(&b'\n')).map(|i| shown.buffer_byte(i)) {
             Some(newline) if text.get(newline) == Some(&b'\n') => newline + 1,
@@ -1552,7 +1644,7 @@ impl Vm {
     /// it out (GNU's cursor on its row, which hscroll_window_tree reads).
     /// None without a layout host.
     pub(crate) fn point_place(&mut self, window: Value, point_byte: usize) -> Result<Option<romacs_layout_input::PointPlace>> {
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let begv = b.accessible().start.0;
         let line = b.as_str()[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
         // A window's first redisplay places point too.
@@ -1571,7 +1663,7 @@ impl Vm {
         let (width, _) = self.window_body_size(window)?;
         let buffer = self.window(window)?.buffer;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let zv = b.accessible().end.0;
         let to = b.as_str().as_bytes()[to.min(zv)..zv].iter().position(|&c| c == b'\n').map_or(zv, |i| to + i + 1);
         let shown = self.window_text(window, 0, Some(from..to))?;
@@ -1579,7 +1671,7 @@ impl Vm {
         let height = 1 << 24;
         let table = self.window_faces(window)?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
             vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -1620,7 +1712,7 @@ impl Vm {
     /// the accessible end when AT_ZV: the boundary indicators' marks.
     fn text_chrome(&mut self, window: Value, table: &FaceTable, base: usize, at_zv: bool) -> Result<romacs_layout_input::WindowChrome> {
         let mut chrome = self.window_chrome(window, table, true)?;
-        let begv = match self.object(self.window(window)?.buffer)? { Object::Buffer(b) => b.accessible().start.0, _ => 0 };
+        let begv = match self.shown_text(self.window(window)?.buffer) { Ok(b) => b.accessible().start.0, _ => 0 };
         (chrome.indicators.bob, chrome.indicators.eob) = (base <= begv, at_zv);
         Ok(chrome)
     }
@@ -1649,13 +1741,14 @@ impl Vm {
             .marker_position_value(start)?
             .integer_value()
             .unwrap_or(1);
+        self.mirror_shown(buffer)?;
         let point = self.window_point_value(window)?.as_integer()?;
         let region = self.snapshot_region(window, buffer, point)?;
         let region_face = self.intern("region");
         let table = self.display_faces_for(window, buffer)?;
         let floor = self.row_floor_of(&table);
         let (shown, start_byte, start, point_byte, at_zv, rows) = {
-            let Object::Buffer(b) = self.object(buffer)? else {
+            let Ok(b) = self.shown_text(buffer) else {
                 return Err("Unicode display buffer required".into());
             };
             let point_byte = b
@@ -1684,7 +1777,7 @@ impl Vm {
         let elements = if mini || !self.shows_elements(window, buffer, shown.clone())? { None } else {
             let mut lines = rows.unwrap_or(0);
             loop {
-                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
                 let pos = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 as i64 + 1);
                 let (from, to) = (pos(shown.start)?, pos(shown.end)?);
                 let Ok((elements, element_images)) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
@@ -1692,7 +1785,7 @@ impl Vm {
                 // until as many show as the window has rows.
                 let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some((elements, element_images)) };
                 lines *= 2;
-                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
                 let accessible = b.accessible();
                 shown = crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows + lines);
                 at_zv = shown.end >= accessible.end.0;
@@ -1715,7 +1808,7 @@ impl Vm {
         let region_background = table.handle("region").map(|i| faces[i.0 as usize].background);
         // A control character other than TAB and newline shows as an escape.
         let escape = table.handle("escape-glyph");
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
         let mut style_index = styles.partition_point(|run| run.bytes.end <= shown.start);
         // The face the buffer's character CH at byte AT shows in, and for a
         // newline the face its row paints past the text in (`extend_face').
@@ -1894,7 +1987,7 @@ impl Vm {
     fn shows_elements(&mut self, window: Value, buffer: Value, shown: std::ops::Range<usize>) -> Result<bool> {
         let display = [self.display_symbol("display"), self.display_symbol("invisible")];
         let keys = ["display", "invisible", "before-string", "after-string"].map(|n| self.display_symbol(n));
-        let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(false) };
         let (at, end) = (ByteOffset(shown.start), ByteOffset(shown.end));
         // An overlay ending at the start shows its after-string there, one
         // starting at the end its before-string: the characters around.
@@ -1925,7 +2018,7 @@ impl Vm {
         if !found {
             // Printable ASCII, newlines and TABs show as themselves: only
             // other bytes, or a display table, need the iterator's look.
-            let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+            let Ok(b) = self.shown_text(buffer) else { return Ok(false) };
             let plain = b.as_str().as_bytes()[shown.start..shown.end].iter().all(|&c| (0x20..0x7f).contains(&c) || c == b'\n' || c == b'\t');
             let tables = ["buffer-display-table", "standard-display-table"].into_iter()
                 .map(|name| { let slot = self.slot(name); self.value_in_buffer(slot, buffer) })
@@ -1969,6 +2062,7 @@ impl Vm {
         let modiff = self.buffer_state(buffer)?.modiff;
         let accessible = match self.object(buffer)? {
             Object::Buffer(b) => { let region = b.accessible(); (region.start.0, region.end.0) }
+            Object::ByteBuffer(b) => (b.restriction.start.0, b.restriction.end.0),
             _ => (0, 0),
         };
         let mark = match self.buffer_mark_value(buffer) {
@@ -2049,7 +2143,7 @@ impl Vm {
             }
             // Point's row must be one the last paint showed whole, and its
             // cursor in the text area: the point-visibility step's checks.
-            let Object::Buffer(b) = self.object(key.buffer)? else { return Ok(None) };
+            let Ok(b) = self.shown_text(key.buffer) else { return Ok(None) };
             let point_byte = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0;
             let base = self.display_state.base(id);
             let offset = point_byte.wrapping_sub(base);
@@ -2075,9 +2169,9 @@ impl Vm {
         }
         let (face, header_face) = (self.mode_line_face_name(window)?, self.header_line_face_name(window)?);
         let table = self.window_faces(window)?;
-        snapshot.mode_line = bands.mode_line.map(|band| band_slice(&table, band));
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
+        (snapshot.mode_line, snapshot.header_line, snapshot.band_stretches) = (mode_line, header_line, band_stretches);
         snapshot.mode_line_face = table.handle(&face).ok_or("mode-line face required")?;
-        snapshot.header_line = bands.header_line.map(|band| band_slice(&table, band));
         snapshot.header_line_face = table.handle(&header_face).ok_or("header-line face required")?;
         let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
         shown.point = point;
@@ -2202,7 +2296,8 @@ impl Vm {
         // (21626-21645). Do this after visibility has finalized window-point:
         // that pass can move the window marker for a forced window-start.
         let buffer = self.slots[buffer_slot].value;
-        let Object::Buffer(b) = self.object(buffer)? else {
+        self.mirror_shown(buffer)?;
+        let Ok(b) = self.shown_text(buffer) else {
             return Err("Unicode display buffer required".into());
         };
         let saved_point = b.char_of_byte(b.point)?;
@@ -2232,6 +2327,10 @@ impl Vm {
         // by character position if Lisp changed its text. As in GNU's restore,
         // a saved point beyond the new ZV falls back to the buffer's true end.
         let buffer = self.slots[buffer_slot].value;
+        if let Object::ByteBuffer(b) = self.object_mut(buffer)? {
+            b.point = ByteOffset(saved_point.0.clamp(b.restriction.start.0, b.restriction.end.0));
+            return outcome;
+        }
         let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
@@ -2445,6 +2544,62 @@ impl Vm {
     /// and face, its `:propertize' face with FACE after it, else FACE.
     /// GNU adds a piece's element number before a FACE it adds but after a
     /// face the piece already had.
+    /// BANDS as the window paints them (`band_slice'), each band's text
+    /// with the stretches its `(space ...)' displays make, resolved with
+    /// the window ROOT holds.
+    fn band_slices(&mut self, root: usize, table: &FaceTable, bands: Bands) -> Result<(Option<TextSlice>, Option<TextSlice>, BandStretches)> {
+        let slice = |vm: &mut Vm, band: Option<mode_line::Band>| -> Result<(Option<TextSlice>, Vec<Stretch>)> {
+            let Some(band) = band else { return Ok((None, vec![])) };
+            let spaces = vm.band_spaces(root, &band)?;
+            let (text, stretches) = band_slice(table, band, &spaces);
+            Ok((Some(text), stretches))
+        };
+        let (mode_line, mode) = slice(self, bands.mode_line)?;
+        let (header_line, header) = slice(self, bands.header_line)?;
+        Ok((mode_line, header_line, BandStretches { header_line: header, mode_line: mode }))
+    }
+    /// The runs of BAND a `display' property shows as a stretch, each run
+    /// of pieces sharing one value once (a display replaces all the text it
+    /// covers), its width as GNU's display of the band of the window ROOT
+    /// holds computes it (`Leaf::band_stretch'). Another display shows the
+    /// text.
+    fn band_spaces(&mut self, root: usize, band: &mode_line::Band) -> Result<Vec<(std::ops::Range<usize>, StretchWidth)>> {
+        let mut props: Vec<&(std::ops::Range<usize>, mode_line::Projected)> = band.props.iter()
+            .filter(|(_, projected)| projected.iter().any(|(name, _)| *name == "display")).collect();
+        if props.is_empty() { return Ok(vec![]); }
+        props.sort_by_key(|(range, _)| range.start);
+        // A run is the adjacent pieces whose value is one object: a string's
+        // own property is the object it carries (split at every face or
+        // help boundary), a `:propertize''s the datum all its pieces share.
+        let identity = |vm: &mut Vm, form: &std::rc::Rc<Form>| -> Result<std::result::Result<Value, *const Form>> {
+            Ok(match &**form { Form::Object(object) => Ok(object.value(vm)?), _ => Err(std::rc::Rc::as_ptr(form)) })
+        };
+        let mut runs: Vec<(std::ops::Range<usize>, &std::rc::Rc<Form>, std::result::Result<Value, *const Form>)> = vec![];
+        for (range, projected) in props {
+            let Some((_, form)) = projected.iter().find(|(name, _)| *name == "display") else { continue };
+            let id = identity(self, form)?;
+            match runs.last_mut() {
+                // One rendering of one string: never across another element's.
+                Some((last, _, last_id)) if last.end == range.start && *last_id == id
+                    && band.element_starts.binary_search(&range.start).is_err() => last.end = range.end,
+                _ => runs.push((range.clone(), form, id)),
+            }
+        }
+        // Every run's value, in one list rooted while the window's display
+        // resolves them all with its geometry read once.
+        let slot = self.slot("#:vm2-band-spaces");
+        self.slots[slot].value = Value::NIL;
+        for (_, form, _) in runs.iter().rev() {
+            let value = self.ml_prop_value(form)?;
+            let cell = self.list_value(&[value]);
+            self.cons_mut(cell)?.1 = self.slots[slot].value;
+            self.slots[slot].value = cell;
+        }
+        let (window, specs) = (self.slots[root].value, self.slots[slot].value);
+        let widths = crate::prim::band_stretches(self, window, specs).unwrap_or_default();
+        self.slots[slot].value = Value::UNBOUND;
+        Ok(runs.into_iter().zip(widths).filter_map(|((range, _, _), width)| Some((range, width?))).collect())
+    }
     fn mode_line_string(&mut self, band: &mode_line::Band, face: Value) -> Result<Value> {
         let text = &band.text;
         // VM2 keys string properties by interned name.
@@ -2523,6 +2678,7 @@ impl Vm {
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
+        self.mirror_shown(buffer)?;
         // `buffer-name', not a search of every symbol for its registry slot.
         let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
@@ -2535,7 +2691,7 @@ impl Vm {
         let command_loop_level = self.names.get("romacs--command-loop-level")
             .and_then(|&slot| self.slots[slot].value.integer_value())
             .map_or(0, |level| level.max(0) as usize);
-        let Object::Buffer(b) = self.object(buffer)? else {
+        let Ok(b) = self.shown_text(buffer) else {
             return Err("Unicode display buffer required".into());
         };
         let text = b.as_str();
@@ -2686,8 +2842,8 @@ impl Vm {
     pub(crate) fn host_measure_elements(&mut self, window: Value, shown: &[(char, crate::prim::FaceKey)]) -> Result<romacs_layout_input::Measured> {
         let table = self.current_faces(Some(window))?;
         let buffer = self.slots[self.buffer_slot].value;
-        let span = match self.object(buffer)? {
-            Object::Buffer(b) => {
+        let span = match self.shown_text(buffer) {
+            Ok(b) => {
                 let byte = |pos: i64| b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map(|b| b.0);
                 let charpos = |key: &crate::prim::FaceKey| match *key { crate::prim::FaceKey::Buffer(p) | crate::prim::FaceKey::String { charpos: p, .. } | crate::prim::FaceKey::Glyph { charpos: p, .. } => p };
                 let (low, high) = shown.iter().map(|(_, key)| charpos(key)).fold((i64::MAX, 0), |(l, h), p| (l.min(p), h.max(p)));
@@ -2734,8 +2890,8 @@ impl Vm {
         };
         let at = match at {
             Some(at) => at,
-            None => match self.object(sources.buffer)? {
-                Object::Buffer(b) => {
+            None => match self.shown_text(sources.buffer) {
+                Ok(b) => {
                     // Elements come in order: step from the last one's byte.
                     let (pos, byte) = sources.cursor;
                     let at = if pos > 0 && (pos..pos + 64).contains(&charpos) {
@@ -2755,12 +2911,12 @@ impl Vm {
             let mut layers: Vec<Value> = crate::overlay_order::sort_overlays(covering, |o| o.0).into_iter().rev().map(|(.., face)| face).filter(|&face| face != Value::NIL).collect();
             // The text's own face last, nil past the text; the mini-window
             // shows text outside a narrowing too.
-            let text_face = match self.object(sources.buffer)? {
-                Object::Buffer(_) if at >= sources.end => Value::NIL,
+            let text_face = match self.shown_text(sources.buffer) {
+                Ok(_) if at >= sources.end => Value::NIL,
                 // The property itself, where nothing could stand in for it.
-                Object::Buffer(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
+                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
                     b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
-                Object::Buffer(b) => {
+                Ok(b) => {
                     let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
                     self.annotation_resolve(&raw, sources.face)?
                 }
@@ -3084,8 +3240,8 @@ fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
     buffer_of(segments, display, end)
 }
 
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
+fn laid(end: &romacs_layout_input::WindowEnd, byte_end: usize, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
     let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
     let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
-    Laid { end: byte(end.end), visible_end, body_height: end.body_height }
+    Laid { end: byte_end, visible_end, body_height: end.body_height }
 }
