@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Standing benchmark suite: fixed workloads in pinned GNU and one Romacs build.
+"""Standing benchmark suite: fixed workloads in GNU Emacs and one Romacs build.
+
+The GNU engine is this machine's own installation (/usr/bin/emacs, or --gnu),
+with LD_LIBRARY_PATH unset, as a user runs it, and its version, commit, package
+and native compilation are recorded with each run, since an upgrade moves it.
+The parity harnesses keep the pinned oracle; only this suite compares against
+the installed engine.  The Emacs tree stays pinned: it supplies the same inputs
+to every engine (fixture files, ERT test files), not the GNU engine's own Lisp.
 
 Every workload runs in both engines on the same pinned inputs, each engine
 in private HOME/XDG/TMPDIR trees, and reports per engine user-space
@@ -24,8 +31,8 @@ the init and apps rows load read as source too, and those rows say so.
 
 --neomacs BIN adds a third engine, its own column: the same workloads as it
 installs, its dump and its `.elc' files, a workload's own file byte-compiled by
-its own compiler.  A row it cannot run says why.  The init and apps rows are
-GNU's and Romacs's alone.
+its own compiler.  A row it cannot run says why.  The ERT, init and apps rows
+are GNU's and Romacs's alone.
 
 Workloads (--quick runs those marked q):
   batch      GNU's and Romacs's `-Q --batch' on perfbench.el, one process per
@@ -56,6 +63,14 @@ Workloads (--quick runs those marked q):
              says why; the geometric mean names the members it leaves out.
              Pure Lisp compute, not an editor workload: its own table, never
              in --quick.
+  session    what a person feels, in a GUI session on headless labwc: a command
+             on a key (find-file, dired, occur, project-find-regexp,
+             project-find-file, vc-log, vc-diff, vc-dir, M-x shell, org-agenda)
+             and per key editing (kill, yank, undo, isearch, Org).  Wall runs
+             from the key to the result; block is the longest gap between ticks
+             of a 5 ms timer, which cannot run while the main VM is busy
+             (perfbench-session.el).  A path on a worker VM raises instructions
+             and lowers block, so these rows are read by wall and block.
   gui        headless labwc, as the parity harnesses run both engines:
              first-start world build (Romacs only; GNU's dump is built with
              it), warm launch (q) spawn to Romacs's first paint and to the
@@ -93,7 +108,7 @@ usage: perfbench.py --romacs BIN [--runtime DIR] [--commit SHA] [--quick] [--rom
                     [--out ~/.cache/romacs/perf-bench (ROMACS_PERFBENCH_OUT)]
                     [--previous RESULTS.json] [--gnosis-db COPY --gnosis-db-repo REPO]
                     [--profile-config FILE (ROMACS_BENCH_PROFILE)]
-The GNU engine is $ROMACS_GNU_ORACLE (or --gnu).  A binary installed
+The GNU engine is /usr/bin/emacs (or --gnu).  A binary installed
 beside its runtime (gnu-lisp/, rlisp/) uses that runtime; otherwise give
 --runtime, or the binary loads the Lisp of the checkout it was built in.
 """
@@ -187,7 +202,27 @@ ELB_COLUMNS = (('gnu', 'gnu', 'elc'), ('gnu_native', 'gnu', 'eln'), ('romacs', '
 # An error a run reported instead of signalling: the byte compiler's, or
 # the suite's demoted load and run errors.
 ELB_ERROR = re.compile(r'(?:^|: )(Error(?: loading| running)?: .*)', re.M)
-GROUPS = ('batch', 'micro', 'ert', 'elb', 'gui', 'init', 'apps')
+GROUPS = ('batch', 'micro', 'ert', 'elb', 'session', 'gui', 'init', 'apps')
+SESSION_LISP = HERE / 'perfbench-session.el'
+# (row, command in perfbench-session.el, whether it ends in a prompt to leave)
+SESSION_COMMANDS = [('session find-file xdisp.c', 'find-file', False),
+                    ('session dired 5,000 files', 'dired', False),
+                    ('session occur xdisp.c', 'occur', False),
+                    ('session project-find-regexp', 'project-find-regexp', False),
+                    ('session project-find-file', 'project-find-file', True),
+                    ('session vc-log 2,000 commits', 'vc-log', False),
+                    ('session vc-diff xdisp.c', 'vc-diff', False),
+                    ('session vc-dir', 'vc-dir', False),
+                    ('session M-x shell, one command', 'shell', False),
+                    ('session org-agenda, a month', 'org-agenda', False)]
+# (row, Lisp that makes its buffer, Lisp for its check, keys before the row, the row's keys)
+SESSION_KEYS = [('session kill-line, per key', '(perfbench-session-text)', '(buffer-size)', [], [parity_live.C('k')] * 40),
+                ('session yank, per key', '(perfbench-session-kills)', '(buffer-size)', [], [parity_live.C('y')] * 40),
+                ('session undo, per key', '(perfbench-session-undos)', '(buffer-size)', [], [parity_live.C('/')] * 40),
+                ('session isearch xdisp.c, per key', '(perfbench-session--xdisp)', 'isearch-string', [parity_live.C('s')],
+                 [['-k', 'underscore'] if c == '_' else [c] for c in 'glyph_row']),
+                ('session Org self-insert, per key', '(perfbench-session-org)', '(buffer-size)', [], [['a']] * 40),
+                ('session Org TAB, per key', '(perfbench-session-org)', '(perfbench-session-visible)', [], [['-k', 'Tab']] * 40)]
 # One user's configuration and single packages: the suite judges the corpus
 # and general use, so these run only when --only names them.
 BY_NAME_ONLY = ('init', 'apps')
@@ -201,6 +236,10 @@ LISP_JOBS = 8  # compile processes at a time, staging an installation
 
 class Refused(Exception):
     """A workload that cannot run here, with the reason; not a number."""
+
+
+SESSION_FAILURES = (Refused, TimeoutError, parity_live.LispError, RuntimeError, OSError, ValueError,
+                    subprocess.SubprocessError)
 
 
 # --- pure helpers -------------------------------------------------------------
@@ -294,6 +333,29 @@ EXPECTED_D5000 = manifest([(f'file-{n:04}.txt', 'x\n', DIR_MTIME) for n in range
 def row(name, group, unit, gnu, romacs, runs, note=''):
     """GNU's and Romacs's {instructions, wall, check, ...} for one workload."""
     return {'row': name, 'group': group, 'unit': unit, 'runs': runs, 'gnu': gnu, 'romacs': romacs, 'note': note}
+
+
+def gnu_build(gnu):
+    """What GNU, a binary this run compares with, is: an upgrade moves it, so
+    each run records its version, commit, package and native compilation."""
+    form = ('(princ (format "%S" (list emacs-version emacs-repository-version'
+            ' (and (fboundp (quote native-comp-available-p)) (native-comp-available-p) t))))')
+    env = {k: v for k, v in os.environ.items() if k != 'LD_LIBRARY_PATH'}
+    asked = subprocess.run([gnu, '-Q', '--batch', '--eval', form], env=env, capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
+    version, commit, native = parity_live.read_sexp(asked.stdout.strip().splitlines()[-1])
+    return {'path': gnu, 'version': version, 'commit': commit, 'native': bool(native), 'package': package_of(gnu),
+            'sha256': hashlib.sha256(Path(gnu).resolve().read_bytes()).hexdigest()}
+
+
+def package_of(path):
+    """The pacman package that owns PATH, as NAME VERSION; None without one."""
+    try:
+        asked = subprocess.run(['pacman', '-Qo', path], capture_output=True, text=True, timeout=30)
+    except OSError:
+        return None
+    found = re.search(r'is owned by (.+)$', asked.stdout.strip())
+    return found[1] if found else None
 
 
 def geomean(values):
@@ -650,14 +712,18 @@ class Batch:
 
     def figures(self, engine, workload):
         runs = self.ctx.runs
+        # What a first use compiles is no part of a warm row; its note says so.
+        first = self.once(engine, workload) if engine == 'romacs' and self.ctx.store else {}
         full = [self.once(engine, workload) for _ in range(runs)]
         if workload == 'startup':
             return {'instructions': median(r['instructions'] for r in full),
-                    'wall': median(r['process_wall'] for r in full), 'check': None, 'samples': full}
+                    'wall': median(r['process_wall'] for r in full), 'check': None, 'samples': full,
+                    'first_use': first.get('published', 0)}
         skipped = [self.once(engine, workload, skip=True) for _ in range(runs)]
         return {'instructions': median(r['instructions'] for r in full) - median(r['instructions'] for r in skipped),
                 'wall': median(r['seconds'] for r in full), 'check': full[0]['check'],
-                'setup_instructions': median(r['instructions'] for r in skipped), 'samples': full}
+                'setup_instructions': median(r['instructions'] for r in skipped), 'samples': full,
+                'first_use': first.get('published', 0)}
 
     def workload(self, name, workload):
         engines = {e: self.ctx.attempt(e, lambda e=e: self.figures(e, workload)) for e in self.ctx.compared}
@@ -667,6 +733,8 @@ class Batch:
             if figures.get('instructions') is not None and figures['instructions'] <= 0:
                 note += f'; {ENGINE_NAMES[engine]}: instructions not above the setup run\'s ({figures["instructions"]:+.0f})'
                 figures['instructions'] = None
+        if engines['romacs'].get('first_use'):
+            note += f'; Romacs: {engines["romacs"]["first_use"]} artifacts compiled on first use, before these runs'
         made = row(name, 'batch', 'run', engines['gnu'], engines['romacs'], self.ctx.runs,
                    f'{check_note(engines, note)}; {self.ctx.romacs_note(samples["romacs"])}')
         return with_neomacs(made, engines)
@@ -696,8 +764,8 @@ def check_note(engines, note=''):
 def micro_rows(ctx, batch):
     """The call-path rows: per iteration, beyond the empty loop."""
     selected = [m for m in MICRO if m[2] or not ctx.quick]
-    directory = ctx.cache / 'micro'
-    directory.mkdir(exist_ok=True)
+    directory = ctx.cache / 'micro' / ctx.gnu_build['sha256'][:12]  # bytecode is the engine's own
+    directory.mkdir(parents=True, exist_ok=True)
     samples = {}
     for name, body, _ in selected:
         text = MICRO_HEAD.replace('BODY', body)
@@ -788,7 +856,7 @@ def ert_row(ctx, batch):
     """25 GNU ERT files, the same command in both engines: medians of
     --runs passes, withheld when any pass lacks a file's result."""
     engines, passes_of = {}, {}
-    for engine in ctx.compared:
+    for engine in ('gnu', 'romacs'):
         hung = set()
         passes = passes_of[engine] = [ert_pass(ctx, batch, engine, hung) for _ in range(ctx.runs)]
         failed = sorted({name for p in passes for name in p['failed']})
@@ -797,17 +865,11 @@ def ert_row(ctx, batch):
                            'partial': totals if failed else None,
                            'check': passes[0]['check'], 'files_without_result': failed}
     note = f'GNU {engines["gnu"]["check"]}, Romacs {engines["romacs"]["check"]}; wall summed per file; ' \
-           + ctx.romacs_note([s for p in passes_of['romacs'] for s in p['loads']]) + '; test files read as source in all'
+           + ctx.romacs_note([s for p in passes_of['romacs'] for s in p['loads']]) + '; test files read as source in both'
     if engines['gnu']['files_without_result'] or engines['romacs']['files_without_result']:
         note += f'; totals withheld, files without a result: GNU {engines["gnu"]["files_without_result"]},' \
                 f' Romacs {engines["romacs"]["files_without_result"]}'
-    made = row('ERT 25 files', 'ert', 'total', engines['gnu'], engines['romacs'], ctx.runs, note)
-    if 'neomacs' in engines:
-        made['neomacs'] = engines['neomacs']
-        made['note'] += f'; neomacs {engines["neomacs"]["check"]}'
-        if engines['neomacs']['files_without_result']:
-            made['note'] += f', total withheld, files without a result: {engines["neomacs"]["files_without_result"]}'
-    return made
+    return row('ERT 25 files', 'ert', 'total', engines['gnu'], engines['romacs'], ctx.runs, note)
 
 
 def elb_tarball(cache):
@@ -963,6 +1025,134 @@ def launch_rows(ctx):
     return [world, paint, idle]
 
 
+def session_repo(ctx):
+    """A private clone of the pinned tree with src/xdisp.c changed, for the
+    rows that write or need a change, and the Org file the agenda reads."""
+    repo = ctx.work / 'session-repo'
+    git('clone', '-q', '--shared', str(ctx.fixtures / TREE), str(repo))
+    with (repo / 'src/xdisp.c').open('a') as out:
+        out.write('/* perfbench */\n')
+    agenda = ctx.work / 'agenda.org'
+    agenda.write_text(''.join(f'* TODO item {n}\n  SCHEDULED: <2026-01-{n % 28 + 1:02}>\n' for n in range(2000)))
+    return repo, agenda
+
+
+def session_command(session, name, leave, rate, rounds):
+    """Wall, block and instructions of command NAME, the median of ROUNDS."""
+    samples, checks = [], []
+    for n in range(rounds):
+        done = session.root / f'work/{name}-{n}'
+        session.ask(f'(perfbench-session-arm (quote {name}) {parity_live.lisp_string(str(done))})', 120)
+        time.sleep(.5)
+
+        def act():
+            session.engine.keys(['-k', 'F5'])
+            parity_live.wait(done.exists, 120, f'{name} result', session.engine.process, .01)
+        instructions, elapsed = session.counted(act, 120)
+        seconds, block = parity_live.read_sexp(done.read_text())
+        samples.append({'wall': seconds, 'block': block,
+                        'instructions': None if instructions is None else instructions - rate * elapsed})
+        if leave:
+            session.engine.keys(parity_live.C('g'))
+        checks.append(session.ask(f'(perfbench-session-finish (quote {name}))', 60))
+        time.sleep(.5)
+    return session_medians(samples, checks)
+
+
+def session_keys(session, setup, check_form, before, keys, rate, rounds):
+    """Per-key wall, block and instructions, the median of ROUNDS."""
+    samples, checks = [], []
+    for _ in range(rounds):
+        session.ask(f'(progn {setup} t)', 120)
+        time.sleep(1)
+        for group in before:
+            session.engine.keys(group)
+        time.sleep(.5)
+        session.ask('(perfbench-session-reset)')
+        figures = session.phase(keys, .1, rate)
+        figures['block'] = session.ask('perfbench-session-worst-gap')
+        ran = session.ask('perfbench-gui-commands')
+        if ran != len(keys):
+            raise Refused(f'{ran} of {len(keys)} keys ran')
+        checks.append(str(session.ask(f'(with-current-buffer (window-buffer (selected-window)) {check_form})')))
+        session.engine.keys(parity_live.C('g'))
+        session.engine.keys(parity_live.C('g'))
+        samples.append(figures)
+    session.ask('(perfbench-session-abort nil)')
+    return session_medians(samples, checks)
+
+
+def session_medians(samples, checks):
+    """SAMPLES' medians, when every round made the same thing, or a refusal:
+    a round that did something else is no sample of this row."""
+    if len(set(map(str, checks))) > 1:
+        raise Refused(f'rounds differ: {checks}')
+    return {metric: median(s[metric] for s in samples) for metric in ('wall', 'block', 'instructions')} | {'check': checks[0]}
+
+
+def session_group_figures(ctx, engine, repo, agenda):
+    """Every session row in one ENGINE session: a row that fails says so and
+    costs that row alone."""
+    session = Session(ctx, engine)
+    figures = {}
+    try:
+        session.ask(f'(progn (load {parity_live.lisp_string(str(SESSION_LISP))} nil t t)'
+                    f' (setq perfbench-session-repo {parity_live.lisp_string(str(repo))}'
+                    f' perfbench-session-directory {parity_live.lisp_string(str(ctx.fixtures / "d5000") + "/")}'
+                    f' perfbench-session-agenda {parity_live.lisp_string(str(agenda))}'
+                    ' auto-save-default nil create-lockfiles nil make-backup-files nil)'
+                    f' {FIDO} (setq icomplete-compute-delay 0) (blink-cursor-mode -1) t)')
+        time.sleep(2)
+        rate = session.idle_rate()
+        for name, command, leave in SESSION_COMMANDS:
+            figures[name] = session_row(session, name, lambda c=command, l=leave: session_command(session, c, l, rate, ctx.runs),
+                                        command)
+        for name, setup, check, before, keys in SESSION_KEYS:
+            figures[name] = session_row(session, name, lambda s=setup, c=check, b=before, k=keys:
+                                        session_keys(session, s, c, b, k, rate, ctx.runs))
+        if engine == 'romacs' and not session.stopped:
+            figures['romacs_note'] = session.romacs_note()
+    finally:
+        session.stop()
+    return figures
+
+
+def session_row(session, name, function, command=None):
+    """FUNCTION's figures, or why it has none, the session left ready for the
+    next.  A session that stops answering stays stopped: the rows after it say
+    so at once, and what it already measured stands."""
+    if session.stopped:
+        return {'wall': None, 'block': None, 'instructions': None, 'failed': f'not run: {session.stopped}'}
+    print(f'    {session.engine.name} {name}', flush=True)
+    try:
+        return function()
+    except SESSION_FAILURES as error:
+        try:
+            for _ in range(3):
+                session.engine.keys(parity_live.C('g'))
+            session.ask(f'(perfbench-session-abort (quote {command or "nil"}))', 15)
+        except SESSION_FAILURES:
+            session.stopped = f'the session stopped answering in {name.removeprefix("session ")}'
+        return {'wall': None, 'block': None, 'instructions': None, 'failed': f'not run: {str(error)[:160]}'}
+
+
+def session_rows(ctx):
+    """The session group: one session per engine, the rows from each."""
+    repo, agenda = session_repo(ctx)
+    results = {engine: ctx.attempt(engine, lambda e=engine: session_group_figures(ctx, e, repo, agenda)) for engine in ctx.compared}
+    romacs_note = results['romacs'].pop('romacs_note', 'Romacs: loads not checked, the session stopped answering')
+    names = [c[0] for c in SESSION_COMMANDS] + [k[0] for k in SESSION_KEYS]
+    rows = []
+    for name in names:
+        engines = {e: results[e] if results[e].get('failed') else results[e][name] for e in ctx.compared}
+        unit = 'key' if name.endswith('per key') else 'run'
+        note = '; '.join(f'{ENGINE_NAMES[e]}: {engines[e]["failed"]}' for e in ('gnu', 'romacs') if engines[e].get('failed'))
+        made = row(name, 'session', unit, engines['gnu'], engines['romacs'], ctx.runs,
+                   '; '.join(filter(None, [note, check_note(engines), romacs_note])))
+        rows.append(with_neomacs(made, engines))
+    return rows
+
+
 def launch_samples(ctx, engine):
     """ENGINE's warm launches, --runs of them after one that warms the page cache."""
     root, home, env = parity_live.private_tree(engine, ctx.work, ctx.tools)
@@ -1014,7 +1204,7 @@ class Session:
         start = {'gnu': parity_live.gnu_engine,
                  'romacs': lambda *a: parity_live.romacs_engine(ctx.engines['romacs'], *a),
                  'neomacs': lambda *a: parity_live.neomacs_engine(ctx.engines.get('neomacs'), *a)}[engine]
-        self.ctx, self.marks = ctx, ctx.store_marks()
+        self.ctx, self.marks, self.stopped = ctx, ctx.store_marks(), None
         self.engine = start(root, home, env, init, None, 120, ctx.tools)
         self.root = root
 
@@ -1033,13 +1223,16 @@ class Session:
         started = time.time()
         counter = subprocess.Popen(['perf', 'stat', '--per-thread', '-x,', '-e', 'instructions:u',
                                     '-p', str(self.engine.process.pid)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        time.sleep(.25)
-        act()
-        time.sleep(.25)
-        counter.send_signal(signal.SIGINT)
-        elapsed = time.time() - started
-        _, err = counter.communicate(timeout=10)
+                                   # A thread's name is cut at 15 bytes, perhaps mid-character.
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors='replace')
+        try:
+            time.sleep(.25)
+            act()
+            time.sleep(.25)
+        finally:
+            counter.send_signal(signal.SIGINT)
+            elapsed = time.time() - started
+            _, err = counter.communicate(timeout=10)
         return thread_instructions(err), elapsed
 
     def idle_rate(self, seconds=3):
@@ -1308,6 +1501,8 @@ def gate_walls(rows, max_load):
             for engine in ENGINE_NAMES:
                 if r.get(engine) and r[engine].get('wall') is not None:
                     r[engine]['wall_refused'] = r[engine].pop('wall')
+                if r.get(engine) and r[engine].get('block') is not None:
+                    r[engine]['block_refused'] = r[engine].pop('block')
             r['note'] = f'wall refused: load {r["load"]:.1f} > {max_load}; {r["note"]}'
     return rows
 
@@ -1316,7 +1511,7 @@ def with_ratios(rows, previous):
     """ROWS with Romacs/GNU ratios and changes against PREVIOUS's rows."""
     before = {r['row']: r for r in (previous or {}).get('rows', [])}
     for r in rows:
-        for metric in ('instructions', 'wall'):
+        for metric in ('instructions', 'wall', 'block'):
             value = (r['romacs'] or {}).get(metric)
             r[f'{metric}_ratio'] = ratio(value, (r['gnu'] or {}).get(metric))
             r[f'{metric}_change'] = change(value, ((before.get(r['row']) or {}).get('romacs') or {}).get(metric))
@@ -1360,7 +1555,7 @@ def table(results):
              '| workload | per | GNU instr | Romacs instr | R/G | Δ instr | GNU wall | Romacs wall | R/G | Δ wall | note |',
              '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|']
     for r in results['rows']:
-        if r['group'] == 'elb':
+        if r['group'] in ('elb', 'session'):
             continue
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
         lines.append(f'| {r["row"]} | {r["unit"]} | {scaled(gnu.get("instructions"), "instructions")} | '
@@ -1368,10 +1563,26 @@ def table(results):
                      f'{percent(r["instructions_change"])} | {scaled(gnu.get("wall"), "s")} | '
                      f'{scaled(romacs.get("wall"), "s")} | {times(r["wall_ratio"])} | {percent(r["wall_change"])} | '
                      f'{r["note"]} |')
-    lines += elb_table(results) + neomacs_table(results)
+    lines += session_table(results) + elb_table(results) + neomacs_table(results)
     for line in results['skipped']:
         lines.append(f'\nNot run: {line}')
     return '\n'.join(lines) + '\n'
+
+
+def session_table(results):
+    """The session rows, apart: read by wall and block, not instructions."""
+    rows = [r for r in results['rows'] if r['group'] == 'session']
+    if not rows:
+        return []
+    lines = ['', 'Sessions: wall from key to result, block the longest time the main VM ran no timer.', '',
+             '| row | per | GNU wall | Romacs wall | R/G | GNU block | Romacs block | R/G | R/G instr | note |',
+             '|---|---|---:|---:|---:|---:|---:|---:|---:|---|']
+    for r in rows:
+        gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
+        lines.append(f'| {r["row"]} | {r["unit"]} | {scaled(gnu.get("wall"), "s")} | {scaled(romacs.get("wall"), "s")} | '
+                     f'{times(r["wall_ratio"])} | {scaled(gnu.get("block"), "s")} | {scaled(romacs.get("block"), "s")} | '
+                     f'{times(r["block_ratio"])} | {times(r["instructions_ratio"])} | {r["note"]} |')
+    return lines
 
 
 def neomacs_table(results):
@@ -1428,6 +1639,7 @@ class Context:
         self.args, self.run_dir, self.cache, self.fixtures, self.store = args, run_dir, cache, fixtures_dir, store
         self.runs, self.quick, self.tools = args.runs, args.quick, args.tools
         self.engines = {'gnu': args.gnu, 'romacs': str(romacs)}
+        self.gnu_build = gnu_build(args.gnu)
         if args.neomacs:
             self.engines['neomacs'] = str(Path(args.neomacs).expanduser())
         self.compared = tuple(self.engines)
@@ -1450,8 +1662,7 @@ class Context:
         has none.  GNU's and Romacs's failures are the row's."""
         try:
             return function()
-        except (Refused, TimeoutError, parity_live.LispError, RuntimeError, OSError,
-                subprocess.SubprocessError) as error:
+        except SESSION_FAILURES as error:
             if engine != 'neomacs':
                 raise
             self.log(f'neomacs {time.monotonic_ns()}', traceback.format_exc())
@@ -1526,13 +1737,13 @@ def commit_of(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--romacs', required=True)
-    parser.add_argument('--gnu', default=os.environ.get('ROMACS_GNU_ORACLE'))
+    parser.add_argument('--gnu', default='/usr/bin/emacs', help='the GNU engine (default: this machine\'s installation)')
     parser.add_argument('--runtime')
     parser.add_argument('--commit')
     parser.add_argument('--quick', action='store_true')
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--only', nargs='+', help='groups, or workloads (a batch row, micro, ERT 25 files, elb,'
-                        ' launch, keys, init, apps)')
+                        ' session, launch, keys, init, apps)')
     parser.add_argument('--max-load', type=float, default=8.0)
     parser.add_argument('--out', default=os.environ.get('ROMACS_PERFBENCH_OUT', '~/.cache/romacs/perf-bench'))
     parser.add_argument('--previous', help='results.json to compare with (default: the newest saved run)')
@@ -1547,8 +1758,9 @@ def main():
     parser.add_argument('--romacs-source', action='store_true',
                         help='measure Romacs from source, with no compiled store or world, not as an installation runs')
     args = parser.parse_args()
-    if not args.gnu or not os.environ.get('ROMACS_GNU_SOURCE'):
-        raise SystemExit('needs ROMACS_GNU_ORACLE (or --gnu) and ROMACS_GNU_SOURCE')
+    if not os.environ.get('ROMACS_GNU_SOURCE'):
+        raise SystemExit('needs ROMACS_GNU_SOURCE, the Emacs tree the fixtures come from')
+    os.environ.pop('LD_LIBRARY_PATH', None)  # a toolchain's would break an installed engine
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     runtime, commit = runtime_of(args), commit_of(args)
     parity_live.GNU = args.gnu
@@ -1570,7 +1782,7 @@ def main():
             'romacs_lisp': 'compiled store' if store else 'source', 'install': install,
             'neomacs': neomacs_build(args) if args.neomacs else None,
             'romacs_sha256': hashlib.sha256(Path(args.romacs).read_bytes()).hexdigest(), 'runtime': str(runtime),
-            'gnu': args.gnu, 'runs': args.runs, 'quick': args.quick, 'max_load': args.max_load,
+            'gnu': args.gnu, 'gnu_build': ctx.gnu_build, 'runs': args.runs, 'quick': args.quick, 'max_load': args.max_load,
             'load_start': load(), 'fixtures': pins, 'cpus': os.cpu_count()}
     print(f'perfbench {commit[:12]} -> {run_dir}; load {meta["load_start"]:.1f}', flush=True)
     rows = []
@@ -1581,6 +1793,7 @@ def main():
         plan += [('micro', 'micro', True, lambda: micro_rows(ctx, batch)),
                  ('ERT 25 files', 'ert', False, lambda: [ert_row(ctx, batch)]),
                  ('elb', 'elb', False, lambda: elb_rows(ctx, batch)),
+                 ('session', 'session', False, lambda: session_rows(ctx)),
                  ('launch', 'gui', True, lambda: launch_rows(ctx)),
                  ('keys', 'gui', True, lambda: key_rows(ctx)),
                  ('init', 'init', False, lambda: init_rows(ctx)),
