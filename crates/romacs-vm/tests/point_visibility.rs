@@ -92,6 +92,21 @@ fn scrolling_past_invisible_text_as_pinned_gnu() {
     replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
 }
 
+/// format_mode_line.el: `format-mode-line' of another buffer reads that
+/// buffer's point, not the selected window's.
+#[test]
+fn format_mode_line_of_another_buffer_as_pinned_gnu() {
+    replay(include_str!("format_mode_line.el"), include_str!("format_mode_line.gnu"), 0);
+}
+
+/// unibyte_window.el: a window shows a unibyte buffer, visited literally
+/// or made unibyte while shown, its raw bytes as escapes: motion,
+/// scrolling, edits and narrowing keep every position as GNU's.
+#[test]
+fn a_window_shows_a_unibyte_buffer_as_pinned_gnu() {
+    replay(include_str!("unibyte_window.el"), include_str!("unibyte_window.gnu"), 400);
+}
+
 /// hidden_tail.el: `window-end', with and without UPDATE, ends at the last
 /// row showing text, so M-> recentres when text hidden to the buffer's end
 /// follows that row, and `recenter' counts the rows shown; an edit leaves

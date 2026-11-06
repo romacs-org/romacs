@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e699c54b73d2a397add00b5429342288238540eea07e3963d6b77e409585d134",
+  "source_fingerprint": "52ecf23991fd623dc4d6019804ae9b421bd3724a0b2901781452e888be207673",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1366,
-  "parsed_vm2_only": 1366
+  "parsed_total": 1368,
+  "parsed_vm2_only": 1368
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -5053,7 +5053,17 @@
   "romacs--treesit-detach": {
    "name": "romacs--treesit-detach",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:289"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:299"
+  },
+  "romacs--treesit-parse-early": {
+   "name": "romacs--treesit-parse-early",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:207"
+  },
+  "romacs--treesit-parsing-p": {
+   "name": "romacs--treesit-parsing-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:212"
   },
   "romacs--validate-region": {
    "name": "romacs--validate-region",
@@ -6246,7 +6256,7 @@
   "treesit-induce-sparse-tree": {
    "name": "treesit-induce-sparse-tree",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:436"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:446"
   },
   "treesit-language-abi-version": {
    "name": "treesit-language-abi-version",
@@ -6266,57 +6276,57 @@
   "treesit-node-check": {
    "name": "treesit-node-check",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:326"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:336"
   },
   "treesit-node-child": {
    "name": "treesit-node-child",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:321"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:331"
   },
   "treesit-node-child-by-field-name": {
    "name": "treesit-node-child-by-field-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:341"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:351"
   },
   "treesit-node-child-count": {
    "name": "treesit-node-child-count",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:336"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:346"
   },
   "treesit-node-descendant-for-range": {
    "name": "treesit-node-descendant-for-range",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:361"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:371"
   },
   "treesit-node-end": {
    "name": "treesit-node-end",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:306"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:316"
   },
   "treesit-node-eq": {
    "name": "treesit-node-eq",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:366"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:376"
   },
   "treesit-node-field-name-for-child": {
    "name": "treesit-node-field-name-for-child",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:331"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:341"
   },
   "treesit-node-first-child-for-pos": {
    "name": "treesit-node-first-child-for-pos",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:356"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:366"
   },
   "treesit-node-match-p": {
    "name": "treesit-node-match-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:442"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:452"
   },
   "treesit-node-next-sibling": {
    "name": "treesit-node-next-sibling",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:346"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:356"
   },
   "treesit-node-p": {
    "name": "treesit-node-p",
@@ -6326,7 +6336,7 @@
   "treesit-node-parent": {
    "name": "treesit-node-parent",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:316"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:326"
   },
   "treesit-node-parser": {
    "name": "treesit-node-parser",
@@ -6336,42 +6346,42 @@
   "treesit-node-prev-sibling": {
    "name": "treesit-node-prev-sibling",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:351"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:361"
   },
   "treesit-node-start": {
    "name": "treesit-node-start",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:301"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:311"
   },
   "treesit-node-string": {
    "name": "treesit-node-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:311"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:321"
   },
   "treesit-node-type": {
    "name": "treesit-node-type",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:296"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:306"
   },
   "treesit-parse-string": {
    "name": "treesit-parse-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:279"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:289"
   },
   "treesit-parser-add-notifier": {
    "name": "treesit-parser-add-notifier",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:269"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:279"
   },
   "treesit-parser-buffer": {
    "name": "treesit-parser-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:217"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:227"
   },
   "treesit-parser-changed-regions": {
    "name": "treesit-parser-changed-regions",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:248"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:258"
   },
   "treesit-parser-create": {
    "name": "treesit-parser-create",
@@ -6381,32 +6391,32 @@
   "treesit-parser-delete": {
    "name": "treesit-parser-delete",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:207"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:217"
   },
   "treesit-parser-embed-level": {
    "name": "treesit-parser-embed-level",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:232"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:242"
   },
   "treesit-parser-included-ranges": {
    "name": "treesit-parser-included-ranges",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:259"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:269"
   },
   "treesit-parser-language": {
    "name": "treesit-parser-language",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:222"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:232"
   },
   "treesit-parser-list": {
    "name": "treesit-parser-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:212"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:222"
   },
   "treesit-parser-notifiers": {
    "name": "treesit-parser-notifiers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:264"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:274"
   },
   "treesit-parser-p": {
    "name": "treesit-parser-p",
@@ -6416,27 +6426,27 @@
   "treesit-parser-remove-notifier": {
    "name": "treesit-parser-remove-notifier",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:274"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:284"
   },
   "treesit-parser-root-node": {
    "name": "treesit-parser-root-node",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:242"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:252"
   },
   "treesit-parser-set-embed-level": {
    "name": "treesit-parser-set-embed-level",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:237"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:247"
   },
   "treesit-parser-set-included-ranges": {
    "name": "treesit-parser-set-included-ranges",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:254"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:264"
   },
   "treesit-parser-tag": {
    "name": "treesit-parser-tag",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:227"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:237"
   },
   "treesit-parser-tracking-line-column-p": {
    "name": "treesit-parser-tracking-line-column-p",
@@ -6446,17 +6456,17 @@
   "treesit-pattern-expand": {
    "name": "treesit-pattern-expand",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:378"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:388"
   },
   "treesit-query-capture": {
    "name": "treesit-query-capture",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:393"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:403"
   },
   "treesit-query-compile": {
    "name": "treesit-query-compile",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:388"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:398"
   },
   "treesit-query-eagerly-compiled-p": {
    "name": "treesit-query-eagerly-compiled-p",
@@ -6466,7 +6476,7 @@
   "treesit-query-expand": {
    "name": "treesit-query-expand",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:383"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:393"
   },
   "treesit-query-language": {
    "name": "treesit-query-language",
@@ -6486,17 +6496,17 @@
   "treesit-search-forward": {
    "name": "treesit-search-forward",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:430"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:440"
   },
   "treesit-search-subtree": {
    "name": "treesit-search-subtree",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:424"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:434"
   },
   "treesit-subtree-stat": {
    "name": "treesit-subtree-stat",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:371"
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:381"
   },
   "treesit-tracking-line-column-p": {
    "name": "treesit-tracking-line-column-p",

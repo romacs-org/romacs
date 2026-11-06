@@ -68,6 +68,18 @@ impl Leaf<'_> {
             return if nocopy != Value::NIL { Ok(string) } else { Ok(self.make_string(source.bytes().to_vec(), !encode)) };
         }
         let kind = self.vector_get(attrs, num(3))?;
+        // Valid UTF-8 with no CR decodes to itself, whatever the line-end
+        // mode: buffer text is UTF-8 for these characters. Nothing else needs
+        // looking at, which is most of what a visit decodes.
+        if !encode && !source.is_multibyte() && kind == self.intern("utf-8") && !source.bytes().contains(&b'\r')
+            && self.vector_get(attrs, num(24))? == Value::NIL
+            && [6, 7, 9, 10].iter().try_fold(true, |plain, &index| Ok::<_, Fault>(plain && self.vector_get(attrs, num(index))? == Value::NIL))?
+            && std::str::from_utf8(source.bytes()).is_ok() {
+            // coding_eol: the first LF names the unix subsidiary.
+            let unix = !inhibit && self.kind(eol) == Kind::Vector && source.bytes().contains(&b'\n');
+            let precise = if unix { self.vector_get(eol, num(0))? } else { name };
+            return self.coding_string_result(buffer, last, precise, source.bytes().to_vec(), true, Vec::new());
+        }
         let tokens = if encode && kind == self.intern("utf-8") && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
         } else { source.chars().map(|code| {

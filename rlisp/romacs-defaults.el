@@ -44,6 +44,7 @@
 (require 'use-package-core)
 (require 'display-line-numbers)
 (require 'treesit)
+(require 'romacs-omarchy)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
   "Options of the libraries above whose standard value names a per-user file.")
@@ -74,6 +75,8 @@
              (which-key-custom-hide-popup-function #'romacs-popup-which-key-hide)
              (which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions)))
     (which-key-mode t)
+    ;; Follow the desktop's theme, where the desktop is Omarchy.
+    (omarchy-mode (omarchy-detected-p) idle)
     (backup-directory-alist
      (list (cons "." (expand-file-name "backups/" user-emacs-directory))))
     ;; GNU's transforms first: a remote file's auto-save stays local, in

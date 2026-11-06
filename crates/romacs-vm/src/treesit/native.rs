@@ -3,6 +3,7 @@
 //! (`dynlib.c`), and parsers, trees, nodes, cursors and queries are the
 //! runtime's own objects behind owning handles. `prim/leaf/treesit.rs`
 //! uses the safe types below.
+use std::cell::OnceCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::rc::Rc;
 use tree_sitter::ffi;
@@ -30,7 +31,7 @@ fn dlerror() -> Option<String> {
 
 /// A grammar: the `TSLanguage` of a library that is never closed (GNU
 /// keeps every grammar for the session).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Language(*const ffi::TSLanguage);
 // SAFETY: a TSLanguage is immutable static data of its library.
 unsafe impl Send for Language {}
@@ -88,12 +89,44 @@ impl Language {
 
 /// A parse tree, deleted with its last handle. One `Tree` is one tree
 /// generation: every node of it holds this handle, so `ts_node_eq`, which
-/// compares the tree pointer, is stable for its nodes (§2.1).
-pub(crate) struct Tree(*mut ffi::TSTree);
+/// compares the tree pointer, is stable for its nodes (§2.1). The second
+/// field is the tree's `Pinned` once it shares its subtrees.
+pub(crate) struct Tree(*mut ffi::TSTree, OnceCell<Rc<Pinned>>);
+
+/// A copy of a shared tree that nothing edits. An edit of a tree copies the
+/// subtrees it shares instead of changing them in place, and a node of the
+/// tree points into those subtrees: this copy keeps them for as long as any
+/// tree sharing them, and so any node of one, lives.
+struct Pinned(*mut ffi::TSTree);
+impl Drop for Pinned {
+    fn drop(&mut self) {
+        // SAFETY: owned since ts_tree_copy returned it.
+        unsafe { ffi::ts_tree_delete(self.0) };
+    }
+}
 impl Drop for Tree {
     fn drop(&mut self) {
         // SAFETY: owned since ts_parser_parse returned it.
         unsafe { ffi::ts_tree_delete(self.0) };
+    }
+}
+
+/// A tree no thread holds yet, on its way from the one that parsed it.
+pub(crate) struct Loose(*mut ffi::TSTree);
+// SAFETY: the only handle of the tree, which shares nothing, so its thread
+// may change as a parser's result may.
+unsafe impl Send for Loose {}
+impl Drop for Loose {
+    fn drop(&mut self) {
+        // SAFETY: owned since `Tree::loose` gave it up.
+        unsafe { ffi::ts_tree_delete(self.0) };
+    }
+}
+impl Loose {
+    pub(crate) fn tree(self) -> Tree {
+        let tree = Tree(self.0, OnceCell::new());
+        std::mem::forget(self);
+        tree
     }
 }
 impl Tree {
@@ -106,6 +139,20 @@ impl Tree {
     pub(crate) fn root(&self) -> TSNode {
         // SAFETY: the tree is live.
         unsafe { ffi::ts_tree_root_node(self.0) }
+    }
+    /// This tree, new from a parse, to send to another thread.
+    pub(crate) fn loose(self) -> Loose {
+        let loose = Loose(self.0);
+        std::mem::forget(self);
+        loose
+    }
+    /// ts_tree_copy: a tree of its own to edit, sharing this one's subtrees
+    /// until the edits part them, so O(1) in the tree's size. Only an
+    /// unedited tree: the nodes `Pinned` keeps are the ones it had.
+    pub(crate) fn duplicate(&self) -> Tree {
+        // SAFETY: the tree is live; each copy is owned by its new handle.
+        let pinned = self.1.get_or_init(|| Rc::new(Pinned(unsafe { ffi::ts_tree_copy(self.0) })));
+        Tree(unsafe { ffi::ts_tree_copy(self.0) }, OnceCell::from(pinned.clone()))
     }
     /// ts_tree_get_changed_ranges from OLD to this tree, as byte ranges.
     pub(crate) fn changed_since(&self, old: &Tree) -> Vec<(u32, u32)> {
@@ -161,6 +208,14 @@ impl Parser {
         // SAFETY: the array is read for its length during the call.
         unsafe { ffi::ts_parser_set_included_ranges(self.0, if ranges.is_empty() { std::ptr::null() } else { ranges.as_ptr() }, ranges.len() as u32) }
     }
+    /// Whether its included ranges show all of a text of LENGTH bytes: the
+    /// runtime's default, or one range that covers it.
+    pub(crate) fn sees_all(&self, length: u32) -> bool {
+        let mut count = 0;
+        // SAFETY: the parser is live and owns the array.
+        let ranges = unsafe { raw_slice(ffi::ts_parser_included_ranges(self.0, &mut count), count) };
+        matches!(ranges, [range] if range.start_byte == 0 && range.end_byte >= length)
+    }
     /// ts_parser_parse of SOURCE, reusing OLD's unchanged subtrees.
     pub(crate) fn parse(&mut self, old: Option<&Tree>, mut source: &mut dyn Source) -> Option<Tree> {
         let input = ffi::TSInput {
@@ -171,7 +226,7 @@ impl Parser {
         };
         // SAFETY: `input.payload` outlives the call; OLD is live.
         let tree = unsafe { ffi::ts_parser_parse(self.0, old.map_or(std::ptr::null(), |t| t.0), input) };
-        (!tree.is_null()).then(|| Tree(tree))
+        (!tree.is_null()).then(|| Tree(tree, OnceCell::new()))
     }
 }
 

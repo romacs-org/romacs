@@ -26,6 +26,10 @@ possible; say so where you do.
 - A build or fix request authorizes focused edits, checks, review, and a local
   commit. Questions, explanations, and reviews remain read-only unless changes
   are requested.
+- In Lisp the user sees, use faces, not bare strings: key hints through
+  `substitute-command-keys` or `help-key-binding`, mode-line and status text in
+  named faces that inherit theme faces. A command that only makes sense in a mode
+  declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
@@ -165,10 +169,12 @@ standalone Cargo execution without it.
   interruption, missing completion, and unexpected failure must not become success.
 - Keep real GNU ERT, the reduced mini harness, and Romacs Lisp tests distinct.
   A reduced scoreboard is not proof that GNU ERT executed the bodies.
-- Preserve GNU reference answers, imported test bodies, and protected floors.
-  Fix missing dependencies and runtime behavior; do not use stubs, skipped load
-  forms, swallowed errors, new exclusions, or weaker assertions to manufacture
-  progress. Document intentional adaptations and remaining compatibility limits.
+- GNU's tests served to reach parity; they now serve the project. Change or retire
+  a test, a reference answer or a floor when the behavior it measures is deliberately
+  replaced or a better test covers it, and record the reason. Fix missing dependencies
+  and runtime behavior first: never use stubs, skipped load forms, swallowed errors,
+  new exclusions, or weaker assertions to hide a failure. Document intentional
+  adaptations and remaining compatibility limits.
 
 ## Working safely
 
