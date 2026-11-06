@@ -227,7 +227,7 @@ pub(super) struct DisplayState {
     remapped: Vec<(u64, BoundedDatum, Vec<Option<romacs_face::Datum>>, std::rc::Rc<FaceTable>)>,
     /// Each terminal's own table, by session: what its programs colour
     /// stays out of every other buffer's.
-    terminal_tables: Vec<(u64, std::rc::Rc<FaceTable>)>,
+    terminal_tables: std::collections::HashMap<u64, std::rc::Rc<FaceTable>>,
     /// The last face table's id.
     table_ids: u64,
     pub(super) font_selection_order: romacs_layout_input::FontSelectionState,
@@ -375,7 +375,7 @@ impl DisplayState {
             face_heights: Default::default(),
             face_table: None,
             remapped: vec![],
-            terminal_tables: vec![],
+            terminal_tables: Default::default(),
             table_ids: 0,
             previous: std::collections::BTreeMap::new(),
             shown: std::collections::BTreeMap::new(),
@@ -2843,19 +2843,22 @@ impl Vm {
     /// BUFFER's faces with no remapping: the shared table, or a terminal's
     /// own, since any colour a program prints makes a row there.
     fn plain_faces_for(&mut self, buffer: Value) -> Result<std::rc::Rc<FaceTable>> {
-        let Some(session) = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer).map(|binding| binding.session) else {
+        let Some(session) = self.buffer_state(buffer).ok().and_then(|state| state.terminal) else {
             return self.display_faces();
         };
-        if let Some((_, table)) = self.display_state.terminal_tables.iter().find(|(owner, _)| *owner == session)
+        if let Some(table) = self.display_state.terminal_tables.get(&session)
             && table.len() < FACE_TABLE_LIMIT {
             return Ok(table.clone());
         }
         self.display_state.table_ids += 1;
         let table = std::rc::Rc::new(self.face_table_for(self.display_state.table_ids, &romacs_face::Remap::empty(), false)?);
-        let bindings = &self.terminal_bindings;
-        self.display_state.terminal_tables.retain(|(owner, _)| *owner != session && bindings.iter().any(|binding| binding.session == *owner));
-        self.display_state.terminal_tables.push((session, table.clone()));
+        self.display_state.terminal_tables.insert(session, table.clone());
         Ok(table)
+    }
+    /// SESSION no longer shows in BUFFER, which may be dead.
+    pub(crate) fn terminal_ended(&mut self, session: u64, buffer: Value) {
+        if let Ok(state) = self.buffer_state_mut(buffer) { state.terminal = None; }
+        self.display_state.terminal_tables.remove(&session);
     }
     /// The current buffer's default face in WINDOW where its
     /// `face-remapping-alist' remaps faces, else None.

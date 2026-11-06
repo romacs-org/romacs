@@ -334,14 +334,29 @@ thousandth a stack mark."
            (switch-to-buffer (get-buffer-create "scaling-registry")))
   :body (scaling--preview-once it))
 
-;; N terminals open beside the buffer being typed in: each has a table of
-;; its own, which what is shown must not walk.
-(scaling-probe terminal-face-tables :gui t :n 4 :steps 4
-  :setup (progn
-           (require 'romacs-term)
-           (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
-           (switch-to-buffer (get-buffer-create "scaling-typing")))
+;; N terminals open, each with a table of its own, which what is shown
+;; must not walk: an ordinary buffer finds none, the last terminal opened
+;; finds its own, and a face change makes it again.  Constant in N.
+(defun scaling--terminals (n)
+  "N terminals, each shown once; the last."
+  (require 'romacs-term)
+  (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
+  (current-buffer))
+
+(scaling-probe terminal-face-tables-none :gui t :n 4 :steps 4 :budget 0.25
+  :setup (progn (scaling--terminals n) (switch-to-buffer (get-buffer-create "scaling-typing")))
   :body (with-current-buffer it (insert "x")))
+
+(scaling-probe terminal-face-tables-own :gui t :n 4 :steps 4 :budget 0.25
+  :setup (scaling--terminals n)
+  :body (with-current-buffer it
+          (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
+
+(scaling-probe terminal-face-tables-made :gui t :n 4 :steps 4 :budget 0.25
+  :setup (scaling--terminals n)
+  :body (with-current-buffer it
+          (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
+          (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
 
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1

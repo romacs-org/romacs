@@ -13,11 +13,13 @@ pub(crate) struct BufferState {
     /// syntax.c's find_start_* cache, tagged with `Vm::defun_start_epoch`
     /// when this buffer wrote it: GNU keeps one cache for the last buffer.
     pub(crate) defun_start: Option<(u64, crate::syntax_scan::DefunStart)>,
+    /// The terminal session this buffer shows, where it shows one.
+    pub(crate) terminal: Option<u64>,
 }
-romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start });
+romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start, terminal });
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
     }
 }
 impl BufferState {
