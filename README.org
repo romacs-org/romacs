@@ -83,6 +83,19 @@ Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on 
 Not measured in this run: init, gnosis, apps.
 # perfbench-table-end
 
+** Headlines
+
+# perfbench-headlines-begin
+Every row of this run where Romacs beats a rival by at least 20%: 0.80x or better on every metric the run measured.  Build ~0cfcb823~.  The tables keep every row, losses included.
+
+| Row | Against | Instructions | Time | Build | Rerun |
+|-
+| how-many xdisp.c | GNU | 0.14x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'how-many xdisp.c'= |
+| micro named call | GNU | 0.53x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'micro'= |
+| elb fibn | GNU | 0.49x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
+| elb fibn-named-let | GNU | 0.55x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
+# perfbench-headlines-end
+
 ** Lisp compute: GNU's elisp-benchmarks
 
 # perfbench-elb-begin
