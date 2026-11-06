@@ -559,6 +559,83 @@ from; and each one Romacs cannot run, with why."
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
 
+;;; Options
+
+(declare-function romacs-option-describe "romacs-option" (symbol))
+(declare-function romacs-option-search "romacs-option" (query &rest keys))
+(declare-function romacs-option-set "romacs-option" (symbol value))
+(declare-function romacs-option-save "romacs-option" (symbol value))
+
+(defconst romacs-agent-tools--flags '(:risky :safe :local :setter :obsolete :loaded)
+  "The keys of an option's record that are true or false.")
+
+(defun romacs-agent-tools--json (value)
+  "An option record's VALUE as JSON: a symbol by its name, a list as an array."
+  (cond ((null value) :null)
+        ((eq value t) t)
+        ((symbolp value) (symbol-name value))
+        ((listp value) (vconcat (mapcar #'romacs-agent-tools--json value)))
+        (t value)))
+
+(defun romacs-agent-tools--object (record)
+  "RECORD, a plist of `romacs-option.el', as a JSON object."
+  (let ((object (romacs-mcp--object)))
+    (cl-loop for (key value) on record by #'cddr
+             do (puthash (substring (symbol-name key) 1)
+                         (cond ((memq key romacs-agent-tools--flags) (if value t :false))
+                               (t (romacs-agent-tools--json value)))
+                         object))
+    object))
+
+(defun romacs-agent-tools--option-symbol (arguments)
+  "The symbol ARGUMENTS name, which must exist: no tool interns a client's name."
+  (let ((name (gethash "name" arguments)))
+    (or (intern-soft name) (user-error "Unknown option: %s" name))))
+
+(defun romacs-agent-tools--option-value (arguments)
+  "The value ARGUMENTS give, Lisp syntax read and never evaluated."
+  (let* ((text (gethash "value" arguments))
+         (parsed (condition-case failure (read-from-string text)
+                   (error (user-error "Value does not read as Lisp: %s"
+                                      (error-message-string failure)))))
+         (rest (substring text (cdr parsed))))
+    (unless (string-match-p "\\`[ \t\n]*\\'" rest)
+      (user-error "Text after the value: %s" rest))
+    (car parsed)))
+
+(defun romacs-agent-tools--option-describe (arguments)
+  (romacs-mcp--instance arguments)
+  (require 'romacs-option)
+  (romacs-agent-tools--object (romacs-option-describe (romacs-agent-tools--option-symbol arguments))))
+
+(defun romacs-agent-tools--option-search (arguments)
+  (romacs-mcp--instance arguments)
+  (require 'romacs-option)
+  (let* ((group (gethash "group" arguments)) (kind (gethash "kind" arguments))
+         (rows (romacs-option-search (gethash "query" arguments)
+                                     :group (and group (intern-soft group))
+                                     :kind (and kind (intern-soft kind))
+                                     :docs (eq (gethash "docs" arguments) t)
+                                     :limit (gethash "limit" arguments 50))))
+    (romacs-mcp--object
+     "scope" "loaded"
+     "options" (vconcat (mapcar (lambda (row)
+                                  (romacs-mcp--object "name" (symbol-name (car row))
+                                                      "kind" (symbol-name (nth 1 row))
+                                                      "summary" (or (nth 2 row) :null)))
+                                rows)))))
+
+(defun romacs-agent-tools--option-write (write verb arguments)
+  "Call WRITE, `romacs-option-set' or `-save', for ARGUMENTS, and say so:
+the user sees what an agent changed.  VERB names it."
+  (romacs-mcp--instance arguments)
+  (require 'romacs-option)
+  (let ((outcome (funcall write (romacs-agent-tools--option-symbol arguments)
+                          (romacs-agent-tools--option-value arguments))))
+    (message "Agent %s %s %s: %s" (or (romacs-agent-tools--caller) "over MCP") verb
+             (plist-get outcome :option) (plist-get outcome :value))
+    (romacs-agent-tools--object outcome)))
+
 ;;; Registration
 
 (romacs-mcp-register-tool
@@ -678,6 +755,43 @@ restart this session is told \"Romacs restarted into <commit>\"; if it fails, it
  (romacs-mcp--schema '(("instance" . "string")) nil)
  #'romacs-agent-tools--capabilities
  (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_option_search"
+ "Find user options and faces by words in their names, or in their documentation with docs. group keeps one \
+customization group, kind `variable' or `face' one kind, limit (default 50) bounds the rows. Only options whose \
+library is loaded are known: load it first to find the rest. Obsolete options are left out."
+ (romacs-mcp--schema '(("instance" . "string") ("query" . "string") ("group" . "string") ("kind" . "string")
+                       ("docs" . "boolean") ("limit" . "integer"))
+                     '("query"))
+ #'romacs-agent-tools--option-search
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_option_describe"
+ "One option or face: documentation, groups, its raw :type as Lisp, standard and current values printed as Lisp, \
+state (GNU's: standard, saved, set, themed, changed, rogue), the themes setting it, and whether it is risky. An \
+autoloaded option whose library is not loaded says loaded false and little else."
+ (romacs-mcp--schema '(("instance" . "string") ("name" . "string")) '("name"))
+ #'romacs-agent-tools--option-describe
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
+ "romacs_option_set"
+ "Set a user option for this session, through its :set as GNU does. value is Lisp syntax, read and not evaluated: \
+72, t, nil, \"text\", (a b). A value that does not fit :type is refused and nothing changes. The answer gives \
+previous, value and state: set previous back to restore the value, though what a :set function did stays done. \
+Faces are read-only here. Loads the option's library when it must."
+ (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string")) '("name" "value"))
+ (lambda (arguments) (romacs-agent-tools--option-write #'romacs-option-set "set" arguments)))
+
+(romacs-mcp-register-tool
+ "romacs_option_save"
+ "As romacs_option_set, and keep the value for future sessions, in the user's saved settings, never their init. \
+Ask the user first for a risky option. A later saved value replaces this one; the entry itself stays."
+ (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string")) '("name" "value"))
+ (lambda (arguments) (romacs-agent-tools--option-write #'romacs-option-save "saved" arguments))
+ (romacs-mcp--object "destructiveHint" t))
 
 (romacs-mcp-enable-editor-tools)
 ;; Gnosis's agent API, when gnosis is installed (it loads at a tool's first call).

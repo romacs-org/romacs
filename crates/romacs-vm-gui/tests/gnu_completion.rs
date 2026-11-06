@@ -608,6 +608,14 @@ fn romacs_custom_lisp_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-custom-test.el");
 }
 
+/// User options as data (tests/romacs-option-test.el): `:match' verdicts
+/// pinned GNU gave, set and save through GNU's own functions, and a search
+/// that follows what is declared.
+#[test]
+fn romacs_option_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-option-test.el");
+}
+
 /// `rum' is the configured Rum look, face for face
 /// (tests/romacs-theme-rum-test.el), in a session of its own: the
 /// comparison defines faces and realises them for a graphic display.

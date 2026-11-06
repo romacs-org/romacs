@@ -44,8 +44,10 @@ Replies echo the ID, so bounding it keeps every error reply bounded.")
 (defconst romacs-mcp--scan-limit 8)
 (defconst romacs-mcp--modern "2026-07-28")
 (defconst romacs-mcp--legacy "2025-11-25")
-(defconst romacs-mcp--full-access-tools '("romacs_eval")
-  "Tools available only while `romacs-mcp-full-access' is non-nil.")
+(defconst romacs-mcp--full-access-tools '("romacs_eval" "romacs_option_set" "romacs_option_save")
+  "Tools available only while `romacs-mcp-full-access' is non-nil.
+Setting an option is evaluation by another name: a hook or function
+option runs what it is given.")
 (defconst romacs-mcp--legacy-versions '("2025-11-25" "2025-06-18")
   "Supported handshake versions, newest first; both use legacy envelopes.")
 (defvar romacs-mcp--boot nil)
@@ -222,7 +224,8 @@ The printed value is bounded; effects are not rolled back on failure."
 (the instance a fenced call names), romacs_observe (what the frame shows) and \
 romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 (romacs_buffer_list/read/edit, romacs_file_write, romacs_visit); input \
-(romacs_send_keys, romacs_wait_idle); agents (romacs_delegate_task, \
+(romacs_send_keys, romacs_wait_idle); options (romacs_option_search/describe, \
+romacs_option_set/save); agents (romacs_delegate_task, \
 romacs_task_status/cancel, romacs_orchestrator_capabilities); restart \
 (romacs_restart_request, romacs_call_outcome); gnosis_* (spaced-repetition \
 practice and review). romacs_help lists them all, one line each."
@@ -234,6 +237,7 @@ tools' groups, short, since every session pays for it.")
     ("buffers and files" "romacs_buffer_list" "romacs_buffer_read" "romacs_buffer_edit" "romacs_file_write"
      "romacs_visit")
     ("input" "romacs_send_keys" "romacs_wait_idle")
+    ("options" . "romacs_option_")
     ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_cancel"
      "romacs_orchestrator_capabilities")
     ("restart" "romacs_restart_request" "romacs_call_outcome")

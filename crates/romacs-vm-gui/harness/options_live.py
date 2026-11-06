@@ -15,6 +15,9 @@ what it was, and at the end a new session must have every saved value.
   nil       `custom-file' saved as nil, then naming the init.
   defaults  a saved value of an option Romacs's defaults also set survives.
   quick     -Q: nothing is written, and no ~/.emacs appears.
+  agent     the option tools over MCP: search, describe, set and save, a value
+            that does not fit refused, the init untouched, and set and save
+            gone with `romacs-mcp-full-access' off.
 
 ROMACS_HARNESS_WLR_ENV puts the private compositor on the real GPU.
 
@@ -352,7 +355,55 @@ def quick(args, base):
         j.close()
 
 
-WORKFLOWS = {'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
+def agent(args, base):
+    j = Journey(args, base, 'ag')
+    try:
+        j.start()
+        mcp = j.mcp
+        instance = mcp.identity()
+
+        def refused(tool, arguments):
+            _, text, failed = mcp.tool(tool, {'instance': instance, **arguments})
+            return failed, text
+
+        def answer(tool, arguments):
+            failed, text = refused(tool, arguments)
+            if failed:
+                raise RuntimeError(f'{tool}: {text}')
+            return json.loads(text)
+        found = answer('romacs_option_search', {'query': 'kill-ring-max'})
+        described = answer('romacs_option_describe', {'name': 'kill-ring-max'})
+        changed = answer('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'})
+        misfit = refused('romacs_option_set', {'name': 'kill-ring-max', 'value': '"text"'})
+        trailing = refused('romacs_option_set', {'name': 'kill-ring-max', 'value': '61 62'})
+        unknown = refused('romacs_option_describe', {'name': 'romacs-option-no-such'})
+        face = refused('romacs_option_set', {'name': 'bold', 'value': '((t :weight bold))'})
+        kept = j.eval('(eql kill-ring-max 61)') == 't'
+        saved = answer('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'})
+        j.check('romacs_option_save')
+        told = j.eval('(with-current-buffer "*Messages*" (and (string-search "kill-ring-max: 62" (buffer-string)) t))') == 't'
+        listed = mcp.tools()
+        j.eval('(setq romacs-mcp-full-access nil)')
+        limited = mcp.tools()
+        checks = {
+            'search': any(row['name'] == 'kill-ring-max' for row in found['options']) and found['scope'] == 'loaded',
+            'describe': described['type'] == 'natnum' and described['state'] == 'standard',
+            'set': changed['previous'] == described['value'] and changed['value'] == '61' and changed['state'] == 'set',
+            'misfit': misfit[0] and ':type natnum' in misfit[1],
+            'trailing': trailing[0], 'unknown': unknown[0], 'face': face[0] and 'read-only' in face[1],
+            'refused-left-it': kept,
+            'save': saved['previous'] == '61' and saved['state'] == 'saved' and 'kill-ring-max 62' in j.custom.read_text(),
+            'told-the-user': told,
+            'listed': 'romacs_option_set' in listed and 'romacs_option_save' in listed,
+            'off': 'romacs_option_set' not in limited and 'romacs_option_save' not in limited
+                   and 'romacs_option_search' in limited and 'romacs_option_describe' in limited,
+        }
+        return {'checks': checks, 'ok': all(checks.values())}
+    finally:
+        j.close()
+
+
+WORKFLOWS = {'agent': agent, 'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
 
 
 def main():

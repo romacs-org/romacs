@@ -90,6 +90,60 @@ thousandth a stack mark."
             names))
     (nreverse names)))
 
+;;;; User options (rlisp/romacs-option.el)
+
+(defun scaling--declare-options (prefix n)
+  "Declare N integer options named from PREFIX in one group, and name them."
+  (require 'romacs-option)
+  (mapcar (lambda (name)
+            (let ((option (intern name)))
+              (custom-declare-variable option 0 "A scaling option." :type 'integer :group 'scaling-options)
+              option))
+          (scaling--names prefix n)))
+
+(defun scaling--saving-session ()
+  "Give this batch session an init and a directory, as a session has."
+  (let ((directory (file-name-as-directory (make-temp-file "scaling-custom" t))))
+    (setq user-emacs-directory directory custom-file nil
+          user-init-file (expand-file-name "init.el" directory))))
+
+(scaling-probe options-rebuild :n 2000
+  :setup (scaling--declare-options "scaling-rebuild" n)
+  :body (progn (romacs-option--stale) (romacs-option--current)))
+
+(scaling-probe options-search :n 2000
+  :setup (prog1 nil (scaling--declare-options "scaling-search" n) (romacs-option--current))
+  :body (dotimes (_ 20) (romacs-option-search "scaling-search no-such-word")))
+
+(scaling-probe options-describe :n 2000
+  :setup (prog1 (scaling--declare-options "scaling-describe" n) (romacs-option--current))
+  :body (dolist (option it) (romacs-option-describe option)))
+
+;; Declaring and adding marks the cache and no more, and one query rebuilds.
+(scaling-probe options-register :n 500
+  :setup (progn (require 'romacs-option) (mapcar #'intern (scaling--names "scaling-register" n)))
+  :body (progn (dolist (option it)
+                 (custom-declare-variable option 0 "A scaling option." :type 'integer :group 'scaling-options))
+               (romacs-option-search "scaling-register no-such-word")
+               (custom-add-to-group 'scaling-options 'scaling-register-extra 'custom-variable)
+               (romacs-option-search "scaling-register no-such-word")))
+
+;; Each option set again, at N settings of the `user' theme, older entries too.
+(scaling-probe options-set :n 500
+  :known "ticket custom-push-theme: GNU's scan of theme-settings on each change of a setting"
+  :setup (let ((options (scaling--declare-options "scaling-set" n)))
+           (dolist (option options) (romacs-option-set option 1))
+           options)
+  :body (dolist (option it) (romacs-option-set option 2)))
+
+;; Five saves at N saved settings: each is GNU's whole-file rewrite.
+(scaling-probe options-save :n 300
+  :setup (let ((options (scaling--declare-options "scaling-save" n)))
+           (scaling--saving-session)
+           (dolist (option options) (customize-save-variable option 1))
+           options)
+  :body (dotimes (i 5) (romacs-option-save (car it) (+ i 2))))
+
 ;;;; Faces
 
 (scaling-probe faces-defface :n 200
