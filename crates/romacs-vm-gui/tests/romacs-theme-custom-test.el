@@ -219,13 +219,15 @@
     (romacs-should (< (romacs-color-contrast (funcall face 'default 'line-number :foreground) "#000000")
                       (romacs-color-contrast (funcall face 'default 'font-lock-comment-face :foreground) "#000000")))
     ;; The bar is quiet, its dim segments read, purple is the pill's alone.
-    (let ((bar (funcall face 'default 'mode-line-active :background)))
+    (let ((bar (funcall face 'default 'mode-line :background)))
       (romacs-should (equal bar "#1b1814"))
       (romacs-should (stringp (funcall face 'default 'mode-line-active :overline)))
+      ;; On the active line alone: `header-line' and others inherit `mode-line'.
+      (romacs-should (null (funcall face 'default 'mode-line :overline)))
       (romacs-should (>= (romacs-color-contrast (funcall face 'default 'romacs-mode-line-dim :foreground) bar) 4.5)))
     (romacs-should (equal (funcall face 'default 'romacs-mode-line-pill :background) "#50269a"))
     ;; Rum keeps its bar and its code colours.
-    (romacs-should (equal (funcall face 'rum 'mode-line-active :background) "#50269a"))
+    (romacs-should (equal (funcall face 'rum 'mode-line :background) "#50269a"))
     (romacs-should (equal (funcall face 'rum 'font-lock-variable-name-face :foreground) "#00a6a6"))
     (romacs-should (null (plist-get (romacs-theme-rows 'rum) :floors)))))
 

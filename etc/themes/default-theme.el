@@ -44,6 +44,7 @@
 
 (defconst romacs-theme-default-faces
   '((font-lock-variable-use-face :foreground fg)
+    ;; The active line alone: `header-line' and others inherit `mode-line'.
     (mode-line-active :overline "#2e2922")
     (romacs-mode-line-pill :background "#50269a")
     (org-document-title :height 1.4 :weight bold)

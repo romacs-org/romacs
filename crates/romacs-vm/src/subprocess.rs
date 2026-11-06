@@ -25,8 +25,9 @@ pub(crate) enum Slot {
     Encode,
     Stderrproc,
     TtyName,
+    Thread,
 }
-pub(crate) const SLOTS: usize = Slot::TtyName as usize + 1;
+pub(crate) const SLOTS: usize = Slot::Thread as usize + 1;
 
 /// A process object. Its descriptors live in [`Table`] under `serial`, so a
 /// moved or copied object never owns an OS resource.

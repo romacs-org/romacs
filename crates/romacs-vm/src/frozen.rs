@@ -236,7 +236,7 @@ impl<'a> Walk<'a> {
             Object::HashTable(t) => t.weakness == hash::Weakness::None && !t.local_bindings
                 && !matches!(t.test, hash::Test::User(..)),
             Object::SyntaxTable(_) | Object::Window(_) | Object::Frame(_) | Object::Terminal(_) | Object::WindowConfiguration(_)
-            | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
+            | Object::Sqlite(_) | Object::Treesit(_) | Object::Process(_) | Object::Finalizer(_) | Object::Thread | Object::SubCharTable(_) | Object::MapKeymapCursor(_)
             | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::ByteBuffer(_) | Object::Obarray(_)
             | Object::Free => false,
         }

@@ -82,6 +82,18 @@ EXCLUDE = {
 TABLE_LITERALS = {'"gray50"': ',fg-table-dim', '"#595959"': ',term-dim', '"#a6a6a6"': ',term-light'}
 
 
+def active_mode_line(form):
+    """The face table FORM with the active window's line `mode-line' itself, so
+    a buffer's remapping of `mode-line' (`face-remap-add-relative') reaches it."""
+    form, found = re.subn(r"`\(mode-line-active\n.*?\(t :underline ,border-mode-line-active\)\)\)",
+                          ";; The active window's line is `mode-line' itself, so a buffer's\n"
+                          "    ;; remapping of `mode-line' (`face-remap-add-relative') reaches it.\n"
+                          "    `(mode-line-active ((,c :inherit mode-line)))", form, count=1, flags=re.S)
+    if not found:
+        raise SystemExit('modus-themes-faces: mode-line-active moved')
+    return form
+
+
 def required_core(form):
     """The generator FORM with the core a caller names: Modus infers one of
     the cores Romacs does not take."""
@@ -246,6 +258,8 @@ def adapt(source):
         if key[1] in ('modus-themes-faces', 'modus-themes-custom-variables'):
             for literal, name in TABLE_LITERALS.items():
                 form = form.replace(literal, name)
+        if key[1] == 'modus-themes-faces':
+            form = active_mode_line(form)
         out.append(rename(form))
     header = f''';;; romacs-theme-modus.el --- The Modus theming machinery, for Romacs's themes  -*- lexical-binding: t -*-
 

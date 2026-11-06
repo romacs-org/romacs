@@ -284,8 +284,13 @@ INDICATORS_INIT = '''(run-at-time 1 nil (lambda ()
   ;; From the source buffer, which stays selected; *compilation* shows
   ;; in another window.
   (let ((default-directory (expand-file-name "~/"))) (compile "sleep 120"))
+  ;; F9: a name too long for the bar, cut in its middle; the pill yields.
+  (global-set-key [f9] (lambda () (interactive)
+                         (rename-buffer "a-buffer-name-long-enough-that-the-status-bar-cuts-it-in-its-middle.el")))
   (run-at-time 1 nil (lambda ()
-    (write-region (prin1-to-string (list :time (substring-no-properties (string-trim display-time-string)) :selected (buffer-name (window-buffer)))) nil {state} nil 'quiet)))))
+    (write-region (prin1-to-string (list :time (substring-no-properties (string-trim display-time-string)) :selected (buffer-name (window-buffer))
+                                         :width (frame-pixel-width) :border (frame-internal-border-width)))
+                  nil {state} nil 'quiet)))))
 '''
 
 
@@ -565,9 +570,38 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
     which-function's name (`mode-line-misc-info'), compile's `[Compiling]'
     (`mode-line-modes') from the source buffer, the narrowing glyph; with
     the compilation buffer selected, its process state
-    (`mode-line-process').  Minor-mode lighters stay out."""
+    (`mode-line-process').  Minor-mode lighters stay out.  The bar's three
+    zones (modeline.md §14): the buffer's name centred on the frame where
+    the sides leave room, Elisp's mode named without `/l', the right zone
+    flush inside the padding; a name too long for the bar cut in its
+    middle, and no glyph over another."""
     def bar():
         return ' '.join(text for _, text, _ in rows(glyphs(), 'StatusBar'))
+
+    def bar_glyphs():
+        """The bar's glyphs in the order the painter drew them (text order)."""
+        return [(g['x'], g['char']) for g in glyphs() if g['role'] == 'StatusBar']
+
+    def zones(name, setup):
+        """Check the bar's glyphs run left to right and the left zone starts
+        inside the padding; NAME's first and last x, the bar's last x, the
+        left zone's first x, the right zone's first x (after the widest
+        gap past NAME) and the right padding's edge."""
+        drawn = bar_glyphs()
+        xs = [x for x, _ in drawn]
+        if any(b <= a for a, b in zip(xs, xs[1:])):
+            raise AssertionError(f'bar glyphs overlap or run backwards: {drawn}')
+        text = ''.join(c for _, c in drawn)
+        at = text.find(name)
+        if at < 0:
+            raise AssertionError(f'{name!r} not in the bar {text!r}')
+        left_edge, right_edge = setup['border'] + 12, setup['width'] - setup['border'] - 12
+        if abs(xs[0] - left_edge) > 1.5:
+            raise AssertionError(f'the left zone starts at {xs[0]}, want {left_edge}')
+        last = at + len(name) - 1
+        gaps = [(xs[i + 1] - xs[i], i + 1) for i in range(last, len(xs) - 1)]
+        right_start = xs[max(gaps)[1]] if gaps else right_edge
+        return xs[at], xs[last], xs[-1], left_edge, right_start, right_edge
 
     fio.wait(state.exists, args.timeout, 'indicators set up', process)
     setup = read_plist(state.read_text())
@@ -580,9 +614,27 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
     fio.shot(output / 'indicators.png', env, report)
     source = bar()
     report['captures'].append({'name': 'indicators', 'bar': source})
-    for lighter in ('ElDoc', 'WK', 'Narrow'):
+    for lighter in ('ElDoc', 'WK', 'Narrow', 'Elisp/l'):
         if lighter in source:
             raise AssertionError(f'the bar shows {lighter!r}: {source!r}')
+    if 'Elisp' not in source:
+        raise AssertionError(f'the bar does not name the mode: {source!r}')
+    first, last, end, left_edge, right_start, right_edge = zones('w.el', setup)
+    middle = (first + last) / 2
+    # Centred, or pushed left by the right zone with the gap kept (§14.2).
+    pushed = middle < setup['width'] / 2 and right_start - last >= 24
+    if abs(middle - setup['width'] / 2) > 40 and not pushed:
+        raise AssertionError(f'w.el at {first}..{last}, not centred on {setup["width"] / 2} nor pushed (right zone at {right_start})')
+    if end > right_edge or end < right_edge - 30:
+        raise AssertionError(f'the right zone ends at {end}, want flush with {right_edge}')
+    report['checks'].append({'centred': [first, last, setup['width'] / 2], 'right_start': right_start, 'pushed': pushed})
+    # A name too long for the bar: cut in its middle, nothing overlapping.
+    keys('-k', 'F9')
+    fio.wait(lambda: '…' in bar() and 'middle.el' in bar(), args.timeout, 'long name cut in its middle', process)
+    time.sleep(.5)
+    fio.shot(output / 'long-name.png', env, report)
+    zones('middle.el', setup)
+    report['captures'].append({'name': 'long-name', 'bar': bar()})
     # The compilation buffer selected: its process state.
     keys('-M', 'ctrl', 'x', '-m', 'ctrl', 'o')
     fio.wait(lambda: ':run' in bar(), args.timeout, 'process state with *compilation* selected', process)

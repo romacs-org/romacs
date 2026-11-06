@@ -513,6 +513,7 @@ spec replaces the face's own."
         (funcall face 'romacs-mode-line-state :inherit '(romacs-pane-focus bold) :foreground (funcall text 'accent band))
         (funcall face 'romacs-mode-line-error :inherit 'error :foreground (funcall text 'error band))
         (funcall face 'romacs-mode-line-warning :inherit 'warning :foreground (funcall text 'warning band))
+        (funcall face 'romacs-mode-line-modified :inherit 'warning :foreground (funcall text 'warning band))
         (funcall face 'romacs-mode-line-ok :inherit 'success :foreground (funcall text 'success band))))
      ;; Headings: Rum's heights and weights (its Modus `headings': 1
      ;; ultrabold 1.35, 2 semibold 1.2, the rest Modus's bold at 1.15), on

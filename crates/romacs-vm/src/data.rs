@@ -58,6 +58,9 @@ pub(super) enum Object {
     Treesit(Box<crate::treesit::Object>),
     Process(Box<crate::subprocess::Process>),
     Finalizer(Value), // alloc.c's: its function, nil once called (gc.rs dooms it)
+    /// The main thread's object, the only one a threadless build has
+    /// (VM2-THREAD1): what `process-thread' answers.
+    Thread,
     String(Box<LispString>),
     RawString(Box<LispString>),
     Vector(Vec<Value>),
@@ -92,6 +95,7 @@ romacs_snapshot::snapshot_enum!(Object {
     Object::Treesit(f0) => (),
     Object::Process(f0) => (f0),
     Object::Finalizer(f0) => (f0),
+    Object::Thread => (),
     Object::String(f0) => (f0),
     Object::RawString(f0) => (f0),
     Object::Vector(f0) => (f0),
@@ -129,7 +133,7 @@ impl Object {
             | Object::WindowConfiguration(_) | Object::String(_) | Object::RawString(_) | Object::Vector(_)
             | Object::BoolVector(_) | Object::Record(_) | Object::CharTable(_) | Object::SubCharTable(_)
             | Object::MapKeymapCursor(_) | Object::Buffer(_) | Object::Marker(_) | Object::Overlay(_) | Object::Bytes(_)
-            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) | Object::Finalizer(_) | Object::Free => None,
+            | Object::ByteBuffer(_) | Object::HashTable(_) | Object::Obarray(_) | Object::Finalizer(_) | Object::Thread | Object::Free => None,
         }
     }
 }
@@ -932,6 +936,7 @@ impl Vm {
                             | Object::Sqlite(_)
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
+                            | Object::Thread
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
@@ -983,6 +988,7 @@ impl Vm {
                             | Object::Sqlite(_)
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
+                            | Object::Thread
                             | Object::Process(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
@@ -1036,6 +1042,7 @@ impl Vm {
                             | Object::Sqlite(_)
                             | Object::Treesit(_)
                             | Object::Finalizer(_)
+                            | Object::Thread
                             | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)

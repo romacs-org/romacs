@@ -466,10 +466,12 @@ for one of T3's)."
                        (symbol-value (plist-get known :arguments-option)))
           :model (plist-get options :model) :effort (plist-get options :effort)
           :options (plist-get options :options)
-          :source (or (plist-get options :source) 'lisp) :t3-id (plist-get options :t3-id))))
+          :source (or (plist-get options :source) 'lisp) :t3-id (plist-get options :t3-id)
+          :t3-store (plist-get options :t3-store))))
 
 (defvar romacs-agent-t3-settings)
 (declare-function romacs-agent-t3-read "romacs-agent-t3" (file harness-of generation))
+(declare-function romacs-agent-t3-store "romacs-agent-t3" (settings))
 
 (defun romacs-agent--t3-harnesses ()
   "A function from T3 Code's driver name to the harness running it, or
@@ -493,15 +495,17 @@ Romacs cannot run, why."
   (let ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil))
     (dolist (entry romacs-agent-providers)
       (if (or (eq entry 't3) (eq (car-safe entry) 't3))
-          (pcase-let ((`(,t3 . ,why)
-                       (progn (require 'romacs-agent-t3)
-                              (romacs-agent-t3-read (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings)
-                                                    (romacs-agent--t3-harnesses) romacs-agent--driver-generation))))
-            (setq problems (append (reverse why) problems))
-            (dolist (row t3)
-              (unless (gethash (car row) taken)
-                (puthash (car row) t taken)
-                (push (romacs-agent--provider row) instances))))
+          (let ((settings (progn (require 'romacs-agent-t3)
+                                 (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings))))
+            (pcase-let ((`(,t3 . ,why)
+                         (romacs-agent-t3-read settings (romacs-agent--t3-harnesses) romacs-agent--driver-generation)))
+              (setq problems (append (reverse why) problems))
+              (dolist (row t3)
+                (unless (gethash (car row) taken)
+                  (puthash (car row) t taken)
+                  ;; Its threads' titles are in the store beside these settings.
+                  (push (romacs-agent--provider (append row (list :t3-store (romacs-agent-t3-store settings))))
+                        instances)))))
         (unless (gethash (car entry) taken)
           (puthash (car entry) t taken)
           (condition-case err (push (romacs-agent--provider entry) instances)
@@ -722,9 +726,26 @@ goes on whatever becomes of this server."
      (setf (romacs-agent-state session) (if (romacs-agent--per-turn-p session) 'idle 'ended))))
   (run-hook-with-args 'romacs-agent-event-functions session event))
 
+(defcustom romacs-agent-preambles
+  '("\\`Act as the [[:alnum:] -]+ sub-agent for this task\\.?\\'"
+    "\\`Context handoff ([[:alnum:]_ -]+):?\\'")
+  "Regexps of the first lines an orchestrator (T3 Code) puts before a
+delegated task: a title is the task's first line after them."
+  :type '(repeat regexp) :group 'romacs-agent)
+
+(defun romacs-agent--task-line (text)
+  "TEXT's first line that says what it is about: an orchestrator's
+preamble lines (`romacs-agent-preambles') skipped, unless there is no
+other; empty for none."
+  (let ((lines (split-string (or text "") "\n" t "[ \t]+")))
+    (while (and (cdr lines)
+                (cl-some (lambda (regexp) (string-match-p regexp (car lines))) romacs-agent-preambles))
+      (setq lines (cdr lines)))
+    (or (car lines) "")))
+
 (defun romacs-agent--title-from (session text)
   "Name SESSION, whose title was generated, after its first prompt TEXT."
-  (let ((line (string-trim (car (split-string (or text "") "\n" t "[ \t]+")) )))
+  (let ((line (romacs-agent--task-line text)))
     (unless (string-empty-p line)
       (setf (romacs-agent-title session) (truncate-string-to-width line 60 nil nil "…")
             (romacs-agent-title-auto session) nil)
@@ -1100,7 +1121,10 @@ with the session before its harness starts.  Return the session."
                  (list cwd (read-string "Prompt (empty for none): ") nil provider)))
   (let* ((name (or provider (romacs-agent--default-provider)))
          (instance (or (romacs-agent--configured name)
-                       (user-error "No agent provider %s in `romacs-agent-providers'" name)))
+                       (user-error "No agent provider %s; configured: %s" name
+                                   (mapconcat #'identity (cl-loop for i in (romacs-agent-instances)
+                                                                  when (plist-get i :enabled) collect (plist-get i :name))
+                                              ", "))))
          (name (progn (unless (plist-get instance :enabled)
                         (user-error "Agent provider %s is disabled" (plist-get instance :name)))
                       ;; A T3 id names its instance.

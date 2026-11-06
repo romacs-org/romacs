@@ -2591,13 +2591,9 @@ If COLOR is unspecified, then return :box unspecified."
        (((supports :box t))
         ,@(romacs-theme-modus--box border-mode-line-active nil nil))
        (t :underline ,border-mode-line-active)))
-    `(mode-line-active
-      ((default :inherit romacs-theme-ui-variable-pitch
-                :background ,bg-mode-line-active
-                :foreground ,fg-mode-line-active)
-       (((supports :box t))
-        ,@(romacs-theme-modus--box border-mode-line-active nil nil))
-       (t :underline ,border-mode-line-active)))
+    ;; The active window's line is `mode-line' itself, so a buffer's
+    ;; remapping of `mode-line' (`face-remap-add-relative') reaches it.
+    `(mode-line-active ((,c :inherit mode-line)))
     `(mode-line-buffer-id ((,c :inherit bold)))
     `(mode-line-emphasis ((,c :inherit italic :foreground ,modeline-info)))
     `(mode-line-highlight

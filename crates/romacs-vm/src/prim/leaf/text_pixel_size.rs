@@ -231,6 +231,24 @@ impl Leaf<'_> {
             box_width: area.columns - area.left_margin - area.right_margin, left_margin: area.left_margin, right_margin: area.right_margin, pixels: false, lnum }
     }
 
+    /// The stretch each of SPECS, a list of `(space ...)' display
+    /// specifications in WINDOW's header or mode line, makes there, in the
+    /// pixels of a window-system frame: produce_stretch_glyph's width as
+    /// calc_pixel_width_or_height computes it for the window's text area,
+    /// an `:align-to' target from its left edge (VM2-MODE-LINE-STRETCH);
+    /// None for another display. The window's geometry is read once.
+    pub(crate) fn band_stretches(&mut self, window: Value, specs: Value) -> std::result::Result<Vec<Option<romacs_layout_input::StretchWidth>>, Fault> {
+        let mut area = self.windows().text_area(window, "redisplay")?;
+        area.hosted = true;
+        let buffer = area.buffer;
+        self.with_buffer(buffer, |leaf| {
+            let (begv, zv) = leaf.accessible_positions(buffer)?;
+            let specs = leaf.vm.list_values(specs).map_err(Fault::Error)?;
+            let mut source = Source::new(leaf, Self::view(&area, buffer, begv, zv, None), begv)?;
+            specs.into_iter().map(|spec| source.band_stretch(spec)).collect()
+        })
+    }
+
     /// The elements WINDOW shows of its buffer from FROM, a line start,
     /// through TO, in the pixels of a window-system frame (VM2-WTPS1).
     pub(crate) fn window_shown_elements(&mut self, window: Value, from: i64, to: i64) -> std::result::Result<(Vec<super::display_hosted::Shown>, Vec<romacs_layout_input::InlineImage>), Fault> {

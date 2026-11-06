@@ -178,6 +178,7 @@ impl Vm {
             let name = if symbol == Value::NIL { "nil".to_owned() } else if symbol == Value::TRUE { "t".to_owned() } else { self.symbol_names[symbol.payload() as usize - 1].clone() };
             if let Some(&slot) = self.names.get(&name).filter(|&&slot| Value::reference(slot + 1, 7) == symbol) {
                 self.names.remove(&name);
+                self.special_changes += 1;
                 self.set_initial_obarray(slot, false);
                 return true;
             }
