@@ -95,6 +95,8 @@
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
 ;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
+;; SCRAM's key derivation natively (VM2-SCRAM1).
+(with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 (load "simple.el" nil t t)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
@@ -108,6 +110,8 @@
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
 ;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
+;; SCRAM's key derivation natively (VM2-SCRAM1).
+(with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of
