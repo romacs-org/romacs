@@ -9,7 +9,7 @@
   "minibuf.c"
  ],
  "gnu_def": "minibuf.c:1420",
- "rust": "src/prims/minibuf.rs:39",
+ "rust": "src/prims/minibuf.rs:38",
  "args": [
   "none",
   "none",
