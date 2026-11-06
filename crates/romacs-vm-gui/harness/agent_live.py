@@ -53,6 +53,7 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  chat_view  a chat keeps its transcript in view as turns come in.
   children   what runs under a session, in its header and C-c C-o menu,
              by real keys.
   select     a new model or effort in a running session: live between
@@ -2446,6 +2447,86 @@ def start_picker(args, base):
         a.close()
 
 
+def chat_view(args, base):
+    """A chat never hides its own transcript, by real keys: the first prompt
+    of a chat started with none, and a later turn in a window whose start
+    is the composer's line, alone and split beside a delegated child."""
+    a = Agents(args, base, 'cv')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        result = {}
+
+        def shot(name):
+            path = base / f'chat-view-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            return str(path)
+
+        def view(sid, text):
+            """Where SID's window starts, and whether it shows TEXT."""
+            return parity_live.read_sexp(a.eval(
+                f'(let* ((buffer (romacs-agent-buffer {a.s(sid)})) (window (get-buffer-window buffer))) '
+                '(with-current-buffer buffer (redisplay t) '
+                '(list (window-start window) (marker-position romacs-agent-ui--end) (point-max) '
+                f'(save-excursion (goto-char (point-min)) (and (search-forward {lisp_text(text)} nil t) '
+                '(pos-visible-in-window-p (match-beginning 0) window) t)))))'))
+
+        def typed_turn(sid, text, count):
+            a.keys(text)
+            until(lambda: a.eval(f'(with-current-buffer (romacs-agent-buffer {a.s(sid)}) '
+                                 '(string-suffix-p ' + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't',
+                  15, f'{text} typed')
+            a.keys('-k', 'Return')
+            until(lambda: len(a.results(sid) or []) >= count, 30, f'{text} answered')
+            a.idle(sid)
+            time.sleep(.5)
+
+        # The first prompt of a chat started with none, its window alone.
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+                     '(romacs-agent-id session))').strip('"')
+        a.eval('(progn (delete-other-windows) t)')
+        a.keyboard_ready()
+        typed_turn(sid, 'say hi', 1)
+        result['first'] = view(sid, 'say hi')
+        result['shot_first'] = shot('first')
+
+        # A later turn with the window's start at the composer.
+        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+        a.keys('0')
+        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
+        time.sleep(.5)
+        result['before_later'] = view(sid, 'say hi')
+        typed_turn(sid, 'say later', 2)
+        result['later'] = view(sid, 'say later')
+        result['shot_later'] = shot('later')
+
+        # The same, split beside a delegated child.
+        a.send(sid, 'call romacs_delegate_task ' + json.dumps(
+            {'task': 'say child', 'title': 'a child', 'target': {'provider': 'codex'}, 'clientRequestId': 'view'}))
+        a.idle(sid, 60)
+        child = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')['taskId']
+        until(lambda: a.state(child) == 'idle', 20, 'child done')
+        a.idle(sid, 30)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) (split-window-right) '
+               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-show {a.s(child)}) (current-buffer))) '
+               f'(other-window 1) (goto-char (point-max)) t)')
+        a.keyboard_ready()
+        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+        a.keys('0')
+        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
+        time.sleep(.5)
+        count = len(a.results(sid))
+        typed_turn(sid, 'say split', count + 1)
+        result['split'] = view(sid, 'say split')
+        result['shot_split'] = shot('split')
+
+        result['ok'] = all(result[k][3] == 't' or result[k][3] is True for k in ('first', 'later', 'split'))
+        return result
+    finally:
+        a.close()
+
+
 def children(args, base):
     """What runs under a session, by real keys: the header counts and the
     `C-c C-o' menu's rows of a parent's delegated tasks (running, waiting,
@@ -2849,7 +2930,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

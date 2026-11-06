@@ -58,5 +58,19 @@
     (goto-char (point-min))
     (should-error (romacs-agent-chat-edit-turn) :type 'user-error)))
 
+(ert-deftest romacs-agent-chat-a-window-start-stays-at-the-transcript ()
+  ;; A window starting at the transcript's end stays where it is as text
+  ;; comes in, while point at the composer follows.
+  (romacs-agent-chat-tests--with "" ""
+    (save-window-excursion
+      (set-window-buffer (selected-window) (current-buffer))
+      (set-window-start (selected-window) (point-min))
+      (goto-char romacs-agent-ui--end)
+      (set-window-point (selected-window) (point))
+      (romacs-agent-ui--insert-at romacs-agent-ui--end "> first\n")
+      (should (= (window-start) (point-min)))
+      (should (= (window-point) (point-max)))
+      (should (= romacs-agent-ui--end (point-max))))))
+
 (provide 'romacs-agent-chat-tests)
 ;;; romacs-agent-chat-tests.el ends here

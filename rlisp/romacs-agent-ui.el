@@ -122,13 +122,18 @@ mark of the transcript's end hides or styles what is typed there."
 (defun romacs-agent-ui--insert-at (position text)
   "Insert TEXT, sealed, at POSITION in the transcript.  At its end, before
 the end marker and every marker there (the composer, a window's point at
-the composer, follow the transcript); a row's mark or a message's start
-is always taken after its own text is in."
+the composer, follow the transcript), but for a window's start, which
+would leave the transcript above the window; a row's mark or a message's
+start is always taken after its own text is in."
   (save-excursion
     ;; A number: the end marker moves past what is inserted at it.
     (let ((inhibit-read-only t) (text (romacs-agent-ui--sealed text)) (start (+ 0 position)))
       (goto-char start)
-      (if (= start romacs-agent-ui--end) (insert-before-markers text) (insert text))
+      (if (/= start romacs-agent-ui--end) (insert text)
+        (let ((windows (seq-filter (lambda (window) (= (window-start window) start))
+                                   (get-buffer-window-list nil nil t))))
+          (insert-before-markers text)
+          (dolist (window windows) (set-window-start window start t))))
       ;; A rule's fill, remembered: a resize refits the rules alone.
       (when-let* ((offset (text-property-any 0 (length text) 'romacs-agent-rule-fill t text)))
         (push (copy-marker (+ start offset)) romacs-agent-ui--fills)
