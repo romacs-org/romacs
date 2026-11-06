@@ -83,6 +83,18 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(autoload 'romacs-agent-switch "romacs-agent-ui"
+"Switch to agent SESSION, in this window, chosen by what each is doing:
+those that want you first, finished delegated tasks last, each with its
+state, last activity, context, model, project and the start of its last
+reply.  A session with no chat yet gets one.
+
+(fn SESSION)" t)
+(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
+"Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
+only sessions whose chat is open.
+
+(fn SESSION)" t)
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))

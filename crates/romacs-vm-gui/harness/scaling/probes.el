@@ -1028,6 +1028,42 @@ thousandth a stack mark."
               (romacs-agent--input session "see" (list it))
               (json-parse-string (romacs-agent--json kept))))))
 
+;; The switcher's rows for N sessions, as a prompt shows every match.
+(scaling-probe agent-switch-rows :n 2000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (romacs-agent-ui--session-names
+                 (mapcar (lambda (id) (romacs-agent--make :id id :harness 'claude :provider "claude" :title id
+                                                         :state 'idle :cwd "/tmp/"))
+                         (scaling--names "scaling-session" n))))
+  :body (let* ((table (romacs-agent-ui--session-table (car it) (cdr it) 120))
+               (rows (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
+          (funcall rows (cdr it))))
+
+;; A row with a reply of N characters: it reads what it can show.
+(scaling-probe agent-switch-reply :n 200000 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (romacs-agent--make :id "scaling-reply" :harness 'claude :state 'idle :title "reply"
+                                    :reply (make-string n ?a)))
+  :body (dotimes (_ 200) (romacs-agent-ui--switch-suffix it 120 nil)))
+
+;; The rows of a switcher with N providers configured: a table resolves the
+;; default once, not per row.
+(scaling-probe agent-switch-providers :n 400 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (setq romacs-agent-providers
+                      (cons (cons "claude" "~/.claude")
+                            (mapcar (lambda (name) (cons name "~/.claude")) (scaling--names "provider" n))))
+                (romacs-agent-ui--session-names
+                 (mapcar (lambda (id) (romacs-agent--make :id id :harness 'claude :provider "claude" :title id
+                                                         :state 'idle :cwd "/tmp/"))
+                         (scaling--names "scaling-provider" 200))))
+  :body (let* ((table (romacs-agent-ui--session-table (car it) (cdr it) 120))
+               (rows (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
+          (funcall rows (cdr it))))
+
 ;; Replaying N images of a transcript lays them out from their headers.
 (scaling-probe agent-image-replay :n 400
   :setup (progn (scaling--agent)

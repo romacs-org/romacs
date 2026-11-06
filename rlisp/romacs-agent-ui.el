@@ -24,7 +24,8 @@
 ;;   sends, C-c C-c interrupts, C-c C-k stops, C-c C-r resumes, M-p recalls;
 ;;   in the transcript TAB folds a tool's output and n and p move between
 ;;   prompts.  An approval the harness asks for is answered with y or N (or
-;;   the actions menu).  C-c C-a attaches an image.
+;;   the actions menu).  C-c C-a attaches an image.  C-c C-b goes to another
+;;   open chat, C-c C-t to any session, opening its chat.
 ;;
 ;; The chat is rebuilt from the journal, so a new server shows what the
 ;; session did while no server was there.
@@ -714,7 +715,8 @@ or a repeat."
     (define-key map (kbd "C-c C-/") #'romacs-agent-chat-show-commands)
     (define-key map (kbd "C-c C-n") #'romacs-agent-chat-new)
     (define-key map (kbd "C-c C-r") #'romacs-agent-chat-rename)
-    (define-key map (kbd "C-c C-b") #'romacs-agent-chat-switch)
+    (define-key map (kbd "C-c C-b") #'romacs-agent-switch-chat)
+    (define-key map (kbd "C-c C-t") #'romacs-agent-switch)
     (define-key map (kbd "C-c C-j") #'romacs-agent-chat-composer)
     (define-key map (kbd "M-p") #'romacs-agent-chat-history-previous)
     (define-key map (kbd "M-n") #'romacs-agent-chat-history-next)
@@ -1222,15 +1224,178 @@ what was there."
   (apply #'funcall-interactively #'romacs-agent-start
          (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session)))))
 
-(defun romacs-agent-chat-switch (buffer)
-  "Switch to another session's chat BUFFER."
-  (interactive
-   (list (read-buffer "Chat: " nil t
-                      (lambda (entry)
-                        (let ((buffer (get-buffer (if (consp entry) (car entry) entry))))
-                          (and buffer (not (eq buffer (current-buffer)))
-                               (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-chat-mode)))))))
-  (switch-to-buffer buffer))
+(defun romacs-agent-ui--attention (session)
+  "How much SESSION wants the user, least first: its place in the switcher."
+  (cond ((eq (romacs-agent-state session) 'waiting-approval) 0)
+        ;; Its result reached its parent: unread here says nothing.
+        ((romacs-agent-ui--finished-child-p session) 4)
+        ((> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)) 1)
+        ((memq (romacs-agent-state session) '(starting running)) 2)
+        (t 3)))
+
+(defun romacs-agent-ui--by-attention (sessions)
+  "SESSIONS, those wanting the user first, then the latest active."
+  (sort (copy-sequence sessions)
+        (lambda (a b)
+          (let ((x (romacs-agent-ui--attention a)) (y (romacs-agent-ui--attention b)))
+            (if (= x y)
+                (> (or (romacs-agent-last-time a) 0) (or (romacs-agent-last-time b) 0))
+              (< x y))))))
+
+(defun romacs-agent-ui--context-share (session)
+  "How full SESSION's context is, as \"NN%\", or nil when it is not known."
+  (let ((used (romacs-agent-context-used session)) (window (romacs-agent-context-window session)))
+    (and (numberp used) (numberp window) (> window 0)
+         (format "%d%%" (round (* 100.0 (/ used (float window))))))))
+
+(defun romacs-agent-ui--one-line (text width)
+  "TEXT on one line, shortened to WIDTH, reading no more of it than that
+can show: a reply can be long."
+  (let ((text (or text "")))
+    (truncate-string-to-width
+     (string-trim (replace-regexp-in-string "[\n\t ]+" " " (substring text 0 (min (length text) (* 4 (max 0 width))))))
+     (max 0 width) nil nil "…")))
+
+(defun romacs-agent-ui--switch-facts (session default)
+  "What is worth knowing of SESSION at a glance, the most useful first;
+DEFAULT is the provider not worth naming."
+  (let ((queued (romacs-agent-queue-length session)))
+    (delq nil (list (romacs-agent-ui--context-share session)
+                    (and (> queued 0) (format "%d queued" queued))
+                    (romacs-agent-ui--instance
+                     (romacs-agent-provider session) (romacs-agent-harness session)
+                     (or (romacs-agent-model session) (plist-get (romacs-agent-options session) :model))
+                     default)
+                    (and (romacs-agent-cwd session)
+                         (file-name-nondirectory (directory-file-name (romacs-agent-cwd session))))))))
+
+(defun romacs-agent-ui--switch-suffix (session width default)
+  "What the switcher says of SESSION after its title, in at most WIDTH
+columns: the state always, then facts, then what room leaves of its reply.
+DEFAULT is the provider not worth naming."
+  (pcase-let* ((`(,_mark ,face ,word) (romacs-agent-ui--status session))
+               (unread (> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)))
+               (head (concat (propertize (format "%-9s" (or word "")) 'face face)
+                             (propertize (format "%5s  " (or (romacs-agent-ui--ago (romacs-agent-last-time session)) ""))
+                                         'face 'romacs-agent-dim)
+                             (if unread (propertize "● " 'face 'romacs-agent-unread) "  ")))
+               (space (- width (string-width head)))
+               (facts (truncate-string-to-width
+                       (mapconcat #'identity (romacs-agent-ui--switch-facts session default) " · ") (max 0 space) nil nil "…"))
+               (room (- space (string-width facts) 2)))
+    (truncate-string-to-width
+     (concat head (propertize facts 'face 'romacs-agent-dim)
+             (if (> room 8)
+                 (propertize (concat "  " (romacs-agent-ui--one-line (romacs-agent-reply session) room)) 'face 'romacs-agent-dim)
+               ""))
+     (max 0 width))))
+
+(defun romacs-agent-ui--session-names (sessions)
+  "A table of a unique name to each of SESSIONS, and the names in order, as
+\(TABLE . NAMES).  A title in use takes its id, then as much of it as it
+needs, then a count: every name stands for one session."
+  (let ((table (make-hash-table :test #'equal)) (names nil))
+    (dolist (session sessions)
+      (let* ((title (or (romacs-agent-title session) "session"))
+             (id (romacs-agent-id session))
+             (name title) (n 1))
+        (while (gethash name table)
+          (setq name (if (= n 1) (format "%s <%s>" title (substring id 0 (min 8 (length id))))
+                       (format "%s <%s %d>" title (substring id 0 (min 8 (length id))) n))
+                n (1+ n)))
+        (puthash name session table)
+        (push name names)))
+    (cons table (nreverse names))))
+
+(defun romacs-agent-ui--switch-row (name session column width default)
+  "NAME's row for SESSION: the affixation of a candidate, whose value stays
+NAME and whose shown form fits COLUMN.  DEFAULT is the provider not worth
+naming."
+  (let ((shown (truncate-string-to-width name column nil nil "…")))
+    (list (if (equal shown name) name (propertize name 'display shown))
+          (concat (romacs-agent-ui--status-mark session) " ")
+          (concat (make-string (max 1 (- (+ column 2) (string-width shown))) ?\s)
+                  (romacs-agent-ui--switch-suffix session (- width column 4) default)))))
+
+(defun romacs-agent-ui--session-table (table names width)
+  "A completion table of NAMES in their order, each TABLE's session, each
+row its status within WIDTH columns."
+  (let* ((column (min 44 (apply #'max 1 (mapcar #'string-width names))))
+         (default (romacs-agent-ui--default-provider))
+         (rows (lambda (candidates)
+                 (mapcar (lambda (name)
+                           (romacs-agent-ui--switch-row name (gethash name table) column width default))
+                         candidates))))
+    (lambda (string predicate action)
+      (if (eq action 'metadata)
+          `(metadata (category . romacs-agent) (display-sort-function . identity)
+                     (cycle-sort-function . identity) (affixation-function . ,rows))
+        (complete-with-action action names string predicate)))))
+
+(defun romacs-agent-ui--status-mark (session)
+  "SESSION's status mark, in its face."
+  (pcase-let ((`(,mark ,face ,_word) (romacs-agent-ui--status session)))
+    (propertize (or mark " ") 'face face)))
+
+(defvar romacs-complete-center-width)
+
+(defcustom romacs-agent-switch-width 0.8
+  "How much of the frame's width `romacs-agent-switch' takes: a row says more
+than most completions."
+  :type 'float :group 'romacs-agent)
+
+(defun romacs-agent-ui--finished-child-p (session)
+  "Whether SESSION is a delegated task with nothing more for anyone to do."
+  (and (plist-get (romacs-agent-options session) :parent)
+       (not (memq (romacs-agent-state session) '(starting running waiting-approval)))))
+
+(defun romacs-agent-ui--switch-sessions ()
+  "Every session but this chat's, those wanting the user first."
+  (let ((here (and (derived-mode-p 'romacs-agent-chat-mode) romacs-agent-ui--session)))
+    (romacs-agent-ui--by-attention (remq here (romacs-agent-sessions)))))
+
+(defun romacs-agent-ui--open-sessions ()
+  "The sessions of `romacs-agent-ui--switch-sessions' with a live chat buffer."
+  (seq-filter (lambda (session) (buffer-live-p (romacs-agent-buffer session)))
+              (romacs-agent-ui--switch-sessions)))
+
+(defun romacs-agent-ui--resolve-session (table names answer)
+  "The session of ANSWER, as a prompt accepted it: its case may differ."
+  (or (gethash answer table)
+      (let ((name (seq-find (lambda (name) (eq t (compare-strings name nil nil answer nil nil t))) names)))
+        (and name (gethash name table)))
+      (user-error "No agent session %s" answer)))
+
+(defun romacs-agent-ui--read-session (prompt sessions none)
+  "Read one of SESSIONS by its status with PROMPT; with none, say NONE."
+  (pcase-let ((`(,table . ,names) (romacs-agent-ui--session-names sessions)))
+    (unless names (user-error "%s" none))
+    (let ((romacs-complete-center-width romacs-agent-switch-width))
+      (romacs-agent-ui--resolve-session
+       table names
+       (completing-read prompt
+                        (romacs-agent-ui--session-table
+                         table names (- (floor (* (frame-width) romacs-agent-switch-width)) 6))
+                        nil t)))))
+
+;;;###autoload
+(defun romacs-agent-switch (session)
+  "Switch to agent SESSION, in this window, chosen by what each is doing:
+those that want you first, finished delegated tasks last, each with its
+state, last activity, context, model, project and the start of its last
+reply.  A session with no chat yet gets one."
+  (interactive (list (romacs-agent-ui--read-session
+                      "Agent: " (romacs-agent-ui--switch-sessions) "No other agent sessions")))
+  (let ((display-buffer-overriding-action '(display-buffer-same-window)))
+    (romacs-agent-show session)))
+
+;;;###autoload
+(defun romacs-agent-switch-chat (session)
+  "Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
+only sessions whose chat is open."
+  (interactive (list (romacs-agent-ui--read-session
+                      "Chat: " (romacs-agent-ui--open-sessions) "No other agent chats are open")))
+  (romacs-agent-switch session))
 
 (defun romacs-agent-chat-show-commands ()
   "List this chat's keys."
@@ -1265,7 +1430,8 @@ what was there."
   :group "Session"
   "R" ("Rename" romacs-agent-chat-rename)
   "n" ("New session" romacs-agent-chat-new)
-  "b" ("Switch chat" romacs-agent-chat-switch)
+  "b" ("Switch chat" romacs-agent-switch-chat)
+  "t" ("Switch thread" romacs-agent-switch)
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
   "x" ("Stop" romacs-agent-chat-stop)
   "h" ("Home page" romacs-agent-chat-home)
@@ -1309,10 +1475,14 @@ what was there."
 (defconst romacs-agent-ui--word-width 10 "The status column: its longest word and a space.")
 (defconst romacs-agent-ui--instance-width 20 "The model column, shown on a page 72 columns wide or more.")
 
-(defun romacs-agent-ui--instance (provider harness model)
-  "The model column: PROVIDER when not the default, then MODEL without its
+(defun romacs-agent-ui--default-provider ()
+  "The default provider's name, or nil when there is none: a row still shows."
+  (ignore-errors (romacs-agent--default-provider)))
+
+(defun romacs-agent-ui--instance (provider harness model default)
+  "The model column: PROVIDER when not DEFAULT, then MODEL without its
 HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
-  (let ((provider (and provider (not (equal provider (ignore-errors (romacs-agent--default-provider)))) provider))
+  (let ((provider (and provider (not (equal provider default)) provider))
         (model (if (and model harness) (string-remove-prefix (concat (symbol-name harness) "-") model) model)))
     (mapconcat #'identity (delq nil (list provider model)) " · ")))
 
@@ -1350,7 +1520,8 @@ age and model columns leave; a narrow page drops the model."
             :ago (romacs-agent-ui--ago (romacs-agent-last-time session))
             :instance (romacs-agent-ui--instance (romacs-agent-provider session) (romacs-agent-harness session)
                                                  (or (romacs-agent-model session)
-                                                     (plist-get (romacs-agent-options session) :model))))
+                                                     (plist-get (romacs-agent-options session) :model))
+                                                 (romacs-agent-ui--default-provider)))
       width)
      'romacs-agent-session (romacs-agent-id session))))
 
@@ -1386,7 +1557,7 @@ activity first, and a table from a session's id to its children."
     (list :indent "" :mark "◇" :face 'romacs-agent-dim :word ""
           :title (plist-get item :title) :title-face 'romacs-agent-dim
           :ago (romacs-agent-ui--ago (plist-get item :mtime))
-          :instance (romacs-agent-ui--instance (plist-get item :provider) nil nil))
+          :instance (romacs-agent-ui--instance (plist-get item :provider) nil nil (romacs-agent-ui--default-provider)))
     width)
    'romacs-agent-history item))
 

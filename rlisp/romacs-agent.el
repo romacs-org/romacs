@@ -510,6 +510,40 @@ nil: its index built once, when first asked."
           (when-let* ((name (plist-get (cdr cell) :t3-driver))) (puthash name (car cell) index))))
       (gethash driver index))))
 
+(defun romacs-agent--walk-instances (stop)
+  "`romacs-agent-providers' as (INSTANCES . CONSTRAINTS), as
+`romacs-agent-instances' says.  A non-nil STOP ends the walk at the first
+instance it accepts: finding that need not read a long list."
+  (let* ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil)
+         (add (lambda (instance)
+                (push instance instances)
+                (when (and stop (funcall stop instance)) (throw 'romacs-agent--walked nil)))))
+    (catch 'romacs-agent--walked
+      (dolist (entry romacs-agent-providers)
+        (if (or (eq entry 't3) (eq (car-safe entry) 't3))
+            (let ((settings (progn (require 'romacs-agent-t3)
+                                   (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings))))
+              (pcase-let ((`(,t3 . ,why)
+                           (romacs-agent-t3-read settings (romacs-agent--t3-harnesses) romacs-agent--driver-generation)))
+                (setq problems (append (reverse why) problems))
+                (dolist (row t3)
+                  (unless (gethash (car row) taken)
+                    (puthash (car row) t taken)
+                    ;; Its threads' titles are in the store beside these settings.
+                    (funcall add (romacs-agent--provider
+                                  (append row (list :t3-store (romacs-agent-t3-store settings)))))))))
+          (unless (gethash (car entry) taken)
+            (puthash (car entry) t taken)
+            (condition-case err (funcall add (romacs-agent--provider entry))
+              (user-error (push (list :source 'lisp :id (car entry) :reason (error-message-string err)) problems)
+                          (setq unknown t)))))))
+    ;; The harnesses there are, once.
+    (when unknown
+      (push (list :source 'lisp :id nil
+                  :reason (format "Romacs runs: %s" (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
+            problems))
+    (cons (nreverse instances) (nreverse problems))))
+
 (defun romacs-agent-instances (&optional constraints)
   "The instances `romacs-agent-providers' names, in its order, each a plist
 \=(`romacs-agent--provider'): the first entry of a name wins; the `t3'
@@ -518,31 +552,8 @@ entry, or (t3 :settings FILE), stands for T3 Code's instances there
 offered, but their sessions still resume.  With CONSTRAINTS non-nil,
 return (INSTANCES . CONSTRAINTS), the second saying, for each instance
 Romacs cannot run, why."
-  (let ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil))
-    (dolist (entry romacs-agent-providers)
-      (if (or (eq entry 't3) (eq (car-safe entry) 't3))
-          (let ((settings (progn (require 'romacs-agent-t3)
-                                 (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings))))
-            (pcase-let ((`(,t3 . ,why)
-                         (romacs-agent-t3-read settings (romacs-agent--t3-harnesses) romacs-agent--driver-generation)))
-              (setq problems (append (reverse why) problems))
-              (dolist (row t3)
-                (unless (gethash (car row) taken)
-                  (puthash (car row) t taken)
-                  ;; Its threads' titles are in the store beside these settings.
-                  (push (romacs-agent--provider (append row (list :t3-store (romacs-agent-t3-store settings))))
-                        instances)))))
-        (unless (gethash (car entry) taken)
-          (puthash (car entry) t taken)
-          (condition-case err (push (romacs-agent--provider entry) instances)
-            (user-error (push (list :source 'lisp :id (car entry) :reason (error-message-string err)) problems)
-                        (setq unknown t))))))
-    ;; The harnesses there are, once.
-    (when unknown
-      (push (list :source 'lisp :id nil
-                  :reason (format "Romacs runs: %s" (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
-            problems))
-    (if constraints (cons (nreverse instances) (nreverse problems)) (nreverse instances))))
+  (let ((walked (romacs-agent--walk-instances nil)))
+    (if constraints walked (car walked))))
 
 (defun romacs-agent--configured (name)
   "The instance NAME, or whose T3 id is NAME, or nil."
@@ -583,7 +594,8 @@ whatever the editor's own environment and the user manager's say."
 
 (defun romacs-agent--default-provider ()
   (or romacs-agent-default-provider
-      (plist-get (cl-find-if (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)) :name)
+      (let ((enabled (lambda (i) (plist-get i :enabled))))
+        (plist-get (cl-find-if enabled (car (romacs-agent--walk-instances enabled))) :name))
       (user-error "No agent provider: `romacs-agent-providers' names no enabled instance")))
 
 ;;; Models
