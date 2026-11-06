@@ -1,6 +1,7 @@
 """Real OS pipes/sockets; fixture peer is transport-only, not MCP proof.
 Run: python3 transport.py /absolute/path/to/romacs-mcp
 """
+import json
 import os
 import pathlib
 import select
@@ -282,6 +283,228 @@ class Transport(unittest.TestCase):
         p = self.launch()
         self.assertEqual(self.finish(p, False, b"connect deadline/worker"), b"")
         self.assertTrue(pathlib.Path(self.path).exists())
+
+    # The reconnect relay, against a session that accepts and goes silent.
+    def relay(self, timeout="30"):
+        child = subprocess.Popen([str(BINARY), "--socket", self.path, "--reconnect", "--session", "s",
+                                  "--reply-timeout", timeout],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.children.append(child)
+        peer, _ = self.listener.accept()
+        self.sockets.append(peer)
+        return child, peer
+
+    def say(self, child, message):
+        child.stdin.write((json.dumps(message) + "\n").encode())
+        child.stdin.flush()
+
+    def hear(self, child, wanted, seconds=5):
+        deadline = time.monotonic() + seconds
+        buffer = b""
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([child.stdout], [], [], .1)
+            if not ready:
+                continue
+            buffer += os.read(child.stdout.fileno(), 1 << 16)
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                message = json.loads(line)
+                if message.get("id") == wanted:
+                    return message
+        self.fail(f"no reply to {wanted}")
+
+    def endpoint(self, answer=b'{"status":"ok"}\n'):
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(self.root / "inspect.sock"))
+        server.listen(4)
+        self.sockets.append(server)
+
+        def serve():
+            while True:
+                try:
+                    peer, _ = server.accept()
+                except OSError:
+                    return
+                peer.recv(16)
+                peer.sendall(answer)
+                peer.close()
+        threading.Thread(target=serve, daemon=True).start()
+
+    def test_reconnect_discovery_and_inspection_with_a_silent_session(self):
+        self.endpoint()
+        child, _ = self.relay()
+        self.say(child, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "v"}})
+        reply = self.hear(child, 1)
+        self.assertEqual(reply["result"]["protocolVersion"], "v")
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        names = [tool["name"] for tool in self.hear(child, 2)["result"]["tools"]]
+        self.assertEqual(names, ["romacs_debug_inspect"])
+        self.say(child, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "romacs_debug_inspect"}})
+        reply = self.hear(child, 3, 2)
+        self.assertIs(reply["result"]["isError"], False)
+        self.assertIn("ok", reply["result"]["content"][0]["text"])
+
+    def test_reconnect_inspection_past_a_full_session_socket(self):
+        self.endpoint()
+        child, _ = self.relay()
+        big = "x" * (1 << 20)
+        for n in range(100, 180):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "romacs_eval", "arguments": {"code": big}}})
+        self.say(child, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "romacs_debug_inspect"}})
+        self.assertIs(self.hear(child, 3, 2)["result"]["isError"], False)
+
+    def test_reconnect_outcomes_of_written_and_queued_calls(self):
+        child, peer = self.relay("1")
+        self.say(child, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "t"}})
+        peer.settimeout(3)
+        received = b""
+        while b'"id":1' not in received:
+            received += peer.recv(1 << 16)
+        reply = self.hear(child, 1, 15)
+        self.assertIn("outcome unknown", reply["result"]["content"][0]["text"])
+
+    def test_reconnect_a_call_queued_behind_a_stuck_socket_is_withdrawn(self):
+        child, _ = self.relay("1")
+        big = "x" * (1 << 20)
+        for n in range(100, 110):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "t", "arguments": {"code": big}}})
+        reply = self.hear(child, 109)
+        self.assertIn("not executed", reply["result"]["content"][0]["text"])
+
+    def test_reconnect_a_session_that_answers_lists_both(self):
+        child, peer = self.relay()
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        peer.settimeout(3)
+        received = b""
+        while b"tools/list" not in received:
+            received += peer.recv(1 << 16)
+        peer.sendall(b'{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"romacs_eval"}]}}\n')
+        names = [tool["name"] for tool in self.hear(child, 2)["result"]["tools"]]
+        self.assertEqual(names, ["romacs_eval", "romacs_debug_inspect"])
+
+    def hear_method(self, child, method, seconds=5):
+        deadline = time.monotonic() + seconds
+        buffer = b""
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([child.stdout], [], [], .1)
+            if not ready:
+                continue
+            buffer += os.read(child.stdout.fileno(), 1 << 16)
+            if method.encode() in buffer:
+                return
+        self.fail(f"no {method}")
+
+    def test_reconnect_inspects_through_a_route(self):
+        self.endpoint()
+        route = self.root / "agents"
+        route.mkdir()
+        (route / "route").symlink_to(self.path)
+        self.path, real = str(route / "route"), self.path
+        child, _ = self.relay()
+        self.path = real
+        self.say(child, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "romacs_debug_inspect"}})
+        self.assertIs(self.hear(child, 3, 2)["result"]["isError"], False)
+
+    def test_reconnect_a_session_lost_during_discovery_settles_it(self):
+        child, peer = self.relay()
+        self.say(child, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "v"}})
+        time.sleep(.2)
+        peer.close()
+        self.assertEqual(self.hear(child, 1, 2)["result"]["protocolVersion"], "v")
+
+    def test_reconnect_the_list_changes_when_the_session_returns(self):
+        child, peer = self.relay()
+        peer.close()
+        time.sleep(.2)
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        self.assertEqual(len(self.hear(child, 2)["result"]["tools"]), 1)
+        back, _ = self.listener.accept()
+        self.sockets.append(back)
+        back.settimeout(5)
+        received = b""
+        while b"romacs-relay-probe" not in received:
+            received += back.recv(1 << 16)
+        line = next(l for l in received.split(b"\n") if b"romacs-relay-probe" in l)
+        back.sendall(json.dumps({"jsonrpc": "2.0", "id": json.loads(line)["id"], "result": {"tools": []}}).encode() + b"\n")
+        self.hear_method(child, "notifications/tools/list_changed")
+
+    def test_reconnect_a_withdrawn_call_stays_unsent_when_its_id_returns(self):
+        child, peer = self.relay("1")
+        big = "x" * (1 << 20)
+        for n in range(100, 109):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "t", "arguments": {"code": big}}})
+        self.say(child, {"jsonrpc": "2.0", "id": 109, "method": "tools/call", "params": {"name": "first"}})
+        self.assertIn("not executed", self.hear(child, 109)["result"]["content"][0]["text"])
+        self.say(child, {"jsonrpc": "2.0", "id": 109, "method": "tools/call", "params": {"name": "second"}})
+        peer.settimeout(.5)
+        received = b""
+        try:
+            while True:
+                part = peer.recv(1 << 20)
+                if not part:
+                    break
+                received += part
+        except socket.timeout:
+            pass
+        self.assertIn(b'"second"', received)
+        self.assertNotIn(b'"first"', received)
+
+    def test_reconnect_inspections_are_bounded(self):
+        silent = socket.socket(socket.AF_UNIX)
+        silent.bind(str(self.root / "inspect.sock"))
+        silent.listen(32)
+        self.sockets.append(silent)
+        child, _ = self.relay()
+        for n in range(1, 21):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "romacs_debug_inspect"}})
+        reply = self.hear(child, 20, 2)
+        self.assertIn("too many", reply["result"]["content"][0]["text"])
+
+    def answer_probes(self, peer, seconds=6):
+        """Read what the relay sends, and answer each probe at once."""
+        peer.settimeout(.1)
+        deadline = time.monotonic() + seconds
+        buffer = b""
+        while time.monotonic() < deadline:
+            try:
+                part = peer.recv(1 << 20)
+            except socket.timeout:
+                continue
+            if not part:
+                return
+            buffer += part
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                if b"romacs-relay-probe" in line:
+                    peer.sendall(json.dumps({"jsonrpc": "2.0", "id": json.loads(line)["id"], "result": {"tools": []}}).encode() + b"\n")
+                    return
+
+    def test_reconnect_the_change_follows_the_list_it_replaces(self):
+        child, peer = self.relay()
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        threading.Thread(target=self.answer_probes, args=(peer,), daemon=True).start()
+        lines = []
+        buffer = b""
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline and not any(b"list_changed" in line for line in lines):
+            ready, _, _ = select.select([child.stdout], [], [], .1)
+            if ready:
+                buffer += os.read(child.stdout.fileno(), 1 << 16)
+                *complete, buffer = buffer.split(b"\n")
+                lines += complete
+        self.assertEqual(len(lines), 2, lines)
+        self.assertEqual(json.loads(lines[0])["id"], 2)
+        self.assertIn(b"list_changed", lines[1])
+
+    def test_reconnect_a_probe_refused_by_a_full_queue_is_retried(self):
+        child, peer = self.relay("60")
+        big = "x" * (1 << 20)
+        for n in range(100, 180):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "t", "arguments": {"code": big}}})
+        self.say(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        self.assertEqual(len(self.hear(child, 2)["result"]["tools"]), 1)
+        threading.Thread(target=self.answer_probes, args=(peer, 20), daemon=True).start()
+        self.hear_method(child, "notifications/tools/list_changed", 20)
 
     def test_cli_requires_one_absolute_socket(self):
         for args in [["--socket", "relative"], ["--socket"], ["--server"], ["--server", "a/b"],

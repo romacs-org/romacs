@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "996438b9737e444904656e28171161e825bdd8b3d1e7ad6c280d204985a988fa",
+  "input_hash": "254d3498883d375286a1b8ac828ed30712e637bc0ae2c15706389668f75221f3",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 369,
-  "symbols": 1123,
+  "rows": 370,
+  "symbols": 1127,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -27,11 +27,14 @@
    66
   ],
   "(max-char)": [
-   293
+   294
   ],
   "+": [
    66,
    91
+  ],
+  "..": [
+   268
   ],
   "/": [
    66
@@ -41,7 +44,7 @@
   ],
   "1+": [
    66,
-   308
+   309
   ],
   "1-": [
    66
@@ -69,7 +72,7 @@
    91
   ],
   "[:class:]": [
-   368
+   369
   ],
   "\\": [
    282
@@ -90,12 +93,12 @@
    8
   ],
   "add-text-properties": [
-   307,
-   353
+   308,
+   354
   ],
   "add-variable-watcher": [
-   321,
-   322
+   322,
+   323
   ],
   "advice-add": [
    66,
@@ -108,20 +111,20 @@
    209
   ],
   "after-insert-file-set-coding": [
-   354
+   355
   ],
   "after-load-alist": [
-   337
+   338
   ],
   "after-load-functions": [
    143
   ],
   "after-string": [
-   346
+   347
   ],
   "all-completions": [
-   347,
-   348
+   348,
+   349
   ],
   "ange-ftp": [
    139
@@ -134,7 +137,7 @@
    66,
    136,
    169,
-   315
+   316
   ],
   "aref": [
    66,
@@ -161,13 +164,13 @@
    283
   ],
   "autoload": [
-   325,
-   357,
-   358
+   326,
+   358,
+   359
   ],
   "autoload-do-load": [
-   325,
-   338
+   326,
+   339
   ],
   "average_width": [
    28
@@ -176,16 +179,16 @@
    239
   ],
   "backtrace--frames-and-locals": [
-   351
-  ],
-  "backtrace--locals": [
-   350
-  ],
-  "backtrace-debug": [
    352
   ],
-  "backtrace-get-frames": [
+  "backtrace--locals": [
    351
+  ],
+  "backtrace-debug": [
+   353
+  ],
+  "backtrace-get-frames": [
+   352
   ],
   "backward-char": [
    180
@@ -203,7 +206,7 @@
    209
   ],
   "before-string": [
-   346
+   347
   ],
   "beginning-of-line": [
    180
@@ -218,11 +221,11 @@
    279
   ],
   "blink-cursor-mode": [
-   320
+   321
   ],
   "bool-vector": [
    105,
-   305
+   306
   ],
   "bool-vector-p": [
    105
@@ -231,7 +234,7 @@
    244
   ],
   "boundp": [
-   333
+   334
   ],
   "buffer-chars-modified-tick": [
    126
@@ -244,7 +247,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   354
+   355
   ],
   "buffer-file-name": [
    125
@@ -289,7 +292,7 @@
   "byte-code-function-p": [
    56,
    57,
-   330
+   331
   ],
   "byte-compile": [
    57,
@@ -326,7 +329,7 @@
   ],
   "car": [
    66,
-   317
+   318
   ],
   "ccl-execute": [
    208
@@ -345,7 +348,7 @@
    215
   ],
   "char-category-set": [
-   314
+   315
   ],
   "char-code-property-description": [
    58
@@ -383,10 +386,10 @@
    68
   ],
   "cl-print-object": [
-   350
+   351
   ],
   "cl-type-of": [
-   349
+   350
   ],
   "clear-buffer-auto-save-failure": [
    12
@@ -434,7 +437,7 @@
    94
   ],
   "command-line-1": [
-   291
+   292
   ],
   "command-line-args": [
    110
@@ -443,10 +446,10 @@
    132
   ],
   "compare-strings": [
-   348
+   349
   ],
   "compiled-function-p": [
-   330
+   331
   ],
   "completion-styles completion-category-overrides romacs-completion--fido-fzf": [
    264
@@ -467,14 +470,14 @@
   "concat": [
    31,
    66,
-   294,
    295,
    296,
-   336
+   297,
+   337
   ],
   "condition-case": [
-   331,
-   338
+   332,
+   339
   ],
   "configure-info-directory": [
    118
@@ -494,7 +497,7 @@
   "copy-sequence": [
    97,
    133,
-   336
+   337
   ],
   "copy-syntax-table": [
    196
@@ -535,7 +538,7 @@
    3
   ],
   "current-load-list": [
-   337
+   338
   ],
   "current-message": [
    273
@@ -574,7 +577,7 @@
    269
   ],
   "custom-reevaluate-setting": [
-   357
+   358
   ],
   "custom-save-all": [
    268
@@ -610,7 +613,7 @@
    33
   ],
   "debug-on-next-call": [
-   352
+   353
   ],
   "debug-on-quit": [
    32
@@ -636,22 +639,22 @@
    128,
    131,
    147,
-   325,
-   327,
-   329
+   326,
+   328,
+   330
   ],
   "default-boundp": [
-   332
+   333
   ],
   "default-directory": [
    117
   ],
   "default-file-name-coding-system": [
-   354
+   355
   ],
   "default-value": [
-   332,
-   333
+   333,
+   334
   ],
   "defcustom": [
    174
@@ -664,27 +667,27 @@
    164,
    192,
    226,
-   360,
-   364
+   361,
+   365
   ],
   "define-category": [
-   314
+   315
   ],
   "define-ccl-program": [
    208
   ],
   "define-charset-internal": [
    205,
-   311
-  ],
-  "define-coding-system": [
-   354
-  ],
-  "define-coding-system-alias": [
    312
   ],
+  "define-coding-system": [
+   355
+  ],
+  "define-coding-system-alias": [
+   313
+  ],
   "define-error": [
-   326
+   327
   ],
   "define-fringe-bitmap": [
    251
@@ -709,7 +712,7 @@
   ],
   "defun": [
    176,
-   327
+   328
   ],
   "defvar": [
    17,
@@ -718,11 +721,11 @@
    177
   ],
   "defvaralias": [
-   321,
-   324
+   322,
+   325
   ],
   "delete": [
-   336
+   337
   ],
   "delete-backward-char": [
    180
@@ -840,10 +843,10 @@
    231
   ],
   "display-warning": [
-   324
+   325
   ],
   "do-after-load-evaluation": [
-   337
+   338
   ],
   "do-auto-save": [
    12
@@ -854,10 +857,10 @@
   ],
   "downcase": [
    66,
-   348
+   349
   ],
   "downcase_char_code_emacs_compat": [
-   367
+   368
   ],
   "elt": [
    35,
@@ -866,13 +869,13 @@
    66
   ],
   "emacs-build-time": [
-   355
+   356
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   367
+   368
   ],
   "emoji": [
    29
@@ -881,7 +884,7 @@
    269
   ],
   "enable-recursive-minibuffers": [
-   334
+   335
   ],
   "encode-coding-string": [
    14
@@ -909,10 +912,10 @@
   "error-message-string": [
    182,
    183,
-   316
+   317
   ],
   "ert--run-test-internal": [
-   350
+   351
   ],
   "esc-map": [
    178
@@ -926,14 +929,15 @@
   "eval": [
    39,
    66,
-   317,
    318,
-   328
+   319,
+   329
   ],
   "eval-after-load": [
    143,
-   337,
-   358
+   267,
+   338,
+   359
   ],
   "eval-and-compile": [
    141
@@ -962,7 +966,7 @@
   "eval-when-compile": [
    139,
    141,
-   318
+   319
   ],
   "eval_sub": [
    66
@@ -1007,17 +1011,17 @@
    161,
    162,
    163,
-   360,
    361,
-   364
+   362,
+   365
   ],
   "face-family": [
    159,
-   363
+   364
   ],
   "face-font": [
    158,
-   362
+   363
   ],
   "face-remap-add-relative": [
    255
@@ -1027,7 +1031,7 @@
    162,
    163,
    255,
-   366
+   367
   ],
   "face-spec-recalc": [
    257
@@ -1042,8 +1046,8 @@
   ],
   "features": [
    110,
-   325,
-   339
+   326,
+   340
   ],
   "file-accessible-directory-p": [
    46
@@ -1080,7 +1084,7 @@
    124
   ],
   "find-auto-coding": [
-   354
+   355
   ],
   "find-composition": [
    284
@@ -1096,11 +1100,11 @@
    139
   ],
   "find-file-literally": [
-   288
+   289
   ],
   "find-file-name-handler": [
    69,
-   345
+   346
   ],
   "find-file-noselect": [
    0
@@ -1175,7 +1179,7 @@
    200
   ],
   "force-window-update": [
-   320
+   321
   ],
   "format": [
    4,
@@ -1185,17 +1189,17 @@
    116,
    134,
    149,
-   294,
-   344
+   295,
+   345
   ],
   "format-message": [
    95,
    134,
-   344
+   345
   ],
   "format-mode-line": [
    185,
-   319
+   320
   ],
   "format-time-string": [
    106
@@ -1252,10 +1256,10 @@
    188
   ],
   "frame-parameter": [
-   323
+   324
   ],
   "frame-parameters": [
-   323
+   324
   ],
   "frame-parent": [
    257
@@ -1330,8 +1334,8 @@
    136,
    169,
    176,
-   315,
-   317
+   316,
+   318
   ],
   "funcall-interactively": [
    94
@@ -1344,7 +1348,7 @@
    170
   ],
   "function-history": [
-   325
+   326
   ],
   "function-key-map": [
    178
@@ -1359,7 +1363,7 @@
    52
   ],
   "gc-cons-threshold": [
-   334
+   335
   ],
   "gc-cons-threshold gc-cons-percentage garbage-collect": [
    49
@@ -1380,7 +1384,7 @@
    66,
    107,
    146,
-   326
+   327
   ],
   "get-buffer": [
    219,
@@ -1400,15 +1404,15 @@
   ],
   "get-load-suffixes": [
    96,
-   333,
-   335
+   334,
+   336
   ],
   "get-text-property": [
-   295,
-   296
+   296,
+   297
   ],
   "get-variable-watchers": [
-   322
+   323
   ],
   "getenv": [
    141
@@ -1528,16 +1532,16 @@
    128
   ],
   "indirect-variable": [
-   321
+   322
   ],
   "inhibit-debugger": [
    32
   ],
   "inhibit-file-name-handlers": [
-   345
+   346
   ],
   "inhibit-file-name-operation": [
-   345
+   346
   ],
   "inhibit-mouse-event-check": [
    94
@@ -1558,7 +1562,7 @@
    188
   ],
   "inline": [
-   329
+   330
   ],
   "inotify-add-watch": [
    222
@@ -1571,7 +1575,7 @@
   ],
   "input-pending-p": [
    86,
-   310
+   311
   ],
   "insert": [
    66,
@@ -1597,15 +1601,15 @@
    94
   ],
   "intern": [
-   297,
-   340,
+   298,
    341,
    342,
-   343
+   343,
+   344
   ],
   "intern-soft": [
-   341,
-   342
+   342,
+   343
   ],
   "internal-border-width": [
    244
@@ -1614,14 +1618,14 @@
    233
   ],
   "internal-delete-indirect-variable": [
-   321
+   322
   ],
   "internal-interpreter-environment": [
    177
   ],
   "internal-macroexpand-for-load": [
-   327,
-   328
+   328,
+   329
   ],
   "internal-set-alternative-font-family-alist": [
    26,
@@ -1637,24 +1641,24 @@
    130
   ],
   "internal-show-cursor": [
-   320,
-   323
+   321,
+   324
   ],
   "internal-when-entered-debugger": [
    32
   ],
   "interpreted-function-p": [
    57,
-   330
+   331
   ],
   "invalid-function": [
    136
   ],
   "invocation-directory": [
-   291
+   292
   ],
   "invocation-name": [
-   291
+   292
   ],
   "isolate-await": [
    18
@@ -1731,10 +1735,10 @@
   ],
   "kill-emacs": [
    10,
-   291
+   292
   ],
   "kill-emacs-hook": [
-   291
+   292
   ],
   "kill-local-variable": [
    60,
@@ -1743,13 +1747,13 @@
   "lambda": [
    175,
    176,
-   315,
-   327,
-   331
+   316,
+   328,
+   332
   ],
   "last-coding-system-used": [
    125,
-   354
+   355
   ],
   "last-command": [
    94
@@ -1762,7 +1766,7 @@
    256
   ],
   "latin-extra-code-table": [
-   354
+   355
   ],
   "length": [
    66,
@@ -1772,7 +1776,7 @@
    120,
    175,
    177,
-   333
+   334
   ],
   "let*": [
    120
@@ -1827,9 +1831,9 @@
    144,
    150,
    177,
-   328,
-   338,
-   339
+   329,
+   339,
+   340
   ],
   "load eval-buffer eval-region": [
    41
@@ -1841,21 +1845,21 @@
    143
   ],
   "load-file-rep-suffixes": [
-   333,
-   335
+   334,
+   336
   ],
   "load-history": [
    138,
    143,
-   321,
-   325,
-   337
+   322,
+   326,
+   338
   ],
   "load-path": [
    110,
    111,
    121,
-   357
+   358
   ],
   "load-prefer-newer": [
    140
@@ -1864,7 +1868,7 @@
    129
   ],
   "load-suffixes": [
-   333
+   334
   ],
   "load-true-file-name": [
    143
@@ -1877,7 +1881,7 @@
   ],
   "locate-file-internal": [
    117,
-   345
+   346
   ],
   "locate-library": [
    111,
@@ -1904,12 +1908,12 @@
    259
   ],
   "macroexp--pending-eager-loads": [
-   328
+   329
   ],
   "macroexpand": [
    39,
-   318,
-   327
+   319,
+   328
   ],
   "main-thread": [
    223,
@@ -1924,11 +1928,11 @@
    78,
    104,
    105,
-   305
+   306
   ],
   "make-char-table": [
    97,
-   305
+   306
   ],
   "make-finalizer": [
    51
@@ -1946,11 +1950,11 @@
    170
   ],
   "make-interpreted-closure": [
-   349
+   350
   ],
   "make-local-variable": [
    199,
-   334
+   335
   ],
   "make-lock-file-name": [
    10
@@ -1982,11 +1986,11 @@
   ],
   "make-string": [
    133,
-   336
+   337
   ],
   "make-symbol": [
    108,
-   340
+   341
   ],
   "make-symbolic-link": [
    8
@@ -1998,16 +2002,16 @@
   ],
   "make-variable-buffer-local": [
    199,
-   332,
-   334
+   333,
+   335
   ],
   "make-vector": [
-   305,
    306,
-   308
+   307,
+   309
   ],
   "makunbound": [
-   333
+   334
   ],
   "map-char-table": [
    97
@@ -2016,10 +2020,10 @@
    97
   ],
   "mapatoms": [
-   341
+   342
   ],
   "mapbacktrace": [
-   350
+   351
   ],
   "mapc": [
    73,
@@ -2069,16 +2073,16 @@
   ],
   "max-lisp-eval-depth": [
    112,
-   334
+   335
   ],
   "max-mini-window-height": [
-   346
+   347
   ],
   "member": [
    66
   ],
   "memory-signal-data": [
-   306
+   307
   ],
   "memq": [
    66
@@ -2112,7 +2116,7 @@
    85
   ],
   "minibuffer-local-map": [
-   333
+   334
   ],
   "minibuffer-prompt-properties": [
    85
@@ -2132,7 +2136,7 @@
    187,
    243,
    248,
-   319
+   320
   ],
   "mode-line-in-non-selected-windows": [
    185
@@ -2141,10 +2145,10 @@
    185
   ],
   "modify-category-entry": [
-   314
+   315
   ],
   "modify-frame-parameters": [
-   323
+   324
   ],
   "modify-syntax-entry": [
    196
@@ -2159,7 +2163,7 @@
    3
   ],
   "move-to-window-line": [
-   290
+   291
   ],
   "move_it_to": [
    282
@@ -2183,10 +2187,10 @@
    165
   ],
   "next-property-change": [
-   353
+   354
   ],
   "next-single-char-property-change": [
-   353
+   354
   ],
   "no-byte-compile": [
    144
@@ -2213,10 +2217,10 @@
    66
   ],
   "not-unicode-string": [
-   297,
    298,
    299,
-   300
+   300,
+   301
   ],
   "notmuch": [
    123
@@ -2242,16 +2246,16 @@
    72
   ],
   "obarray-make": [
-   343
+   344
   ],
   "obarrayp": [
-   341
+   342
   ],
   "object-intervals": [
    101
   ],
   "oclosure-type": [
-   349
+   350
   ],
   "optimize-char-table": [
    206
@@ -2263,7 +2267,7 @@
    282
   ],
   "overlay-arrow-string": [
-   334
+   335
   ],
   "overlays-at": [
    165
@@ -2274,7 +2278,7 @@
    167
   ],
   "overriding-plist-environment": [
-   326
+   327
   ],
   "overwrite-mode": [
    209
@@ -2360,6 +2364,12 @@
   "pp-eval-last-sexp": [
    273
   ],
+  "pre-redisplay-function": [
+   288
+  ],
+  "pre-redisplay-functions": [
+   288
+  ],
   "prefix-help-command": [
    275
   ],
@@ -2378,7 +2388,7 @@
    203,
    204,
    285,
-   340
+   341
   ],
   "prin1-to-string": [
    74,
@@ -2388,15 +2398,15 @@
    203,
    204,
    285,
-   304,
-   340
+   305,
+   341
   ],
   "princ": [
    201,
    202,
    203,
    204,
-   304
+   305
   ],
   "print": [
    201,
@@ -2495,29 +2505,29 @@
    23
   ],
   "propertize": [
-   296,
-   307
+   297,
+   308
   ],
   "provide": [
-   325,
-   337,
-   339
+   326,
+   338,
+   340
   ],
   "purify-flag": [
-   349
+   350
   ],
   "push macroexp-let2 gv-letplace": [
    42
   ],
   "put": [
    269,
-   326
+   327
   ],
   "put-image": [
    254
   ],
   "put-text-property": [
-   296
+   297
   ],
   "puthash": [
    19
@@ -2544,7 +2554,7 @@
    102,
    103,
    150,
-   295
+   296
   ],
   "read-char": [
    86
@@ -2571,8 +2581,8 @@
    102,
    103,
    150,
-   295,
-   343
+   296,
+   344
   ],
   "read-key-sequence": [
    86
@@ -2597,10 +2607,10 @@
    86
   ],
   "recenter": [
-   290
+   291
   ],
   "record": [
-   305
+   306
   ],
   "recordp": [
    44
@@ -2616,7 +2626,10 @@
    277
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
-   346
+   347
+  ],
+  "redisplay-highlight-region-function": [
+   288
   ],
   "register-ccl-program": [
    208
@@ -2628,7 +2641,7 @@
    19
   ],
   "remove-variable-watcher": [
-   322
+   323
   ],
   "rename-buffer": [
    219
@@ -2648,25 +2661,25 @@
   "require": [
    110,
    140,
-   325,
-   337,
+   326,
    338,
    339,
-   357
+   340,
+   358
   ],
   "reset": [
    161,
-   359
+   360
   ],
   "resize-mini-windows": [
-   346
+   347
   ],
   "restore-buffer-modified-p": [
    10
   ],
   "reverse": [
    78,
-   305
+   306
   ],
   "right-divider-width": [
    244
@@ -2702,7 +2715,7 @@
    190
   ],
   "romacs--oclosure-type": [
-   349
+   350
   ],
   "romacs--prefix-help-functions": [
    275
@@ -2802,7 +2815,7 @@
    127
   ],
   "romacs-init-layer-exclude": [
-   358
+   359
   ],
   "romacs-layer-animation romacs-layer-show": [
    272
@@ -2989,13 +3002,13 @@
    213
   ],
   "romacs-unsafe-coding": [
-   354
+   355
   ],
   "round": [
    286
   ],
   "run-at-time": [
-   310
+   311
   ],
   "run-hooks": [
    40
@@ -3008,7 +3021,7 @@
    228
   ],
   "run-with-timer": [
-   310
+   311
   ],
   "save-buffer": [
    126
@@ -3029,7 +3042,7 @@
    186
   ],
   "scroll-down": [
-   290
+   291
   ],
   "scroll-left": [
    283
@@ -3044,25 +3057,25 @@
    186
   ],
   "scroll-up": [
-   290
+   291
   ],
   "secure-hash": [
-   309
+   310
   ],
   "secure-hash-algorithms": [
-   309
+   310
   ],
   "select-frame": [
    257
   ],
   "select-safe-coding-system": [
-   354
+   355
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   354
+   355
   ],
   "selected-frame": [
    192,
@@ -3101,10 +3114,10 @@
   "set": [
    66,
    107,
-   333
+   334
   ],
   "set-auto-coding": [
-   354
+   355
   ],
   "set-buffer": [
    66
@@ -3117,10 +3130,10 @@
   ],
   "set-buffer-multibyte": [
    215,
-   288
+   289
   ],
   "set-buffer-redisplay": [
-   322
+   323
   ],
   "set-case-table": [
    75
@@ -3130,24 +3143,24 @@
    97
   ],
   "set-charset-priority": [
-   311
+   312
   ],
   "set-coding-system-priority": [
-   312,
-   354
+   313,
+   355
   ],
   "set-default": [
-   333
+   334
   ],
   "set-face-attribute": [
    130,
    157,
    158,
    159,
-   361,
    362,
    363,
-   365
+   364,
+   366
   ],
   "set-file-acl": [
    11
@@ -3238,16 +3251,16 @@
    66
   ],
   "setf": [
-   331
+   332
   ],
   "setplist": [
-   326
+   327
   ],
   "setq": [
-   333
+   334
   ],
   "signal": [
-   338
+   339
   ],
   "signal-hook-function": [
    32,
@@ -3257,10 +3270,10 @@
    33
   ],
   "skip-chars-backward": [
-   368
+   369
   ],
   "skip-chars-forward": [
-   368
+   369
   ],
   "sleep-for": [
    221,
@@ -3273,8 +3286,8 @@
    217
   ],
   "source_string": [
-   298,
-   299
+   299,
+   300
   ],
   "special-event-map": [
    33,
@@ -3282,14 +3295,14 @@
    222
   ],
   "special-form-p": [
-   329
+   330
   ],
   "special-variable-p": [
    109,
-   333
+   334
   ],
   "split-window-internal": [
-   292
+   293
   ],
   "standard-case-table": [
    55
@@ -3356,7 +3369,7 @@
   "substring": [
    66,
    133,
-   336
+   337
   ],
   "supports": [
    156
@@ -3379,16 +3392,16 @@
    148
   ],
   "symbol-name": [
-   342
+   343
   ],
   "symbol-plist": [
    17,
-   326
+   327
   ],
   "symbol-value": [
    34,
    66,
-   333
+   334
   ],
   "symbol-with-pos-p": [
    71
@@ -3421,28 +3434,28 @@
   "terminal-live-p": [
    250,
    256,
-   313
+   314
   ],
   "terminal-parameter": [
-   313
+   314
   ],
   "terpri": [
    202
   ],
   "test-completion": [
-   347,
-   348
+   348,
+   349
   ],
   "text": [
    282
   ],
   "text-properties-at": [
    102,
-   296,
-   307
+   297,
+   308
   ],
   "text-quoting-style": [
-   344
+   345
   ],
   "text-scale-adjust": [
    255
@@ -3474,10 +3487,10 @@
    18
   ],
   "timer-event-handler": [
-   310
+   311
   ],
   "timer-list": [
-   310
+   311
   ],
   "tmm-prompt": [
    234
@@ -3520,8 +3533,8 @@
    4
   ],
   "try-completion": [
-   347,
-   348
+   348,
+   349
   ],
   "tty-color-alist": [
    225,
@@ -3535,7 +3548,7 @@
    181
   ],
   "undo-limit": [
-   334
+   335
   ],
   "unibyte-display-via-language-environment": [
    282
@@ -3544,11 +3557,11 @@
    58
   ],
   "unify-charset": [
-   311
+   312
   ],
   "unintern": [
-   341,
-   342
+   342,
+   343
   ],
   "unlock-file": [
    10
@@ -3559,7 +3572,7 @@
   ],
   "upcase": [
    66,
-   348
+   349
   ],
   "upcase-initials": [
    75
@@ -3573,7 +3586,7 @@
    77
   ],
   "use-package": [
-   358
+   359
   ],
   "user-emacs-directory": [
    267
@@ -3588,7 +3601,7 @@
    30
   ],
   "vconcat": [
-   305
+   306
   ],
   "vector": [
    133
@@ -3666,7 +3679,7 @@
    244
   ],
   "window-end": [
-   289
+   290
   ],
   "window-fringes": [
    251
@@ -3696,7 +3709,7 @@
    283
   ],
   "window-persistent-parameters": [
-   333
+   334
   ],
   "window-point": [
    192,
@@ -3758,10 +3771,10 @@
    282
   ],
   "with-eval-after-load": [
-   337
+   338
   ],
   "with-output-to-string": [
-   304
+   305
   ],
   "with-snapshot-buffer": [
    18
@@ -3787,7 +3800,7 @@
    148
   ],
   "wrong-type-argument": [
-   316
+   317
   ],
   "x": [
    28
@@ -5478,7 +5491,7 @@
    "planned": false,
    "mechanism": "`call-interactively`, `funcall-interactively`, `interactive-form`: the supported spec subset and what VM2 lacks around them",
    "gnu": "GNU `Fcall_interactively` (`callint.c:256-801`) asks `interactive-form` through its symbol (`callint.c:305`), evaluates a non-string spec with `Feval` in the closure's lexical environment (`callint.c:316-319`), records on `command-history` through `add-to-history` (`callint.c:325-330`, `780-783`), handles the prefix characters `+ * - @ ^` (`callint.c:364-405`) and every code letter `a b B c C d D e f F G i k K m M n N p P r R s S U v x X z Z` (`callint.c:449-762`), formatting each prompt with `format-message` (`callint.c:457`). `Finteractive_form` (`data.c:1139-1210`) reads the `interactive-form` property along the alias chain, a subr's DEFUN intspec, `CLOSURE_INTERACTIVE`, autoloads (via `autoload-do-load`) and `(lambda ...)` lists. `funcall-interactively` (`callint.c:239-254`) is `Ffuncall` in a frame that `called-interactively-p` (subr.el) finds by walking the backtrace.",
-   "romacs": "Recorded live against GNU 32.0.50 through primh (`tools/primh/callint-specs/*.json`, `evidence/{call-interactively,funcall-interactively,interactive-form,prefix-numeric-value}.json`, inputs in `tools/primh/logs/callint/make_spec.py`). **Supported and matching GNU row-for-row:** prefix characters `* - ^ @` (`^` calls `handle-shift-selection` when it is fbound; `@` with a window event signals unsupported), `+` error, codes `d e i m p P r R U Z`(no prefix) `N`(with prefix), the reading codes `D f F G` (`read-file-name` through its symbol with callint.c's arguments) and `s` (the `read-string` subr, not its symbol), their prompts through `format-message` (`tests/callint_reading.rs`), invalid-letter error text, `this-command`/`this-original-command`/`real-this-command`/`last-command` save and restore, `current-prefix-arg` (never `prefix-arg`), KEYS vector and `inhibit-mouse-event-check`, RECORD-FLAG history items including `interactive-args`, `history-length` (variable and property), the list-spec path in the closure's own lexical environment, the `interactive-form` property chain, and the GNU intspecs of the VM2 subrs that GNU defines as commands. **Divergent:** (1) the other minibuffer/keyboard-reading codes (`a b B c C k K M n S v x X z`, `N` without and `Z` with a prefix) signals `(error \"call-interactively: the input-reading code `X' is not supported in VM2 yet\")` where GNU reads input (`call-interactively/0466`, `/0471` pinned `CONDITION`; GNU batch gives `end-of-file`); (2) a `%` in a prompt signals the same kind of unsupported error where GNU formats it (`/0497`, GNU `Not enough arguments for format string`); (3) VM2 has no mark, so `m`, `r` and an active-region `R` always take GNU's no-mark error, and `set-mark` is void (`/0475`); (4) `buffer-read-only`, `inhibit-read-only` are ordinary global specials, not GNU's per-buffer slot, and buffer edits do not enforce them — only `*` reads them; (5) `add-to-history` (subr.el) is void in a bare VM2, so the KEEP-ALL body is run natively, and a non-nil `history-delete-duplicates` signals unsupported; (6) `called-interactively-p`, `command-execute`, `advice-add`, `identity` are void (subr.el/simple.el/nadvice.el not loadable), so those rows are pinned `MISSING`; (7) a closure's spec lives in a private key-weak `eq` table keyed by the closure (VM2 closures have no `CLOSURE_INTERACTIVE` slot), so `(interactive SPEC)` registered by `function`/`lambda`/`defun` is found, but a closure GNU would build from `make-interpreted-closure` with an explicit IFORM is not; `(interactive SPEC . MODES)` drops MODES as `interactive-form` does; (8) quoted `(lambda ...)` lists are read, stored and called as GNU does (`/0439`, `funcall-interactively/0507`, `interactive-form/0110`; VM2-ALIAS1); (9) `funcall-interactively` leaves no frame, so `called-interactively-p` cannot be implemented on it. (10) GNU binds `command-debug-status` to nil around a string-spec command (`callint.c:797-800`); the primitive step protocol (`Step::Done`/`Step::Call`, `src/prim.rs`) has no scoped, unwind-safe binding (the engine's specbind machinery is not exposed to primitives, and a set-and-restore would leak on a non-local exit), so the caller's value shows through (`call-interactively/0540`: GNU nil, VM2 9). Engine-owned substrate work, not infeasible. (11) GNU evaluates ANY non-string spec in the target closure's lexical environment (`callint.c:318-323`); a compiled VM2 closure keeps positional captures with unused bindings pruned, so there is no named environment to evaluate an arbitrary form in; only the closure's own registered spec runs in it (through its thunk) and any other spec (an `interactive-form` property, a redefined `interactive-form`, advice) is evaluated as `(eval SPEC nil)` (`/0541`: GNU 8, VM2 `void-variable x`). Every pinned row of these five evidence files is also locked to its exact reviewed VM2 outcome (`tests/primh_cmdloop_pins.rs`), so a pinned answer that changes within its class fails. Printer-only rows (circular lists, closures, `'X`, killed buffers) are pinned `PRINTER`/`DATA`/`VALUE` under VM2-EV2.",
+   "romacs": "Recorded live against GNU 32.0.50 through primh (`tools/primh/callint-specs/*.json`, `evidence/{call-interactively,funcall-interactively,interactive-form,prefix-numeric-value}.json`, inputs in `tools/primh/logs/callint/make_spec.py`). **Supported and matching GNU row-for-row:** prefix characters `* - ^ @` (`^` calls `handle-shift-selection` when it is fbound; `@` with a window event signals unsupported), `+` error, codes `d e i m p P r R U Z`(no prefix) `N`(with prefix), the reading codes `D f F G` (`read-file-name` through its symbol with callint.c's arguments), `s` (the `read-string` subr, not its symbol), and `C v` (`read-command` and `read-variable`), their prompts through `format-message` (`tests/callint_reading.rs`), invalid-letter error text, `this-command`/`this-original-command`/`real-this-command`/`last-command` save and restore, `current-prefix-arg` (never `prefix-arg`), KEYS vector and `inhibit-mouse-event-check`, RECORD-FLAG history items including `interactive-args`, `history-length` (variable and property), the list-spec path in the closure's own lexical environment, the `interactive-form` property chain, and the GNU intspecs of the VM2 subrs that GNU defines as commands. **Divergent:** (1) the other minibuffer/keyboard-reading codes (`a b B c k K M n S x X z`, `N` without and `Z` with a prefix) signals `(error \"call-interactively: the input-reading code `X' is not supported in VM2 yet\")` where GNU reads input (`call-interactively/0466`, `/0471` pinned `CONDITION`; GNU batch gives `end-of-file`); (2) a `%` in a prompt signals the same kind of unsupported error where GNU formats it (`/0497`, GNU `Not enough arguments for format string`); (3) VM2 has no mark, so `m`, `r` and an active-region `R` always take GNU's no-mark error, and `set-mark` is void (`/0475`); (4) `buffer-read-only`, `inhibit-read-only` are ordinary global specials, not GNU's per-buffer slot, and buffer edits do not enforce them — only `*` reads them; (5) `add-to-history` (subr.el) is void in a bare VM2, so the KEEP-ALL body is run natively, and a non-nil `history-delete-duplicates` signals unsupported; (6) `called-interactively-p`, `command-execute`, `advice-add`, `identity` are void (subr.el/simple.el/nadvice.el not loadable), so those rows are pinned `MISSING`; (7) a closure's spec lives in a private key-weak `eq` table keyed by the closure (VM2 closures have no `CLOSURE_INTERACTIVE` slot), so `(interactive SPEC)` registered by `function`/`lambda`/`defun` is found, but a closure GNU would build from `make-interpreted-closure` with an explicit IFORM is not; `(interactive SPEC . MODES)` drops MODES as `interactive-form` does; (8) quoted `(lambda ...)` lists are read, stored and called as GNU does (`/0439`, `funcall-interactively/0507`, `interactive-form/0110`; VM2-ALIAS1); (9) `funcall-interactively` leaves no frame, so `called-interactively-p` cannot be implemented on it. (10) GNU binds `command-debug-status` to nil around a string-spec command (`callint.c:797-800`); the primitive step protocol (`Step::Done`/`Step::Call`, `src/prim.rs`) has no scoped, unwind-safe binding (the engine's specbind machinery is not exposed to primitives, and a set-and-restore would leak on a non-local exit), so the caller's value shows through (`call-interactively/0540`: GNU nil, VM2 9). Engine-owned substrate work, not infeasible. (11) GNU evaluates ANY non-string spec in the target closure's lexical environment (`callint.c:318-323`); a compiled VM2 closure keeps positional captures with unused bindings pruned, so there is no named environment to evaluate an arbitrary form in; only the closure's own registered spec runs in it (through its thunk) and any other spec (an `interactive-form` property, a redefined `interactive-form`, advice) is evaluated as `(eval SPEC nil)` (`/0541`: GNU 8, VM2 `void-variable x`). Every pinned row of these five evidence files is also locked to its exact reviewed VM2 outcome (`tests/primh_cmdloop_pins.rs`), so a pinned answer that changes within its class fails. Printer-only rows (circular lists, closures, `'X`, killed buffers) are pinned `PRINTER`/`DATA`/`VALUE` under VM2-EV2.",
    "why": "**Package-observable**. A command whose spec reads from the minibuffer, prompts with `%`, uses the mark, or is quoted-lambda old-style signals a VM2-specific error naming the code instead of reading input — loud, never a silent default. Read-only buffers are not enforced by edits. The reading codes need the minibuffer and the mark needs the marker lane; both are separate surfaces",
    "symbols": [
     "call-interactively",
@@ -8709,12 +8722,13 @@
    "planned": false,
    "mechanism": "Saved settings at startup",
    "gnu": "Nothing loads `custom-file`: an init that wants it says `(load custom-file)`. `user-init-file` names the default init even when there is none, so a first session can save",
-   "romacs": "A session that loads an init gives `custom-file` the value `custom.el` in `user-emacs-directory`, unless something set it, and loads that file after Romacs's defaults and before the init: a saved value replaces a default and the init has the last word. `user-init-file` names the init whether or not it exists, as GNU's does. -q and -Q load nothing. A file that fails to load is reported and the init still runs. `rlisp/romacs-custom.el`, `harness/options_live.py`",
+   "romacs": "A session that loads an init gives `custom-file` the value `custom.el` in `user-emacs-directory`, unless something set it, and loads that file after Romacs's defaults and before the init: a saved value replaces a default and the init has the last word. `user-init-file` names the init whether or not it exists, as GNU's does. -q and -Q load nothing. A file that fails to load is reported and the init still runs. One limit: an init's `eval-after-load` form that a restored init layer already ran (VM2-WORLD3) ran before the saved settings, so a saved value of the same option wins over it there, and it wins over the saved value on a cold start. `rlisp/romacs-custom.el`, `harness/options_live.py`",
    "why": "",
    "symbols": [
     "custom-file",
     "user-init-file",
     "user-emacs-directory",
+    "eval-after-load",
     "harness/options_live.py"
    ],
    "symbols_derived": true
@@ -8727,10 +8741,11 @@
    "planned": false,
    "mechanism": "The function `custom-file`",
    "gnu": "A nil `custom-file`, or one naming the init, saves into the init (`lisp/cus-edit.el:5065`)",
-   "romacs": "It never answers the init, by name or through a link, even one not written yet: it gives the default `custom.el`. If that is the init too, nothing is saved: `custom-save-all` signals, and `customize-save-variable` sets the value for the session with GNU's \"temporarily\" message. Automatic saves stay out of a file the user wrote. `rlisp/romacs-custom.el`",
+   "romacs": "It never answers the init, by name, through a symbolic or hard link, or past a link with `..`, even one not written yet: it gives the default `custom.el`, and the name it checked. If that is the init too, nothing is saved: `custom-save-all` signals, and `customize-save-variable` sets the value for the session with GNU's \"temporarily\" message. Automatic saves stay out of a file the user wrote. `rlisp/romacs-custom.el`",
    "why": "",
    "symbols": [
     "custom-file",
+    "..",
     "custom-save-all",
     "customize-save-variable"
    ],
@@ -9111,6 +9126,23 @@
     "set-window-start"
    ],
    "symbols_derived": true
+  },
+  {
+   "id": "VM2-PREREDISPLAY1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`pre-redisplay-function`",
+   "gnu": "GNU's `prepare_menu_bars` (`xdisp.c:14264`) calls it on every redisplay, and `simple.el`'s default runs `pre-redisplay-functions`, whose default member makes the region's overlay. A second call after point moved during redisplay (`xdisp.c:20911`) lets the region follow",
+   "romacs": "Called from `frame_snapshot` and from `redisplay` under `inhibit-redisplay` and `inhibit-quit`, with GNU's windows (`crates/romacs-vm/tests/pre_redisplay.el`). A gate in Rust skips the call for nil, `ignore`, and the default while no shown buffer has work on the hook, so a key with no active region runs no Lisp; `rect.el`, preloaded, wraps `redisplay-highlight-region-function`, so an active region runs it on each redisplay. The region stays native: `redisplay-highlight-region-function` defaults to `romacs--native-region`, which makes no overlay, so `internal-region-overlay` stays nil",
+   "why": "**Package-observable**: no region overlay shows in `overlays-in`; a package wrapping the variable (`rect.el`) has its overlays drawn beside the native region; no second call after a redisplay moves point; GNU's t for a frame change without a new window arrives as a list of the windows concerned",
+   "symbols": [
+    "pre-redisplay-function",
+    "pre-redisplay-functions",
+    "redisplay-highlight-region-function"
+   ],
+   "symbols_derived": false
   },
   {
    "id": "VM2-UNIWIN1",

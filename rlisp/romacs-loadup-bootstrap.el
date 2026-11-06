@@ -96,6 +96,8 @@
 ;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 (load "simple.el" nil t t)
+;; The region is drawn natively (`snapshot_region'): no overlay for it.
+(setq redisplay-highlight-region-function #'romacs--native-region)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
 (load "emacs-lisp/nadvice.el" nil t t)
