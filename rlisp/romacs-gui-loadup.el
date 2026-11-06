@@ -217,6 +217,26 @@ system; then GNU's function runs."
                    default-frame-alist nil)))
     (frame-notice-user-settings)))
 
+(defun romacs-gui-loadup-startup-buffer (name)
+  "The startup screen, the buffer NAME, built if it is not live.
+As `fancy-startup-screen' sets up *GNU Emacs* (startup.el:2269), it
+starts in `command-line-default-directory' and takes GNU's
+`splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
+\(`exit-splash-screen') kills it.  It is the animated logo
+\(rlisp/romacs-landing.el), whose keys (SPC, Home) come first, and
+nothing else; without the logo, one title line."
+  (or (get-buffer name)
+      (with-current-buffer (get-buffer-create name)
+        (setq default-directory command-line-default-directory)
+        (use-local-map splash-screen-keymap)
+        (if (fboundp 'romacs-landing)
+            (progn (setq buffer-read-only t) (set-buffer-modified-p nil) (romacs-landing))
+          (insert "Romacs\n")
+          (setq buffer-read-only t)
+          (set-buffer-modified-p nil))
+        (goto-char (point-min))
+        (current-buffer))))
+
 (defun romacs-gui-loadup-startup-screen (buffer concise)
   "Show BUFFER, the filled *Romacs* startup screen, as startup.el
 `fancy-startup-screen' shows *GNU Emacs* (startup.el:2269): if

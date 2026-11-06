@@ -121,5 +121,31 @@ then run `romacs-landing-hook'."
                         #'romacs-landing--element)
   (run-hooks 'romacs-landing-hook))
 
+(declare-function romacs-gui-loadup-startup-buffer "romacs-gui-loadup")
+
+(defun romacs-landing-show ()
+  "Show the *Romacs* landing in the selected window.
+Reuse the buffer, or build it again as startup does: q kills it."
+  (interactive)
+  (switch-to-buffer (romacs-gui-loadup-startup-buffer "*Romacs*")))
+
+(defun romacs-landing--empty-session-p ()
+  "Whether the session holds nothing yet: only what startup leaves.
+Hidden buffers, *Messages*, the landing and an untouched *scratch*."
+  (seq-every-p (lambda (buffer)
+                 (let ((name (buffer-name buffer)))
+                   (or (string-prefix-p " " name)
+                       (member name '("*Messages*" "*Romacs*"))
+                       (and (equal name "*scratch*") (not (buffer-modified-p buffer))))))
+               (buffer-list)))
+
+(defun romacs-landing-new-client ()
+  "Show the landing to a client with nothing to visit, on an empty session.
+Where startup would: not with `initial-buffer-choice' or
+`inhibit-startup-screen' set."
+  (when (and (not initial-buffer-choice) (not inhibit-startup-screen)
+             (romacs-landing--empty-session-p))
+    (romacs-landing-show)))
+
 (provide 'romacs-landing)
 ;;; romacs-landing.el ends here

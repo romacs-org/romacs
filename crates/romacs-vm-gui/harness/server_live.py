@@ -29,6 +29,12 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
   probe      clients x files: finishing one buffer and retiring one client
              with many pending buffers, at 1, 10 and 100 in each dimension
              (the costs must not grow with the other dimension).
+  landing    the landing comes back from real keys: q kills *Romacs*, M-x
+             `romacs-landing-show' builds it again with its keys and motion,
+             and shows the live one without rebuilding it; a client with no
+             files lands on an empty session, by `romacs' and `emacsclient
+             -c', and not with `initial-buffer-choice' or
+             `inhibit-startup-screen' set, nor beside work.
   daemon     pinned GNU `--fg-daemon=dm' and a Romacs server dm, in turn in
              the same tree: `noninteractive', `daemonp' and
              `daemon-initialized' before and after `emacsclient -c' are
@@ -59,7 +65,7 @@ INIT = ''';; -*- lexical-binding: t -*-
 class Server:
     """A private tree with a compositor, in which clients start server NAME."""
 
-    def __init__(self, args, base, name, env_extra=None):
+    def __init__(self, args, base, name, env_extra=None, init=INIT):
         self.args, self.name = args, name
         self.root, self.home, self.env = private_tree('romacs', base, args.tools, prefix=f'server-{name}-')
         # Sockets need short paths (108 bytes): a runtime directory of their
@@ -68,7 +74,7 @@ class Server:
         self.runtime = Path(tempfile.mkdtemp(prefix='rs-', dir=host_runtime))
         self.env['XDG_RUNTIME_DIR'] = str(self.runtime)
         (self.home / '.config/romacs').mkdir()
-        (self.home / '.config/romacs/init.el').write_text(INIT)
+        (self.home / '.config/romacs/init.el').write_text(init)
         self.env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14', **(env_extra or {}))
         # The real GPU, when asked for: the compositor stays private.
         wlr = dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
@@ -237,6 +243,71 @@ def lifecycle(args, base):
         # Reported, not judged here: under a loaded host single launches swing
         # by a second; the gate reads the paired medians.
         result['launch_within_0_2s'] = cold <= standalone + .2
+        return result
+    finally:
+        s.close()
+
+
+def landing(args, base):
+    # The landing itself: the screen left on, as a new user's is.
+    s = Server(args, base, 'ld', init=';; -*- lexical-binding: t -*-\n(setq initial-scratch-message nil)\n')
+    current = lambda: s.eval('(buffer-name (window-buffer (selected-window)))')
+
+    def typed_show():
+        s.keys('-M', 'alt', '-k', 'x', '-m', 'alt')
+        s.keys('romacs-landing-show')
+        s.keys('-k', 'Return')
+        until(lambda: current() == '"*Romacs*"', 15, 'the landing shows')
+
+    def quit_landing():
+        s.keys('-k', 'q')
+        until(lambda: s.eval('(get-buffer "*Romacs*")') == 'nil', 15, 'q kills the landing')
+
+    try:
+        s.client('-n')
+        started = current()
+        buffers = s.eval("(mapcar #'buffer-name (buffer-list))")
+        s.keyboard_ready()
+        quit_landing()
+        typed_show()
+        state = s.eval('''(with-current-buffer "*Romacs*"
+                            (list buffer-read-only cursor-type (key-binding " ") (key-binding "q")
+                                  (and (romacs-animate--get 'romacs-landing) t)
+                                  (equal default-directory command-line-default-directory)))''')
+        # Shown again, the live buffer is reused.
+        s.eval('(progn (setq ld-buffer (get-buffer "*Romacs*")) (switch-to-buffer "*scratch*"))')
+        typed_show()
+        reused = s.eval('(eq ld-buffer (get-buffer "*Romacs*"))')
+        # A client with no files, on an empty session.
+        quit_landing()
+        s.client('-n')
+        native = current()
+        quit_landing()
+        s.emacsclient('-c', '-n')
+        client = current()
+        # Not where the user chose otherwise, nor beside work.
+        quit_landing()
+        s.eval('(setq initial-buffer-choice t)')
+        s.client('-n')
+        s.emacsclient('-c', '-n')
+        chosen = current()
+        s.eval('(setq initial-buffer-choice nil inhibit-startup-screen t)')
+        s.client('-n')
+        s.emacsclient('-c', '-n')
+        inhibited = current()
+        s.eval('(setq inhibit-startup-screen nil)')
+        a = s.file('a.txt')
+        s.client('-n', str(a))
+        s.client('-n')
+        beside_native = current()
+        s.emacsclient('-c', '-n')
+        beside_client = current()
+        s.client('--stop=none')
+        result = {'started': started, 'buffers': buffers, 'state': state, 'reused': reused, 'native': native,
+                  'emacsclient': client, 'chosen': chosen, 'inhibited': inhibited, 'beside_native': beside_native, 'beside_client': beside_client}
+        result['ok'] = (started == '"*Romacs*"' and state == '(t nil romacs-landing-pause exit-splash-screen t t)'
+                        and reused == 't' and native == client == '"*Romacs*"' and chosen == inhibited == '"*scratch*"'
+                        and beside_native == '"a.txt"' and beside_client == '"*scratch*"')
         return result
     finally:
         s.close()
@@ -585,7 +656,7 @@ def lisp_read(text):
 
 
 WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
-             'probe': probe, 'daemon': daemon}
+             'probe': probe, 'daemon': daemon, 'landing': landing}
 
 
 def main():
@@ -600,7 +671,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['lifecycle', 'waiters', 'stop', 'build', 'probe']:
+    for name in args.workflow or ['lifecycle', 'waiters', 'landing', 'stop', 'build', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
