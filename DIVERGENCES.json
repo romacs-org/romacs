@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "dc42a1736a8888c31806c27b475c409324d5f85f19af0839dedf4651452f14c3",
+  "input_hash": "b49b10a790e3f7de1ab38d7af2df2b8778b5c1cbe6ccd1d70aa53319484caa41",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -9183,10 +9183,10 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "Extended and raw-byte character substrate; literal kinds still staged",
+   "mechanism": "Extended and raw-byte character substrate",
    "gnu": "GNU `(max-char)` is 4194303, `(max-char t)` is 1114111; `(string-bytes (char-to-string 1114112))` is 4 and raw-byte character 4194303 occupies 2 multibyte bytes; ASCII literals are unibyte",
-   "romacs": "VM2 now matches those character limits, byte counts, conversions, equality/hash shapes and octal raw-byte printing through internal encoded `LispString`; Object remains 32 bytes. ASCII literal/format/printer kind flips are intentionally not in P1a: `(multibyte-string-p \"abc\")` remains t, GNU nil",
-   "why": "Partial closure: full-range runtime substrate is present; P1b owns literal/result kind changes, P2 mixed concat widening, P6 raw/extended source constants",
+   "romacs": "VM2 now matches those character limits, byte counts, conversions, equality/hash shapes and octal raw-byte printing through internal encoded `LispString`; Object remains 32 bytes. ASCII literals are unibyte, as GNU's, and unibyte ASCII of any origin takes the string slot (`data::unibyte_object`), so every reader of text takes it; only bytes above 127 are a byte string",
+   "why": "Partial closure: full-range runtime substrate is present; P2 mixed concat widening, P6 raw/extended source constants remain",
    "symbols": [
     "(max-char)"
    ],

@@ -747,7 +747,7 @@ impl Vm {
                     if aa < t.restriction.start.0 || bb > t.restriction.end.0 || aa > bb {
                         return Err(fail());
                     }
-                    Object::Bytes(t.bytes[aa..bb].to_vec())
+                    data::unibyte_object(t.bytes[aa..bb].to_vec())
                 }
                 _ => unreachable!("buffer_index validates"),
             }

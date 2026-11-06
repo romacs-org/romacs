@@ -49,7 +49,7 @@ fn p1a_gc_raw_properties_and_retention() {
 fn p1a_aset_reclassifies_slot_between_allocations() {
     let mut vm=Vm::new();vm.set_collection_floor(1);
     // GNU refuses width changes (D001); VM2 permits all GNU character codes.
-    assert_eq!(printed(&mut vm,"(let* ((s (copy-sequence \"ab\")) (alias s) (p (cons 'p1a-aset-left 'p1a-aset-right)) (i 0)) (put-text-property 0 1 'p1a-aset-prop p s) (aset s 0 4194303) (while (< i 10000) (cons i i) (setq i (1+ i))) (list (eq s alias) (eq p (get-text-property 0 'p1a-aset-prop s)) (aref s 0) (string-bytes s)))"), "(t t 4194303 3)");
+    assert_eq!(printed(&mut vm,"(let* ((s (string-to-multibyte \"ab\")) (alias s) (p (cons 'p1a-aset-left 'p1a-aset-right)) (i 0)) (put-text-property 0 1 'p1a-aset-prop p s) (aset s 0 4194303) (while (< i 10000) (cons i i) (setq i (1+ i))) (list (eq s alias) (eq p (get-text-property 0 'p1a-aset-prop s)) (aref s 0) (string-bytes s)))"), "(t t 4194303 3)");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn p1a_aset_utf8_slot_invariant_both_directions() {
     let mut vm=Vm::new(); vm.set_collection_floor(1);
     // GNU refuses this write; D001 deliberately accepts it. Unicode-only
     // display must now refuse normally, not panic by treating raw bytes as &str.
-    let raw=vm.eval_source("(condition-case nil (let ((s (copy-sequence \"a\"))) (aset s 0 4194303) s) (error nil))").unwrap();
+    let raw=vm.eval_source("(condition-case nil (let ((s (string-to-multibyte \"a\"))) (aset s 0 4194303) s) (error nil))").unwrap();
     assert!(raw.display().is_err(), "raw mutation must reclassify the String slot");
     let raw=raw.root();
     vm.declare_special_rooted("p1a-slot-invariant",&raw).unwrap();

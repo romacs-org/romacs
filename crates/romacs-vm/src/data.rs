@@ -156,6 +156,12 @@ const ASCII: u8 = 2;
 const UTF8: u8 = 4;
 /// The heap object of STRING: a `String` when it is UTF-8, else a
 /// `RawString` (a multibyte string with raw bytes).
+/// Unibyte text as an object: ASCII keeps the string slot, which every
+/// reader of text takes; only bytes above 127 are a byte string.
+pub(crate) fn unibyte_object(bytes: Vec<u8>) -> Object {
+    if bytes.is_ascii() { string_object(LispString::from_bytes(bytes, false)) } else { Object::Bytes(bytes) }
+}
+
 pub(crate) fn string_object(string: LispString) -> Object {
     let string = Box::new(string);
     if string.is_utf8() { Object::String(string) } else { Object::RawString(string) }
@@ -437,7 +443,7 @@ impl Vm {
     }
     pub(crate) fn make_lisp_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
         if !multibyte {
-            return self.allocate_object(Object::Bytes(bytes));
+            return self.allocate_object(unibyte_object(bytes));
         }
         self.allocate_object(string_object(LispString::from_bytes(bytes, multibyte)))
     }
@@ -567,6 +573,10 @@ impl Vm {
             Form::Sym(s) => {
                 let slot = self.slot(s);
                 Ok(Value::reference(slot + 1, 7))
+            }
+            // Unibyte text; ASCII keeps its string slot, as the reader's.
+            Form::Bytes(bytes) if bytes.is_ascii() => {
+                Ok(self.allocate_object(Object::String(Box::new(LispString::from_bytes(bytes.clone(), false)))))
             }
             Form::Bytes(bytes) => Ok(self.byte_string(bytes)),
             Form::String(s) => {
