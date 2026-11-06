@@ -63,6 +63,10 @@
   "The harness's permission mode in a chat's header.")
 (defface romacs-agent-section '((t :inherit font-lock-function-name-face :weight bold))
   "A project heading on the home page.")
+(defface romacs-agent-delegate '((t :inherit font-lock-function-name-face :weight bold))
+  "Face of a delegated task's title.")
+(defface romacs-agent-link '((t :inherit link))
+  "Face of a link to a delegated task's thread.")
 (defface romacs-agent-unread '((t :weight bold))
   "A session whose last turn ended since its chat was shown.")
 
@@ -71,6 +75,8 @@
   "Marker at the transcript's end; the composer follows it.")
 (defvar-local romacs-agent-ui--tool-lines nil
   "Tool use id to the marker at its row's mark.")
+(defvar-local romacs-agent-ui--tasks nil
+  "A delegated task's id to the marker of its card's state chip.")
 (defvar-local romacs-agent-ui--messages nil
   "An open message's id to (START . LENGTH): where its text starts and how
 much of it its deltas wrote.")
@@ -156,8 +162,106 @@ is always taken after its own text is in."
       (match-string 1 name)
     (or name "tool")))
 
+(defun romacs-agent-ui--delegation (name input)
+  "What a card shows for tool NAME's INPUT, (TITLE DETAIL), or nil when
+the tool delegates nothing.  One card serves a harness's own subagent
+tool and `romacs_delegate_task'."
+  (when (hash-table-p input)
+    (pcase name
+      ("romacs_delegate_task"
+       (let ((target (gethash "target" input)))
+         (list (or (gethash "title" input) "task")
+               (and (hash-table-p target) (gethash "provider" target)))))
+      ((or "Agent" "Task")
+       (list (or (gethash "description" input) "task") (gethash "subagent_type" input))))))
+
+(defun romacs-agent-ui--tool-text (name input)
+  "A tool row's text after its mark: a delegation's card head, or NAME and
+a brief of INPUT."
+  (let ((delegation (romacs-agent-ui--delegation name input)))
+    (if delegation
+        (concat " ⇢ " (propertize (car delegation) 'face 'romacs-agent-delegate 'romacs-agent-card t)
+                (if (cadr delegation) (propertize (concat "  " (cadr delegation)) 'face 'romacs-agent-dim) ""))
+      (let ((brief (romacs-agent-ui--brief input)))
+        (concat " " name (if (string-empty-p brief) "" (concat "  " brief)))))))
+
+(defun romacs-agent-ui--chip (state)
+  "A task's STATE as its card shows it."
+  (propertize state 'romacs-agent-chip t
+              'face (pcase state
+                      ("completed" 'romacs-agent-done)
+                      ((or "failed" "cancelled") 'romacs-agent-error)
+                      (_ 'romacs-agent-running))))
+
+(defvar romacs-agent-ui--link-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'romacs-agent-chat-open-task)
+    (define-key map [mouse-1] #'romacs-agent-chat-open-task)
+    map)
+  "Keys of a link to a delegated task's thread.")
+
+(defun romacs-agent-ui--thread-link (id)
+  "A link to task ID's thread."
+  (propertize "↗ thread" 'face 'romacs-agent-link 'mouse-face 'highlight 'help-echo "Open this task's thread"
+              'keymap romacs-agent-ui--link-map 'romacs-agent-task id))
+
+(defun romacs-agent-ui--task-record (output)
+  "The task record a delegate call's OUTPUT holds, or nil."
+  (let ((record (ignore-errors (json-parse-string output))))
+    (and (hash-table-p record) (stringp (gethash "taskId" record)) record)))
+
+(defun romacs-agent-ui--card-task (record tool)
+  "Give the card of tool call TOOL on this line RECORD's state and a link
+to its thread, which fold its result as the rest of the row does."
+  (let ((id (gethash "taskId" record)))
+    (save-excursion
+      (end-of-line)
+      (let ((start (point)))
+        (romacs-agent-ui--insert-at
+         start (propertize (concat "  " (romacs-agent-ui--chip (gethash "status" record "running"))
+                                   "  " (romacs-agent-ui--thread-link id))
+                           'romacs-agent-tool tool))
+        (puthash id (copy-marker (+ start 2)) romacs-agent-ui--tasks)))))
+
+(defun romacs-agent-ui--settle-task (id state)
+  "Show STATE on task ID's card, when it has one here."
+  (when-let* ((mark (gethash id romacs-agent-ui--tasks)))
+    (save-excursion
+      (let* ((inhibit-read-only t) (start (marker-position mark))
+             (tool (get-text-property start 'romacs-agent-tool)))
+        (delete-region start (next-single-property-change start 'romacs-agent-chip))
+        (romacs-agent-ui--insert-at start (propertize (romacs-agent-ui--chip state) 'romacs-agent-tool tool))
+        (set-marker mark start)))))
+
+(defun romacs-agent-ui--wake (session text)
+  "TEXT, a message to SESSION, as the wake of a task it delegated, or nil:
+what the user wrote stays theirs, whatever it looks like."
+  (when-let* ((wake (romacs-agent-tools--wake-parse text))
+              (child (romacs-agent-get (plist-get wake :id)))
+              ((equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+    wake))
+
+(defun romacs-agent-ui--arrival (session event wake)
+  "Show WAKE, a task's result reaching SESSION at EVENT: a row of its own,
+never a prompt, the result folded below it, and its card settled."
+  (let* ((id (plist-get wake :id)) (state (plist-get wake :state))
+         (result (string-trim (plist-get wake :result)))
+         (key (format "%s:%s" id (plist-get event :seq)))
+         (preview (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " result) 72 nil nil "…")))
+    (romacs-agent-ui--settle-task id state)
+    (romacs-agent-ui--line
+     session event
+     (concat "  ⇠ " (propertize (plist-get wake :title) 'face 'romacs-agent-delegate 'romacs-agent-card t)
+             "  " (romacs-agent-ui--chip state) "  " (romacs-agent-ui--thread-link id)
+             (if (string-empty-p preview) "" (propertize (concat "  " preview) 'face 'romacs-agent-dim)))
+     'romacs-agent-tool key)
+    (unless (string-empty-p result)
+      (romacs-agent-ui--insert (concat result "\n") 'face 'romacs-agent-dim 'romacs-agent-output key
+                               'invisible 'romacs-agent-output))))
+
 (defun romacs-agent-ui--tool (session event)
-  "A tool row: ● while running, then ✓ or !, its output folded below."
+  "A tool row: ● while running, then ✓ or !, its output folded below.  A
+delegation's row is a card (`romacs-agent-ui--tool-text')."
   (let ((id (plist-get event :id)))
     (pcase (plist-get event :state)
       ('started
@@ -167,15 +271,19 @@ is always taken after its own text is in."
            (romacs-agent-ui--insert (concat (if (save-excursion (goto-char romacs-agent-ui--end) (bolp)) "" "\n") indent))
            (romacs-agent-ui--insert "●" 'face 'romacs-agent-running)
            (puthash id (copy-marker (1- romacs-agent-ui--end)) romacs-agent-ui--tool-lines)
-           (romacs-agent-ui--insert (concat " " name
-                                            (let ((brief (romacs-agent-ui--brief (plist-get event :input))))
-                                              (if (string-empty-p brief) "" (concat "  " brief)))
-                                            "\n")
+           (romacs-agent-ui--insert (concat (romacs-agent-ui--tool-text name (plist-get event :input)) "\n")
                                     'romacs-agent-tool id))))
       (state
        (let* ((output (or (plist-get event :output) ""))
               (failed (eq state 'failed))
-              (mark (gethash id romacs-agent-ui--tool-lines)))
+              (mark (gethash id romacs-agent-ui--tool-lines))
+              (card (and mark (save-excursion
+                                (goto-char mark)
+                                (text-property-any (point) (line-end-position) 'romacs-agent-card t))))
+              (record (and card (romacs-agent-ui--task-record output)))
+              ;; A task's record is the card; a `wait' brings its result
+              ;; here, and no wake follows it.
+              (body (if record (let ((result (gethash "result" record))) (if (stringp result) result "")) output)))
          (setq romacs-agent-ui--tool nil)
          (save-excursion
            (let ((inhibit-read-only t))
@@ -186,11 +294,14 @@ is always taken after its own text is in."
                (delete-char 1)
                (insert (romacs-agent-ui--sealed
                         (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-done))))
-               (add-face-text-property (point) (line-end-position) (if failed 'romacs-agent-error 'romacs-agent-dim))
+               ;; A card stays readable: it is the task, not a settled call.
+               (when (or failed (not card))
+                 (add-face-text-property (point) (line-end-position) (if failed 'romacs-agent-error 'romacs-agent-dim)))
+               (when record (romacs-agent-ui--card-task record id))
                (forward-line 1))
-             (unless (string-empty-p (string-trim output))
+             (unless (string-empty-p (string-trim body))
                (romacs-agent-ui--insert-at
-                (point) (propertize (concat (string-trim-right output) "\n")
+                (point) (propertize (concat (string-trim-right body) "\n")
                                     'face 'romacs-agent-dim 'romacs-agent-output id
                                     'invisible 'romacs-agent-output))))))))))
 
@@ -280,11 +391,13 @@ or a repeat."
   "Draw SESSION's EVENT in its chat BUFFER, the current buffer."
       (pcase (plist-get event :type)
         ('input
-         (romacs-agent-ui--line session event "")
-         (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
-         (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
-         (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
-         (romacs-agent-ui--insert "\n")
+         (let ((wake (romacs-agent-ui--wake session (plist-get event :text))))
+           (if wake (romacs-agent-ui--arrival session event wake)
+             (romacs-agent-ui--line session event "")
+             (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
+             (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
+             (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
+             (romacs-agent-ui--insert "\n")))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
@@ -501,6 +614,7 @@ or a repeat."
     (define-key map "?" (romacs-agent-ui--transcript-key #'romacs-agent-chat-actions-map-popup))
     (define-key map "n" (romacs-agent-ui--transcript-key #'romacs-agent-chat-next-turn))
     (define-key map "p" (romacs-agent-ui--transcript-key #'romacs-agent-chat-previous-turn))
+    (define-key map "o" (romacs-agent-ui--transcript-key #'romacs-agent-chat-open-task))
     (define-key map "w" (romacs-agent-ui--transcript-key #'romacs-agent-chat-copy))
     (define-key map "e" (romacs-agent-ui--transcript-key #'romacs-agent-chat-edit-turn))
     (define-key map "r" (romacs-agent-ui--transcript-key #'romacs-agent-chat-quote-region))
@@ -550,6 +664,7 @@ and a running turn's live rule ticks."
         (romacs-agent-chat-mode)
         (setq romacs-agent-ui--session session
               romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+              romacs-agent-ui--tasks (make-hash-table :test #'equal)
               romacs-agent-ui--messages (make-hash-table :test #'equal))
         (let ((inhibit-read-only t)) (erase-buffer))
         (setq romacs-agent-ui--end (point-marker))
@@ -687,6 +802,18 @@ transcript, scroll back, as hermes's chat does."
           (when (> (point) start)
             (put-text-property start (point) 'invisible
                                (if (get-text-property start 'invisible) nil 'romacs-agent-output))))))))
+
+(defun romacs-agent-chat-open-task ()
+  "Open the thread of the delegated task on this row."
+  (interactive)
+  (let* ((start (line-beginning-position))
+         (at (if (get-text-property start 'romacs-agent-task) start
+               (next-single-property-change start 'romacs-agent-task nil (line-end-position))))
+         (id (get-text-property at 'romacs-agent-task))
+         (session (and id (romacs-agent-get id))))
+    (cond (session (romacs-agent-show session))
+          (id (user-error "Task %s is gone" id))
+          (t (user-error "No delegated task on this row")))))
 
 (defun romacs-agent-chat-composer ()
   "Go to the composer."

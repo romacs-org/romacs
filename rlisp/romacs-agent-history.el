@@ -450,6 +450,7 @@ buffer, for SESSION: its end, from a prompt on."
                                         :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
                                         :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history)
               romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+              romacs-agent-ui--tasks (make-hash-table :test #'equal)
               romacs-agent-ui--messages (make-hash-table :test #'equal)
               romacs-agent-ui--end (point-marker)))
       ;; Shown first: its rules fit its window.

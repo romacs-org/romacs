@@ -322,6 +322,14 @@ parent's harness takes them in order."
   (format "Delegated task %s (%s) [%s]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
           (if (nth 2 end) "failed" "completed") (or (nth 1 end) "")))
 
+(defun romacs-agent-tools--wake-parse (text)
+  "TEXT read back as a `romacs-agent-tools--wake-text', a plist of :id
+:title :state :result, or nil.  The harness takes a wake as a plain
+message, so its journal keeps only this text."
+  (when (string-match "\\`Delegated task \\([0-9a-f-]\\{36\\}\\) (\\(.*\\)) \\[\\(completed\\|failed\\)\\]:\n" text)
+    (list :id (match-string 1 text) :title (match-string 2 text) :state (match-string 3 text)
+          :result (substring text (match-end 0)))))
+
 (defvar romacs-agent-tools--answered (make-hash-table :test #'equal)
   "A child's id to a table of its turn ends' seqs a `wait' answered with,
 read once from its `answered' file.")
