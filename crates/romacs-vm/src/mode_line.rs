@@ -18,11 +18,16 @@ pub(super) enum Target { Display, String, NoProp }
 /// `format-mode-line' string carries them all, and so does the status bar
 /// (`BandMarks' and its clicks read them, VM2-STATUS-BAR); a window's band
 /// none.
-const PROJECTED: [&str; 7] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text"];
+const PROJECTED: [&str; 8] = ["local-map", "keymap", "help-echo", "romacs-segment", "romacs-icon", "romacs-pill", "romacs-pill-text", "romacs-pill-modified"];
+
+/// The properties a window's header or mode line projects: a string's
+/// `display', whose `(space ...)' the band shows as a stretch, as GNU's
+/// display of a mode-line string does (VM2-MODE-LINE-STRETCH).
+const BAND: [&str; 1] = ["display"];
 
 /// The `:propertize' properties that make a construct one of the status
 /// bar's segments, which owns all it expands to (`Band::segments').
-const SEGMENT: [&str; 4] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-priority"];
+const SEGMENT: [&str; 5] = ["romacs-segment", "romacs-pill", "romacs-pill-text", "romacs-pill-modified", "romacs-priority"];
 
 /// A piece's projected properties, by name.
 /// Each value is shared (`Rc'): a `:propertize''s values reach every piece
@@ -45,6 +50,11 @@ struct Own {
     projected: Projected,
 }
 
+impl Band {
+    /// Whether this is the status bar's band, which reads segments.
+    fn marks(&self) -> bool { self.projected.contains(&"romacs-segment") }
+}
+
 /// One expanded mode line: text plus face-name runs over its bytes.
 #[derive(Clone)]
 pub(super) struct Band {
@@ -65,6 +75,10 @@ pub(super) struct Band {
     /// restarts the count, as GNU's global does.
     pub elt: i64,
     pub elts: Vec<(Range<usize>, i64)>,
+    /// Where each string element's rendering starts in TEXT, ascending: a
+    /// display property is seated again at each (display_string), so a
+    /// stretch never spans two (`Vm::band_spaces').
+    pub element_starts: Vec<usize>,
     /// Columns already built, and the most that can ever be shown. GNU's
     /// display_string stops at the window's last visible column
     /// (`xdisp.c:30105`); text past it is never produced, so no field width
@@ -285,6 +299,7 @@ impl Band {
         self.props.extend(other.props.into_iter().map(|(r, v)| (moved(r), v)));
         self.segments.extend(other.segments.into_iter().map(|(r, v)| (moved(r), v)));
         self.elts.extend(other.elts.into_iter().map(|(r, v)| (moved(r), v)));
+        self.element_starts.extend(other.element_starts.into_iter().map(|start| at + start));
         self.text.push_str(&other.text);
     }
     /// The band without the bytes of DROP, disjoint ranges in order: its
@@ -560,9 +575,10 @@ impl Vm {
         let projected: &'static [&'static str] = match target {
             Target::String => &PROJECTED,
             Target::Display if state.marks => &PROJECTED,
-            Target::Display | Target::NoProp => &[],
+            Target::Display => &BAND,
+            Target::NoProp => &[],
         };
-        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], cols: 0, max_cols, rule: self.width_rule()? };
+        let mut band = Band { text: String::new(), runs: vec![], props: vec![], segments: vec![], projected, target, elt: 0, elts: vec![], element_starts: vec![], cols: 0, max_cols, rule: self.width_rule()? };
         self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
         Ok(band)
     }
@@ -592,15 +608,19 @@ impl Vm {
             }
             depth += 1;
             if let Some(s) = self.ml_string(&elt)? {
+                // A start stays only if the element renders text: an empty
+                // one (a `%M' of "") seats nothing, so it splits no stretch.
+                let start = band.text.len();
+                let seated = band.element_starts.last() != Some(&start);
+                if seated { band.element_starts.push(start); }
                 // GNU replaces a risky string's properties with PROPS and
                 // otherwise merges PROPS onto the string's own: where PROPS
                 // has no face, the string's own faces show.
                 // The status bar reads a string's own projected properties;
-                // a window's band only its faces.
+                // a window's band its faces and `display'.
                 let own_names: &'static [&'static str] = match band.target {
-                    Target::String => band.projected,
-                    Target::Display if !band.projected.is_empty() => &PROJECTED,
-                    _ => &[],
+                    Target::String | Target::Display => band.projected,
+                    Target::NoProp => &[],
                 };
                 let own = self.ml_own_props(&elt, props.as_deref(), risky, own_names)?;
                 if literal {
@@ -608,6 +628,7 @@ impl Vm {
                     let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
                     n += chars(shown);
                     match &own { Some(own) => band.push_own(shown, own, 0, props.as_deref()), None => band.push_piece(shown, props.as_deref(), None) }
+                    if seated && band.text.len() == start { band.element_starts.pop(); }
                     break;
                 }
                 let mut rest = s.split('\0').next().unwrap_or_default();
@@ -661,6 +682,7 @@ impl Vm {
                     }
                     n += written;
                 }
+                if seated && band.text.len() == start { band.element_starts.pop(); }
                 break;
             }
             // ELT is taken, not copied: each arm moves its parts on.
@@ -710,14 +732,14 @@ impl Vm {
                                 let start = band.text.len();
                                 // In the status bar a construct naming a segment
                                 // owns all it expands to (`Band::segments').
-                                let segment = (band.target == Target::Display && !band.projected.is_empty()
+                                let segment = (band.target == Target::Display && band.marks()
                                                && plist_has(&plist, "romacs-segment"))
                                     .then(|| propertize_of(&plist, &SEGMENT)).flatten().map(|p| p.projected.clone());
-                                // The bar's painter lays out what follows a
-                                // `right-align' marker from the right edge and
+                                // The bar's painter lays out the zone a `centre-align'
+                                // or `right-align' marker starts on its own and
                                 // shows it whole: it gets its own columns, however
-                                // long the left side ran.
-                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(&**v, Form::Sym(v) if v == "right-align"))) {
+                                // long the zone before it ran.
+                                if segment.as_ref().is_some_and(|s| s.iter().any(|(name, v)| *name == "romacs-segment" && matches!(&**v, Form::Sym(v) if v == "right-align" || v == "centre-align"))) {
                                     band.cols = 0;
                                 }
                                 n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, propertize_of(&plist, band.projected), risky)?;
@@ -891,8 +913,7 @@ impl Vm {
             // (xdisp.c:29840). The initial terminal keeps GNU's "not yet
             // decided" mnemonics (`decode_mode_spec_coding`).
             'z' | 'Z' if self.frame_type() != Value::TRUE => {
-                let slot = self.slot("enable-multibyte-characters");
-                let multibyte = !matches!(self.variable_value(slot)?, Value::NIL | Value::UNBOUND);
+                let multibyte = !matches!(self.object_if(self.slots[self.buffer_slot].value), Some(crate::data::Object::ByteBuffer(_)));
                 let slot = self.slot("buffer-file-coding-system");
                 let coding = self.variable_value(slot)?;
                 let coding = if coding == Value::UNBOUND { Value::NIL } else { coding };

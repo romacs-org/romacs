@@ -377,7 +377,7 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_COMPILED_LISP'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')

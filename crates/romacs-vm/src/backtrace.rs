@@ -251,6 +251,15 @@ impl Vm {
             }
         }
     }
+    /// `backtrace_arguments' for a reader that must not panic.
+    pub(super) fn backtrace_arguments_if(&self, index: usize) -> Option<&[Value]> {
+        match &self.backtrace.frames.get(index)?.args {
+            Arguments::Copied(range) => self.backtrace.arguments.get(range.clone()),
+            &Arguments::Registers { stack, offset, count } => {
+                self.suspended_stacks.get(stack).unwrap_or(&self.stack).get(offset..offset.checked_add(count)?)
+            }
+        }
+    }
     pub(super) fn backtrace_resolve(
         &self,
         original: Value,

@@ -15,7 +15,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![PlacedWindowSnapshot {
             x: 0,
             y: 0,
-            snapshot: WindowSnapshot { underline_rules: Default::default(),
+            snapshot: WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
                 id: 1,
                 width: 400,
                 height: 300,
