@@ -9,7 +9,7 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
-pub(crate) use mini_window::buffer_of;
+pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
@@ -319,12 +319,13 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
-    /// Window END.id's last publication was painted as END reports.
-    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
+    /// Window END.id's last publication was painted as END reports, ending
+    /// at buffer byte BYTE.
+    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
         let base = self.base(end.id);
         let segments = self.segments.get(&end.id).cloned();
         if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv, segments.as_deref())));
+            shown.laid = Some((shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -473,8 +474,11 @@ struct Shown {
     /// The window laid out from its start under a key: by its last paint
     /// under KEY, or by redisplay since under the key then (`window_layout`).
     laid: Option<(ShownKey, Laid)>,
+    /// The key the recorded end was laid out under when redisplay recorded
+    /// it since the last paint (`record_end_laid'), else KEY's.
+    ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -1355,7 +1359,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None, ended: None });
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1402,9 +1406,35 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
-        let laid = laid(&end, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        let byte = shown.base + end.end;
+        let byte = match (&shown.segments, self.object(self.window(window)?.buffer)?) {
+            (Some(segments), Object::Buffer(b)) => shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)),
+            _ => byte,
+        };
+        let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
         if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
         Ok(Some(laid))
+    }
+    /// Whether the end recorded for WINDOW still holds (GNU's Fwindow_end
+    /// asks `window_end_valid', `clip_changed' and `window_outdated'):
+    /// nothing it showed has changed since, and no `force-window-update'
+    /// waits. Point may have moved.
+    pub(crate) fn window_end_current(&mut self, window: Value) -> Result<bool> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        Ok(w.end_valid && self.display_state.previous.contains_key(&w.id)
+            && self.display_state.shown.get(&w.id).is_some_and(|shown| shown.ended.as_ref().unwrap_or(&shown.key).same_display(&key)))
+    }
+    /// Redisplay recorded WINDOW's end from `window_layout' before any
+    /// paint: it holds for what the window shows now.
+    pub(crate) fn record_end_laid(&mut self, window: Value) -> Result<()> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.ended = Some(key); }
+        self.window_mut(window)?.end_valid = true;
+        Ok(())
     }
     /// WINDOW laid out from its start as `window_layout' lays it out, every
     /// row, and the text it showed; not recorded.
@@ -3046,8 +3076,8 @@ fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
     buffer_of(segments, display, end)
 }
 
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
+fn laid(end: &romacs_layout_input::WindowEnd, byte_end: usize, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
     let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
     let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
-    Laid { end: byte(end.end), visible_end, body_height: end.body_height }
+    Laid { end: byte_end, visible_end, body_height: end.body_height }
 }
