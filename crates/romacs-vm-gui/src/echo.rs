@@ -23,7 +23,10 @@ use romacs_vm::Vm;
 ///
 /// As GNU's echo area, a multibyte buffer, holds it: ASCII messages
 /// (`format''s and `set_echo_area_message''s) are unibyte strings; a raw
-/// byte shows as GNU's \ooo escape, so the text is always printable.
+/// byte shows as GNU's \ooo escape, so the text is always printable. The
+/// message keeps its text properties, so a key hint's `help-key-binding'
+/// reaches the echo area and the layers showing it; only a message with a
+/// raw byte, rebuilt for that escape, loses them.
 const LISP: &str = r#"(progn
   (defvar romacs--echo-shown nil)
   (defun romacs--echo-display (text)
@@ -36,9 +39,12 @@ const LISP: &str = r#"(progn
     (and (boundp 'romacs-echo-area-functions) romacs-echo-area-functions
          (condition-case nil (run-hook-with-args 'romacs-echo-area-functions text) (error nil))))
   (defun romacs--echo-printable (message)
-    (string-to-multibyte
-     (mapconcat (lambda (c) (if (> c #x10ffff) (format "\\%o" (logand c 255)) (string c)))
-                (string-to-multibyte (substring-no-properties message)) "")))
+    (let ((text (string-to-multibyte message)))
+      (if (catch 'raw (mapc (lambda (c) (if (> c #x10ffff) (throw 'raw t))) text) nil)
+          (string-to-multibyte
+           (mapconcat (lambda (c) (if (> c #x10ffff) (format "\\%o" (logand c 255)) (string c)))
+                      (substring-no-properties text) ""))
+        text)))
   (defun romacs--echo-sync ()
     (let ((message (current-message)))
       (unless (or (eq message romacs--echo-shown) (> (minibuffer-depth) 0))
@@ -117,6 +123,21 @@ mod tests {
         crate::startup::initialize(&mut vm).unwrap();
         crate::eval_last_sexp::install(&mut vm).unwrap();
         (vm, Default::default(), crate::presentation::Presentation::new())
+    }
+
+    /// A key hint's face reaches the echo area and what shows its messages.
+    #[test]
+    fn a_message_keeps_its_faces_to_the_echo_area() {
+        let (mut vm, _, _) = workspace();
+        vm.set_echo_area_host(true);
+        vm.eval_source("(setq seen nil romacs-echo-area-functions (list (lambda (text) (setq seen text))))
+                        (message \"%s\" (propertize \"C-c\" 'face 'help-key-binding))").unwrap();
+        show_current_message(&mut vm).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        assert_eq!(printed(&mut vm, "(list (substring-no-properties seen) (get-text-property 0 'face seen))"), "(\"C-c\" help-key-binding)");
+        assert_eq!(text(&mut vm).unwrap(), "C-c");
+        assert_eq!(printed(&mut vm, "(save-current-buffer (set-buffer (window-buffer (minibuffer-window))) (get-text-property 1 'face))"),
+                   "help-key-binding");
     }
 
     /// A message holding a raw byte, even one whose `message' signalled,

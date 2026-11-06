@@ -175,7 +175,7 @@ fn c_c_c_j_leaves_the_cursor_and_returns() {
     let cursor = printed(&mut vm, "(point)");
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(3), CommandEvent::Character(10)]), 1);
     assert_eq!(printed(&mut vm, "(list (point) (plist-get (romacs--term-state romacs-term-session) :following) (current-message))"),
-               format!("({cursor} nil \"Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there Up/Down recall history\")"), "C_C_C_J_LEAVES_AT_THE_CURSOR");
+               format!("({cursor} nil \"Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there <up>/<down> recall history\")"), "C_C_C_J_LEAVES_AT_THE_CURSOR");
     assert!(sent(&state).is_empty(), "LEAVING_SENDS_NOTHING");
     // Emacs keys move there; C-c C-j again returns to the cursor.
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(16)]), 1);
@@ -208,7 +208,7 @@ fn motion_keys_move_point_and_typing_returns() {
     // nothing reaches the shell, and the motion hint shows once.
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(16)]), 1);
     assert_eq!(printed(&mut vm, &"(list (< (point) {cursor}) (plist-get (romacs--term-state romacs-term-session) :following) (current-message))".replace("{cursor}", &cursor)),
-               "(t nil \"C-p/C-n move; type or C-c C-j to return; there Up/Down recall history\")", "C_P_MOVES_AND_HINTS");
+               "(t nil \"C-p/C-n move; type or C-c C-j to return; there <up>/<down> recall history\")", "C_P_MOVES_AND_HINTS");
     assert!(sent(&state).is_empty(), "C_P_SENDS_NOTHING");
     // C-n moves back down; M-< and M-> move to the scrollback's ends.
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(14), CommandEvent::Character(0x8000000 | 0x3c)]), 2);
@@ -220,7 +220,7 @@ fn motion_keys_move_point_and_typing_returns() {
     assert_eq!(printed(&mut vm, "(list (point) (plist-get (romacs--term-state romacs-term-session) :following))"), format!("({cursor} t)"), "TYPING_RETURNS");
     // The hint shows once per terminal.
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(16)]), 1);
-    assert_ne!(printed(&mut vm, "(current-message)"), "\"C-p/C-n move; type or C-c C-j to return; there Up/Down recall history\"", "THE_HINT_SHOWS_ONCE");
+    assert_ne!(printed(&mut vm, "(current-message)"), "\"C-p/C-n move; type or C-c C-j to return; there <up>/<down> recall history\"", "THE_HINT_SHOWS_ONCE");
     // A program the shell runs in the foreground (a REPL) gets them.
     type_keys(&mut vm, &state, keys(&[ch('y')]), 1);
     sent(&state);
@@ -277,7 +277,7 @@ fn the_hint_waits_for_the_echo_area() {
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(META | '<' as i64)]), 1);
     assert_eq!(printed(&mut vm, "(current-message)"), "\"Mark set\"", "M_LESS_KEEPS_ITS_MESSAGE");
     type_keys(&mut vm, &state, keys(&[CommandEvent::Character(14)]), 1);
-    assert_eq!(printed(&mut vm, "(current-message)"), "\"C-p/C-n move; type or C-c C-j to return; there Up/Down recall history\"", "THE_HINT_COMES_NEXT");
+    assert_eq!(printed(&mut vm, "(current-message)"), "\"C-p/C-n move; type or C-c C-j to return; there <up>/<down> recall history\"", "THE_HINT_COMES_NEXT");
 }
 
 #[test]
@@ -458,4 +458,20 @@ fn terminal_base_colours_follow_the_ansi_color_faces() {
     assert_eq!(foreground(&mut vm),[0xff,0x5f,0x59],"BASE_COLOUR_IS_THE_FACE_S");
     vm.eval_source("(internal-set-lisp-face-attribute 'ansi-color-red :foreground \"#604020\" nil)").unwrap();
     assert_eq!(foreground(&mut vm),[0x60,0x40,0x20],"A_FACE_CHANGE_RECOLOURS_THE_TERMINAL");
+}
+
+#[test]
+fn terminal_commands_declare_their_mode_and_its_hints_show_real_keys() {
+    let (mut vm,_)=setup(); open(&mut vm);
+    assert_eq!(printed(&mut vm,"(mapcar #'command-modes '(romacs-term-interrupt romacs-term-send-key romacs-term-yank romacs-term))"),
+               "((romacs-term-mode) (romacs-term-mode) (romacs-term-mode) nil)","ENTRY_POINT_STAYS_GLOBAL");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c C-c interrupt  C-c C-j leave\")"),"t");
+    assert_eq!(printed(&mut vm,"(let ((text (romacs-term--hint))) (list (get-text-property 0 'face text) (get-text-property 8 'face text)))"),
+               "((help-key-binding romacs-term-dim) romacs-term-dim)","KEYS_IN_THEIR_FACE_OVER_THE_DIM_TEXT");
+    assert_eq!(printed(&mut vm,"(let ((first (romacs-term--hint))) (eq first (romacs-term--hint)))"),"t","NO_LOOKUP_PER_REDISPLAY");
+    vm.eval_source("(define-key romacs-term-mode-map [3 3] nil) (define-key romacs-term-mode-map [3 11] nil)
+                    (define-key romacs-term-mode-map [3 105] 'romacs-term-interrupt)").unwrap();
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c i interrupt  C-c C-j leave\")"),"t","A_REBINDING_SHOWS");
+    assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--away-keys)) \"C-p/C-n move; type or C-c C-j to return; there <up>/<down> recall history\")"),"t");
+    assert_eq!(printed(&mut vm,"(get-text-property 0 'face (romacs-term--away-keys))"),"help-key-binding");
 }
