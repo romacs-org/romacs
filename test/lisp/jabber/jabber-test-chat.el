@@ -4241,6 +4241,23 @@ Non-nil GROUP selects a MUC send through the same native discovery."
      (should-not jabber-message-reply--id)
      (should (equal '("nested body") jabber-chat--input-history)))))
 
+(ert-deftest jabber-test-chat-plain-message-loads-no-crypto ()
+  "A plain message loads no crypto module; an encrypted one does, once."
+  (let ((jabber-chat--crypto-loaded nil)
+        (jabber-chat-decrypt-handlers nil)
+        (required nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &rest _) (push feature required) feature)))
+      (jabber-chat--decrypt-if-needed
+       'jc '(message ((from . "peer@example.com")) (body () "plain")))
+      (should-not required)
+      (should-not jabber-chat--crypto-loaded)
+      (dotimes (_ 2)
+        (jabber-chat--decrypt-if-needed
+         'jc '(message ((from . "peer@example.com"))
+                       (encrypted ((xmlns . "eu.siacs.conversations.axolotl"))))))
+      (should (equal '(jabber-openpgp-legacy jabber-openpgp jabber-omemo) required)))))
+
 (provide 'jabber-test-chat)
 
 ;;; jabber-test-chat.el ends here
