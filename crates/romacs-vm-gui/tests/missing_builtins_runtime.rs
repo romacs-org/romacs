@@ -40,6 +40,11 @@ const FORMS: &str = r###"
 (let ((print-circle t) (print-gensym t) (print-continuous-numbering t) (print-number-table (make-hash-table :test 'eq)) (g (make-symbol "z"))) (print--preprocess g) (gethash g print-number-table))
 (progn (put 'romacs-test-alias 'face-alias 'bold) (let ((face-remapping-alist '((bold :foreground "red")))) (list (aref (face-attributes-as-vector 'romacs-test-alias) 9))))
 (progn (let ((prev 'bold)) (dotimes (i 12) (let ((name (intern (format "romacs-test-alias-%d" i)))) (put name 'face-alias prev) (setq prev name))) (let ((face-remapping-alist '((bold :foreground "red")))) (aref (face-attributes-as-vector prev) 9))))
+(let ((b (expt 2 80)) (c (- (expt 3 60)))) (list (truncate b 7) (truncate b c) (truncate c 7) (truncate 7 b) (truncate 7.5 b) (truncate b 2.5) (floor b 7) (floor c 7) (floor c b) (floor 7 b) (floor -7 b) (floor b 2.5) (ceiling b 7) (ceiling c 7) (ceiling 7 b) (ceiling -7 b) (round b 7) (round c 7) (round b 3) (round 7 b) (round (* 3 b) (* 2 b)) (round (* 5 b) (* 2 b)) (round 1.0e300 1.0e-300) (floor 1.0e300 3) (truncate 5.0e-324 1.0e300)))
+(let ((b (expt 2 80))) (list (condition-case e (truncate b 0) (error e)) (condition-case e (floor b 0.0) (error e)) (condition-case e (round b 1.0e+INF) (error e)) (condition-case e (ceiling b 0.0e+NaN) (error e)) (condition-case e (floor 'a b) (error e)) (condition-case e (floor b 'a) (error e))))
+(let ((b (expt 2 80)) (c (- (expt 3 60)))) (list (% b 7) (% c 7) (% b c) (% 7 b) (% 7 3) (% -7 3) (oddp b) (evenp b) (with-temp-buffer (insert "abcde") (list (% (copy-marker 5) 3) (% 7 (copy-marker 4))))))
+(list (condition-case e (% (expt 2 80) 0) (error e)) (condition-case e (% 7 0) (error e)) (condition-case e (% 1.5 2) (error e)) (condition-case e (% 'a 2) (error e)) (condition-case e (% 7 2.5) (error e)) (condition-case e (funcall '% 7 2.5) (error e)) (condition-case e (funcall '% 7 0) (error e)) (condition-case e (% 7 (make-marker)) (error e)))
+
 "###;
 
 #[test]

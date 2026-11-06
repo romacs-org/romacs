@@ -363,7 +363,6 @@ enum Primitive {
     Assq,
     Setcar,
     Setcdr,
-    Remainder,
     CurrentBuffer,
     SetBuffer,
     Insert,
@@ -611,7 +610,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("assq", Primitive::Assq),
     ("setcar", Primitive::Setcar),
     ("setcdr", Primitive::Setcdr),
-    ("%", Primitive::Remainder),
     ("current-buffer", Primitive::CurrentBuffer),
     ("set-buffer", Primitive::SetBuffer),
     // The storage kernel under `insert' (prims/insdel.rs), which runs no hooks.
@@ -3677,7 +3675,7 @@ impl Vm {
         if (p as usize) >= Primitive::DisplayDefineFace as usize {
             return self.display_primitive(p, start, n);
         }
-        if (p as usize) >= Primitive::Remainder as usize {
+        if (p as usize) >= Primitive::CurrentBuffer as usize {
             return self.buffer_primitive(p, start, n);
         }
         let a = &self.stack[start..start + n];

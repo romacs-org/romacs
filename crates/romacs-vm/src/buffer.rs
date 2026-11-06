@@ -743,7 +743,7 @@ impl Vm {
         }
         let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
-            Remainder | DeleteRegion | Substring | Narrow => n == 2,
+            DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
             CurrentBuffer | Point | PointMin | PointMax | Widen => {
                 n == 0
@@ -756,14 +756,6 @@ impl Vm {
         };
         if !valid {
             return Err("wrong primitive arity".into());
-        }
-        if p == Remainder {
-            return Value::integer(
-                args[0]
-                    .as_integer()?
-                    .checked_rem(args[1].as_integer()?)
-                    .ok_or("arithmetic error")?,
-            );
         }
         if p == SetBuffer {
             let mut v = args[0];

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "a67aabebce3ab5e99053e39384679cf82cbc1a4a89dbbf2f01a05f74f5153327",
+  "input_hash": "9d572b66111db09ca1110c465f8d99ddb113c65767ac68261ce9f372485a2862",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 368,
-  "symbols": 1125,
+  "symbols": 1123,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -1114,9 +1114,6 @@
   ],
   "floatp": [
    72
-  ],
-  "floor": [
-   285
   ],
   "font-at": [
    235
@@ -3518,9 +3515,6 @@
   ],
   "treesit-query-capture": [
    212
-  ],
-  "truncate": [
-   285
   ],
   "truncate-lines": [
    200
@@ -9073,15 +9067,13 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`floor` / `round` / `ceiling` / `truncate` with a bignum operand under a DIVISOR, or a quotient past 2^127",
-   "gnu": "GNU `rounding_driver` (`src/floatfns.c:404`) divides exactly with mpz arithmetic for any integer or float operands",
-   "romacs": "Romacs shares exact quotient rounding (an odd mantissa times a power of two and u128 long division) and returns bignums for integral results outside the fixnum range, e.g. `(round 1e300)`; an integer, bignums included, rounds to itself. A bignum operand together with a DIVISOR signals `wrong-type-argument numberp`, and an exact quotient past 2^127 signals `overflow-error`. Existing pins in `tools/primh/evidence/round.json` and `ceiling.json` retain their recorded result, printer and signal differences.",
-   "why": "**Package-observable** only for bignum division and astronomically large quotients",
+   "mechanism": "`round` and `ceiling` circular-input printer pins",
+   "gnu": "GNU prints the circular domain value as `(1 2 1 2 . #2)` in the corpus rows",
+   "romacs": "The rounding results match; VM2 cannot print that input, the printer limit of VM2-ELT3, so 72 `PRINTER` pins remain in each of `tools/primh/evidence/round.json` and `ceiling.json` under `crates/romacs-vm`",
+   "why": "Printed form of a circular list only, not rounding",
    "symbols": [
-    "floor",
     "round",
-    "ceiling",
-    "truncate"
+    "ceiling"
    ],
    "symbols_derived": false
   },
