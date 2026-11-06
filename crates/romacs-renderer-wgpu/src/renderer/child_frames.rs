@@ -509,17 +509,18 @@ impl WgpuRenderer {
 
         // A layer's lighting falls outside its rect: a soft shadow below it
         // and its glow around it, clipped only by the surface.
-        if child.layer.shadow || child.layer.glow.is_some() {
+        if child.layer.shadow.is_some() || child.layer.glow.is_some() {
             let mut light: Vec<RoundedRectVertex> = Vec::new();
-            if child.layer.shadow {
-                let shade = Color::new(0.0, 0.0, 0.0, 0.55 * alpha);
-                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y + 6.0 * scale, frame_w, frame_h),
-                                             corner_radius, &shade, 11, 18.0 * scale);
+            if let Some([reach, drop, opacity]) = child.layer.shadow {
+                let shade = Color::new(0.0, 0.0, 0.0, opacity * alpha);
+                self.add_rounded_rect_styled(&mut light, (offset_x, offset_y + drop * scale, frame_w, frame_h),
+                                             corner_radius, &shade, 11, reach * scale);
             }
             if let Some(glow) = child.layer.glow {
-                let glow = Color::new(glow.r, glow.g, glow.b, 0.35 * alpha);
+                let [reach, opacity] = child.layer.glow_light;
+                let glow = Color::new(glow.r, glow.g, glow.b, opacity * alpha);
                 self.add_rounded_rect_styled(&mut light, (offset_x, offset_y, frame_w, frame_h),
-                                             corner_radius, &glow, 12, 14.0 * scale);
+                                             corner_radius, &glow, 12, reach * scale);
             }
             if let Some(upload) = self.arenas.rounded.upload(&self.device, &self.queue, &light) {
                 let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

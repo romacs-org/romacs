@@ -37,7 +37,7 @@ The run fails when
     to the first round's exceeds --slack times the ratio of the face
     counts (cost linear in the faces passes; quadratic does not).
 
-usage: theme_live.py --binary PATH --output DIR [--themes default,modus-vivendi,tango-dark]
+usage: theme_live.py --binary PATH --output DIR [--themes default,catppuccin-latte,tokyonight-night]
                      [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 4]
                      [--tools DIR:DIR]
 """
@@ -132,7 +132,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--themes', default='default,modus-vivendi,tango-dark')
+    ap.add_argument('--themes', default='default,catppuccin-latte,tokyonight-night')
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
     ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)

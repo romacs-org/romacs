@@ -79,16 +79,16 @@ pub(crate) struct ShownText {
 /// The labels LABELS gives the lines starting at STARTS, (display byte,
 /// buffer byte) in TEXT, whose accessible part starts at BEGV; none for
 /// the empty line at the end of a text of LEN bytes reaching ZV.
-fn line_numbers(table: &FaceTable, text: &str, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
+fn line_numbers(table: &FaceTable, text: &crate::text::TextBody, begv: usize, labels: &crate::prim::LineLabels, starts: Vec<(usize, usize)>, len: usize, at_zv: bool)
     -> romacs_layout_input::LineNumbers {
     let face = table.handle("line-number").unwrap_or(FaceHandle(0));
     let current = table.handle("line-number-current-line").unwrap_or(face);
-    let (mut from, mut line) = (begv, 0i64);
+    let line_of = |byte| text.line_of_byte(crate::coordinates::ByteOffset(byte)).unwrap_or(0) as i64;
+    let first = line_of(begv);
     let mut out = vec![];
     for (display, buffer) in starts {
         if display == len && at_zv { break; }
-        line += text.as_bytes()[from.min(buffer)..buffer].iter().filter(|&&c| c == b'\n').count() as i64;
-        from = from.max(buffer);
+        let line = line_of(buffer) - first;
         out.push((display, labels.label(line), line == labels.point_line));
     }
     romacs_layout_input::LineNumbers { columns: (labels.width + 2) as u32, face, current, labels: out }
@@ -457,6 +457,9 @@ impl ShownKey {
     /// OTHER shows what this showed (GNU's test that a window's current
     /// matrix is up to date: its buffer's text, overlays and narrowing,
     /// its start, size, scroll and faces), whatever Lisp ran between.
+    fn same_size(&self, other: &Self) -> bool {
+        self.geometry == other.geometry
+    }
     fn same_display(&self, other: &Self) -> bool {
         (self.buffer, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
             == (other.buffer, other.modiff, other.accessible, other.start, other.overlays, other.geometry, other.min_hscroll, other.suspended)
@@ -669,8 +672,12 @@ impl Vm {
     }
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
-        // redisplay_internal runs the window change functions first.
-        if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }
+        // redisplay_internal's order: prepare_menu_bars, then the window
+        // change functions.
+        if !self.redisplay_inhibited()? {
+            self.run_pre_redisplay()?;
+            self.run_window_change_functions()?;
+        }
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let mut windows = self.frame_window_snapshots(width, height)?;
@@ -712,15 +719,38 @@ impl Vm {
         let (focus, border) = if drawn {
             (Some(self.display_face("romacs-pane-focus")?.foreground), Some(self.display_face("romacs-pane-border")?.foreground))
         } else { (None, None) };
+        let cursor = self.frame_colour_parameter(frame, "cursor-color")?;
+        let style = self.frame_style(frame)?;
         let selected = self.status_bar_owner()?.0;
         let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
-        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, cursor, selected, minibuffer , style})
     }
     /// FRAME's parameter NAME, if it has one.
     pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
+    }
+    /// FRAME's material (`romacs-style'), a vector of its numbers
+    /// (`romacs-style--wire'), else the `flat' style.
+    fn frame_style(&mut self, frame: Value) -> Result<romacs_layout_input::Style> {
+        let value = self.frame_parameter_of(frame, "romacs-style")?;
+        let Some(Object::Vector(slots)) = value.and_then(|v| self.object_if(v)) else { return Ok(Default::default()) };
+        let &[layer, band, reach, drop, opacity, glow_reach, glow_opacity] = &slots[..] else { return Ok(Default::default()) };
+        let number = |v: Value| match self.object_if(v) {
+            Some(Object::Float(f)) => Some(*f as f32),
+            _ => v.integer_value().map(|n| n as f32),
+        };
+        let numbers = [layer, band, reach, drop, opacity, glow_reach, glow_opacity].map(number);
+        let [Some(layer_radius), Some(band_radius), Some(reach), Some(drop), Some(opacity), Some(glow_reach), Some(glow_opacity)] = numbers
+        else { return Ok(Default::default()) };
+        Ok(romacs_layout_input::Style { layer_radius, band_radius, shadow: [reach, drop, opacity], glow: [glow_reach, glow_opacity] })
+    }
+    /// FRAME's parameter NAME when it names a colour.
+    fn frame_colour_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
+        let value = self.frame_parameter_of(frame, name)?;
+        let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
+        Ok(romacs_display_protocol::x11_colors::x11_color_value(&text).map(|(r, g, b)| [r, g, b]))
     }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
@@ -734,6 +764,9 @@ impl Vm {
     /// their ids: a window's redisplay runs Lisp, which may collect and
     /// move them, or delete one.
     fn child_frame_snapshots(&mut self) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
+        let root = self.host_frame_peek();
+        let style = self.frame_style(root)?;
+        let by_style = self.intern("t");
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let ids: Vec<u64> = self.child_frames_bottom_up().into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
         let mut children = vec![];
@@ -748,8 +781,12 @@ impl Vm {
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
             let border_color = if edge.background == default.background { default.foreground } else { edge.background };
-            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
-                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+            // A number is the layer's own; `t' is the style's, whichever is
+            // in force now.
+            let radius = match self.frame_parameter_of(frame, "romacs-layer-radius")? {
+                Some(value) if value == by_style => style.layer_radius as u32,
+                value => value.and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0),
+            };
             // A glass layer (one with rounded corners) takes its colours
             // from faces: its background from `romacs-layer-glass', or the
             // face its `romacs-layer-face' parameter names (a toast's), and
@@ -768,21 +805,8 @@ impl Vm {
             } else {
                 (self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background), None)
             };
-            let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
-            // The hosted mini-window is placed in the host frame; drawn in this one.
-            if hosts {
-                let mini = self.window(self.mini_window())?.id;
-                let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
-                windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
-            }
-            // The frame's `background-color' is its default face's background
-            // (frame.c gui_set_background_color): text whose faces leave the
-            // background unspecified shows it.
-            if background != default.background {
-                for face in windows.iter_mut().flat_map(|w| w.snapshot.faces.iter_mut()) {
-                    if face.background == default.background { face.background = background; }
-                }
-            }
+            // All FRAME's reads come before its windows' redisplay, which runs
+            // Lisp that may collect and move it.
             let edge = match self.frame_parameter_of(frame, "romacs-layer-edge")? {
                 Some(v) if v == self.intern("top") => romacs_layout_input::LayerEdge::Top,
                 _ => romacs_layout_input::LayerEdge::Bottom,
@@ -799,6 +823,21 @@ impl Vm {
             // only fades: the slide and tweens are off for it.
             let fade = self.intern("fade");
             let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
+            let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
+            // The hosted mini-window is placed in the host frame; drawn in this one.
+            if hosts {
+                let mini = self.window(self.mini_window())?.id;
+                let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
+                windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
+            }
+            // The frame's `background-color' is its default face's background
+            // (frame.c gui_set_background_color): text whose faces leave the
+            // background unspecified shows it.
+            if background != default.background {
+                for face in windows.iter_mut().flat_map(|w| w.snapshot.faces.iter_mut()) {
+                    if face.background == default.background { face.background = background; }
+                }
+            }
             let animation = match self.layer_animation() {
                 romacs_layout_input::LayerAnimation::Full if fades => romacs_layout_input::LayerAnimation::Reduced,
                 animation => animation,
@@ -1898,7 +1937,7 @@ impl Vm {
             let merged = sources.merged;
             let line_numbers = labels.map(|labels| {
                 let starts = std::iter::once(0).chain(utf8.match_indices('\n').map(|(at, _)| at + 1)).map(|at| (at, base + at)).collect();
-                line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
+                line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, utf8.len(), at_zv)
             });
             return Ok(ShownText { text: TextSlice { extends, utf8, face_runs, raw }, start_byte, point_byte, faces, base, at_zv, table: table.clone(), merged,
                 segments: None, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers });
@@ -1962,7 +2001,7 @@ impl Vm {
         segments.push(mini_window::Segment { display: utf8.len(), buffer: shown.end, len: 1, string: false });
         let len = utf8.len();
         let merged = sources.merged;
-        let line_numbers = labels.map(|labels| line_numbers(&table, b.as_str(), b.accessible().start.0, &labels, starts, len, at_zv));
+        let line_numbers = labels.map(|labels| line_numbers(&table, b.body(), b.accessible().start.0, &labels, starts, len, at_zv));
         // produce_stretch_glyph: FACTOR times the glyph's pixel width.
         for (byte, face, c, factor) in relative {
             let input = romacs_layout_input::MeasureInput {
@@ -2203,6 +2242,40 @@ impl Vm {
         merged.insert(value.0, handle);
         handle
     }
+    /// prepare_menu_bars's WINDOWS: nil while only the selected window
+    /// needs redisplay; else, once a buffer or the selection changed, those
+    /// that do (needs_no_redisplay): every window showing that buffer, the
+    /// windows selection left and reached, one whose point moved, or all, the
+    /// mini-window too, when a window's size did; t for a window not shown
+    /// yet, as GNU for a change to the frame.
+    pub(crate) fn pre_redisplay_windows(&mut self) -> Result<Value> {
+        let (selected, leaves, windows) = (self.selected_window_value()?, self.leaf_windows()?, self.displayed_windows());
+        let (mut buffers, mut picked, mut moved, mut all) = (vec![], vec![], vec![], false);
+        for &window in &windows {
+            let (width, height) = self.window_body_size(window)?;
+            let key = self.shown_key(window, width, height)?;
+            let point = self.window_point_value(window)?.integer_value();
+            let id = self.window(window)?.id;
+            match self.display_state.shown.get(&id) {
+                Some(shown) if !shown.key.same_size(&key) => all = true,
+                Some(shown) if shown.key.same_display(&key) => {
+                    // Selection flags the window it left and the one it reached.
+                    if shown.key.selected != key.selected && (shown.key.selected == window || key.selected == window) { picked.push(window); }
+                    else if point != Some(shown.point) { moved.push(window); }
+                }
+                Some(_) => buffers.push(key.buffer),
+                // A mini-window or child frame's window keeps no record.
+                None if !leaves.contains(&window) => {}
+                None => return Ok(Value::TRUE),
+            }
+        }
+        // Point alone asks for nothing beyond the selected window.
+        if buffers.is_empty() && picked.is_empty() && !all { return Ok(Value::NIL); }
+        let list: Vec<Value> = windows.into_iter().filter(|&v| all || picked.contains(&v) || moved.contains(&v)
+            || self.window(v).is_ok_and(|w| buffers.contains(&w.buffer))).collect();
+        if list.iter().all(|&w| w == selected) { return Ok(Value::NIL); }
+        Ok(self.list_value(&list))
+    }
     /// Fredisplay's part VM2 does inside a command (VM2-REDISPLAY1): each
     /// live window's point visibility (`keep_point_visible'), its buffer
     /// current and at the text height the next layout gives it, so
@@ -2382,6 +2455,9 @@ impl Vm {
         if self.variable_value(functions)? == Value::NIL {
             return Ok(true);
         }
+        if self.treesit_parse_pending(root, buffer_slot)? {
+            return Ok(true);
+        }
         let mut range = self.displayed_range(self.slots[root].value, text_height)?;
         let mut tries = 1;
         while let Some((start, end)) = range {
@@ -2410,6 +2486,41 @@ impl Vm {
             };
         }
         Ok(true)
+    }
+    /// Whether the first parse of the buffer in BUFFER_SLOT has not landed,
+    /// so that redisplay shows the window in ROOT plain and leaves its faces
+    /// to the frame the landing wakes (`land_treesit'): fontifying now would
+    /// wait for the parse.
+    fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<bool> {
+        if self.process_jobs.wake().is_none() {
+            return Ok(false);
+        }
+        let buffer = self.slots[buffer_slot].value;
+        let base = match self.object(buffer)? {
+            Object::Buffer(b) if b.base != Value::NIL => b.base,
+            Object::Buffer(_) => buffer,
+            _ => return Ok(false),
+        };
+        let Object::Buffer(text) = self.object_mut(base)? else { return Ok(false) };
+        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
+        if pending {
+            let id = self.window(self.slots[root].value)?.id;
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+        }
+        Ok(pending)
+    }
+    /// Whether a parse landed with windows left plain: they are laid out
+    /// again, as an unchanged window is not, and fontify if theirs was it.
+    pub fn land_treesit(&mut self) -> bool {
+        let landed = !self.treesit_plain.is_empty() && crate::treesit::take_early_landed();
+        if landed {
+            for id in std::mem::take(&mut self.treesit_plain) {
+                self.display_state.repaint_window(id);
+            }
+        }
+        landed
     }
     /// What decides the rows a live window shows: its buffer's edits
     /// (MODIFF, which property changes advance), its character edits
@@ -2646,7 +2757,13 @@ impl Vm {
         let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
-        let point = self.window_point_value(window)?.as_integer()? as usize;
+        // A buffer the window does not show (`format-mode-line' BUFFER)
+        // stands at its own point.
+        let point = match self.object(buffer)? {
+            Object::Buffer(b) if self.window(window)?.buffer != buffer => b.char_of_byte(b.point)?.0 + 1,
+            Object::ByteBuffer(b) if self.window(window)?.buffer != buffer => b.point.0 + 1,
+            _ => self.window_point_value(window)?.as_integer()? as usize,
+        };
         let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
@@ -2685,7 +2802,7 @@ impl Vm {
             begv: char_at(begv_byte)?,
             zv: char_at(zv_byte)?,
             z: b.len_chars() + 1,
-            line: text.as_bytes()[begv_byte..point_byte].iter().filter(|&&c| c == b'\n').count() + 1,
+            line: b.line_of_byte(ByteOffset(point_byte))? - b.line_of_byte(accessible.start)? + 1,
             column,
             modified: b.state.modified(),
             frame_cols,

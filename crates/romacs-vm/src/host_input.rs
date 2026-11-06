@@ -214,6 +214,67 @@ impl Vm {
         self.window_change_seen = self.window_change_signature()?;
         Ok(())
     }
+    /// prepare_menu_bars's call of `pre-redisplay-function', with the windows
+    /// to redisplay. Lisp runs only when it would do something: never for
+    /// nil or `ignore', nor for `simple.el''s default while no window's
+    /// buffer has work on `pre-redisplay-functions'.
+    pub(crate) fn run_pre_redisplay(&mut self) -> Result<()> {
+        let Some(windows) = self.pre_redisplay_call()? else { return Ok(()) };
+        self.call_prepared_source_raw("(lambda (windows) (and (fboundp 'romacs--pre-redisplay) (romacs--pre-redisplay windows)))", &[windows])?;
+        Ok(())
+    }
+    /// The windows argument `romacs--pre-redisplay' takes now, when it has
+    /// anything to do.
+    pub(crate) fn pre_redisplay_call(&mut self) -> Result<Option<Value>> {
+        let slot = self.slot("pre-redisplay-function");
+        let function = self.variable_value(slot)?;
+        if matches!(function, Value::NIL | Value::UNBOUND) || function == self.display_symbol("ignore") { return Ok(None); }
+        if function == self.display_symbol("redisplay--pre-redisplay-functions") && !self.pre_redisplay_has_work()? { return Ok(None); }
+        self.pre_redisplay_windows().map(Some)
+    }
+    /// Whether `pre-redisplay-functions', in any shown buffer, holds more
+    /// than GNU's region overlay, which `romacs--native-region' leaves to
+    /// the native highlight unless a package wraps it (rect.el).
+    fn pre_redisplay_has_work(&mut self) -> Result<bool> {
+        let (hook, mark) = (self.slot("pre-redisplay-functions"), self.slot("mark-active"));
+        let (region, global) = (self.display_symbol("redisplay--update-region-highlight"), self.default_value(hook)?);
+        let highlight = self.slot("redisplay-highlight-region-function");
+        let native = self.variable_value(highlight)? == self.display_symbol("romacs--native-region");
+        let overlay = self.display_symbol("internal-region-overlay");
+        let saved = self.slots[self.buffer_slot].value;
+        let mut work = false;
+        for window in self.displayed_windows() {
+            let w = self.window(window)?;
+            let (buffer, shown) = (w.buffer, w.parameters.iter().any(|&(k, v)| k == overlay && v != Value::NIL));
+            self.slots[self.buffer_slot].value = buffer;
+            let (value, marked) = (self.variable_value(hook), self.variable_value(mark));
+            self.slots[self.buffer_slot].value = saved;
+            let (value, marked) = (value?, marked? != Value::NIL);
+            let functions = |vm: &Self, list: Value| vm.list_values(list).unwrap_or_else(|_| vec![list]);
+            let mut members = functions(self, value);
+            if members.contains(&Value::TRUE) { members.extend(functions(self, global)); }
+            work |= members.iter().any(|&f| match f {
+                Value::NIL | Value::TRUE | Value::UNBOUND => false,
+                f if f == region => !native && (marked || shown),
+                _ => true,
+            });
+        }
+        Ok(work)
+    }
+    /// Every leaf window of every frame, the mini-windows too: what any
+    /// redisplay may show.
+    pub(crate) fn displayed_windows(&self) -> Vec<Value> {
+        let mut out = vec![];
+        for frame in self.frames() {
+            let Ok(f) = self.frame(frame) else { continue };
+            let mut pending = vec![f.root, f.minibuffer];
+            while let Some(window) = pending.pop() {
+                let Ok(w) = self.window(window) else { continue };
+                if w.children.is_empty() { if !out.contains(&window) { out.push(window); } } else { pending.extend(w.children.iter().copied()); }
+            }
+        }
+        out
+    }
     /// What window_change_record keeps, for the run's gate: the selected
     /// frame, and each frame with its selected window and its windows'
     /// buffers, pixel boxes and what their body sizes also depend on (their
@@ -283,6 +344,8 @@ impl Vm {
             redraw |= self.poll_terminal_output()?;
             // An image decoded off the VM landed: the frame shows it.
             redraw |= self.land_images()?;
+            // So did the parse a redisplay left a window plain for.
+            redraw |= self.land_treesit();
             // GNU redisplay_internal does nothing while `inhibit-redisplay'
             // is non-nil, as it is around Lisp that redisplay itself calls,
             // and waits for pending input; but GNU's `message' displays the
@@ -402,6 +465,23 @@ mod tests {
         assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
         let first: u64 = words[2].parse().expect(&got);
         assert!((5_000..40_000).contains(&first), "{got}");
+    }
+
+    /// A collection in a prompt's redisplay runs with the host taken for the
+    /// read, so no key can be seen: its record says so rather than nothing.
+    #[test]
+    fn a_collection_in_a_prompts_redisplay_is_recorded_as_met() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120], vec![0]))));
+        vm.eval_source("(setq mode-line-format '(:eval (progn (garbage-collect) \"m\")))").unwrap();
+        vm.take_collections();
+        vm.idle_since = Some(crate::host::monotonic());
+        vm.eval_source("(romacs--read-host-event)").unwrap();
+        let taken = vm.take_collections();
+        let got = vm.display(taken).unwrap();
+        assert!(got.contains(" redisplay "), "{got}");
     }
 
     /// The T2 continuation path (`t2_dispatch`) also routes the read to engine

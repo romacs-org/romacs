@@ -107,15 +107,70 @@ thousandth a stack mark."
             (setq k (1+ k)))))
 
 ;; A theme application over N more package faces: loading and enabling
-;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
-;; the theme file; nearly flat in the faces, which only the root frame
+;; catppuccin-latte in a -Q window, most of it loading the theme file; nearly flat in the faces, which only the root frame
 ;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
              (custom-declare-face face '((t :inherit font-lock-keyword-face)) "A package face." :group 'scaling))
            faces)
-  :body (load-theme 'modus-operandi t))
+  :body (load-theme 'catppuccin-latte t))
+
+;; N Omarchy themes Romacs does not ship, made one after another, the first
+;; made again: Custom's theme list and `features' grow by one each.  Sessions
+;; meet tens of them.
+(scaling-probe omarchy-generated-themes :n 40
+  :setup (progn
+           (require 'romacs-omarchy)
+           (cons (mapcar #'intern (scaling--names "omarchy-scaling" n))
+                 '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                   (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))))
+  :body (let ((palette (cdr it)))
+          (dolist (theme (car it)) (omarchy--define theme "scaling" palette))
+          (omarchy--define (car (car it)) "scaling" palette)))
+
+;; Registering N bundled themes, as a load of romacs-theme.el does: a property
+;; each, no scan of the table per theme.
+(scaling-probe theme-bundled-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme)
+           (mapcar (lambda (name) (list (intern name) 'dark (intern (concat name "-family"))))
+                   (scaling--names "scaling-theme" n)))
+  :body (romacs-theme--register it))
+
+;; A theme's role resolution over N more palette rows: an index, not a scan
+;; per name.
+(scaling-probe theme-palette-rows :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (append '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                     (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))
+                   (mapcar (lambda (name) (list (intern name) "#123456")) (scaling--names "scaling-slot" n))))
+  :body (romacs-theme-roles-resolve it))
+
+;; The floor pass and its merge over N face rows, a tenth of them failing on
+;; one pair: each pair is computed once, each row merged once.
+(scaling-probe theme-floor-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (mapcar (lambda (name)
+                     (list (intern name) (list (list t :foreground (if (string-suffix-p "1" name) "#333333" "#eeeeee")))))
+                   (scaling--names "scaling-floor" n)))
+  :body (let ((moves (romacs-theme-roles-floors it '((bg . "#101418")))))
+          (romacs-theme--apply-delta it (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) moves))))
+
+;; The floor pass over an `:inherit' chain N deep: each ancestor is read once.
+(scaling-probe theme-inherit-depth :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (let ((names (mapcar #'intern (scaling--names "scaling-inherit" n))) (rows nil) (parent nil))
+             (dolist (name names (nreverse rows))
+               (push (list name (list (if parent
+                                          (list t :inherit parent :background "#101418")
+                                        (list t :foreground "#eeeeee"))))
+                     rows)
+               (setq parent name))))
+  :body (romacs-theme-roles-floors it '((bg . "#101418"))))
 
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
@@ -253,6 +308,49 @@ thousandth a stack mark."
               (insert "x")
               (treesit-query-capture (treesit-parser-root-node parser) "(identifier) @i"
                                      (line-beginning-position) (line-end-position))))))
+
+;; The same buffer parsed, then a hundred more parsers of it, each like
+;; c-ts-mode's `for-each' one: a first parse copies the tree, so none costs
+;; anything in N.
+(scaling-probe treesit-twin-parser :n 2000 :budget 0.1
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-twin")
+           (dotimes (i n)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (treesit-parser-root-node (treesit-parser-create 'rust))
+           (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (i 100)
+            (treesit-parser-root-node
+             (treesit-parser-create 'rust nil nil (intern (format "twin-%d" i)))))))
+
+;; The same buffer's first parse on another thread: what reaches the
+;; evaluating thread is the tree, so its parser and a hundred more cost
+;; nothing in N.
+(scaling-probe treesit-early-parse :n 2000 :budget 0.1
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-early")
+           (dotimes (i n)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (romacs--treesit-parse-early 'rust)
+           (current-buffer))
+  :body (with-current-buffer it
+          (treesit-parser-root-node (treesit-parser-create 'rust))
+          (dotimes (i 100)
+            (treesit-parser-root-node
+             (treesit-parser-create 'rust nil nil (intern (format "twin-%d" i)))))))
+
+;; Edits made while it runs, which its tree catches up with: linear in the
+;; edits, nothing in the text.
+(scaling-probe treesit-early-edits :n 200
+  :setup (with-current-buffer (get-buffer-create " scaling-treesit-early-edits")
+           (dotimes (i 2000)
+             (insert (format "fn f%d(x: u32) -> u32 { let y = x + %d; y * 2 }\n" i i)))
+           (romacs--treesit-parse-early 'rust)
+           (current-buffer))
+  :body (with-current-buffer it
+          (dotimes (i n)
+            (goto-char (* 40 (1+ i)))
+            (insert "x"))
+          (treesit-parser-root-node (treesit-parser-create 'rust))))
 
 ;;;; Windows
 
@@ -440,6 +538,42 @@ thousandth a stack mark."
              (set-window-buffer (split-window-below) other)
              other))
   :body (with-current-buffer it (insert "x")))
+
+;; The same bar with a box, and a context window's line folded in: the
+;; stretches of its box run, and the context's background swept with the
+;; characters, never a walk over the segments for each one.  N stays small
+;; enough to fit: a bar too full drops the context and clips the pills.
+;; The body refuses a run whose bar, at its widest after the last key, has
+;; lost the context, which follows every pill, so the pills are shown too.
+(scaling-probe mode-line-bar-boxed :gui t :n 6 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (set-face-attribute 'mode-line nil :box '(:line-width 1 :color "#808080"))
+           (dotimes (i n)
+             (let ((face (intern (format "bar-boxed-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :background (format "#%02x3040" (% (* 5 i) 256))
+                                   :foreground (format "#e0%02xa0" (% (* 3 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-boxed-%d" i)) "A probe."
+                        :pill ,face :pill-text ,face
+                        :format (" " (:propertize "%*" romacs-icon ((?* . modified) (?- . saved))) " "))
+                     t))
+             (push (intern (format "bar-boxed-%d" i)) romacs-mode-line-right))
+           (romacs-mode-line-rebuild)
+           (let ((buffer (scaling--lines-buffer "scaling-bar-boxed" 50)))
+             (switch-to-buffer buffer)
+             (with-selected-window (split-window-below)
+               (switch-to-buffer (get-buffer-create "scaling-bar-context"))
+               (setq-local mode-line-format '("q  " "context")))
+             buffer))
+  :body (progn
+          (with-current-buffer it (insert "x"))
+          (when (= i 19)
+            (let ((shown (romacs-status-bar-string)))
+              (unless (string-search "context" shown)
+                (scaling--mark (list :scaling "unfit" :shown shown))
+                (kill-emacs 3))))))
 
 ;; N pills on one pill face, each a different character in its own text
 ;; colour, all shown (the right side shows whole): the painter's
@@ -672,6 +806,16 @@ thousandth a stack mark."
            (cons (switch-to-buffer (get-buffer-create "scaling-kept-panels")) (car (last buffers))))
   :body (progn (romacs-popup-hide (cdr it)) (romacs-popup-show 'panel (cdr it) :lines 1)
                (with-current-buffer (car it) (insert "x"))))
+
+;; Typing at the end of N numbered lines: a label comes from the text's line
+;; index, not from counting the lines before it.
+(scaling-probe line-numbers-at-end :gui t :n 20000 :steps 20 :budget 0.5
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-line-numbers"))))
+           (dotimes (_ n) (insert "a line of the buffer\n"))
+           (setq display-line-numbers t)
+           (goto-char (point-max))
+           buffer)
+  :body (with-current-buffer it (insert "x")))
 
 ;; Clearing N toasts (the echo area's clearing at the next command) with N
 ;; more layers kept hidden: each toast hidden once, no restacking per
@@ -1968,10 +2112,22 @@ closures over a mutable variable (each a closure and a cell)."
                 (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
            (list environment directories
                  (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
-                         expanded (romacs--isolate-stamp expanded) 0)))
+                         expanded (romacs--isolate-stamp expanded) 0 nil nil isolate-job-memory-headroom nil)))
   :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
           (dotimes (_ 10)
             (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
+;; The room check at each pooled dispatch (rlisp/vm/isolate.el): one pass
+;; over the isolates.  The waiting queue is bounded by `isolate-queue-limit'.
+(scaling-probe isolate-room-check :n 2000
+  :setup (let ((zygote (record 'isolate-zygote nil nil 'ready nil nil nil nil nil nil 0 nil nil 0 nil))
+               isolates)
+           (dotimes (i n)
+             (push (record 'isolate i nil 'live nil (and (zerop (% i 2)) '((1 . nil))) nil nil nil nil 'job zygote) isolates))
+           isolates)
+  :body (let ((romacs--isolates it) (isolate-pool-size 1000000)
+              (isolate-pool-memory-limit most-positive-fixnum) (isolate-job-memory-headroom 0))
+          (dotimes (_ 10) (romacs--isolate-room-p))))
 
 ;; The project commands' record of enumeration times (rlisp/romacs-project.el):
 ;; one entry per project root, each decision one lookup and one stat of the
@@ -2038,9 +2194,9 @@ closures over a mutable variable (each a closure and a cell)."
 ;; compiled, lowered by a call and dropped in each step; the host's idle
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
-;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
-;; and shows a startup message, so the probe supplies the one and clears
-;; the other.  A step with no collection after the last ends the session,
+;; A session no key has reached has no `romacs--idle-collect' (the lazy
+;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; the one and clears the other.  A step with no collection after the last ends the session,
 ;; which fails the measure.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
@@ -2061,6 +2217,14 @@ closures over a mutable variable (each a closure and a cell)."
             (insert (format "step %d\n" i)))
           (message nil)
           (setq scaling--retire-collections gcs-done)))
+
+;; The collections a usage log reads (gc.rs `Vm::note_collection'): N
+;; collections, past what the log keeps at 4N, then its read.  A record
+;; costs the same however many were kept, and past the limit only a count.
+(scaling-probe gc-collection-log :n 100
+  :setup (romacs--take-collections)
+  :body (progn (dotimes (_ n) (garbage-collect))
+               (romacs--take-collections)))
 
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a

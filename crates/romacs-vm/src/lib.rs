@@ -1343,6 +1343,8 @@ pub struct Vm {
     /// `romacs--redisplay-since-mark': None unmarked; marked, the first
     /// redisplay's microseconds after the mark, None until it runs.
     redisplay_since_mark: Option<Option<u64>>,
+    /// The windows redisplay left plain for a first parse (`land_treesit').
+    treesit_plain: Vec<u64>,
     /// The host's `C-g', shared with its input thread (quit.rs).
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
@@ -1448,6 +1450,8 @@ pub struct Vm {
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
+    /// The collections since the usage log last read them.
+    collection_log: gc::CollectionLog,
     gc_retained: usize,
     /// Payload bytes (string text, vector slots) allocated since the last
     /// collection, which GNU charges to `consing_until_gc' with the objects
@@ -1467,6 +1471,14 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
+    /// In a child forked for one job: the heap it was forked with, the
+    /// growth over it allowed now, and the grace added after each signal of
+    /// exhaustion, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize, usize)>,
+    /// The payload the last collection kept, as allocation charges it
+    /// (`data::payload_bytes`), measured only for a job's budget
+    /// (`Vm::job_live`).
+    gc_retained_payload: usize,
     /// Open frames that keep heap Values in untraced Rust storage across a
     /// call that can run Lisp: compiler builders and watcher notifications
     /// from native writers (`gc.rs`, `Vm::may_collect`).
@@ -1658,6 +1670,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
+    collection_log,
     gc_retained,
     gc_payload_bytes,
     collect_poll,
@@ -1670,6 +1683,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     free,
     suspended_stacks,
     gc_floor,
+    job_budget,
+    gc_retained_payload,
     names,
     initial_obarray,
     symbol_names,
@@ -1716,6 +1731,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit,
     force_quit_count,
     redisplay_since_mark,
+    treesit_plain,
     quit_slots,
     debug_event_slots,
 } at_rest {
@@ -1820,6 +1836,7 @@ impl Vm {
             session_host: None,
             idle_since: None,
             redisplay_since_mark: None,
+            treesit_plain: Vec::new(),
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
@@ -1867,12 +1884,15 @@ impl Vm {
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
+            collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
             collect_poll: false,
             gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
+            job_budget: None,
+            gc_retained_payload: 0,
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,

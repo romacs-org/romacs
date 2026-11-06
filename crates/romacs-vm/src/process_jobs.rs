@@ -50,6 +50,8 @@ impl Jobs {
 
     /// Wake the embedder's wait when a job completes, so it need not poll.
     pub fn set_wake(&mut self, wake: Wake) { self.wake = Some(wake); }
+    /// The embedder's wake, for other work that ends a wait.
+    pub(crate) fn wake(&self) -> Option<Wake> { self.wake.clone() }
 
     pub fn start(&mut self, request: Request) -> Result<u64, String> {
         if !cfg!(target_os = "linux") {

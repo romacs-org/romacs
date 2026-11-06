@@ -13,17 +13,30 @@ repo=$(cd "$here/../../../.." && pwd)
 emacs=$(python3 "$repo/scripts/gnu_oracle.py" path)
 out="$here/fixtures"; mkdir -p "$out"
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
-themes=$(find "$repo/etc/themes" -name '*-theme.el' -printf '%f\n' | sed 's/-theme\.el$//' | sort)
-[ -n "$themes" ] || { echo "no themes under $repo/etc/themes" >&2; exit 1; }
-for t in nil $themes; do
-  q=$t; [ "$t" = nil ] || q="'$t"
+# The face model's evidence is GNU's own themes, which Romacs does not ship:
+# they come from the oracle's own data directory.
+sandbox() {
   h=$(mktemp -d "$work/home.XXXX")
-  env -i PATH=/usr/bin:/bin HOME="$h" TMPDIR="$h" LANG=C.UTF-8 timeout -s KILL 120 \
-    "$emacs" -Q --batch -l "$here/dump.el" \
-    --eval "(s86-dump $q \"$repo/etc/themes\" \"$work/$t.eld\")" > "$work/$t.log" 2>&1 \
-    || { echo "$t failed:" >&2; tail -5 "$work/$t.log" >&2; exit 1; }
-  cp "$work/$t.eld" "$out/$t.eld"
-done
+  env -i PATH=/usr/bin:/bin HOME="$h" TMPDIR="$h" LANG=C.UTF-8 "$@"
+}
+theme_dir=$(sandbox "$emacs" -Q --batch --eval '(princ (expand-file-name "themes" data-directory))')
+themes=$(find "$theme_dir" -name '*-theme.el' -printf '%f\n' | sed 's/-theme\.el$//' | sort)
+[ -n "$themes" ] || { echo "no themes under $theme_dir" >&2; exit 1; }
+# dump THEME DIR [FORM]: FORM runs before the theme loads.
+dump() {
+  q=$1; [ "$1" = nil ] || q="'$1"
+  sandbox timeout -s KILL 120 "$emacs" -Q --batch -l "$here/dump.el" \
+    --eval "${3:-nil}" --eval "(s86-dump $q \"$2\" \"$work/$1.eld\")" > "$work/$1.log" 2>&1 \
+    || { echo "$1 failed:" >&2; tail -5 "$work/$1.log" >&2; exit 1; }
+  cp "$work/$1.eld" "$out/$1.eld"
+}
+for t in nil $themes; do dump "$t" "$theme_dir"; done
+# Rum beside them: its theme file and the Modus it is written for, with the
+# colours Omarchy gives it.  It is the one dump with palette overrides.
+rum=$work/rum-themes; mkdir "$rum"
+cp "$here/inputs/modus-themes.el" "$rum/"
+cp "$here/inputs/rum-emacs.el" "$rum/rum-theme.el"
+dump rum "$rum" '(setq omarchy-color-bg "#000000" omarchy-color-fg "#d4c5a0" omarchy-color-bright-black "#756b59" omarchy-color-accent "#d48a20")'
 h=$(mktemp -d "$work/home.XXXX")
 env -i PATH=/usr/bin:/bin HOME="$h" TMPDIR="$h" LANG=C.UTF-8 timeout -s KILL 60 \
   "$emacs" -Q --batch -l "$here/remap.el" --eval "(s86-remap-dump \"$out/remap.eld\")" \
