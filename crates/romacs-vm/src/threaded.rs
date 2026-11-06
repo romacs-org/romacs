@@ -1418,6 +1418,15 @@ impl Vm {
         self.site_leaf = site;
         result
     }
+    /// Answer an inspection from inside a native loop: a leaf a site runs
+    /// with no activation shows its frame for the snapshot.
+    pub(crate) fn inspect_in_leaf(&mut self) {
+        let mark = self.record_site_leaf(self.site_leaf);
+        self.inspect_capture();
+        if let Some(mark) = mark {
+            self.trace_leave(mark);
+        }
+    }
     /// The activation `trace_call' would have made for the leaf at SITE.
     fn record_site_leaf(&mut self, site: (usize, usize)) -> Option<usize> {
         let (pc, r) = (site.0 as *const Inst, site.1 as *mut Value);
