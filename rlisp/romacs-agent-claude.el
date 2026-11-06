@@ -125,12 +125,38 @@ RESUME is non-nil."
                        :tool (gethash "tool_name" request) :input (gethash "input" request)
                        :description (gethash "description" request))))))
       ("control_response"
-       (let ((id (gethash "request_id" (gethash "response" line))))
-         (when (and id (gethash id (romacs-agent-approvals session)))
-           (remhash id (romacs-agent-approvals session)))
+       (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
+         (cond ((and id (equal id (romacs-agent-models-request session)))
+                (setf (romacs-agent-models-request session) nil)
+                (when (hash-table-p (gethash "response" response))
+                  (romacs-agent--keep-models session (romacs-agent--claude-models (gethash "response" response)))))
+               ((and id (gethash id (romacs-agent-approvals session)))
+                (remhash id (romacs-agent-approvals session))))
          nil))
       ("rate_limit_event" nil)
       (_ (list (list :type 'unknown :raw line))))))
+
+(defun romacs-agent--claude-models (answer)
+  "The model rows in ANSWER, what Claude Code says to `initialize': each
+model by the id its alias resolves to, its label and efforts and nothing
+else of the answer, which also describes the account.  The \"default\"
+alias is no model."
+  (let ((models (gethash "models" answer)))
+    (cl-loop for model across (if (vectorp models) models [])
+             for id = (or (romacs-agent--value (gethash "resolvedModel" model)) (gethash "value" model))
+             for efforts = (romacs-agent--value (gethash "supportedEffortLevels" model))
+             when (and (stringp id) (not (equal (gethash "value" model) "default")))
+             ;; No efforts is what it says too: not left to the catalogue.
+             collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
+                                    :efforts (and (vectorp efforts) (append efforts nil)))))))
+
+(defun romacs-agent--claude-refresh-models (session)
+  "Ask SESSION's Claude Code for its models, as its own SDK does at the
+start: its answer comes with the other control responses."
+  (let ((id (format "romacs-models-%d" (romacs-agent-request-id session))))
+    (setf (romacs-agent-models-request session) id)
+    (romacs-agent--line session (romacs-mcp--object "type" "control_request" "request_id" id
+                                                    "request" (romacs-mcp--object "subtype" "initialize")))))
 
 (defun romacs-agent--claude-input-events (session line)
   "The events of LINE, written to SESSION's harness: a user's prompt, or
@@ -172,6 +198,7 @@ when ALLOW, else denied with MESSAGE."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent
+  :refresh-models #'romacs-agent--claude-refresh-models
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt

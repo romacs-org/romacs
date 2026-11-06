@@ -1188,6 +1188,14 @@ thousandth a stack mark."
           (setq romacs-agent-t3--read nil)
           (romacs-agent-instances t)))
 
+;; The start palette of N instances, each with the harness's catalogue:
+;; rows by instance, one table of shown names.
+(scaling-probe agent-picker-rows :n 1000
+  :setup (progn (scaling--agent)
+                (cl-loop for i below n collect (list (format "claude-%d" i) :display "Claude"
+                                                     :config-dir (format "/tmp/claude-config-%d" i))))
+  :body (let ((romacs-agent-providers it)) (romacs-agent--picker-rows)))
+
 ;; N drivers, each a T3 driver name, and T3's settings of N instances of
 ;; them, read anew: each instance's harness by an index built once.
 (scaling-probe agent-instances-drivers :n 500
