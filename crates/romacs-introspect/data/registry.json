@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "f85905cf55a4a6bd7053312014681246829fd5896cdda66785b5c20791bea874",
+    "input_hash": "d94c93945d4cbaee3c2189ab96fba25fc0eae4312781f223b3ccb0dc07829141",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8520
+    "vm2_universe": 8523
   },
   "schema": 2,
   "vm2": {
-    "count": 1426,
+    "count": 1429,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -995,6 +995,7 @@
       "romacs--read-host-event",
       "romacs--recalc-all-faces",
       "romacs--recalc-faces-except",
+      "romacs--recenter-start",
       "romacs--record-input",
       "romacs--redisplay-since-mark",
       "romacs--replace-range",
@@ -1002,11 +1003,13 @@
       "romacs--resize-mini-window",
       "romacs--restore-excursion",
       "romacs--restore-restriction",
+      "romacs--rows-shown-from",
       "romacs--run-host-command",
       "romacs--run-special-event",
       "romacs--rust-definition",
       "romacs--save-excursion",
       "romacs--save-restriction",
+      "romacs--scroll-start",
       "romacs--secure-hash",
       "romacs--session-image-read",
       "romacs--session-image-write",

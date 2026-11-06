@@ -384,6 +384,8 @@ def main():
                 # Scroll only the selected window, the upper one C-x 2 kept,
                 # away and back.
                 # Only this window has shown the landing before the split.
+                # A loaded host may not have painted both windows yet.
+                until(lambda: len(views()) == 2 and len(drawn()) == 2)
                 pair, shown = drawn(), views()
                 upper = window
                 tops = sorted(shown)

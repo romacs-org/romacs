@@ -120,7 +120,8 @@ screen-fulls when WHOLE, keeping point in view."
       (setq start (point)))
     (goto-char start)
     (setq lose (and (< n 0) (= (point) (point-min))))
-    (vertical-motion n window)
+    (let ((pixels (and whole (romacs--scroll-start (point) (> n 0) next-screen-context-lines))))
+      (if pixels (goto-char pixels) (vertical-motion n window)))
     (setq pos (point))
     (goto-char opoint)
     (when lose (signal 'beginning-of-buffer nil))
@@ -144,7 +145,8 @@ screen-fulls when WHOLE, keeping point in view."
        ;; Scrolled back: point near the end of the window, clear of the margin.
        ((< n 0)
         (goto-char pos)
-        (let* ((moved (vertical-motion (- ht margin) window))
+        (let* ((ht (or (romacs--rows-shown-from pos) ht))
+               (moved (vertical-motion (- ht margin) window))
                (bottom (if (= moved (- ht margin)) (point) (1+ (point)))))
           (cond ((> bottom opoint) (goto-char opoint))
                 (scroll-preserve-screen-position
@@ -171,8 +173,11 @@ nil or a list) of the selected window, clear of `scroll-margin'."
            (ht (romacs--window-internal-height window))
            (line (cond (center (/ ht 2)) ((< iarg 0) (+ iarg ht)) (t iarg)))
            (line (max margin (min line (- ht margin 1))))
-           ;; Short of lines, the iterator ends at BEGV, shown or not.
-           (start (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point)))))
+           ;; GNU's pixel branches, where a host lays the window out.
+           (start (or (and (or center (< iarg 0))
+                           (romacs--recenter-start (and (not center) iarg) margin ht))
+                      ;; Short of lines, the iterator ends at BEGV, shown or not.
+                      (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point))))))
       ;; optional_new_start: redisplay keeps it while point shows.
       (set-window-start window start t)
       ;; Zero in lines or pixels alike; VM2 keeps it in pixels.
