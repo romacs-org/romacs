@@ -1937,6 +1937,34 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+;; Code retirement (request_code.rs, Program::retire_code): N functions
+;; compiled, lowered by a call and dropped in each step; the host's idle
+;; pass between steps collects at the top level, the only place request
+;; code retires, and the next step takes their sites and cache slots back.
+;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
+;; and shows a startup message, so the probe supplies the one and clears
+;; the other.  A step with no collection after the last ends the session,
+;; which fails the measure.  Retirement that scanned its free lists, or
+;; rebuilt tables per function, would grow faster than N.
+(defvar scaling--retire-collections 0
+  "`gcs-done' when the last `gc-retired-code' step ended.")
+
+(scaling-probe gc-retired-code :gui t :n 1000 :steps 4 :gap 1.0
+  :setup (progn
+           (defalias 'romacs--idle-collect (lambda (&optional _in-lisp) t))
+           (setq scaling--retire-collections gcs-done)
+           (switch-to-buffer (get-buffer-create "*scaling-retire*")))
+  :body (progn
+          (when (and (> i 0) (<= gcs-done scaling--retire-collections))
+            (kill-emacs 3))
+          (dotimes (k n)
+            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k)) t)))
+          (with-current-buffer (window-buffer (selected-window))
+            (goto-char (point-max))
+            (insert (format "step %d\n" i)))
+          (message nil)
+          (setq scaling--retire-collections gcs-done)))
+
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
 ;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
