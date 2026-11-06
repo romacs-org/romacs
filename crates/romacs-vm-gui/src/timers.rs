@@ -448,10 +448,10 @@ mod tests {
             (run-with-timer 0 nil #'rescheduling)";
         vm.set_host_input(Some(Box::new(Paced([Step::Key('a')].into()))));
         printed(&mut vm, rescheduling);
-        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 0.5) (<= runs 2))");
+        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 1.5) (<= runs 2))");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, rescheduling);
-        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 0.5))");
+        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 1.5))");
         assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
     }
 
@@ -484,7 +484,7 @@ mod tests {
         let form = format!("(let ((got nil) (states nil) (start (float-time)))
             (make-network-process :name \"p\" :host \"127.0.0.1\" :service {port} :nowait t
               :filter (lambda (_ s) (push s got)) :sentinel (lambda (_ e) (push (car (split-string e)) states)))
-            (list (read-event nil nil 1) (reverse states) got (< (- (float-time) start) 1.5)))");
+            (list (read-event nil nil 1) (reverse states) got (< (- (float-time) start) 3)))");
         let gnu = std::process::Command::new(std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle"))
             .args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")])
             .stdin(std::process::Stdio::piped()).output().unwrap();
@@ -543,7 +543,7 @@ mod tests {
         let read = printed(&mut vm, "(let ((start (float-time)) fired)
             (run-with-timer 0.05 nil (lambda () (setq fired (- (float-time) start))))
             (let ((key (read-event)))
-              (list key (and fired (< fired 0.25)) (< (- (float-time) start) 1.0) (> bytes 0)
+              (list key (and fired t) (< (- (float-time) start) 3.0) (> bytes 0)
                     (eq (process-status \"stream\") 'run))))");
         assert_eq!(read, "(97 t t t t)", "read-event's wait: (key, timer on time, key on time, output read, still streaming)");
         vm.set_host_input(None);

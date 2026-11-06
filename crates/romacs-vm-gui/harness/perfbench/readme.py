@@ -13,7 +13,10 @@ by the build, the GNU engine, the machine and the run's date.  Every row is kept
 block whose rows the run did not measure is left as it was.  Between
 `# perfbench-headlines-begin' and `# perfbench-headlines-end' it lists the
 rows where Romacs clearly beats a rival, with build and rerun command, and
-names on standard error any headline this run no longer has.
+names on standard error any headline this run no longer has.  Between
+`# perfbench-lead-begin' and `# perfbench-lead-end' it writes lead.org with
+each {{name}} filled from the run; a name with no value stops it, and
+README.org stays as it was.
 """
 import json
 import os
@@ -21,7 +24,9 @@ import re
 import sys
 from pathlib import Path
 
-BLOCKS = {'table': ('# perfbench-table-begin', '# perfbench-table-end'),
+LEAD = Path(__file__).with_name('lead.org')
+BLOCKS = {'lead': ('# perfbench-lead-begin', '# perfbench-lead-end'),
+          'table': ('# perfbench-table-begin', '# perfbench-table-end'),
           'session': ('# perfbench-session-begin', '# perfbench-session-end'),
           'headlines': ('# perfbench-headlines-begin', '# perfbench-headlines-end'),
           'elb': ('# perfbench-elb-begin', '# perfbench-elb-end')}
@@ -30,6 +35,11 @@ MARGIN = .80
 # (rival, its column, the prefix of its ratios)
 RIVALS = (('GNU', 'gnu', ''), ('GNU native', 'gnu_native', 'native_'), ('neomacs', 'neomacs', 'neomacs_'))
 SUMMARIES = ('elb geometric mean', 'elb median')
+VC_HISTORY = 'session vc-print-root-log whole history'
+OPEN_XDISP = 'session find-file xdisp.c'
+OPEN_HEADER = 'session find-file generated header'
+THEME = 'session theme switch, cycled'
+LEAD_ROWS = (VC_HISTORY, OPEN_XDISP, OPEN_HEADER, THEME)
 
 
 def scaled(value, unit):
@@ -162,8 +172,73 @@ def session_section(results):
         cells += [scaled(third.get('block'), 's')] if neomacs else []
         cells += [ratio(r['wall_ratio']), ratio(r['block_ratio']), ratio(r['instructions_ratio'])]
         cells += [ratio(r.get('neomacs_wall_ratio')), ratio(r.get('neomacs_block_ratio'))] if neomacs else []
-        lines.append('| ' + ' | '.join(cells + [public(r['note'])]) + ' |')
+        lines.append('| ' + ' | '.join(cells + [public('; '.join(filter(None, [session_extras(r), r['note']])))]) + ' |')
     return '\n'.join(lines)
+
+
+def session_extras(made):
+    """What a session row's note adds: when each engine first showed anything,
+    and how its keys fared while the command ran."""
+    def per_engine(metric):
+        figures = [(name, (made.get(column) or {}).get(metric))
+                   for name, column in (('GNU', 'gnu'), ('Romacs', 'romacs'), ('neomacs', 'neomacs'))]
+        return [(name, value) for name, value in figures if value is not None]
+    parts = [f'{label} {", ".join(f"{name} {scaled(value, unit)}" for name, value in figures)}'
+             for label, metric, unit in (('first shown', 'first', 's'), ('median key', 'key', 's'))
+             if (figures := per_engine(metric))]
+    if details := per_engine('detail'):
+        parts.append(f'mode {", ".join(f"{name} {value}" for name, value in details)}')
+    return '; '.join(parts)
+
+
+def commits(rows, history):
+    """The commits of the whole history, when both engines listed the same log
+    and it has every one of git's HISTORY commits: a partial log is no figure."""
+    made = rows.get(VC_HISTORY) or {}
+    checks = [(made.get(engine) or {}).get('check') for engine in ('gnu', 'romacs')]
+    if not checks[0] or checks[0] != checks[1] or int(checks[0].split()[0]) != history:
+        return None
+    return f'{history:,}'
+
+
+def lead_values(results):
+    """Every {{name}} lead.org uses, or None where the run has no value."""
+    rows = {r['row']: r for r in results['rows']}
+
+    def figure(row, engine, metric='wall'):
+        value = ((rows.get(row) or {}).get(engine) or {}).get(metric)
+        return None if value is None else scaled(value, 's')
+    size = results['meta'].get('header_bytes')
+    return {'vc-history-romacs': figure(VC_HISTORY, 'romacs'), 'vc-history-gnu': figure(VC_HISTORY, 'gnu'),
+            'vc-history-commits': commits(rows, results['meta'].get('history_commits')),
+            'vc-history-key': figure(VC_HISTORY, 'romacs', 'key'),
+            'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'), 'open-xdisp-gnu': figure(OPEN_XDISP, 'gnu'),
+            'open-big-size': f'{size / 1e6:.0f} MB' if size else None,
+            'open-big-romacs': figure(OPEN_HEADER, 'romacs'), 'open-big-gnu': figure(OPEN_HEADER, 'gnu'),
+            'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu')}
+
+
+def lead_measured(results):
+    """Whether this run set out to measure what the lead quotes."""
+    return any(r['row'] in LEAD_ROWS for r in results['rows'])
+
+
+def lead_missing(results, template=None):
+    """The names TEMPLATE (lead.org) uses that this run has no value for."""
+    values = lead_values(results)
+    names = re.findall(r'\{\{([^{}]+)\}\}', template if template is not None else LEAD.read_text())
+    return sorted({name for name in names if values.get(name) is None})
+
+
+def lead_section(results):
+    """lead.org with every {{name}} filled.  A name with no value stops here,
+    so a number is never blank: a refused wall time counts as none."""
+    template = LEAD.read_text()
+    missing = lead_missing(results, template)
+    if missing:
+        raise SystemExit(f'README lead: no value for {", ".join(missing)}')
+    values = lead_values(results)
+    return re.sub(r'\{\{([^{}]+)\}\}', lambda found: values[found[1]], template).rstrip('\n')
 
 
 def elb_section(results):
@@ -273,7 +348,8 @@ def main(argv):
     text = readme.read_text()
     groups = {r['group'] for r in results['rows']}
     whole = bool(groups - {'elb', 'session'}) and 'elb' in groups
-    for block, measured_here, body in (('table', bool(groups - {'elb', 'session'}), section),
+    for block, measured_here, body in (('lead', lead_measured(results), lead_section),
+                                       ('table', bool(groups - {'elb', 'session'}), section),
                                        ('session', 'session' in groups, session_section),
                                        ('elb', 'elb' in groups, elb_section),
                                        ('headlines', whole, headlines)):

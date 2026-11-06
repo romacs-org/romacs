@@ -24,7 +24,7 @@ fn window(text: &str, faces: Vec<Face>) -> WindowSnapshot {
 }
 
 fn frame(text: &str, no_font: NoFont) -> FrameSnapshot {
-    FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 100,
+    FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 100,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: window(text, vec![face("Liberation Mono")]) }], background_alpha: 1.0,
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, no_font }
 }
@@ -34,7 +34,7 @@ fn lay_out(text: &str, no_font: NoFont) -> FrameGlyphBuffer {
 }
 
 fn measured(text: &str, no_font: NoFont) -> Vec<u32> {
-    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), faces: vec![face("Liberation Mono")],
+    let input = MeasureInput { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), faces: vec![face("Liberation Mono")],
         text: slice(text), no_font };
     LayoutEngine::new().unwrap().measure(&input).expect("measuring a character no font has succeeds").glyphs.iter().map(|g| g.0).collect()
 }
@@ -161,4 +161,25 @@ fn a_glyphless_character_ending_a_box_run_closes_it() {
     assert_eq!(run.last(), Some(&(true, Some(BoxVerticalEdges::Right))), "the box's cell closes the run: {run:?}");
     // Its digits are inside the run, in a face of their own without a box.
     assert!(chars(&frame).iter().any(|c| c.0 == '7'));
+}
+
+/// A character no font has stays inside a boxed tab bar's run: its cell
+/// has no edges of its own, and its blank character, there for a click,
+/// no box.
+#[test]
+fn a_glyphless_character_stays_inside_a_boxed_tab_bar_run() {
+    use romacs_display_protocol::{BoxVerticalEdges::{Left, Neither, Right}, FrameGlyph, frame_glyphs::GlyphRowRole};
+    use romacs_layout_input::{BoxLine, Decor};
+    let text = format!("a{NONE}b");
+    let boxed = Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some([200, 10, 10]), style: 1 }), ..Default::default() },
+                       ..face("Liberation Mono") };
+    let mut snapshot = frame("x", NoFont::ThinSpace);
+    snapshot.tab_bar = Some(TabBarSnapshot { height: 20, text: slice(&text), face: FaceHandle(0), faces: vec![boxed] });
+    let painted = LayoutEngine::new().unwrap().layout_frame(&snapshot, 1, None).unwrap().0;
+    let cells: Vec<_> = painted.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. }
+        | FrameGlyph::Stretch { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. } => Some(*box_vertical_edges),
+        _ => None,
+    }).collect();
+    assert_eq!(cells, [Left, Neither, Neither, Right]);
 }

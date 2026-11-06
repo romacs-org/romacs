@@ -14,6 +14,7 @@ struct Identity {
     name: Option<String>,
     live: bool,
     inhibit_buffer_hooks: bool,
+    terminal: Option<u64>,
     per_buffer: crate::forwarded::PerBuffer,
     case_tables: [Value; 4],
     local_keymap: Value,
@@ -30,6 +31,7 @@ fn take_identity(object: &mut Object) -> Identity {
                 name: state.name.take(),
                 live: state.live,
                 inhibit_buffer_hooks: state.inhibit_buffer_hooks,
+                terminal: state.terminal,
                 per_buffer: std::mem::take(&mut $b.per_buffer),
                 case_tables: $b.case_tables,
                 local_keymap: $b.local_keymap,
@@ -51,6 +53,7 @@ fn put_identity(object: &mut Object, id: Identity) {
             $b.state.name = id.name;
             $b.state.live = id.live;
             $b.state.inhibit_buffer_hooks = id.inhibit_buffer_hooks;
+            $b.state.terminal = id.terminal;
             $b.per_buffer = id.per_buffer;
             $b.case_tables = id.case_tables;
             $b.local_keymap = id.local_keymap;

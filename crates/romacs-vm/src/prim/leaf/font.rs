@@ -21,6 +21,7 @@ impl Leaf<'_> {
     }
     /// The open display's host; None while the frame is on the initial terminal.
     pub(crate) fn font_host(&mut self) -> Option<&mut (dyn crate::DisplayHost + 'static)> {
+        self.vm.fontset_state();
         self.vm.window_system_host()
     }
     /// The open display's cached ASCII font name for KEY (a face's family

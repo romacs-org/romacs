@@ -3,10 +3,11 @@
 #
 #   scripts/package-release NAME BIN_DIR OUT_DIR
 #
-# BIN_DIR holds builds of romacs-vm-gui and romacs-mcp. Writes
+# BIN_DIR holds builds of romacs-vm-gui, romacs-mcp and romacs-agent-host. Writes
 # OUT_DIR/NAME.tar.gz, which unpacks to NAME/:
 #
-#   bin/romacs-vm-gui  bin/romacs -> romacs-vm-gui  bin/romacs-mcp
+#   bin/romacs-vm-gui  bin/romacs-mcp  bin/romacs-agent-host
+#   bin/romacs, which runs romacs-vm-gui with GNU's Lisp unless told otherwise
 #   share/romacs/{gnu-lisp,rlisp,etc}  share/applications  share/icons
 #
 # The binary finds share/romacs beside its bin/ (host::runtime_root), so the
@@ -32,7 +33,13 @@ fi
 
 install -D -m 0755 "$bin_dir/romacs-vm-gui" "$stage/bin/romacs-vm-gui"
 install -D -m 0755 "$bin_dir/romacs-mcp" "$stage/bin/romacs-mcp"
-ln -s romacs-vm-gui "$stage/bin/romacs"
+install -D -m 0755 "$bin_dir/romacs-agent-host" "$stage/bin/romacs-agent-host"
+# A later mode argument overrides this one.
+cat >"$stage/bin/romacs" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$(readlink -f "$0")")/romacs-vm-gui" --loadup "$@"
+EOF
+chmod 0755 "$stage/bin/romacs"
 mkdir -p "$stage/share/romacs"
 cp -r "$repo/gnu-lisp" "$repo/rlisp" "$repo/etc" "$stage/share/romacs/"
 bash "$repo/scripts/install-linux-desktop-assets.sh" "$stage"

@@ -175,3 +175,53 @@ fn leaf_kind_covers_every_current_storage_variant() {
     for (value, kind) in cases { assert_eq!(cx.kind(value), kind, "{value:?}"); }
     assert_eq!(cx.kind(Value::reference(usize::MAX >> 3, 0)), Kind::Invalid);
 }
+
+/// A unibyte buffer's mirror follows every kind of edit without a rebuild,
+/// through raw bytes whose width in it differs from the ASCII they replace.
+#[test]
+fn a_unibyte_buffers_mirror_follows_every_edit() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(r#"(progn (set-buffer (get-buffer-create "mirror")) (set-buffer-multibyte nil)
+                        (insert (unibyte-string 65 195 169 10 66 255 67)))"#).unwrap();
+    let buffer = vm.slots[vm.buffer_slot].value;
+    vm.mirror_shown(buffer).unwrap();
+    for edit in [
+        "(insert (unibyte-string 200 97))",
+        "(progn (goto-char 2) (insert (unibyte-string 255)))",
+        "(delete-region 3 5)",
+        "(progn (goto-char 1) (insert-before-markers (unibyte-string 128 66)))",
+        "(subst-char-in-region 1 (point-max) 66 200)",
+        "(subst-char-in-region 1 (point-max) 200 66)",
+        "(upcase-region 1 (point-max))",
+        "(downcase-region 1 (point-max))",
+        "(progn (narrow-to-region 2 4) (goto-char 3) (insert (unibyte-string 250)) (widen))",
+        "(progn (goto-char (point-max)) (insert 10 (unibyte-string 129)))",
+        "(transpose-regions 1 2 4 5)",
+        "(transpose-regions 1 3 5 6 t)",
+        "(erase-buffer)",
+        "(insert (unibyte-string 255 65))",
+    ] {
+        vm.eval_source(edit).unwrap();
+        let crate::data::Object::ByteBuffer(b) = vm.object(buffer).unwrap() else { panic!("unibyte buffer") };
+        assert_eq!(b.shown().unwrap().bytes().to_vec(), crate::text::octets_to_multibyte(&b.bytes), "after {edit}");
+    }
+}
+
+/// Display asks a unibyte buffer's boundaries in the mirror's bytes, where a
+/// raw byte is two: a property or overlay after one must not land inside it.
+#[test]
+fn a_unibyte_buffers_boundaries_are_the_mirrors() {
+    use crate::coordinates::ByteOffset;
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(r#"(progn (set-buffer (get-buffer-create "bounds")) (set-buffer-multibyte nil)
+                        (insert (unibyte-string 255 65 66 254 67)) (put-text-property 2 3 'x 1))"#).unwrap();
+    let buffer = vm.slots[vm.buffer_slot].value;
+    vm.mirror_shown(buffer).unwrap();
+    let end = ByteOffset(7);
+    let next = |vm: &Vm, at: usize| -> usize { vm.next_property_boundary(buffer, ByteOffset(at), end).unwrap().0 };
+    assert_eq!((next(&vm, 0), next(&vm, 2), next(&vm, 3)), (2, 3, 7));
+    vm.eval_source("(make-overlay 5 6)").unwrap();
+    assert_eq!((next(&vm, 3), next(&vm, 6)), (6, 7), "from the overlay's start, past the raw byte at 4");
+}

@@ -64,9 +64,15 @@ Workloads (--quick runs those marked q):
              Pure Lisp compute, not an editor workload: its own table, never
              in --quick.
   session    what a person feels, in a GUI session on headless labwc: a command
-             on a key (find-file, dired, occur, project-find-regexp,
-             project-find-file, vc-log, vc-diff, vc-dir, M-x shell, org-agenda)
-             and per key editing (kill, yank, undo, isearch, Org).  Wall runs
+             on a key (dired, occur, project-find-regexp, project-find-file,
+             vc-log, vc-diff, vc-dir, M-x shell, org-agenda) and per key editing
+             (kill, yank, undo, isearch, Org); then, with Romacs's shipped
+             defaults on, what README's lead quotes: find-file of xdisp.c and of
+             a generated 15 MB header to the window's final faces,
+             vc-print-root-log over the whole history (limit lifted in both;
+             commits, complete, first screen, median key while it streams),
+             and a theme switch among each engine's own shipped themes, cycled
+             and on first visit, none being shipped by both.  Wall runs
              from the key to the result; block is the longest gap between ticks
              of a 5 ms timer, which cannot run while the main VM is busy
              (perfbench-session.el).  A path on a worker VM raises instructions
@@ -135,6 +141,7 @@ HARNESS = HERE.parent
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HARNESS / 'bench'))
 import parity_live  # noqa: E402
+import readme  # noqa: E402
 import real_init  # noqa: E402
 
 PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
@@ -204,9 +211,9 @@ ELB_COLUMNS = (('gnu', 'gnu', 'elc'), ('gnu_native', 'gnu', 'eln'), ('romacs', '
 ELB_ERROR = re.compile(r'(?:^|: )(Error(?: loading| running)?: .*)', re.M)
 GROUPS = ('batch', 'micro', 'ert', 'elb', 'session', 'gui', 'init', 'apps')
 SESSION_LISP = HERE / 'perfbench-session.el'
+SESSION_METRICS = ('wall', 'block', 'instructions', 'first', 'key', 'keys')
 # (row, command in perfbench-session.el, whether it ends in a prompt to leave)
-SESSION_COMMANDS = [('session find-file xdisp.c', 'find-file', False),
-                    ('session dired 5,000 files', 'dired', False),
+SESSION_COMMANDS = [('session dired 5,000 files', 'dired', False),
                     ('session occur xdisp.c', 'occur', False),
                     ('session project-find-regexp', 'project-find-regexp', False),
                     ('session project-find-file', 'project-find-file', True),
@@ -215,6 +222,21 @@ SESSION_COMMANDS = [('session find-file xdisp.c', 'find-file', False),
                     ('session vc-dir', 'vc-dir', False),
                     ('session M-x shell, one command', 'shell', False),
                     ('session org-agenda, a month', 'org-agenda', False)]
+# What README's lead quotes, in a session as each engine ships: (row, command,
+# rounds per --runs, seconds a round may take).  First visits come before the
+# cycled rows load their themes.
+SESSION_SHIPPED = [('session find-file xdisp.c', 'open-xdisp', 1, 120),
+                   ('session find-file generated header', 'open-header', 1, 300),
+                   ('session vc-print-root-log whole history', 'vc-history', 1, 300),
+                   ('session theme switch, first visit', 'theme-first', 1, 120),
+                   ('session theme switch, cycled', 'theme-cycle', 3, 120)]
+# Each engine's own shipped themes: (to cycle through, to visit once each).
+# Romacs ships none of GNU's, whose modus and tango it replaced with its ports.
+GNU_THEMES = (['modus-operandi', 'modus-vivendi', 'tango-dark'], ['wombat', 'leuven', 'adwaita', 'deeper-blue', 'misterioso'])
+SESSION_THEMES = {'gnu': GNU_THEMES, 'neomacs': GNU_THEMES,
+                  'romacs': (['dracula', 'nord', 'gruvbox-dark'], ['zenburn', 'solarized-dark', 'tokyonight-night',
+                                                                   'monokai-classic', 'catppuccin-mocha'])}
+HEADER_LINES = 146_000  # about 15 MB, the shape of a generated register header
 # (row, Lisp that makes its buffer, Lisp for its check, keys before the row, the row's keys)
 SESSION_KEYS = [('session kill-line, per key', '(perfbench-session-text)', '(buffer-size)', [], [parity_live.C('k')] * 40),
                 ('session yank, per key', '(perfbench-session-kills)', '(buffer-size)', [], [parity_live.C('y')] * 40),
@@ -971,17 +993,18 @@ def elb_samples(ctx, batch, column, member):
 
 # --- GUI workloads ------------------------------------------------------------
 
-def gui_init(engine, idle_file=None):
+def gui_init(engine, idle_file=None, shipped=False):
     """The GUI init: GNU's --loadup settings (Romacs's own defaults off in
-    Romacs), the probe and perfbench-gui.el; with IDLE_FILE, write the first
-    idle moment after startup there and exit."""
+    Romacs, unless SHIPPED: it then starts as a user's does), the probe and
+    perfbench-gui.el; with IDLE_FILE, write the first idle moment after startup
+    there and exit."""
     idle = ('(add-hook (quote emacs-startup-hook) (lambda () (run-with-idle-timer 0 nil'
             f' (lambda () (perfbench-gui-write-loaded {parity_live.lisp_string(str(idle_file) + "-loaded")})'
             f' (perfbench-gui-stamp {parity_live.lisp_string(str(idle_file))}) (kill-emacs 0)))))\n'
             if idle_file else '')
     return (';; -*- lexical-binding: t -*-\n'
             f'(load {parity_live.lisp_string(str(GUI_LISP))} nil t)\n'
-            + (real_init.GNU_COMPLETION_UI + parity_live.ROMACS_DEFAULTS_OFF if engine == 'romacs'
+            + (('' if shipped else real_init.GNU_COMPLETION_UI + parity_live.ROMACS_DEFAULTS_OFF) if engine == 'romacs'
                else real_init.gnu_settings())
             + '(setq inhibit-startup-screen t)\n' + idle
             + f'(load {parity_live.lisp_string(str(parity_live.PROBE))} nil t)\n'
@@ -1034,12 +1057,25 @@ def session_repo(ctx):
         out.write('/* perfbench */\n')
     agenda = ctx.work / 'agenda.org'
     agenda.write_text(''.join(f'* TODO item {n}\n  SCHEDULED: <2026-01-{n % 28 + 1:02}>\n' for n in range(2000)))
-    return repo, agenda
+    header = ctx.work / 'generated.h'
+    header.write_text(generated_header(HEADER_LINES))
+    ctx.header_bytes = header.stat().st_size
+    ctx.history_commits = int(git('rev-list', '--count', 'HEAD', cwd=repo))
+    return repo, agenda, header
 
 
-def session_command(session, name, leave, rate, rounds):
-    """Wall, block and instructions of command NAME, the median of ROUNDS."""
-    samples, checks = [], []
+def generated_header(lines):
+    """A generated C register header of LINES lines, the same on every run."""
+    def line(n):
+        name = f'#define REG_{n // 12:06}_CNTL__FIELD_{n % 12:02}_MASK'
+        return f'//REG_{n // 12:06}_CNTL\n' if n % 12 == 0 else f'{name:<96}0x{(n * 2654435761) % 2 ** 32:08X}L\n'
+    return ''.join(line(n) for n in range(lines))
+
+
+def session_command(session, name, leave, rate, rounds, timeout=120):
+    """Wall, block and instructions of command NAME, the median of ROUNDS, each
+    allowed TIMEOUT seconds, and what it showed first and how its keys fared."""
+    samples, checks, detail = [], [], None
     for n in range(rounds):
         done = session.root / f'work/{name}-{n}'
         session.ask(f'(perfbench-session-arm (quote {name}) {parity_live.lisp_string(str(done))})', 120)
@@ -1047,16 +1083,17 @@ def session_command(session, name, leave, rate, rounds):
 
         def act():
             session.engine.keys(['-k', 'F5'])
-            parity_live.wait(done.exists, 120, f'{name} result', session.engine.process, .01)
-        instructions, elapsed = session.counted(act, 120)
-        seconds, block = parity_live.read_sexp(done.read_text())
-        samples.append({'wall': seconds, 'block': block,
+            parity_live.wait(done.exists, timeout, f'{name} result', session.engine.process, .01)
+        instructions, elapsed = session.counted(act, timeout)
+        seconds, block, first, key, keys = parity_live.read_sexp(done.read_text())
+        samples.append({'wall': seconds, 'block': block, 'first': first, 'key': key, 'keys': keys,
                         'instructions': None if instructions is None else instructions - rate * elapsed})
         if leave:
             session.engine.keys(parity_live.C('g'))
-        checks.append(session.ask(f'(perfbench-session-finish (quote {name}))', 60))
+        check, detail = session.ask(f'(perfbench-session-finish (quote {name}))', 120)
+        checks.append(check)
         time.sleep(.5)
-    return session_medians(samples, checks)
+    return session_medians(samples, checks) | {'detail': detail}
 
 
 def session_keys(session, setup, check_form, before, keys, rate, rounds):
@@ -1087,23 +1124,33 @@ def session_medians(samples, checks):
     a round that did something else is no sample of this row."""
     if len(set(map(str, checks))) > 1:
         raise Refused(f'rounds differ: {checks}')
-    return {metric: median(s[metric] for s in samples) for metric in ('wall', 'block', 'instructions')} | {'check': checks[0]}
+    return {metric: median(s.get(metric) for s in samples) for metric in SESSION_METRICS} | {'check': checks[0]}
 
 
-def session_group_figures(ctx, engine, repo, agenda):
-    """Every session row in one ENGINE session: a row that fails says so and
-    costs that row alone."""
-    session = Session(ctx, engine)
+def session_start(session, ctx, engine, inputs, comparing):
+    """SESSION with its Lisp loaded and its inputs set; COMPARING, in fido-vertical."""
+    repo, agenda, header = inputs
+    cycle, visits = SESSION_THEMES[engine]
+    symbols = lambda names: f"'({' '.join(names)})"  # noqa: E731
+    session.ask(f'(progn (load {parity_live.lisp_string(str(SESSION_LISP))} nil t t)'
+                f' (setq perfbench-session-repo {parity_live.lisp_string(str(repo))}'
+                f' perfbench-session-directory {parity_live.lisp_string(str(ctx.fixtures / "d5000") + "/")}'
+                f' perfbench-session-agenda {parity_live.lisp_string(str(agenda))}'
+                f' perfbench-session-header {parity_live.lisp_string(str(header))}'
+                f' perfbench-session-cycle {symbols(cycle)} perfbench-session-visits {symbols(visits)}'
+                ' auto-save-default nil create-lockfiles nil make-backup-files nil)'
+                f' {FIDO + " (setq icomplete-compute-delay 0)" if comparing else ""} (blink-cursor-mode -1) t)')
+    time.sleep(2)
+    return session.idle_rate()
+
+
+def session_group_figures(ctx, engine, inputs):
+    """Every session row of ENGINE, in a session for the comparison rows and one
+    as it ships for the lead's: a row that fails says so and costs that row alone."""
     figures = {}
+    session = Session(ctx, engine)
     try:
-        session.ask(f'(progn (load {parity_live.lisp_string(str(SESSION_LISP))} nil t t)'
-                    f' (setq perfbench-session-repo {parity_live.lisp_string(str(repo))}'
-                    f' perfbench-session-directory {parity_live.lisp_string(str(ctx.fixtures / "d5000") + "/")}'
-                    f' perfbench-session-agenda {parity_live.lisp_string(str(agenda))}'
-                    ' auto-save-default nil create-lockfiles nil make-backup-files nil)'
-                    f' {FIDO} (setq icomplete-compute-delay 0) (blink-cursor-mode -1) t)')
-        time.sleep(2)
-        rate = session.idle_rate()
+        rate = session_start(session, ctx, engine, inputs, True)
         for name, command, leave in SESSION_COMMANDS:
             figures[name] = session_row(session, name, lambda c=command, l=leave: session_command(session, c, l, rate, ctx.runs),
                                         command)
@@ -1112,6 +1159,18 @@ def session_group_figures(ctx, engine, repo, agenda):
                                         session_keys(session, s, c, b, k, rate, ctx.runs))
         if engine == 'romacs' and not session.stopped:
             figures['romacs_note'] = session.romacs_note()
+    finally:
+        session.stop()
+    session = Session(ctx, engine, shipped=True)
+    try:
+        rate = session_start(session, ctx, engine, inputs, False)
+        for name, command, repeat, timeout in SESSION_SHIPPED:
+            # A first visit happens once per theme, however many --runs there are.
+            rounds = min(ctx.runs, len(SESSION_THEMES[engine][1])) if command == 'theme-first' else ctx.runs * repeat
+            figures[name] = session_row(session, name, lambda c=command, r=rounds, t=timeout:
+                                        session_command(session, c, False, rate, r, t), command)
+        if engine == 'romacs' and not session.stopped:
+            figures['shipped_note'] = session.romacs_note()
     finally:
         session.stop()
     return figures
@@ -1138,12 +1197,17 @@ def session_row(session, name, function, command=None):
 
 def session_rows(ctx):
     """The session group: one session per engine, the rows from each."""
-    repo, agenda = session_repo(ctx)
-    results = {engine: ctx.attempt(engine, lambda e=engine: session_group_figures(ctx, e, repo, agenda)) for engine in ctx.compared}
-    romacs_note = results['romacs'].pop('romacs_note', 'Romacs: loads not checked, the session stopped answering')
-    names = [c[0] for c in SESSION_COMMANDS] + [k[0] for k in SESSION_KEYS]
+    inputs = session_repo(ctx)
+    results = {engine: ctx.attempt(engine, lambda e=engine: session_group_figures(ctx, e, inputs)) for engine in ctx.compared}
+    stopped = 'Romacs: loads not checked, the session stopped answering'
+    notes = {'comparison': results['romacs'].pop('romacs_note', stopped), 'shipped': results['romacs'].pop('shipped_note', stopped)}
+    shipped = [c[0] for c in SESSION_SHIPPED]
+    names = [c[0] for c in SESSION_COMMANDS] + [k[0] for k in SESSION_KEYS] + shipped
     rows = []
     for name in names:
+        romacs_note = notes['shipped' if name in shipped else 'comparison']
+        if 'theme switch' in name:
+            romacs_note += '; each engine on its own shipped themes'
         engines = {e: results[e] if results[e].get('failed') else results[e][name] for e in ctx.compared}
         unit = 'key' if name.endswith('per key') else 'run'
         note = '; '.join(f'{ENGINE_NAMES[e]}: {engines[e]["failed"]}' for e in ('gnu', 'romacs') if engines[e].get('failed'))
@@ -1197,10 +1261,10 @@ def launch_samples(ctx, engine):
 class Session:
     """One engine's GUI session on the probe, measuring key phases."""
 
-    def __init__(self, ctx, engine):
+    def __init__(self, ctx, engine, shipped=False):
         root, home, env = parity_live.private_tree(engine, ctx.work, ctx.tools)
         env.update(ctx.engine_env[engine])
-        init = gui_init(engine)
+        init = gui_init(engine, shipped=shipped)
         start = {'gnu': parity_live.gnu_engine,
                  'romacs': lambda *a: parity_live.romacs_engine(ctx.engines['romacs'], *a),
                  'neomacs': lambda *a: parity_live.neomacs_engine(ctx.engines.get('neomacs'), *a)}[engine]
@@ -1501,8 +1565,9 @@ def gate_walls(rows, max_load):
             for engine in ENGINE_NAMES:
                 if r.get(engine) and r[engine].get('wall') is not None:
                     r[engine]['wall_refused'] = r[engine].pop('wall')
-                if r.get(engine) and r[engine].get('block') is not None:
-                    r[engine]['block_refused'] = r[engine].pop('block')
+                for metric in ('block', 'first', 'key'):
+                    if r.get(engine) and r[engine].get(metric) is not None:
+                        r[engine][f'{metric}_refused'] = r[engine].pop(metric)
             r['note'] = f'wall refused: load {r["load"]:.1f} > {max_load}; {r["note"]}'
     return rows
 
@@ -1581,7 +1646,8 @@ def session_table(results):
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
         lines.append(f'| {r["row"]} | {r["unit"]} | {scaled(gnu.get("wall"), "s")} | {scaled(romacs.get("wall"), "s")} | '
                      f'{times(r["wall_ratio"])} | {scaled(gnu.get("block"), "s")} | {scaled(romacs.get("block"), "s")} | '
-                     f'{times(r["block_ratio"])} | {times(r["instructions_ratio"])} | {r["note"]} |')
+                     f'{times(r["block_ratio"])} | {times(r["instructions_ratio"])} | '
+                     f'{"; ".join(filter(None, [readme.session_extras(r), r["note"]]))} |')
     return lines
 
 
@@ -1656,6 +1722,8 @@ class Context:
         self.engine_env = {name: self.engine_env[name] for name in self.engines}
         self.skipped = []
         self.elb_native = None
+        self.header_bytes = None
+        self.history_commits = None
 
     def attempt(self, engine, function):
         """FUNCTION's result; neomacs, which a row need not have, says why it
@@ -1819,6 +1887,8 @@ def main():
             shutil.rmtree(ctx.work, ignore_errors=True)
     meta['load_end'] = load()
     meta['elb_native'] = ctx.elb_native
+    meta['header_bytes'] = ctx.header_bytes
+    meta['history_commits'] = ctx.history_commits
     previous = previous_results(out_root, args.previous, run_dir)
     meta['previous'] = str(previous) if previous else None
     results = {'meta': meta, 'skipped': ctx.skipped,
@@ -1827,6 +1897,12 @@ def main():
     text = table(results)
     (run_dir / 'table.md').write_text(text)
     print(text)
+    # What README's lead needs comes from this run or the run has failed.
+    if selected(args, 'session', 'session', False):
+        missing = readme.lead_missing(results)
+        if missing:
+            print(f'README lead: no value for {", ".join(missing)}', file=sys.stderr)
+            return 1
     return 0
 
 
