@@ -89,6 +89,7 @@ class Harness:
         self.mcp = self.connect(argument('--mcp-config')) if argument('--mcp-config') else None
         self.inbox = queue.Queue()
         self.interrupted = threading.Event()
+        self.busy = False
         self.approvals = {}
         self.turn = 0
 
@@ -229,7 +230,15 @@ class Harness:
             message = json.loads(line)
             if message.get('type') == 'control_request':
                 subtype = message['request'].get('subtype')
-                log(control=subtype)
+                selecting = subtype in ('set_model', 'apply_flag_settings')
+                log(control=subtype, request=message['request'], busy=self.busy)
+                how = os.environ.get('FAKE_SELECT') if selecting else None
+                if how == 'silent':
+                    continue
+                if how == 'error':
+                    emit({'type': 'control_response', 'response': {'subtype': 'error', 'error': 'refused',
+                                                                   'request_id': message['request_id']}})
+                    continue
                 answer = INITIALIZED if subtype == 'initialize' else {'still_queued': []}
                 emit({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': message['request_id'],
                                                                'response': answer}})
@@ -251,8 +260,10 @@ class Harness:
             text = self.inbox.get()
             if text is None:
                 return 0
+            self.busy = True
             self.init()
             self.run(text)
+            self.busy = False
 
 
 if __name__ == '__main__':

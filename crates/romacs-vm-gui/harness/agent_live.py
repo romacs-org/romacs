@@ -53,6 +53,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  select     a new model or effort in a running session: live between
+             turns, armed during one, restarted when refused, carried by
+             Codex's next run, across a server restart.
   start_picker  a session started by real keys through the palette of
              instances and models, with an effort; the first session's
              models kept once.
@@ -1232,7 +1235,7 @@ def unicode(args, base):
         a.idle(sid)
         chat = a.chat(sid)
         journal = a.journal(sid)
-        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict)), {})
+        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict) and r['in'].get('type') == 'user'), {})
         sent_text = (sent.get('message') or {}).get('content')
         results = a.results(sid)
         title = a.eval(f'(romacs-agent-title {a.s(sid)})')
@@ -2433,6 +2436,226 @@ def start_picker(args, base):
         a.close()
 
 
+def select(args, base):
+    """A new model or effort in a running session.  Fake Claude: both control
+    requests between turns, armed during one, messages held until each is
+    confirmed, a refusal or silence restarting on `--resume' with the new
+    words, clearing the effort restarting, a harness dying mid-turn resuming
+    on the selection; Codex's next run carrying it, built after the last
+    retired.  A server restart replays the divider in place and finds an
+    armed selection, which applies at the live turn end only."""
+    a = Agents(args, base, 'sl')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        result = {}
+
+        def selected(sid, model, effort):
+            models = 'nil' if model is None else lisp_text(model)
+            efforts = 'nil' if effort is None else lisp_text(effort)
+            return a.eval(f'(romacs-agent-select {a.s(sid)} {models} {efforts})')
+
+        def options(sid):
+            return parity_live.read_sexp(a.eval(
+                f'(let ((o (romacs-agent-options {a.s(sid)}))) (list (plist-get o :model) (plist-get o :effort)))'))
+
+        def settled(sid, seconds=20):
+            until(lambda: a.eval(f'(romacs-agent-switch {a.s(sid)})') == 'nil', seconds, 'selection settled')
+
+        def controls(sid):
+            return [r['in'] for r in a.journal(sid) if isinstance(r.get('in'), dict)
+                    and r['in'].get('type') == 'control_request'
+                    and r['in']['request']['subtype'] in ('set_model', 'apply_flag_settings')]
+
+        def order(sid):
+            """What was written to SID's harness, in order."""
+            return [(r['in'].get('type'), r['in'].get('request', {}).get('subtype')) for r in a.journal(sid)
+                    if isinstance(r.get('in'), dict) and r['in'].get('request', {}).get('subtype') != 'initialize']
+
+        def starts(sid):
+            return [e['argv'] for e in a.logged() if e.get('started') == sid]
+
+        def after(argv, flag):
+            return argv[argv.index(flag) + 1] if flag in argv else None
+
+        # Idle: live, confirmed, and the next message on it.
+        one = a.start('say one')
+        a.idle(one)
+        selected(one, 'claude-sonnet-5-5', 'low')
+        settled(one)
+        result['live'] = {'requests': [c['request']['subtype'] for c in controls(one)], 'options': options(one),
+                          'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')],
+                          'starts': len(starts(one))}
+
+        # Armed during a turn: nothing mid-turn, the message waits for both.
+        a.send(one, 'slow 15')
+        until(lambda: a.state(one) == 'running', 10, 'turn running')
+        selected(one, 'claude-opus-5-5', 'high')
+        a.send(one, 'say after')
+        header = parity_live.read_sexp(a.eval(
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
+        armed = a.eval(f'(and (romacs-agent-switch {a.s(one)}) t)')
+        until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
+        written = order(one)
+        result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
+                           'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
+
+        # The divider, again after a server restart, between the same turns.
+        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        before = a.chat(one)
+        a.restart()
+        until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        a.codex_instance()
+        replayed = a.chat(one)
+        result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
+                             'in_place': replayed.find(divider) < replayed.find('after')}
+
+        # A restart of the server while armed: applied at the live turn's end.
+        a.send(one, 'slow 40')
+        until(lambda: a.state(one) == 'running', 10, 'turn running')
+        selected(one, 'claude-haiku-5-5', 'high')
+        a.restart()
+        until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        a.codex_instance()
+        found = a.eval(f'(plist-get (romacs-agent-switch {a.s(one)}) :model)')
+        settled(one, 30)
+        result['restart_armed'] = {'found': found, 'options': options(one),
+                                   'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
+
+        # Refused, and silent: a new harness on the selection.
+        restarts = {}
+        for how, model in (('error', 'claude-haiku-5-5'), ('silent', 'claude-sonnet-5-5')):
+            a.eval(f'(progn (setenv "FAKE_SELECT" {lisp_text(how)}) t)')
+            sid = a.start('say first')
+            a.idle(sid)
+            selected(sid, model, None)
+            # Waits behind the selection, and goes to the new harness.
+            a.send(sid, 'say again')
+            settled(sid, 30)
+            a.eval('(progn (setenv "FAKE_SELECT" nil) t)')
+            until(lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
+            argv = starts(sid)[-1]
+            restarts[how] = {'runs': len(starts(sid)), 'resume': after(argv, '--resume') == sid,
+                             'model': after(argv, '--model')}
+        result['restarts'] = restarts
+
+        # Clearing the effort takes a new harness too.
+        cleared = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} "say first" nil nil (list :effort "high")))').strip('"')
+        a.idle(cleared)
+        selected(cleared, None, None)
+        settled(cleared, 30)
+        until(lambda: len(starts(cleared)) == 2, 15, 'restarted')
+        result['cleared'] = {'requests': controls(cleared), 'first': after(starts(cleared)[0], '--effort'),
+                             'second': after(starts(cleared)[-1], '--effort'),
+                             'resume': after(starts(cleared)[-1], '--resume') == cleared}
+
+        # A harness that dies mid-turn: its resume uses the selection.
+        dying = a.start('say first')
+        a.idle(dying)
+        a.send(dying, 'slow 200')
+        until(lambda: a.state(dying) == 'running', 10, 'turn running')
+        selected(dying, 'claude-haiku-5-5', None)
+        a.send(dying, 'say held')
+        os.kill(a.harness_pid(dying), signal.SIGKILL)
+        settled(dying, 30)
+        until(lambda: a.state(dying) == 'ended', 15, 'ended')
+        a.eval(f'(romacs-agent-resume {a.s(dying)})')
+        until(lambda: len(starts(dying)) == 2, 15, 'resumed')
+        result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
+
+        # Codex: the next run's words, built after this run retired.
+        run = a.start('slow 3', 'codex')
+        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        selected(run, 'gpt-6-luna', 'low')
+        a.send(run, 'say next')
+        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'second run')
+        runs = [r['argv'] for r in a.codex_runs()]
+        result['codex'] = {'first': 'gpt-6-luna' in runs[0], 'second': 'gpt-6-luna' in runs[-1],
+                           'effort': 'model_reasoning_effort="low"' in runs[-1], 'runs': len(runs)}
+
+        live, armed_r, div = result['live'], result['armed'], result['divider']
+        result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
+                        and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
+                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
+                        and armed_r['written'][-3:] == [('control_request', 'set_model'),
+                                                        ('control_request', 'apply_flag_settings'), ('user', None)]
+                        and div['before'] == 1 and div['after'] == 1 and div['in_place']
+                        and result['restart_armed']['found'].strip('"') == 'claude-haiku-5-5'
+                        and result['restart_armed']['options'] == ['claude-haiku-5-5', 'high']
+                        and result['restart_armed']['busy'] is False
+                        and restarts['error'] == {'runs': 2, 'resume': True, 'model': 'claude-haiku-5-5'}
+                        and restarts['silent'] == {'runs': 2, 'resume': True, 'model': 'claude-sonnet-5-5'}
+                        and result['cleared']['requests'] == [] and result['cleared']['first'] == 'high'
+                        and result['cleared']['second'] is None and result['cleared']['resume']
+                        and result['died']['model'] == 'claude-haiku-5-5'
+                        and not result['codex']['first'] and result['codex']['second'] and result['codex']['effort'])
+        return result
+    finally:
+        a.close()
+
+
+def select_real(args, base):
+    """`select' on the real harnesses: Claude Code (--claude-model) from
+    effort low to medium between two turns, both control requests confirmed
+    and the second turn answered; Codex (--codex-model) over two runs, the
+    second carrying the new effort.  Costs money: not a default workflow."""
+    a = Agents(args, base, 'sr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        a.providers([('claude', args.claude_config, claude, []), ('codex', args.codex_home, codex, [])])
+        result = {}
+
+        def turn(sid, text, expect):
+            a.send(sid, text)
+            until(lambda: expect in (a.eval(f'(romacs-agent-reply {a.s(sid)})') or ''), 180, f'{expect} answered')
+            a.idle(sid, 60)
+
+        def start(provider, model, effort, text, expect):
+            sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} {lisp_text(text)} nil {lisp_text(provider)} '
+                         f'(list :model {lisp_text(model)} :effort {lisp_text(effort)})))').strip('"')
+            until(lambda: expect in (a.eval(f'(romacs-agent-reply {a.s(sid)})') or ''), 180, f'{expect} answered')
+            a.idle(sid, 60)
+            return sid
+
+        sid = start('claude', args.claude_model, 'low', 'Reply with only the word ALPHA.', 'ALPHA')
+        a.eval(f'(romacs-agent-select {a.s(sid)} {lisp_text(args.claude_model)} "medium")')
+        until(lambda: a.eval(f'(romacs-agent-switch {a.s(sid)})') == 'nil', 30, 'selection confirmed')
+        turn(sid, 'Reply with only the word BRAVO.', 'BRAVO')
+        records = a.journal(sid)
+        result['claude'] = {
+            'written': [r['in']['request'] for r in records if isinstance(r.get('in'), dict)
+                        and r['in'].get('request', {}).get('subtype') == 'apply_flag_settings'],
+            'answers': [r['out']['response'].get('subtype') for r in records if isinstance(r.get('out'), dict)
+                        and r['out'].get('type') == 'control_response'
+                        and str(r['out']['response'].get('request_id', '')).startswith('romacs-select')],
+            'runs': sum(1 for r in records if r.get('note', {}).get('type') == 'run') if records else 0,
+            'models': [sorted(r['out'].get('modelUsage', {})) for r in records if isinstance(r.get('out'), dict)
+                       and r['out'].get('type') == 'result'],
+            'cost': [r['out'].get('total_cost_usd') for r in records if isinstance(r.get('out'), dict)
+                     and r['out'].get('type') == 'result'][-1]}
+
+        run = start('codex', args.codex_model, 'low', 'Reply with only the word CHARLIE.', 'CHARLIE')
+        a.eval(f'(romacs-agent-select {a.s(run)} {lisp_text(args.codex_model)} "medium")')
+        turn(run, 'Reply with only the word DELTA.', 'DELTA')
+        host = json.loads((a.home / '.local/state/romacs/agents' / run / 'host.json').read_text())
+        result['codex'] = {'second': [w for w in host['argv'] if 'model_reasoning_effort' in w]}
+        c = result['claude']
+        result['ok'] = (c['written'] == [{'subtype': 'apply_flag_settings', 'settings': {'effortLevel': 'medium'}}]
+                        and c['answers'] == ['success'] and c['runs'] == 1
+                        and result['codex']['second'] == ['model_reasoning_effort="medium"'])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -2490,7 +2713,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
