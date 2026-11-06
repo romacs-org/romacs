@@ -1779,6 +1779,24 @@ thousandth a stack mark."
                                                      :config-dir (format "/tmp/claude-config-%d" i))))
   :body (let ((romacs-agent-providers it)) (romacs-agent--picker-rows)))
 
+;; What runs under a session of N delegated tasks: rows and a summary, made
+;; once per batch of their events, however many arrive.
+(scaling-probe agent-children :n 1000
+  :setup (progn (scaling--agent) (require 'romacs-agent-ui)
+                (let ((parent (romacs-agent--make :id "scaling-parent" :harness 'claude :provider "claude")))
+                  (puthash "scaling-parent" parent romacs-agent--sessions)
+                  (dotimes (i n)
+                    (let ((child (romacs-agent--make :id (format "scaling-child-%d-%d" n i) :harness 'codex
+                                                     :provider "codex" :state 'running
+                                                     :options '(:parent "scaling-parent"))))
+                      (puthash (romacs-agent-id child) child romacs-agent--sessions)
+                      (romacs-agent--index child)))
+                  (romacs-agent-children parent)))
+  :body (progn
+          (dolist (child it)
+            (romacs-agent-ui--track-children child (list :type 'done)))
+          (romacs-agent-ui--children-flush)))
+
 ;; N drivers, each a T3 driver name, and T3's settings of N instances of
 ;; them, read anew: each instance's harness by an index built once.
 (scaling-probe agent-instances-drivers :n 500

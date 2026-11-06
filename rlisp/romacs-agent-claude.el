@@ -29,6 +29,8 @@ RESUME is non-nil."
     (append (romacs-agent--environment-words session)
             (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                   "--input-format" "stream-json" "--verbose" "--include-partial-messages"
+                  ;; Without it the stream carries thinking blocks with no text.
+                  "--thinking-display" "summarized"
                   ;; The harness's own approvals come to this session's UI.
                   "--permission-prompt-tool" "stdio"
                   "--mcp-config" (expand-file-name "mcp.json" dir))
@@ -72,10 +74,28 @@ the model is given them, and no file is named for it to open."
           (mapconcat (lambda (e) (if (stringp e) e (romacs-agent--json e))) errors "; ")
         (romacs-agent--value (gethash "result" result))))))
 
+(defun romacs-agent--claude-status (line)
+  "The events of LINE, a status: a compaction's end has no status of its own."
+  (let ((status (romacs-agent--value (gethash "status" line))))
+    (cond ((equal (gethash "compact_result" line) "failed")
+           (list (list :type 'error :text (format "Compaction failed: %s" (gethash "compact_error" line)))))
+          (status (list (list :type 'status :text status))))))
+
+(defun romacs-agent--claude-injected (text parent)
+  "The events of TEXT, a local command's output nobody typed.  The compaction's
+own \"Compacted\" is already said by its row."
+  (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
+    (unless (member output '("" "Compacted"))
+      (list (list :type 'status :text output :parent parent)))))
+
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
   (let ((type (gethash "type" line))
-        (parent (romacs-agent--value (gethash "parent_tool_use_id" line))))
+        (parent (romacs-agent--value (gethash "parent_tool_use_id" line)))
+        (compacting (romacs-agent-compacting session)))
+    ;; Only the next line can be the summary: a compaction cut short leaves
+    ;; no mark for a later run's line to match.
+    (setf (romacs-agent-compacting session) nil)
     (pcase type
       ("system"
        (pcase (gethash "subtype" line)
@@ -83,7 +103,8 @@ the model is given them, and no file is named for it to open."
                              :harness-session (gethash "session_id" line)
                              :permission-mode (gethash "permissionMode" line)
                              :mcp (gethash "mcp_servers" line))))
-         ("status" (list (list :type 'status :text (gethash "status" line))))
+         ("status" (romacs-agent--claude-status line))
+         ("compact_boundary" (setf (romacs-agent-compacting session) t) nil)
          (_ nil)))
       ("stream_event"
        (let* ((event (gethash "event" line))
@@ -115,6 +136,8 @@ the model is given them, and no file is named for it to open."
           (cl-loop for block across (gethash "content" message)
                    for btype = (gethash "type" block)
                    when (equal btype "text") do (setq text t)
+                   when (and (equal btype "thinking") (not streamed))
+                   collect (list :type 'thinking :text (gethash "thinking" block) :parent parent)
                    when (and (equal btype "text") (not streamed))
                    collect (list :type 'delta :text (gethash "text" block) :parent parent :message id)
                    when (equal btype "tool_use")
@@ -127,8 +150,13 @@ the model is given them, and no file is named for it to open."
           (when text (list (list :type 'message-end :message id :parent parent))))))
       ("user"
        (let ((content (gethash "content" (gethash "message" line))))
-         (if (stringp content)
-             (list (list :type 'status :text content :parent parent))
+         (cond
+          ;; The synthetic line right after a boundary is its summary: a
+          ;; string from /compact, text blocks from an automatic compaction.
+          ((and compacting (eq (gethash "isSynthetic" line) t))
+           (list (list :type 'compacted :text (romacs-agent--text-of content))))
+          ((stringp content) (romacs-agent--claude-injected content parent))
+          (t
            (cl-loop for block across content
                     for btype = (gethash "type" block)
                     when (equal btype "tool_result")
@@ -137,7 +165,7 @@ the model is given them, and no file is named for it to open."
                                   :output (romacs-agent--text-of (gethash "content" block))
                                   :parent parent)
                     when (equal btype "text")
-                    collect (list :type 'status :text (gethash "text" block) :parent parent)))))
+                    collect (list :type 'status :text (gethash "text" block) :parent parent))))))
       ("result"
        (list (list :type 'done :cost (gethash "total_cost_usd" line)
                    :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
@@ -159,7 +187,8 @@ the model is given them, and no file is named for it to open."
                        :description (gethash "description" request))))))
       ("control_response"
        (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
-         (cond ((and id (equal id (romacs-agent-models-request session)))
+         (cond ((and id (romacs-agent--select-answered session id (equal (gethash "subtype" response) "success"))))
+               ((and id (equal id (romacs-agent-models-request session)))
                 (setf (romacs-agent-models-request session) nil)
                 (when (hash-table-p (gethash "response" response))
                   (romacs-agent--keep-models session (romacs-agent--claude-models (gethash "response" response)))))
@@ -182,6 +211,22 @@ alias is no model."
              ;; No efforts is what it says too: not left to the catalogue.
              collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
                                     :efforts (and (vectorp efforts) (append efforts nil)))))))
+
+(defun romacs-agent--claude-select (session model effort)
+  "The control requests moving SESSION's idle Claude Code to MODEL at
+EFFORT.  Neither can be cleared in a live harness: `restart' then."
+  (let ((now (romacs-agent--selection session)))
+    (if (or (and (plist-get now :model) (not model)) (and (plist-get now :effort) (not effort)))
+        'restart
+      (cl-flet ((request (subtype &rest fields)
+                  (let ((id (format "romacs-select-%d" (romacs-agent-request-id session)))
+                        (body (romacs-mcp--object "subtype" subtype)))
+                    (cl-loop for (name value) on fields by #'cddr do (puthash name value body))
+                    (cons id (romacs-mcp--object "type" "control_request" "request_id" id "request" body)))))
+        (append (unless (equal model (plist-get now :model))
+                  (list (request "set_model" "model" model)))
+                (unless (equal effort (plist-get now :effort))
+                  (list (request "apply_flag_settings" "settings" (romacs-mcp--object "effortLevel" effort)))))))))
 
 (defun romacs-agent--claude-refresh-models (session)
   "Ask SESSION's Claude Code for its models, as its own SDK does at the
@@ -236,6 +281,7 @@ when ALLOW, else denied with MESSAGE."
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent
   :refresh-models #'romacs-agent--claude-refresh-models
+  :select #'romacs-agent--claude-select
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt

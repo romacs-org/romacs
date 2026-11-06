@@ -53,6 +53,12 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  chat_view  a chat keeps its transcript in view as turns come in.
+  children   what runs under a session, in its header and C-c C-o menu,
+             by real keys.
+  select     a new model or effort in a running session: live between
+             turns, armed during one, restarted when refused, carried by
+             Codex's next run, across a server restart.
   start_picker  a session started by real keys through the palette of
              instances and models, with an effort; the first session's
              models kept once.
@@ -1232,7 +1238,7 @@ def unicode(args, base):
         a.idle(sid)
         chat = a.chat(sid)
         journal = a.journal(sid)
-        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict)), {})
+        sent = next((r['in'] for r in journal if isinstance(r.get('in'), dict) and r['in'].get('type') == 'user'), {})
         sent_text = (sent.get('message') or {}).get('content')
         results = a.results(sid)
         title = a.eval(f'(romacs-agent-title {a.s(sid)})')
@@ -1887,7 +1893,14 @@ def composer(args, base, real=False):
         a.keys(*ctrl('g'))
         until(lambda: not popup(), 10, 'the menu closed')
         a.keys('w')
-        steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+
+        def copied():
+            steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+            return steps['copied'].startswith('> say hello from Romacs')
+        try:
+            until(copied, 10, 'the turn copied')
+        except RuntimeError:
+            pass
         good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
         a.keys('-M', 'alt', '>', '-m', 'alt')
         # The queue is the session's: sent though the chat buffer is gone, and
@@ -1984,6 +1997,7 @@ def composer(args, base, real=False):
         good.append(typed('home_after_turn', 'more'))
         said = messages()
         result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
+        result['failed'] = [i for i, check in enumerate(good) if not check]
         result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
         return result
     finally:
@@ -2433,6 +2447,432 @@ def start_picker(args, base):
         a.close()
 
 
+def chat_view(args, base):
+    """A chat never hides its own transcript, by real keys: the first prompt
+    of a chat started with none, and a later turn in a window whose start
+    is the composer's line, alone and split beside a delegated child."""
+    a = Agents(args, base, 'cv')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        result = {}
+
+        def shot(name):
+            path = base / f'chat-view-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            return str(path)
+
+        def view(sid, text):
+            """Where SID's window starts, and whether it shows TEXT."""
+            return parity_live.read_sexp(a.eval(
+                f'(let* ((buffer (romacs-agent-buffer {a.s(sid)})) (window (get-buffer-window buffer))) '
+                '(with-current-buffer buffer (redisplay t) '
+                '(list (window-start window) (marker-position romacs-agent-ui--end) (point-max) '
+                f'(save-excursion (goto-char (point-min)) (and (search-forward {lisp_text(text)} nil t) '
+                '(pos-visible-in-window-p (match-beginning 0) window) t)))))'))
+
+        def typed_turn(sid, text, count):
+            a.keys(text)
+            until(lambda: a.eval(f'(with-current-buffer (romacs-agent-buffer {a.s(sid)}) '
+                                 '(string-suffix-p ' + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't',
+                  15, f'{text} typed')
+            a.keys('-k', 'Return')
+            until(lambda: len(a.results(sid) or []) >= count, 30, f'{text} answered')
+            a.idle(sid)
+            time.sleep(.5)
+
+        # The first prompt of a chat started with none, its window alone.
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+                     '(romacs-agent-id session))').strip('"')
+        a.eval('(progn (delete-other-windows) t)')
+        a.keyboard_ready()
+        typed_turn(sid, 'say hi', 1)
+        result['first'] = view(sid, 'say hi')
+        result['shot_first'] = shot('first')
+
+        # A later turn with the window's start at the composer.
+        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+        a.keys('0')
+        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
+        time.sleep(.5)
+        result['before_later'] = view(sid, 'say hi')
+        typed_turn(sid, 'say later', 2)
+        result['later'] = view(sid, 'say later')
+        result['shot_later'] = shot('later')
+
+        # The same, split beside a delegated child.
+        a.send(sid, 'call romacs_delegate_task ' + json.dumps(
+            {'task': 'say child', 'title': 'a child', 'target': {'provider': 'codex'}, 'clientRequestId': 'view'}))
+        a.idle(sid, 60)
+        child = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')['taskId']
+        until(lambda: a.state(child) == 'idle', 20, 'child done')
+        a.idle(sid, 30)
+        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) (split-window-right) '
+               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-show {a.s(child)}) (current-buffer))) '
+               f'(other-window 1) (goto-char (point-max)) t)')
+        a.keyboard_ready()
+        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+        a.keys('0')
+        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
+        time.sleep(.5)
+        count = len(a.results(sid))
+        typed_turn(sid, 'say split', count + 1)
+        result['split'] = view(sid, 'say split')
+        result['shot_split'] = shot('split')
+
+        result['ok'] = all(result[k][3] == 't' or result[k][3] is True for k in ('first', 'later', 'split'))
+        return result
+    finally:
+        a.close()
+
+
+def children(args, base):
+    """What runs under a session, by real keys: the header counts and the
+    `C-c C-o' menu's rows of a parent's delegated tasks (running, waiting,
+    failed) and of its harness's own subagent, following their state with
+    the menu open; a digit opens a child's chat or a subagent's card, and
+    RET one chosen from the list of them; opening a failure takes it out
+    of the count."""
+    a = Agents(args, base, 'ch')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate(task, title, provider):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
+                {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
+            a.idle(parent, 60)
+            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
+            return record['taskId']
+
+        running = delegate('slow 300', 'long build', 'codex')
+        waiting = delegate('ask true', 'needs approval', 'claude')
+        failed = delegate('fail', 'broken task', 'codex')
+        until(lambda: a.state(failed) == 'idle', 20, 'failed child ended')
+        done = delegate('say fine', 'finished task', 'codex')
+        until(lambda: a.state(done) == 'idle', 20, 'done child ended')
+        a.idle(parent, 60)
+        until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
+
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def header():
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+                '(substring-no-properties (romacs-agent-ui--header-line)))'))
+
+        def menu():
+            return parity_live.read_sexp(a.eval(
+                '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
+                '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
+
+        def shot(name):
+            path = base / f'children-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            return str(path)
+
+        def shown():
+            return parity_live.read_sexp(a.eval('(buffer-name (window-buffer (selected-window)))'))
+
+        def open_menu():
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: 'Agents' in menu(), 15, 'menu open')
+
+        until(lambda: '1 failed' in header(), 15, 'counts in the header')
+        result = {'header': header()}
+        result['shot_header'] = shot('header')
+        open_menu()
+        time.sleep(.5)
+        result['menu'] = menu()
+        result['shot_menu'] = shot('menu')
+
+        # With the menu open, the approval answered: its row and the title follow.
+        a.eval(f'(romacs-agent-respond {a.s(waiting)} (car (hash-table-keys (romacs-agent-approvals {a.s(waiting)}))) t)')
+        until(lambda: 'waiting' not in menu(), 15, 'menu follows the child')
+        result['menu_after'] = menu()
+        result['header_after'] = header()
+        result['shot_menu_after'] = shot('menu-after')
+
+        # A digit on the first row: the failure, first of what wants the user.
+        a.keys('1')
+        until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
+        result['opened'] = shown()
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
+        result['header_seen'] = header()
+
+        # The list of them, RET on the one typed for.
+        open_menu()
+        a.keys('o')
+        until(lambda: 'Subagent' in (parity_live.read_sexp(a.eval(
+            '(if (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+            '(substring-no-properties (minibuffer-prompt))) "")')) or ''), 15, 'palette open')
+        time.sleep(.5)
+        result['shot_palette'] = shot('palette')
+        a.keys('finished')
+        time.sleep(.5)
+        a.keys('-k', 'Return')
+        until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
+        result['chosen'] = shown()
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+
+        # The harness's own subagent: counted while it runs; its row goes to its card.
+        a.send(parent, 'agent 6 read the code')
+        until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
+        until(lambda: '2 running' in header() or '1 running' in header(), 15, 'subagent counted')
+        result['header_subagent'] = header()
+        open_menu()
+        time.sleep(.3)
+        result['menu_subagent'] = menu()
+        result['shot_subagent'] = shot('subagent')
+        lines = [line for line in result['menu_subagent'].splitlines() if 'read the code' in line]
+        key = lines[0].split('read the code')[0].split()[-1] if lines else '1'
+        a.keys(key)
+        until(lambda: not menu(), 15, 'menu closed')
+        result['card_line'] = parity_live.read_sexp(a.eval(
+            f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+            '(buffer-substring-no-properties (line-beginning-position) (line-end-position)))'))
+        a.idle(parent, 30)
+
+        running_stopped = a.eval(f'(romacs-agent-stop {a.s(running)})')
+        result['header_end'] = header()
+        result['ok'] = (all(w in result['header'] for w in ('⇢', '1 running', '1 waiting', '1 failed'))
+                        and all(w in result['menu'] for w in ('long build', 'needs approval', 'broken task', 'finished task'))
+                        and '1 running' in result['header_after'] and 'waiting' not in result['header_after']
+                        and 'waiting' not in result['menu_after']
+                        and 'finished task' in result['chosen']
+                        and 'broken task' in result['opened'] and 'failed' not in result['header_seen']
+                        and 'read the code' in result['menu_subagent'] and 'read the code' in result['card_line'])
+        return result
+    finally:
+        a.close()
+
+
+def select(args, base):
+    """A new model or effort in a running session.  Fake Claude: both control
+    requests between turns, armed during one, messages held until each is
+    confirmed, a refusal or silence restarting on `--resume' with the new
+    words, clearing the effort restarting, a harness dying mid-turn resuming
+    on the selection; Codex's next run carrying it, built after the last
+    retired.  A server restart replays the divider in place and finds an
+    armed selection, which applies at the live turn end only."""
+    a = Agents(args, base, 'sl')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        result = {}
+
+        def selected(sid, model, effort):
+            models = 'nil' if model is None else lisp_text(model)
+            efforts = 'nil' if effort is None else lisp_text(effort)
+            return a.eval(f'(romacs-agent-select {a.s(sid)} {models} {efforts})')
+
+        def options(sid):
+            return parity_live.read_sexp(a.eval(
+                f'(let ((o (romacs-agent-options {a.s(sid)}))) (list (plist-get o :model) (plist-get o :effort)))'))
+
+        def settled(sid, seconds=20):
+            until(lambda: a.eval(f'(romacs-agent-pending-selection {a.s(sid)})') == 'nil', seconds, 'selection settled')
+
+        def controls(sid):
+            return [r['in'] for r in a.journal(sid) if isinstance(r.get('in'), dict)
+                    and r['in'].get('type') == 'control_request'
+                    and r['in']['request']['subtype'] in ('set_model', 'apply_flag_settings')]
+
+        def order(sid):
+            """What was written to SID's harness, in order."""
+            return [(r['in'].get('type'), r['in'].get('request', {}).get('subtype')) for r in a.journal(sid)
+                    if isinstance(r.get('in'), dict) and r['in'].get('request', {}).get('subtype') != 'initialize']
+
+        def starts(sid):
+            return [e['argv'] for e in a.logged() if e.get('started') == sid]
+
+        def after(argv, flag):
+            return argv[argv.index(flag) + 1] if flag in argv else None
+
+        # Idle: live, confirmed, and the next message on it.
+        one = a.start('say one')
+        a.idle(one)
+        selected(one, 'claude-sonnet-5-5', 'low')
+        settled(one)
+        result['live'] = {'requests': [c['request']['subtype'] for c in controls(one)], 'options': options(one),
+                          'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')],
+                          'starts': len(starts(one))}
+
+        # Armed during a turn: nothing mid-turn, the message waits for both.
+        a.send(one, 'slow 15')
+        until(lambda: a.state(one) == 'running', 10, 'turn running')
+        selected(one, 'claude-opus-5-5', 'high')
+        a.send(one, 'say after')
+        header = parity_live.read_sexp(a.eval(
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
+        armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
+        until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
+        written = order(one)
+        result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
+                           'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
+
+        # The divider, again after a server restart, between the same turns.
+        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        before = a.chat(one)
+        a.restart()
+        until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        a.codex_instance()
+        replayed = a.chat(one)
+        result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
+                             'in_place': replayed.find(divider) < replayed.find('after')}
+
+        # A restart of the server while armed: applied at the live turn's end.
+        a.send(one, 'slow 40')
+        until(lambda: a.state(one) == 'running', 10, 'turn running')
+        selected(one, 'claude-haiku-5-5', 'high')
+        a.restart()
+        until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
+        a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
+        a.codex_instance()
+        found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
+        settled(one, 30)
+        result['restart_armed'] = {'found': found, 'options': options(one),
+                                   'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
+
+        # Refused, and silent: a new harness on the selection.
+        restarts = {}
+        for how, model in (('error', 'claude-haiku-5-5'), ('silent', 'claude-sonnet-5-5')):
+            a.eval(f'(progn (setenv "FAKE_SELECT" {lisp_text(how)}) t)')
+            sid = a.start('say first')
+            a.idle(sid)
+            selected(sid, model, None)
+            # Waits behind the selection, and goes to the new harness.
+            a.send(sid, 'say again')
+            settled(sid, 30)
+            a.eval('(progn (setenv "FAKE_SELECT" nil) t)')
+            until(lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
+            argv = starts(sid)[-1]
+            restarts[how] = {'runs': len(starts(sid)), 'resume': after(argv, '--resume') == sid,
+                             'model': after(argv, '--model')}
+        result['restarts'] = restarts
+
+        # Clearing the effort takes a new harness too.
+        cleared = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} "say first" nil nil (list :effort "high")))').strip('"')
+        a.idle(cleared)
+        selected(cleared, None, None)
+        settled(cleared, 30)
+        until(lambda: len(starts(cleared)) == 2, 15, 'restarted')
+        result['cleared'] = {'requests': controls(cleared), 'first': after(starts(cleared)[0], '--effort'),
+                             'second': after(starts(cleared)[-1], '--effort'),
+                             'resume': after(starts(cleared)[-1], '--resume') == cleared}
+
+        # A harness that dies mid-turn: its resume uses the selection.
+        dying = a.start('say first')
+        a.idle(dying)
+        a.send(dying, 'slow 200')
+        until(lambda: a.state(dying) == 'running', 10, 'turn running')
+        selected(dying, 'claude-haiku-5-5', None)
+        a.send(dying, 'say held')
+        os.kill(a.harness_pid(dying), signal.SIGKILL)
+        settled(dying, 30)
+        until(lambda: a.state(dying) == 'ended', 15, 'ended')
+        a.eval(f'(romacs-agent-resume {a.s(dying)})')
+        until(lambda: len(starts(dying)) == 2, 15, 'resumed')
+        result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
+
+        # Codex: the next run's words, built after this run retired.
+        run = a.start('slow 3', 'codex')
+        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        selected(run, 'gpt-6-luna', 'low')
+        a.send(run, 'say next')
+        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'second run')
+        runs = [r['argv'] for r in a.codex_runs()]
+        result['codex'] = {'first': 'gpt-6-luna' in runs[0], 'second': 'gpt-6-luna' in runs[-1],
+                           'effort': 'model_reasoning_effort="low"' in runs[-1], 'runs': len(runs)}
+
+        live, armed_r, div = result['live'], result['armed'], result['divider']
+        result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
+                        and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
+                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
+                        and armed_r['written'][-3:] == [('control_request', 'set_model'),
+                                                        ('control_request', 'apply_flag_settings'), ('user', None)]
+                        and div['before'] == 1 and div['after'] == 1 and div['in_place']
+                        and result['restart_armed']['found'].strip('"') == 'claude-haiku-5-5'
+                        and result['restart_armed']['options'] == ['claude-haiku-5-5', 'high']
+                        and result['restart_armed']['busy'] is False
+                        and restarts['error'] == {'runs': 2, 'resume': True, 'model': 'claude-haiku-5-5'}
+                        and restarts['silent'] == {'runs': 2, 'resume': True, 'model': 'claude-sonnet-5-5'}
+                        and result['cleared']['requests'] == [] and result['cleared']['first'] == 'high'
+                        and result['cleared']['second'] is None and result['cleared']['resume']
+                        and result['died']['model'] == 'claude-haiku-5-5'
+                        and not result['codex']['first'] and result['codex']['second'] and result['codex']['effort'])
+        return result
+    finally:
+        a.close()
+
+
+def select_real(args, base):
+    """`select' on the real harnesses: Claude Code (--claude-model) from
+    effort low to medium between two turns, both control requests confirmed
+    and the second turn answered; Codex (--codex-model) over two runs, the
+    second carrying the new effort.  Costs money: not a default workflow."""
+    a = Agents(args, base, 'sr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        claude = args.claude_program or real_program('claude')
+        codex = args.codex_program or real_program('codex')
+        a.providers([('claude', args.claude_config, claude, []), ('codex', args.codex_home, codex, [])])
+        result = {}
+
+        def turn(sid, text, expect):
+            a.send(sid, text)
+            until(lambda: expect in (a.eval(f'(romacs-agent-reply {a.s(sid)})') or ''), 180, f'{expect} answered')
+            a.idle(sid, 60)
+
+        def start(provider, model, effort, text, expect):
+            sid = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(a.work)} {lisp_text(text)} nil {lisp_text(provider)} '
+                         f'(list :model {lisp_text(model)} :effort {lisp_text(effort)})))').strip('"')
+            until(lambda: expect in (a.eval(f'(romacs-agent-reply {a.s(sid)})') or ''), 180, f'{expect} answered')
+            a.idle(sid, 60)
+            return sid
+
+        sid = start('claude', args.claude_model, 'low', 'Reply with only the word ALPHA.', 'ALPHA')
+        a.eval(f'(romacs-agent-select {a.s(sid)} {lisp_text(args.claude_model)} "medium")')
+        until(lambda: a.eval(f'(romacs-agent-pending-selection {a.s(sid)})') == 'nil', 30, 'selection confirmed')
+        turn(sid, 'Reply with only the word BRAVO.', 'BRAVO')
+        records = a.journal(sid)
+        result['claude'] = {
+            'written': [r['in']['request'] for r in records if isinstance(r.get('in'), dict)
+                        and r['in'].get('request', {}).get('subtype') == 'apply_flag_settings'],
+            'answers': [r['out']['response'].get('subtype') for r in records if isinstance(r.get('out'), dict)
+                        and r['out'].get('type') == 'control_response'
+                        and str(r['out']['response'].get('request_id', '')).startswith('romacs-select')],
+            'runs': sum(1 for r in records if r.get('note', {}).get('type') == 'run') if records else 0,
+            'models': [sorted(r['out'].get('modelUsage', {})) for r in records if isinstance(r.get('out'), dict)
+                       and r['out'].get('type') == 'result'],
+            'cost': [r['out'].get('total_cost_usd') for r in records if isinstance(r.get('out'), dict)
+                     and r['out'].get('type') == 'result'][-1]}
+
+        run = start('codex', args.codex_model, 'low', 'Reply with only the word CHARLIE.', 'CHARLIE')
+        a.eval(f'(romacs-agent-select {a.s(run)} {lisp_text(args.codex_model)} "medium")')
+        turn(run, 'Reply with only the word DELTA.', 'DELTA')
+        host = json.loads((a.home / '.local/state/romacs/agents' / run / 'host.json').read_text())
+        result['codex'] = {'second': [w for w in host['argv'] if 'model_reasoning_effort' in w]}
+        c = result['claude']
+        result['ok'] = (c['written'] == [{'subtype': 'apply_flag_settings', 'settings': {'effortLevel': 'medium'}}]
+                        and c['answers'] == ['success'] and c['runs'] == 1
+                        and result['codex']['second'] == ['model_reasoning_effort="medium"'])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -2490,7 +2930,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
