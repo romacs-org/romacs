@@ -3173,6 +3173,15 @@ pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
 }
+/// Whether a listener runs, so that a native loop should poll for requests.
+pub fn inspect_enabled() -> bool {
+    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Raise a request, as a client does.
+#[cfg(test)]
+pub fn inspect_request() {
+    INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
 /// The newest request, which a snapshot taken now answers.
 pub fn inspect_generation() -> u64 {
     INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)

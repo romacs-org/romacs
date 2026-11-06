@@ -60,6 +60,14 @@ impl Leaf<'_> {
     /// Interactive use never signals a layout refusal (VM2-WTPS1): where a
     /// displayed window's measurement refuses, the refusal is counted
     /// (`count_refusal') and APPROXIMATE answers; batch signals it.
+    /// BODY, a motion Lisp called, which may quit at its polls. GNU's
+    /// iterator quits nowhere; `vertical-motion' over a long buffer should.
+    pub(crate) fn quittable_motion<T>(&mut self, body: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
+        let outer = std::mem::replace(&mut self.vm.motion_quit, true);
+        let result = body(self);
+        self.vm.motion_quit = outer;
+        result
+    }
     fn or_approximate<T>(&mut self, outcome: std::result::Result<T, Fault>,
                          approximate: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
         match outcome {

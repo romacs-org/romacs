@@ -1386,8 +1386,11 @@ impl Vm {
         if bound <= position {
             return Value::integer(bound).map_err(Fault::Error);
         }
-        let mut at = bytes.start;
+        let (mut at, mut steps) = (bytes.start, 0u32);
         while at < bytes.end {
+            // A constant property can span millions of other runs.
+            steps = steps.wrapping_add(1);
+            if steps.is_multiple_of(1024) { self.native_poll()?; }
             let mut next = self.property_next_text_boundary(object, at, bytes.end);
             if !string {
                 next = next.min(

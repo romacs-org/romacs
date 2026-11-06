@@ -22,6 +22,10 @@ use romacs_layout_input::StretchWidth;
 
 /// The elements one host measurement covers past the first it needs.
 const CHUNK: usize = 4096;
+/// The elements measured at once past any line end: faces and layout run
+/// with no poll, so a huge single line goes in batches. Each batch shapes
+/// apart, one seam per BATCH elements of such a line.
+const BATCH: usize = 16384;
 
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
 /// Whether FAULT is such a refusal: what the display iterator cannot yet
@@ -217,13 +221,14 @@ impl<'l, 'a> Hosted<'l, 'a> {
         for at in index.. {
             let slot = match self.source.slot(at) {
                 Ok(slot) => slot,
-                Err(refused) if at == index => return Err(refused),
+                // A refusal past the first ends the batch; a quit ends the motion.
+                Err(fault) if at == index || !refused(&fault) => return Err(fault),
                 Err(_) => break,
             };
             let Some(e) = slot.elem else { break };
             let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
             shown.push((c, face_key(&e)));
-            if at - index >= CHUNK && c == '\n' { break; }
+            if at - index >= CHUNK && c == '\n' || at - index >= BATCH { break; }
         }
         let window = self.source.window();
         let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
@@ -242,6 +247,7 @@ impl<'l, 'a> Hosted<'l, 'a> {
 }
 
 impl Elements for Hosted<'_, '_> {
+    fn poll(&mut self) -> R<()> { self.source.poll() }
     fn line_at(&mut self, index: usize) -> R<i64> { self.source.line_at(index) }
     fn slot(&mut self, index: usize) -> R<Slot> {
         let slot = self.source.slot(index)?;

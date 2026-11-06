@@ -1281,6 +1281,9 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
+    /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
+    /// Off in redisplay, which never unwinds half done.
+    motion_quit: bool,
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -1608,6 +1611,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     display_state,
     window_state,
     world_version,
+    motion_quit,
     #[cfg(test)] variable_read_probes,
     #[cfg(test)] speculative_hits,
     #[cfg(test)] inline_hits,
@@ -1788,6 +1792,7 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
+            motion_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]

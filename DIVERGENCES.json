@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "d41c5b80e1597f7b3b249719624b6bd6c1c843b58c2cca35641e46fe2b5511f7",
+  "input_hash": "5cb00ad19abf372943083edeb462400e9529e6e5e7d562cfba10c91a39638ba8",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,7 +12,7 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 366,
+  "rows": 367,
   "symbols": 1114,
   "rows_without_symbols": 14
  },
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   365
+   366
   ],
   "\\": [
    279
@@ -91,7 +91,7 @@
   ],
   "add-text-properties": [
    304,
-   350
+   351
   ],
   "add-variable-watcher": [
    318,
@@ -108,7 +108,7 @@
    209
   ],
   "after-insert-file-set-coding": [
-   351
+   352
   ],
   "after-load-alist": [
    334
@@ -162,8 +162,8 @@
   ],
   "autoload": [
    322,
-   354,
-   355
+   355,
+   356
   ],
   "autoload-do-load": [
    322,
@@ -244,7 +244,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   351
+   352
   ],
   "buffer-file-name": [
    125
@@ -278,7 +278,8 @@
    24
   ],
   "buffer-text-pixel-size": [
-   279
+   279,
+   350
   ],
   "buffer-undo-list": [
    209
@@ -569,7 +570,7 @@
    245
   ],
   "custom-reevaluate-setting": [
-   354
+   355
   ],
   "custom-set": [
    174
@@ -636,7 +637,7 @@
    117
   ],
   "default-file-name-coding-system": [
-   351
+   352
   ],
   "default-value": [
    329,
@@ -653,8 +654,8 @@
    164,
    192,
    226,
-   357,
-   361
+   358,
+   362
   ],
   "define-category": [
    311
@@ -667,7 +668,7 @@
    308
   ],
   "define-coding-system": [
-   351
+   352
   ],
   "define-coding-system-alias": [
    309
@@ -843,7 +844,7 @@
    345
   ],
   "downcase_char_code_emacs_compat": [
-   364
+   365
   ],
   "elt": [
    35,
@@ -852,13 +853,13 @@
    66
   ],
   "emacs-build-time": [
-   352
+   353
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   364
+   365
   ],
   "emoji": [
    29
@@ -916,7 +917,7 @@
   "eval-after-load": [
    143,
    334,
-   355
+   356
   ],
   "eval-and-compile": [
    141
@@ -990,17 +991,17 @@
    161,
    162,
    163,
-   357,
    358,
-   361
+   359,
+   362
   ],
   "face-family": [
    159,
-   360
+   361
   ],
   "face-font": [
    158,
-   359
+   360
   ],
   "face-remap-add-relative": [
    255
@@ -1010,7 +1011,7 @@
    162,
    163,
    255,
-   363
+   364
   ],
   "face-spec-recalc": [
    257
@@ -1063,7 +1064,7 @@
    124
   ],
   "find-auto-coding": [
-   351
+   352
   ],
   "find-composition": [
    281
@@ -1729,7 +1730,7 @@
   ],
   "last-coding-system-used": [
    125,
-   351
+   352
   ],
   "last-command": [
    94
@@ -1742,7 +1743,7 @@
    256
   ],
   "latin-extra-code-table": [
-   351
+   352
   ],
   "length": [
    66,
@@ -1782,7 +1783,8 @@
    279
   ],
   "line-pixel-height": [
-   277
+   277,
+   350
   ],
   "lisp-eval-depth-reserve": [
    112
@@ -1835,7 +1837,7 @@
    110,
    111,
    121,
-   354
+   355
   ],
   "load-prefer-newer": [
    140
@@ -2163,10 +2165,10 @@
    165
   ],
   "next-property-change": [
-   350
+   351
   ],
   "next-single-char-property-change": [
-   350
+   351
   ],
   "no-byte-compile": [
    144
@@ -2327,7 +2329,8 @@
    234
   ],
   "pos-visible-in-window-p": [
-   278
+   278,
+   350
   ],
   "position-symbol": [
    71
@@ -2335,7 +2338,8 @@
   "posn-at-point": [
    254,
    267,
-   278
+   278,
+   350
   ],
   "pp-eval-last-sexp": [
    270
@@ -2631,11 +2635,11 @@
    334,
    335,
    336,
-   354
+   355
   ],
   "reset": [
    161,
-   356
+   357
   ],
   "resize-mini-windows": [
    343
@@ -2781,7 +2785,7 @@
    127
   ],
   "romacs-init-layer-exclude": [
-   355
+   356
   ],
   "romacs-layer-animation romacs-layer-show": [
    269
@@ -2968,7 +2972,7 @@
    213
   ],
   "romacs-unsafe-coding": [
-   351
+   352
   ],
   "round": [
    283
@@ -3035,13 +3039,13 @@
    257
   ],
   "select-safe-coding-system": [
-   351
+   352
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   351
+   352
   ],
   "selected-frame": [
    192,
@@ -3083,7 +3087,7 @@
    330
   ],
   "set-auto-coding": [
-   351
+   352
   ],
   "set-buffer": [
    66
@@ -3113,7 +3117,7 @@
   ],
   "set-coding-system-priority": [
    309,
-   351
+   352
   ],
   "set-default": [
    330
@@ -3123,10 +3127,10 @@
    157,
    158,
    159,
-   358,
    359,
    360,
-   362
+   361,
+   363
   ],
   "set-file-acl": [
    11
@@ -3236,10 +3240,10 @@
    33
   ],
   "skip-chars-backward": [
-   365
+   366
   ],
   "skip-chars-forward": [
-   365
+   366
   ],
   "sleep-for": [
    221,
@@ -3552,7 +3556,7 @@
    77
   ],
   "use-package": [
-   355
+   356
   ],
   "usize": [
    107
@@ -3573,7 +3577,8 @@
    125
   ],
   "vertical-motion": [
-   277
+   277,
+   350
   ],
   "visible-frame-list": [
    257,
@@ -3718,7 +3723,8 @@
    243
   ],
   "window-text-pixel-size": [
-   279
+   279,
+   350
   ],
   "window-total-height": [
    241
@@ -10159,6 +10165,26 @@
    "symbols": [
     "debug-on-next-call",
     "backtrace-debug"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-MOTION-QUIT",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "A long motion quits",
+   "gnu": "GNU's display iterator polls nothing, so `vertical-motion` and its kin run to the end, and C-g waits",
+   "romacs": "`vertical-motion`, `posn-at-point`, `pos-visible-in-window-p`, `line-pixel-height`, `window-text-pixel-size` and `buffer-text-pixel-size` poll every 1024 elements (`Vm::native_poll`), through the quit owner, so `inhibit-quit` holds a C-g and a debug event comes through as in a regexp search. To a package: one of these may signal `quit`. Redisplay does not poll for quit: it never unwinds half done, and the quit waits for the next safepoint",
+   "why": "A session must not freeze in a motion nothing can interrupt",
+   "symbols": [
+    "vertical-motion",
+    "posn-at-point",
+    "pos-visible-in-window-p",
+    "line-pixel-height",
+    "window-text-pixel-size",
+    "buffer-text-pixel-size"
    ],
    "symbols_derived": false
   },
