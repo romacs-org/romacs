@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "1189874460ee0071544d0b8d5f07a71bc17b185b3892d0880e14b76db0307940",
+  "source_fingerprint": "068a86d065590e26c7eefe12bb0f7833c44b2c5a61f51086ed8b2a9cd588a4e8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -3177,7 +3177,7 @@
   "make-vector": {
    "name": "make-vector",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:43"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:45"
   },
   "makunbound": {
    "name": "makunbound",
@@ -3970,7 +3970,7 @@
   "propertize": {
    "name": "propertize",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:79"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:81"
   },
   "provide": {
    "name": "provide",
@@ -5240,7 +5240,7 @@
   "secure-hash-algorithms": {
    "name": "secure-hash-algorithms",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:116"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:118"
   },
   "select-frame": {
    "name": "select-frame",
@@ -6673,7 +6673,7 @@
   "vconcat": {
    "name": "vconcat",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:56"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:58"
   },
   "vector": {
    "name": "vector",
