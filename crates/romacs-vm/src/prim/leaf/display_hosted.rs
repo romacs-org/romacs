@@ -22,6 +22,8 @@ use romacs_layout_input::StretchWidth;
 
 /// The elements one host measurement covers past the first it needs.
 const CHUNK: usize = 4096;
+/// The reach of the measurement after a reset's first.
+const FIRST_REACH: usize = 128;
 /// The elements measured at once past any line end: faces and layout run
 /// with no poll, so a huge single line goes in batches. Each batch shapes
 /// apart, one seam per BATCH elements of such a line.
@@ -188,6 +190,10 @@ pub(super) struct Hosted<'l, 'a> {
     /// on, by index since the last reset.
     base: usize,
     glyphs: Vec<(i64, i64, i64, bool)>,
+    /// The elements the next measurement reaches at least: CHUNK, for each
+    /// measurement has a fixed cost, but none past the line after motion
+    /// reseats, as it walks a line at a time, then doubling to CHUNK.
+    reach: usize,
     /// The default face's row height, which every host row reaches, and
     /// its ascent.
     pub default_height: i64,
@@ -196,12 +202,12 @@ pub(super) struct Hosted<'l, 'a> {
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, base: 0, glyphs: vec![], default_height: 0, default_ascent: 0 }
+        Hosted { source, base: 0, glyphs: vec![], reach: CHUNK, default_height: 0, default_ascent: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
-        (self.base, self.glyphs) = (0, vec![]);
+        (self.base, self.glyphs, self.reach) = (0, vec![], CHUNK);
         self.source.reset(start)
     }
     /// The host's advance and own height for element INDEX.
@@ -214,7 +220,7 @@ impl<'l, 'a> Hosted<'l, 'a> {
         self.glyphs.get(index - self.base).copied().ok_or_else(|| Fault::Error("host measurement misses an element".into()))
     }
     /// Ask the host for the elements from INDEX through the end of the
-    /// line CHUNK elements on, or up to the first the iterator refuses,
+    /// line `reach' elements on, or up to the first the iterator refuses,
     /// which refuses when the motion reaches it.
     fn measure(&mut self, index: usize) -> R<()> {
         let mut shown = vec![];
@@ -228,8 +234,9 @@ impl<'l, 'a> Hosted<'l, 'a> {
             let Some(e) = slot.elem else { break };
             let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
             shown.push((c, face_key(&e)));
-            if at - index >= CHUNK && c == '\n' || at - index >= BATCH { break; }
+            if at - index >= self.reach && c == '\n' || at - index >= BATCH { break; }
         }
+        self.reach = (self.reach * 2).clamp(FIRST_REACH, CHUNK);
         let window = self.source.window();
         let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
         self.base = index;
@@ -282,7 +289,12 @@ impl Elements for Hosted<'_, '_> {
 }
 
 impl Lines for Hosted<'_, '_> {
-    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn reseat(&mut self, start: i64) -> R<()> {
+        self.reset(start)?;
+        self.reach = 0;
+        Ok(())
+    }
+    fn delivered(&mut self, index: usize) -> R<Slot> { self.source.slot(index) }
     fn line_start_before(&mut self, pos: i64) -> R<i64> { self.source.visible_line_start(pos) }
     fn begv(&self) -> i64 { self.source.begv() }
 }

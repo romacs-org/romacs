@@ -229,6 +229,50 @@ fn a_quick_session_keeps_gnus_values() {
     ]);
 }
 
+/// A VC log shows the whole history in an interactive session, and C-g
+/// stops one that is still arriving, keeping its text; -Q keeps GNU's limit
+/// and GNU's C-g.  vc.el is not loaded until the end, as in a session.
+#[test]
+fn logs_show_the_whole_history_and_c_g_stops_one_arriving() {
+    const LIMITS: &str = "(list vc-log-show-limit (eval (car (get 'vc-log-show-limit 'standard-value)) t))";
+    const LOG: &str = "(with-current-buffer (get-buffer-create \"*oob-log*\")
+        (log-view-mode)
+        (let ((inhibit-read-only t)) (insert \"arrived\\n\"))
+        (setq oob-log (make-process :name \"oob-log\" :buffer (current-buffer) :command '(\"sleep\" \"30\") :sentinel #'ignore))
+        (command-remapping 'keyboard-quit))";
+    const STOPPED: &str = "(with-current-buffer \"*oob-log*\"
+        (call-interactively (command-remapping 'keyboard-quit))
+        (while (process-live-p oob-log) (accept-process-output oob-log 0.01))
+        (list (process-status oob-log) (buffer-string) (command-remapping 'keyboard-quit)))";
+    // A process kept after it exits is not a log still arriving.
+    const RETAINED: &str = "(with-current-buffer \"*oob-log*\"
+        (let ((delete-exited-processes nil))
+          (setq oob-log (make-process :name \"oob-done\" :buffer (current-buffer) :command '(\"true\") :sentinel #'ignore))
+          (while (process-live-p oob-log) (accept-process-output oob-log 0.01))
+          (prog1 (list (and (get-buffer-process (current-buffer)) t) (command-remapping 'keyboard-quit) (romacs-defaults-log-stop))
+            (delete-process oob-log))))";
+    let loaded = format!("(progn (require 'vc) {LIMITS})");
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, _) = session("log", false);
+        let on = [LIMITS, LOG, STOPPED, RETAINED, &loaded].map(|form| printed(&mut vm, form));
+        // A limit set before vc.el loads, here and with -Q; the switch
+        // leaves it, and gives an untouched option GNU's value.
+        let (mut vm, _) = session("log-set", false);
+        let set = ["(progn (setopt vc-log-show-limit 1000) nil)", "(progn (romacs-defaults-mode -1) nil)", &loaded]
+            .map(|form| printed(&mut vm, form));
+        let (mut vm, _) = session("log-off", false);
+        let off = ["(progn (romacs-defaults-mode -1) nil)", &loaded].map(|form| printed(&mut vm, form));
+        let (mut vm, _) = session("log-quick", true);
+        let quick = [LIMITS, LOG, "(progn (delete-process oob-log) nil)", "(progn (setopt vc-log-show-limit 7) nil)", &loaded]
+            .map(|form| printed(&mut vm, form));
+        (on, set, off, quick)
+    }).unwrap().join().unwrap();
+    assert_eq!(report.0, ["(0 0)", "romacs-defaults-log-stop", "(signal \"arrived\\n\" nil)", "(t nil nil)", "(0 0)"]);
+    assert_eq!(report.1, ["nil", "nil", "(1000 500)"]);
+    assert_eq!(report.2, ["nil", "(500 500)"]);
+    assert_eq!(report.3, ["(500 500)", "nil", "nil", "nil", "(7 500)"]);
+}
+
 /// Programming buffers number their lines relative to point, the current
 /// line by its own number; text, Org and special buffers do not.  The
 /// switch takes only its own hook away: a user's `prog-mode-hook' entry

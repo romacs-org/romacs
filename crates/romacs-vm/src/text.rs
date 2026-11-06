@@ -1557,6 +1557,20 @@ mod tests {
         assert_eq!(&text.as_str()[..64], "x".repeat(64));
     }
     #[test]
+    fn an_append_keeps_the_flat_text_current() {
+        let mut text = crate::text::Text::new("aλЖ🙂\n".repeat(4096).as_bytes()).unwrap();
+        let mut expected = text.as_str().to_owned();
+        let copied = crate::text::copied_bytes();
+        for _ in 0..64 {
+            let end = ByteOffset(text.len_bytes());
+            text.replace(end..end, "λ\n".repeat(600).as_bytes()).unwrap();
+            expected.push_str(&"λ\n".repeat(600));
+            assert!(text.flat.get().is_some(), "an append dropped the flat text");
+        }
+        assert_eq!(crate::text::copied_bytes(), copied, "an append copied the text whole");
+        assert_eq!(text.as_str(), expected);
+    }
+    #[test]
     fn rope_line_summaries_use_lf_and_survive_width_changing_edits() {
         let mut text = crate::text::Text::new("a\rλ\nЖ🙂\r\nlast\n".as_bytes()).unwrap();
         for inserted in ["", "🙂\nλ", "x\r\ny"] {

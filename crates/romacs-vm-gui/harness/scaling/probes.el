@@ -510,6 +510,50 @@ thousandth a stack mark."
           (length (buffer-list))
           (dolist (name it) (kill-buffer name))))
 
+;; Output arriving at the end of a large displayed buffer, as a process
+;; filter inserts it, redisplayed after each insertion: what the display
+;; reads of the text costs what it shows, not the buffer's size.
+(scaling-probe display-appended-text :gui t :n 20000 :k 8 :steps 20 :budget 0.1
+  :setup (switch-to-buffer (scaling--lines-buffer "scaling-appended" n))
+  :body (with-current-buffer it
+          (save-excursion (goto-char (point-max)) (insert "an appended line\n"))
+          ;; Point moves, so each step paints.
+          (forward-char 1)))
+
+;; The same with the window at the end, its lines numbered.
+(scaling-probe display-appended-tail :gui t :n 20000 :k 8 :steps 20 :budget 0.1
+  :setup (let ((buffer (scaling--lines-buffer "scaling-appended-tail" n)))
+           (switch-to-buffer buffer)
+           (display-line-numbers-mode 1)
+           (goto-char (point-max))
+           (forward-line -30)
+           buffer)
+  :body (with-current-buffer it
+          (save-excursion (goto-char (point-max)) (insert "an appended line\n"))
+          (forward-char 1)))
+
+;; `vertical-motion' up N lines, as `recenter' does to place point: each
+;; line walked once, not once for each line stepped back.
+(scaling-probe vertical-motion-up :gui t :n 200 :k 8 :steps 1
+  :setup (switch-to-buffer (scaling--lines-buffer "scaling-motion" (* 2 n)))
+  :body (with-current-buffer it
+          (goto-char (point-max))
+          (vertical-motion (- n))))
+
+;; The same over long lines a display property hides, one row each.
+(scaling-probe vertical-motion-up-hidden :gui t :n 100 :k 8 :steps 1
+  :setup (with-current-buffer (get-buffer-create "scaling-motion-hidden")
+           (erase-buffer)
+           (dotimes (_ (* 2 n))
+             (let ((start (point)))
+               (insert (make-string 400 ?x))
+               (put-text-property (1+ start) (point) 'display "")
+               (insert "\n")))
+           (switch-to-buffer (current-buffer)))
+  :body (with-current-buffer it
+          (goto-char (point-max))
+          (vertical-motion (- n))))
+
 (scaling-probe markers :n 2000
   :setup (with-current-buffer (scaling--lines-buffer " scaling-markers" 200) (current-buffer))
   :body (with-current-buffer it

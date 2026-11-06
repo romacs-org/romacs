@@ -679,6 +679,11 @@ fn next_line_start<E: Elements>(src: &mut E, it: &mut It) -> R<()> {
 /// iterator stands where a move may stop (not inside a string), then on
 /// to START.
 pub(super) fn screen_row<E: Elements>(src: &mut E, cx: &Ctx, start: i64) -> R<i64> {
+    Ok(screen_position(src, cx, start)?.vpos)
+}
+
+/// [`screen_row`]'s iterator, stopped at START.
+fn screen_position<E: Elements>(src: &mut E, cx: &Ctx, start: i64) -> R<It> {
     let mut probe = It::default();
     let mut to = start;
     loop {
@@ -689,7 +694,7 @@ pub(super) fn screen_row<E: Elements>(src: &mut E, cx: &Ctx, start: i64) -> R<i6
         if valid_after_move(src, &probe)?.0 || after_string_newline(src, &probe, start)? { break; }
     }
     move_to(src, cx, &mut probe, start, -1, -1, -1, POS)?;
-    Ok(probe.vpos)
+    Ok(probe)
 }
 
 /// The iterator is in a string at START, just after the string's newline.
@@ -810,6 +815,8 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
 pub(super) trait Lines: Elements {
     /// Deliver from START, a line start.
     fn reseat(&mut self, start: i64) -> R<()>;
+    /// Element INDEX as delivered, measured or not.
+    fn delivered(&mut self, index: usize) -> R<Slot>;
     /// back_to_previous_visible_line_start: the start of the visible line
     /// holding POS - 1.
     fn line_start_before(&mut self, pos: i64) -> R<i64>;
@@ -838,16 +845,51 @@ pub(super) fn lines_up<E: Lines>(src: &mut E, cx: &Ctx, pos: i64, dvpos: i64) ->
     let begv = src.begv();
     let mut origin = src.line_start_before(pos)?;
     src.reseat(origin)?;
-    let mut rows = screen_row(src, cx, pos)?;
+    let at = screen_position(src, cx, pos)?;
+    let (mut rows, mut plain) = (at.vpos, buffer_text(src, &at)?);
     while rows < -dvpos && origin > begv {
-        origin = src.line_start_before(origin)?;
+        let below = origin;
+        origin = src.line_start_before(below)?;
         src.reseat(origin)?;
+        // Over the buffer's own text, a line ended by its newline adds its
+        // rows to those below it, and only it needs walking. Anything else
+        // from here to POS, or a newline the display table shows otherwise
+        // or not at all, and only a walk to POS can say.
+        if plain {
+            let at = screen_position(src, cx, below)?;
+            plain = buffer_text(src, &at)? && at.current_x == 0 && at.continuation_lines_width == 0
+                && charpos(src, &at)? == below && after_newline(src, &at, below)?;
+            if plain {
+                rows += at.vpos;
+                continue;
+            }
+            src.reseat(origin)?;
+        }
         rows = screen_row(src, cx, pos)?;
     }
     let moved = rows.min(-dvpos);
     let mut it = row_start(src, cx, rows - moved)?;
     it.vpos = -moved;
     Ok(it)
+}
+
+/// Whether all IT has passed, and what it stands at, is the buffer's own
+/// text: no string, display table glyph, stretch or display property. Only
+/// there does a walk count no row past where it stops, and a reseat deliver
+/// what the walk delivered.
+fn buffer_text<E: Lines>(src: &mut E, it: &It) -> R<bool> {
+    let own = |slot: Slot| slot.elem.is_none_or(|e| e.method == Method::Buffer && !e.from_display && e.ellipsis.is_none());
+    for index in 0..it.index {
+        if !own(src.delivered(index)?) { return Ok(false); }
+    }
+    Ok(it.prefix.is_none() && src.delivered(it.index).is_ok_and(own))
+}
+
+/// Whether the last element IT passed is the buffer's newline just before
+/// BELOW: what `Source' delivers next then depends on nothing before it.
+fn after_newline<E: Lines>(src: &mut E, it: &It, below: i64) -> R<bool> {
+    let Some(last) = it.index.checked_sub(1) else { return Ok(false) };
+    Ok(src.delivered(last)?.elem.is_some_and(|e| e.charpos == below - 1 && matches!(e.shape, Shape::Glyph { c: 10, .. })))
 }
 
 /// Fvertical_motion (indent.c:2207) on a displayed window, from point PT:
