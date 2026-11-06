@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "55ab6b3f86910299fc0dad1c0990c5208495f97508f259ff087b39a4de13f09f",
+  "source_fingerprint": "992327d1c0e4f4be0b8233de7ffc3f66a90e391710b03145002f73b77dc22fe9",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -679,12 +679,12 @@
   "capitalize-region": {
    "name": "capitalize-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:103"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:116"
   },
   "capitalize-word": {
    "name": "capitalize-word",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:119"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:132"
   },
   "car": {
    "name": "car",
@@ -1452,12 +1452,12 @@
   "downcase-region": {
    "name": "downcase-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:98"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:111"
   },
   "downcase-word": {
    "name": "downcase-word",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:116"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:129"
   },
   "elt": {
    "name": "elt",
@@ -6627,17 +6627,17 @@
   "upcase-initials-region": {
    "name": "upcase-initials-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:108"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:121"
   },
   "upcase-region": {
    "name": "upcase-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:93"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:106"
   },
   "upcase-word": {
    "name": "upcase-word",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:113"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:126"
   },
   "use-global-map": {
    "name": "use-global-map",
