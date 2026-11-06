@@ -82,6 +82,27 @@ const CASES: &[&str] = &[
               (let ((read-buffer-function (lambda (&rest args) (cons 'reader args))))
                 (list (read-buffer "P: " "d" t) (read-buffer "P: " nil nil #'ignore)))))
     (mapc #'kill-buffer buffers)))"#,
+    // read-variable: completes user options, with its default and history.
+    r#"(let (got)
+  (global-set-key "m" (lambda () (interactive) (push (read-variable "Option: " 'kill-ring-max) got)))
+  (global-set-key "n" (lambda () (interactive) (push (read-variable "Option: ") got)))
+  (execute-kbd-macro (kbd "m RET n r e a d - q u o t e d TAB RET"))
+  (list (nreverse got) (car custom-variable-history)))"#,
+    // The readers' arguments, and call-interactively's `C' and `v' codes
+    // (callint.c:495, 698), with the history they add.
+    r#"(let* (calls
+       (log (lambda (answer)
+              (lambda (p c pred m i h d inh)
+                (push (list p (eq c obarray) pred m i h d inh) calls) answer)))
+       (command-history nil)
+       (cmd (lambda (v) (interactive "CCommand `here': ") v))
+       (opt (lambda (v) (interactive "vOption: ") v)))
+  (list (let ((completing-read-function (funcall log "forward-char"))) (call-interactively cmd t))
+        (let ((completing-read-function (funcall log "kill-ring-max"))) (call-interactively opt t))
+        (let ((completing-read-function (funcall log "forward-word")))
+          (list (read-command "P: " 'forward-char) (read-command "P: " '("a" "b"))
+                (read-variable "P: " 'kill-ring-max) (read-variable "P: ")))
+        (nreverse calls) (length command-history)))"#,
     // read_minibuf's state: the history variable and position, a reused
     // minibuffer without its last overlays or local variables, the caller's
     // directory, file-name reading as `lambda', and the exit hook.

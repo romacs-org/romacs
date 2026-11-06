@@ -1403,6 +1403,10 @@ def mcp_tour(args, base):
                 'romacs_file_write': {'path': str(note), 'text': 'two\n', 'save': True},
                 'romacs_send_keys': {'keys': 'C-a'}, 'romacs_wait_idle': {'timeout': 5},
                 'romacs_call_outcome': {'id': 'no-such-call'},
+                'romacs_option_search': {'query': 'kill-ring'},
+                'romacs_option_describe': {'name': 'kill-ring-max'},
+                'romacs_option_set': {'name': 'kill-ring-max', 'value': '61'},
+                'romacs_option_save': {'name': 'kill-ring-max', 'value': '62'},
                 'romacs_orchestrator_capabilities': {},
                 'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
             }

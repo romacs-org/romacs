@@ -1254,6 +1254,9 @@ fn evaluate(
         startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
+                if let Err(error) = user_init::start_saved_settings(&mut vm, &path) {
+                    eprintln!("romacs: saved settings: {error}");
+                }
                 // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
                 // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).

@@ -454,5 +454,8 @@ definitions (`romacs--world-reseed-all')."
 (romacs--make-default-fontsets)
 (romacs--stage-fontsets)
 
+;; Saved settings stay out of the user's init, in every launch of this chain.
+(require 'romacs-saved-settings)
+
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

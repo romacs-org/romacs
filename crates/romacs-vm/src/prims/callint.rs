@@ -665,8 +665,16 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
                 let f = cx.intern("other-buffer");
                 return Ok(Step::Call { f, args: vec![current, Value::NIL, Value::NIL], then: buffer_default, saved });
             }
-            b'a' | b'c' | b'C' | b'k' | b'K' | b'M' | b'n' | b'N'
-            | b'S' | b'v' | b'x' | b'X' | b'z' | b'Z' => {
+            // callint.c:495, 698: a command's or an option's name.
+            b'C' | b'v' => {
+                let template = cx.make_string(prompt.to_vec(), crate::environment::multibyte(prompt));
+                let message = cx.format_message(template, &[])?;
+                let f = cx.intern(if spec[pos] == b'C' { "read-command" } else { "read-variable" });
+                saved[POS] = fixnum(line_end.min(spec.len()) as i64);
+                return Ok(Step::Call { f, args: vec![message, Value::NIL], then: read_argument, saved });
+            }
+            b'a' | b'c' | b'k' | b'K' | b'M' | b'n' | b'N'
+            | b'S' | b'x' | b'X' | b'z' | b'Z' => {
                 let code = spec[pos] as char;
                 return Err(unsupported(&format!("the input-reading code `{code}'")));
             }

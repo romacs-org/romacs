@@ -478,6 +478,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-omarchy" '("omarchy-"))
 
 
+;;; Generated autoloads from romacs-option.el
+
+(register-definition-prefixes "romacs-option" '("romacs-option-"))
+
+
 ;;; Generated autoloads from romacs-orderless.el
 
 (autoload 'orderless-all-completions "romacs-orderless"
@@ -530,6 +535,11 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-sasl-scram.el
 
 (register-definition-prefixes "romacs-sasl-scram" '("sasl-scram-"))
+
+
+;;; Generated autoloads from romacs-saved-settings.el
+
+(register-definition-prefixes "romacs-saved-settings" '("romacs-saved-settings-"))
 
 
 ;;; Generated autoloads from romacs-server.el

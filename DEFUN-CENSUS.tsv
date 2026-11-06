@@ -257,11 +257,9 @@ previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, disp
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
 re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
-read-command	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-function	needed	lane A (editing, windows, frames, minibuffer readers, display)
 read-non-nil-coding-system	absent	no shipped Lisp calls it and it is no command
 read-positioning-symbols	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
-read-variable	needed	lane A (editing, windows, frames, minibuffer readers, display)
 recent-doskeys	absent	platform: MS-Windows build only
 reconsider-frame-fonts	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 redirect-debugging-output	absent	GNU C core debugging aid: Romacs's diagnostics are its own

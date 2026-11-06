@@ -14,6 +14,27 @@ pub fn path() -> Option<PathBuf> {
               std::env::var_os("HOME").map(PathBuf::from))
 }
 
+/// The session's init is PATH, as GNU's startup says whether or not it
+/// exists: `user-init-file', and the directory beside it.
+fn identify(vm: &mut Vm, path: &Path) -> Result<(), String> {
+    let file = path.to_str().ok_or("init path is not UTF-8")?;
+    let directory = path.parent().ok_or("init path has no parent")?;
+    let directory = format!("{}/", directory.to_str().ok_or("init directory is not UTF-8")?);
+    vm.eval_source(&format!("(setq user-init-file {} user-emacs-directory {})",
+        serde_json::to_string(file).map_err(|error| error.to_string())?,
+        serde_json::to_string(&directory).map_err(|error| error.to_string())?))?;
+    Ok(())
+}
+
+/// A session with an init, even one not written yet, has somewhere to save
+/// settings: name PATH, then load the saved settings, after Romacs's
+/// defaults and before the init (rlisp/romacs-saved-settings.el).
+pub fn start_saved_settings(vm: &mut Vm, path: &Path) -> Result<(), String> {
+    identify(vm, path)?;
+    vm.eval_source("(when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start))")?;
+    Ok(())
+}
+
 /// Load PATH as Lisp source; an absent init is optional, other errors propagate.
 pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
     match path.metadata() {
@@ -22,12 +43,7 @@ pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
         Ok(metadata) if !metadata.is_file() => return Err(format!("{} is not a file", path.display())),
         Ok(_) => {},
     }
-    let file = path.to_str().ok_or("init path is not UTF-8")?;
-    let directory = path.parent().ok_or("init path has no parent")?;
-    let directory = format!("{}/", directory.to_str().ok_or("init directory is not UTF-8")?);
-    vm.eval_source(&format!("(setq user-init-file {} user-emacs-directory {})",
-        serde_json::to_string(file).map_err(|error| error.to_string())?,
-        serde_json::to_string(&directory).map_err(|error| error.to_string())?))?;
+    identify(vm, path)?;
     vm.load_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(true)
 }

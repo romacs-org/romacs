@@ -201,6 +201,16 @@ fn read_coding_system(cx, prompt: Value; optional default_coding_system: Value) 
     enter(cx, "romacs--read-coding-system", vec![prompt, default_coding_system], DONE)
 }}
 
+defsubr! { name = "read-command", gnu = "minibuf.c:1462", effect = Global,
+fn read_command(cx, prompt: Value; optional default_value: Value) -> Step {
+    enter(cx, "romacs--read-command", vec![prompt, default_value], DONE)
+}}
+
+defsubr! { name = "read-variable", gnu = "minibuf.c:1496", effect = Global,
+fn read_variable(cx, prompt: Value; optional default_value: Value) -> Step {
+    enter(cx, "romacs--read-variable", vec![prompt, default_value], DONE)
+}}
+
 defsubr! { name = "internal-complete-buffer", gnu = "minibuf.c:2156", effect = Global,
 fn internal_complete_buffer(cx, string: Value, predicate: Value, flag: Value) -> Step {
     enter(cx, "romacs--internal-complete-buffer", vec![string, predicate, flag], DONE)
