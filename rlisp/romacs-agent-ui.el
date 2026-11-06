@@ -496,6 +496,12 @@ or a repeat."
       (when (plist-get event :last) (setq romacs-agent-ui--shown (plist-get event :seq)))
       (romacs-agent-ui--draw session event buffer))))
 
+(defun romacs-agent-ui--selection-label (selection)
+  "SELECTION, a model and effort, for a person: unnamed, the harness's own."
+  (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
+                            '("harness's own"))
+             " · "))
+
 (defun romacs-agent-ui--draw (session event buffer)
   "Draw SESSION's EVENT in its chat BUFFER, the current buffer."
       (pcase (plist-get event :type)
@@ -564,9 +570,14 @@ or a repeat."
                (when (get-buffer-window buffer 'visible)
                  (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session))))
         ('status
-         (unless (member (plist-get event :text) '("requesting" "compacting" "detached"))
+         (unless (member (plist-get event :text) '("requesting" "compacting" "detached" "selection armed"))
            (romacs-agent-ui--line session event (format "  · %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
+        ('selection
+         (romacs-agent-ui--line session event
+                                (format "── %s → %s ──" (romacs-agent-ui--selection-label (plist-get event :from))
+                                        (romacs-agent-ui--selection-label (plist-get event :to)))
+                                'face 'romacs-agent-dim))
         ('exit
          ;; A per-turn harness ends every turn: only a failed run is news.
          (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
@@ -733,7 +744,13 @@ turn starts, and last turn's failures have been seen."
                       (and mode (if (equal mode "bypassPermissions")
                                     (propertize "YOLO" 'face 'warning 'help-echo mode)
                                   (propertize mode 'face 'romacs-agent-mode)))
-                      (propertize (or (romacs-agent-model session) "…") 'face 'romacs-agent-model)
+                      (propertize (mapconcat #'identity
+                                             (delq nil (list (or (romacs-agent-model session) "…")
+                                                             (plist-get (romacs-agent-options session) :effort)))
+                                             " · ")
+                                  'face 'romacs-agent-model)
+                      (when-let* ((switch (romacs-agent-switch session)))
+                        (propertize (format "→ %s next turn" (romacs-agent-ui--selection-label switch)) 'face 'warning))
                       (when-let* ((children (romacs-agent-children-summary session)))
                         (concat (propertize "⇢ " 'face 'romacs-agent-delegate) children))
                       (and context (propertize context 'face 'romacs-agent-context))
@@ -976,6 +993,8 @@ harness's own transcript it was imported from, when it was."
           (romacs-agent-connection scratch) nil (romacs-agent-caught-up scratch) nil
           ;; The live session's: its rows come from its own events.
           (romacs-agent-subagents scratch) nil
+          ;; The live session's: a confirmation replayed here is not this copy's.
+          (romacs-agent-switch scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)

@@ -187,7 +187,8 @@ own \"Compacted\" is already said by its row."
                        :description (gethash "description" request))))))
       ("control_response"
        (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
-         (cond ((and id (equal id (romacs-agent-models-request session)))
+         (cond ((and id (romacs-agent--select-answered session id (equal (gethash "subtype" response) "success"))))
+               ((and id (equal id (romacs-agent-models-request session)))
                 (setf (romacs-agent-models-request session) nil)
                 (when (hash-table-p (gethash "response" response))
                   (romacs-agent--keep-models session (romacs-agent--claude-models (gethash "response" response)))))
@@ -210,6 +211,22 @@ alias is no model."
              ;; No efforts is what it says too: not left to the catalogue.
              collect (cons id (list :label (or (romacs-agent--value (gethash "displayName" model)) id)
                                     :efforts (and (vectorp efforts) (append efforts nil)))))))
+
+(defun romacs-agent--claude-select (session model effort)
+  "The control requests moving SESSION's idle Claude Code to MODEL at
+EFFORT.  Neither can be cleared in a live harness: `restart' then."
+  (let ((now (romacs-agent--selection session)))
+    (if (or (and (plist-get now :model) (not model)) (and (plist-get now :effort) (not effort)))
+        'restart
+      (cl-flet ((request (subtype &rest fields)
+                  (let ((id (format "romacs-select-%d" (romacs-agent-request-id session)))
+                        (body (romacs-mcp--object "subtype" subtype)))
+                    (cl-loop for (name value) on fields by #'cddr do (puthash name value body))
+                    (cons id (romacs-mcp--object "type" "control_request" "request_id" id "request" body)))))
+        (append (unless (equal model (plist-get now :model))
+                  (list (request "set_model" "model" model)))
+                (unless (equal effort (plist-get now :effort))
+                  (list (request "apply_flag_settings" "settings" (romacs-mcp--object "effortLevel" effort)))))))))
 
 (defun romacs-agent--claude-refresh-models (session)
   "Ask SESSION's Claude Code for its models, as its own SDK does at the
@@ -264,6 +281,7 @@ when ALLOW, else denied with MESSAGE."
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent
   :refresh-models #'romacs-agent--claude-refresh-models
+  :select #'romacs-agent--claude-select
   :argv #'romacs-agent--claude-argv
   :input #'romacs-agent--claude-user
   :interrupt #'romacs-agent--claude-interrupt
