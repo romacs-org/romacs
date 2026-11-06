@@ -1065,8 +1065,18 @@ impl Vm {
         }
         // This is an explicit text/byte boundary, not a second text encoding.
         // Conversion preserves octets and byte-canonical metadata or fails atomically.
+        let buffer = self.slots[self.buffer_slot].value;
+        let mut overlays = self.overlay_ends(buffer)?;
         let replacement = match (&self.objects[index], text) {
-            (Object::Buffer(t), false) => Some(Object::ByteBuffer(Box::new(Self::unibyte_buffer(t)?))),
+            (Object::Buffer(t), false) => {
+                let mut b = Self::unibyte_storage(t)?;
+                for (overlay, start, end) in &mut overlays {
+                    let o = self.overlay(*overlay)?;
+                    for anchor in [o.start, o.end].into_iter().flatten() { b.anchors.remove(anchor); }
+                    (*start, *end) = (t.raw_compaction(*start), t.raw_compaction(*end));
+                }
+                Some(Object::ByteBuffer(Box::new(b)))
+            }
             (Object::ByteBuffer(b), true) => {
                 // VM2-IFC-HELD1: insert-file-contents holds its text buffer.
                 if b.held.is_some() {
@@ -1082,6 +1092,9 @@ impl Vm {
                     && (1..b.bytes.len()).any(|i| (text[map(i)] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
                     return Err("cannot decode buffer with a marker inside a character".into());
                 }
+                // An overlay's end inside a character moves past it.
+                let character = |i: usize| (map(i)..).find(|&at| text.get(at).is_none_or(|c| c & 0xc0 != 0x80)).unwrap_or(text.len());
+                for (_, start, end) in &mut overlays { (*start, *end) = (character(*start), character(*end)); }
                 *a.anchors = b.anchors.clone();
                 for &g in grown.iter().rev() {
                     assert!(a.anchors.insert(g as u32 + 1, 1, true));
@@ -1096,18 +1109,23 @@ impl Vm {
         };
         if let Some(o) = replacement {
             self.objects[index] = o;
+            self.adopt_overlays(buffer, overlays)?;
         }
         Ok(if text { Value::TRUE } else { Value::NIL })
     }
-    /// T's unibyte storage: the same bytes, per-buffer variables and
-    /// markers.  Overlays have no unibyte storage (VM2-MD2).
+    /// T's unibyte storage, where its overlays cannot follow (VM2-MD2).
     fn unibyte_buffer(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
+        if !t.intervals.is_empty() {
+            return Err("cannot encode buffer with overlays".into());
+        }
+        Self::unibyte_storage(t)
+    }
+    /// T's unibyte storage: the same bytes, per-buffer variables and
+    /// markers.  Its overlays stay with T.
+    fn unibyte_storage(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
         // DIVERGENCES.md VM2-INDIRECT1.
         if t.base != Value::NIL || !t.indirect.is_empty() {
             return Err("VM2 cannot make a buffer sharing its text unibyte".into());
-        }
-        if !t.intervals.is_empty() {
-            return Err("cannot encode buffer with overlays".into());
         }
         let mut b = t.binary();
         b.state = t.state.clone();
@@ -1289,7 +1307,10 @@ impl Vm {
                 }
             }
             DeleteRegion => {
-                b.replace(region(args[0], args[1])?, b"")?;
+                let deleted = region(args[0], args[1])?;
+                let at = deleted.start;
+                b.replace(deleted, b"")?;
+                self.evaporate_unibyte(self.slots[self.buffer_slot].value, at..at)?;
                 Ok(Value::NIL)
             }
             Substring => {

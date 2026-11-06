@@ -72,7 +72,8 @@ romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, categ
 
 /// The text of a unibyte buffer as display reads it: each byte one
 /// character, so its positions are the buffer's, a byte above 127 the
-/// raw-byte character GNU shows as an escape. Every edit of the bytes edits it.
+/// raw-byte character GNU shows as an escape. Every edit of the bytes edits
+/// it, and it holds the buffer's overlays.
 #[derive(Clone)]
 pub(crate) struct Mirror {
     text: crate::annotations::AnnotatedBuffer,
@@ -83,9 +84,14 @@ impl Mirror {
         let byte = |at: ByteOffset| self.text.byte_of_char(crate::coordinates::CharOffset(at.0));
         Ok(byte(r.start)?..byte(r.end)?)
     }
+    /// As the bytes' `replace_with_bias': a replacement inserts before the
+    /// markers at its end and then deletes (adjust_markers_for_replace).
     fn replace(&mut self, r: &Range<ByteOffset>, inserted: &[u8], before_markers: bool) -> Result<()> {
         let range = self.range(r)?;
-        self.text.replace_with_bias(range, &crate::text::octets_to_multibyte(inserted), before_markers)
+        let text = crate::text::octets_to_multibyte(inserted);
+        if range.is_empty() { return self.text.replace_with_bias(range, &text, before_markers); }
+        self.text.replace_with_bias(range.end..range.end, &text, true)?;
+        self.text.replace_with_bias(range, b"", false)
     }
 }
 /// A unibyte buffer's or insertion's text properties, by byte.
@@ -135,6 +141,9 @@ impl ByteBuffer {
     /// The mirror, once a window has shown these bytes.
     pub(crate) fn shown(&self) -> Option<&crate::annotations::AnnotatedBuffer> {
         self.mirror.as_ref().map(|m| &m.text)
+    }
+    pub(crate) fn shown_mut(&mut self) -> Option<&mut crate::annotations::AnnotatedBuffer> {
+        self.mirror.as_mut().map(|m| &mut m.text)
     }
     /// The byte at AT is now BYTE: no marker moves.
     pub(crate) fn set_byte(&mut self, at: usize, byte: u8) -> Result<()> {
@@ -261,6 +270,7 @@ impl ByteBuffer {
         visit(&mut self.local_keymap);
         self.per_buffer.visit_values(visit);
         if let Some(held) = &mut self.held { held.visit_values(visit); }
+        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(visit); }
         for props in self.properties.values_mut() {
             for v in props.values_mut() {
                 visit(v);

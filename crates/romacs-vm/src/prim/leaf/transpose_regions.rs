@@ -173,8 +173,10 @@ impl Leaf<'_> {
                 }
                 data::Object::Overlay(o) if buffers.contains(&o.buffer) => {
                     let (Some(a), Some(z)) = (o.start, o.end) else { continue };
-                    let (Some(a), Some(z)) = (resolve(self.vm, a), resolve(self.vm, z)) else { continue };
-                    let (a, z) = (char_at(self.vm, a).map_err(Fault::Error)?, char_at(self.vm, z).map_err(Fault::Error)?);
+                    let Some(store) = self.vm.overlay_store(o.buffer) else { continue };
+                    let (Some(a), Some(z)) = (store.anchors.resolve(a), store.anchors.resolve(z)) else { continue };
+                    let at = |byte: u32| store.char_of_byte(ByteOffset(byte as usize)).map(|c| c.0 as i64 + 1).map_err(Fault::Error);
+                    let (a, z) = (at(a)?, at(z)?);
                     if inside(a) || inside(z) { places.push(Place::Overlay(o.buffer, Value::reference(i + 1, 0), a, z)); }
                 }
                 _ => {}
@@ -210,10 +212,11 @@ impl Leaf<'_> {
                     }
                 }
                 Place::Overlay(buffer, overlay, a, z) => {
-                    let (a, z) = (byte(self.vm, a).map_err(Fault::Error)?, byte(self.vm, z).map_err(Fault::Error)?);
                     let Some(data::Object::Overlay(o)) = self.vm.object_if(overlay) else { continue };
                     let (Some(start), Some(end), front, rear) = (o.start, o.end, o.front, o.rear) else { continue };
-                    let target = self.vm.annotated_mut(buffer).map_err(Fault::Error)?;
+                    let target = self.vm.overlay_store_mut(buffer).map_err(Fault::Error)?;
+                    let at = |t: &crate::annotations::AnnotatedBuffer, c: i64| t.byte_of_char(CharOffset((c - 1) as usize)).map(|b| b.0 as u32).map_err(Fault::Error);
+                    let (a, z) = (at(target, a)?, at(target, z)?);
                     target.intervals.remove(start, &target.anchors);
                     target.anchors.set(start, a, front);
                     target.anchors.set(end, z, rear);

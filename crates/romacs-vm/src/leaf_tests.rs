@@ -207,3 +207,21 @@ fn a_unibyte_buffers_mirror_follows_every_edit() {
         assert_eq!(b.shown().unwrap().bytes().to_vec(), crate::text::octets_to_multibyte(&b.bytes), "after {edit}");
     }
 }
+
+/// Display asks a unibyte buffer's boundaries in the mirror's bytes, where a
+/// raw byte is two: a property or overlay after one must not land inside it.
+#[test]
+fn a_unibyte_buffers_boundaries_are_the_mirrors() {
+    use crate::coordinates::ByteOffset;
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(r#"(progn (set-buffer (get-buffer-create "bounds")) (set-buffer-multibyte nil)
+                        (insert (unibyte-string 255 65 66 254 67)) (put-text-property 2 3 'x 1))"#).unwrap();
+    let buffer = vm.slots[vm.buffer_slot].value;
+    vm.mirror_shown(buffer).unwrap();
+    let end = ByteOffset(7);
+    let next = |vm: &Vm, at: usize| -> usize { vm.next_property_boundary(buffer, ByteOffset(at), end).unwrap().0 };
+    assert_eq!((next(&vm, 0), next(&vm, 2), next(&vm, 3)), (2, 3, 7));
+    vm.eval_source("(make-overlay 5 6)").unwrap();
+    assert_eq!((next(&vm, 3), next(&vm, 6)), (6, 7), "from the overlay's start, past the raw byte at 4");
+}
