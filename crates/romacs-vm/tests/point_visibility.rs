@@ -92,6 +92,13 @@ fn scrolling_past_invisible_text_as_pinned_gnu() {
     replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
 }
 
+/// format_mode_line.el: `format-mode-line' of another buffer reads that
+/// buffer's point, not the selected window's.
+#[test]
+fn format_mode_line_of_another_buffer_as_pinned_gnu() {
+    replay(include_str!("format_mode_line.el"), include_str!("format_mode_line.gnu"), 0);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
 fn replay(probe: &str, answers: &str, least: usize) {
