@@ -49,6 +49,18 @@ fn resolve(cx: &mut Leaf<'_>, ccl: Value) -> std::result::Result<Resolved, Fault
     Ok(if unresolved { Resolved::Unresolved } else { Resolved::Program(cx.vector_from(items)) })
 }
 
+defsubr! { name = "ccl-program-p", gnu = "ccl.c:2029", effect = Reads,
+fn ccl_program_p(cx, object: Value) {
+    if cx.kind(object) == Kind::Vector {
+        return Ok(if matches!(resolve(cx, object)?, Resolved::Program(_)) { Value::TRUE } else { Value::NIL });
+    }
+    if cx.kind(object) != Kind::Symbol { return Ok(Value::NIL); }
+    let key = cx.intern("ccl-program-idx");
+    let index = cx.face_property(object, key)?.integer_value().filter(|&n| n >= 0);
+    let size = match cx.internal_value(TABLE) { Some(table) => cx.vector_len(table)?, None => 32 };
+    Ok(if index.is_some_and(|n| (n as usize) < size) { Value::TRUE } else { Value::NIL })
+}}
+
 defsubr! { name = "register-ccl-program", gnu = "ccl.c:2245", effect = Global,
 fn register_ccl_program(cx, name: Value, ccl_prog: Value) {
     if cx.kind(name) != Kind::Symbol { return Err(Fault::Wrong("symbolp", name)); }

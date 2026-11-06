@@ -50,7 +50,7 @@
     (cond ((null common) (message "No matching %s" romacs-complete--kind))
           ((> (length common) (length prefix)) (romacs-prompt--replace-input (concat base common)))
           ((= count 1) (message "Complete"))
-          (t (message "%s%s" labels (if (> count 12) "  …" ""))))))
+          (t (message "%s%s" labels (if (> count 12) "  ..." ""))))))
 
 (defun romacs-complete--read (prompt initial history kind candidates &optional default)
   "Read with PROMPT and INITIAL input, completing over CANDIDATES.

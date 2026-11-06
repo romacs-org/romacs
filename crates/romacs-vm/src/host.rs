@@ -2778,6 +2778,18 @@ pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// uname's release (editfns.c init_editfns).
+pub fn os_release() -> String {
+    let mut name: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut name) } != 0 { return String::new(); }
+    unsafe { std::ffi::CStr::from_ptr(name.release.as_ptr()) }.to_string_lossy().into_owned()
+}
+
+/// sysconf (_SC_ARG_MAX) / 4, GNU's crude bytes to characters (callproc.c:2249).
+pub fn command_line_max() -> i64 {
+    match unsafe { libc::sysconf(libc::_SC_ARG_MAX) } { n if n > 0 => n as i64 / 4, _ => 4096 }
+}
+
 /// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
 /// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
 /// for the whole process.

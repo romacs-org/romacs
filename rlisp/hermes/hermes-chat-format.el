@@ -30,6 +30,7 @@
 
 ;;; Code:
 
+(require 'romacs-truncate)
 (require 'diff-mode)
 (require 'markdown-mode)
 (require 'subr-x)
@@ -948,7 +949,7 @@ roughly its printed size in characters; a hash table costs its header."
         (let ((keep (min (length object) string-limit (cdr budget))))
           (funcall spend (+ keep 2))
           (if (< keep (length object))
-              (concat (substring-no-properties object 0 keep) "…")
+              (concat (substring-no-properties object 0 keep) (truncate-string-ellipsis))
             (substring-no-properties object))))
        ((and (bignump object)
              (> (logb (abs object)) hermes-chat--unknown-event-bignum-bits))
@@ -1013,7 +1014,7 @@ the preview never traverses or prints all of a huge payload or string."
                   raw print-level print-length
                   (min width hermes-chat--unknown-event-preview-string-limit)
                   hermes-chat--unknown-event-preview-budget)))
-    (truncate-string-to-width (prin1-to-string object) width nil nil "…")))
+    (romacs-truncate (prin1-to-string object) width)))
 
 (defun hermes-chat--unknown-event-content (event)
   "Return visible diagnostic text for unknown transport EVENT."

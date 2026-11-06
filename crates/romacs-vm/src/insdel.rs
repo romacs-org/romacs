@@ -285,7 +285,11 @@ impl Vm {
     }
 
     fn buffer_has_overlays(&self, index: usize) -> bool {
-        matches!(&self.objects[index], Object::Buffer(b) if !b.intervals.is_empty())
+        match &self.objects[index] {
+            Object::Buffer(b) => !b.intervals.is_empty(),
+            Object::ByteBuffer(b) => b.shown().is_some_and(|text| !text.intervals.is_empty()),
+            _ => false,
+        }
     }
 
     /// overlay_change_hooks for character positions START..END of the
@@ -300,6 +304,7 @@ impl Vm {
         // original bounds; GNU still selects with those bounds.
         let z = match self.object_if(buffer) {
             Some(Object::Buffer(b)) => b.len_chars() as i64 + 1,
+            Some(Object::ByteBuffer(b)) => b.bytes.len() as i64 + 1,
             _ => return Ok(Vec::new()),
         };
         if start > z || end > z {
@@ -356,10 +361,17 @@ impl Vm {
     /// start, insert-behind-hooks at its end, and modification-hooks when
     /// the change overlaps it, in ascending overlay order.
     pub(crate) fn overlay_change_hooks(&mut self, buffer: Value, start: ByteOffset, end: ByteOffset) -> Faulty<Vec<(Value, Value)>> {
-        let Some(Object::Buffer(b)) = self.object_if(buffer) else { return Ok(Vec::new()) };
+        let Some(b) = self.overlay_store(buffer) else { return Ok(Vec::new()) };
         if b.intervals.is_empty() {
             return Ok(Vec::new());
         }
+        // A unibyte buffer's offsets are its characters.
+        let (start, end) = if matches!(self.object_if(buffer), Some(Object::ByteBuffer(_))) {
+            let byte = |at: ByteOffset| b.byte_of_char(CharOffset(at.0)).map_err(Fault::Error);
+            (byte(start)?, byte(end)?)
+        } else {
+            (start, end)
+        };
         let insertion = start == end;
         // An insertion also meets the overlays that end or start at it.
         let (low, high) = if insertion {
@@ -541,6 +553,7 @@ impl Vm {
             let (a, z) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
             let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
             b.replace(a..z, &bytes).map_err(Fault::Error)?;
+            self.evaporate_unibyte(buffer, a..ByteOffset(a.0 + bytes.len())).map_err(Fault::Error)?;
             self.display_state.version += 1;
         } else {
             self.replace_text(buffer, from, to, text, inserted)?;

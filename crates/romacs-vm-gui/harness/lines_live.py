@@ -204,9 +204,26 @@ def check_tabs(args, report, check):
         check('the window shows the visited file', name == TAB_FILE.name, name)
 
 
-def gnu_points(emacs, file, columns, rows, keys):
+class Forked:
+    """A `pty.fork' child as `wait_for_reply' reads a Popen: its `pid', and
+    `poll' reaping it."""
+
+    def __init__(self, pid):
+        self.pid, self.returncode = pid, None
+
+    def poll(self):
+        if self.returncode is None:
+            done, status = os.waitpid(self.pid, os.WNOHANG)
+            if done:
+                self.returncode = os.waitstatus_to_exitcode(status)
+        return self.returncode
+
+
+def gnu_points(emacs, file, columns, rows, keys, stall):
     """Pinned GNU -nw on FILE in a COLUMNS x ROWS terminal: the window's
-    continued-line width probe, then (COMMAND POINT) after each of KEYS."""
+    continued-line width probe, then (COMMAND POINT) after each of KEYS, and
+    why it stopped short, or None.  Each key waits for the one before, as a
+    loaded host slows the oracle as it does the binary (`wait_for_reply')."""
     with tempfile.TemporaryDirectory(prefix='lines-gnu-') as temporary:
         home = Path(temporary)
         log = home / 'points.el'
@@ -231,16 +248,23 @@ def gnu_points(emacs, file, columns, rows, keys):
                         os.read(fd, 65536)
                     except OSError:
                         return
+        child, stalled = Forked(pid), None
+
+        def lines():
+            return log.read_text().splitlines() if log.exists() else []
         try:
-            drain(3)
-            for _, byte in keys:
+            # Its terminal drained, so its output never blocks it.
+            wait_for_reply(lambda: bool(lines()), log, child, 'GNU start', stall, lambda: drain(.05))
+            for index, (_, byte) in enumerate(keys):
                 os.write(fd, byte)
-                drain(0.2)
-            drain(1)
+                wait_for_reply(lambda: len(lines()) > index + 1, log, child, f'GNU command {index + 1}', stall, lambda: drain(.05))
+        except AssertionError as error:
+            stalled = str(error)
         finally:
-            os.kill(pid, 9)
-            os.waitpid(pid, 0)
-        return log.read_text().splitlines() if log.exists() else []
+            if child.poll() is None:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+        return lines(), stalled
 
 
 def command_signals(stderr_text):
@@ -308,7 +332,7 @@ def cpu_seconds(pid):
     return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
 
 
-def wait_for_reply(pred, log, process, what, stall):
+def wait_for_reply(pred, log, process, what, stall, pause=lambda: time.sleep(.05)):
     """Until PRED holds, read again only when LOG has grown.  A loaded host
     slows a command without limit, so no fixed time decides: the binary has
     stalled when, for STALL seconds, LOG does not grow and it uses under a
@@ -319,7 +343,8 @@ def wait_for_reply(pred, log, process, what, stall):
     while True:
         if process.poll() is not None:
             raise AssertionError(f'{what}: process exited {process.returncode}')
-        grown, used, now = log.stat().st_size, cpu_seconds(process.pid), time.monotonic()
+        grown = log.stat().st_size if log.exists() else 0
+        used, now = cpu_seconds(process.pid), time.monotonic()
         if grown != size or used - spent >= 1:
             if grown != size and pred():
                 return
@@ -328,7 +353,7 @@ def wait_for_reply(pred, log, process, what, stall):
             raise AssertionError(f'{what}: no progress for {stall} seconds')
         if now > limit:
             raise AssertionError(f'{what}: busy for {5 * stall} seconds')
-        time.sleep(.05)
+        pause()
 
 
 def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion'):
@@ -364,21 +389,27 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
         romacs = command_points(replies(), text)
         signals = command_signals(replies())
         report[f'{name}_echo'] = fio.rows((output / 'binary.stderr').read_text(errors='replace'))[-2:]
-    gnu = gnu_points(args.gnu, file, columns, 40, keys)
+    gnu, stalled = gnu_points(args.gnu, file, columns, 40, keys, args.timeout)
     report[name] = {'columns': columns, 'gnu_geometry': gnu[:1], 'gnu': gnu[1:], 'romacs': romacs}
-    check(f'GNU -nw at {columns} columns continues lines after {glyphs} glyphs, as the native window does',
-          bool(gnu) and gnu[0].endswith(f' {glyphs})'), gnu[:1])
+    # What the oracle did not answer is no evidence, for Romacs or against it:
+    # the commands compare as far as it went, and main reports the stall.
+    answered = max(len(gnu) - 1, 0)
+    if stalled:
+        report[f'{name}_gnu_stalled'] = stalled
+    if gnu or not stalled:
+        check(f'GNU -nw at {columns} columns continues lines after {glyphs} glyphs, as the native window does',
+              bool(gnu) and gnu[0].endswith(f' {glyphs})'), gnu[:1])
     # GNU signals only where a motion runs out of buffer: point stays put.
     edges = [i for i in range(1, len(gnu) - 1) if i > 6 and gnu[i + 1] == gnu[i]]
     expected = [('end-of-buffer nil' if keys[i][0] == 'n' else 'beginning-of-buffer nil') if i in edges else None
                 for i in range(len(keys))]
     report[name]['signals'] = signals
-    check(f'{file.name}: commands signal only at the ends of the buffer, as GNU does', signals == expected,
-          [{'command': i + 1, 'expected': e, 'signal': g} for i, (e, g) in enumerate(zip(expected, signals)) if e != g][:6])
+    check(f'{file.name}: commands signal only at the ends of the buffer, as GNU does', signals[:answered] == expected[:answered],
+          [{'command': i + 1, 'expected': e, 'signal': g} for i, (e, g) in enumerate(zip(expected[:answered], signals)) if e != g][:6])
     check(f'{file.name}: the cursor shows after every command', not any(r.endswith(' hidden') for r in romacs),
           [r for r in romacs if r.endswith(' hidden')][:6])
     shown = [r.removesuffix(' hidden') for r in romacs]
-    check(f'{file.name}: {len(keys)} C-f/C-n/C-p commands move point as pinned GNU does', shown == gnu[1:] and len(shown) == len(keys),
+    check(f'{file.name}: {len(keys)} C-f/C-n/C-p commands move point as pinned GNU does', shown[:answered] == gnu[1:] and len(shown) == len(keys),
           [{'command': i + 1, 'gnu': g, 'romacs': r} for i, (g, r) in enumerate(zip(gnu[1:], shown + [None] * len(keys))) if g != r][:6])
 
 
@@ -491,13 +522,16 @@ def main():
         if args.only in (None, 'motion'):
             check_motion(args, report, check)
             check_motion(args, report, check, TALL_FILE, TALL_KEYS, 'scroll')
-        report['status'] = 'PASS' if not report['failures'] else 'FAIL'
+        # A stalled oracle is neither Romacs's failure nor a pass: the commands
+        # past it were not compared.
+        stalls = [key for key in report if key.endswith('_gnu_stalled')]
+        report['status'] = 'FAIL' if report['failures'] else 'ORACLE-STALLED' if stalls else 'PASS'
     except Exception as error:  # noqa: BLE001
         report['error'] = repr(error)
     finally:
         (args.output / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False) + '\n')
-    print(report['status'], json.dumps({k: report.get(k) for k in ('failures', 'error')}))
-    return 0 if report['status'] == 'PASS' else 1
+    print(report['status'], json.dumps({k: report.get(k) for k in ('failures', 'error', 'motion_gnu_stalled', 'scroll_gnu_stalled')}))
+    return {'PASS': 0, 'ORACLE-STALLED': 2}.get(report['status'], 1)
 
 
 if __name__ == '__main__':

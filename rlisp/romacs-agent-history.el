@@ -86,7 +86,7 @@ instructions)."
   (let ((text (and (stringp text) (string-trim text))))
     (unless (or (null text) (string-empty-p text) (string-prefix-p "<" text)
                 (string-prefix-p "# AGENTS.md instructions" text))
-      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil "…"))))
+      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil t))))
 
 (defun romacs-agent-history--prompt (content)
   "The user's typed text in a Claude Code message CONTENT, or nil (a tool
@@ -367,7 +367,7 @@ T3 ran it: its first prompt is then T3's preamble."
                                                                        titles))))
                                               ;; T3's title as T3 shows it, cut to fit.
                                               (and title (not (string-empty-p (string-trim title)))
-                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil "…"))))
+                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil t))))
                                             (list :path path :size size :mtime mtime
                                                   :provider provider :config-dir config-dir)
                                             description))))))
@@ -475,6 +475,7 @@ buffer, for SESSION: its end, from a prompt on."
                                         :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
                                         :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history)
               romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+              romacs-agent-ui--tasks (make-hash-table :test #'equal)
               romacs-agent-ui--messages (make-hash-table :test #'equal)
               romacs-agent-ui--end (point-marker)))
       ;; Shown first: its rules fit its window.

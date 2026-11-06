@@ -85,9 +85,22 @@ fn casified(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 // cased as the region commands case.
 fn casify_word(cx: &mut Leaf<'_>, case: Value, count: Value) -> Next {
     let n = count.integer_value().ok_or(Fault::Wrong("fixnump", count))?;
+    // scan_words calls the table's functions: as `forward-word' (word_motion.rs).
+    if cx.word_boundary_functions()? {
+        let args = vec![fixnum(cx.point()?), count];
+        return Ok(Step::Call { f: cx.intern("romacs--scan-words"), args, then: word_scanned, saved: vec![case, count] });
+    }
     let point = cx.point()?;
     let (farend, _) = cx.scan_words(n)?;
     casify_region(cx, case, fixnum(point), fixnum(farend), Value::NIL, Value::TRUE)
+}
+
+// casify_word after `romacs--scan-words': nil is the accessible text's edge.
+fn word_scanned(cx: &mut Leaf<'_>, farend: Value, saved: &[Value]) -> Next {
+    let (point, begv, zv) = cx.point_extent()?;
+    let edge = if saved[1].integer_value().is_some_and(|n| n <= 0) { begv } else { zv };
+    let farend = if farend == Value::NIL { fixnum(edge) } else { farend };
+    casify_region(cx, saved[0], fixnum(point), farend, Value::NIL, Value::TRUE)
 }
 
 defsubr! { name = "upcase-region", gnu = "casefiddle.c:609", effect = Global,

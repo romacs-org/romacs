@@ -184,6 +184,10 @@ pub struct Base(Attrs);
 romacs_snapshot::snapshot_tuple!(Base(f0));
 
 impl Base {
+    pub fn attrs(&self) -> &Attrs {
+        &self.0
+    }
+
     pub fn new(attrs: Attrs) -> Result<Base, FaceError> {
         for a in Attribute::ALL {
             if a == Attribute::DistantForeground {

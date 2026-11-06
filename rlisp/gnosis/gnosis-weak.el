@@ -110,7 +110,7 @@ Retrievability uses the pinned FSRS model; nothing here is fitted."
 (defun gnosis-weak--snippet (text)
   "Return a short one-line display form of thema TEXT."
   (let ((line (string-trim (replace-regexp-in-string "[ \t\n]+" " " (format "%s" (or text ""))))))
-    (truncate-string-to-width line 60 nil nil "…")))
+    (truncate-string-to-width line 60 nil nil t)))
 
 (defun gnosis-weak-aggregate (rows today &optional threshold)
   "Aggregate thema ROWS into per-node weakness plists for TODAY.

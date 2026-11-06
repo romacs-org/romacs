@@ -76,6 +76,13 @@ class LispLayoutTests(unittest.TestCase):
                         self.assertIn(notice, (ROOT / upstream).read_text())
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU frame.el', source)
+                elif file == ROOT / 'rlisp/romacs-custom.el':
+                    # Derives custom.el's enable-theme and disable-theme.
+                    notices = re.findall(copyright_pattern, (ROOT / 'gnu-lisp/custom.el').read_text())
+                    self.assertTrue(notices, 'GNU_CUSTOM_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU custom.el', source)
                 elif file == ROOT / 'rlisp/romacs-keymap.el':
                     # Derived from GNU src/keymap.c and src/keyboard.c, outside gnu-lisp/.
                     self.assertIn(';; Copyright (C) 1985-1988, 1993-1995, 1998-2026 Free Software', source)
