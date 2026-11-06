@@ -531,6 +531,14 @@ def build(args, base):
 
 
 DAEMON_PROBE = '(list noninteractive (daemonp) (condition-case e (daemon-initialized) (error (cadr e))))'
+# What `make-frame' reaches (`pgtk-dnd-init-frame'), and the primitive's
+# checks, on a window frame.
+DND_PROBE = '''(let ((f (car (filtered-frame-list #'display-graphic-p))))
+  (append
+   (mapcar (lambda (targets) (condition-case e (pgtk-register-dnd-targets f targets) (error e)))
+           (list '("text/plain") nil 'x '("a" . "b") '("a" 3)))
+   (let ((made (make-frame `((parent-frame . ,f) (visibility . nil)))))
+     (prog1 (list (frame-live-p made)) (delete-frame made)))))'''
 
 
 def daemon(args, base):
@@ -548,7 +556,7 @@ def daemon(args, base):
             until(lambda: ask(shown) == 't', 30, 'the client frame shown')
             after = (ask(DAEMON_PROBE), ask('(length (frame-list))'))
             ask('(ding)')
-            return before, after
+            return before, after, ask(DND_PROBE)
         gnu_out = s.root / 'gnu-daemon.out'
         with gnu_out.open('wb') as out:
             gnu = subprocess.Popen([args.gnu, '-Q', '--fg-daemon=dm'], env=s.env, cwd=s.root / 'work',
@@ -576,7 +584,7 @@ def daemon(args, base):
                                  check=False).stdout.strip() == f'({s.pid} t)'
         result = {'gnu': gnu_states, 'romacs': romacs_states, 'worker_noninteractive': worker,
                   'gnu_bells': gnu_bells, 'romacs_bells': romacs_bells, 'stop_automatically_survived': survived}
-        result['ok'] = ([b[0] for b in gnu_states] == [b[0] for b in romacs_states]
+        result['ok'] = ([b[0] for b in gnu_states[:2]] == [b[0] for b in romacs_states[:2]] and gnu_states[2] == romacs_states[2]
                         and worker == 't' and gnu_bells == 0 and romacs_bells == 0 and survived)
         return result
     finally:
