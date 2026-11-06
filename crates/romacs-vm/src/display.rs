@@ -247,6 +247,9 @@ pub(super) struct DisplayState {
     /// Per window id, what its last full snapshot read (`ShownKey`), for
     /// GNU's redisplay shortcuts (`Vm::reuse_shown`).
     shown: std::collections::BTreeMap<u64, Shown>,
+    /// `shown' when a frame last skipped the hooks (`Vm::defer_parse'), until
+    /// the hooks run: they are told what changed since they last ran.
+    hooked: Option<std::collections::BTreeMap<u64, Shown>>,
     /// Advanced by every overlay change: overlays are display state no
     /// buffer modification tick counts.
     pub(super) overlays: u64,
@@ -283,7 +286,7 @@ pub(super) struct DisplayState {
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -383,6 +386,7 @@ impl DisplayState {
             table_ids: 0,
             previous: std::collections::BTreeMap::new(),
             shown: std::collections::BTreeMap::new(),
+            hooked: None,
             overlays: 0,
             segments: std::collections::BTreeMap::new(),
             bases: std::collections::BTreeMap::new(),
@@ -481,6 +485,7 @@ impl ShownKey {
 
 romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, shows, selected_id, selected, modiff, accessible, start, mark, terminal, geometry, min_hscroll, suspended, chrome, root, metrics, faces, table, variables, header });
 
+#[derive(Clone)]
 struct Shown {
     key: ShownKey,
     point: i64,
@@ -690,7 +695,10 @@ impl Vm {
         // redisplay_internal's order: prepare_menu_bars, then the window
         // change functions.
         if !self.redisplay_inhibited()? {
-            self.run_pre_redisplay()?;
+            if self.treesit_deferred.is_none() {
+                self.run_pre_redisplay()?;
+                self.display_state.hooked = None;
+            }
             self.run_window_change_functions()?;
         }
         let font_alternatives = self.font_alternative_state()?;
@@ -2257,7 +2265,10 @@ impl Vm {
             let key = self.shown_key(window, width, height)?;
             let point = self.window_point_value(window)?.integer_value();
             let id = self.window(window)?.id;
-            match self.display_state.shown.get(&id) {
+            let hooked = self.display_state.hooked.as_ref();
+            match hooked.unwrap_or(&self.display_state.shown).get(&id) {
+                // A collection may have moved what a saved key names.
+                Some(shown) if hooked.is_some() && shown.key.collections != key.collections => all = true,
                 Some(shown) if !shown.key.same_size(&key) => all = true,
                 Some(shown) if shown.key.same_display(&key) => {
                     // Selection flags the window it left and the one it reached.
@@ -2493,24 +2504,81 @@ impl Vm {
     /// to the frame the landing wakes (`land_treesit'): fontifying now would
     /// wait for the parse.
     fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<bool> {
+        let id = self.window(self.slots[root].value)?.id;
+        let buffer = self.slots[buffer_slot].value;
+        let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        if text.treesit.small_edit_due(limit) {
+            self.treesit_deferred.as_mut().expect("a deferred frame").push(id);
+            return Ok(true);
+        }
+        // This window fontifies now: the next edit counts from here.
+        text.treesit.edited.set(0);
         if self.process_jobs.wake().is_none() {
             return Ok(false);
         }
-        let buffer = self.slots[buffer_slot].value;
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
+        if pending && !self.treesit_plain.contains(&id) {
+            self.treesit_plain.push(id);
+        }
+        Ok(pending)
+    }
+    /// BUFFER's text, its base's for an indirect one; none for a killed buffer.
+    fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
         let base = match self.object(buffer)? {
             Object::Buffer(b) if b.base != Value::NIL => b.base,
             Object::Buffer(_) => buffer,
-            _ => return Ok(false),
+            _ => return Ok(None),
         };
-        let Object::Buffer(text) = self.object_mut(base)? else { return Ok(false) };
-        let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
-        if pending {
-            let id = self.window(self.slots[root].value)?.id;
-            if !self.treesit_plain.contains(&id) {
-                self.treesit_plain.push(id);
+        match self.object_mut(base)? {
+            Object::Buffer(text) => Ok(Some(text)),
+            _ => Ok(None),
+        }
+    }
+    /// `romacs-treesit-show-before-parse': the largest edit a frame shows
+    /// before parsing it, in bytes; nothing is shown so when it is not a
+    /// positive number.
+    fn treesit_show_limit(&mut self) -> i64 {
+        let slot = self.slot("romacs-treesit-show-before-parse");
+        self.variable_value(slot).ok().and_then(|limit| limit.integer_value()).unwrap_or(0)
+    }
+    /// Build the next frame without the parse a small edit needs, if one is
+    /// due in a shown buffer: a typed character reaches the screen while the
+    /// parser is still to run, as a first parse's text does (`land_treesit').
+    /// It carries the faces it inherited; `pre-redisplay-functions', which
+    /// ask for the parse, and fontification wait for the next frame. That
+    /// frame always parses, so a run of keys cannot starve the faces, and
+    /// tells the hooks every change since the last frame that ran them.
+    pub fn defer_parse(&mut self) -> Result<()> {
+        if std::mem::take(&mut self.treesit_parse_owed) {
+            return Ok(());
+        }
+        let limit = self.treesit_show_limit();
+        for window in self.displayed_windows() {
+            let buffer = self.window(window)?.buffer;
+            if self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit)) {
+                self.treesit_deferred = Some(Vec::new());
+                let shown = self.display_state.shown.clone();
+                self.display_state.hooked.get_or_insert(shown);
+                break;
             }
         }
-        Ok(pending)
+        Ok(())
+    }
+    /// `redisplay' ran the hooks: they have been told what changed so far.
+    pub(crate) fn pre_redisplay_ran(&mut self) {
+        self.display_state.hooked = None;
+    }
+    /// The frame `defer_parse' started is out: whether one was, and the next
+    /// must then parse and fontify what it left.
+    pub fn deferred_parse_done(&mut self) -> bool {
+        let Some(windows) = self.treesit_deferred.take() else { return false };
+        for id in windows {
+            self.display_state.repaint_window(id);
+        }
+        self.treesit_parse_owed = true;
+        true
     }
     /// Whether a parse landed with windows left plain: they are laid out
     /// again, as an unchanged window is not, and fontify if theirs was it.

@@ -187,6 +187,95 @@ impl RenderApp {
         }
     }
 
+    /// Draw WINDOW_ID's next frame: what the platform's redraw asks for, and
+    /// what a scene that just arrived does without waiting for it
+    /// (`draw_fresh_scene').
+    pub(super) fn draw_window(&mut self, window_id: WindowId) {
+        self.complete_pending_scale_change(window_id);
+        super::frame_stats::count(&super::frame_stats::REDRAW_EVENTS);
+        if let Some(emacs_fid) = self.frame_windows.event_frame_for_winit(window_id) {
+            use super::frame_sched::{
+                ClockSource, FrameTick, NativeWindowId, PacingAction,
+            };
+            let sched_id = NativeWindowId(emacs_fid);
+            let now = romacs_display_protocol::frame_time::observe_platform_now();
+            let estimated_interval = self
+                .frame_windows
+                .get(emacs_fid)
+                .map(|window_state| {
+                    std::time::Duration::from_secs_f64(
+                        1.0 / f64::from(Self::window_max_rate(window_state).get()),
+                    )
+                })
+                .unwrap_or(std::time::Duration::from_millis(16));
+            let tick = FrameTick {
+                frame_time: now,
+                target_presentation_time: now.plus(estimated_interval),
+                estimated_interval,
+                source: ClockSource::Synthetic,
+            };
+            let mut plan = self.frame_coordinator.begin_frame(sched_id, tick);
+            // Occluded/hidden windows present nothing. begin_frame
+            // already returns no work while ineligible; skipping the
+            // render here makes that concrete and avoids servicing an
+            // OS-delivered RedrawRequested for a surface the
+            // compositor is not showing.
+            if !self.frame_coordinator.is_eligible(sched_id) {
+                super::frame_stats::count_plan(sched_id, &plan);
+                return;
+            }
+            if !plan.should_present {
+                // Nothing we scheduled explains this tick, and this is
+                // the one place that knows why: the event came from the
+                // window system (expose, resize, first map) or from a
+                // recovery path that requests a redraw on the window
+                // directly. Both need the surface repainted, so the
+                // frame is granted under a reason of its own rather
+                // than rendered unattributed.
+                plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
+            }
+            super::frame_stats::count_plan(sched_id, &plan);
+            if plan.reasons.is_empty() {
+                super::frame_stats::count(
+                    &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
+                );
+                debug_assert!(
+                    false,
+                    "every presented frame must name a demand reason (invariant 12)"
+                );
+            }
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.set_frame_sample(plan.tick.sample());
+            }
+            if let Some(window_state) = self.frame_windows.get_mut(emacs_fid) {
+                window_state.render.set_dirty(false);
+            }
+            // Stage 4: any compositor-only plan can use the retained
+            // static scene and sample just its dynamic layers (cursor,
+            // frame post, and later compositor effects). Any stronger
+            // work class renders fully.
+            let result = self.render_frame_window_hinted(emacs_fid, &plan);
+            let finished = romacs_display_protocol::frame_time::observe_platform_now();
+            if emacs_fid == self.frame_windows.primary_event_frame_id()
+                && self.scene != super::state::SceneDraw::Drawn
+            {
+                // A failed draw is the coordinator's to retry, at its pace.
+                self.scene = if result == super::frame_sched::SubmissionResult::Submitted {
+                    self.frame_coordinator.scene_drawn(sched_id, finished, estimated_interval);
+                    super::state::SceneDraw::Drawn
+                } else {
+                    super::state::SceneDraw::Waiting
+                };
+            }
+            let action = self.frame_coordinator.finish_frame(sched_id, &plan, result, finished);
+            if action == PacingAction::RequestRedraw
+                && let Some(window_state) = self.frame_windows.get(emacs_fid)
+            {
+                window_state.request_redraw();
+            }
+        }
+    }
+
     pub(super) fn handle_window_event(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
@@ -651,84 +740,7 @@ impl RenderApp {
                 self.handle_mouse_wheel(window_id, device_id, delta, phase);
             }
 
-            WindowEvent::RedrawRequested => {
-                self.complete_pending_scale_change(window_id);
-                super::frame_stats::count(&super::frame_stats::REDRAW_EVENTS);
-                if let Some(emacs_fid) = self.frame_windows.event_frame_for_winit(window_id) {
-                    use super::frame_sched::{
-                        ClockSource, FrameTick, NativeWindowId, PacingAction,
-                    };
-                    let sched_id = NativeWindowId(emacs_fid);
-                    let now = romacs_display_protocol::frame_time::observe_platform_now();
-                    let estimated_interval = self
-                        .frame_windows
-                        .get(emacs_fid)
-                        .map(|window_state| {
-                            std::time::Duration::from_secs_f64(
-                                1.0 / f64::from(Self::window_max_rate(window_state).get()),
-                            )
-                        })
-                        .unwrap_or(std::time::Duration::from_millis(16));
-                    let tick = FrameTick {
-                        frame_time: now,
-                        target_presentation_time: now.plus(estimated_interval),
-                        estimated_interval,
-                        source: ClockSource::Synthetic,
-                    };
-                    let mut plan = self.frame_coordinator.begin_frame(sched_id, tick);
-                    // Occluded/hidden windows present nothing. begin_frame
-                    // already returns no work while ineligible; skipping the
-                    // render here makes that concrete and avoids servicing an
-                    // OS-delivered RedrawRequested for a surface the
-                    // compositor is not showing.
-                    if !self.frame_coordinator.is_eligible(sched_id) {
-                        super::frame_stats::count_plan(sched_id, &plan);
-                        return;
-                    }
-                    if !plan.should_present {
-                        // Nothing we scheduled explains this tick, and this is
-                        // the one place that knows why: the event came from the
-                        // window system (expose, resize, first map) or from a
-                        // recovery path that requests a redraw on the window
-                        // directly. Both need the surface repainted, so the
-                        // frame is granted under a reason of its own rather
-                        // than rendered unattributed.
-                        plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
-                    }
-                    super::frame_stats::count_plan(sched_id, &plan);
-                    if plan.reasons.is_empty() {
-                        super::frame_stats::count(
-                            &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
-                        );
-                        debug_assert!(
-                            false,
-                            "every presented frame must name a demand reason (invariant 12)"
-                        );
-                    }
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.set_frame_sample(plan.tick.sample());
-                    }
-                    if let Some(window_state) = self.frame_windows.get_mut(emacs_fid) {
-                        window_state.render.set_dirty(false);
-                    }
-                    // Stage 4: any compositor-only plan can use the retained
-                    // static scene and sample just its dynamic layers (cursor,
-                    // frame post, and later compositor effects). Any stronger
-                    // work class renders fully.
-                    let result = self.render_frame_window_hinted(emacs_fid, &plan);
-                    let action = self.frame_coordinator.finish_frame(
-                        sched_id,
-                        &plan,
-                        result,
-                        romacs_display_protocol::frame_time::observe_platform_now(),
-                    );
-                    if action == PacingAction::RequestRedraw
-                        && let Some(window_state) = self.frame_windows.get(emacs_fid)
-                    {
-                        window_state.request_redraw();
-                    }
-                }
-            }
+            WindowEvent::RedrawRequested => self.draw_window(window_id),
 
             WindowEvent::ModifiersChanged(mods) => {
                 let old_modifiers = self.modifiers;

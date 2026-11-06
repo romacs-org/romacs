@@ -1348,6 +1348,11 @@ pub struct Vm {
     redisplay_since_mark: Option<Option<u64>>,
     /// The windows redisplay left plain for a first parse (`land_treesit').
     treesit_plain: Vec<u64>,
+    /// The frame being built shows a small edit before its parse
+    /// (`defer_parse'): the windows it left as they are.
+    treesit_deferred: Option<Vec<u64>>,
+    /// The last frame was that: the next parses, whatever it shows.
+    treesit_parse_owed: bool,
     /// The host's `C-g', shared with its input thread (quit.rs).
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
@@ -1741,6 +1746,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     force_quit_count,
     redisplay_since_mark,
     treesit_plain,
+    treesit_deferred,
+    treesit_parse_owed,
     quit_slots,
     face_keys,
     debug_event_slots,
@@ -1848,6 +1855,8 @@ impl Vm {
             idle_since: None,
             redisplay_since_mark: None,
             treesit_plain: Vec::new(),
+            treesit_deferred: None,
+            treesit_parse_owed: false,
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],

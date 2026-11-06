@@ -511,6 +511,8 @@ struct WindowSched {
     scheduled: Vec<ScheduledDemand>,
     /// Phase anchors for MaxRate reasons: next allowed fire time.
     max_rate_anchor: Vec<MaxRateAnchor>,
+    /// When the next scene may draw ahead of the platform's pacing.
+    next_scene_at: Option<EventTime>,
 }
 
 impl WindowSched {
@@ -729,6 +731,20 @@ impl FrameCoordinator {
         }
         ws.request_pending = true;
         PacingAction::RequestRedraw
+    }
+
+    /// May a scene that just arrived draw at once, ahead of the platform's
+    /// pacing? One a period does (`scene_drawn'): the evaluator paints when
+    /// its last paint has drawn, so this is what holds a stream of scenes (a
+    /// held key, streaming output) to the display's rate.
+    pub(crate) fn scene_slot_open(&mut self, id: NativeWindowId, now: EventTime) -> bool {
+        let ws = self.window(id);
+        ws.eligible() && ws.next_scene_at.is_none_or(|at| now >= at)
+    }
+
+    /// A scene reached the surface, by either path: the next waits PERIOD.
+    pub(crate) fn scene_drawn(&mut self, id: NativeWindowId, now: EventTime, period: Duration) {
+        self.window(id).next_scene_at = Some(now.plus(period));
     }
 
     /// Withdraw a reason's demand (effect disabled, timer cancelled). Due

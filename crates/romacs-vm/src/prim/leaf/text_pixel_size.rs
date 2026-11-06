@@ -295,6 +295,11 @@ impl Leaf<'_> {
         self.vm.pre_redisplay_call().map_err(Fault::Error)
     }
 
+    /// The hooks `pre_redisplay_call' named have run.
+    pub(crate) fn pre_redisplay_ran(&mut self) {
+        self.vm.pre_redisplay_ran();
+    }
+
     /// Settle each live window's start as the next layout will
     /// (`Vm::redisplay_point_visibility_now'), and record the end that
     /// layout will show, so `window-end' without UPDATE (isearch's

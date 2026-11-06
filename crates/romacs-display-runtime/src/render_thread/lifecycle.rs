@@ -519,6 +519,7 @@ impl RenderApp {
         // wake deadline. Continuous activity is paced at the estimated
         // display cadence instead of a 4 ms poll; new-content demand fires
         // immediately on its first frame after idle.
+        self.draw_fresh_scene(now);
         self.declare_frame_demands(now);
         // Publish per-window active demand for diagnostics (plan:
         // Observability). Runs only on loop wakes that already reconcile
@@ -597,6 +598,45 @@ impl RenderApp {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+    }
+
+    /// Draw a scene the evaluator just sent, now. The platform holds a redraw
+    /// until the last frame's callback, which a running animation keeps
+    /// pending, so a typed character behind a gliding cursor would wait out
+    /// the frame for nothing: a commit before the compositor's next frame
+    /// replaces the one it has. With the display's slot spent, it takes the
+    /// platform's pace.
+    fn draw_fresh_scene(&mut self, now: EventTime) {
+        use super::frame_sched::{Cadence, Damage, DemandReason, FrameDemand, Invalidation, LayerMask, NativeWindowId};
+        use super::state::SceneDraw;
+        if self.scene != SceneDraw::Arrived {
+            return;
+        }
+        let Some(window_state) = self.frame_windows.primary_window() else {
+            return;
+        };
+        let Some(window_id) = window_state.window().map(|window| window.id()) else {
+            return;
+        };
+        let id = NativeWindowId(self.frame_windows.primary_event_frame_id());
+        if !self.frame_coordinator.scene_slot_open(id, now) {
+            self.scene = SceneDraw::Waiting;
+            window_state.request_redraw();
+            return;
+        }
+        self.frame_coordinator.submit_demand(
+            id,
+            FrameDemand {
+                invalidation: Invalidation::RepaintLayers {
+                    layers: LayerMask::all(),
+                    damage: Damage::FullLayer,
+                },
+                cadence: Cadence::NextPresentation,
+                reason: DemandReason::Redisplay,
+            },
+            now,
+        );
+        self.draw_window(window_id);
     }
 
     /// Reconcile the legacy activity latches into the persistent frame
