@@ -394,8 +394,7 @@ or a repeat."
 
 (defun romacs-agent-ui--key (command)
   "COMMAND's key in a chat, as hermes-chat--command-key-hint shows it."
-  (let ((key (car (where-is-internal command romacs-agent-chat-mode-map))))
-    (propertize (if key (key-description key) (concat "M-x " (symbol-name command))) 'face 'help-key-binding)))
+  (substitute-command-keys (format "\\<romacs-agent-chat-mode-map>\\[%s]" command)))
 
 (defvar romacs-agent-ui--hint nil "The composer's hint, made once: looking up keys is slow.")
 
@@ -513,6 +512,7 @@ or a repeat."
 
 (define-derived-mode romacs-agent-chat-mode fundamental-mode "Agent"
   "An agent session's transcript and composer."
+  :interactive nil
   (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header-line)))
   (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
@@ -628,7 +628,7 @@ harness's own transcript it was imported from, when it was."
 
 (defun romacs-agent-chat-return ()
   "In the composer, send its text; on a tool row, show its output."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (if (not (romacs-agent-ui--in-composer-p))
       (romacs-agent-chat-toggle)
     (let ((text (romacs-agent-ui--composer-text)))
@@ -648,7 +648,7 @@ or brought, nothing hides or styles it."
 (defun romacs-agent-chat-self-insert (n)
   "Insert the typed character N times in the composer: typed in the
 transcript, it goes to the composer's end."
-  (interactive "p")
+  (interactive "p" romacs-agent-chat-mode)
   (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
   (self-insert-command n))
 
@@ -659,7 +659,7 @@ transcript, it goes to the composer's end."
 (defun romacs-agent-chat-backward-kill-word (n)
   "Kill N words backward, in the composer no further than its start: the
 transcript above it is not the composer's to kill."
-  (interactive "p")
+  (interactive "p" romacs-agent-chat-mode)
   (if (not (romacs-agent-ui--in-composer-p))
       (backward-kill-word n)
     ;; Point first: consecutive kills join in the buffer's order.
@@ -669,13 +669,13 @@ transcript above it is not the composer's to kill."
   "Delete N characters backward in the composer; at its start, nothing:
 the transcript above it is not the composer's to delete.  In the
 transcript, scroll back, as hermes's chat does."
-  (interactive "p")
+  (interactive "p" romacs-agent-chat-mode)
   (cond ((not (romacs-agent-ui--in-composer-p)) (scroll-down-command))
         ((> (point) romacs-agent-ui--end) (delete-char (- (min n (- (point) romacs-agent-ui--end)))))))
 
 (defun romacs-agent-chat-toggle ()
   "Show or hide the output of the tool call on this row."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let ((id (or (get-text-property (point) 'romacs-agent-tool)
                 (get-text-property (line-beginning-position) 'romacs-agent-tool)
                 (get-text-property (max (point-min) (1- (line-end-position))) 'romacs-agent-tool))))
@@ -690,7 +690,7 @@ transcript, scroll back, as hermes's chat does."
 
 (defun romacs-agent-chat-composer ()
   "Go to the composer."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (goto-char (point-max)))
 
 (defun romacs-agent-ui--run-start (pos property)
@@ -711,15 +711,15 @@ PROPERTY: the previous one is the run point is in, past its start."
             (setq target (romacs-agent-ui--run-start end property))))))
     (when target (goto-char target))))
 
-(defun romacs-agent-chat-next-turn () "Next prompt." (interactive) (romacs-agent-ui--move-to 'romacs-agent-turn 1))
-(defun romacs-agent-chat-previous-turn () "Previous prompt." (interactive) (romacs-agent-ui--move-to 'romacs-agent-turn -1))
+(defun romacs-agent-chat-next-turn () "Next prompt." (interactive nil romacs-agent-chat-mode) (romacs-agent-ui--move-to 'romacs-agent-turn 1))
+(defun romacs-agent-chat-previous-turn () "Previous prompt." (interactive nil romacs-agent-chat-mode) (romacs-agent-ui--move-to 'romacs-agent-turn -1))
 
-(defun romacs-agent-chat-interrupt () "Interrupt the turn." (interactive) (romacs-agent-interrupt romacs-agent-ui--session))
+(defun romacs-agent-chat-interrupt () "Interrupt the turn." (interactive nil romacs-agent-chat-mode) (romacs-agent-interrupt romacs-agent-ui--session))
 (defun romacs-agent-chat-stop ()
   "Stop the session."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (when (yes-or-no-p "Stop this agent session? ") (romacs-agent-stop romacs-agent-ui--session)))
-(defun romacs-agent-chat-resume () "Resume the session." (interactive) (romacs-agent-resume romacs-agent-ui--session))
+(defun romacs-agent-chat-resume () "Resume the session." (interactive nil romacs-agent-chat-mode) (romacs-agent-resume romacs-agent-ui--session))
 
 (defun romacs-agent-ui--approval-here ()
   "The approval request on this row, else the session's only one."
@@ -729,21 +729,21 @@ PROPERTY: the previous one is the run point is in, past its start."
 
 (defun romacs-agent-chat-allow ()
   "Allow the tool call the harness asks about."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let ((id (romacs-agent-ui--approval-here)))
     (unless id (user-error "No approval here"))
     (romacs-agent-respond romacs-agent-ui--session id t)))
 
 (defun romacs-agent-chat-deny ()
   "Deny the tool call the harness asks about."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let ((id (romacs-agent-ui--approval-here)))
     (unless id (user-error "No approval here"))
     (romacs-agent-respond romacs-agent-ui--session id nil)))
 
 (defun romacs-agent-chat-respond ()
   "Answer the approval the harness waits for."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (pcase (read-char-choice "Allow this tool call? (y/n) " '(?y ?n))
     (?y (romacs-agent-chat-allow))
     (?n (romacs-agent-chat-deny))))
@@ -766,23 +766,23 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-newline ()
   "A new line in the composer."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
   (insert "\n"))
 
 (defun romacs-agent-chat-queue ()
   "Send the composer's text when the running turn ends; now, when none runs."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--deliver (lambda (text) (romacs-agent-send-later romacs-agent-ui--session text))))
 
 (defun romacs-agent-chat-steer ()
   "Send the composer's text now, into the running turn."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--deliver (lambda (text) (romacs-agent-send romacs-agent-ui--session text))))
 
 (defun romacs-agent-chat-interrupt-and-send ()
   "Interrupt the running turn; the composer's text is sent once it ends."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (if (not (romacs-agent-ui--running-p))
         (romacs-agent-ui--deliver (lambda (text) (romacs-agent-send session text)))
@@ -807,7 +807,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-history-previous ()
   "Put the previous prompt in the composer; the draft is kept for M-n."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let ((next (if romacs-agent-ui--history-at (cdr romacs-agent-ui--history-at) romacs-agent-ui--history)))
     (when next
       (unless romacs-agent-ui--history-at
@@ -818,7 +818,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-history-next ()
   "Put the next prompt in the composer; past the newest, the draft."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (when romacs-agent-ui--history-at
     (setq romacs-agent-ui--history-at (pop romacs-agent-ui--history-back))
     (romacs-agent-ui--show-history (if romacs-agent-ui--history-at (car romacs-agent-ui--history-at)
@@ -835,14 +835,14 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-copy ()
   "Copy the region, else the turn at point (its prompt and reply)."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (pcase-let ((`(,start . ,end) (if (use-region-p) (cons (region-beginning) (region-end)) (romacs-agent-ui--turn-bounds))))
     (kill-new (string-trim (buffer-substring-no-properties start end)))
     (message "Copied")))
 
 (defun romacs-agent-chat-edit-turn ()
   "Put the prompt of the turn at point in the composer, to edit and send."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (let* ((start (car (romacs-agent-ui--turn-bounds)))
          (end (or (next-single-property-change start 'romacs-agent-turn nil romacs-agent-ui--end) romacs-agent-ui--end))
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
@@ -852,7 +852,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-quote-region ()
   "Quote the region in the composer, each line after \"> \"."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (unless (use-region-p) (user-error "No region to quote"))
   (let ((text (buffer-substring-no-properties (region-beginning) (region-end))))
     (deactivate-mark)
@@ -870,17 +870,18 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-expand-all ()
   "Show every tool call's output."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--set-outputs nil))
 
 (defun romacs-agent-chat-collapse-all ()
   "Fold every tool call's output."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--set-outputs t))
 
 (defun romacs-agent-chat-rename (title)
   "Name this session TITLE."
-  (interactive (list (read-string "Title: " (romacs-agent-title romacs-agent-ui--session))))
+  (interactive (list (read-string "Title: " (romacs-agent-title romacs-agent-ui--session)))
+               romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
     (romacs-agent--update-manifest session)
@@ -889,7 +890,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (apply #'funcall-interactively #'romacs-agent-start
          (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session)))))
 
@@ -900,15 +901,16 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
                       (lambda (entry)
                         (let ((buffer (get-buffer (if (consp entry) (car entry) entry))))
                           (and buffer (not (eq buffer (current-buffer)))
-                               (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-chat-mode)))))))
+                               (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-chat-mode))))))
+   romacs-agent-chat-mode)
   (switch-to-buffer buffer))
 
 (defun romacs-agent-chat-show-commands ()
   "List this chat's keys."
-  (interactive)
+  (interactive nil romacs-agent-chat-mode)
   (describe-keymap 'romacs-agent-chat-mode-map))
 
-(defun romacs-agent-chat-home () "The agents home page." (interactive) (romacs-agents))
+(defun romacs-agent-chat-home () "The agents home page." (interactive nil romacs-agent-chat-mode) (romacs-agents))
 
 (defun romacs-agent-ui--queue-label ()
   (let ((waiting (and romacs-agent-ui--session (romacs-agent-queue-length romacs-agent-ui--session))))
@@ -1112,13 +1114,16 @@ row point was on stays under point."
                                  'romacs-agents-newest target))
             (dolist (item shown) (insert (romacs-agent-ui--history-row item width)))
             (when (> (length items) (length shown))
-              (insert (propertize (format "  ◇ %d more  (h shows all)\n" (- (length items) (length shown)))
-                                  'face 'romacs-agent-dim 'romacs-agents-more t)))
+              (insert (propertize (concat (propertize (format "  ◇ %d more  " (- (length items) (length shown)))
+                                                      'face 'romacs-agent-dim)
+                                          (romacs-key-hint "(\\<romacs-agents-mode-map>\\[romacs-agents-toggle-history] shows all)\n"
+                                                           'romacs-agent-dim))
+                                  'romacs-agents-more t)))
             ;; `c' anywhere in it starts a session here.
             (put-text-property header (point) 'romacs-agents-project cwd))
           (insert "\n")))
-      (insert (propertize "RET open  c new  i interrupt  k stop  r resume  h history  g refresh  n/p move\n"
-                          'face 'romacs-agent-dim))
+      (insert (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-open] open  \\[romacs-agents-new] new  \\[romacs-agents-interrupt] interrupt  \\[romacs-agents-stop] stop  \\[romacs-agents-resume] resume  \\[romacs-agents-toggle-history] history  \\[romacs-agents-refresh] refresh  \\[romacs-agents-next]/\\[romacs-agents-previous] move\n"
+                               'romacs-agent-dim))
       (add-hook 'window-size-change-functions #'romacs-agents--resized nil t)
       (goto-char (point-min))
       (let ((row (and selected (or (text-property-any (point-min) (point-max) 'romacs-agent-session selected)
@@ -1140,7 +1145,8 @@ row point was on stays under point."
             (propertize " | " 'face 'romacs-agent-dim)
             (format "%d running" running)
             (propertize " | " 'face 'romacs-agent-dim)
-            (propertize "c new  g refresh  ? help" 'face 'romacs-agent-dim))))
+            (romacs-key-hint "\\<romacs-agents-mode-map>\\[romacs-agents-new] new  \\[romacs-agents-refresh] refresh  \\[describe-mode] help"
+                             'romacs-agent-dim))))
 
 (defvar romacs-agents-mode-map
   (let ((map (make-sparse-keymap)))
@@ -1158,9 +1164,13 @@ row point was on stays under point."
     map)
   "Keys of the agents home page.")
 
+;; The key the page names, of the two that start a session.
+(put 'romacs-agents-new :advertised-binding [?c])
+
 (define-derived-mode romacs-agents-mode special-mode "Agents"
   "Every agent session this server knows, by project.
 \\{romacs-agents-mode-map}"
+  :interactive nil
   (setq-local header-line-format '(:eval (romacs-agents--header-line)))
   (setq-local truncate-lines t))
 
@@ -1195,14 +1205,14 @@ shown; hidden, it is rebuilt when shown."
 
 (defun romacs-agents-refresh ()
   "Rebuild the home page, the harnesses' transcripts listed anew."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (require 'romacs-agent-history)
   (romacs-agent-history-list)
   (romacs-agent-ui--home))
 
 (defun romacs-agents-toggle-history ()
   "Show every project's history, or its newest few."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (setq romacs-agents--all-history (not romacs-agents--all-history))
   (romacs-agent-ui--home))
 
@@ -1213,7 +1223,8 @@ shown; hidden, it is rebuilt when shown."
 
 (defun romacs-agents--at-point ()
   (or (romacs-agent-get (get-text-property (line-beginning-position) 'romacs-agent-session))
-      (user-error "No session on this line: n and p move to one")))
+      (user-error "%s" (substitute-command-keys
+                        "No session on this line: \\<romacs-agents-mode-map>\\[romacs-agents-next] and \\[romacs-agents-previous] move to one"))))
 
 (defun romacs-agents--history-at-point ()
   (get-text-property (line-beginning-position) 'romacs-agent-history))
@@ -1223,20 +1234,20 @@ shown; hidden, it is rebuilt when shown."
 
 (defun romacs-agents-next ()
   "The next row."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (forward-line 1)
   (while (and (not (eobp)) (not (romacs-agents--row-p))) (forward-line 1)))
 
 (defun romacs-agents-previous ()
   "The previous row."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (forward-line -1)
   (while (and (not (bobp)) (not (romacs-agents--row-p))) (forward-line -1)))
 
 (defun romacs-agents-open ()
   "Open this session's chat, or this transcript read-only; on a project,
 its newest; on \"more\", every transcript."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (let ((start (line-beginning-position)))
     (cond ((romacs-agents--history-at-point) (romacs-agent-history-open (romacs-agents--history-at-point)))
           ((get-text-property start 'romacs-agent-session) (romacs-agent-show (romacs-agents--at-point)))
@@ -1249,20 +1260,20 @@ its newest; on \"more\", every transcript."
           (t (romacs-agents--at-point)))))
 (defun romacs-agents-new ()
   "Start a new session, by default in the project at point."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (let ((project (get-text-property (line-beginning-position) 'romacs-agents-project)))
     (apply #'funcall-interactively #'romacs-agent-start
            (romacs-agent--start-arguments (if project (file-name-as-directory project)
                                             (romacs-agent--project-default))))))
 
-(defun romacs-agents-interrupt () "Interrupt this session." (interactive) (romacs-agent-interrupt (romacs-agents--at-point)))
+(defun romacs-agents-interrupt () "Interrupt this session." (interactive nil romacs-agents-mode) (romacs-agent-interrupt (romacs-agents--at-point)))
 (defun romacs-agents-stop ()
   "Stop this session."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (when (yes-or-no-p "Stop this agent session? ") (romacs-agent-stop (romacs-agents--at-point))))
 (defun romacs-agents-resume ()
   "Resume this session, or go on with this transcript as a session."
-  (interactive)
+  (interactive nil romacs-agents-mode)
   (if-let* ((item (romacs-agents--history-at-point)))
       (romacs-agent-history-resume item)
     (romacs-agent-resume (romacs-agents--at-point))))
