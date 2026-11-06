@@ -1497,7 +1497,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         .and_then(|n| n.checked_add(vm.spread_reserve))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
-    vm.stack.resize(size, Value::NIL);
+    // They come back all NIL, however far the last run widened them: cut to
+    // SIZE, every run past MIN_FRAMES would fill them again.
+    if vm.stack.len() < size {
+        vm.stack.resize(size, Value::NIL);
+    }
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
     let mark = vm.dynamic.len();
@@ -4693,6 +4697,20 @@ mod register_tests {
             vm.register_width, expected,
             "definition must update register width, not the next call"
         );
+    }
+
+    #[test]
+    fn registers_stay_widened_and_nil_across_runs() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun register-probe (n) (if (> n 0) (1+ (register-probe (1- n))) 0))")
+            .unwrap();
+        vm.eval_source_raw("(register-probe 100)").unwrap();
+        let widened = vm.execution.registers.len();
+        assert!(widened > vm.register_width * MIN_FRAMES, "the recursion went past MIN_FRAMES");
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        vm.eval_source_raw("(register-probe 1)").unwrap();
+        assert_eq!(vm.execution.registers.len(), widened);
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     #[test]
