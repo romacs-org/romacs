@@ -428,7 +428,8 @@ impl Vm {
             return Some(crate::lstring::StrView {
                 bytes: text.as_bytes(),
                 chars: text.chars().count(),
-                multibyte: true,
+                // An image holds literals, whose kind is the reader's rule.
+                multibyte: !text.is_ascii(),
             });
         }
         match self.object_if(value)? {

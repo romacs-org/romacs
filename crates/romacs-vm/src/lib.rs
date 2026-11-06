@@ -3767,6 +3767,10 @@ impl Vm {
                 data::Object::Bignum(n) => Ok(n.to_string()),
                 data::Object::BoolVector(v) => Ok(v.printed()),
                 data::Object::String(s) => Ok(serde_json::to_string(s.as_str()).unwrap()),
+                data::Object::RawString(s) if !s.is_multibyte() => Ok(format!(
+                    "#u8({})",
+                    s.bytes().iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
+                )),
                 data::Object::RawString(_) => Err("not-unicode-string: JSON display".into()),
                 data::Object::Buffer(_) => Ok("#<buffer>".into()),
                 data::Object::Window(w) => Ok(format!("#<window {}>", w.id)),

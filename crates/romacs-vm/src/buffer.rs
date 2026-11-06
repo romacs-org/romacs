@@ -975,7 +975,7 @@ impl Vm {
     pub(crate) fn bytes_value(&self, v: Value) -> Result<&[u8]> {
         match self.object(v)? {
             Object::Bytes(b) => Ok(b),
-            Object::String(s) if !s.is_multibyte() => Ok(s.bytes()),
+            Object::String(s) | Object::RawString(s) if !s.is_multibyte() => Ok(s.bytes()),
             _ => Err("bytes required".into()),
         }
     }
