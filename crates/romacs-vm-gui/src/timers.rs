@@ -287,6 +287,29 @@ mod tests {
     /// until enough was allocated; then one collection once the session has
     /// been idle for the delay, on a pass where nothing else ran, made by
     /// the host outside any request.
+    /// A collection at a command's end, after `romacs--command-loop-top'
+    /// cleared the running command, still names it.
+    #[test]
+    fn a_collection_at_a_commands_end_names_the_command() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(command_end_body).unwrap().join().unwrap();
+    }
+    fn command_end_body() {
+        let mut vm = Vm::new();
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        // The command loop's Lisp half, as a session's first key installs it.
+        vm.eval_source("(read-event nil nil 0)").unwrap();
+        vm.eval_source("(defun collected-command () (interactive)) (global-set-key \"q\" 'collected-command)").unwrap();
+        vm.timer_stop_idle();
+        vm.eval_source("(setq unread-command-events (list ?q)) (romacs--run-host-command) (romacs--take-collections)").unwrap();
+        // Where a request boundary collects: the loop's top has run.
+        assert_eq!(vm.eval_source("real-this-command").unwrap().display().unwrap(), "nil");
+        vm.collect_garbage();
+        let taken = vm.eval_source("(romacs--take-collections)").unwrap().display().unwrap();
+        assert!(taken.contains("command \"collected-command\""), "{taken}");
+    }
+
     #[test]
     fn idle_collects_after_its_delay_once_enough_was_allocated() {
         std::thread::Builder::new().stack_size(64 << 20).spawn(idle_collect_body).unwrap().join().unwrap();
