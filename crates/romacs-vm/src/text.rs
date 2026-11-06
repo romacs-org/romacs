@@ -375,6 +375,7 @@ impl Text {
             had_intervals: self.properties.has_intervals(),
             per_buffer: Default::default(),
             held: None,
+            mirror: None,
         }
     }
     /// The multibyte text of unibyte B (set-buffer-multibyte t): valid

@@ -136,10 +136,13 @@ impl Vm {
         let (id, buffer, size, start) = (w.id, w.buffer, (w.width, w.height), w.start);
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1);
         let point = self.window_point_value(window)?.integer_value().unwrap_or(1);
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("buffer required".into()) };
-        let accessible = b.accessible();
+        let (state, accessible) = match self.object(buffer)? {
+            Object::Buffer(b) => (&b.state, b.accessible()),
+            Object::ByteBuffer(b) => (&b.state, b.restriction.clone()),
+            _ => return Err("buffer required".into()),
+        };
         // Its name too: `rename-buffer' changes `%b' without a modification.
-        Ok(LineKey { id, buffer: buffer.0, name: b.state.name.clone(), format, modiff: b.state.modiff, modified: b.state.modified(),
+        Ok(LineKey { id, buffer: buffer.0, name: state.name.clone(), format, modiff: state.modiff, modified: state.modified(),
                      point, start, size, accessible: (accessible.start.0, accessible.end.0) })
     }
     /// The marks of a bar's TEXT: its segments, from the `:propertize'

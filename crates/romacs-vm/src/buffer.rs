@@ -1435,6 +1435,7 @@ mod tests {
             had_intervals: false,
             per_buffer: Default::default(),
             held: None,
+            mirror: None,
         };
         b.properties
             .entry(ByteOffset(1))

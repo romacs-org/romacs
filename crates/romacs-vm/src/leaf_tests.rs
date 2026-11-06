@@ -170,7 +170,7 @@ fn leaf_kind_covers_every_current_storage_variant() {
     cases.push((vm.byte_string(b"raw"), Kind::Bytes));
     vm.cells.push(Value::NIL);
     cases.push((Value::reference(vm.cells.len()-1, 5), Kind::Cell));
-    cases.push((vm.allocate_object(data::Object::ByteBuffer(Box::new(bytes::ByteBuffer { state: Default::default(), case_tables: [Value::NIL; 4], local_keymap: Value::NIL, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, point: coordinates::ByteOffset(0), restriction: coordinates::ByteOffset(0)..coordinates::ByteOffset(0), anchors: crate::anchors::AnchorTree::new(0), properties: Default::default(), had_intervals: false, per_buffer: Default::default(), held: None }))), Kind::ByteBuffer));
+    cases.push((vm.allocate_object(data::Object::ByteBuffer(Box::new(bytes::ByteBuffer { state: Default::default(), case_tables: [Value::NIL; 4], local_keymap: Value::NIL, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, point: coordinates::ByteOffset(0), restriction: coordinates::ByteOffset(0)..coordinates::ByteOffset(0), anchors: crate::anchors::AnchorTree::new(0), properties: Default::default(), had_intervals: false, per_buffer: Default::default(), held: None, mirror: None }))), Kind::ByteBuffer));
     let cx = Leaf::new(&mut vm);
     for (value, kind) in cases { assert_eq!(cx.kind(value), kind, "{value:?}"); }
     assert_eq!(cx.kind(Value::reference(usize::MAX >> 3, 0)), Kind::Invalid);

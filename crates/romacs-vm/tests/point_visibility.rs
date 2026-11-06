@@ -92,6 +92,14 @@ fn scrolling_past_invisible_text_as_pinned_gnu() {
     replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
 }
 
+/// unibyte_window.el: a window shows a unibyte buffer, visited literally
+/// or made unibyte while shown, its raw bytes as escapes: motion,
+/// scrolling, edits and narrowing keep every position as GNU's.
+#[test]
+fn a_window_shows_a_unibyte_buffer_as_pinned_gnu() {
+    replay(include_str!("unibyte_window.el"), include_str!("unibyte_window.gnu"), 400);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
 fn replay(probe: &str, answers: &str, least: usize) {

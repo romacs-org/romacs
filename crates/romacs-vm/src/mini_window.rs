@@ -195,7 +195,7 @@ impl Vm {
     fn overlay_strings(&mut self, window: Value, buffer: Value) -> Result<Vec<(usize, Vec<Value>)>> {
         let (before, after, priority) =
             (self.display_symbol("before-string"), self.display_symbol("after-string"), self.display_symbol("priority"));
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("text buffer required".into()) };
         let end = b.len_bytes();
         let mut overlays = vec![];
         self.visit_overlays_in(buffer, coordinates::ByteOffset(0)..coordinates::ByteOffset(end), |overlay, _| overlays.push(overlay))?;
@@ -238,7 +238,7 @@ impl Vm {
         if value(self, "inhibit-redisplay")? != Value::NIL { return Ok(false); }
         let adhoc = value(self, "redisplay-adhoc-scroll-in-resize-mini-windows")? != Value::NIL;
         let (buffer, marker, width) = { let w = self.window(mini)?; (w.buffer, w.start, w.width) };
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("text buffer required".into()) };
         let (text, empty) = (b.as_str().to_owned(), b.accessible().is_empty());
         let begv = b.char_of_byte(b.accessible().start)?.0 as i64 + 1;
         if adhoc { self.set_window_start_if_moved(marker, buffer, begv)?; }
@@ -276,7 +276,7 @@ impl Vm {
             // Start at the screen row that shows the last MAX_LINES, a
             // continuation row of a text line too (xdisp.c resize_mini_window).
             let byte = buffer_of(&spliced.segments, starts[lines - max_lines], text.len());
-            let Object::Buffer(b) = self.object(buffer)? else { return Err("text buffer required".into()) };
+            let Ok(b) = self.shown_text(buffer) else { return Err("text buffer required".into()) };
             let start = b.char_of_byte(coordinates::ByteOffset(byte))?.0 as i64 + 1;
             self.set_window_start_if_moved(marker, buffer, start)?;
         }
