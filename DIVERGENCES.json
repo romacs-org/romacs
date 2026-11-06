@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "d50dcef27cd5d82d9e3e9f4dcc85044a3ad21705385b60f5ebd3e72ea92bd016",
+  "input_hash": "5ca4dff11bd74ab70271df8e6e58e2a4919bd4742ff5f995a56516d9f90762c2",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -9036,8 +9036,8 @@
    "planned": false,
    "mechanism": "A window showing a unibyte buffer",
    "gnu": "GNU's iterator reads a unibyte buffer's bytes directly: a byte above 127 shows as an octal escape, and overlays and text properties apply as in any buffer",
-   "romacs": "A unibyte buffer (`ByteBuffer`) holds bytes, not the text every display path reads, so display reads a mirror (`bytes.rs` `Mirror`): `Text` with each byte one character, positions equal to the buffer's, built only once a window shows the buffer and rebuilt when its text changes. Motion, scrolling, edits and escapes match pinned GNU (`crates/romacs-vm/tests/unibyte_window.el`, real keys in `raw_bytes_parity_live.py` `literal`)",
-   "why": "**Package-observable** limits: a unibyte buffer has no overlays, so `make-overlay` there signals and isearch's highlighting fails (`literal-search`); text properties on its bytes do not reach display, so `face` shows nothing; each edit rebuilds the mirror, O(buffer): a key measured +5 ms at 1 MB and +180 ms at 8 MB over an empty buffer",
+   "romacs": "A unibyte buffer (`ByteBuffer`) holds bytes, not the text every display path reads, so display reads a mirror (`bytes.rs` `Mirror`): `Text` with each byte one character, positions equal to the buffer's, built once a window shows the buffer and edited with it after. Motion, scrolling, edits and escapes match pinned GNU (`crates/romacs-vm/tests/unibyte_window.el`, real keys in `raw_bytes_parity_live.py` `literal`)",
+   "why": "**Package-observable** limits: a unibyte buffer has no overlays, so `make-overlay` there signals and isearch's highlighting fails (`literal-search`); text properties on its bytes do not reach display, so `face` shows nothing; a key measured +1 ms at 1 MB and +25 ms at 8 MB over an empty buffer",
    "symbols": [
     "find-file-literally",
     "set-buffer-multibyte"

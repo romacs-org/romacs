@@ -87,7 +87,7 @@ impl Leaf<'_> {
                     let byte = b.byte_of_char(CharOffset((at - 1) as usize)).map_err(Fault::Error)?;
                     b.overwrite(byte..ByteOffset(byte.0 + text.len()), text).map_err(Fault::Error)?;
                 }
-                data::Object::ByteBuffer(b) => b.bytes[(at - 1) as usize] = to_c as u8,
+                data::Object::ByteBuffer(b) => b.set_byte((at - 1) as usize, to_c as u8).map_err(Fault::Error)?,
                 _ => unreachable!(),
             }
         }

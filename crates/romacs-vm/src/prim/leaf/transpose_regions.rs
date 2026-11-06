@@ -93,7 +93,7 @@ impl Leaf<'_> {
             data::Object::ByteBuffer(b) => {
                 let [b1, f1, b2, f2] = span.map(|c| (c - 1) as usize);
                 let swapped = [&b.bytes[b2..f2], &b.bytes[f1..b2], &b.bytes[b1..f1]].concat();
-                b.bytes[b1..f2].copy_from_slice(&swapped);
+                for (i, &byte) in swapped.iter().enumerate() { b.set_byte(b1 + i, byte).map_err(Fault::Error)?; }
                 let at = |p: usize| (p + 1) as i64;
                 let moved_properties: Vec<_> = b.properties.range(ByteOffset(b1)..ByteOffset(f2))
                     .map(|(&p, v)| (ByteOffset((transposed(at(p.0), [at(b1), at(f1), at(b2), at(f2)]) - 1) as usize), v.clone())).collect();
