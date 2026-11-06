@@ -375,15 +375,11 @@ impl Leaf<'_> {
         let data::Object::ByteBuffer(b) = &mut self.vm.objects[index] else {
             return Err(Fault::Error("unibyte buffer required".into()));
         };
-        debug_assert!(b.bytes.is_empty());
         // Its markers stay at BEG, as insert_from_gap_1 leaves them.
         if !b.anchors.grow(u32::try_from(bytes.len()).map_err(|_| Fault::Error("buffer too large".into()))?) {
             return Err(Fault::Error("buffer too large".into()));
         }
-        b.bytes = bytes.to_vec();
-        b.point = ByteOffset(0);
-        b.restriction = ByteOffset(0)..ByteOffset(bytes.len());
-        Ok(())
+        b.fill(bytes).map_err(Fault::Error)
     }
 
     /// decide_coding_unwind's text half: move every byte of the current
