@@ -280,14 +280,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     validate_runs(text, band.faces.len())?;
     if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
     let background = band.faces[face].background;
-    // The band's box goes round the band once (`band_box'); a face that has
-    // it draws none of its own, or each glyph would be a box.
-    let boxed = band.faces[face].decor.boxed;
-    let faces: Vec<Face> = band.faces.iter().map(|f| {
-        let mut own = Face { background, ..f.clone() };
-        if own.decor.boxed == boxed { own.decor.boxed = None; }
-        own
-    }).collect();
+    let faces: Vec<Face> = band.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
     let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut face_text = face_text(faces.len(), &[(text, face)]);
     for &(byte, icon) in &band.marks.icons { face_text[face_at(text, byte, face)].push(icon); }
@@ -308,7 +301,6 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     if let Some(line) = band.faces[face].decor.overline {
         frame.add_background(bounds.x, bounds.y, bounds.width, 1.0, color(line.color.unwrap_or(band.faces[face].foreground)));
     }
-    if let Some(line) = boxed { band_box(frame, bounds, line, band.faces[face].foreground); }
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
     // text in the pill's own foreground where it has one.
@@ -370,38 +362,60 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     }
     frame.set_draw_context(owner.0, owner.1, Some(bounds));
     let [_, centre_marker, _, right_marker, _] = band.marks.zones(text);
-    // Text sits below the box's top, which the band's height includes.
-    let top = bounds.y + boxed.map_or(0.0, |line| f32::from(line.horizontal.max(0)));
-    // A box of its own runs over the characters that share it.
-    let shares = |i: Option<usize>, own| i.and_then(|i| chars.get(i)).is_some_and(|c| faces[c.2].decor.boxed == Some(own));
-    for (i, (&(_, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
+    // A boxed band is one box run, as a mode line is: stretches of its face
+    // fill the room between the characters and lie under those whose faces
+    // have no box (a mode line's faces merge over its own, so they inherit
+    // it), and every cell of a row with a box is the band's height on one
+    // baseline (the tallest ascent, a box's top included), so the box's
+    // lines run straight.
+    let band_box = faces[face].decor.boxed;
+    let boxes = band_box.is_some() || chars.iter().any(|c| faces[c.2].decor.boxed.is_some());
+    let row_ascent = chars.iter().map(|c| metrics[c.2].0).fold(metrics[face].0, f32::max);
+    let band_id = FaceId::new(face_base + face as u32);
+    let mut run: Vec<(usize, f32, f32, Option<romacs_layout_input::BoxLine>)> = vec![];
+    let fill = |frame: &mut FrameGlyphBuffer, run: &mut Vec<_>, from: f32, to: f32, under: [u8; 3]| {
+        if band_box.is_some() && to > from {
+            frame.add_stretch(from, bounds.y, to - from, bounds.height, color(under), band_id, false);
+            run.push((frame.glyphs.len() - 1, from, to - from, band_box));
+        }
+    };
+    let context = |byte: usize| band.marks.segments.iter().any(|s| s.name == "context" && s.bytes.contains(&byte));
+    let mut filled = bounds.x + band.accent.map_or(0.0, |_| STATUS_BAR_ACCENT);
+    for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
         if centre_marker.contains(&i) || right_marker.contains(&i) { continue; }
-        let (ascent, height, _, _) = metrics[index];
+        let (ascent, height) = if boxes { (row_ascent, bounds.height) } else { (metrics[index].0, metrics[index].1) };
+        let left = bounds.x + x;
+        fill(frame, &mut run, filled, left, background);
+        let own = faces[index].decor.boxed;
+        if own.is_none() { fill(frame, &mut run, left, left + width, if context(byte) { band.faces[index].background } else { background }); }
         let at = match glyphless.get(index, shown) {
-            Some(glyph) => glyphless.paint(frame, index, glyph, bounds.x + x, top, (ascent, height), ids[i], true, 0.0)?,
+            Some(glyph) => {
+                let at = glyphless.paint(frame, index, glyph, left, bounds.y, (ascent, height), ids[i], true, 0.0)?;
+                // Its blank character is no cell of the run.
+                if boxes && matches!(frame.glyphs.get(at + 1), Some(romacs_display_protocol::FrameGlyph::Char { .. })) { frame.glyphs.remove(at + 1); }
+                at
+            }
             None => {
-                frame.add_char(shown, bounds.x + x, top, width, height, ascent, false);
+                frame.add_char(shown, left, bounds.y, width, height, ascent, false);
                 *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
                 frame.glyphs.len() - 1
             }
         };
-        if let Some(own) = faces[index].decor.boxed {
-            set_glyph_box_edges(frame, at, edges(!shares(i.checked_sub(1), own), !shares(Some(i + 1), own)));
-        }
+        if own.is_some() || band_box.is_none() { run.push((at, left, width, own)); }
+        filled = filled.max(left + width);
+    }
+    fill(frame, &mut run, filled, bounds.x + bounds.width, background);
+    // Ends of a run: a neighbour painted against it that shares its box goes on.
+    let joins = |a: Option<&(usize, f32, f32, Option<romacs_layout_input::BoxLine>)>, b: &(usize, f32, f32, Option<romacs_layout_input::BoxLine>)|
+        a.is_some_and(|a| a.3 == b.3 && (a.1 + a.2 - b.1).abs() < 0.01);
+    for k in 0..run.len() {
+        if run[k].3.is_none() { continue; }
+        let open_left = joins(k.checked_sub(1).and_then(|p| run.get(p)), &run[k]);
+        let open_right = run.get(k + 1).is_some_and(|next| joins(Some(&run[k]), next));
+        set_glyph_box_edges(frame, run[k].0, edges(!open_left, !open_right));
     }
     Ok(places)
-}
-
-/// LINE, a marked band's box, round BOUNDS: its height includes the box, as
-/// a mode line's does, and FOREGROUND is its colour where it names none.
-fn band_box(frame: &mut FrameGlyphBuffer, bounds: Rect, line: romacs_layout_input::BoxLine, foreground: [u8; 3]) {
-    let (side, rule) = (f32::from(line.vertical.unsigned_abs()), f32::from(line.horizontal.unsigned_abs()));
-    let ink = color(line.color.unwrap_or(foreground));
-    frame.add_background(bounds.x, bounds.y, bounds.width, rule, ink);
-    frame.add_background(bounds.x, bounds.y + bounds.height - rule, bounds.width, rule, ink);
-    frame.add_background(bounds.x, bounds.y, side, bounds.height, ink);
-    frame.add_background(bounds.x + bounds.width - side, bounds.y, side, bounds.height, ink);
 }
 
 /// Where each character of BAR is as FRAME paints it, in its text's
