@@ -51,7 +51,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
@@ -132,6 +132,7 @@ mod fringe;
 mod tab_bar;
 mod overlay_order;
 mod window;
+mod fontsets;
 mod frame;
 mod hash;
 mod intervals;
@@ -362,7 +363,6 @@ enum Primitive {
     Assq,
     Setcar,
     Setcdr,
-    Remainder,
     CurrentBuffer,
     SetBuffer,
     Insert,
@@ -610,7 +610,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("assq", Primitive::Assq),
     ("setcar", Primitive::Setcar),
     ("setcdr", Primitive::Setcdr),
-    ("%", Primitive::Remainder),
     ("current-buffer", Primitive::CurrentBuffer),
     ("set-buffer", Primitive::SetBuffer),
     // The storage kernel under `insert' (prims/insdel.rs), which runs no hooks.
@@ -1353,6 +1352,8 @@ pub struct Vm {
     /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
     /// the evaluator's quit polls (quit.rs).
     quit_slots: [usize; 3],
+    /// The symbols face primitives compare against.
+    pub(crate) face_keys: crate::prim::FaceKeys,
     /// The slots of `debug-on-event' and of the user signal events, in
     /// host::USER_SIGNAL_NAMES's order (`Vm::debug_event_mask').
     debug_event_slots: [usize; 3],
@@ -1472,6 +1473,14 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
+    /// In a child forked for one job: the heap it was forked with, the
+    /// growth over it allowed now, and the grace added after each signal of
+    /// exhaustion, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize, usize)>,
+    /// The payload the last collection kept, as allocation charges it
+    /// (`data::payload_bytes`), measured only for a job's budget
+    /// (`Vm::job_live`).
+    gc_retained_payload: usize,
     /// Open frames that keep heap Values in untraced Rust storage across a
     /// call that can run Lisp: compiler builders and watcher notifications
     /// from native writers (`gc.rs`, `Vm::may_collect`).
@@ -1571,6 +1580,8 @@ pub struct Vm {
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
     doomed_finalizers: Vec<Value>,
+    /// A collection ended since `post-gc-hook' last ran (`Vm::post_gc_runs').
+    post_gc_due: bool,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1676,6 +1687,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     free,
     suspended_stacks,
     gc_floor,
+    job_budget,
+    gc_retained_payload,
     names,
     initial_obarray,
     symbol_names,
@@ -1712,6 +1725,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     external_roots,
     finalizers,
     doomed_finalizers,
+    post_gc_due,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1724,6 +1738,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     redisplay_since_mark,
     treesit_plain,
     quit_slots,
+    face_keys,
     debug_event_slots,
 } at_rest {
     regexp_cache,
@@ -1831,6 +1846,7 @@ impl Vm {
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
+            face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
             keymap_generation: 0,
             process_jobs: process_jobs::Jobs::default(),
@@ -1882,6 +1898,8 @@ impl Vm {
             gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
+            job_budget: None,
+            gc_retained_payload: 0,
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,
@@ -1929,6 +1947,7 @@ impl Vm {
             external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: vec![],
+            post_gc_due: false,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -1970,6 +1989,7 @@ impl Vm {
         vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
             .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.quit_slots = ["quit-flag", "inhibit-quit", "throw-on-input"].map(|name| vm.slot(name));
+        vm.face_keys = crate::prim::FaceKeys::new(&mut vm);
         let [usr2, usr1] = crate::host::USER_SIGNAL_NAMES;
         vm.debug_event_slots = ["debug-on-event", usr2, usr1].map(|name| vm.slot(name));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
@@ -3461,6 +3481,11 @@ impl Vm {
         let slot = self.slot(prim::ECHO_AREA_MESSAGE);
         self.slots[slot].value = value;
     }
+    /// Whether the echo area shows a message for `current-message'.
+    pub fn echo_area_message_shown(&mut self) -> bool {
+        let slot = self.slot(prim::ECHO_AREA_MESSAGE);
+        self.slots[slot].value != Value::NIL
+    }
     /// Unwinding pops every binding; one whose restore signals keeps its
     /// value, as GNU's popped entry does. That signal is dropped and the
     /// escape already in flight kept (see `unbind_one`).
@@ -3684,7 +3709,7 @@ impl Vm {
         if (p as usize) >= Primitive::DisplayDefineFace as usize {
             return self.display_primitive(p, start, n);
         }
-        if (p as usize) >= Primitive::Remainder as usize {
+        if (p as usize) >= Primitive::CurrentBuffer as usize {
             return self.buffer_primitive(p, start, n);
         }
         let a = &self.stack[start..start + n];
@@ -3766,6 +3791,10 @@ impl Vm {
                 data::Object::Bignum(n) => Ok(n.to_string()),
                 data::Object::BoolVector(v) => Ok(v.printed()),
                 data::Object::String(s) => Ok(serde_json::to_string(s.as_str()).unwrap()),
+                data::Object::RawString(s) if !s.is_multibyte() => Ok(format!(
+                    "#u8({})",
+                    s.bytes().iter().map(u8::to_string).collect::<Vec<_>>().join(" ")
+                )),
                 data::Object::RawString(_) => Err("not-unicode-string: JSON display".into()),
                 data::Object::Buffer(_) => Ok("#<buffer>".into()),
                 data::Object::Window(w) => Ok(format!("#<window {}>", w.id)),

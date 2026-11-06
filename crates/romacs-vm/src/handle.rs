@@ -550,6 +550,8 @@ mod tests {
     #[test]
     fn dropped_rooted_slots_are_bounded_without_collection() {
         let mut vm = Vm::new();
+        // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+        vm.set_gc_stress(0);
         vm.set_collection_floor(usize::MAX);
         let before = vm.heap_stats().collections;
         for _ in 0..10_000 {

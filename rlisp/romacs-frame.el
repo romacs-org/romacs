@@ -158,6 +158,312 @@ The value is (RED GREEN BLUE), each between 0 and 65535, or nil."
   (unless (member color '(unspecified "unspecified-fg" "unspecified-bg"))
     (tty-color-values color frame)))
 
+(defun romacs--color-rgb (color frame)
+  "The (RED GREEN BLUE) of COLOR, a list of them or a name, for `color-distance'."
+  (or (if (consp color)
+          (and (proper-list-p color) (= (length color) 3)
+               (fixnump (nth 0 color)) (fixnump (nth 1 color)) (fixnump (nth 2 color))
+               color)
+        (and (stringp color) (color-values color frame)))
+      (signal 'error (cons "Invalid color" (if (proper-list-p color) color (list color))))))
+
+(defun color-distance (color1 color2 &optional frame metric)
+  "Return an integer distance between COLOR1 and COLOR2 on FRAME.
+COLOR1 and COLOR2 may be either strings containing the color name,
+or lists of the form (RED GREEN BLUE), each in the range 0 to 65535
+inclusive.  If FRAME is unspecified or nil, the current frame is used.
+If METRIC is specified, it should be a function that accepts two
+lists of the form (RED GREEN BLUE) aforementioned."
+  (when (and frame (not (frame-live-p frame)))
+    (signal 'wrong-type-argument (list 'frame-live-p frame)))
+  (let ((rgb1 (romacs--color-rgb color1 frame))
+        (rgb2 (romacs--color-rgb color2 frame)))
+    (if metric
+        (funcall metric rgb1 rgb2)
+      (let ((mean (ash (+ (nth 0 rgb1) (nth 0 rgb2)) -1))
+            (r (- (nth 0 rgb1) (nth 0 rgb2)))
+            (g (- (nth 1 rgb1) (nth 1 rgb2)))
+            (b (- (nth 2 rgb1) (nth 2 rgb2))))
+        (ash (+ (ash (* (+ (* 2 65536) mean) r r) -16)
+                (* 4 g g)
+                (ash (* (- (+ (* 2 65536) 65535) mean) b b) -16))
+             -16)))))
+
+(defun color-supported-p (color &optional frame background-p)
+  "Return non-nil if COLOR can be displayed on FRAME.
+BACKGROUND-P non-nil means COLOR is used as a background.
+COLOR must be a valid color name."
+  (unless (stringp color) (signal 'wrong-type-argument (list 'stringp color)))
+  (cond ((not (display-graphic-p frame)) (color-defined-p color frame))
+        ((display-color-p frame) t)
+        ((member (downcase color) '("black" "white")) t)
+        ((or background-p (display-grayscale-p frame))
+         (let ((rgb (color-values color frame)))
+           (and rgb (= (nth 0 rgb) (nth 1 rgb) (nth 2 rgb)))))))
+
+;;;; xfaces.c: `face-attributes-as-vector', merge_face_ref over a Lisp vector.
+
+(defconst romacs--face-attribute-slots
+  '((:family . 1) (:foundry . 2) (:width . 3) (:height . 4) (:weight . 5) (:slant . 6)
+    (:underline . 7) (:inverse-video . 8) (:foreground . 9) (:background . 10)
+    (:stipple . 11) (:overline . 12) (:strike-through . 13) (:box . 14) (:font . 15)
+    (:distant-foreground . 18) (:extend . 19))
+  "Each attribute `merge_face_ref' sets, and its slot in a Lisp face vector.")
+
+(defun romacs--merge-face-height (from to invalid)
+  "merge_face_heights: FROM, a height, over the height TO; INVALID if none."
+  (cond ((integerp from) from)
+        ((floatp from)
+         (cond ((integerp to) (truncate (* from to)))
+               ((floatp to) (* from to))
+               ((eq to 'unspecified) from)
+               (t invalid)))
+        ((functionp from)
+         (let ((height (condition-case nil (funcall from to) (error nil))))
+           (if (or (integerp height) (floatp height)) height invalid)))
+        (t invalid)))
+
+(defun romacs--merge-face-attribute (keyword value to)
+  "Merge face attribute KEYWORD's VALUE into the vector TO, if it is valid."
+  (let ((valid
+         (pcase keyword
+           ((or :family :foundry :foreground :background :distant-foreground) (stringp value))
+           ((or :weight :slant :width)
+            (romacs--font-style-p (intern (substring (symbol-name keyword) 1)) value))
+           (:underline (or (memq value '(t nil)) (stringp value) (consp value)))
+           ((or :overline :strike-through) (or (memq value '(t nil)) (stringp value)))
+           (:box (or (eq value t) (null value) (stringp value) (consp value)
+                     (and (integerp value) (/= value 0))))
+           ((or :inverse-video :extend) (memq value '(t nil)))
+           (:stipple (or (null value) (bitmap-spec-p value)))
+           (:font (fontp value)))))
+    (when valid
+      (aset to (alist-get keyword romacs--face-attribute-slots)
+            (if (and (eq keyword :box) (eq value t)) 1 value)))))
+
+(defun romacs--merge-face-vector (from to merging)
+  "merge_face_vectors: the Lisp face vector FROM into TO."
+  (let ((inherit (aref from 16)))
+    (unless (memq inherit '(nil unspecified))
+      (romacs--merge-face-ref inherit to merging)))
+  (dotimes (i (length from))
+    (let ((value (aref from i)))
+      (cond ((or (= i 0) (= i 15) (eq value 'unspecified)))
+            ((and (= i 4) (not (integerp value)))
+             (aset to i (romacs--merge-face-height value (aref to i) (aref to i))))
+            (t (aset to i value)))))
+  (aset to 16 nil))
+
+(defun romacs--resolve-face-name (face)
+  "resolve_face_name: FACE, a name, through its `face-alias' properties."
+  (let ((face (if (stringp face) (intern face) face))
+        (seen nil))
+    (while (and (symbolp face) (get face 'face-alias) (not (memq face seen)))
+      (push face seen)
+      (setq face (get face 'face-alias)))
+    face))
+
+(defun romacs--merge-point-open-p (kind face merging)
+  "push_named_merge_point's test: FACE is open as KIND in MERGING, newest first.
+A remapping hides the plain merges of its face before it."
+  (catch 'open
+    (dolist (point merging)
+      (when (eq (cdr point) face)
+        (cond ((eq (car point) kind) (throw 'open t))
+              ((eq (car point) 'remap) (throw 'open nil)))))
+    nil))
+
+(defun romacs--merge-named-face (face to merging)
+  "merge_named_face: FACE's attributes into TO.
+MERGING lists the merge points open, as (normal . FACE) and (remap . FACE):
+FACE named inside its own remapping means the plain face."
+  (let ((face (romacs--resolve-face-name face)))
+    (unless (romacs--merge-point-open-p 'normal face merging)
+      (let* ((merging (cons (cons 'normal face) merging))
+             (remapping (and (not (romacs--merge-point-open-p 'remap face merging))
+                             (assq face face-remapping-alist))))
+        (if remapping
+            (let ((from (make-vector 20 'unspecified)))
+              (romacs--merge-face-ref (cdr remapping) from (cons (cons 'remap face) merging))
+              (romacs--merge-face-vector from to merging))
+          (let ((from (and (symbolp face) (internal-lisp-face-p face (selected-frame)))))
+            (when from (romacs--merge-face-vector from to merging))))))))
+
+(defun romacs--merge-face-ref (ref to merging)
+  "merge_face_ref: the face reference REF into the vector TO."
+  (cond
+   ((null ref))
+   ((consp ref)
+    (let ((first (car ref)))
+      (cond
+       ((eq first 'foreground-color) (when (stringp (cdr ref)) (aset to 9 (cdr ref))))
+       ((eq first 'background-color) (when (stringp (cdr ref)) (aset to 10 (cdr ref))))
+       ((eq first :filtered))
+       ((keywordp first)
+        (while (and (consp ref) (consp (cdr ref)))
+          (let ((keyword (car ref)) (value (cadr ref)))
+            (cond ((eq value 'unspecified))
+                  ((eq keyword :height)
+                   (let ((height (romacs--merge-face-height value (aref to 4) nil)))
+                     (when height (aset to 4 height))))
+                  ((eq keyword :inherit) (romacs--merge-face-ref value to merging))
+                  ((assq keyword romacs--face-attribute-slots)
+                   (romacs--merge-face-attribute keyword value to))))
+          (setq ref (cddr ref))))
+       (t
+        (when (cdr ref) (romacs--merge-face-ref (cdr ref) to merging))
+        (romacs--merge-face-ref first to merging)))))
+   (t (romacs--merge-named-face ref to merging))))
+
+(defun face-attributes-as-vector (plist)
+  "Return a vector of face attributes corresponding to PLIST."
+  (let ((to (make-vector 20 'unspecified)))
+    (romacs--merge-face-ref plist to nil)
+    to))
+
+;;;; terminal.c, keyboard.c.
+
+(defun delete-terminal (&optional terminal force)
+  "Delete TERMINAL by deleting all frames on it and closing the terminal.
+TERMINAL may be a terminal object, a frame, or nil (meaning the
+selected frame's terminal).  Romacs has one terminal: it is the sole
+active one, so even with FORCE it stays (VM2-WIN5)."
+  (ignore force)
+  (when (or (null terminal) (framep terminal) (terminal-live-p terminal))
+    (error "Attempt to delete the sole active display terminal")))
+
+(defun suspend-emacs (&optional stuffstring)
+  "Stop Emacs and return to the superior process.
+Run `suspend-hook' first and `suspend-resume-hook' after the process
+continues.  STUFFSTRING has nowhere to go: Romacs has no terminal input."
+  (interactive "")
+  (when stuffstring (unless (stringp stuffstring) (signal 'wrong-type-argument (list 'stringp stuffstring))))
+  (run-hooks 'suspend-hook)
+  (signal-process 0 'SIGTSTP)
+  (run-hooks 'suspend-resume-hook)
+  nil)
+
+;;;; fontset.c over the leaves in prims/fontset.rs.
+
+(defvar fontset-alias-alist
+  (list (cons "-*-*-*-*-*-*-*-*-*-*-*-*-fontset-default" "fontset-default"))
+  "Alist of fontset names vs the aliases.")
+
+(defvar use-default-font-for-symbols t
+  "If non-nil, use the default face's font for symbols and punctuation.
+By default, Emacs will try to use the default face's font for
+displaying symbol and punctuation characters, disregarding the
+fontsets, if the default font can display the character.
+Set this to nil to make Emacs honor the fontsets instead.")
+
+(put 'fontset-info 'char-table-extra-slots 1)
+
+(defun set-fontset-font (fontset characters font-spec &optional frame add)
+  "Modify FONTSET to use font specification in FONT-SPEC for displaying CHARACTERS.
+
+FONTSET should be a fontset name (a string); or nil, meaning the
+fontset of FRAME; or t, meaning the default fontset.
+
+CHARACTERS may be a single character, a cons (FROM . TO), a script
+symbol, a charset symbol, or nil for any character for which no
+font-spec is specified in FONTSET.
+
+FONT-SPEC may be a font-spec object, a cons (FAMILY . REGISTRY), a
+font name string, or nil, which explicitly specifies that there's no
+font for CHARACTERS.
+
+ADD, if non-nil, specifies how to add FONT-SPEC to the previously set
+font specifications for CHARACTERS: `prepend' or `append'.  By default,
+FONT-SPEC overwrites the previous settings."
+  (when (romacs--set-fontset-font fontset characters font-spec frame add)
+    (romacs--set-default-font font-spec frame))
+  nil)
+
+(defun romacs--set-default-font (font-spec frame)
+  "Make FONT-SPEC, as `set-fontset-font' takes it, FRAME's ASCII font.
+The default face is what paints ASCII, so its attributes change, each one
+FONT-SPEC names; the frame keeps its fontset."
+  (let* ((spec (cond ((consp font-spec) (font-spec :family (car font-spec)))
+                     ((stringp font-spec) (font-spec :name font-spec))
+                     (t font-spec)))
+         (size (font-get spec :size))
+         (attributes
+          (nconc
+           (mapcan (lambda (key)
+                     (let ((value (font-get spec key)))
+                       (when value
+                         (list key (if (eq key :family) (symbol-name value) value)))))
+                   '(:family :weight :slant :width))
+           ;; An integer size is pixels at the frame's 96 dpi, a float points.
+           (cond ((and (integerp size) (> size 0)) (list :height (round (* size 7.5))))
+                 ((and (floatp size) (> size 0)) (list :height (round (* size 10))))))))
+    (when attributes
+      (apply #'set-face-attribute 'default (or frame (selected-frame)) attributes))))
+
+(defun romacs--fontset-info-table (table runs)
+  "Fill the char-table TABLE from RUNS, (FALLBACK (FROM TO . ALIST) ...)."
+  (when (car runs) (set-char-table-range table nil (car runs)))
+  (dolist (run (cdr runs))
+    (set-char-table-range table (cons (car run) (cadr run)) (cddr run))))
+
+(defun fontset-info (fontset &optional frame)
+  "Return information about a fontset FONTSET on frame FRAME.
+
+FONTSET is a fontset name string, nil for the fontset of FRAME, or t
+for the default fontset.  FRAME nil means the selected frame.
+
+The value is a char-table whose elements have this form:
+
+    ((FONT OPENED-FONT ...) ...)
+
+FONT is a name of font specified for a range of characters.
+
+OPENED-FONT is a name of a font actually opened.
+
+The char-table has one extra slot.  If FONTSET is not the default
+fontset, the value the extra slot is a char-table containing the
+information about the derived fonts from the default fontset.  The
+format is the same as above."
+  (let ((runs (romacs--fontset-info fontset frame))
+        (table (make-char-table 'fontset-info)))
+    (romacs--fontset-info-table table (car runs))
+    (when (cdr runs)
+      (let ((shared (make-char-table nil)))
+        (romacs--fontset-info-table shared (cdr runs))
+        (set-char-table-extra-slot table 0 shared)))
+    table))
+
+(defun x-list-fonts (pattern &optional _face frame maximum _width)
+  "Return a list of the names of available fonts matching PATTERN.
+If optional arguments FACE and FRAME are specified, return only fonts
+the same size as FACE on FRAME.  MAXIMUM limits the number of names."
+  (mapcar (lambda (font) (font-xlfd-name font))
+          (list-fonts (font-spec :name pattern) frame maximum)))
+
+(defun romacs--make-default-fontsets ()
+  "The default fontset's rules and the standard fontset."
+  (create-default-fontset)
+  (create-fontset-from-fontset-spec standard-fontset-spec t))
+
+(defun romacs--setup-fontsets ()
+  "What a window system's initialization does for fontsets: the default
+fontset's rules, the standard fontset, and the frame's own fontset from its
+font (fontset_from_font)."
+  (unless (romacs--unstage-fontsets)
+    (romacs--make-default-fontsets))
+  (let* ((font (frame-parameter nil 'font))
+         (spec (font-spec :name font))
+         (registry (font-get spec :registry))
+         (target (let ((encoding (romacs--font-encoding (symbol-name registry))))
+                   (let ((charset (if (consp encoding) (cdr encoding) encoding)))
+                     (if (charsetp charset) charset 'latin))))
+         (rule (font-spec :registry registry)))
+    (font-put spec :registry 'fontset-startup)
+    (let ((name (font-xlfd-name spec nil t)))
+      (romacs--make-frame-fontset name (list "fontset-startup" (downcase font)) font)
+      (romacs--set-fontset-font name target rule)
+      (romacs--set-fontset-font name nil rule))))
+
 ;;;; frame.el: background mode.
 
 (defun frame--current-background-mode (frame)
@@ -173,16 +479,48 @@ The value is (RED GREEN BLUE), each between 0 and 65535, or nil."
            'dark)
           (t 'light))))
 
-;; A child frame shows its parent's faces until something sets one on it
-;; alone (`romacs--frame-shares-faces-p', DIVERGENCES.md VM2-CHILD-FRAME):
-;; recomputing a face there would only repeat the parent's, so
-;; `face-spec-recalc' skips it, and a theme or a `defface' costs one
-;; frame's work however many layers are open.
-(defun romacs--face-spec-recalc-shared (_face frame)
-  "Non-nil when FRAME shows another frame's faces, which `face-spec-recalc'
-already recomputes there."
-  (romacs--frame-shares-faces-p frame))
-(advice-add 'face-spec-recalc :before-until #'romacs--face-spec-recalc-shared)
+;; Recalculating a face is the same writes in the same order as faces.el,
+;; in Rust (DIVERGENCES.md VM2-FACE-ENGINE).  A child frame shows its
+;; parent's faces until something sets one on it alone
+;; (`romacs--frame-shares-faces-p', VM2-CHILD-FRAME), so recomputing there
+;; is skipped, and a theme or a `defface' costs one frame's work however
+;; many layers are open.
+(defalias 'face-spec-recalc #'romacs--face-spec-recalc
+  "Reset the face attributes of FACE on FRAME according to its specs.")
+(defalias 'custom-theme-recalc-face #'romacs--custom-theme-recalc-face
+  "Set FACE according to currently enabled custom themes.")
+(defalias 'face-spec-choose #'romacs--face-spec-choose
+  "Return the proper attributes for FRAME, out of SPEC.")
+(defalias 'face-spec-set-match-display #'romacs--face-spec-set-match-display
+  "Non-nil if DISPLAY matches FRAME.")
+(defalias 'face-attr-match-p #'romacs--face-attr-match-p
+  "Return t if attributes of FACE match values in plist ATTRS.")
+(defalias 'face-list #'romacs--face-list
+  "Return a list of all defined faces.")
+
+;; `face-set-after-frame-default' with its loop over the faces in Rust.
+(defun face-set-after-frame-default (frame &optional parameters)
+  "Initialize the frame-local faces of FRAME.
+Calculate the face definitions using the face specs, custom theme
+settings, X resources, and `face--new-frame-defaults'.
+Finally, apply any relevant face attributes found amongst the
+frame parameters in PARAMETERS."
+  (romacs--recalc-all-faces frame)
+  ;; Apply attributes specified by frame parameters.
+  (let ((face-params '((foreground-color default :foreground)
+  		       (background-color default :background)
+                       (font default :font)
+  		       (border-color border :background)
+  		       (cursor-color cursor :background)
+  		       (scroll-bar-foreground scroll-bar :foreground)
+  		       (scroll-bar-background scroll-bar :background)
+  		       (mouse-color mouse :background))))
+    (dolist (param face-params)
+      (let* ((param-name (nth 0 param))
+  	     (value (cdr (assq param-name parameters))))
+  	(if value
+  	    (set-face-attribute (nth 1 param) frame
+				(nth 2 param) value))))))
 
 (defun frame-set-background-mode (frame &optional keep-face-specs)
   "Set up display-dependent faces on FRAME.
@@ -197,8 +535,7 @@ face specs for the new background mode."
 	   (old-bg-mode (frame-parameter frame 'background-mode))
 	   (old-display-type (frame-parameter frame 'display-type)))
       (unless (and (eq bg-mode old-bg-mode) (eq display-type old-display-type))
-	(let ((locally-modified-faces nil)
-	      ;; Prevent face-spec-recalc from calling this function
+	(let (;; Prevent face-spec-recalc from calling this function
 	      ;; again, resulting in a loop (bug#911).
 	      (inhibit-frame-set-background-mode t)
 	      (params (list (cons 'background-mode bg-mode)
@@ -208,17 +545,9 @@ face specs for the new background mode."
 	    ;; Faces that don't match their face-specs were modified on
 	    ;; FRAME; leave them alone.  A face not yet realized for FRAME
 	    ;; counts as mismatched, so face-spec-recalc realizes it.
-	    (dolist (face (face-list))
-	      (and (not (get face 'face-override-spec))
-		   (not (and (gethash face (frame--face-hash-table))
-                             (face-spec-match-p face
-                                                (face-user-default-spec face)
-                                                frame)))
-		   (push face locally-modified-faces)))
-	    (modify-frame-parameters frame params)
-	    (dolist (face (face-list))
-	      (unless (memq face locally-modified-faces)
-		(face-spec-recalc face frame)))))))))
+	    (let ((locally-modified-faces (romacs--faces-modified-on frame)))
+	      (modify-frame-parameters frame params)
+	      (romacs--recalc-faces-except frame locally-modified-faces))))))))
 
 ;; composite.c's `find-composition-internal'. VM2 builds no composition
 ;; glyph strings: where GNU would find a static composition, or an automatic

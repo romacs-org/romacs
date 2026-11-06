@@ -158,11 +158,11 @@ class GnuEngine(unittest.TestCase):
         meta = {'gnu_build': {'version': '32.0.50', 'commit': 'c' * 40, 'package': 'emacs-x 1-1', 'native': True},
                 'fixtures': {'commit': 'b' * 40}}
         text = readme.gnu_engine(meta)
-        for part in ('32.0.50', '~cccccccc~', 'emacs-x 1-1', 'natively compiled', 'inputs are pinned at ~bbbbbbbb~'):
+        for part in ('32.0.50', '`cccccccc`', 'emacs-x 1-1', 'natively compiled', 'inputs are pinned at `bbbbbbbb`'):
             self.assertIn(part, text)
 
     def test_a_run_from_before_keeps_its_pinned_wording(self):
-        self.assertEqual(readme.gnu_engine({'fixtures': {'commit': 'b' * 40}}), 'pinned GNU Emacs ~bbbbbbbb~')
+        self.assertEqual(readme.gnu_engine({'fixtures': {'commit': 'b' * 40}}), 'pinned GNU Emacs `bbbbbbbb`')
 
     def test_a_missing_package_manager_is_no_failure(self):
         self.addCleanup(setattr, pb.subprocess, 'run', pb.subprocess.run)
@@ -309,6 +309,152 @@ class Source(unittest.TestCase):
         # A later definition silently replaces an earlier one, and only a live run shows it.
         names = re.findall(r'^def (\w+)\(', Path(pb.__file__).read_text(), re.M)
         self.assertEqual(sorted({n for n in names if names.count(n) > 1}), [])
+
+
+def lead_results(**overrides):
+    def made(name, gnu, romacs):
+        return pb.row(name, 'session', 'run', gnu, romacs, 3)
+    rows = [made(readme.VC_HISTORY, {'wall': 19.0, 'check': '183574 abc'}, {'wall': 3.0, 'key': .005, 'check': '183574 abc'}),
+            made(readme.OPEN_XDISP, {'wall': .65}, {'wall': .77}),
+            made(readme.OPEN_HEADER, {'wall': 2.0}, {'wall': 1.0}),
+            made(readme.THEME, {'wall': .05}, {'wall': .06})]
+    made_results = results(rows)
+    made_results['meta'].update(header_bytes=15_600_000, history_commits=183574)
+    for name, change in overrides.items():
+        change(made_results)
+    return made_results
+
+
+class Lead(unittest.TestCase):
+    def test_every_name_in_the_template_is_filled_and_none_is_left(self):
+        text = readme.lead_section(lead_results())
+        self.assertNotIn('{{', text)
+        for part in ('3 s', '19 s', '183,574', '5 ms', '650 ms', '770 ms', '16 MB', '50 ms', '60 ms'):
+            self.assertIn(part, text)
+
+    def test_the_template_keeps_the_names_of_the_draft(self):
+        names = set(re.findall(r'\{\{([^{}]+)\}\}', readme.LEAD.read_text()))
+        self.assertEqual(names, set(readme.lead_values(lead_results())))
+
+    def test_a_value_the_run_lacks_stops_it_and_says_which(self):
+        def refuse(made):
+            made['rows'][1]['romacs']['wall_refused'] = made['rows'][1]['romacs'].pop('wall')
+        made = lead_results(x=refuse)
+        self.assertEqual(readme.lead_missing(made), ['open-xdisp-romacs'])
+        with self.assertRaises(SystemExit) as stopped:
+            readme.lead_section(made)
+        self.assertIn('open-xdisp-romacs', str(stopped.exception))
+
+    def test_a_refused_value_the_lead_does_not_quote_is_no_failure(self):
+        def refuse(made):
+            row = pb.row('session vc-dir', 'session', 'run', {'wall_refused': 1.0}, {'wall_refused': 1.0}, 3)
+            made['rows'].append(row)
+            # Each of these rows' other metrics is quoted by nothing either.
+            made['rows'][0]['romacs']['block_refused'] = 1.0
+            made['rows'][3]['gnu']['first_refused'] = 1.0
+        self.assertEqual(readme.lead_missing(lead_results(x=refuse)), [])
+
+    def test_the_history_row_is_upstream_masters_not_the_pins(self):
+        self.assertNotEqual(pb.UPSTREAM, pb.PIN)
+        self.assertEqual(len(pb.UPSTREAM), 40)
+
+    def test_a_name_the_filler_does_not_know_is_a_failure_not_a_blank(self):
+        self.assertEqual(readme.lead_missing(lead_results(), 'a {{no-such-number}} b'), ['no-such-number'])
+
+    def test_a_log_that_differs_from_gnus_gives_no_commit_count(self):
+        def partial(made):
+            made['rows'][0]['romacs']['check'] = '2000 def'
+        self.assertIn('vc-history-commits', readme.lead_missing(lead_results(x=partial)))
+
+    def test_a_log_short_of_gits_count_is_no_commit_count_though_both_engines_agree(self):
+        def short(made):
+            made['meta']['history_commits'] = 194171
+        self.assertIn('vc-history-commits', readme.lead_missing(lead_results(x=short)))
+
+    def test_a_run_with_session_selected_checks_the_lead_and_quick_does_not(self):
+        args = lambda **k: type('Args', (), {'only': None, 'quick': False, **k})  # noqa: E731
+        self.assertTrue(pb.selected(args(), 'session', 'session', False))
+        self.assertTrue(pb.selected(args(only=['session']), 'session', 'session', False))
+        self.assertFalse(pb.selected(args(quick=True), 'session', 'session', False))
+        self.assertFalse(pb.selected(args(only=['elb']), 'session', 'session', False))
+        self.assertEqual(len(readme.lead_missing(results([]))), 11)
+
+    def test_a_failed_lead_leaves_the_readme_alone(self):
+        def refuse(made):
+            made['rows'][0]['gnu'].pop('wall')
+        with tempfile.TemporaryDirectory() as directory:
+            path, data = Path(directory) / 'README.md', Path(directory) / 'results.json'
+            original = ('<!-- perfbench-lead-begin -->\nOLD\n<!-- perfbench-lead-end -->\n<!-- perfbench-session-begin -->\nOLD\n'
+                        '<!-- perfbench-session-end -->\n')
+            path.write_text(original)
+            data.write_text(json.dumps(lead_results(x=refuse)))
+            with self.assertRaises(SystemExit):
+                readme.main([str(data), str(path)])
+            self.assertEqual(path.read_text(), original)
+
+    def test_a_run_that_measured_none_of_it_keeps_the_block(self):
+        made = results([pb.row('startup', 'batch', 'run', {'wall': 1.0}, {'wall': 1.0}, 3)])
+        self.assertFalse(readme.lead_measured(made))
+        self.assertTrue(readme.lead_measured(lead_results()))
+
+    def test_load_refuses_first_shown_and_key_with_the_wall(self):
+        made = pb.row(readme.VC_HISTORY, 'session', 'run', {'wall': 1.0}, {'wall': 1.0, 'first': .1, 'key': .005}, 3)
+        made['load'] = 12
+        pb.gate_walls([made], 8)
+        self.assertEqual((made['romacs'].get('first'), made['romacs'].get('key')), (None, None))
+
+    def test_a_session_note_gives_first_shown_and_median_key(self):
+        made = pb.row(readme.VC_HISTORY, 'session', 'run', {'first': .2, 'key': .02}, {'first': .1, 'key': .005}, 3)
+        self.assertEqual(readme.session_extras(made), 'first shown GNU 200 ms, Romacs 100 ms; median key GNU 20 ms, Romacs 5 ms')
+        self.assertEqual(readme.session_extras(pb.row('r', 'session', 'run', {}, {}, 3)), '')
+        moded = pb.row('r', 'session', 'run', {'detail': 'c-mode'}, {'detail': 'c-ts-mode'}, 3)
+        self.assertEqual(readme.session_extras(moded), 'mode GNU c-mode, Romacs c-ts-mode')
+
+    def test_the_generated_header_is_the_same_every_time_and_about_its_size(self):
+        text = pb.generated_header(1200)
+        self.assertEqual(text, pb.generated_header(1200))
+        self.assertEqual(text.count('\n'), 1200)
+        self.assertIn('#define REG_000000_CNTL__FIELD_01_MASK', text)
+        self.assertGreater(len(pb.generated_header(pb.HEADER_LINES)), 13_000_000)
+
+    def test_each_engine_has_themes_enough_for_its_rows(self):
+        for cycle, visits in pb.SESSION_THEMES.values():
+            self.assertGreaterEqual(len(cycle), 2)
+            self.assertGreaterEqual(len(visits), 3)
+            self.assertEqual(set(cycle) & set(visits), set())
+
+
+class Markdown(unittest.TestCase):
+    def test_a_table_head_has_a_rule_as_wide_as_itself(self):
+        self.assertEqual(readme.header('| a | b |'), ['| a | b |', '| --- | --- |'])
+
+    def test_every_table_row_is_as_wide_as_its_head(self):
+        rows = [pb.row('startup', 'batch', 'run', {'wall': 1.0}, {'wall': 1.0}, 3, 'a | b'),
+                pb.row('session x', 'session', 'run', {'wall': 1.0}, {'wall': 1.0}, 3, 'c | d'),
+                member_row('fibn', {'wall': 1.0}, {'wall': 1.0}, {'wall': 1.0})]
+        rows[2]['note'] = 'e | f'
+        made = results(rows)
+        for text in (readme.section(made), readme.session_section(made), readme.elb_section(made)):
+            table = [re.split(r'(?<!\\)\|', line) for line in text.splitlines() if line.startswith('|')]
+            self.assertGreater(len(table), 2)
+            self.assertEqual({len(line) for line in table}, {len(table[0])}, text)
+
+    def test_no_org_markup_is_left_in_what_it_writes(self):
+        made = lead_results()
+        made['meta'].update(gnu_build={'version': '32', 'commit': 'c' * 40, 'native': True},
+                            install={'files': 100, 'not_compiled': 3})
+        for text in (readme.section(made), readme.session_section(made), readme.elb_section(made), readme.headlines(made),
+                     readme.lead_section(made)):
+            self.assertNotRegex(text, r'(?m)~[0-9a-f]{8}~|^\|-$|^#\+|(?<![\w`])=[-.a-z]+=')
+
+    def test_a_block_marker_is_a_comment_a_page_does_not_show(self):
+        for begin, end in readme.BLOCKS.values():
+            self.assertRegex(begin, r'^<!-- perfbench-[a-z]+-begin -->$')
+            self.assertRegex(end, r'^<!-- perfbench-[a-z]+-end -->$')
+
+    def test_the_lead_keeps_the_hero_clip_under_its_title(self):
+        lines = [line for line in readme.LEAD.read_text().splitlines() if line]
+        self.assertEqual(lines[:2], ['# Romacs', '<!-- hero-clip -->'])
 
 
 class Ratio(unittest.TestCase):
@@ -641,17 +787,17 @@ class Readme(unittest.TestCase):
         rows[1]['neomacs'] = {'instructions': 1000}
         text = readme.headlines(results(rows))
         self.assertIn("--only 'how-many xdisp.c'", text)
-        self.assertIn('~aaaaaaaa~', text)
+        self.assertIn('`aaaaaaaa`', text)
         self.assertIn("--neomacs NEOMACS --only 'keys'", text)
-        self.assertEqual(readme.kept_wins(f'# perfbench-headlines-begin\n{text}\n# perfbench-headlines-end\n'),
+        self.assertEqual(readme.kept_wins(f'<!-- perfbench-headlines-begin -->\n{text}\n<!-- perfbench-headlines-end -->\n'),
                          {('how-many xdisp.c', 'GNU'), ('key C-f', 'neomacs')})
 
     def test_a_lost_headline_is_said(self):
         with tempfile.TemporaryDirectory() as directory:
-            path, data = Path(directory) / 'README.org', Path(directory) / 'results.json'
-            path.write_text('# perfbench-table-begin\n# perfbench-table-end\n'
-                            '# perfbench-headlines-begin\n| old row | GNU | 0.10x | - | ~a~ | =x= |\n'
-                            '# perfbench-headlines-end\n# perfbench-elb-begin\n# perfbench-elb-end\n')
+            path, data = Path(directory) / 'README.md', Path(directory) / 'results.json'
+            path.write_text('<!-- perfbench-table-begin -->\n<!-- perfbench-table-end -->\n'
+                            '<!-- perfbench-headlines-begin -->\n| old row | GNU | 0.10x | - | ~a~ | =x= |\n'
+                            '<!-- perfbench-headlines-end -->\n<!-- perfbench-elb-begin -->\n<!-- perfbench-elb-end -->\n')
             data.write_text(json.dumps(results(self.ROWS())))
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 readme.main([str(data), str(path)])
@@ -665,14 +811,14 @@ class Readme(unittest.TestCase):
         made['meta']['neomacs'] = {'version': 'Neomacs 1.2', 'commit': 'c' * 40}
         text = readme.section(made)
         self.assertIn('| neomacs | Romacs/GNU', text)
-        self.assertIn('~cccccccc~', text)
+        self.assertIn('`cccccccc`', text)
         self.assertIn('| 0.50x |', text)
 
     def test_a_block_the_run_did_not_measure_is_kept(self):
         with tempfile.TemporaryDirectory() as directory:
-            path, data = Path(directory) / 'README.org', Path(directory) / 'results.json'
-            path.write_text('# perfbench-table-begin\nOLD EDITOR\n# perfbench-table-end\n'
-                            '# perfbench-elb-begin\nOLD ELB\n# perfbench-elb-end\n')
+            path, data = Path(directory) / 'README.md', Path(directory) / 'results.json'
+            path.write_text('<!-- perfbench-table-begin -->\nOLD EDITOR\n<!-- perfbench-table-end -->\n'
+                            '<!-- perfbench-elb-begin -->\nOLD ELB\n<!-- perfbench-elb-end -->\n')
             data.write_text(json.dumps(results([member_row('fibn', {'wall': 2.0}, {'wall': 1.0}, {'wall': 1.0})])))
             readme.main([str(data), str(path)])
             text = path.read_text()

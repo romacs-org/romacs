@@ -98,6 +98,25 @@ fn a_child_frame_shares_its_parents_faces_until_one_is_set_on_it() {
                r##"(t (bold t) (t t) t "#102030" (nil light bold "#102030"))"##);
 }
 
+/// A background flip keeps what was modified on the frame it flips. An
+/// edit on a child with its own faces shows there though the selected
+/// frame still holds what the child's memo recorded.
+#[test]
+fn an_edit_on_a_child_outdates_its_memo() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.eval_source("(progn (setq f (selected-frame)) (internal-make-lisp-face 'probe-face) (internal-make-lisp-face 'probe-face f) \
+                    (put 'probe-face 'face-defface-spec '((t :foreground \"#112233\"))) \
+                    (setq c (romacs--create-frame `((parent-frame . ,f) (width . 10) (height . 2)))) \
+                    (internal-set-lisp-face-attribute 'probe-face :weight 'bold c) \
+                    (romacs--face-spec-recalc 'probe-face f) (romacs--face-spec-recalc 'probe-face c))").unwrap();
+    let probe = "(list (memq 'probe-face (romacs--faces-modified-on c)) \
+                 (progn (internal-set-lisp-face-attribute 'probe-face :foreground \"#445566\" c) \
+                        (and (memq 'probe-face (romacs--faces-modified-on c)) t)))";
+    assert_eq!(vm.eval_source(probe).unwrap().display().unwrap(), "(nil t)");
+}
+
 /// Positions as frame.c reads them for a child frame: a negative integer
 /// or `(- N)' from the parent's far edge, a float a fraction of the room.
 #[test]
@@ -130,6 +149,9 @@ fn child_frame_snapshots_survive_a_collecting_mode_line() {
           (let ((c (romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3) (left . ,(* 100 i)) \
                                            (background-color . ,(format \"#10203%d\" i)))))) \
             (set-window-buffer (frame-root-window c) (if (= i 0) \"gc\" \"plain\")))))").unwrap();
+    // Stress moves every live object; a plain compaction leaves the frames,
+    // with no garbage below them, where they are.
+    vm.set_gc_stress(1);
     for _ in 0..3 {
         let children = vm.frame_snapshot(800, 600).unwrap().children;
         let seen: Vec<_> = children.iter().map(|c| (c.x, c.background)).collect();

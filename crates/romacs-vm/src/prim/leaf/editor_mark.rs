@@ -16,7 +16,7 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         if let Some(marker) = self.vm.buffer_mark_value(buffer) { return Ok(marker); }
         let marker = self.vm.allocate_object(Object::Marker(Box::new(Marker {
-            buffer: Value::NIL, anchor: None, bias: Bias::Left,
+            buffer: Value::NIL, anchor: None, bias: Bias::Left, last_position: 0
         })));
         match &mut self.vm.objects[buffer.index(0).map_err(Fault::Error)? - 1] {
             Object::Buffer(b) => b.per_buffer.set_editor_mark(marker),
@@ -33,7 +33,7 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let point = Value::integer(position).map_err(Fault::Error)?;
         let marker = self.vm.allocate_object(Object::Marker(Box::new(Marker {
-            buffer: Value::NIL, anchor: None, bias: Bias::Left,
+            buffer: Value::NIL, anchor: None, bias: Bias::Left, last_position: 0
         })));
         self.vm.set_marker_object(marker, point, buffer).map_err(Fault::Error)
     }

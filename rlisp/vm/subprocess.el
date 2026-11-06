@@ -525,6 +525,8 @@ family; nil for anything else, or for an element out of range."
                           (process-name server))))
               (if base (setq buffer (get-buffer-create (concat base suffix))))))
         (setq proc (romacs--proc-make (concat (process-name server) suffix)))
+        ;; An accepted client takes its server's lock (process.c:5116).
+        (set-process-thread proc (process-thread server))
         (setq contact (copy-sequence (romacs--proc-get server 'childp)))
         (setq contact (plist-put contact :server nil))
         (setq contact (plist-put contact :host host))

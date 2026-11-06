@@ -16,7 +16,9 @@
 //! unless it steals the attachment.
 //!
 //! The socket speaks lines: the server's first is `{"attach":{"from":N,
-//! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness.
+//! "steal":BOOL}}`, then `{"write":LINE}` for each line to the harness. With
+//! `"journal":LINE` beside it, that line is journaled in its place: a message
+//! carrying image bytes is kept as a reference, as a replay reads every record.
 //!
 //! `--note JSON` journals `{"seq":N,"t":SECS,"note":JSON}` as the run's
 //! first record, before anything the harness writes: never written to
@@ -26,7 +28,9 @@
 //! `--input FILE` gives a harness that reads its whole stdin (one run per
 //! turn, its prompt on stdin) FILE as that input: journaled as an `"in"`
 //! record, written, and the stdin closed, with no server needed; FILE is
-//! then removed.
+//! then removed. That record is always `{"prompt":TEXT,"images":JSON}`, made
+//! here with TEXT a string: a prompt is never read as JSON, so its words cannot
+//! pose as attachments. `--input-images JSON` gives what the user attached.
 #![forbid(unsafe_code)]
 
 use serde_json::{Value as Json, json};
@@ -37,24 +41,26 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--note JSON] -- PROGRAM [ARG...]";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] -- PROGRAM [ARG...]";
 
 struct Config {
     dir: PathBuf,
     socket: PathBuf,
     input: Option<PathBuf>,
     note: Option<Json>,
+    input_images: Option<Json>,
     argv: Vec<String>,
 }
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
-    let (mut dir, mut socket, mut input, mut note) = (None, None, None, None);
+    let (mut dir, mut socket, mut input, mut note, mut input_images) = (None, None, None, None, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
             "--socket" => socket = args.next().map(PathBuf::from),
             "--input" => input = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
+            "--input-images" => input_images = Some(args.next().and_then(|text| serde_json::from_str(&text).ok()).ok_or(USAGE)?),
             "--note" => note = Some(args.next().and_then(|text| serde_json::from_str::<Json>(&text).ok()).ok_or(USAGE)?),
             "--" => break,
             _ => return Err(USAGE.into()),
@@ -62,7 +68,7 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
     }
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
-        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, argv }),
+        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, input_images, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -155,6 +161,23 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
     Some(id)
 }
 
+/// A server's request: the line for the harness and the line for the journal.
+/// A `journal` that is no string refuses the request: falling back to `write`
+/// would journal the very bytes it was to keep out.
+fn lines_of(request: &Json) -> Option<(String, String)> {
+    let write = request.get("write")?.as_str()?.to_owned();
+    let journal = match request.get("journal") {
+        None => write.clone(),
+        Some(journal) => journal.as_str()?.to_owned(),
+    };
+    Some((write, journal))
+}
+
+/// The record of a per-turn prompt TEXT, with the IMAGES attached to it.
+fn input_record(seq: u64, text: &str, images: Option<&Json>) -> String {
+    json!({"seq": seq, "t": now(), "in": {"prompt": text, "images": images.cloned().unwrap_or_else(|| json!([]))}}).to_string()
+}
+
 /// Serve one connection: its attach line, then the lines it writes.
 fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream) {
     let Ok(reading) = stream.try_clone() else { return };
@@ -162,7 +185,7 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream) {
     let Some(Ok(first)) = lines.next() else { return };
     let Some(id) = serde_json::from_str::<Json>(&first).ok().and_then(|r| attach(&shared, stream, &r)) else { return };
     for line in lines.map_while(Result::ok) {
-        let Some(text) = serde_json::from_str::<Json>(&line).ok().and_then(|r| r.get("write")?.as_str().map(str::to_owned)) else { continue };
+        let Some((text, journaled)) = serde_json::from_str::<Json>(&line).ok().as_ref().and_then(lines_of) else { continue };
         // The harness's stdin first, then the journal briefly: lines are
         // journaled in the order they are written, and a writer blocked on
         // a full stdin never holds the journal (the output, the exit).
@@ -173,7 +196,7 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream) {
             // A server whose attachment was stolen writes nothing more.
             if shared.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return; }
             shared.seq += 1;
-            let entry = record(shared.seq, "in", &text);
+            let entry = record(shared.seq, "in", &journaled);
             shared.append(&entry, false);
         }
         let written = stdin.as_mut().map(|stdin| writeln!(stdin, "{text}").and_then(|()| stdin.flush()));
@@ -230,7 +253,7 @@ fn run(config: Config) -> Result<i32, String> {
     if let Some(file) = &config.input {
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         shared.seq += 1;
-        let entry = record(shared.seq, "in", &text);
+        let entry = input_record(shared.seq, &text, config.input_images.as_ref());
         shared.append(&entry, true);
         // Its own thread: a harness slow to read never holds up the host.
         let mut writer = stdin.take();
@@ -356,6 +379,33 @@ mod tests {
         assert!(kept["attached"].is_u64());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_request_may_journal_another_line_than_it_writes() {
+        let both = json!({"write": "bytes", "journal": "reference"});
+        assert_eq!(lines_of(&both), Some(("bytes".into(), "reference".into())));
+        assert_eq!(lines_of(&json!({"write": "line"})), Some(("line".into(), "line".into())));
+        assert_eq!(lines_of(&json!({"journal": "no write"})), None);
+        // Not a string: refused, never journaled as what was written.
+        assert_eq!(lines_of(&json!({"write": "bytes", "journal": 7})), None);
+        assert_eq!(lines_of(&json!({"write": "bytes", "journal": null})), None);
+    }
+
+    #[test]
+    fn a_turn_s_images_are_journaled_beside_its_text() {
+        let with: Json = serde_json::from_str(&input_record(3, "see", Some(&json!(["/a.png"])))).unwrap();
+        assert_eq!(with["in"], json!({"prompt": "see", "images": ["/a.png"]}));
+        let without: Json = serde_json::from_str(&input_record(3, "see", None)).unwrap();
+        assert_eq!(without["in"], json!({"prompt": "see", "images": []}));
+    }
+
+    #[test]
+    fn a_prompt_shaped_like_a_record_stays_its_words() {
+        let text = r#"{"text":"quoted","images":["/a.png"]}"#;
+        let kept: Json = serde_json::from_str(&input_record(3, text, None)).unwrap();
+        assert_eq!(kept["in"]["prompt"], json!(text));
+        assert_eq!(kept["in"]["images"], json!([]));
     }
 
     #[test]

@@ -22,6 +22,18 @@ fn native_defface_records_the_declared_spec_and_documentation() {
                "(1 ((t (:foreground \"red\"))) \"Declared\" \"red\")");
 }
 
+/// A spec may name `:height' twice, and a function runs on every
+/// recalculation wherever in the plist it stands: it keeps the face from
+/// being memoised.
+#[test]
+fn a_function_height_after_a_number_runs_on_every_recalculation() {
+    let mut vm = Vm::new();
+    answer(&mut vm, "(setq calls 0)");
+    answer(&mut vm, "(defface height-face (list (list t :height 120 :height (lambda (h) (setq calls (1+ calls)) h))) \"Twice\")");
+    answer(&mut vm, "(setq calls 0)");
+    assert_eq!(answer(&mut vm, "(progn (dotimes (_ 3) (romacs--face-spec-recalc 'height-face (selected-frame))) calls)"), "3");
+}
+
 #[test]
 fn native_defface_registers_separate_global_and_frame_attributes() {
     let mut vm = Vm::new();

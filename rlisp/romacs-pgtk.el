@@ -198,6 +198,19 @@ Child frames stack among themselves; the root frame stays where it is."
 
 ;; browse-url.el's dispatch for a pgtk frame.
 
+(defun pgtk-register-dnd-targets (frame targets)
+  "Register TARGETS, a list of strings, as what can be dropped on FRAME.
+pgtkselect.c's checks; Romacs's window takes no drops, so nothing keeps
+them.  `pgtk-dnd-init-frame' calls this for each new frame."
+  (unless (eq (frame-live-p (or frame (selected-frame))) 'pgtk)
+    (error "Window system frame should be used"))
+  (unless (proper-list-p targets)
+    (signal 'wrong-type-argument
+            (list 'listp (if (consp targets) (cdr (last targets)) targets))))
+  (dolist (target targets)
+    (unless (stringp target)
+      (signal 'wrong-type-argument (list 'stringp target)))))
+
 (defun pgtk-backend-display-class (&optional _terminal)
   "Return the name of the GDK backend display class of TERMINAL."
   (interactive "")

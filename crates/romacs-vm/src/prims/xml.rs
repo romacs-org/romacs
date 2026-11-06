@@ -1,16 +1,16 @@
 //! GNU xml.c. `libxml-parse-html-region' parses with Romacs's own HTML
-//! parser (crate::html), which builds the tree libxml2 builds for GNU; there
-//! is no libxml2 XML parser, so `libxml-available-p' still answers nil, as a
-//! GNU built without HAVE_LIBXML2 does, and its callers (dbus.el, nnatom.el)
-//! parse XML with xml.el (VM2-LIBXML1).  `romacs--xml-read-element' reads an
-//! element as xml.el itself does (crate::xml_read), for XMPP's stanzas.
+//! parser (crate::html), which builds the tree libxml2 builds for GNU, and
+//! `libxml-parse-xml-region' with crate::xml_read's document reader, which
+//! answers as libxml2 does; so `libxml-available-p' is t (VM2-LIBXML1).
+//! `romacs--xml-read-element' reads an element as xml.el itself does
+//! (crate::xml_read too), for XMPP's stanzas.
 use super::*;
 use crate::html::Node;
 
 defsubr! { name = "libxml-available-p", gnu = "xml.c:321", effect = Pure,
 fn libxml_available_p(cx) {
     let _ = cx;
-    Ok(Value::NIL)
+    Ok(Value::TRUE)
 }}
 
 /// make_dom: (NAME ATTRS . CHILDREN), a text node's string, or
@@ -35,25 +35,29 @@ fn dom(cx: &mut Leaf<'_>, node: &Node) -> Value {
     }
 }
 
-// Fparse_region with HTMLP: the region START..END (default the accessible
-// buffer, in either order) as libxml2 reads it; nil when it holds no
-// element. Unless DISCARD-COMMENTS, top-level comments come back with the
-// root elements as (top nil NODE...), with the quirk of GNU's loop: a
-// lone top-level node that is no element gives nil.
-defsubr! { name = "libxml-parse-html-region", gnu = "xml.c:285", effect = Reads,
-fn libxml_parse_html_region(cx; optional start: Value, end: Value, base_url: Value, discard_comments: Value) {
+/// parse_region's text: START..END (default the accessible buffer, in
+/// either order).
+fn region_text(cx: &mut Leaf<'_>, start: Value, end: Value, base_url: Value) -> std::result::Result<Vec<u8>, Fault> {
     if base_url != Value::NIL && !matches!(cx.kind(base_url), Kind::String | Kind::Bytes) {
         return Err(Fault::Wrong("stringp", base_url));
     }
     let (start, end) = if start == Value::NIL || end == Value::NIL {
-        let buffer = cx.current_buffer()?;
-        let (begv, zv) = cx.accessible_positions(buffer)?;
+        let (_, begv, zv) = cx.point_extent()?;
         let position = |n: i64| Value::integer(n).map_err(Fault::Error);
         (if start == Value::NIL { position(begv)? } else { start }, if end == Value::NIL { position(zv)? } else { end })
     } else { (start, end) };
     if matches!(cx.kind(start), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("integer-or-marker-p", start)); }
-    let text = cx.text_span(start, end, true)?;
-    let nodes = crate::html::parse(&String::from_utf8_lossy(&text.bytes));
+    Ok(cx.text_span(start, end, true)?.bytes)
+}
+
+// Fparse_region with HTMLP: the region as libxml2 reads it; nil when it
+// holds no element. Unless DISCARD-COMMENTS, top-level comments come back
+// with the root elements as (top nil NODE...), with the quirk of GNU's
+// loop: a lone top-level node that is no element gives nil.
+defsubr! { name = "libxml-parse-html-region", gnu = "xml.c:285", effect = Reads,
+fn libxml_parse_html_region(cx; optional start: Value, end: Value, base_url: Value, discard_comments: Value) {
+    let text = region_text(cx, start, end, base_url)?;
+    let nodes = crate::html::parse(&String::from_utf8_lossy(&text));
     if discard_comments == Value::NIL && nodes.len() > 1 {
         let mut items = vec![cx.intern("top"), Value::NIL];
         items.extend(nodes.iter().map(|n| dom(cx, n)));
@@ -62,13 +66,39 @@ fn libxml_parse_html_region(cx; optional start: Value, end: Value, base_url: Val
     Ok(nodes.iter().find(|n| matches!(n, Node::Element { .. })).map_or(Value::NIL, |root| dom(cx, root)))
 }}
 
-/// An element of `crate::xml_read' as xml.el builds it: (NAME ATTRS .
-/// CHILDREN), names interned, text a string.
+// Fparse_region without HTMLP: nil when the region is not well-formed.
+// Unless DISCARD-COMMENTS, GNU's loop over the top-level nodes gives (top
+// nil NODE...) when a node other than the last is not nil: such a node is
+// dropped, the last one kept, nil or not. Otherwise, the root element.
+defsubr! { name = "libxml-parse-xml-region", gnu = "xml.c:297", effect = Reads,
+fn libxml_parse_xml_region(cx; optional start: Value, end: Value, base_url: Value, discard_comments: Value) {
+    use crate::xml_read::XmlNode;
+    let text = region_text(cx, start, end, base_url)?;
+    let Some(nodes) = std::str::from_utf8(&text).ok().and_then(crate::xml_read::parse_document) else { return Ok(Value::NIL) };
+    let root = |cx: &mut Leaf<'_>| nodes.iter().find(|n| matches!(n, XmlNode::Element { .. })).map_or(Value::NIL, |n| xml_el(cx, n));
+    let Some((last, earlier)) = nodes.split_last() else { return Ok(Value::NIL) };
+    if discard_comments != Value::NIL || earlier.iter().all(|n| matches!(n, XmlNode::Other)) {
+        return Ok(root(cx));
+    }
+    let mut items = vec![cx.intern("top"), Value::NIL];
+    items.extend(earlier.iter().filter(|n| !matches!(n, XmlNode::Other)).map(|n| xml_el(cx, n)));
+    items.push(xml_el(cx, last));
+    Ok(cx.coding_list(&items))
+}}
+
+/// A node of `crate::xml_read': an element as xml.el and make_dom build it,
+/// (NAME ATTRS . CHILDREN), names interned, text a string; a comment and
+/// what else make_dom knows.
 fn xml_el(cx: &mut Leaf<'_>, node: &crate::xml_read::XmlNode) -> Value {
     use crate::xml_read::XmlNode;
     let string = |cx: &mut Leaf<'_>, s: &str| cx.make_string(s.as_bytes().to_vec(), !s.is_ascii());
     match node {
-        XmlNode::Text(text) => string(cx, text),
+        XmlNode::Text(text) | XmlNode::Cdata(text) => string(cx, text),
+        XmlNode::Comment(text) => {
+            let items = [cx.intern("comment"), Value::NIL, string(cx, text)];
+            cx.coding_list(&items)
+        }
+        XmlNode::Other => Value::NIL,
         XmlNode::Element { name, attrs, children } => {
             let attrs: Vec<Value> = attrs.iter().map(|(k, v)| {
                 let (k, v) = (cx.intern(k), string(cx, v));

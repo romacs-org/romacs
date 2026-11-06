@@ -69,6 +69,21 @@ fn take_doomed_finalizers(cx) {
     Ok(cx.take_doomed_finalizers())
 }}
 
+// Whether `post-gc-hook' is due, for `romacs--run-finalizers'; asking
+// takes it.
+defsubr! { name = "romacs--take-post-gc", gnu = "alloc.c:6022", effect = Global,
+fn take_post_gc(cx) {
+    Ok(if cx.take_post_gc() { Value::TRUE } else { Value::NIL })
+}}
+
+// alloc.c inhibit_garbage_collection, for the length of `post-gc-hook':
+// non-nil ON holds collection, nil lets it go.
+defsubr! { name = "romacs--hold-collection", gnu = "alloc.c:5458", effect = Global,
+fn hold_collection(cx, on: Value) {
+    cx.hold_collection(on != Value::NIL);
+    Ok(Value::NIL)
+}}
+
 /// The engine's continuation after `romacs--run-finalizers', which
 /// returns the collection's statistics it was given.
 pub(crate) fn finalizers_ran(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
@@ -112,4 +127,12 @@ fn memory_info(cx) -> Step {
         cx.cons(kib, list)
     });
     Ok(Step::Done(list))
+}}
+
+// Each counter wraps past the largest fixnum, as GNU's doc says, and
+// collection never lowers one.
+defsubr! { name = "memory-use-counts", gnu = "alloc.c:7212", effect = Reads,
+fn memory_use_counts(cx) {
+    let counters = cx.consed().map(|n| Value::fixnum((n & Value::MAX_FIXNUM as u64) as i64).unwrap());
+    Ok(counters.iter().rev().fold(Value::NIL, |list, &n| cx.cons(n, list)))
 }}

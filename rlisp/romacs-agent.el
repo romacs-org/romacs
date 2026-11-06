@@ -371,7 +371,8 @@ and that nothing answers at."
       (when (romacs-agent--own-directory-p routes)
         (dolist (route (directory-files routes t "\\.sock\\'"))
           (unless (file-directory-p (expand-file-name (file-name-base route) (romacs-agent--state-root)))
-            (when (file-symlink-p route) (delete-file route))))))
+            ;; Another HOME's process sees no record of a live session here.
+            (when (and (file-symlink-p route) (romacs-agent--stale-p route)) (delete-file route))))))
     (let ((editor (expand-file-name "editor/" runtime)))
       (when (romacs-agent--own-directory-p editor)
         (dolist (socket (directory-files editor t "\\`[0-9]+\\.sock\\'"))
@@ -510,6 +511,40 @@ nil: its index built once, when first asked."
           (when-let* ((name (plist-get (cdr cell) :t3-driver))) (puthash name (car cell) index))))
       (gethash driver index))))
 
+(defun romacs-agent--walk-instances (stop)
+  "`romacs-agent-providers' as (INSTANCES . CONSTRAINTS), as
+`romacs-agent-instances' says.  A non-nil STOP ends the walk at the first
+instance it accepts: finding that need not read a long list."
+  (let* ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil)
+         (add (lambda (instance)
+                (push instance instances)
+                (when (and stop (funcall stop instance)) (throw 'romacs-agent--walked nil)))))
+    (catch 'romacs-agent--walked
+      (dolist (entry romacs-agent-providers)
+        (if (or (eq entry 't3) (eq (car-safe entry) 't3))
+            (let ((settings (progn (require 'romacs-agent-t3)
+                                   (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings))))
+              (pcase-let ((`(,t3 . ,why)
+                           (romacs-agent-t3-read settings (romacs-agent--t3-harnesses) romacs-agent--driver-generation)))
+                (setq problems (append (reverse why) problems))
+                (dolist (row t3)
+                  (unless (gethash (car row) taken)
+                    (puthash (car row) t taken)
+                    ;; Its threads' titles are in the store beside these settings.
+                    (funcall add (romacs-agent--provider
+                                  (append row (list :t3-store (romacs-agent-t3-store settings)))))))))
+          (unless (gethash (car entry) taken)
+            (puthash (car entry) t taken)
+            (condition-case err (funcall add (romacs-agent--provider entry))
+              (user-error (push (list :source 'lisp :id (car entry) :reason (error-message-string err)) problems)
+                          (setq unknown t)))))))
+    ;; The harnesses there are, once.
+    (when unknown
+      (push (list :source 'lisp :id nil
+                  :reason (format "Romacs runs: %s" (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
+            problems))
+    (cons (nreverse instances) (nreverse problems))))
+
 (defun romacs-agent-instances (&optional constraints)
   "The instances `romacs-agent-providers' names, in its order, each a plist
 \=(`romacs-agent--provider'): the first entry of a name wins; the `t3'
@@ -518,31 +553,8 @@ entry, or (t3 :settings FILE), stands for T3 Code's instances there
 offered, but their sessions still resume.  With CONSTRAINTS non-nil,
 return (INSTANCES . CONSTRAINTS), the second saying, for each instance
 Romacs cannot run, why."
-  (let ((taken (make-hash-table :test #'equal)) (instances nil) (problems nil) (unknown nil))
-    (dolist (entry romacs-agent-providers)
-      (if (or (eq entry 't3) (eq (car-safe entry) 't3))
-          (let ((settings (progn (require 'romacs-agent-t3)
-                                 (or (plist-get (cdr-safe entry) :settings) romacs-agent-t3-settings))))
-            (pcase-let ((`(,t3 . ,why)
-                         (romacs-agent-t3-read settings (romacs-agent--t3-harnesses) romacs-agent--driver-generation)))
-              (setq problems (append (reverse why) problems))
-              (dolist (row t3)
-                (unless (gethash (car row) taken)
-                  (puthash (car row) t taken)
-                  ;; Its threads' titles are in the store beside these settings.
-                  (push (romacs-agent--provider (append row (list :t3-store (romacs-agent-t3-store settings))))
-                        instances)))))
-        (unless (gethash (car entry) taken)
-          (puthash (car entry) t taken)
-          (condition-case err (push (romacs-agent--provider entry) instances)
-            (user-error (push (list :source 'lisp :id (car entry) :reason (error-message-string err)) problems)
-                        (setq unknown t))))))
-    ;; The harnesses there are, once.
-    (when unknown
-      (push (list :source 'lisp :id nil
-                  :reason (format "Romacs runs: %s" (mapconcat (lambda (h) (symbol-name (car h))) romacs-agent--drivers ", ")))
-            problems))
-    (if constraints (cons (nreverse instances) (nreverse problems)) (nreverse instances))))
+  (let ((walked (romacs-agent--walk-instances nil)))
+    (if constraints walked (car walked))))
 
 (defun romacs-agent--configured (name)
   "The instance NAME, or whose T3 id is NAME, or nil."
@@ -583,7 +595,8 @@ whatever the editor's own environment and the user manager's say."
 
 (defun romacs-agent--default-provider ()
   (or romacs-agent-default-provider
-      (plist-get (cl-find-if (lambda (i) (plist-get i :enabled)) (romacs-agent-instances)) :name)
+      (let ((enabled (lambda (i) (plist-get i :enabled))))
+        (plist-get (cl-find-if enabled (car (romacs-agent--walk-instances enabled))) :name))
       (user-error "No agent provider: `romacs-agent-providers' names no enabled instance")))
 
 ;;; Models
@@ -686,7 +699,7 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
                                     :model (car row) :efforts efforts
                                     :default-effort (plist-get (cdr row) :default-effort)
                                     :note (or missing
-                                              (and efforts (format "effort %s…%s" (car efforts) (car (last efforts))))
+                                              (and efforts (format "effort %s...%s" (car efforts) (car (last efforts))))
                                               ""))
                               common)))
                   models))))
@@ -763,13 +776,17 @@ with ASK-EFFORT, or when nothing gives the chosen model one."
     (append (when-let* ((model (plist-get options :model))) (list model-flag model))
             (when-let* ((effort (plist-get options :effort))) (list effort-flag effort)))))
 
-(defun romacs-agent--line (session object)
-  "Write OBJECT as one line to SESSION's harness.  A detached session whose
-supervisor still runs is attached first; one whose supervisor ended says
-so: it resumes with `romacs-agent-resume'."
+(defun romacs-agent--line (session object &optional journal)
+  "Write OBJECT as one line to SESSION's harness; JOURNAL, when given, is
+what the journal keeps of it.  A detached session whose supervisor still
+runs is attached first; one whose supervisor ended says so: it resumes with
+`romacs-agent-resume'."
   (let ((connection (romacs-agent-connection session))
         ;; The harness's line is text inside the envelope: serialized once.
-        (line (concat (json-serialize (romacs-mcp--object "write" (romacs-agent--json object)))
+        (line (concat (json-serialize
+                       (if journal
+                           (romacs-mcp--object "write" (romacs-agent--json object) "journal" (romacs-agent--json journal))
+                         (romacs-mcp--object "write" (romacs-agent--json object))))
                       "\n")))
     (cond ((process-live-p connection) (process-send-string connection line))
           ;; A stopped supervisor leaves its socket: only a connection says it listens.
@@ -781,6 +798,26 @@ so: it resumes with `romacs-agent-resume'."
   "The text of a message CONTENT: a string or a vector of blocks."
   (if (stringp content) content
     (mapconcat (lambda (block) (or (and (hash-table-p block) (gethash "text" block)) "")) content "")))
+
+(defcustom romacs-agent-image-max-bytes (* 20 1024 1024)
+  "The largest image that may be attached or sent: one goes whole into a
+message, on the main VM, and a harness refuses what is far beyond this."
+  :type 'natnum :group 'romacs-agent)
+
+(defun romacs-agent-image-file-p (file)
+  "Whether FILE is a regular file with an image's name, of a size to send."
+  (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
+       (file-regular-p file) (file-readable-p file)
+       ;; The file a read would get, past any symbolic link.
+       (<= (file-attribute-size (file-attributes (file-truename file))) romacs-agent-image-max-bytes)))
+
+(defun romacs-agent--sendable-images (images)
+  "IMAGES that may still be sent: a queued message's file can change while
+it waits.  A file left out is said, as its message goes on without it."
+  (seq-filter (lambda (file)
+                (or (romacs-agent-image-file-p file)
+                    (progn (message "Not sending %s: gone, or over `romacs-agent-image-max-bytes'" file) nil)))
+              images))
 
 (defun romacs-agent--value (value)
   "VALUE, with JSON null and false as nil."
@@ -795,9 +832,24 @@ so: it resumes with `romacs-agent-resume'."
   "SESSION's harness's command line, RESUME going on with its conversation."
   (funcall (romacs-agent--harness-get session :argv) session resume))
 
-(defun romacs-agent--input (session text)
-  "Write TEXT to SESSION's persistent harness as the user's message."
-  (romacs-agent--line session (funcall (romacs-agent--harness-get session :input) session text)))
+(defvar romacs-agent--message-images nil
+  "The images the user attached to the message being written to a harness,
+for its driver.  Only what was attached: nothing is ever read from a
+message's text, which a child's result or a quote can fill.")
+
+(defun romacs-agent--input (session text &optional images)
+  "Write TEXT to SESSION's persistent harness as the user's message, with
+the attached IMAGES.  The journal keeps the message as it would be without
+them, and their files: a replay reads every record, and no image's bytes."
+  (let ((input (romacs-agent--harness-get session :input))
+        (images (romacs-agent--sendable-images images)))
+    (if (not images)
+        (romacs-agent--line session (funcall input session text))
+      (let ((record (funcall input session text)))
+        (puthash "images" (vconcat images) record)
+        (romacs-agent--line session
+                            (let ((romacs-agent--message-images images)) (funcall input session text))
+                            record)))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -834,18 +886,20 @@ a digest of its identity, UUID-shaped."
                               key)))
                 (hash-table-values romacs-agent--sessions))))
 
-(defun romacs-agent--turn (session text)
-  "Run one turn of SESSION's per-turn harness on prompt TEXT.  The
-supervisor journals TEXT and gives it to the harness itself, so the turn
-goes on whatever becomes of this server."
+(defun romacs-agent--turn (session text &optional images)
+  "Run one turn of SESSION's per-turn harness on prompt TEXT with the
+attached IMAGES.  The supervisor journals TEXT and gives it to the harness
+itself, so the turn goes on whatever becomes of this server."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
-  (let ((input (expand-file-name "input" (romacs-agent-dir session))))
+  (let ((input (expand-file-name "input" (romacs-agent-dir session)))
+        (images (romacs-agent--sendable-images images)))
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
     (setf (romacs-agent-journal-start session)
           (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-    (romacs-agent--launch session (romacs-agent--argv session t) input))
+    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
+                          input images))
   (setf (romacs-agent-state session) 'starting)
   (romacs-agent--attach session 50))
 
@@ -934,7 +988,7 @@ other; empty for none."
   "Name SESSION, whose title was generated, after its first prompt TEXT."
   (let ((line (romacs-agent--task-line text)))
     (unless (string-empty-p line)
-      (setf (romacs-agent-title session) (truncate-string-to-width line 60 nil nil "…")
+      (setf (romacs-agent-title session) (truncate-string-to-width line 60 nil nil t)
             (romacs-agent-title-auto session) nil)
       (romacs-agent--update-manifest session))))
 
@@ -980,6 +1034,10 @@ other; empty for none."
               (setf (romacs-agent-startup-pending session) nil))))
         (let ((events (cond ((hash-table-p out) (funcall (romacs-agent--harness-get session :events) session out))
                             ((stringp out) (list (list :type 'unknown :raw out)))
+                            ;; A per-turn prompt: the supervisor's own record.
+                            ((and (hash-table-p in) (stringp (gethash "prompt" in)))
+                             (list (list :type 'input :text (gethash "prompt" in)
+                                         :images (append (gethash "images" in) nil))))
                             ((hash-table-p in)
                              (funcall (or (romacs-agent--harness-get session :input-events) #'ignore) session in))
                             ;; A per-turn harness's prompt, written as text.
@@ -1155,23 +1213,24 @@ for the next, sent once this one is off the queue."
                     ;; harness gone meanwhile) keeps it for the next turn end
                     ;; or resume.
                     (if (romacs-agent--per-turn-p session)
-                        (romacs-agent--turn session (car next))
-                      (romacs-agent--input session (car next)))
+                        (romacs-agent--turn session (car next) (nth 3 next))
+                      (romacs-agent--input session (car next) (nth 3 next)))
                     (drop)
                     (when (nth 1 next) (funcall (nth 1 next)))
                     (setq more (eq (romacs-agent-dispatch session) 'again) force nil)
                     (setf (romacs-agent-dispatch session) 'busy)))))))
       (setf (romacs-agent-dispatch session) nil))))
 
-(defun romacs-agent-send-later (session text &optional first)
-  "Send TEXT to SESSION once its running turn ends, now when none runs;
-FIRST puts it ahead of the messages already waiting."
+(defun romacs-agent-send-later (session text &optional first images)
+  "Send TEXT to SESSION, with the attached IMAGES, once its running turn
+ends, now when none runs; FIRST puts it ahead of the messages already
+waiting."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
-      (romacs-agent-send session text)
+      (romacs-agent-send session text nil nil images)
     (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil nil) (romacs-agent-queue session))
+        (progn (push (list text nil nil images) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
-      (romacs-agent--enqueue session (list text nil nil)))))
+      (romacs-agent--enqueue session (list text nil nil images)))))
 
 ;;; Lifecycle
 
@@ -1249,10 +1308,11 @@ shows on a command line other users can read."
            when (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=" entry)
            collect (concat "--setenv=" (match-string 1 entry))))
 
-(defun romacs-agent--launch (session argv &optional input)
+(defun romacs-agent--launch (session argv &optional input images)
   "Run SESSION's supervisor with harness ARGV, as a user unit when a user
 manager answers, else detached.  INPUT is a file the supervisor gives the
-harness as its whole stdin."
+harness as its whole stdin, and IMAGES what the journal keeps as attached
+to it."
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
@@ -1261,6 +1321,7 @@ harness as its whole stdin."
                                 ;; Journaled first: where this run's records start.
                                 "--note" "{\"type\":\"run\"}")
                           (and input (list "--input" input))
+                          (and images (list "--input-images" (json-serialize (vconcat images))))
                           (cons "--" argv)))
          (unit (format "romacs-agent-%s" (romacs-agent--key (romacs-agent-id session))))
          (default-directory (file-name-as-directory (romacs-agent-cwd session))))
@@ -1420,21 +1481,22 @@ resumed; a per-turn harness goes on with its next message."
     (when (> (or tries 100) 0)
       (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- (or tries 100))))))
 
-(defun romacs-agent-send (session text &optional delivered valid)
+(defun romacs-agent-send (session text &optional delivered valid images)
   "Send TEXT to SESSION's harness as the user's next message, then call
 DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
-given, then says it is no longer wanted."
+given, then says it is no longer wanted.  IMAGES are the files the user
+attached to it."
   (cond ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
-         (romacs-agent--input session text)
+         (romacs-agent--input session text images)
          (when delivered (funcall delivered)))
         ;; Starting up: it goes once the harness is ready.
         ((not (romacs-agent--per-turn-p session))
-         (romacs-agent--enqueue session (list text delivered valid)))
+         (romacs-agent--enqueue session (list text delivered valid images)))
         ((or (process-live-p (romacs-agent-connection session))
              (memq (romacs-agent-state session) '(starting running)))
-         (romacs-agent--enqueue session (list text delivered valid)))
-        (t (romacs-agent--turn session text)
+         (romacs-agent--enqueue session (list text delivered valid images)))
+        (t (romacs-agent--turn session text images)
            (when delivered (funcall delivered)))))
 
 (defun romacs-agent--enqueue (session item)

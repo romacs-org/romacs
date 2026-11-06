@@ -86,6 +86,10 @@ pub fn sync_current_message(vm: &mut Vm) -> Result<(), String> {
 
 /// Clear a message left by the previous command.
 pub fn clear(vm: &mut Vm) -> Result<(), String> {
+    // keyboard.c read_char: the hook runs while the message still shows.
+    if vm.echo_area_message_shown() {
+        vm.eval_source("(and (fboundp 'romacs--safe-run-hooks) (romacs--safe-run-hooks 'echo-area-clear-hook))")?;
+    }
     vm.set_echo_area_message(None);
     hide(vm)
 }
@@ -122,6 +126,19 @@ mod tests {
         crate::startup::initialize(&mut vm).unwrap();
         crate::eval_last_sexp::install(&mut vm).unwrap();
         (vm, Default::default(), crate::presentation::Presentation::new())
+    }
+
+    /// A command wiping a message runs `echo-area-clear-hook' while the
+    /// message shows; with none showing it does not run.
+    #[test]
+    fn clearing_a_message_runs_the_echo_area_clear_hook() {
+        let (mut vm, _, _) = workspace();
+        vm.set_echo_area_host(true);
+        vm.eval_source("(progn (fset 'romacs--safe-run-hooks (lambda (hook) (funcall (symbol-value hook)))) (setq echo-probe nil echo-area-clear-hook (lambda () (setq echo-probe (cons (current-message) echo-probe)))) (message \"shown\"))").unwrap();
+        show_current_message(&mut vm).unwrap();
+        clear(&mut vm).unwrap();
+        clear(&mut vm).unwrap();
+        assert_eq!(vm.eval_source("echo-probe").unwrap().display().unwrap(), "(\"shown\")");
     }
 
     /// A message holding a raw byte, even one whose `message' signalled,

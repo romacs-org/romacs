@@ -1,21 +1,10 @@
-//! The heap boundary is a compile-time property. Each `fail/` program holds a
-//! `Local` across a call that can collect, or reaches for the raw moving index;
-//! it must not compile, and its `.stderr` pins WHICH error rejects it, so an
-//! unrelated failure (a typo, a missing import) cannot pass for the property.
-//! `pass/` is the positive control: the same harness accepts sealed usage.
+//! The heap boundary is a compile-time property (tests/compile_boundaries.rs).
 //!
 //! The runtime tests below are the net under the type: a `Rooted` handle is
 //! the only way to hold a value across a collection, so it must resolve after
 //! a compacting collection and must stop retaining anything once dropped.
 
 use romacs_vm::Vm;
-
-#[test]
-fn heap_boundary_is_enforced_by_the_compiler() {
-    let t = trybuild::TestCases::new();
-    t.pass("tests/heap_boundary/pass/*.rs");
-    t.compile_fail("tests/heap_boundary/fail/*.rs");
-}
 
 /// GC.md's "existing wait/budget points": the executor polls at backward
 /// branches and calls and may collect mid-request, with live registers, not

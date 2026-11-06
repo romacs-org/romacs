@@ -287,3 +287,31 @@ fn an_event_queued_during_the_wait_is_read_as_keyboard_input() {
         "(122 nil 1 nil)"
     );
 }
+
+/// A display whose pointer stands at one place.
+struct Pointing(Option<(i32, i32)>);
+
+impl HostInput for Pointing {
+    fn input_pending(&mut self) -> bool { false }
+    fn redisplay(&mut self, _: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> Result<HostEvent, String> { Err("no events".into()) }
+    fn pointer(&mut self) -> Option<(i32, i32)> { self.0 }
+}
+
+/// `mouse-pixel-position' is the host's answer; `mouse-position' is that in
+/// characters (pixel_to_glyph_coords, rounding down at the frame's edge);
+/// a pointer elsewhere is nil.
+#[test]
+fn mouse_position_reads_the_host_pointer() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    let form = "(list (cdr (mouse-pixel-position)) (cdr (mouse-position)) (mouse-position-in-root-frame))";
+    vm.set_host_input(Some(Box::new(Pointing(Some((45, 61))))));
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "((45 . 61) (4 . 3) (4 . 3))");
+    vm.set_host_input(Some(Box::new(Pointing(Some((-1, -1))))));
+    assert_eq!(vm.eval_source("(cdr (mouse-position))").unwrap().display().unwrap(), "(-1 . -1)");
+    vm.set_host_input(Some(Box::new(Pointing(None))));
+    assert_eq!(vm.eval_source("(cdr (mouse-position))").unwrap().display().unwrap(), "(nil)");
+}
+

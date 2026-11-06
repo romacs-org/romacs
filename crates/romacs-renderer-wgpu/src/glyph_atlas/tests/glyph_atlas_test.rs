@@ -17,7 +17,7 @@ fn resolved_test_font(family: &str, weight: u16, size: f32) -> Option<ResolvedFo
     let request = romacs_font::FontRequest::new(family, size).with_weight(weight);
     romacs_font::FontResolver::new()
         .ok()?
-        .resolve_primary(&request, &romacs_font::FontsetPolicy::new())
+        .resolve_primary(&request)
         .ok()
 }
 
