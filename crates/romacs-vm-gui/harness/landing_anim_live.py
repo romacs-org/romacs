@@ -221,6 +221,24 @@ def main():
 
                 whole = f'{WIDTH}x{HEIGHT - 80}+0+0'
 
+                def no_cursor(where):
+                    """*Romacs* shows no cursor (`cursor-type' nil): the host
+                    publishes none and the window's first cell stays dark,
+                    over shots longer than a blink."""
+                    published = [json.loads(line) for line in stderr_path.read_text(errors='replace').splitlines()
+                                 if line.startswith('{') and '"cursor-publication"' in line]
+                    lit = []
+                    for i in range(5):
+                        out = subprocess.run([tool('magick'), str(shot(f'cursor-{where}-{i}')), '-crop', '8x16+15+10',
+                                              '-format', '%[fx:mean]', 'info:'], capture_output=True, text=True, check=True)
+                        lit.append(float(out.stdout))
+                        time.sleep(.4)
+                    cursors = published[-1]['cursors'] if published else None
+                    check(f'{where}: the landing shows no cursor', cursors == [] and max(lit) < .1,
+                          {'cursors': cursors, 'first cell': lit})
+
+                no_cursor('at start')
+
                 # quick
                 started = time.monotonic()
                 keys('-M', 'ctrl', 'x', '-m', 'ctrl')
@@ -270,6 +288,7 @@ def main():
                 check('SPC holds the landing still', held < 600, held)
                 keys(' ')
                 check('SPC again sets it moving', turning('resumed', whole) > 1000)
+                no_cursor('back from *scratch*')
 
                 # scroll
                 def drawn(since=0):

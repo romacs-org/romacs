@@ -212,6 +212,10 @@ here, with GNU's save question; otherwise GNU's body runs (its
                     (and (integerp line) (cons line (if (integerp column) column 0))))))
           files))
 
+(defun romacs-server--landing ()
+  "A client with nothing to visit lands where the session is empty."
+  (when (fboundp 'romacs-landing-new-client) (romacs-landing-new-client)))
+
 (defun romacs-server--frame (peer params)
   "`romacs/frame': show the window, visit the files, and answer with
 their buffers' names, or with `wait' once every one is done."
@@ -221,7 +225,9 @@ their buffers' names, or with `wait' once every one is done."
          (files (romacs-server--files (gethash "files" params []) cwd))
          (buffers (let ((default-directory cwd))
                     (nreverse (server-visit-files files nil t)))))
-    (when buffers (switch-to-buffer (car (last buffers))))
+    (if buffers
+        (switch-to-buffer (car (last buffers)))
+      (romacs-server--landing))
     (if (and buffers (eq (gethash "wait" params) t))
         (progn
           (romacs-server--wait (romacs-mcp-hold) peer buffers)
@@ -277,6 +283,15 @@ client's end does not delete it."
     ;; The session's terminal outlives every client.
     (process-put proc 'no-delete-terminal t)
     frame))
+
+(defun romacs-server--execute (orig proc files nowait commands evalexprs dontkill frame tty)
+  "Around `server-execute': a client that opened only a frame (`emacsclient
+-c') and was shown *scratch* lands (`romacs-server--landing').  Not where
+`initial-buffer-choice' chose: its function may clear it."
+  (let ((chosen initial-buffer-choice))
+    (funcall orig proc files nowait commands evalexprs dontkill frame tty)
+    (when (and frame (not chosen) (not (or files commands evalexprs)))
+      (romacs-server--landing))))
 
 (defun romacs-server--filter (orig proc string)
   "Around `server-process-filter': emacsclient's -c asks for a window,
@@ -401,6 +416,7 @@ beside its build.json), or nil."
     (advice-add 'server-create-window-system-frame :override #'romacs-server--create-frame)
     (advice-add 'server-create-tty-frame :override #'romacs-server--refuse-tty)
     (advice-add 'server-process-filter :around #'romacs-server--filter)
+    (advice-add 'server-execute :around #'romacs-server--execute)
     (advice-add 'save-buffers-kill-terminal :around #'romacs-server--kill-terminal)
     ;; An endpoint started before this (agent sessions restored at
     ;; startup) gives way: a server serves its own name's.

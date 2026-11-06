@@ -778,7 +778,7 @@ fn point_line_snapshot(published: &romacs_layout_input::WindowSnapshot, point: u
         text: TextSlice { extends: vec![], utf8: text[from..to].into(), face_runs, raw },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: published.hscroll, faces, tab_width: published.tab_width, wrap: published.wrap,
-        cursor_off: false, stretches, images, wrap_flips, line_numbers: None,
+        cursor_off: false, no_cursor: false, stretches, images, wrap_flips, line_numbers: None,
         // Only the fringes' widths place the row; their bitmaps' faces are not kept.
         chrome: WindowChrome { left_fringe: published.chrome.left_fringe, right_fringe: published.chrome.right_fringe,
             left_margin: published.chrome.left_margin, right_margin: published.chrome.right_margin, ..WindowChrome::default() },

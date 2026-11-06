@@ -776,14 +776,9 @@ pub fn finish_loadup(vm: &mut Vm, started: &Started) -> Result<(), String> {
 
 /// startup.el `display-startup-screen' (startup.el:2708): once, a
 /// read-only [`STARTUP_SCREEN`] with the launch's status, shown as GNU
-/// shows its screen, beside the visited buffers when CONCISE.  As
-/// `fancy-startup-screen' (startup.el:2269) sets up *GNU Emacs*, it starts
-/// in `command-line-default-directory' and takes GNU's
-/// `splash-screen-keymap': typing does nothing, SPC and DEL scroll, and q
-/// (`exit-splash-screen') kills it.  The screen is the animated logo
-/// (rlisp/romacs-landing.el), whose keys (SPC, Home) come first, and
-/// nothing else; without the logo, one title line.  The launch's status
-/// line goes to *Messages*.
+/// shows its screen, beside the visited buffers when CONCISE.  The screen
+/// is `romacs-gui-loadup-startup-buffer's, which `romacs-landing-show'
+/// brings back later.  The launch's status line goes to *Messages*.
 fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), String> {
     let name = lisp_string(STARTUP_SCREEN);
     if vm.eval_source(&format!("(get-buffer {name})"))? != romacs_vm::Fixed::NIL {
@@ -792,18 +787,7 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
     vm.eval_source(&format!(
         "(progn
            (message \"%s\" {status})
-           (romacs-gui-loadup-startup-screen
-            (with-current-buffer (get-buffer-create {name})
-              (setq default-directory command-line-default-directory)
-              (use-local-map splash-screen-keymap)
-              (if (fboundp 'romacs-landing)
-                  (progn (setq buffer-read-only t) (set-buffer-modified-p nil) (romacs-landing))
-                (insert \"Romacs\\n\")
-                (setq buffer-read-only t)
-                (set-buffer-modified-p nil))
-              (goto-char (point-min))
-              (current-buffer))
-            {concise}))",
+           (romacs-gui-loadup-startup-screen (romacs-gui-loadup-startup-buffer {name}) {concise}))",
         status = lisp_string(&started.status()),
         concise = if concise { "t" } else { "nil" },
     ))?;
@@ -1947,6 +1931,16 @@ mod tests {
 (setq command-line-default-directory default-directory splash-screen-keymap (make-sparse-keymap))
 (defun romacs-gui-loadup-after-init () nil)
 (defun romacs-gui-loadup-command-line-1 () 'full)
+(defun romacs-gui-loadup-startup-buffer (name)
+  (or (get-buffer name)
+      (with-current-buffer (get-buffer-create name)
+        (setq default-directory command-line-default-directory)
+        (use-local-map splash-screen-keymap)
+        (insert \"Romacs\\n\")
+        (setq buffer-read-only t)
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (current-buffer))))
 (defun romacs-gui-loadup-startup-screen (buffer concise) (set-window-buffer nil buffer) (set-buffer buffer))
 (defun romacs-gui-loadup-normal-top-level () nil)\n").unwrap();
         // A scratch chain has no minibuffer.el or icomplete.el to configure.
