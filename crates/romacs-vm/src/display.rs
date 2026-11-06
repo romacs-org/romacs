@@ -225,6 +225,9 @@ pub(super) struct DisplayState {
     /// latest first: the face revision, the alist's value, the values of
     /// the window parameters its `:filtered' faces test, and the table.
     remapped: Vec<(u64, BoundedDatum, Vec<Option<romacs_face::Datum>>, std::rc::Rc<FaceTable>)>,
+    /// Each terminal's own table, by session: what its programs colour
+    /// stays out of every other buffer's.
+    terminal_tables: Vec<(u64, std::rc::Rc<FaceTable>)>,
     /// The last face table's id.
     table_ids: u64,
     pub(super) font_selection_order: romacs_layout_input::FontSelectionState,
@@ -277,7 +280,7 @@ pub(super) struct DisplayState {
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, table_ids, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, previous, shown, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -290,6 +293,7 @@ impl DisplayState {
     pub(super) fn faces_changed(&mut self) {
         self.face_table = None;
         self.remapped.clear();
+        self.terminal_tables.clear();
         self.face_revision += 1;
     }
     pub(super) fn set_font_alternative_families(&mut self, names: Vec<Vec<String>>) {
@@ -371,6 +375,7 @@ impl DisplayState {
             face_heights: Default::default(),
             face_table: None,
             remapped: vec![],
+            terminal_tables: vec![],
             table_ids: 0,
             previous: std::collections::BTreeMap::new(),
             shown: std::collections::BTreeMap::new(),
@@ -2809,10 +2814,10 @@ impl Vm {
     /// remapping and filter values, not per redisplay.
     pub(crate) fn display_faces_for(&mut self, window: Value, buffer: Value) -> Result<std::rc::Rc<FaceTable>> {
         let alist = self.buffer_variable(buffer, "face-remapping-alist")?;
-        if alist == Value::NIL || alist == Value::UNBOUND { return self.display_faces(); }
+        if alist == Value::NIL || alist == Value::UNBOUND { return self.plain_faces_for(buffer); }
         // A remapping the faces cannot read paints as none (VM2-FACE-REMAP).
-        let Ok(datum) = BoundedDatum::from_graph(&Graph(self), alist.0) else { return self.display_faces() };
-        let Ok(remap) = romacs_face::Remap::from_alist(&datum) else { return self.display_faces() };
+        let Ok(datum) = BoundedDatum::from_graph(&Graph(self), alist.0) else { return self.plain_faces_for(buffer) };
+        let Ok(remap) = romacs_face::Remap::from_alist(&datum) else { return self.plain_faces_for(buffer) };
         let parameters = remap.filter_parameters();
         let values: Vec<Option<romacs_face::Datum>> = parameters.iter().map(|name| self.window_parameter_datum(window, name)).collect();
         let revision = self.display_state.face_revision;
@@ -2833,6 +2838,23 @@ impl Vm {
         let table = std::rc::Rc::new(self.face_table_for(self.display_state.table_ids, &remap, true)?);
         self.display_state.remapped.insert(0, (revision, datum, values, table.clone()));
         self.display_state.remapped.truncate(8);
+        Ok(table)
+    }
+    /// BUFFER's faces with no remapping: the shared table, or a terminal's
+    /// own, since any colour a program prints makes a row there.
+    fn plain_faces_for(&mut self, buffer: Value) -> Result<std::rc::Rc<FaceTable>> {
+        let Some(session) = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer).map(|binding| binding.session) else {
+            return self.display_faces();
+        };
+        if let Some((_, table)) = self.display_state.terminal_tables.iter().find(|(owner, _)| *owner == session)
+            && table.len() < FACE_TABLE_LIMIT {
+            return Ok(table.clone());
+        }
+        self.display_state.table_ids += 1;
+        let table = std::rc::Rc::new(self.face_table_for(self.display_state.table_ids, &romacs_face::Remap::empty(), false)?);
+        let bindings = &self.terminal_bindings;
+        self.display_state.terminal_tables.retain(|(owner, _)| *owner != session && bindings.iter().any(|binding| binding.session == *owner));
+        self.display_state.terminal_tables.push((session, table.clone()));
         Ok(table)
     }
     /// The current buffer's default face in WINDOW where its

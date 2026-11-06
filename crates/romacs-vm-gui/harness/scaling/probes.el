@@ -334,6 +334,15 @@ thousandth a stack mark."
            (switch-to-buffer (get-buffer-create "scaling-registry")))
   :body (scaling--preview-once it))
 
+;; N terminals open beside the buffer being typed in: each has a table of
+;; its own, which what is shown must not walk.
+(scaling-probe terminal-face-tables :gui t :n 4 :steps 4
+  :setup (progn
+           (require 'romacs-term)
+           (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
+           (switch-to-buffer (get-buffer-create "scaling-typing")))
+  :body (with-current-buffer it (insert "x")))
+
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1
   :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
