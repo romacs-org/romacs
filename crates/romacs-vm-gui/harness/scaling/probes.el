@@ -1858,6 +1858,34 @@ closures over a mutable variable (each a closure and a cell)."
   (dotimes (_ (/ n 100)) (make-string 16 ?x))
   (dotimes (i (/ n 10)) (let ((x i)) (lambda () (setq x (1+ x))))))
 
+;; A zygote's validity check before each dispatch (rlisp/vm/isolate.el,
+;; worker-vms design §2.4): the inherited variables compared, then the
+;; files it loaded and the `load-path' directories stamped.  Linear in
+;; each, and in nothing else.
+(scaling-probe isolate-zygote-check :n 200
+  :setup (let* ((environment (scaling--names "SCALING_VARIABLE=value" (* 10 n)))
+                (directories (scaling--names "/nonexistent/scaling-lisp" n))
+                (files (scaling--names "/nonexistent/scaling-library.el" n))
+                (inputs (let ((process-environment environment) (load-path directories))
+                          (romacs--isolate-inputs)))
+                (expanded (let ((load-path directories)) (romacs--isolate-load-directories))))
+           (list environment directories
+                 (record 'isolate-zygote nil nil 'ready nil inputs files (romacs--isolate-stamp files)
+                         expanded (romacs--isolate-stamp expanded) 0)))
+  :body (let ((process-environment (nth 0 it)) (load-path (nth 1 it)))
+          (dotimes (_ 10)
+            (or (romacs--isolate-zygote-current-p (nth 2 it)) (error "Zygote check failed")))))
+
+;; The project commands' record of enumeration times (rlisp/romacs-project.el):
+;; one entry per project root, each decision one lookup and one stat of the
+;; root's Git index.
+(scaling-probe romacs-project-enumerations :n 2000
+  :setup (progn (require 'romacs-project) (scaling--names "/nonexistent/scaling-project" n))
+  :body (progn
+          (dolist (root it) (romacs-project--record root 0.01))
+          (dolist (root it) (romacs-project--enumeration-estimate root))
+          (dolist (root it) (remhash root romacs-project--enumerations))))
+
 ;; A child's environment (rlisp/vm/subprocess.el romacs--environment-block):
 ;; N distinct names in `process-environment', each first definition kept.
 (scaling-probe process-environment-block :n 2000
