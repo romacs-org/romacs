@@ -1309,3 +1309,19 @@ fn per_window_counters_preserve_every_reason_in_diagnostic_order() {
     frame_stats::publish_window_demand(std::iter::empty());
     assert!(frame_stats::window_snapshots().is_empty());
 }
+
+#[test]
+fn a_scene_drawn_by_either_path_closes_the_slot_for_a_period() {
+    let mut c = FrameCoordinator::new();
+    let w = win(1);
+    let t = t0();
+    assert!(c.scene_slot_open(w, t), "the first scene draws at once");
+    c.scene_drawn(w, t, ms(16));
+    assert!(!c.scene_slot_open(w, t.plus(ms(8))), "the next takes the platform's pace");
+    // That one draws on the callback, and spends the slot as a direct draw does.
+    c.scene_drawn(w, t.plus(ms(17)), ms(16));
+    assert!(!c.scene_slot_open(w, t.plus(ms(18))), "a scene right after it waits too");
+    assert!(c.scene_slot_open(w, t.plus(ms(33))), "the period over, a scene draws at once");
+    c.set_occluded(w, true);
+    assert!(!c.scene_slot_open(w, t.plus(ms(60))), "a window not shown has no slot");
+}

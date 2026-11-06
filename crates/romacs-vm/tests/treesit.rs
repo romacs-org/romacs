@@ -149,6 +149,130 @@ fn an_early_parse_is_used_only_for_the_text_it_read() {
     assert_eq!(value.as_deref(), Ok("((t nil t) t t t t nil t)"));
 }
 
+/// A frame `defer_parse' starts shows a small edit without its parse, and
+/// so without `pre-redisplay-functions' or fontification; the next frame
+/// runs them, however small its own edit. A larger edit never waits.
+#[test]
+fn a_small_edit_shows_for_one_frame_before_its_parse() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (defvar romacs-treesit-show-before-parse 8) \
+        (setq parsed 0 pre 0 fontified 0) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") (insert \"int a;\\n\") \
+        (setq treesit-test-parser (treesit-parser-create 'c)) \
+        (treesit-parser-add-notifier treesit-test-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (setq pre (1+ pre)) (treesit-parser-root-node treesit-test-parser))) \
+        (setq fontification-functions (list (lambda (pos) (setq fontified (1+ fontified)) (put-text-property pos (point-max) 'fontified t)))))");
+    vm.eval_source(&setup).unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    let counts = |vm: &mut Vm| vm.eval_source("(list parsed pre (> fontified 0))").and_then(|v| v.display()).unwrap();
+    assert_eq!(counts(&mut vm), "(1 1 t)");
+    vm.eval_source("(progn (setq fontified 0) (goto-char (point-max)) (insert \"x\"))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(counts(&mut vm), "(1 1 nil)", "a small edit's frame waits for nothing");
+    assert!(vm.deferred_parse_done());
+    vm.eval_source("(insert \"y\")").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(counts(&mut vm), "(2 2 t)", "the next frame parses, a new edit or not");
+    assert!(!vm.deferred_parse_done());
+    vm.eval_source("(progn (setq fontified 0) (insert (make-string 100 ?z)))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(counts(&mut vm), "(3 3 t)", "a large edit waits for its parse");
+    assert!(!vm.deferred_parse_done());
+    // A parser nothing asks, as an embedded one out of view, holds no one up.
+    vm.eval_source("(setq treesit-test-idle (treesit-parser-create 'c nil nil 'idle))").unwrap();
+    for _ in 0..3 {
+        vm.eval_source("(insert \"abcdef\")").unwrap();
+        vm.defer_parse().unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        assert!(vm.deferred_parse_done(), "an idle parser's backlog is not this edit");
+        vm.defer_parse().unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        assert!(!vm.deferred_parse_done());
+    }
+    // Nor does a parser a query ran, which leaves the shown one still to parse.
+    vm.eval_source("(progn (insert \"x\") (treesit-parser-root-node treesit-test-idle))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(vm.deferred_parse_done(), "another parser's parse is not the frame's");
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(!vm.deferred_parse_done());
+    vm.eval_source("(treesit-parser-delete treesit-test-idle)").unwrap();
+    // The frame after tells the hooks what changed since they last ran, which
+    // the deferred frame has already recorded as shown: here a selection.
+    vm.eval_source("(progn (setq treesit-test-seen nil) \
+        (add-hook 'pre-redisplay-functions (lambda (w) (push (eq w (selected-window)) treesit-test-seen))) \
+        (split-window))").unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    vm.eval_source("(progn (setq treesit-test-seen nil) (select-window (next-window)) (insert \"x\"))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(vm.eval_source("treesit-test-seen").and_then(|v| v.display()).unwrap(), "nil", "no hook ran");
+    assert!(vm.deferred_parse_done());
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(!vm.deferred_parse_done());
+    assert_eq!(vm.eval_source("(and (memq nil treesit-test-seen) (memq t treesit-test-seen) t)").and_then(|v| v.display()).unwrap(), "t",
+        "the window selection left and the one it reached both ran");
+    vm.eval_source("(progn (setq romacs-treesit-show-before-parse 0) (insert \"x\"))").unwrap();
+    vm.defer_parse().unwrap();
+    assert!(!vm.deferred_parse_done(), "zero shows nothing early");
+}
+
+/// Rows of 25 pixels, cells of 10.
+struct Cells;
+impl romacs_vm::LayoutHost for Cells {
+    fn measure(&mut self, input: &romacs_layout_input::MeasureInput) -> Result<romacs_layout_input::Measured, String> {
+        let chars = input.text.utf8.chars().count();
+        let heights = vec![25; input.faces.len()];
+        Ok(romacs_layout_input::Measured { glyphs: vec![(10, 25); chars], ascents: vec![20; chars], face_ascents: vec![20; heights.len()], face_heights: heights, fallback: vec![false; chars] })
+    }
+    fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+        Ok(frame.windows.iter().map(|w| {
+            let len = w.snapshot.text.utf8.len();
+            romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], point: None }
+        }).collect())
+    }
+}
+
+/// `redisplay' between a deferred frame and the next tells the hooks what
+/// changed: the next frame does not tell them again.
+#[test]
+fn redisplay_after_a_deferred_frame_settles_the_hooks() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(require 'treesit)").unwrap();
+    vm.set_layout_host(Some(Box::new(Cells)));
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (setq noninteractive nil seen nil) \
+        (defvar romacs-treesit-show-before-parse 8) (setq romacs-treesit-show-before-parse 8) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") (insert \"int a;\\n\") \
+        (treesit-parser-create 'c) \
+        (setq fontification-functions (list (lambda (pos) (put-text-property pos (point-max) 'fontified t)))) \
+        (with-current-buffer (get-buffer-create \"other\") (insert \"some text\")) \
+        (set-window-buffer (split-window) \"other\") \
+        (add-hook 'pre-redisplay-functions (lambda (w) (push (buffer-name (window-buffer w)) seen))))");
+    vm.eval_source(&setup).unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    vm.eval_source("(progn (insert \"x\") (set-window-point (next-window) 3))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(vm.deferred_parse_done());
+    vm.eval_source("(progn (setq seen nil) (redisplay))").unwrap();
+    assert_eq!(vm.eval_source("(and (member \"other\" seen) t)").and_then(|v| v.display()).unwrap(), "t", "redisplay names the moved window");
+    vm.eval_source("(setq seen nil)").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert_eq!(vm.eval_source("(and (member \"other\" seen) t)").and_then(|v| v.display()).unwrap(), "nil", "and the next frame does not again");
+}
+
 /// VM2-TREESIT-HASH: `equal' nodes hash alike, so an `equal' table finds
 /// them (GNU hashes the node object's address and misses).
 #[test]

@@ -1567,6 +1567,7 @@ fn evaluate(
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
+                vm.defer_parse()?;
                 let next = frame(&mut vm, g1, width, height)?;
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
@@ -1599,6 +1600,7 @@ fn evaluate(
                     }
                 }
             }
+            if vm.deferred_parse_done() { live_presentation.changed(); }
             if pending.is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
                 // after any ran, redisplay and check again before blocking.

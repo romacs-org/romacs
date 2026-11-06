@@ -90,6 +90,11 @@ pub(crate) struct Registry {
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
+    /// Bytes inserted and deleted since a frame last fontified a window of
+    /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
+    /// parser out of view may never catch up, and one a query runs is not
+    /// the frame.
+    pub edited: std::cell::Cell<i64>,
 }
 /// A copy of a text (a snapshot or a cloned buffer) has no parsers.
 impl Clone for Registry {
@@ -215,8 +220,14 @@ impl Registry {
             visit(parser);
         }
     }
+    /// Whether a parse is due for an edit of LIMIT bytes at most.
+    pub(crate) fn small_edit_due(&self, limit: i64) -> bool {
+        (1..=limit).contains(&self.edited.get())
+            && self.parsers.iter().any(|(_, core)| core.borrow().need_reparse)
+    }
     /// treesit_record_change_1 for every parser of TEXT, edited already.
     pub(crate) fn record(&self, change: Change, text: &TextBody) {
+        self.edited.set(self.edited.get() + (change.old_end - change.start) + (change.new_end - change.start));
         for (_, core) in &self.parsers {
             core.borrow_mut().record(change, text);
         }

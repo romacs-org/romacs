@@ -869,6 +869,16 @@ pub(super) struct RenderGpuContext {
     pub(super) queue: Arc<wgpu::Queue>,
 }
 
+/// Where the evaluator's last scene is on its way to the surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SceneDraw {
+    Drawn,
+    /// Just ingested: it draws this event-loop pass if it can.
+    Arrived,
+    /// It takes the platform's pace, like any redraw.
+    Waiting,
+}
+
 pub(super) struct RenderApp {
     pub(super) comms: RenderComms,
     pub(super) menus: crate::menus::MenuPresentation,
@@ -941,6 +951,8 @@ pub(super) struct RenderApp {
     pub(super) key_repeats: super::key_repeat::KeyRepeats,
     /// The evaluator's busy indicator (busy_toast.rs).
     pub(super) busy_toast: super::busy_toast::BusyToast,
+    /// How far the last scene from the evaluator got (`draw_fresh_scene').
+    pub(super) scene: SceneDraw,
     pub(super) pending_file_drops: std::collections::HashSet<winit::event_loop::AsyncRequestSerial>,
 
     pub(super) image_metadata: SharedImageRenderState,
@@ -1165,6 +1177,7 @@ impl RenderApp {
             modifier_sides: super::modifier_sides::ModifierSides::default(),
             key_repeats: super::key_repeat::KeyRepeats::default(),
             busy_toast: super::busy_toast::BusyToast::default(),
+            scene: SceneDraw::Drawn,
             pending_file_drops: Default::default(),
             image_metadata,
             cursor_defaults: CursorState::new(

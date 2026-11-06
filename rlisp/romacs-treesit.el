@@ -18,7 +18,21 @@
 ;; parse with the keys behind it: `show-paren-mode's idle timer is the one
 ;; such asker, and highlights no paren until the tree is there.
 
+;; A typed character does not wait for its parse either.  A frame shows an
+;; edit of `romacs-treesit-show-before-parse' bytes or fewer as the text
+;; stands, with the faces the character inherited, and the next frame
+;; parses and fontifies it: a parse of a large function takes longer than a
+;; display's frame (`defer_parse' in display.rs).
+
 ;;; Code:
+
+(defcustom romacs-treesit-show-before-parse 8
+  "Largest edit, in bytes, a frame shows before the parse it needs.
+Typing shows at once and takes its faces a frame later.  A larger edit,
+such as a yank, waits for its parse, so that no plain text flashes.  Zero
+waits for every parse, as GNU does."
+  :type 'integer
+  :group 'treesit)
 
 (defconst romacs-treesit--mode-languages
   '((bash-ts-mode . bash) (c-ts-mode . c) (c++-ts-mode . cpp)

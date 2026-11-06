@@ -607,7 +607,7 @@ recompiling; signals an error if no frame shader is installed
 
 ;;; Generated autoloads from romacs-treesit.el
 
-(register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
+(register-definition-prefixes "romacs-treesit" '("romacs-treesit-"))
 
 
 ;;; Generated autoloads from romacs-truncate.el

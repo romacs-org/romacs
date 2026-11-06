@@ -390,10 +390,14 @@ fn redisplay(cx; optional _force: Value) -> Step {
     // Lisp runs through the evaluator here, not nested in this primitive.
     if let Some(windows) = cx.pre_redisplay_call()? {
         let f = cx.intern("romacs--pre-redisplay");
-        return Ok(Step::Call { f, args: vec![windows], then: redisplay_settled, saved: vec![] });
+        return Ok(Step::Call { f, args: vec![windows], then: redisplay_hooks_ran, saved: vec![] });
     }
     redisplay_settled(cx, Value::NIL, &[])
 }}
+fn redisplay_hooks_ran(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
+    cx.pre_redisplay_ran();
+    redisplay_settled(cx, value, saved)
+}
 fn redisplay_settled(cx: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
     cx.redisplay_point_visibility_now()?;
     Ok(Step::Done(Value::TRUE))

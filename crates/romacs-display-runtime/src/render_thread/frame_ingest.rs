@@ -208,9 +208,7 @@ impl RenderApp {
             self.update_primary_child(child);
         }
         self.scene_children = shown;
-        if let Some(window) = self.frame_windows.primary_window() {
-            window.request_redraw();
-        }
+        self.scene = super::state::SceneDraw::Arrived;
     }
 
     fn ingest_primary_paint(
