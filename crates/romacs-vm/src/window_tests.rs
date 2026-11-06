@@ -576,10 +576,10 @@ fn g3a_geometry_and_layout_end_journal() {
     let snapshot = vm.display_snapshot(800, 576).unwrap();
     vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], point: None }]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
-    // A laid-out window lays itself out again for UPDATE, which needs the
-    // host's layout attached.
+    // UPDATE answers a current end as recorded; a stale one lays the window
+    // out again, which needs the host's layout attached.
+    yes(&mut vm, "(= (window-end nil t) 4)");
     let refused = r#"(equal (condition-case e (window-end nil t) (error (car (cdr e)))) "VM2 window-end in a displayed window is unsupported")"#;
-    yes(&mut vm, refused);
     run(&mut vm, "(insert \"z\")");
     yes(&mut vm, refused);
     yes(&mut vm, "(= (window-end nil) 5)");
@@ -823,7 +823,7 @@ fn a_remapping_added_after_a_paint_makes_a_band_new() {
     assert!(first.mode_line.is_some(), "the band is shown");
     run(&mut vm, r##"(set (make-local-variable 'face-remapping-alist) '((default :foreground "#00ff00")))"##);
     let window = vm.selected_window_value().unwrap();
-    let (band, face) = vm.painted_band(window, false).unwrap();
+    let (band, face, _) = vm.painted_band(window, false).unwrap();
     let table = vm.window_faces(window).unwrap();
     assert!((face.0 as usize) < table.len(), "the handle indexes the table a layout will read");
     assert!(band.is_some_and(|band| band.face_runs.iter().all(|run| (run.face.0 as usize) < table.len())), "so do its runs");

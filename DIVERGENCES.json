@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "7e7608fad283bfb22e736676315171f617100ed778b37c24d76965cc3b18be29",
+  "input_hash": "1a11f2d7e8d871e68019c0e17db74b0cc4c2257878d2e4e041ca86ab3c50f77b",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 365,
-  "symbols": 1113,
+  "rows": 367,
+  "symbols": 1124,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -21,13 +21,13 @@
    107
   ],
   "$": [
-   280
+   281
   ],
   "(max)": [
    66
   ],
   "(max-char)": [
-   290
+   291
   ],
   "+": [
    66,
@@ -41,7 +41,7 @@
   ],
   "1+": [
    66,
-   305
+   306
   ],
   "1-": [
    66
@@ -69,10 +69,10 @@
    91
   ],
   "[:class:]": [
-   364
+   366
   ],
   "\\": [
-   280
+   281
   ],
   "abort-minibuffers": [
    85
@@ -90,12 +90,12 @@
    8
   ],
   "add-text-properties": [
-   304,
-   349
+   305,
+   351
   ],
   "add-variable-watcher": [
-   318,
-   319
+   319,
+   320
   ],
   "advice-add": [
    66,
@@ -108,20 +108,20 @@
    209
   ],
   "after-insert-file-set-coding": [
-   350
+   352
   ],
   "after-load-alist": [
-   334
+   335
   ],
   "after-load-functions": [
    143
   ],
   "after-string": [
-   343
+   344
   ],
   "all-completions": [
-   344,
-   345
+   345,
+   346
   ],
   "ange-ftp": [
    139
@@ -134,7 +134,7 @@
    66,
    136,
    169,
-   312
+   313
   ],
   "aref": [
    66,
@@ -158,16 +158,16 @@
    29
   ],
   "auto-hscroll-mode": [
-   281
+   282
   ],
   "autoload": [
-   322,
-   353,
-   354
+   323,
+   355,
+   356
   ],
   "autoload-do-load": [
-   322,
-   335
+   323,
+   336
   ],
   "average_width": [
    28
@@ -176,25 +176,28 @@
    239
   ],
   "backquote": [
-   259
+   260
   ],
   "backquote-delay-process": [
-   259
+   260
   ],
   "backquote-listify": [
-   259
+   260
   ],
   "backquote-process": [
-   259
+   260
   ],
   "backtrace--frames-and-locals": [
-   348
+   349
   ],
   "backtrace--locals": [
-   347
+   348
+  ],
+  "backtrace-debug": [
+   350
   ],
   "backtrace-get-frames": [
-   348
+   349
   ],
   "backward-char": [
    180
@@ -212,26 +215,26 @@
    209
   ],
   "before-string": [
-   343
+   344
   ],
   "beginning-of-line": [
    180
   ],
   "bidi-display-reordering": [
-   277
+   278
   ],
   "bidi-paragraph-separate-re": [
-   277
+   278
   ],
   "bidi-paragraph-start-re": [
-   277
+   278
   ],
   "blink-cursor-mode": [
-   317
+   318
   ],
   "bool-vector": [
    105,
-   302
+   303
   ],
   "bool-vector-p": [
    105
@@ -240,20 +243,20 @@
    244
   ],
   "boundp": [
-   330
+   331
   ],
   "buffer-chars-modified-tick": [
    126
   ],
   "buffer-display-table": [
-   272
+   273
   ],
   "buffer-face-mode": [
-   254
+   255
   ],
   "buffer-file-coding-system": [
    125,
-   350
+   352
   ],
   "buffer-file-name": [
    125
@@ -287,7 +290,7 @@
    24
   ],
   "buffer-text-pixel-size": [
-   280
+   281
   ],
   "buffer-undo-list": [
    209
@@ -298,7 +301,7 @@
   "byte-code-function-p": [
    56,
    57,
-   327
+   328
   ],
   "byte-compile": [
    57,
@@ -335,7 +338,7 @@
   ],
   "car": [
    66,
-   314
+   315
   ],
   "ccl-execute": [
    208
@@ -347,14 +350,14 @@
    66
   ],
   "ceiling": [
-   284
+   285
   ],
   "char-after": [
    66,
    215
   ],
   "char-category-set": [
-   311
+   312
   ],
   "char-code-property-description": [
    58
@@ -369,7 +372,7 @@
    72
   ],
   "char-property-alias-alist": [
-   280
+   281
   ],
   "char-syntax": [
    197
@@ -382,7 +385,7 @@
   ],
   "char-width-table": [
    3,
-   280
+   281
   ],
   "characterp": [
    107
@@ -392,10 +395,10 @@
    68
   ],
   "cl-print-object": [
-   347
+   348
   ],
   "cl-type-of": [
-   346
+   347
   ],
   "clear-buffer-auto-save-failure": [
    12
@@ -443,7 +446,7 @@
    94
   ],
   "command-line-1": [
-   288
+   289
   ],
   "command-line-args": [
    110
@@ -452,13 +455,13 @@
    132
   ],
   "compare-strings": [
-   345
+   346
   ],
   "compiled-function-p": [
-   327
+   328
   ],
   "completion-styles completion-category-overrides romacs-completion--fido-fzf": [
-   265
+   266
   ],
   "compose-region-internal": [
    207
@@ -467,7 +470,7 @@
    207
   ],
   "composition": [
-   280
+   281
   ],
   "composition-function-table": [
    29,
@@ -476,14 +479,14 @@
   "concat": [
    31,
    66,
-   291,
    292,
    293,
-   333
+   294,
+   334
   ],
   "condition-case": [
-   328,
-   335
+   329,
+   336
   ],
   "configure-info-directory": [
    118
@@ -503,7 +506,7 @@
   "copy-sequence": [
    97,
    133,
-   333
+   334
   ],
   "copy-syntax-table": [
    196
@@ -512,17 +515,17 @@
    69
   ],
   "create-image": [
-   253
+   254
   ],
   "ctl-arrow": [
    3,
-   280
+   281
   ],
   "ctl-x-map": [
    178
   ],
   "current-bidi-paragraph-direction": [
-   277
+   278
   ],
   "current-buffer": [
    66
@@ -544,10 +547,10 @@
    3
   ],
   "current-load-list": [
-   334
+   335
   ],
   "current-message": [
-   271
+   272
   ],
   "current-prefix-arg": [
    94
@@ -578,7 +581,7 @@
    245
   ],
   "custom-reevaluate-setting": [
-   353
+   355
   ],
   "custom-set": [
    174
@@ -587,7 +590,7 @@
    155
   ],
   "custom-theme-recalc-face": [
-   258
+   259
   ],
   "custom-type": [
    174
@@ -609,6 +612,9 @@
   ],
   "debug-on-event": [
    33
+  ],
+  "debug-on-next-call": [
+   350
   ],
   "debug-on-quit": [
    32
@@ -634,22 +640,22 @@
    128,
    131,
    147,
-   322,
-   324,
-   326
+   323,
+   325,
+   327
   ],
   "default-boundp": [
-   329
+   330
   ],
   "default-directory": [
    117
   ],
   "default-file-name-coding-system": [
-   350
+   352
   ],
   "default-value": [
-   329,
-   330
+   330,
+   331
   ],
   "defcustom": [
    174
@@ -662,30 +668,30 @@
    164,
    192,
    226,
-   356,
-   360
+   358,
+   362
   ],
   "define-category": [
-   311
+   312
   ],
   "define-ccl-program": [
    208
   ],
   "define-charset-internal": [
    205,
-   308
-  ],
-  "define-coding-system": [
-   350
-  ],
-  "define-coding-system-alias": [
    309
   ],
+  "define-coding-system": [
+   352
+  ],
+  "define-coding-system-alias": [
+   310
+  ],
   "define-error": [
-   323
+   324
   ],
   "define-fringe-bitmap": [
-   250
+   251
   ],
   "define-hash-table-test": [
    170
@@ -707,7 +713,7 @@
   ],
   "defun": [
    176,
-   324
+   325
   ],
   "defvar": [
    17,
@@ -716,11 +722,11 @@
    177
   ],
   "defvaralias": [
-   318,
-   321
+   319,
+   322
   ],
   "delete": [
-   333
+   334
   ],
   "delete-backward-char": [
    180
@@ -729,11 +735,11 @@
    180
   ],
   "delete-frame": [
-   256
+   257
   ],
   "delete-other-windows-internal": [
    242,
-   248
+   249
   ],
   "describe-buffer-bindings": [
    216
@@ -745,9 +751,10 @@
    216
   ],
   "destroy-fringe-bitmap": [
-   250
+   251
   ],
   "ding": [
+   22,
    181
   ],
   "directory-file-name": [
@@ -760,13 +767,13 @@
    0
   ],
   "disable-theme": [
-   258
+   259
   ],
   "discard-input": [
    86
   ],
   "display": [
-   280
+   281
   ],
   "display-color-cells": [
    225,
@@ -788,16 +795,16 @@
    231
   ],
   "display-line-numbers": [
-   280
+   281
   ],
   "display-line-numbers-current-absolute": [
-   280
+   281
   ],
   "display-line-numbers-disable": [
-   280
+   281
   ],
   "display-line-numbers-width": [
-   280
+   281
   ],
   "display-mm-height": [
    225,
@@ -824,7 +831,7 @@
    231
   ],
   "display-raw-bytes-as-hex": [
-   280
+   281
   ],
   "display-startup-screen": [
    188
@@ -837,10 +844,10 @@
    231
   ],
   "display-warning": [
-   321
+   322
   ],
   "do-after-load-evaluation": [
-   334
+   335
   ],
   "do-auto-save": [
    12
@@ -851,10 +858,10 @@
   ],
   "downcase": [
    66,
-   345
+   346
   ],
   "downcase_char_code_emacs_compat": [
-   363
+   365
   ],
   "elt": [
    35,
@@ -863,22 +870,22 @@
    66
   ],
   "emacs-build-time": [
-   351
+   353
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   363
+   365
   ],
   "emoji": [
    29
   ],
   "enable-recursive-minibuffers": [
-   331
+   332
   ],
   "enable-theme": [
-   258
+   259
   ],
   "encode-coding-string": [
    14
@@ -896,7 +903,7 @@
    66,
    171,
    235,
-   259
+   260
   ],
   "equal-including-properties": [
    170
@@ -907,16 +914,16 @@
   "error-message-string": [
    182,
    183,
-   313
+   314
   ],
   "ert--run-test-internal": [
-   347
+   348
   ],
   "esc-map": [
    178
   ],
   "escape-glyph": [
-   280
+   281
   ],
   "esh-util": [
    139
@@ -924,15 +931,15 @@
   "eval": [
    39,
    66,
-   259,
-   314,
+   260,
    315,
-   325
+   316,
+   326
   ],
   "eval-after-load": [
    143,
-   334,
-   354
+   335,
+   356
   ],
   "eval-and-compile": [
    141
@@ -945,15 +952,15 @@
    138
   ],
   "eval-defun": [
-   271
+   272
   ],
   "eval-expression": [
    66,
-   271
+   272
   ],
   "eval-last-sexp": [
    182,
-   271
+   272
   ],
   "eval-region": [
    138
@@ -961,7 +968,7 @@
   "eval-when-compile": [
    139,
    141,
-   315
+   316
   ],
   "eval_sub": [
    66
@@ -995,10 +1002,10 @@
    66
   ],
   "face": [
-   280
+   281
   ],
   "face-attr-match-p": [
-   258
+   259
   ],
   "face-attribute": [
    130,
@@ -1009,44 +1016,44 @@
    161,
    162,
    163,
-   356,
-   357,
-   360
+   358,
+   359,
+   362
   ],
   "face-family": [
    159,
-   359
+   361
   ],
   "face-font": [
    158,
-   358
+   360
   ],
   "face-list": [
-   258
+   259
   ],
   "face-remap-add-relative": [
-   254
+   255
   ],
   "face-remapping-alist": [
    153,
    162,
    163,
-   254,
-   362
+   255,
+   364
   ],
   "face-set-after-frame-default": [
-   258
+   259
   ],
   "face-spec-choose": [
-   258
+   259
   ],
   "face-spec-recalc": [
-   256,
-   258
+   257,
+   259
   ],
   "face-spec-set-match-display": [
    226,
-   258
+   259
   ],
   "featurep": [
    110,
@@ -1055,8 +1062,8 @@
   ],
   "features": [
    110,
-   322,
-   336
+   323,
+   337
   ],
   "file-accessible-directory-p": [
    46
@@ -1093,13 +1100,13 @@
    124
   ],
   "find-auto-coding": [
-   350
+   352
   ],
   "find-composition": [
-   282
+   283
   ],
   "find-composition-internal": [
-   282
+   283
   ],
   "find-file": [
    0,
@@ -1110,7 +1117,7 @@
   ],
   "find-file-name-handler": [
    69,
-   342
+   343
   ],
   "find-file-noselect": [
    0
@@ -1128,7 +1135,7 @@
    217
   ],
   "fit-window-to-buffer": [
-   268
+   269
   ],
   "float-output-format": [
    203
@@ -1140,7 +1147,7 @@
    72
   ],
   "floor": [
-   284
+   285
   ],
   "font-at": [
    233
@@ -1170,7 +1177,7 @@
    29
   ],
   "fontification-functions": [
-   276
+   277
   ],
   "fontp": [
    233
@@ -1185,7 +1192,7 @@
    200
   ],
   "force-window-update": [
-   317
+   318
   ],
   "format": [
    4,
@@ -1195,17 +1202,17 @@
    116,
    134,
    149,
-   291,
-   341
+   292,
+   342
   ],
   "format-message": [
    95,
    134,
-   341
+   342
   ],
   "format-mode-line": [
    185,
-   316
+   317
   ],
   "format-time-string": [
    106
@@ -1217,58 +1224,58 @@
    197
   ],
   "frame--set-was-invisible": [
-   256
+   257
   ],
   "frame-after-make-frame": [
-   256
+   257
   ],
   "frame-ancestor-p": [
-   256
+   257
   ],
   "frame-bottom-divider-width": [
    244
   ],
   "frame-char-height": [
-   249
-  ],
-  "frame-char-width": [
-   249
-  ],
-  "frame-focus": [
-   256
-  ],
-  "frame-fringe-width": [
    250
   ],
+  "frame-char-width": [
+   250
+  ],
+  "frame-focus": [
+   257
+  ],
+  "frame-fringe-width": [
+   251
+  ],
   "frame-initial-p": [
-   249
+   250
   ],
   "frame-internal-border-width": [
    244
   ],
   "frame-list": [
-   255
+   256
   ],
   "frame-live-p": [
-   249
+   250
   ],
   "frame-native-height": [
-   249
+   250
   ],
   "frame-native-width": [
-   249
+   250
   ],
   "frame-notice-user-settings": [
    188
   ],
   "frame-parameter": [
-   320
+   321
   ],
   "frame-parameters": [
-   320
+   321
   ],
   "frame-parent": [
-   256
+   257
   ],
   "frame-pixel-height": [
    192
@@ -1277,53 +1284,53 @@
    192
   ],
   "frame-position": [
-   256
+   257
   ],
   "frame-right-divider-width": [
    244
   ],
   "frame-root-window": [
-   268
+   269
   ],
   "frame-set-background-mode": [
    225,
    231,
-   258
+   259
   ],
   "frame-terminal": [
-   255,
-   283
+   256,
+   284
   ],
   "frame-text-cols": [
-   256
+   257
   ],
   "frame-text-height": [
-   256
+   257
   ],
   "frame-text-lines": [
-   256
+   257
   ],
   "frame-text-width": [
-   256
+   257
   ],
   "frame-total-cols": [
-   256
+   257
   ],
   "frame-total-lines": [
-   256
+   257
   ],
   "frame-visible-p": [
-   260
+   261
   ],
   "framep": [
-   249,
-   255
+   250,
+   256
   ],
   "freeze": [
    18
   ],
   "fringe-bitmaps-at-pos": [
-   250
+   251
   ],
   "frozen-p": [
    18
@@ -1341,8 +1348,8 @@
    136,
    169,
    176,
-   312,
-   314
+   313,
+   315
   ],
   "funcall-interactively": [
    94
@@ -1355,7 +1362,7 @@
    170
   ],
   "function-history": [
-   322
+   323
   ],
   "function-key-map": [
    178
@@ -1370,7 +1377,7 @@
    52
   ],
   "gc-cons-threshold": [
-   331
+   332
   ],
   "gc-cons-threshold gc-cons-percentage garbage-collect": [
    49
@@ -1391,7 +1398,7 @@
    66,
    107,
    146,
-   323
+   324
   ],
   "get-buffer": [
    219,
@@ -1401,7 +1408,7 @@
    219
   ],
   "get-buffer-window": [
-   255
+   256
   ],
   "get-char-code-property": [
    58
@@ -1411,15 +1418,15 @@
   ],
   "get-load-suffixes": [
    96,
-   330,
-   332
+   331,
+   333
   ],
   "get-text-property": [
-   292,
-   293
+   293,
+   294
   ],
   "get-variable-watchers": [
-   319
+   320
   ],
   "getenv": [
    141
@@ -1432,11 +1439,11 @@
   ],
   "glyphless-char": [
    28,
-   280
+   281
   ],
   "glyphless-char-display": [
    28,
-   280
+   281
   ],
   "gnu-lisp/": [
    66
@@ -1484,7 +1491,7 @@
    156
   ],
   "gui_produce_glyphs": [
-   280
+   281
   ],
   "handler-bind": [
    112
@@ -1496,7 +1503,11 @@
    170
   ],
   "header-line-format": [
-   243
+   243,
+   248
+  ],
+  "header-line-indent-width": [
+   248
   ],
   "help--describe-vector": [
    216
@@ -1508,13 +1519,13 @@
    28
   ],
   "hscroll-margin": [
-   281
+   282
   ],
   "hscroll-step": [
-   281
+   282
   ],
   "iconify-frame": [
-   260
+   261
   ],
   "identity": [
    73
@@ -1523,7 +1534,7 @@
    66
   ],
   "image-types": [
-   252
+   253
   ],
   "indent-to": [
    3
@@ -1532,16 +1543,16 @@
    128
   ],
   "indirect-variable": [
-   318
+   319
   ],
   "inhibit-debugger": [
    32
   ],
   "inhibit-file-name-handlers": [
-   342
+   343
   ],
   "inhibit-file-name-operation": [
-   342
+   343
   ],
   "inhibit-mouse-event-check": [
    94
@@ -1556,13 +1567,13 @@
    188
   ],
   "init-image-library": [
-   252
+   253
   ],
   "initial-buffer-choice": [
    188
   ],
   "inline": [
-   326
+   327
   ],
   "inotify-add-watch": [
    222
@@ -1575,7 +1586,7 @@
   ],
   "input-pending-p": [
    86,
-   307
+   308
   ],
   "insert": [
    66,
@@ -1586,7 +1597,7 @@
    215
   ],
   "insert-image": [
-   253
+   254
   ],
   "insert-special-event": [
    222
@@ -1601,15 +1612,15 @@
    94
   ],
   "intern": [
-   294,
-   337,
+   295,
    338,
    339,
-   340
+   340,
+   341
   ],
   "intern-soft": [
-   338,
-   339
+   339,
+   340
   ],
   "internal-border-width": [
    244
@@ -1618,14 +1629,14 @@
    233
   ],
   "internal-delete-indirect-variable": [
-   318
+   319
   ],
   "internal-interpreter-environment": [
    177
   ],
   "internal-macroexpand-for-load": [
-   324,
-   325
+   325,
+   326
   ],
   "internal-set-alternative-font-family-alist": [
    26,
@@ -1641,24 +1652,24 @@
    130
   ],
   "internal-show-cursor": [
-   317,
-   320
+   318,
+   321
   ],
   "internal-when-entered-debugger": [
    32
   ],
   "interpreted-function-p": [
    57,
-   327
+   328
   ],
   "invalid-function": [
    136
   ],
   "invocation-directory": [
-   288
+   289
   ],
   "invocation-name": [
-   288
+   289
   ],
   "isolate-await": [
    18
@@ -1694,8 +1705,17 @@
    18,
    20
   ],
+  "isolate-zygote": [
+   18
+  ],
+  "isolate-zygote-list": [
+   18
+  ],
+  "isolate-zygotes": [
+   21
+  ],
   "jit-lock-function": [
-   276
+   277
   ],
   "kbd": [
    184
@@ -1726,10 +1746,10 @@
   ],
   "kill-emacs": [
    10,
-   288
+   289
   ],
   "kill-emacs-hook": [
-   288
+   289
   ],
   "kill-local-variable": [
    60,
@@ -1738,13 +1758,13 @@
   "lambda": [
    175,
    176,
-   312,
-   324,
-   328
+   313,
+   325,
+   329
   ],
   "last-coding-system-used": [
    125,
-   350
+   352
   ],
   "last-command": [
    94
@@ -1754,10 +1774,10 @@
    184
   ],
   "last-nonminibuffer-frame": [
-   255
+   256
   ],
   "latin-extra-code-table": [
-   350
+   352
   ],
   "length": [
    66,
@@ -1767,7 +1787,7 @@
    120,
    175,
    177,
-   330
+   331
   ],
   "let*": [
    120
@@ -1788,16 +1808,16 @@
    210
   ],
   "line-move-visual": [
-   278
+   279
   ],
   "line-number": [
-   280
+   281
   ],
   "line-number-display-width": [
-   280
+   281
   ],
   "line-pixel-height": [
-   278
+   279
   ],
   "lisp-eval-depth-reserve": [
    112
@@ -1822,9 +1842,9 @@
    144,
    150,
    177,
-   325,
-   335,
-   336
+   326,
+   336,
+   337
   ],
   "load eval-buffer eval-region": [
    41
@@ -1836,21 +1856,21 @@
    143
   ],
   "load-file-rep-suffixes": [
-   330,
-   332
+   331,
+   333
   ],
   "load-history": [
    138,
    143,
-   318,
-   322,
-   334
+   319,
+   323,
+   335
   ],
   "load-path": [
    110,
    111,
    121,
-   353
+   355
   ],
   "load-prefer-newer": [
    140
@@ -1859,7 +1879,7 @@
    129
   ],
   "load-suffixes": [
-   330
+   331
   ],
   "load-true-file-name": [
    143
@@ -1872,7 +1892,7 @@
   ],
   "locate-file-internal": [
    117,
-   342
+   343
   ],
   "locate-library": [
    111,
@@ -1895,16 +1915,16 @@
    198
   ],
   "lower-frame": [
-   256,
-   260
+   257,
+   261
   ],
   "macroexp--pending-eager-loads": [
-   325
+   326
   ],
   "macroexpand": [
    39,
-   315,
-   324
+   316,
+   325
   ],
   "main-thread": [
    223,
@@ -1919,33 +1939,33 @@
    78,
    104,
    105,
-   302
+   303
   ],
   "make-char-table": [
    97,
-   302
+   303
   ],
   "make-finalizer": [
    51
   ],
   "make-frame": [
-   256
+   257
   ],
   "make-frame-invisible": [
-   260
+   261
   ],
   "make-frame-visible": [
-   260
+   261
   ],
   "make-hash-table": [
    170
   ],
   "make-interpreted-closure": [
-   346
+   347
   ],
   "make-local-variable": [
    199,
-   331
+   332
   ],
   "make-lock-file-name": [
    10
@@ -1977,11 +1997,11 @@
   ],
   "make-string": [
    133,
-   333
+   334
   ],
   "make-symbol": [
    108,
-   337
+   338
   ],
   "make-symbolic-link": [
    8
@@ -1993,16 +2013,16 @@
   ],
   "make-variable-buffer-local": [
    199,
-   329,
-   331
+   330,
+   332
   ],
   "make-vector": [
-   302,
    303,
-   305
+   304,
+   306
   ],
   "makunbound": [
-   330
+   331
   ],
   "map-char-table": [
    97
@@ -2011,10 +2031,10 @@
    97
   ],
   "mapatoms": [
-   338
+   339
   ],
   "mapbacktrace": [
-   347
+   348
   ],
   "mapc": [
    73,
@@ -2064,16 +2084,16 @@
   ],
   "max-lisp-eval-depth": [
    112,
-   331
+   332
   ],
   "max-mini-window-height": [
-   343
+   344
   ],
   "member": [
    66
   ],
   "memory-signal-data": [
-   303
+   304
   ],
   "memq": [
    66
@@ -2094,20 +2114,20 @@
   "message": [
    149,
    181,
-   271
+   272
   ],
   "min": [
    66,
    91
   ],
   "minibuffer--sort-by-length-alpha minibuffer--sort-by-position": [
-   274
+   275
   ],
   "minibuffer-history": [
    85
   ],
   "minibuffer-local-map": [
-   330
+   331
   ],
   "minibuffer-prompt-properties": [
    85
@@ -2116,17 +2136,18 @@
    85
   ],
   "minibuffer-selected-window": [
-   257
+   258
   ],
   "minibuffer-window": [
-   268
+   269
   ],
   "mode-line-format": [
    173,
    185,
    187,
    243,
-   316
+   248,
+   317
   ],
   "mode-line-in-non-selected-windows": [
    185
@@ -2135,10 +2156,10 @@
    185
   ],
   "modify-category-entry": [
-   311
+   312
   ],
   "modify-frame-parameters": [
-   320
+   321
   ],
   "modify-syntax-entry": [
    196
@@ -2147,16 +2168,16 @@
    28
   ],
   "move-overlay": [
-   280
+   281
   ],
   "move-to-column": [
    3
   ],
   "move-to-window-line": [
-   287
+   288
   ],
   "move_it_to": [
-   280
+   281
   ],
   "native-comp-available-p": [
    70
@@ -2171,16 +2192,16 @@
    66
   ],
   "next-line": [
-   278
+   279
   ],
   "next-overlay-change": [
    165
   ],
   "next-property-change": [
-   349
+   351
   ],
   "next-single-char-property-change": [
-   349
+   351
   ],
   "no-byte-compile": [
    144
@@ -2189,13 +2210,16 @@
    28
   ],
   "nobreak-char-display": [
-   280
+   281
   ],
   "nobreak-hyphen": [
-   280
+   281
   ],
   "nobreak-space": [
-   280
+   281
+  ],
+  "noninteractive": [
+   237
   ],
   "normal-top-level-add-to-load-path": [
    111
@@ -2204,10 +2228,10 @@
    66
   ],
   "not-unicode-string": [
-   294,
    295,
    296,
-   297
+   297,
+   298
   ],
   "notmuch": [
    123
@@ -2233,28 +2257,28 @@
    72
   ],
   "obarray-make": [
-   340
+   341
   ],
   "obarrayp": [
-   338
+   339
   ],
   "object-intervals": [
    101
   ],
   "oclosure-type": [
-   346
+   347
   ],
   "optimize-char-table": [
    206
   ],
   "orderless-all-completions orderless-try-completion orderless-compile orderless-filter orderless--highlight": [
-   263
+   264
   ],
   "org-ellipsis": [
-   280
+   281
   ],
   "overlay-arrow-string": [
-   331
+   332
   ],
   "overlays-at": [
    165
@@ -2265,7 +2289,7 @@
    167
   ],
   "overriding-plist-environment": [
-   323
+   324
   ],
   "overwrite-mode": [
    209
@@ -2338,27 +2362,27 @@
    234
   ],
   "pos-visible-in-window-p": [
-   279
+   280
   ],
   "position-symbol": [
    71
   ],
   "posn-at-point": [
-   253,
-   268,
-   279
+   254,
+   269,
+   280
   ],
   "pp-eval-last-sexp": [
-   271
+   272
   ],
   "prefix-help-command": [
-   273
+   274
   ],
   "prefix-numeric-value": [
    94
   ],
   "previous-line": [
-   278
+   279
   ],
   "previous-overlay-change": [
    165
@@ -2368,8 +2392,8 @@
    202,
    203,
    204,
-   283,
-   337
+   284,
+   338
   ],
   "prin1-to-string": [
    74,
@@ -2378,16 +2402,16 @@
    201,
    203,
    204,
-   283,
-   301,
-   337
+   284,
+   302,
+   338
   ],
   "princ": [
    201,
    202,
    203,
    204,
-   301
+   302
   ],
   "print": [
    201,
@@ -2433,8 +2457,12 @@
    221,
    228
   ],
+  "process-thread": [
+   223,
+   229
+  ],
   "produce_glyphs": [
-   280
+   281
   ],
   "profiler-cpu-log": [
    67
@@ -2482,28 +2510,28 @@
    23
   ],
   "propertize": [
-   293,
-   304
+   294,
+   305
   ],
   "provide": [
-   322,
-   334,
-   336
+   323,
+   335,
+   337
   ],
   "purify-flag": [
-   346
+   347
   ],
   "push macroexp-let2 gv-letplace": [
    42
   ],
   "put": [
-   323
+   324
   ],
   "put-image": [
-   253
+   254
   ],
   "put-text-property": [
-   293
+   294
   ],
   "puthash": [
    19
@@ -2512,8 +2540,8 @@
    87
   ],
   "raise-frame": [
-   256,
-   260
+   257,
+   261
   ],
   "re-search-backward": [
    196,
@@ -2530,7 +2558,7 @@
    102,
    103,
    150,
-   292
+   293
   ],
   "read-char": [
    86
@@ -2557,8 +2585,8 @@
    102,
    103,
    150,
-   292,
-   340
+   293,
+   341
   ],
   "read-key-sequence": [
    86
@@ -2583,10 +2611,10 @@
    86
   ],
   "recenter": [
-   287
+   288
   ],
   "record": [
-   302
+   303
   ],
   "recordp": [
    44
@@ -2595,26 +2623,26 @@
    86
   ],
   "redirect-frame-focus": [
-   256
+   257
   ],
   "redisplay": [
    181,
-   275
+   276
   ],
   "redisplay-adhoc-scroll-in-resize-mini-windows": [
-   343
+   344
   ],
   "register-ccl-program": [
    208
   ],
   "relative": [
-   280
+   281
   ],
   "remhash": [
    19
   ],
   "remove-variable-watcher": [
-   319
+   320
   ],
   "rename-buffer": [
    219
@@ -2634,25 +2662,25 @@
   "require": [
    110,
    140,
-   322,
-   334,
+   323,
    335,
    336,
-   353
+   337,
+   355
   ],
   "reset": [
    161,
-   355
+   357
   ],
   "resize-mini-windows": [
-   343
+   344
   ],
   "restore-buffer-modified-p": [
    10
   ],
   "reverse": [
    78,
-   302
+   303
   ],
   "right-divider-width": [
    244
@@ -2664,22 +2692,22 @@
    191
   ],
   "romacs--create-frame": [
-   256
+   257
   ],
   "romacs--frame-shares-faces-p": [
-   256
+   257
   ],
   "romacs--host-input": [
    87
   ],
   "romacs--host-minibuffer": [
-   268
+   269
   ],
   "romacs--key-read-functions": [
-   273
+   274
   ],
   "romacs--minibuffer-host": [
-   268
+   269
   ],
   "romacs--mode-line-click": [
    246
@@ -2688,10 +2716,10 @@
    190
   ],
   "romacs--oclosure-type": [
-   346
+   347
   ],
   "romacs--prefix-help-functions": [
-   273
+   274
   ],
   "romacs--read-host-event": [
    87
@@ -2739,7 +2767,7 @@
    191
   ],
   "romacs-animate--elements romacs--display-animates romacs--logo-frame romacs-animate-start": [
-   266
+   267
   ],
   "romacs-chrome-apply": [
    244
@@ -2763,49 +2791,58 @@
    244
   ],
   "romacs-complete-mode": [
-   268
-  ],
-  "romacs-complete-mode fido-vertical-mode": [
    269
   ],
+  "romacs-complete-mode fido-vertical-mode": [
+   270
+  ],
   "romacs-defaults-mode romacs-defaults-settings romacs-defaults-start": [
-   267
+   268
   ],
   "romacs-display": [
    225,
    231
   ],
   "romacs-echo-area-functions": [
-   271
+   272
   ],
   "romacs-eval-chip-mode": [
-   271
+   272
   ],
   "romacs-fzf-all-completions romacs-fzf-try-completion romacs-completion-candidates": [
-   264
+   265
   ],
   "romacs-gui-install-command": [
    127
   ],
   "romacs-init-layer-exclude": [
-   354
+   356
   ],
   "romacs-layer-animation romacs-layer-show": [
-   270
-  ],
-  "romacs-layer-display-table": [
-   272
-  ],
-  "romacs-layer-toast": [
    271
   ],
-  "romacs-layer-wrap-words": [
+  "romacs-layer-display-table": [
+   273
+  ],
+  "romacs-layer-toast": [
    272
+  ],
+  "romacs-layer-wrap-words": [
+   273
   ],
   "romacs-mode-line-agent": [
    247
   ],
+  "romacs-mode-line-buffer-name-width": [
+   247
+  ],
   "romacs-mode-line-buffer-style": [
+   247
+  ],
+  "romacs-mode-line-centre": [
+   247
+  ],
+  "romacs-mode-line-centre-align": [
    247
   ],
   "romacs-mode-line-default-coding": [
@@ -2841,9 +2878,6 @@
   "romacs-mode-line-right-align": [
    247
   ],
-  "romacs-mode-line-telling-icons": [
-   247
-  ],
   "romacs-pane-border": [
    244
   ],
@@ -2860,19 +2894,19 @@
    244
   ],
   "romacs-popup-hide": [
-   273
+   274
   ],
   "romacs-popup-key-grid": [
-   273
+   274
   ],
   "romacs-popup-prefix-names": [
-   273
+   274
   ],
   "romacs-popup-show": [
-   273
+   274
   ],
   "romacs-popup-which-key-show": [
-   273
+   274
   ],
   "romacs-precompile": [
    142
@@ -2885,6 +2919,9 @@
   ],
   "romacs-precompile-stop": [
    142
+  ],
+  "romacs-project-inline-threshold": [
+   23
   ],
   "romacs-restart": [
    25
@@ -2914,20 +2951,20 @@
    246
   ],
   "romacs-term": [
-   261,
-   262
+   262,
+   263
   ],
   "romacs-term-alternate-exceptions": [
-   262
+   263
   ],
   "romacs-term-keymap-exceptions": [
-   262
+   263
   ],
   "romacs-term-mode-map": [
-   262
+   263
   ],
   "romacs-term-update-keymaps": [
-   262
+   263
   ],
   "romacs-theme-bundled": [
    245
@@ -2966,13 +3003,13 @@
    213
   ],
   "romacs-unsafe-coding": [
-   350
+   352
   ],
   "round": [
-   284
+   285
   ],
   "run-at-time": [
-   307
+   308
   ],
   "run-hooks": [
    40
@@ -2985,7 +3022,7 @@
    228
   ],
   "run-with-timer": [
-   307
+   308
   ],
   "save-buffer": [
    126
@@ -3006,51 +3043,51 @@
    186
   ],
   "scroll-down": [
-   287
+   288
   ],
   "scroll-left": [
-   281
+   282
   ],
   "scroll-margin": [
    186
   ],
   "scroll-right": [
-   281
+   282
   ],
   "scroll-step": [
    186
   ],
   "scroll-up": [
-   287
+   288
   ],
   "secure-hash": [
-   306
+   307
   ],
   "secure-hash-algorithms": [
-   306
+   307
   ],
   "select-frame": [
-   256
+   257
   ],
   "select-safe-coding-system": [
-   350
+   352
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   350
+   352
   ],
   "selected-frame": [
    192,
-   255,
-   283
+   256,
+   284
   ],
   "selected-window": [
    192
   ],
   "selective-display": [
-   280
+   281
   ],
   "self-insert-command": [
    180,
@@ -3078,10 +3115,10 @@
   "set": [
    66,
    107,
-   330
+   331
   ],
   "set-auto-coding": [
-   350
+   352
   ],
   "set-buffer": [
    66
@@ -3096,7 +3133,7 @@
    215
   ],
   "set-buffer-redisplay": [
-   319
+   320
   ],
   "set-case-table": [
    75
@@ -3106,24 +3143,24 @@
    97
   ],
   "set-charset-priority": [
-   308
+   309
   ],
   "set-coding-system-priority": [
-   309,
-   350
+   310,
+   352
   ],
   "set-default": [
-   330
+   331
   ],
   "set-face-attribute": [
    130,
    157,
    158,
    159,
-   357,
-   358,
    359,
-   361
+   360,
+   361,
+   363
   ],
   "set-file-acl": [
    11
@@ -3135,26 +3172,26 @@
    8
   ],
   "set-frame-height": [
-   256
+   257
   ],
   "set-frame-position": [
-   256
+   257
   ],
   "set-frame-size": [
-   256
+   257
   ],
   "set-frame-width": [
-   256
+   257
   ],
   "set-fringe-bitmap-face": [
-   250
+   251
   ],
   "set-match-data": [
    93
   ],
   "set-process-thread": [
-   221,
-   228
+   223,
+   229
   ],
   "set-standard-case-table current-case-table": [
    54
@@ -3177,11 +3214,11 @@
    220
   ],
   "set-window-fringes": [
-   250,
-   256
+   251,
+   257
   ],
   "set-window-hscroll": [
-   281
+   282
   ],
   "set-window-new-total": [
    241
@@ -3193,11 +3230,11 @@
    240
   ],
   "set-window-scroll-bars": [
-   256
+   257
   ],
   "set-window-start": [
    186,
-   285
+   286
   ],
   "set-window-vscroll": [
    173,
@@ -3214,16 +3251,16 @@
    66
   ],
   "setf": [
-   328
+   329
   ],
   "setplist": [
-   323
+   324
   ],
   "setq": [
-   330
+   331
   ],
   "signal": [
-   335
+   336
   ],
   "signal-hook-function": [
    32,
@@ -3233,10 +3270,10 @@
    33
   ],
   "skip-chars-backward": [
-   364
+   366
   ],
   "skip-chars-forward": [
-   364
+   366
   ],
   "sleep-for": [
    221,
@@ -3249,8 +3286,8 @@
    217
   ],
   "source_string": [
-   295,
-   296
+   296,
+   297
   ],
   "special-event-map": [
    33,
@@ -3258,14 +3295,14 @@
    222
   ],
   "special-form-p": [
-   326
+   327
   ],
   "special-variable-p": [
    109,
-   330
+   331
   ],
   "split-window-internal": [
-   289
+   290
   ],
   "standard-case-table": [
    55
@@ -3286,7 +3323,7 @@
    113
   ],
   "string-glyph-split": [
-   282
+   283
   ],
   "string-match": [
    196,
@@ -3332,7 +3369,7 @@
   "substring": [
    66,
    133,
-   333
+   334
   ],
   "supports": [
    156
@@ -3355,16 +3392,16 @@
    148
   ],
   "symbol-name": [
-   339
+   340
   ],
   "symbol-plist": [
    17,
-   323
+   324
   ],
   "symbol-value": [
    34,
    66,
-   330
+   331
   ],
   "symbol-with-pos-p": [
    71
@@ -3385,46 +3422,46 @@
    66
   ],
   "tab-bar-height": [
-   251
+   252
   ],
   "tab-width": [
    3,
-   280
+   281
   ],
   "terminal-list": [
-   255
+   256
   ],
   "terminal-live-p": [
-   249,
-   255,
-   310
+   250,
+   256,
+   311
   ],
   "terminal-parameter": [
-   310
+   311
   ],
   "terpri": [
    202
   ],
   "test-completion": [
-   344,
-   345
+   345,
+   346
   ],
   "text": [
-   280
+   281
   ],
   "text-properties-at": [
    102,
-   293,
-   304
+   294,
+   305
   ],
   "text-quoting-style": [
-   341
+   342
   ],
   "text-scale-adjust": [
-   254
+   255
   ],
   "text-scale-set": [
-   254
+   255
   ],
   "thaw": [
    18
@@ -3450,10 +3487,10 @@
    18
   ],
   "timer-event-handler": [
-   307
+   308
   ],
   "timer-list": [
-   307
+   308
   ],
   "tmm-prompt": [
    234
@@ -3487,7 +3524,7 @@
    212
   ],
   "truncate": [
-   284
+   285
   ],
   "truncate-lines": [
    200
@@ -3496,35 +3533,35 @@
    4
   ],
   "try-completion": [
-   344,
-   345
+   345,
+   346
   ],
   "tty-color-alist": [
    225,
    231
   ],
   "tty-top-frame": [
-   255
+   256
   ],
   "undefined": [
    86,
    181
   ],
   "undo-limit": [
-   331
+   332
   ],
   "unibyte-display-via-language-environment": [
-   280
+   281
   ],
   "unicode-property-table-internal": [
    58
   ],
   "unify-charset": [
-   308
+   309
   ],
   "unintern": [
-   338,
-   339
+   339,
+   340
   ],
   "unlock-file": [
    10
@@ -3535,7 +3572,7 @@
   ],
   "upcase": [
    66,
-   345
+   346
   ],
   "upcase-initials": [
    75
@@ -3549,7 +3586,7 @@
    77
   ],
   "use-package": [
-   354
+   356
   ],
   "usize": [
    107
@@ -3558,7 +3595,7 @@
    30
   ],
   "vconcat": [
-   302
+   303
   ],
   "vector": [
    133
@@ -3570,18 +3607,18 @@
    125
   ],
   "vertical-motion": [
-   278
+   279
   ],
   "visible-frame-list": [
-   256,
-   260
+   257,
+   261
   ],
   "visited-file-modtime": [
    115,
    125
   ],
   "visual-line-mode": [
-   280
+   281
   ],
   "void-function": [
    68
@@ -3596,16 +3633,16 @@
    137
   ],
   "which-key-custom-show-popup-function": [
-   273
+   274
   ],
   "while-no-input-ignore-events": [
    222
   ],
   "window": [
-   280
+   281
   ],
   "window-at": [
-   268
+   269
   ],
   "window-bottom-divider-width": [
    243,
@@ -3618,7 +3655,7 @@
    122
   ],
   "window-combination-limit": [
-   255
+   256
   ],
   "window-configuration-change-hook": [
    122
@@ -3636,22 +3673,22 @@
    244
   ],
   "window-end": [
-   286
+   287
   ],
   "window-fringes": [
-   250
+   251
   ],
   "window-header-line-height": [
    243
   ],
   "window-hscroll": [
-   281
+   282
   ],
   "window-line-height": [
    186
   ],
   "window-list": [
-   255
+   256
   ],
   "window-mode-line-height": [
    243
@@ -3663,10 +3700,10 @@
    122
   ],
   "window-old-point": [
-   281
+   282
   ],
   "window-persistent-parameters": [
-   330
+   331
   ],
   "window-point": [
    192,
@@ -3698,7 +3735,7 @@
    186,
    192,
    239,
-   248
+   249
   ],
   "window-state-change-functions": [
    122
@@ -3709,13 +3746,13 @@
   "window-system": [
    227,
    232,
-   249
+   250
   ],
   "window-tab-line-height": [
    243
   ],
   "window-text-pixel-size": [
-   280
+   281
   ],
   "window-total-height": [
    241
@@ -3725,13 +3762,13 @@
    185
   ],
   "window_text_pixel_size": [
-   280
+   281
   ],
   "with-eval-after-load": [
-   334
+   335
   ],
   "with-output-to-string": [
-   301
+   302
   ],
   "with-snapshot-buffer": [
    18
@@ -3740,11 +3777,11 @@
    238
   ],
   "word-wrap": [
-   272,
-   280
+   273,
+   281
   ],
   "word-wrap-by-category": [
-   280
+   281
   ],
   "write-char": [
    202
@@ -3757,13 +3794,13 @@
    148
   ],
   "wrong-type-argument": [
-   313
+   314
   ],
   "x": [
    28
   ],
   "x-focus-frame": [
-   260
+   261
   ],
   "x-gtk-launch-uri": [
    232
@@ -4080,14 +4117,16 @@
    "section": "Observable by a package: isolates and frozen values",
    "observable": true,
    "planned": false,
-   "mechanism": "`isolate-spawn`, `isolate-create`, `isolate-send`, `isolate-receive`, `isolate-await`, `isolate-on-done`, `isolate-future-cancel`, `isolate-interrupt`, `isolate-kill`, `freeze`, `frozen-p`, `thaw`, `buffer-snapshot`, `with-snapshot-buffer`, `buffer-snapshot-current-p`, `isolate-retire`",
+   "mechanism": "`isolate-spawn`, `isolate-create`, `isolate-send`, `isolate-receive`, `isolate-await`, `isolate-on-done`, `isolate-future-cancel`, `isolate-interrupt`, `isolate-kill`, `freeze`, `frozen-p`, `thaw`, `buffer-snapshot`, `with-snapshot-buffer`, `buffer-snapshot-current-p`, `isolate-retire`, `isolate-zygote`, `isolate-zygote-list`",
    "gnu": "Not in GNU. GNU's concurrency is `make-thread` (cooperative, one global lock); an uncaught error in a thread is stored in `thread-last-error` and `thread-join` returns normally.",
-   "romacs": "Worker VMs are child processes that adopt the spawner's world (`--isolate`), run `(apply FUNCTION ARGS)` on frozen arguments and answer with a frozen result or the error, delivered at wait points (the command loop's idle, `isolate-await`). `isolate-await` re-signals the worker's error with its condition and transportable data, defining an unknown condition with the worker's `error-conditions` ancestry; unfreezable data elements arrive as `(isolate-unfreezable PRINTED)`. A worker's death resolves its futures with `isolate-died`, a kill with `isolate-killed`. The worker's backtrace is not transported (`isolate-error-backtrace` stays nil). `isolate-interrupt` quits CPU-bound Lisp at the engine's safepoints, honouring `inhibit-quit`; a job blocked in a primitive (a `call-process` wait) is not interrupted until it returns, and `isolate-kill` follows after `isolate-interrupt-timeout`. GNU's `make-thread` family is not implemented (void). `buffer-snapshot` freezes a buffer's accessible text with its start, ticks, point, file name, directory, mode, generation and chosen locals; `with-snapshot-buffer` gives a worker a buffer of its own over that text in that mode, with writable properties and read-only text (a change made under `inhibit-read-only` signals when the body returns). `isolate-retire` ends an idle worker with its spawner's bye, without waiting and without a death report.",
-   "why": "A package observes these only by calling them. Re-signalling is deliberate: a background job's failure must reach the code that asked for it. Tests: `crates/romacs-vm/tests/isolates.rs`, `tests/isolate_interrupt.rs`; design: vm-concurrency note §4.",
+   "romacs": "Worker VMs are child processes that adopt the spawner's world (`--isolate`), run `(apply FUNCTION ARGS)` on frozen arguments and answer with a frozen result or the error, delivered at wait points (the command loop's idle, `isolate-await`). `isolate-await` re-signals the worker's error with its condition and transportable data, defining an unknown condition with the worker's `error-conditions` ancestry; unfreezable data elements arrive as `(isolate-unfreezable PRINTED)`. A worker's death resolves its futures with `isolate-died`, a kill with `isolate-killed`. The worker's backtrace is not transported (`isolate-error-backtrace` stays nil). `isolate-interrupt` quits CPU-bound Lisp at the engine's safepoints, honouring `inhibit-quit`; a job blocked in a primitive (a `call-process` wait) is not interrupted until it returns, and `isolate-kill` follows after `isolate-interrupt-timeout`. GNU's `make-thread` family is not implemented (void). `buffer-snapshot` freezes a buffer's accessible text with its start, ticks, point, file name, directory, mode, generation and chosen locals; `with-snapshot-buffer` gives a worker a buffer of its own over that text in that mode, with writable properties and read-only text (a change made under `inhibit-read-only` signals when the body returns). `isolate-retire` ends an idle worker with its spawner's bye, without waiting and without a death report. `isolate-zygote` starts (or describes) the zygote for a feature list, a worker prepared once that forks a child per pooled job; `isolate-zygote-list` describes them all.",
+   "why": "A package observes these only by calling them. Re-signalling is deliberate: a background job's failure must reach the code that asked for it. Tests: `crates/romacs-vm/tests/isolates.rs`, `tests/isolate_interrupt.rs`, `tests/isolate_zygotes.rs`; design: vm-concurrency note §4, worker-vms note §2.",
    "symbols": [
     "buffer-snapshot",
     "with-snapshot-buffer",
     "isolate-retire",
+    "isolate-zygote",
+    "isolate-zygote-list",
     "isolate-spawn",
     "isolate-create",
     "isolate-send",
@@ -4151,10 +4190,11 @@
    "planned": false,
    "mechanism": "What a worker sees of the spawner",
    "gnu": "n/a (one heap).",
-   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. A pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
-   "why": "Racket's and Python's contract for isolated interpreters; design §3.5, §7.",
+   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. Where pooled jobs run on forked workers (`isolate-zygotes`; a session by default), each job runs in a fresh child of a zygote prepared once with its `:require` set, in the spawner's `default-directory` unless it names one, and sees nothing an earlier job left; the zygote is retired once an inherited variable, a file it loaded or a `load-path` directory changes. Elsewhere a pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
+   "why": "Racket's and Python's contract for isolated interpreters; design §3.5, §7; worker-vms note §2.3-2.4.",
    "symbols": [
-    "isolate-inherited-variables"
+    "isolate-inherited-variables",
+    "isolate-zygotes"
    ],
    "symbols_derived": false
   },
@@ -4164,12 +4204,13 @@
    "section": "Observable by a package: isolates and frozen values",
    "observable": true,
    "planned": false,
-   "mechanism": "Frame and window queries in a worker",
+   "mechanism": "Frame and window queries, and standard output, in a worker",
    "gnu": "n/a.",
-   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`.",
-   "why": "A worker owns no display.",
+   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`. Its standard output is null (`host::spawn_isolate`): `ding`'s batch BEL and `princ` to `t` go nowhere, never into the spawner's output (a server's journal); `message` still reaches its stderr",
+   "why": "A worker owns no display and no output of the session's.",
    "symbols": [
-    "display-graphic-p"
+    "display-graphic-p",
+    "ding"
    ],
    "symbols_derived": false
   },
@@ -4181,11 +4222,12 @@
    "planned": false,
    "mechanism": "`project-find-file`, `project-find-regexp`",
    "gnu": "Enumerate (`project-files`) and search (`xref-matches-in-files`) synchronously; the session blocks until the prompt or the xref buffer appears.",
-   "romacs": "When a worker of the session's own world stands prepared and idle, the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run normally finds it ready; a worker that will not take the job after all (queue full, process gone) is passed over the same way. The commands never wait for a worker's boot. Without a world (a source boot, batch) nothing is warmed.",
+   "romacs": "When a worker of the session's own world stands prepared and idle (or is the child of a zygote already preparing, forked once it is ready), the enumeration and the grep run in it; the command returns to the command loop at once and continues, with the identical candidate list or xref matches, when the result arrives: the prompt or xref buffer appears then, and keys typed meanwhile run their commands. Without such a worker the GNU definitions run unchanged and a worker is warmed for the next command once the session idles; `project-find-regexp` warms its worker while the regexp is typed, so its first run normally finds it ready; a worker that will not take the job after all (queue full, process gone) is passed over the same way. The commands never wait for a worker's boot. `project-find-file` enumerates in the session, as GNU's does, when the enumeration is expected within `romacs-project-inline-threshold` (the larger of the project's last enumeration and its Git index's size at the rate last measured), since a worker's dispatch and delivery would cost more. Without a world (a source boot, batch) nothing is warmed.",
    "why": "The candidate list and the matches are the worker's `project-files` and `xref-matches-in-files` over the same project; only the timing of the prompt differs. The continuation ends as GNU's command does: `xref-show-xrefs` leaves its window selected and `*xref*` at the head of the buffer list; the progress note it shows meanwhile is echoed, not logged. Live journey: `crates/romacs-vm-gui/harness/isolates_live.py`.",
    "symbols": [
     "project-find-file",
-    "project-find-regexp"
+    "project-find-regexp",
+    "romacs-project-inline-threshold"
    ],
    "symbols_derived": false
   },
@@ -4958,7 +5000,7 @@
    "planned": false,
    "mechanism": "profiler.c's CPU and memory profilers: where samples are taken and what they weigh",
    "gnu": "`SIGPROF` on a `CLOCK_THREAD_CPUTIME_ID` timer interrupts the main thread every SAMPLING-INTERVAL of its CPU time, and the handler records the specpdl backtrace (`get_backtrace`) at that instant, including GNU's `redisplay_internal (C function)` frame during redisplay; a sample inside GC counts in `[Automatic\\ GC nil]`. The memory profiler probes `xmalloc`/`lisp_malloc` with the bytes asked for, so a small object counts only when its block is allocated, and after each GC it probes the bytes the collection freed (`alloc.c:6019`) under the caller's backtrace.",
-   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is running then (its `/proc` state is `R`, which also holds while it is runnable but preempted), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
+   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is on a CPU then (its CPU clock advances between two reads; a thread allowed a single CPU, which the sampler shares, counts as running while its `/proc` state is `R`), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
    "why": "A CPU-time timer is not used: under a zero `RLIMIT_RTTIME` hard limit (agent scopes have one) Linux kills a thread whose CPU timer fires, as it kills pinned GNU there. Same report shape, different counts: a call-dense hot path is charged where it runs; work inside a long primitive is charged to the primitive at its exit. Not running costs one flag test per call boundary; running at 10 ms adds a relaxed load per boundary and a thread wake per interval. Tests: `crates/romacs-vm/src/profiler_tests.rs`, GNU's `test/src/profiler-tests.el`.",
    "symbols": [
     "profiler-cpu-start",
@@ -7720,7 +7762,7 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
    "why": "**Package-observable:** asynchronous network code beyond TCP and serial ports cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
@@ -7734,7 +7776,6 @@
     "call-process-region",
     "process-attributes",
     "list-system-processes",
-    "set-process-thread",
     "sleep-for"
    ],
    "symbols_derived": false
@@ -7768,12 +7809,14 @@
    "planned": false,
    "mechanism": "Lisp threads",
    "gnu": "The pinned GNU is built with threads (`THREADS_ENABLED`): `make-thread`, mutexes and condition variables (`src/thread.c`), `(featurep 'threads)`, and `main-thread` the main thread's object; a build without threads keeps `main-thread` and binds it to nil (`thread.c:1307-1312`), and url-http.el keys its connection pool on it (`url-http-find-free-connection`)",
-   "romacs": "VM2 has no thread objects and does not provide `threads`, so `main-thread` is the threadless build's nil: url-http keys connections by host and port, as GNU without threads does",
-   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread primitives' absence. `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
+   "romacs": "VM2 is GNU's threadless build: it does not provide `threads`, so `main-thread` is nil and the thread.c primitives are void, and url-http keys connections by host and port, as GNU without threads does. `process-thread` and `set-process-thread` are process.c's, in every GNU build: each process holds the one thread object of the VM (type `thread`, printed `#<thread 0x...>`), which `make_process` stores from `Fcurrent_thread` there too",
+   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread.c primitives' absence; `list-processes` shows `--` in its Thread column, as threadless GNU does (pinned GNU shows `Main`). `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
    "symbols": [
     "main-thread",
     "current-thread",
-    "make-thread"
+    "make-thread",
+    "process-thread",
+    "set-process-thread"
    ],
    "symbols_derived": false
   },
@@ -7867,7 +7910,7 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP and local (Unix domain) stream servers and clients, refusing datagrams, Internet `:local`/`:remote` addresses (a string address is a local socket's path, as GNU's), numeric families, non-numeric service names and `:tls-parameters`; `:use-external-socket` names the socket a daemon was started with, of which there is none; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does, and one whose connect fails at once has GNU's `(failed ERROR)` status and no sentinel; an accepted connection's name, contact and `open from` sentinel are GNU's for each family (a local peer has host `t`, no service and a connection-counter name); `delete-process` leaves a local server's socket file, as GNU does (server.el and `romacs-mcp-stop` delete theirs); `format-network-address` is Lisp (`rlisp/vm/subprocess.el`); `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)`, `(:family local)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP and local (Unix domain) stream servers and clients, refusing datagrams, Internet `:local`/`:remote` addresses (a string address is a local socket's path, as GNU's), numeric families, non-numeric service names and `:tls-parameters`; `:use-external-socket` names the socket a daemon was started with, of which there is none; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does, and one whose connect fails at once has GNU's `(failed ERROR)` status and no sentinel; an accepted connection's name, contact and `open from` sentinel are GNU's for each family (a local peer has host `t`, no service and a connection-counter name); `delete-process` leaves a local server's socket file, as GNU does (server.el and `romacs-mcp-stop` delete theirs); `format-network-address` is Lisp (`rlisp/vm/subprocess.el`); `make-serial-process`, `process-attributes`, `list-system-processes` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)`, `(:family local)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
    "why": "**Package-observable:** asynchronous network code beyond TCP and local stream sockets (datagrams, TLS, serial ports) cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
@@ -7881,7 +7924,6 @@
     "call-process-region",
     "process-attributes",
     "list-system-processes",
-    "set-process-thread",
     "sleep-for"
    ],
    "symbols_derived": false
@@ -7894,12 +7936,14 @@
    "planned": false,
    "mechanism": "Lisp threads",
    "gnu": "The pinned GNU is built with threads (`THREADS_ENABLED`): `make-thread`, mutexes and condition variables (`src/thread.c`), `(featurep 'threads)`, and `main-thread` the main thread's object; a build without threads keeps `main-thread` and binds it to nil (`thread.c:1307-1312`), and url-http.el keys its connection pool on it (`url-http-find-free-connection`)",
-   "romacs": "VM2 has no thread objects and does not provide `threads`, so `main-thread` is the threadless build's nil: url-http keys connections by host and port, as GNU without threads does",
-   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread primitives' absence. `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
+   "romacs": "VM2 is GNU's threadless build: it does not provide `threads`, so `main-thread` is nil and the thread.c primitives are void, and url-http keys connections by host and port, as GNU without threads does. `process-thread` and `set-process-thread` are process.c's, in every GNU build: each process holds the one thread object of the VM (type `thread`, printed `#<thread 0x...>`), which `make_process` stores from `Fcurrent_thread` there too",
+   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread.c primitives' absence; `list-processes` shows `--` in its Thread column, as threadless GNU does (pinned GNU shows `Main`). `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
    "symbols": [
     "main-thread",
     "current-thread",
-    "make-thread"
+    "make-thread",
+    "process-thread",
+    "set-process-thread"
    ],
    "symbols_derived": false
   },
@@ -8064,13 +8108,14 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "VM2 is not an Emacs daemon",
-   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized` inspect daemon state and reject initialization in a non-daemon",
-   "romacs": "`(daemonp)` is nil; `(daemon-initialized)` errors that this function requires daemon mode (both measured). No daemon state is fabricated",
-   "why": "Matches GNU non-daemon behavior; daemon startup is not implemented",
+   "mechanism": "Which process is an Emacs daemon",
+   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized`: a `--fg-daemon=NAME` process answers NAME from its start, with `noninteractive` nil, and `daemon-initialized` signals \"The daemon has already been initialized\" once startup ran; any other process answers nil and is told the function needs daemon mode",
+   "romacs": "A server (`--serve NAME`, SERVER2) is GNU's `--fg-daemon=NAME`: `daemonp` answers NAME from the command line on (`host::set_daemon`), so the user's init sees it, `noninteractive` is nil, and `daemon-initialized` signals as an initialized daemon's. Every other process is no daemon, as GNU's. Its frames stay SERVER2's: no initial terminal frame, so `frame-list` differs and server.el's \"only the daemon's terminal frame\" branches never apply. `crates/romacs-vm-gui/harness/server_live.py` (daemon) compares both, and that `ding` in a server, with or without a frame, writes no BEL",
+   "why": "Matches GNU's daemon for `daemonp`, `daemon-initialized` and `noninteractive`; `frame-list` is SERVER2's",
    "symbols": [
     "daemonp",
-    "daemon-initialized"
+    "daemon-initialized",
+    "noninteractive"
    ],
    "symbols_derived": false
   },
@@ -8256,7 +8301,7 @@
    "planned": false,
    "mechanism": "The root frame's status bar is the mode line",
    "gnu": "GNU draws each window's mode line in its own band, `mode-line-active` for the selected window (and for the window a minibuffer was entered from while the mini-window is selected, `CURRENT_MODE_LINE_ACTIVE_FACE_ID_3`, dispextern.h:1553), `mode-line-inactive` for the others; the root window ends at the mini-window",
-   "romacs": "On a window system the root frame shows a status bar, the root frame's `romacs-status-bar-lines` parameter (`rlisp/romacs-chrome.el` sets it in every look, never in batch), between the root window and the mini-window, or with `romacs-status-bar-position` `top` (the `romacs-status-bar-position` frame parameter) under the tab bar with the root window under it, switched at once: `frame-root-window` is shorter by it while `frame-height`, `frame-text-height` and the mini-window are unchanged; its height is the row the host measures for its faces (a canonical line before one), a change lays the frame out again once, and it drops while it would leave the root window under two lines (`tests/status_bar.rs`). The bar is every root-frame window's mode line: no ordinary window of that frame draws a band (a child frame's windows keep theirs, as GNU's), so `window-mode-line-height` is 0 and each body is a line taller than GNU's, in either look (`romacs-classic-chrome` keeps the bar); a batch frame has no bar, so GNU's bands and geometry stand there and GNU's tests do not move. It shows the mode line of the window GNU's face rule treats as selected (`romacs-status-bar-window`; the window a minibuffer was entered from while the mini-window is selected; while a child frame's window is selected, the root frame's selected window, unfocused): that window's `mode-line-format` parameter or its buffer's value, in `mode-line-active`, expanded at the bar's columns with its buffer current and that window selected as GNU's display_mode_lines selects it (frame-local, restored), reading its own point and start, so text past the columns is clipped; `%-` shows nothing in the bar (`format-mode-line` still gives `--`). Unlike GNU's, no window's point is installed in its buffer: an `:eval` form reading `(point)` for another window sees its buffer's point. A nil or `none` format contributes nothing. The bar is expanded again only when GNU's redisplay would update a mode line: `force-mode-line-update` or `set-buffer-modified-p`, another window, buffer, buffer name or format, the buffer's text or modified state, the window's point, start or size, the narrowing, the minibuffer's state, faces or the bar's columns, or any of these for a folded window; a variable set without either call shows at the next such change, as in GNU. Then, while visible, each other ordinary window of the root frame whose own format differs from the default (a buffer-local `mode-line-format` such as keymap-popup's, or a `mode-line-format` window parameter), in the frame's order: its line, expanded the same way, after ` │ `, on `mode-line-inactive`'s background, its `right-align` markers plain text, a `context` segment dropped with its separator first when the bar is too narrow. The bar is painted over that text: a 3-pixel block of the accent (`romacs-pane-focus`) at its left edge, dimmed while a child frame's window holds the focus; each `romacs-segment` run named by a `romacs-pill` face drawn on a rounded background of that face's colour; a character a `romacs-icon` alist names drawn as that icon while Romacs Icons is there, or dropped where it names `none`; segments with a `romacs-priority` dropped, lowest first, until the text fits; the part after a `right-align` segment flush with the right edge and whole, the part before it clipped where that starts (`romacs-status-bar-string` shows the same, spaces between). A mouse button released on the bar runs the binding at the clicked character of the window whose line it is (`romacs--status-bar-click`, `romacs--status-bar-target`): the `local-map` or `keymap` there in the bar's text as last painted, else the global map's, under `[mode-line BUTTON]`, with a `mode-line` position in that window whose object is that text and column; the press runs nothing (so `[mode-line down-mouse-1] mouse-drag-mode-line` never starts), wheel and drag are not delivered; the text carries the properties the mode line projects (VM2-G1B: `local-map`, `keymap`, `help-echo`), so a package reading another from `posn-string` sees nil; the `right-align` marker's room and a separator run nothing; while a prompt reads input the GUI host delivers no pointer event to Lisp. Layers, the completion panel and toasts keep clear of the bar: above one at the bottom (`romacs-chrome-bottom`), below one at the top (`romacs-chrome-top`), restacked when it moves. Nothing in the bar animates yet: a segment's change shows at once (a pulse belongs to the pane-animation work)",
+   "romacs": "On a window system the root frame shows a status bar, the root frame's `romacs-status-bar-lines` parameter (`rlisp/romacs-chrome.el` sets it in every look, never in batch), between the root window and the mini-window, or with `romacs-status-bar-position` `top` (the `romacs-status-bar-position` frame parameter) under the tab bar with the root window under it, switched at once: `frame-root-window` is shorter by it while `frame-height`, `frame-text-height` and the mini-window are unchanged; its height is the row the host measures for its faces (a canonical line before one), a change lays the frame out again once, and it drops while it would leave the root window under two lines (`tests/status_bar.rs`). The bar is every root-frame window's mode line: no ordinary window of that frame draws a band (a child frame's windows keep theirs, as GNU's), so `window-mode-line-height` is 0 and each body is a line taller than GNU's, in either look (`romacs-classic-chrome` keeps the bar); a batch frame has no bar, so GNU's bands and geometry stand there and GNU's tests do not move. It shows the mode line of the window GNU's face rule treats as selected (`romacs-status-bar-window`; the window a minibuffer was entered from while the mini-window is selected; while a child frame's window is selected, the root frame's selected window, unfocused): that window's `mode-line-format` parameter or its buffer's value, in `mode-line-active`, expanded at the bar's columns with its buffer current and that window selected as GNU's display_mode_lines selects it (frame-local, restored), reading its own point and start, so text past the columns is clipped; `%-` shows nothing in the bar (`format-mode-line` still gives `--`). Unlike GNU's, no window's point is installed in its buffer: an `:eval` form reading `(point)` for another window sees its buffer's point. A nil or `none` format contributes nothing. The bar is expanded again only when GNU's redisplay would update a mode line: `force-mode-line-update` or `set-buffer-modified-p`, another window, buffer, buffer name or format, the buffer's text or modified state, the window's point, start or size, the narrowing, the minibuffer's state, faces or the bar's columns, or any of these for a folded window; a variable set without either call shows at the next such change, as in GNU. Then, while visible, each other ordinary window of the root frame whose own format differs from the default (a buffer-local `mode-line-format` such as keymap-popup's, or a `mode-line-format` window parameter), in the frame's order: its line, expanded the same way, after ` │ `, on `mode-line-inactive`'s background, its `centre-align` and `right-align` markers plain text, a `context` segment dropped with its separator first when the bar is too narrow. The bar is painted over that text: a 3-pixel block of the accent (`romacs-pane-focus`) at its left edge, dimmed while a child frame's window holds the focus; each `romacs-segment` run named by a `romacs-pill` face drawn on a rounded background of that face's colour, its text in its `romacs-pill-text` face's foreground, or its `romacs-pill-modified` face's while the bar's own buffer is modified; a character a `romacs-icon` alist names drawn as that icon while Romacs Icons is there, or dropped where it names `none`; segments with a `romacs-priority` dropped, lowest first, until the text fits the bar's columns less its padding; the text inside 12 pixels of padding at either end, in up to three zones: the part after a `right-align` segment flush with the right padding and whole, the part after a `centre-align` segment (and before that one) centred on the bar, at least 24 pixels from either side and pushed as little as that needs, after the left part where there is no room for both gaps, and the left part and that one clipped where the right starts, each zone a prefix of its characters (`romacs-status-bar-string` shows the same, spaces between). A mouse button released on the bar runs the binding at the clicked character of the window whose line it is (`romacs--status-bar-click`, `romacs--status-bar-target`): the `local-map` or `keymap` there in the bar's text as last painted, else the global map's, under `[mode-line BUTTON]`, with a `mode-line` position in that window whose object is that text and column; the press runs nothing (so `[mode-line down-mouse-1] mouse-drag-mode-line` never starts), wheel and drag are not delivered; the text carries the properties the mode line projects (VM2-G1B: `local-map`, `keymap`, `help-echo`), so a package reading another from `posn-string` sees nil; a marker's room and a separator run nothing; while a prompt reads input the GUI host delivers no pointer event to Lisp. Layers, the completion panel and toasts keep clear of the bar: above one at the bottom (`romacs-chrome-bottom`), below one at the top (`romacs-chrome-top`), restacked when it moves. Nothing in the bar animates yet: a segment's change shows at once (a pulse belongs to the pane-animation work)",
    "why": "**User-observable** (one mode line per frame) and **package-observable** through `frame-root-window`'s height, `window-mode-line-height` 0 and the taller bodies of every root-frame window on a window system",
    "symbols": [
     "romacs-status-bar-window",
@@ -8280,14 +8325,17 @@
    "planned": false,
    "mechanism": "The default `mode-line-format` on a window system",
    "gnu": "GNU's default is bindings.el's `mode-line-format` (`mode-line-front-space`, `mode-line-mule-info`, `mode-line-modified`, ..., `mode-line-modes`, `mode-line-misc-info`), which runs `:eval` forms on every redisplay",
-   "romacs": "On a window system `romacs-mode-line-mode` (`rlisp/romacs-mode-line.el`, on by default, never in batch) installs `romacs-mode-line-format`, the status bar's content (VM2-STATUS-BAR): `%e`, the segments of `romacs-mode-line-left`, the `right-align` marker (one space), the segments of `romacs-mode-line-right`; the right side runs, as doom-modeline's: what packages add to `mode-line-modes` (the `modes` segment: GNU's own elements, the mode name, process, lighters and specs, left out, recognised by content and kept by a variable watcher on `mode-line-modes`; compile's `[Compiling]`, erc-track's activity, `repeat-echo-mode-line`'s indicator), misc, LSP, encoding, mode name, branch, diagnostics. A `romacs-icon` alist entry `(CHAR . none)` drops that character from the bar (`%*`'s `-`, `%p`'s `All`, `%n`'s letters but its glyph); `format-mode-line` returns the whole expansion, as GNU's. A segment is the variable `romacs-mode-line-NAME` (`romacs-mode-line-define-segment`): a `:format` segment holds a construct of `%`-specs and conditionals installed verbatim, a `:compute` segment the propertized string its function made on the hooks it names (added at depth 90, after vc-hooks.el's own); the buffer's name follows `romacs-mode-line-buffer-style` over `project-current` and carries GNU's `mode-line-buffer-identification-keymap`; modified and read-only state is `%*`; the search count refreshes on `lazy-count-update-hook`; diagnostics are flymake's error, warning and note counts after their glyphs, counted when flymake reports (after `flymake--handle-report`, as doom-modeline does), so the format runs none of GNU's `flymake-mode-line-counters`; the branch is GNU's `vc-mode` string without its backend's name, after a glyph in its state's colour; the major mode is its icon (`romacs-mode-line-mode-icons`; a mode no icon names, fundamental, special and dashboard buffers among them, shows Romacs's R), and GNU's `mode-name` too unless the icon names the mode alone (`romacs-mode-line-telling-icons`), the minor modes only with `romacs-mode-line-minor-modes`; the end of line and coding (`LF UTF-8`) only where they are not `romacs-mode-line-default-coding`'s; `mode-line-process`, `global-mode-string`/`mode-line-misc-info` and `display-time-string` are read as symbols. The format enters the evaluator only for an active region's size and what packages put in their own elements (`romacs_mode_line_enters_the_evaluator_only_where_due`, `Vm::mode_line_evals`). It replaces only GNU's default or its own last install, and turning it off restores GNU's only over its own, so a format an init or a package installed stays; `romacs-classic-chrome` leaves it alone. An in-place edit of a Romacs segment's list shows after `force-mode-line-update` or a collection (its converted form is kept while the variable holds the same object). Romacs's icons (U+FE000-U+FE0FF, glyphs of Nerd Fonts' Material Design, Devicons, Octicons and own sets, and the Romacs mark's R, assets/icons/LICENSE) are one column wide in any face. A segment refreshed by hooks can be stale where its state changes without one, as GNU's `vc-mode` is after an external `git` command",
+   "romacs": "On a window system `romacs-mode-line-mode` (`rlisp/romacs-mode-line.el`, on by default, never in batch) installs `romacs-mode-line-format`, the status bar's content (VM2-STATUS-BAR), in three zones: `%e`; the left zone, `romacs-mode-line-left`, where you are and what is in progress (state, position, selection, search, input method, repeat); the `centre-align` marker (one space) and the centre zone, `romacs-mode-line-centre`, the buffer's identity on a pill (`romacs-mode-line-pill`), in `romacs-mode-line-modified` while the buffer is modified, a name longer than `romacs-mode-line-buffer-name-width` cut in its middle; the `right-align` marker (one space) and the right zone, `romacs-mode-line-right`, the buffer's context, which runs, as doom-modeline's: what packages add to `mode-line-modes` (the `modes` segment: GNU's own elements, the mode name, process, lighters and specs, left out, recognised by content and kept by a variable watcher on `mode-line-modes`; compile's `[Compiling]`, erc-track's activity, `repeat-echo-mode-line`'s indicator), misc, LSP, encoding, mode name and `mode-line-process`, branch, diagnostics. The position is the column (`C%c`), with the line (`%l:%c`) only where no `display-line-numbers` gutter shows it, and `%p` only as a percentage. A `romacs-icon` alist entry `(CHAR . none)` drops that character from the bar (`%*`'s `-`, `%p`'s `All`, `Top` and `Bot`, `%n`'s letters but its glyph); `format-mode-line` returns the whole expansion, as GNU's. A segment is the variable `romacs-mode-line-NAME` (`romacs-mode-line-define-segment`): a `:format` segment holds a construct of `%`-specs and conditionals installed verbatim, a `:compute` segment the propertized string its function made on the hooks it names (added at depth 90, after vc-hooks.el's own); the buffer's name follows `romacs-mode-line-buffer-style` over `project-current` and carries GNU's `mode-line-buffer-identification-keymap`; modified and read-only state is `%*`; the search count refreshes on `lazy-count-update-hook`; diagnostics are flymake's error, warning and note counts after their glyphs, counted when flymake reports (after `flymake--handle-report`, as doom-modeline does), so the format runs none of GNU's `flymake-mode-line-counters`; the branch is GNU's `vc-mode` string without its backend's name, after its glyph, with a dot in the warning colour while the file differs (the conflict glyph where it conflicts); the major mode's icon leads the identity (`romacs-mode-line-mode-icons`; a mode no icon names, fundamental, special and dashboard buffers among them, shows Romacs's R), and its name always shows in the right zone: GNU's `mode-name` with a `lexical-binding` conditional's lexical branch dropped (Elisp's `/l`; `/d` stays), the minor modes only with `romacs-mode-line-minor-modes`; the end of line and coding (`LF UTF-8`) only where they are not `romacs-mode-line-default-coding`'s; `mode-line-process`, `global-mode-string`/`mode-line-misc-info` and `display-time-string` are read as symbols. The format enters the evaluator only for an active region's size and what packages put in their own elements (`romacs_mode_line_enters_the_evaluator_only_where_due`, `Vm::mode_line_evals`). It replaces only GNU's default or its own last install, and turning it off restores GNU's only over its own, so a format an init or a package installed stays; `romacs-classic-chrome` leaves it alone. An in-place edit of a Romacs segment's list shows after `force-mode-line-update` or a collection (its converted form is kept while the variable holds the same object). Romacs's icons (U+FE000-U+FE0FF, glyphs of Nerd Fonts' Material Design, Devicons, Octicons and own sets, and the Romacs mark's R, assets/icons/LICENSE) are one column wide in any face. A segment refreshed by hooks can be stale where its state changes without one, as GNU's `vc-mode` is after an external `git` command",
    "why": "**User-observable** (the mode line's text) and **package-observable** through `(default-value 'mode-line-format)` and `format-mode-line` of it",
    "symbols": [
     "romacs-mode-line-mode",
     "romacs-mode-line-format",
     "romacs-mode-line-left",
+    "romacs-mode-line-centre",
     "romacs-mode-line-right",
+    "romacs-mode-line-centre-align",
     "romacs-mode-line-right-align",
+    "romacs-mode-line-buffer-name-width",
     "romacs-mode-line-define-segment",
     "romacs-mode-line-buffer-style",
     "romacs-mode-line-minor-modes",
@@ -8295,8 +8343,24 @@
     "romacs-mode-line-agent",
     "romacs-mode-line-rebuild",
     "romacs-mode-line-default-coding",
-    "romacs-mode-line-telling-icons",
     "romacs-mode-line-modes-extra"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-MODE-LINE-STRETCH",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`(space ...)` displays in header and mode lines",
+   "gnu": "xdisp.c displays a mode-line string's `display` property: a `(space ...)` is a stretch glyph (produce_stretch_glyph) whose width calc_pixel_width_or_height computes, an `:align-to` target counting from the window's text area's left edge (`window_box_left_offset`, its left fringe and margin) although the band's row spans the whole window; a run of characters sharing one display value is replaced by it",
+   "romacs": "A window's header and mode line project `display` (`mode_line.rs`), and each run sharing one `(space ...)` value shows as one stretch, computed by the text's own port (`Leaf::band_stretch`: columns, `(N)` pixels, window elements such as `right`, `+`/`-`, variables like `header-line-indent-width`) and painted by `stretch_advance` from the text area's left edge, so tabulated-list.el's header columns land over its rows' (`measure.rs` `header_line_stretches_land_where_gnus_do` against pinned GNU X11, `tests/header_line_stretch.gnu`). Remaining: a `:relative-width` counts a column's width, not a band character's; what the text's stretches refuse (its own height, physical units) is one column; another display (an image, a string) shows the text it covers; the status bar draws its segments by its own zones and shows a stretch's character (VM2-STATUS-BAR)",
+   "why": "**User-observable** (where header-line columns paint)",
+   "symbols": [
+    "header-line-format",
+    "mode-line-format",
+    "header-line-indent-width"
    ],
    "symbols_derived": false
   },
@@ -10141,6 +10205,22 @@
    "symbols": [
     "backtrace-get-frames",
     "backtrace--frames-and-locals"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-NEXT-CALL",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`debug-on-next-call` and debug-on-exit observe Lisp calls only",
+   "gnu": "bytecode.c's call opcode and Ffuncall call the debugger with `(lambda)` at the next call of any function, primitives included, and with `(exit VALUE)` when any flagged activation returns, a primitive's too",
+   "romacs": "The call boundary's hooks (`threaded.rs` `arm_debug_on_call`, `debug_on_exit`) stop at the next Lisp function call, with GNU byte-code's `(lambda)`; `debug-on-next-call` stays set through the primitive calls before it, which run as GNU opcodes do. A flagged primitive activation (`j` on a `mapcar` frame) returns without entering the debugger; its flag is dropped as it leaves. Normal returns of Lisp activations, and throws and errors out of them, match GNU byte-code (`tests/debugger_entry.rs`). `debug-on-next-call` is a forwarded boolean, as GNU's DEFVAR_BOOL",
+   "why": "One test on the call path (`profiler.active`) covers profiling and both hooks; primitive calls stay off it",
+   "symbols": [
+    "debug-on-next-call",
+    "backtrace-debug"
    ],
    "symbols_derived": false
   },

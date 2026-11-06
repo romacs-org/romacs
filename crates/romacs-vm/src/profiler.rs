@@ -3,7 +3,7 @@
 //! functions, to counts.
 //!
 //! The backtrace changes only where a call enters or leaves, so both
-//! profilers sample there (`Vm::trace_enter`, `Vm::trace_leave`): what a
+//! profilers sample there (`threaded::hooked_call`, `Vm::hooked_leave`): what a
 //! meter accumulated since the last boundary was spent under the stack
 //! the boundary sees. The CPU meter is a tick count a host thread adds to
 //! each sampling interval at which the Lisp thread is running
@@ -105,8 +105,21 @@ struct Cpu {
 
 #[derive(Default)]
 pub(crate) struct Profiler {
-    /// A profiler runs: call boundaries sample (`Vm::profile_boundary').
+    /// A call boundary hook is armed: a profiler runs (call boundaries
+    /// sample, `Vm::profile_boundary'), `debug-on-next-call' is set, or an
+    /// activation is flagged debug-on-exit. One test on the call path.
     pub active: bool,
+    /// `debug-on-next-call' is non-nil.
+    pub next_call: bool,
+    /// Some activation is flagged debug-on-exit.
+    pub exit_flags: bool,
+    /// The Lisp call just entered stops for `debug-on-next-call': its
+    /// first poll calls the debugger (`threaded::debug_on_call').
+    pub debug_call: bool,
+    /// Romacs's own Lisp is running where GNU runs C (the debugger's
+    /// eligibility test, compiling a quoted lambda): its calls are no
+    /// `debug-on-next-call' stops, and the variable stays as it is.
+    pub held: u32,
     cpu: Option<Cpu>,
     cpu_log: Option<Log>,
     memory: Option<HeapMark>,
@@ -118,7 +131,7 @@ pub(crate) struct Profiler {
 impl Profiler {
     /// Nothing running and no log kept: what a world capture requires.
     pub fn is_idle(&self) -> bool {
-        !self.active && self.cpu_log.is_none() && self.memory_log.is_none()
+        self.cpu.is_none() && self.memory.is_none() && self.cpu_log.is_none() && self.memory_log.is_none()
     }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for log in self.cpu_log.iter_mut().chain(self.memory_log.iter_mut()) {
@@ -129,7 +142,7 @@ impl Profiler {
         }
     }
     fn update_active(&mut self) {
-        self.active = self.cpu.is_some() || self.memory.is_some();
+        self.active = self.cpu.is_some() || self.memory.is_some() || self.next_call || self.exit_flags;
     }
 }
 
@@ -144,23 +157,37 @@ enum Which {
 }
 
 impl Vm {
-    /// A call's backtrace entry, after the profilers sample the stack it
-    /// is entered from.
-    #[inline(always)]
-    pub(super) fn trace_enter(&mut self, function: Value, resolved: Value, args: backtrace::Arguments, dynamic: usize) -> usize {
-        if self.profiler.active {
-            self.profile_boundary();
-        }
-        self.backtrace.enter(function, resolved, args, dynamic)
-    }
     /// Leave the backtrace entries from MARK, after the profilers sample
     /// the stack they leave.
     #[inline(always)]
     pub(super) fn trace_leave(&mut self, mark: usize) {
         if self.profiler.active {
-            self.profile_boundary();
+            self.hooked_leave(mark);
         }
         self.backtrace.leave(mark)
+    }
+    /// The hooks of leaving the entries from MARK: the profilers sample,
+    /// and the leaving activations' debug-on-exit flags drop.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn hooked_leave(&mut self, mark: usize) {
+        self.profile_boundary();
+        if self.profiler.exit_flags {
+            self.backtrace.drop_exit_flags_from(mark);
+            self.debug_hooks_changed();
+        }
+    }
+    /// Rearm the call hooks after `debug-on-next-call' or a debug-on-exit
+    /// flag changed. Arming the next call bumps the world version: no
+    /// speculative inline body, which has no frame, hides that call.
+    pub(super) fn debug_hooks_changed(&mut self) {
+        let next_call = self.forwarded.debug_on_next_call();
+        if next_call && !self.profiler.next_call {
+            self.world_version = self.world_version.saturating_add(1);
+        }
+        self.profiler.next_call = next_call;
+        self.profiler.exit_flags = self.backtrace.has_exit_flags();
+        self.profiler.update_active();
     }
     /// Charge what the meters took since the last boundary to the stack.
     #[cold]

@@ -388,7 +388,7 @@ mod frame_tests {
             text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
             face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
-                                   status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], Some(2)) };
+                                   status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], vec![2]) };
         let click = |x, y, button, pressed| super::status_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
@@ -469,8 +469,8 @@ struct Shown {
     /// The painted tab bar's characters: each one's left edge and width.
     tab_bar: Vec<(f32, f32)>,
     /// The painted status bar's characters, each one's left edge and width
-    /// or None where clipped, and its `right-align' marker's index.
-    status_bar: (Vec<Option<(f32, f32)>>, Option<usize>),
+    /// or None where clipped, and its markers' indices.
+    status_bar: (Vec<Option<(f32, f32)>>, Vec<usize>),
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -595,7 +595,12 @@ fn run() -> Result<Option<exit::Exit>, String> {
         match arg.as_str() {
             "--world-build" => world_build = true,
             // The server a client started (client.rs): no window until a client asks.
-            "--serve" => serve = Some(client::server_name(&args.next().ok_or("--serve needs a NAME")?)?),
+            // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
+            "--serve" => {
+                let name = client::server_name(&args.next().ok_or("--serve needs a NAME")?)?;
+                romacs_vm::host::set_daemon(&name);
+                serve = Some(name);
+            }
             // The client that starts a server and asks for its window: the
             // window comes up while the world restores, as a session's does.
             "--serve-frame" => serve_frame = true,
@@ -1029,7 +1034,7 @@ fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
 /// A mouse button event over the root frame's status bar as the Lisp that
 /// runs the binding of the mode line it shows (`romacs--status-bar-click'):
 /// the index of the painted character under the pointer. Between or past
-/// the characters, and on the `right-align' marker's room, it is no click.
+/// the characters, and on a marker's room, it is no click.
 fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
         position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
@@ -1037,9 +1042,9 @@ fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let bar = shown.frame.snapshot.status_bar.as_ref()?;
     let (top, bottom) = (bar.y as f32, (bar.y + bar.height) as f32);
     if position.target_frame_id != 1 || position.y < top || position.y >= bottom || !(1..=3).contains(button) { return None; }
-    let (extents, marker) = &shown.status_bar;
+    let (extents, markers) = &shown.status_bar;
     let column = extents.iter().position(|e| e.is_some_and(|(x, width)| position.x >= x && position.x < x + width))?;
-    if Some(column) == *marker { return None; }
+    if markers.contains(&column) { return None; }
     // A press is the bar's and runs nothing: its release is the click, so
     // `[mode-line down-mouse-1] mouse-drag-mode-line' never starts a drag of
     // an edge the bar does not have (VM2-STATUS-BAR).

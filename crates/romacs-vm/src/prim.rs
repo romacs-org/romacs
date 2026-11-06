@@ -183,6 +183,7 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        Thread,
         TreesitParser,
         TreesitNode,
         TreesitQuery,
@@ -1533,6 +1534,7 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Thread) => Kind::Thread,
                     Some(data::Object::Treesit(t)) => match &**t {
                         crate::treesit::Object::Parser(_) => Kind::TreesitParser,
                         crate::treesit::Object::Node(_) => Kind::TreesitNode,
@@ -1810,6 +1812,12 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
         Fault::Error(text) => text,
         _ => "the host's layout cannot choose this window start".into(),
     })
+}
+
+/// The stretches SPECS, a list, make in WINDOW's header or mode line
+/// (Leaf::band_stretches).
+pub(crate) fn band_stretches(vm: &mut Vm, window: Value, specs: Value) -> std::result::Result<Vec<Option<romacs_layout_input::StretchWidth>>, Fault> {
+    Leaf::new(vm).band_stretches(window, specs)
 }
 
 /// The display elements WINDOW shows of its buffer from FROM, a line

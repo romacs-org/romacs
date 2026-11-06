@@ -284,7 +284,6 @@ previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, disp
 print--preprocess	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
-process-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 query-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 query-fontset	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -314,7 +313,6 @@ set-mouse-position	needed	lane A (editing, windows, frames, minibuffer readers, 
 set-network-process-option	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-output-flow-control	absent	terminal frames: Romacs has none (GUI and batch only)
 set-process-datagram-address	absent	no shipped Lisp calls it and it is no command
-set-process-thread	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-quit-char	absent	terminal frames: Romacs has none (GUI and batch only)
 set-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-text-conversion-style	needed	lane A (editing, windows, frames, minibuffer readers, display)

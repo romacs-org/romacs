@@ -1598,10 +1598,15 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    thread_local! {
-        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
-    }
-    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+    INSTRUCTION_COUNTER.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
+    })
+}
+
+thread_local! {
+    /// The calling thread's counter, once opened (None inside: refused).
+    static INSTRUCTION_COUNTER: std::cell::RefCell<Option<Option<std::os::fd::OwnedFd>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_os = "linux")]
@@ -2485,13 +2490,100 @@ pub fn take_terminate_quit() -> bool {
 }
 
 /// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
-/// standard input, this process's stderr. Its pid; the caller reaps.
+/// standard input, this process's stderr. Its standard output is null: a
+/// worker's Lisp is batch, but the output it would write (`ding''s BEL,
+/// `princ' to t) is no one's, and this process's may be a session's log.
+/// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
-    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
     Ok(command.spawn()?.id() as i32)
+}
+
+/// This process was forked from a zygote (`fork_isolate`).
+static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The threads of this process other than its main thread and the
+/// caller (/proc/self/task): those a fork from the caller would lose.
+pub fn other_threads() -> io::Result<Vec<i32>> {
+    let (main, caller) = (unsafe { libc::getpid() }, unsafe { libc::gettid() });
+    let mut others = Vec::new();
+    for entry in std::fs::read_dir("/proc/self/task")? {
+        let tid = entry?.file_name().to_string_lossy().parse::<i32>().map_err(io::Error::other)?;
+        if tid != main && tid != caller { others.push(tid); }
+    }
+    Ok(others)
+}
+
+/// fork(2) from a zygote isolate, which checked that no thread but the
+/// caller and its parked main thread exists (`other_threads`): 0 in the child, whose one
+/// thread is the caller, else the child's pid. The child resets what is
+/// its own with `forked_child_reset`.
+pub fn fork_isolate() -> io::Result<i32> {
+    effect(|| "fork".into())?;
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
+    Ok(pid)
+}
+
+/// Whether this process is a child forked from a zygote: it ends with
+/// `exit`, since no main thread is left to return to.
+pub fn forked_child() -> bool {
+    FORKED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// In a child just forked from ZYGOTE: its process name, no signal noted
+/// yet, a wake pipe of its own (the zygote's would wake both), SIGTERM
+/// once the zygote is gone (fork clears it), and its own instruction
+/// counter (the inherited one counts the zygote's thread).
+pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
+    set_process_name("romacs-worker")?;
+    INTERRUPT.store(false, Ordering::SeqCst);
+    TERMINATE.store(false, Ordering::SeqCst);
+    TERMINATE_QUIT.store(false, Ordering::SeqCst);
+    for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
+        if end >= 0 { unsafe { libc::close(end) }; }
+    }
+    catch_isolate_signals()?;
+    INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
+    set_parent_death_signal(libc::SIGTERM)?;
+    if parent_pid() != zygote {
+        return Err(io::Error::other(format!("zygote {zygote} is gone")));
+    }
+    Ok(())
+}
+
+/// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
+/// write end closes unwritten (false); a termination ends the wait too.
+pub fn await_gate(gate: OwnedFd) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut byte = 0u8;
+    loop {
+        match unsafe { libc::read(gate.as_raw_fd(), (&raw mut byte).cast(), 1) } {
+            1 => return true,
+            0 => return false,
+            _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted && !terminate_pending() => {}
+            _ => return false,
+        }
+    }
+}
+
+/// Open GATE, the write end `await_gate` waits on: one byte, then closed.
+pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| "gate".into())?;
+    status((unsafe { libc::write(gate.as_raw_fd(), [1u8].as_ptr().cast(), 1) } as libc::c_int).min(0))
+}
+
+/// Name this process NAME (the kernel keeps 15 bytes): its thread-group
+/// leader's name, the one `ps` and `pgrep` show, from any of its threads.
+pub fn set_process_name(name: &str) -> io::Result<()> {
+    effect(|| "process-name".into())?;
+    std::fs::write("/proc/self/comm", name)
 }
 
 /// emacs_pipe: a close-on-exec pipe (read end, write end).
@@ -2547,26 +2639,47 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// profiler.c's SIGPROF timer, as a thread that only counts: every
 /// INTERVAL nanoseconds it looks at the calling thread, and when that
 /// thread is running, adds one to TICKS. A late wake samples once: the
-/// thread's state over the intervals it missed is unknown. The evaluator takes them at its next
-/// call boundary, a moment later, under the stack that was running. A
-/// sample is never counted for a thread that waits, so like GNU's
-/// CLOCK_THREAD_CPUTIME_ID timer the samples measure the thread's CPU time,
-/// and no wait is charged with work done before it. (A thread CPU-time
-/// timer itself is not used: under a zero RLIMIT_RTTIME hard limit
-/// Linux kills a thread whose CPU timer fires.) Dropping the sender ends
-/// the thread.
+/// thread's state over the intervals it missed is unknown. The evaluator
+/// takes them at its next call boundary, a moment later, under the stack
+/// that was running. A sample is never counted for a thread that waits,
+/// so like GNU's CLOCK_THREAD_CPUTIME_ID timer the samples measure the
+/// thread's CPU time, and no wait is charged with work done before it.
+/// Running means on a CPU: the thread's CPU clock advances between two
+/// reads. Its scheduler state would not do, since `R' also holds while a
+/// woken thread waits for a CPU, and on a loaded host that wait follows
+/// every sleep. (A thread CPU-time timer itself
+/// is not used: under a zero RLIMIT_RTTIME hard limit Linux kills a
+/// thread whose CPU timer fires.) Dropping the sender ends the thread.
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
-    use std::os::unix::fs::FileExt;
     effect(|| "cpu profiler sampler".into())?;
+    let mut clock: libc::clockid_t = 0;
+    match unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) } {
+        0 => {}
+        error => return Err(io::Error::from_raw_os_error(error)),
+    }
+    let cpu_time = move || {
+        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+        (unsafe { libc::clock_gettime(clock, &mut time) } == 0).then_some((time.tv_sec, time.tv_nsec))
+    };
+    // A thread allowed only one CPU shares it with the sampler, which
+    // never sees it there: for it, runnable has to stand for running.
+    // Read once: an affinity changed later takes a profiler restart.
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    status(unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) })?;
+    let alone = unsafe { libc::CPU_COUNT(&cpus) } == 1;
     let stat = File::open("/proc/thread-self/stat")?;
     // stat's third field, after the parenthesized command name.
-    let running = move || {
+    let runnable = move || {
+        use std::os::unix::fs::FileExt;
         let mut text = [0u8; 512];
         let n = stat.read_at(&mut text, 0).ok()?;
         let close = text[..n].iter().rposition(|&b| b == b')')?;
         Some(text.get(close + 2) == Some(&b'R'))
     };
-    running().ok_or_else(|| io::Error::other("unreadable thread state"))?;
+    // A clock read is a system call, so a thread on a CPU has run between
+    // two of them; a waiting one has not.
+    let running = move || Some(cpu_time()? < cpu_time()? || alone && runnable()?);
+    running().ok_or_else(|| io::Error::other("unreadable thread CPU clock"))?;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let period = std::time::Duration::from_nanos(interval.max(100_000));
     std::thread::Builder::new().name("romacs-profiler".into()).stack_size(64 * 1024).spawn(move || {
@@ -2577,7 +2690,7 @@ pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::Atomi
                 _ => break,
             }
             due = next_sample(due, Instant::now(), period);
-            // The profiled thread is gone: its state no longer reads.
+            // The profiled thread is gone: its clock no longer reads.
             let Some(running) = running() else { break };
             if running {
                 ticks.fetch_add((period.as_nanos() as u64 / interval).max(1), std::sync::atomic::Ordering::Relaxed);
@@ -2614,6 +2727,20 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
+/// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
+/// for the whole process.
+static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_daemon(name: &str) {
+    let _ = DAEMON.set(name.to_owned());
+}
+
+/// The name `daemonp' answers, while this process is a server.
+pub fn daemon() -> Option<&'static str> {
+    DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.

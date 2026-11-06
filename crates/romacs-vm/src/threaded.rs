@@ -842,8 +842,17 @@ pub(super) fn call_debugger(e: &mut Engine<'_>, conditions: Value, object: Value
     let call = Form::List(vec![sym("funcall"), sym("debugger"), Form::List(vec![sym("quote"), sym("error")]), quoted(e.vm, object)]);
     let bindings = Form::List(vec![bind("debugger-may-continue", "t"), bind("inhibit-redisplay", "nil"),
                                    bind("inhibit-debugger", "t"), bind("inhibit-changing-match-data", "nil")]);
-    let form = Form::List(vec![sym("if"), test, Form::List(vec![sym("let"), bindings, call])]);
-    call_in_signal(e, form, 200, failed_depth)
+    // GNU tests eligibility in C: the helper's calls are no stops for a
+    // `debug-on-next-call' (debug-on-event's). The debugger runs after the
+    // hold, so it may arm the variable again (`d').
+    e.vm.profiler.held += 1;
+    let wanted = run_in_signal(e, test, 200, failed_depth);
+    e.vm.profiler.held -= 1;
+    match wanted {
+        Err(escape) => Some(escape),
+        Ok(Value::NIL) => None,
+        Ok(_) => call_in_signal(e, Form::List(vec![sym("let"), bindings, call]), 200, failed_depth),
+    }
 }
 
 /// VALUE as a quoted, rooted form object.
@@ -857,6 +866,11 @@ fn quoted(vm: &Vm, value: Value) -> Form {
 /// collecting safepoint: FORM's objects are rooted, and are also the
 /// pending escape's, which the suspended engine traces.
 fn call_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Option<usize>) -> Option<Escape> {
+    run_in_signal(e, form, room, failed_depth).err()
+}
+/// `call_in_signal', keeping FORM's value: it is read at once, before
+/// anything can collect.
+fn run_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Option<usize>) -> std::result::Result<Value, Escape> {
     let r = e.regs;
     let saved_depth = e.vm.eval_depth;
     // A refused activation has already incremented GNU's depth, even though
@@ -884,13 +898,13 @@ fn call_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Optio
         e.error = Some("register storage exhausted".into());
     }
     match (result, replacement) {
-        (_, Some(escape)) => Some(escape),
+        (_, Some(escape)) => Err(escape),
         (Err(error), None) => {
             let message = e.vm.make_lisp_string(error.into_bytes(), true);
             let data = e.vm.list_value(&[message]);
-            Some(Escape::Signal(e.vm.intern("error"), data))
+            Err(Escape::Signal(e.vm.intern("error"), data))
         }
-        (Ok(_), None) => None,
+        (Ok(value), None) => Ok(value),
     }
 }
 /// Regions belong to register activations. Unwinding consumes those same frames;
@@ -1932,6 +1946,9 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
+    if e.vm.profiler.debug_call {
+        return unsafe { debug_on_call(e, r, pc) };
+    }
     if e.vm.collection_due() {
         // Due but held (a nested engine): the request stays for the engine
         // that may collect.
@@ -2121,8 +2138,18 @@ unsafe fn ret(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         if e.controls.len() != e.controls_base {
             return fail(e, "invalid image return through control region");
         }
+        // The return's one hook test, in place of `trace_leave''s.
+        if e.vm.profiler.active
+            && let Some(frame) = e.frames.last()
+            && frame.mark != NO_MARK
+        {
+            if e.vm.profiler.exit_flags && e.vm.backtrace.exit_flagged_from(frame.mark) {
+                return debug_on_exit(e, r, pc, frame.mark);
+            }
+            e.vm.hooked_leave(frame.mark);
+        }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e, frame.mark);
+            leave_return(e, frame.mark);
             e.rest.leave(e.frames.len() + 1);
             *frame.regs.add(frame.dest as usize) = value;
             e.function = frame.function as usize;
@@ -2225,8 +2252,13 @@ fn leave_native(e: &mut Engine<'_>) {
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
     if mark != NO_MARK { e.vm.trace_leave(mark); }
 }
+/// A normal return's leave: `ret' has run the hooks.
 #[inline(never)]
-unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
+fn leave_return(e: &mut Engine<'_>, mark: usize) {
+    if mark != NO_MARK { e.vm.backtrace.leave(mark); }
+}
+#[inline(never)]
+unsafe fn trace_call<const LISP: bool>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
     target: Value, start: usize, argc: usize) -> usize {
     unsafe {
         let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
@@ -2254,7 +2286,102 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
                 count: argc,
             }
         };
-        e.vm.trace_enter(function, resolved, args, e.vm.dynamic.len())
+        // One test for every call boundary hook; the hooked path is cold.
+        if e.vm.profiler.active {
+            return hooked_call::<LISP>(e, function, resolved, args);
+        }
+        e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len())
+    }
+}
+/// A call's backtrace entry while a hook is armed: the profilers sample the
+/// stack it is entered from, and a Lisp call may stop for
+/// `debug-on-next-call'.
+#[cold]
+#[inline(never)]
+fn hooked_call<const LISP: bool>(e: &mut Engine<'_>, function: Value, resolved: Value, args: backtrace::Arguments) -> usize {
+    e.vm.profile_boundary();
+    let mark = e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len());
+    if LISP { arm_debug_on_call(e, mark); }
+    mark
+}
+/// GNU do_debug_on_call for the Lisp call MARK enters, when
+/// `debug-on-next-call' is set: clear it, flag the call debug-on-exit, and
+/// stop at the call's first poll, its frame in place (`debug_on_call').
+/// Primitives are no stops (DIVERGENCES DBG-NEXT-CALL); the variable stays
+/// set through them.
+#[cold]
+#[inline(never)]
+fn arm_debug_on_call(e: &mut Engine<'_>, mark: usize) {
+    if !e.vm.profiler.next_call || e.vm.profiler.held != 0 { return; }
+    e.vm.forwarded.clear_debug_on_next_call();
+    let token = e.vm.backtrace.frames[mark].token;
+    e.vm.backtrace.set_debug_on_exit(token, true);
+    e.vm.debug_hooks_changed();
+    e.vm.profiler.debug_call = true;
+    e.budget = 0;
+}
+/// GNU call_debugger's form: `debugger' on ARGS under its bindings. Run as
+/// the engine's own code, it adds no frame under the debugger's.
+fn debugger_form(vm: &Vm, args: &[Value]) -> Form {
+    let sym = |name: &str| Form::Sym(name.into());
+    let bind = |name: &str, value: &str| Form::List(vec![sym(name), sym(value)]);
+    let mut call = vec![sym("funcall"), sym("debugger")];
+    call.extend(args.iter().map(|&arg| quoted(vm, arg)));
+    let bindings = Form::List(vec![bind("debugger-may-continue", "t"), bind("inhibit-redisplay", "nil"),
+                                   bind("inhibit-debugger", "t"), bind("inhibit-changing-match-data", "nil")]);
+    let note = Form::List(vec![sym("setq"), sym("debug-on-next-call"), sym("nil"),
+                               sym("internal-when-entered-debugger"), sym("num-nonmacro-input-events")]);
+    Form::List(vec![sym("progn"), note, Form::List(vec![sym("let"), bindings, Form::List(call)])])
+}
+/// Run the debugger on ARGS with the activation at R suspended, borrowing
+/// two hundred levels. Its value, or None with its escape pending.
+unsafe fn hook_debugger(e: &mut Engine<'_>, r: *mut Value, args: &[Value]) -> Option<(*mut Value, Value)> {
+    let form = debugger_form(e.vm, args);
+    // The reserve is borrowed at the engine's depth, which `eval_depth'
+    // learns only at a nested boundary.
+    let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+    let token = e.vm.max_ensure_room(200);
+    e.vm.eval_depth = saved_depth;
+    let out = unsafe {
+        nested_then(e, r, |vm| {
+            let function = vm.compile(&form)?;
+            vm.propagate_next = true;
+            let result = vm.execute_raw(function);
+            vm.propagate_next = false;
+            result
+        })
+    };
+    if let Some(old) = token { e.vm.restore_stack_limits(old); }
+    out
+}
+/// `debug-on-next-call''s stop, at the first poll of the call it armed.
+#[cold]
+#[inline(never)]
+unsafe fn debug_on_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    e.vm.profiler.debug_call = false;
+    let code = e.vm.intern("lambda");
+    match unsafe { hook_debugger(e, r, &[code]) } {
+        Some((r, _)) => unsafe { poll_resume(e, r, pc) },
+        None => Value::UNBOUND,
+    }
+}
+/// GNU funcall's debug-on-exit: the debugger gets `(exit VALUE)' as a
+/// flagged activation returns normally, and its value is returned instead.
+#[cold]
+#[inline(never)]
+unsafe fn debug_on_exit(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, mark: usize) -> Value {
+    unsafe {
+        e.vm.backtrace.drop_exit_flags_from(mark);
+        e.vm.debug_hooks_changed();
+        let exit = e.vm.intern("exit");
+        let value = *r.add((*pc).a);
+        match hook_debugger(e, r, &[exit, value]) {
+            Some((r, value)) => {
+                *r.add((*pc).a) = value;
+                ret(e, r, pc)
+            }
+            None => Value::UNBOUND,
+        }
     }
 }
 #[inline(never)]
@@ -2264,7 +2391,7 @@ unsafe fn enter_native(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
         e.vm.backtrace.resolve_pending(target);
         mark
     } else {
-        unsafe { trace_call(e, r, pc, target, start, argc) }
+        unsafe { trace_call::<false>(e, r, pc, target, start, argc) }
     };
     e.native_mark = Some(e.apply_mark.take().unwrap_or(mark));
 }
@@ -2275,7 +2402,7 @@ unsafe fn enter_apply(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, start:
         e.vm.backtrace.resolve_pending(target);
         mark
     } else {
-        unsafe { trace_call(e, r, pc, target, start, argc) }
+        unsafe { trace_call::<false>(e, r, pc, target, start, argc) }
     };
     // A callee's physical activation owns its whole native apply chain. This
     // keeps genuine apply operations visible until the final callee leaves.
@@ -2490,6 +2617,7 @@ unsafe fn resolve_entry(
                 && !e.vm.functions[function].rest
                 && e.vm.slots[(*pc).b].function == target
                 && !e.vm.macros.contains(&(*pc).b)
+                && !e.vm.profiler.next_call
             {
                 e.vm.world_version
             } else {
@@ -2718,10 +2846,13 @@ unsafe fn enter_frame(
 unsafe fn call_mark(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, target: Value, start: usize, argc: usize) -> usize {
     unsafe {
         if let Some(mark) = e.native_mark.take() {
+            // The activation a primitive (`funcall') entered becomes this
+            // Lisp call's: it is the call `debug-on-next-call' stops.
             e.vm.backtrace.resolve_pending(target);
+            if e.vm.profiler.active { arm_debug_on_call(e, mark); }
             mark
         } else {
-            trace_call(e, r, pc, target, start, argc)
+            trace_call::<true>(e, r, pc, target, start, argc)
         }
     }
 }
@@ -3625,7 +3756,12 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 #[cold]
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
-    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
+    // Compiling the list is Romacs's own work, which GNU's interpreter does
+    // not do: `debug-on-next-call' waits for the lambda's activation.
+    e.vm.profiler.held += 1;
+    let out = unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) };
+    e.vm.profiler.held -= 1;
+    out
 }
 /// specbind of SLOT to VALUE from compiled code or a call site: a protected
 /// variable (most-positive-fixnum, enable-multibyte-characters, ...) is
