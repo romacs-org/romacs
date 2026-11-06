@@ -246,6 +246,13 @@ impl Leaf<'_> {
         })
     }
 
+    /// The windows argument `pre-redisplay-function' takes now, if a host
+    /// lays the frame out and it has anything to do.
+    pub(crate) fn pre_redisplay_call(&mut self) -> std::result::Result<Option<Value>, Fault> {
+        if !self.vm.has_layout_host() { return Ok(None); }
+        self.vm.pre_redisplay_call().map_err(Fault::Error)
+    }
+
     /// Settle each live window's start as the next layout will
     /// (`Vm::redisplay_point_visibility_now'), and record the end it will
     /// show as `window-end' UPDATE measures it, so `window-end' without

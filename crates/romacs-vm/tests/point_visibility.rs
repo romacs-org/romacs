@@ -92,6 +92,13 @@ fn scrolling_past_invisible_text_as_pinned_gnu() {
     replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
 }
 
+/// pre_redisplay.el: `pre-redisplay-function' and its hook run with the
+/// windows GNU's prepare_menu_bars passes, under `inhibit-redisplay'.
+#[test]
+fn pre_redisplay_function_runs_as_pinned_gnu() {
+    replay(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
 fn replay(probe: &str, answers: &str, least: usize) {
