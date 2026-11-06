@@ -803,21 +803,8 @@ impl Vm {
             } else {
                 (self.frame_hex_parameter(frame, "background-color")?.unwrap_or(default.background), None)
             };
-            let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
-            // The hosted mini-window is placed in the host frame; drawn in this one.
-            if hosts {
-                let mini = self.window(self.mini_window())?.id;
-                let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
-                windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
-            }
-            // The frame's `background-color' is its default face's background
-            // (frame.c gui_set_background_color): text whose faces leave the
-            // background unspecified shows it.
-            if background != default.background {
-                for face in windows.iter_mut().flat_map(|w| w.snapshot.faces.iter_mut()) {
-                    if face.background == default.background { face.background = background; }
-                }
-            }
+            // All FRAME's reads come before its windows' redisplay, which runs
+            // Lisp that may collect and move it.
             let edge = match self.frame_parameter_of(frame, "romacs-layer-edge")? {
                 Some(v) if v == self.intern("top") => romacs_layout_input::LayerEdge::Top,
                 _ => romacs_layout_input::LayerEdge::Bottom,
@@ -834,6 +821,21 @@ impl Vm {
             // only fades: the slide and tweens are off for it.
             let fade = self.intern("fade");
             let fades = self.frame_parameter_of(frame, "romacs-layer-motion")? == Some(fade);
+            let mut windows: Vec<_> = self.snapshot_leaves(self.leaf_ids(root)?)?.into_iter().map(place).collect();
+            // The hosted mini-window is placed in the host frame; drawn in this one.
+            if hosts {
+                let mini = self.window(self.mini_window())?.id;
+                let local = |n: u32, origin: i32| u32::try_from(i64::from(n) - i64::from(origin)).unwrap_or(0);
+                windows.extend(self.snapshot_leaves(vec![mini])?.into_iter().map(|(wx, wy, snapshot)| place((local(wx, x), local(wy, y), snapshot))));
+            }
+            // The frame's `background-color' is its default face's background
+            // (frame.c gui_set_background_color): text whose faces leave the
+            // background unspecified shows it.
+            if background != default.background {
+                for face in windows.iter_mut().flat_map(|w| w.snapshot.faces.iter_mut()) {
+                    if face.background == default.background { face.background = background; }
+                }
+            }
             let animation = match self.layer_animation() {
                 romacs_layout_input::LayerAnimation::Full if fades => romacs_layout_input::LayerAnimation::Reduced,
                 animation => animation,
