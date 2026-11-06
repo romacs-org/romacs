@@ -671,6 +671,36 @@ fn romacs_theme_disable_faces(cx, theme: Value, settings: Value) {
     Ok(Value::NIL)
 }}
 
+defsubr! { name = "romacs--face-restore", gnu = "romacs:faces", effect = Global,
+fn romacs_face_restore(cx, face: Value, frame: Value, saved: Value) {
+    // A theme preview's revert: FACE on FRAME (nil, new frames' defaults)
+    // as the vector SAVED holds it, each slot that differs written as a
+    // replay writes it, so what a slot carries follows.
+    let keys = cx.face_keys();
+    let held = cx.vector_slots(saved).ok_or(Fault::Wrong("vectorp", saved))?.to_vec();
+    let lface = if frame == Value::NIL { cx.face_lookup(face, Value::NIL)? }
+        else { cx.owned_lface(face, frame)?.unwrap_or(Value::NIL) };
+    if lface == Value::NIL { return Ok(Value::NIL); }
+    let class = if frame == Value::NIL { None } else { Some(frame_class(cx, &keys, frame)?) };
+    let mut replay = match class {
+        Some(class) => {
+            let shown = super::face::displayed_faces(cx, frame)?;
+            Some(Replay { keys, class, face, frame, lface, effects: carries_effects(&keys, face), shown,
+                          invalidated: false, reentered: false, written: 0, inherits: 0 })
+        }
+        None => None,
+    };
+    for index in 1..LFACE_VECTOR_SIZE.min(held.len()) {
+        let current = cx.vector_get(lface, slot_value(index))?;
+        if cx.equal(current, held[index]).map_err(|_| Fault::Circular(current))? { continue; }
+        match &mut replay {
+            Some(replay) => replay.store(cx, index, held[index])?,
+            None => { cx.vector_set(lface, slot_value(index), held[index])?; }
+        }
+    }
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "romacs--recalc-all-faces", gnu = "romacs:faces", effect = Global,
 fn romacs_recalc_all_faces(cx, frame: Value) {
     // `face-set-after-frame-default''s loop, `default' first: an invalid

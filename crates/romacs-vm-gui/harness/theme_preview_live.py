@@ -13,12 +13,12 @@ into that compositor only).  Real keys go through `M-x load-theme':
   * RET loads what was shown, and the stock theme gives way as it does to
     `load-theme' without a preview.
 
-A candidate costs the themes under it brought back and then itself, two
-switches of the stock theme's size, so the instructions per candidate
-between two loaded themes are judged against a frame's worth, by one M-:
-over many previews, net of the same M-: over none.
+A candidate over the stock theme costs that theme brought back and then
+itself, so the instructions per candidate between two loaded themes are
+judged against two switches, by one M-: over many previews, net of the same
+M-: over none.
 
-usage: theme_preview_live.py --binary PATH --output DIR [--budget 120e6]
+usage: theme_preview_live.py --binary PATH --output DIR [--budget 90e6]
                              [--tools DIR:DIR]
 """
 import argparse
@@ -43,13 +43,10 @@ SETUP = r'''(progn
                   nil theme-preview-log t 'silent))
   (global-set-key (kbd "<f9>") #'theme-preview-state)
   (defun theme-preview-cycle (rounds)
-    (let* ((romacs-theme-preview--base custom-enabled-themes)
-           (romacs-theme--stock romacs-theme--stock)
-           (romacs-theme-preview--stock romacs-theme--stock))
+    (romacs-theme-preview--session
       (dotimes (_ rounds)
         (romacs-theme-preview--show 'tango-dark)
-        (romacs-theme-preview--show 'modus-operandi))
-      (when (> rounds 0) (romacs-theme-preview--show nil))))
+        (romacs-theme-preview--show 'modus-operandi))))
   t)'''
 
 UNSAFE = '''(deftheme theme-preview-unsafe "Nobody agreed to this.")
@@ -111,7 +108,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--budget', type=float, default=120e6, help='instructions per candidate: about 13 ms here, under a frame at 60 Hz')
+    ap.add_argument('--budget', type=float, default=90e6, help='instructions per candidate: two switches at the switch budget')
     ap.add_argument('--rounds', type=int, default=20, help='two previews each; two digits, as the M-: over none is typed the same')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)

@@ -132,6 +132,7 @@ through a list must not run code nobody agreed to."
   :group 'customize)
 
 (defvar romacs-theme--stock)
+(defvar romacs-mode-line--pill-colors)
 
 (defvar romacs-theme-preview--base nil
   "The themes enabled when the preview began, highest priority first.")
@@ -139,65 +140,131 @@ through a list must not run code nobody agreed to."
 (defvar romacs-theme-preview--stock nil
   "`romacs-theme--stock' when the preview began.")
 
+(defvar romacs-theme-preview--candidate nil
+  "The theme shown or being shown: its settings may be in place though
+a failed `enable-theme' never recorded it as enabled.")
+
+(defvar romacs-theme-preview--faces nil
+  "Every face as it stood before the first candidate, nil until one:
+each (FRAME (FACE . VECTOR)...), FRAME nil for new frames' defaults.")
+
 (defvar romacs-theme-preview--names nil
-  "The names of the themes offered.")
+  "A table of the names offered.")
 
 (defvar romacs-theme-preview--selected :opening
-  "The theme selected when the selection last changed, nil for none;
-`:opening' until the minibuffer has shown its first.")
+  "The name selected when the selection last changed; `:opening' until
+the minibuffer has shown its first.")
 
-(defvar romacs-theme-preview--moved nil
-  "Non-nil once the selection left the one the minibuffer opened on.")
+(defun romacs-theme-preview--saved-faces ()
+  "Every face as it stands, `default' first: its background can flip the
+background mode, which recalculates the others."
+  (let ((faces (cons 'default (remq 'default (face-list)))))
+    (mapcar (lambda (frame)
+              (cons frame (mapcar (lambda (face)
+                                    (cons face (copy-sequence (internal-lisp-face-p face frame))))
+                                  faces)))
+            (cons nil (frame-list)))))
 
-(defun romacs-theme-preview-safe-p (theme)
-  "Whether `load-theme' would load THEME without asking."
-  (or (get theme 'theme-settings)
-      (when-let* ((file (locate-file (concat (symbol-name theme) "-theme.el")
-                                     (custom-theme--load-path) '("" "c"))))
-        (or (eq custom-safe-themes t)
-            (and (memq 'default custom-safe-themes)
-                 (equal (file-name-directory file)
-                        (expand-file-name "themes/" data-directory)))
-            (member (with-temp-buffer
-                      (insert-file-contents file)
-                      (secure-hash 'sha256 (current-buffer)))
-                    custom-safe-themes)))))
+(defun romacs-theme-preview--drop (theme)
+  "Take THEME's settings back, whatever state a failure left them in."
+  (unless (custom-theme-enabled-p theme) (push theme custom-enabled-themes))
+  (condition-case failure
+      (disable-theme theme)
+    (error
+     (message "Theme preview: %S" failure)
+     (dolist (setting (get theme 'theme-settings))
+       (put (nth 1 setting) (car setting) (assq-delete-all theme (get (nth 1 setting) (car setting)))))
+     (setq custom-enabled-themes (delq theme custom-enabled-themes)))))
+
+(defun romacs-theme-preview--settle ()
+  "Enable only the themes the preview began with.  What a candidate left
+alone stays: the work follows the candidate, not the stack under it."
+  (when-let* ((theme romacs-theme-preview--candidate))
+    (setq romacs-theme-preview--candidate nil)
+    (romacs-theme-preview--drop theme))
+  (unless (equal custom-enabled-themes romacs-theme-preview--base)
+    (mapc #'romacs-theme-preview--drop (copy-sequence custom-enabled-themes))
+    (dolist (theme (reverse romacs-theme-preview--base))
+      (with-demoted-errors "Theme preview: %S" (enable-theme theme))))
+  (setq romacs-theme--stock romacs-theme-preview--stock))
+
+(defun romacs-theme-preview--load (theme)
+  "Load THEME as `load-theme' would, refusing where it would ask.  Its
+own check, so what it approves is what it reads."
+  (let ((confirm (symbol-function 'custom-theme-load-confirm)))
+    (unwind-protect
+        (progn
+          (fset 'custom-theme-load-confirm #'ignore)
+          (load-theme theme nil t))
+      (fset 'custom-theme-load-confirm confirm))))
 
 (defun romacs-theme-preview--show (theme)
   "Show THEME as `load-theme' would over the themes the preview began
-with; with THEME nil, or one that may not be read, only those."
-  (let ((safe (and theme (romacs-theme-preview-safe-p theme))))
-    (when (and theme (not safe))
-      (minibuffer-message "Not shown: `load-theme' would ask first"))
-    (with-demoted-errors "Theme preview: %S"
-      (when (and safe (not (get theme 'theme-settings)))
-        (load-theme theme t t))
-      (mapc #'disable-theme custom-enabled-themes)
-      (mapc #'enable-theme (reverse romacs-theme-preview--base))
-      (setq romacs-theme--stock romacs-theme-preview--stock)
-      (when safe (enable-theme theme)))))
+with; with THEME nil, or one that may not be read, only those.  A theme
+loads over those themes, which it may read."
+  (when (and theme (not romacs-theme-preview--faces))
+    (setq romacs-theme-preview--faces (romacs-theme-preview--saved-faces)))
+  (romacs-theme-preview--settle)
+  (when theme
+    (condition-case failure
+        (progn
+          (unless (get theme 'theme-settings) (romacs-theme-preview--load theme))
+          (setq romacs-theme-preview--candidate theme)
+          (enable-theme theme))
+      (error (minibuffer-message "Not shown: %s" (error-message-string failure))))))
+
+(defun romacs-theme-preview--revert ()
+  "Put back what the preview began with: the themes; what the enable
+hooks derive from them, which `disable-theme' alone would not tell them;
+and every face as it stood, whose local edits no spec holds."
+  (romacs-theme-preview--settle)
+  (with-demoted-errors "Theme preview: %S" (enable-theme 'user))
+  (pcase-dolist (`(,frame . ,faces) romacs-theme-preview--faces)
+    (when (or (null frame) (frame-live-p frame))
+      (pcase-dolist (`(,face . ,vector) faces)
+        (with-demoted-errors "Theme preview: %S"
+          (romacs--face-restore face frame vector))))))
+
+(defmacro romacs-theme-preview--session (&rest body)
+  "Run BODY, whose `romacs-theme-preview--show's are undone at its end,
+however it ends."
+  (declare (indent 0))
+  `(let* ((romacs-theme-preview--base custom-enabled-themes)
+          (romacs-theme-preview--candidate nil)
+          (romacs-theme-preview--faces nil)
+          (romacs-theme--stock (bound-and-true-p romacs-theme--stock))
+          (romacs-theme-preview--stock romacs-theme--stock)
+          ;; What the pill faces were last given: they come back with the
+          ;; other faces, so this does too.
+          (romacs-mode-line--pill-colors (bound-and-true-p romacs-mode-line--pill-colors)))
+     (unwind-protect (progn ,@body)
+       (when romacs-theme-preview--faces
+         (let ((inhibit-quit t)) (romacs-theme-preview--revert))))))
 
 (defun romacs-theme-preview--current ()
-  "The theme selected in the minibuffer, nil for none."
-  (let ((name (if (bound-and-true-p romacs-complete--candidates)
-                  (romacs-complete--candidate)
-                (minibuffer-contents-no-properties))))
-    (and (member name romacs-theme-preview--names) (intern name))))
+  "The name selected in the minibuffer."
+  (if (bound-and-true-p romacs-complete--candidates)
+      (romacs-complete--candidate)
+    (minibuffer-contents-no-properties)))
 
 (defun romacs-theme-preview--follow ()
   "Show the theme selected now, where that is another.  What the
 minibuffer opens on is nobody's choice yet, and shows nothing."
-  (let ((theme (romacs-theme-preview--current))
+  (let ((name (romacs-theme-preview--current))
         (opening (eq romacs-theme-preview--selected :opening)))
-    (unless (eq theme romacs-theme-preview--selected)
-      (setq romacs-theme-preview--selected theme)
+    (unless (equal name romacs-theme-preview--selected)
+      (setq romacs-theme-preview--selected name)
       (unless opening
-        (setq romacs-theme-preview--moved t)
-        (romacs-theme-preview--show theme)))))
+        (romacs-theme-preview--show (and (gethash name romacs-theme-preview--names) (intern name)))))))
 
 (defun romacs-theme-preview--setup ()
   "Follow the selection in this minibuffer."
   (add-hook 'post-command-hook #'romacs-theme-preview--follow 90 t))
+
+(defun romacs-theme-preview--table (names)
+  "A table of NAMES."
+  (let ((table (make-hash-table :test #'equal :size (length names))))
+    (dolist (name names table) (puthash name t table))))
 
 (defun romacs-theme-preview-read ()
   "Read a theme as `load-theme' does, showing what is selected.
@@ -209,17 +276,11 @@ what the reader chose, `load-theme' goes on to load."
      (intern
       (if (not romacs-theme-preview)
           (completing-read prompt names)
-        (let* ((romacs-theme-preview--base custom-enabled-themes)
-               (romacs-theme-preview--names names)
-               (romacs-theme-preview--selected :opening)
-               (romacs-theme-preview--moved nil)
-               (romacs-theme--stock (bound-and-true-p romacs-theme--stock))
-               (romacs-theme-preview--stock romacs-theme--stock))
-          (unwind-protect
-              (minibuffer-with-setup-hook (:append #'romacs-theme-preview--setup)
-                (completing-read prompt names))
-            (when romacs-theme-preview--moved
-              (romacs-theme-preview--show nil))))))
+        (romacs-theme-preview--session
+          (let ((romacs-theme-preview--names (romacs-theme-preview--table names))
+                (romacs-theme-preview--selected :opening))
+            (minibuffer-with-setup-hook (:append #'romacs-theme-preview--setup)
+              (completing-read prompt names))))))
      nil nil)))
 
 (put 'load-theme 'interactive-form '(interactive (romacs-theme-preview-read)))

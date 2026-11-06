@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d6ea9612114aa4e96ee219677f12aabb707faf56a5172f567d7028cccbb9cbab",
+  "source_fingerprint": "f5c3830d568b883498a74f28edf62636f484c950c142db93b574366c7e7850c4",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1375,
-  "parsed_vm2_only": 1375
+  "parsed_total": 1376,
+  "parsed_vm2_only": 1376
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4372,17 +4372,22 @@
   "romacs--face-attr-match-p": {
    "name": "romacs--face-attr-match-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:807"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:837"
   },
   "romacs--face-list": {
    "name": "romacs--face-list",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:814"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:844"
+  },
+  "romacs--face-restore": {
+   "name": "romacs--face-restore",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:674"
   },
   "romacs--face-spec-choose": {
    "name": "romacs--face-spec-choose",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:769"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:799"
   },
   "romacs--face-spec-recalc": {
    "name": "romacs--face-spec-recalc",
@@ -4392,12 +4397,12 @@
   "romacs--face-spec-set-match-display": {
    "name": "romacs--face-spec-set-match-display",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:777"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:807"
   },
   "romacs--faces-modified-on": {
    "name": "romacs--faces-modified-on",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:724"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:754"
   },
   "romacs--frame-shares-faces-p": {
    "name": "romacs--frame-shares-faces-p",
@@ -4883,12 +4888,12 @@
   "romacs--recalc-all-faces": {
    "name": "romacs--recalc-all-faces",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:674"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:704"
   },
   "romacs--recalc-faces-except": {
    "name": "romacs--recalc-faces-except",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:748"
+   "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:778"
   },
   "romacs--record-input": {
    "name": "romacs--record-input",

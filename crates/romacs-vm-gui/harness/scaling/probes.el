@@ -246,6 +246,42 @@ thousandth a stack mark."
             (dolist (face (nth 2 it)) (face-spec-recalc face frame)))
           (with-current-buffer (car it) (insert "x"))))
 
+;; `load-theme''s prompt with N themes offered: a command that leaves the
+;; selection alone, and one that moves it to no theme.
+(scaling-probe theme-preview-names :n 2000
+  :setup (let ((names (mapcar #'symbol-name (mapcar #'intern (scaling--names "scaling-offered" n)))))
+           (list (romacs-theme-preview--table names) (car (last names))))
+  :body (romacs-theme-preview--session
+          (let ((romacs-theme-preview--names (car it))
+                (romacs-theme-preview--selected "")
+                (name (cadr it)))
+            (with-temp-buffer
+              (dotimes (_ 200)
+                (romacs-theme-preview--follow)
+                (erase-buffer)
+                (insert name)
+                (romacs-theme-preview--follow)
+                (erase-buffer))))))
+
+;; Candidates over N enabled themes: the stack under them is left alone.
+(scaling-probe theme-preview-stack :gui t :n 16 :steps 1
+  :setup (let ((themes (mapcar #'intern (scaling--names "scaling-under" n))))
+           (dolist (theme themes)
+             (custom-declare-theme theme nil)
+             (custom-theme-set-faces theme '(region ((t :underline t))))
+             (enable-theme theme))
+           (deftheme scaling-candidate-a "One face.")
+           (custom-theme-set-faces 'scaling-candidate-a '(highlight ((t :foreground "#102030"))))
+           (deftheme scaling-candidate-b "One face.")
+           (custom-theme-set-faces 'scaling-candidate-b '(highlight ((t :foreground "#203040"))))
+           (switch-to-buffer (get-buffer-create "scaling-under")))
+  :body (progn
+          (romacs-theme-preview--session
+            (dotimes (_ 8)
+              (romacs-theme-preview--show 'scaling-candidate-a)
+              (romacs-theme-preview--show 'scaling-candidate-b)))
+          (with-current-buffer it (insert "x"))))
+
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1
   :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
