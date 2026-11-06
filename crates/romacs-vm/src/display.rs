@@ -2566,7 +2566,7 @@ impl Vm {
             begv: char_at(begv_byte)?,
             zv: char_at(zv_byte)?,
             z: b.len_chars() + 1,
-            line: text.as_bytes()[begv_byte..point_byte].iter().filter(|&&c| c == b'\n').count() + 1,
+            line: b.line_of_byte(ByteOffset(point_byte))? - b.line_of_byte(accessible.start)? + 1,
             column,
             modified: b.state.modified(),
             frame_cols,
