@@ -69,6 +69,17 @@ fn subword_mode_moves_as_pinned_gnu() {
         (push (list (forward-word 2) (point)) r)
         (nreverse r)))";
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
+    // The case commands scan the same way (casefiddle.c casify_word).
+    let form = "(with-temp-buffer
+      (insert \"fooBarBaz quxQuux\") (subword-mode 1)
+      (let (r)
+        (goto-char 1) (upcase-word 1) (push (list (buffer-string) (point)) r)
+        (capitalize-word 1) (push (list (buffer-string) (point)) r)
+        (goto-char (point-max)) (downcase-word -1) (push (list (buffer-string) (point)) r)
+        (goto-char 1) (upcase-word 9) (push (list (buffer-string) (point)) r)
+        (goto-char (point-max)) (downcase-word -9) (push (list (buffer-string) (point)) r)
+        (nreverse r)))";
+    assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -4,7 +4,7 @@
 //! constrained to point's field as syntax.c Fforward_word constrains them.
 //! GNU words-include-escapes and script/category transitions are not
 //! implemented here. A find-word-boundary-function-table with entries takes
-//! `forward-word' to rlisp/vm/prelude.el's scan; the case commands stay here.
+//! `forward-word' and the case commands to rlisp/vm/prelude.el's scan.
 //! The regex default boundary lookup is also a no-op, not a script provider.
 use super::*;
 use crate::prim::leaf::Kind;
