@@ -230,7 +230,7 @@ on before the user's init, unless started with -Q."
 
 (defun romacs-defaults-log-stop ()
   "Stop the log still arriving in this buffer: kill its process, keep its text."
-  (interactive)
+  (interactive nil log-view-mode)
   (let ((process (get-buffer-process (current-buffer))))
     (when (process-live-p process)
       (kill-process process)
