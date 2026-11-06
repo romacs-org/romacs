@@ -286,7 +286,7 @@ references in MESSAGE then get clickable playground-line hints."
   "Compile the playground buffer into the preview surface.
 With QUIET non-nil (live mode), report errors in the echo area instead of
 popping the error buffer."
-  (interactive)
+  (interactive nil romacs-shader-playground-mode)
   (let* ((source (buffer-substring-no-properties (point-min) (point-max)))
          (uniforms (romacs-shader-playground--uniforms))
          (language (romacs-shader-playground--language))
@@ -314,9 +314,10 @@ popping the error buffer."
 VALUE is a number or a vector of up to four numbers."
   (interactive
    (list (intern (read-string "Uniform name: "))
-         (car (read-from-string (read-string "Value (number or [x y z]): ")))))
+         (car (read-from-string (read-string "Value (number or [x y z]): ")))) romacs-shader-playground-mode)
   (unless romacs-shader-playground--surface
-    (error "No live preview surface; compile first (C-c C-c)"))
+    (error "%s" (substitute-command-keys
+                 "No live preview surface; compile first (\\<romacs-shader-playground-mode-map>\\[romacs-shader-playground-compile])")))
   (romacs-surface-set-uniform romacs-shader-playground--surface name value)
   (message "%s = %s" name value))
 
@@ -327,9 +328,20 @@ VALUE is a number or a vector of up to four numbers."
     (kill-buffer buffer))
   (romacs-shader-playground--hide-errors))
 
+(defun romacs-shader-playground--close-command-p (_symbol buffer)
+  "Whether BUFFER is the playground or one it shows beside itself."
+  (with-current-buffer buffer
+    (or (derived-mode-p 'romacs-shader-playground-mode)
+        (member (buffer-name) (list romacs-shader-playground--preview-buffer
+                                    romacs-shader-playground--error-buffer)))))
+
+(put 'romacs-shader-playground-close-preview 'completion-predicate
+     #'romacs-shader-playground--close-command-p)
+
 (define-minor-mode romacs-shader-playground-live-mode
   "Recompile the playground shader after every pause in editing."
   :lighter " Live"
+  :interactive (romacs-shader-playground-mode)
   (if romacs-shader-playground-live-mode
       (add-hook 'after-change-functions
                 #'romacs-shader-playground--schedule nil t)

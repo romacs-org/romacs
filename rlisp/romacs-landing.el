@@ -23,8 +23,6 @@
 
 (require 'romacs-animate)
 
-(defconst romacs-landing-controls "SPC pause   Home restart   q close"
-  "The line under the logo.")
 
 (defvar romacs-landing-hook nil
   "Run in *Romacs* once its logo and controls are in place, with point
@@ -104,6 +102,13 @@ the logo's motion.  The display places it wherever the window scrolls."
     map)
   "The logo's keys in *Romacs*, over the startup screen's.")
 
+(defun romacs-landing--command-p (_symbol buffer)
+  "Whether BUFFER shows the logo these commands act on."
+  (buffer-local-value 'romacs-landing--end buffer))
+
+(put 'romacs-landing-pause 'completion-predicate #'romacs-landing--command-p)
+(put 'romacs-landing-restart 'completion-predicate #'romacs-landing--command-p)
+
 (defun romacs-landing ()
   "Put the logo and its controls at the top of the current buffer, the
 startup screen, whose keymap becomes the parent of `romacs-landing-map';
@@ -111,7 +116,9 @@ then run `romacs-landing-hook'."
   (buffer-disable-undo)
   (let ((inhibit-read-only t))
     (goto-char (point-min))
-    (insert "\n\n" (propertize romacs-landing-controls 'face 'shadow) "\n\n")
+    (insert "\n\n" (romacs-key-hint "\\<romacs-landing-map>\\[romacs-landing-pause] pause   \\[romacs-landing-restart] restart   \\`q' close"
+                                     'shadow)
+            "\n\n")
     ;; Empty until the first frame, which goes before it.
     (setq romacs-landing--end (copy-marker (point-min) t))
     (set-buffer-modified-p nil))
