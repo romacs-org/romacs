@@ -46,7 +46,9 @@ fn cpu_log_records_the_running_backtrace() {
           (profiler-cpu-stop)
           (maphash (lambda (k v)
                      (setq total (+ total v))
-                     (unless (memq (length k) depths) (push (length k) depths))
+                     ;; A collection's sample is GNU's entry, not a stack.
+                     (unless (or (eq (aref k 0) 'Automatic\ GC) (memq (length k) depths))
+                       (push (length k) depths))
                      ;; In pt-leaf or a primitive it calls, under pt-spin.
                      (let ((at (if (eq (aref k 0) 'pt-leaf) 0 1)))
                        (when (eq (aref k at) 'pt-leaf)
