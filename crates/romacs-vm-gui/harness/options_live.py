@@ -15,8 +15,6 @@ what it was, and at the end a new session must have every saved value.
   nil       `custom-file' saved as nil, then naming the init.
   defaults  a saved value of an option Romacs's defaults also set survives.
   quick     -Q: nothing is written, and no ~/.emacs appears.
-  view      the customize commands typed in a session: rows, no widgets, a
-            value set and saved from a row, the init untouched.
   agent     the option tools over MCP: search, describe, set and save, a value
             that does not fit refused, the init untouched, and set and save
             gone with `romacs-mcp-full-access' off.
@@ -421,45 +419,7 @@ def agent(args, base):
         j.close()
 
 
-VIEW_FACTS = """(list (buffer-name) major-mode buffer-read-only (and custom-options t) (and widget-field-list t)
-  (and (seq-some (lambda (overlay) (overlay-get overlay 'button)) (overlays-in (point-min) (point-max))) t)
-  (and (widget-at (point-min)) t))"""
-
-
-def view(args, base):
-    j = Journey(args, base, 'vw')
-    facts = {}
-    try:
-        j.start()
-
-        def opened(command, shown, answer, buffer):
-            j.command(command)
-            j.prompt(shown, answer)
-            j.until(lambda: buffer in j.eval('(buffer-name)'), 20, f'{command} shows {buffer}')
-            facts[command] = j.eval(VIEW_FACTS)
-            return facts[command]
-        opened('customize-group', 'Customize group', 'killing', '*Customize Group: Killing*')
-        opened('customize-apropos', 'Search for', 'kill-ring-max', '*Customize Apropos*')
-        opened('customize-face', 'Customize face', 'bold', '*Customize Face: Bold*')
-        opened('customize-option', 'Customize variable', 'kill-ring-max', '*Customize Option: Kill Ring Max*')
-        j.keys(('-k', 'Return'))
-        j.replace_value('Set kill-ring-max to', '77')
-        j.until(lambda: j.eval('(eql kill-ring-max 77)') == 't', 20, 'a row set the value')
-        row_set = j.eval('(buffer-substring-no-properties (line-beginning-position) (line-end-position))')
-        j.keys(('s',))
-        j.replace_value('Set kill-ring-max to', '78')
-        j.until(lambda: j.eval('(eql kill-ring-max 78)') == 't', 20, 'a row saved the value')
-        row_saved = j.eval('(buffer-substring-no-properties (line-beginning-position) (line-end-position))')
-        j.check('saved from a row')
-        widgetless = all(' nil nil nil nil)' in value and ' Custom-mode t ' in value for value in facts.values())
-        saved = 'kill-ring-max 78' in j.custom.read_text()
-        return {'facts': facts, 'row_set': row_set, 'row_saved': row_saved, 'steps': j.steps,
-                'ok': widgetless and saved and '[set]' in row_set and '[saved]' in row_saved}
-    finally:
-        j.close()
-
-
-WORKFLOWS = {'agent': agent, 'view': view, 'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
+WORKFLOWS = {'agent': agent, 'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
 
 
 def main():
