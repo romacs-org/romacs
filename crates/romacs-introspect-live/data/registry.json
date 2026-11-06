@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "4ef6a7cbaacad2b805476c103bc8100b63aa676f377da338c4106e0ca5ddf691",
+    "input_hash": "510c5fecb9dae39cc77ec568941ca26ee4f28135e08ad9235786d2db67d32fd9",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8271
+    "vm2_universe": 8279
   },
   "schema": 2,
   "vm2": {
-    "count": 1362,
+    "count": 1364,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -764,6 +764,7 @@
       "process-running-child-p",
       "process-sentinel",
       "process-status",
+      "process-thread",
       "process-tty-name",
       "process-type",
       "processp",
@@ -1065,6 +1066,7 @@
       "set-process-plist",
       "set-process-query-on-exit-flag",
       "set-process-sentinel",
+      "set-process-thread",
       "set-process-window-size",
       "set-safe-terminal-coding-system-internal",
       "set-standard-case-table",
