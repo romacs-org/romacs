@@ -187,19 +187,37 @@ fn added(old: Option<&Alternatives>, entry: &Alternative, mode: FontsetMode) -> 
     }
 }
 
+/// One FONTSET_ADD: it writes one list per list it replaces, as fontset_add
+/// makes one vector per run, so a run stays one list however many slots hold it.
+struct Edit<'a> {
+    entry: &'a Alternative,
+    mode: FontsetMode,
+    /// By the identity of the list replaced. Each new list shares that list's
+    /// cells, which keeps the identity unique for the whole edit.
+    made: HashMap<(usize, usize), Alternatives>,
+}
+
+impl Edit<'_> {
+    fn list(&mut self, old: Option<&Alternatives>) -> Alternatives {
+        let old = old.filter(|_| self.mode != FontsetMode::Overwrite);
+        let key = old.map_or((0, 0), Alternatives::identity);
+        self.made.entry(key).or_insert_with(|| added(old, self.entry, self.mode)).clone()
+    }
+}
+
 impl Slot {
     /// FROM..=TO in this slot, which covers SPAN characters from BASE, given
-    /// ENTRY by MODE: touches only the nodes on the range's two ends and the
-    /// slots it covers.
-    fn add(&mut self, base: u32, span: u32, from: u32, to: u32, entry: &Alternative, mode: FontsetMode) {
+    /// EDIT: touches only the nodes on the range's two ends and the slots it
+    /// covers.
+    fn add(&mut self, base: u32, span: u32, from: u32, to: u32, edit: &mut Edit<'_>) {
         if from <= base && base + (span - 1) <= to {
             match self {
-                Slot::Uniform(old) => *old = Some(added(old.as_ref(), entry, mode)),
-                Slot::Node(_) if mode == FontsetMode::Overwrite => *self = Slot::Uniform(Some(added(None, entry, mode))),
+                Slot::Uniform(old) => *old = Some(edit.list(old.as_ref())),
+                Slot::Node(_) if edit.mode == FontsetMode::Overwrite => *self = Slot::Uniform(Some(edit.list(None))),
                 Slot::Node(node) => {
                     let child = span / FANOUT as u32;
                     for (i, slot) in Arc::make_mut(node).iter_mut().enumerate() {
-                        slot.add(base + i as u32 * child, child, from, to, entry, mode);
+                        slot.add(base + i as u32 * child, child, from, to, edit);
                     }
                 }
             }
@@ -215,7 +233,7 @@ impl Slot {
         let last = (to.min(base + (span - 1)) - base) / child;
         let node = Arc::make_mut(node);
         for i in first..=last {
-            node[i as usize].add(base + i * child, child, from, to, entry, mode);
+            node[i as usize].add(base + i * child, child, from, to, edit);
         }
     }
 
@@ -266,7 +284,10 @@ impl Fontset {
     pub fn add(&mut self, target: FontsetTarget, entry: Alternative, mode: FontsetMode) {
         match target {
             FontsetTarget::Fallback => self.fallback = Some(added(self.fallback.as_ref(), &entry, mode)),
-            FontsetTarget::Range(from, to) => self.rules.add(0, ROOT_SPAN, from.min(to), from.max(to), &entry, mode),
+            FontsetTarget::Range(from, to) => {
+                let mut edit = Edit { entry: &entry, mode, made: HashMap::new() };
+                self.rules.add(0, ROOT_SPAN, from.min(to), from.max(to), &mut edit);
+            }
         }
     }
 
@@ -448,6 +469,18 @@ mod tests {
         let mut runs = Vec::new();
         set.runs(|from, to, list| runs.push((from, to, names(Some(list)))));
         assert_eq!(runs, [(0x100, 0x2FF, vec!["A".to_string()]), (0x300, 0x301, vec!["B".to_string()]), (0x302, 0x20000, vec!["A".to_string()])]);
+    }
+
+    #[test]
+    fn adding_to_a_range_keeps_each_run_one_run() {
+        let mut set = Fontset::new("f");
+        set.add(FontsetTarget::Range(0x100, 0x20000), def("A"), FontsetMode::Overwrite);
+        set.add(FontsetTarget::Range(0x300, 0x301), def("B"), FontsetMode::Overwrite);
+        set.add(FontsetTarget::Range(0x100, 0x20000), def("C"), FontsetMode::Append);
+        let mut runs = Vec::new();
+        set.runs(|from, to, list| runs.push((from, to, names(Some(list)))));
+        let list = |names: [&str; 2]| names.map(String::from).to_vec();
+        assert_eq!(runs, [(0x100, 0x2FF, list(["A", "C"])), (0x300, 0x301, list(["B", "C"])), (0x302, 0x20000, list(["A", "C"]))]);
     }
 
     #[test]
