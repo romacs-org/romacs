@@ -311,6 +311,106 @@ class Source(unittest.TestCase):
         self.assertEqual(sorted({n for n in names if names.count(n) > 1}), [])
 
 
+def lead_results(**overrides):
+    def made(name, gnu, romacs):
+        return pb.row(name, 'session', 'run', gnu, romacs, 3)
+    rows = [made(readme.VC_HISTORY, {'wall': 19.0, 'check': '183574 abc'}, {'wall': 3.0, 'key': .005, 'check': '183574 abc'}),
+            made(readme.OPEN_XDISP, {'wall': .65}, {'wall': .77}),
+            made(readme.OPEN_HEADER, {'wall': 2.0}, {'wall': 1.0}),
+            made(readme.THEME, {'wall': .05}, {'wall': .06})]
+    made_results = results(rows)
+    made_results['meta'].update(header_bytes=15_600_000, history_commits=183574)
+    for name, change in overrides.items():
+        change(made_results)
+    return made_results
+
+
+class Lead(unittest.TestCase):
+    def test_every_name_in_the_template_is_filled_and_none_is_left(self):
+        text = readme.lead_section(lead_results())
+        self.assertNotIn('{{', text)
+        for part in ('3 s', '19 s', '183,574', '5 ms', '650 ms', '770 ms', '16 MB', '50 ms', '60 ms'):
+            self.assertIn(part, text)
+
+    def test_the_template_keeps_the_names_of_the_draft(self):
+        names = set(re.findall(r'\{\{([^{}]+)\}\}', readme.LEAD.read_text()))
+        self.assertEqual(names, set(readme.lead_values(lead_results())))
+
+    def test_a_value_the_run_lacks_stops_it_and_says_which(self):
+        def refuse(made):
+            made['rows'][1]['romacs']['wall_refused'] = made['rows'][1]['romacs'].pop('wall')
+        made = lead_results(x=refuse)
+        self.assertEqual(readme.lead_missing(made), ['open-xdisp-romacs'])
+        with self.assertRaises(SystemExit) as stopped:
+            readme.lead_section(made)
+        self.assertIn('open-xdisp-romacs', str(stopped.exception))
+
+    def test_a_name_the_filler_does_not_know_is_a_failure_not_a_blank(self):
+        self.assertEqual(readme.lead_missing(lead_results(), 'a {{no-such-number}} b'), ['no-such-number'])
+
+    def test_a_log_that_differs_from_gnus_gives_no_commit_count(self):
+        def partial(made):
+            made['rows'][0]['romacs']['check'] = '2000 def'
+        self.assertIn('vc-history-commits', readme.lead_missing(lead_results(x=partial)))
+
+    def test_a_log_short_of_gits_count_is_no_commit_count_though_both_engines_agree(self):
+        def short(made):
+            made['meta']['history_commits'] = 194171
+        self.assertIn('vc-history-commits', readme.lead_missing(lead_results(x=short)))
+
+    def test_a_run_with_session_selected_checks_the_lead_and_quick_does_not(self):
+        args = lambda **k: type('Args', (), {'only': None, 'quick': False, **k})  # noqa: E731
+        self.assertTrue(pb.selected(args(), 'session', 'session', False))
+        self.assertTrue(pb.selected(args(only=['session']), 'session', 'session', False))
+        self.assertFalse(pb.selected(args(quick=True), 'session', 'session', False))
+        self.assertFalse(pb.selected(args(only=['elb']), 'session', 'session', False))
+        self.assertEqual(len(readme.lead_missing(results([]))), 11)
+
+    def test_a_failed_lead_leaves_the_readme_alone(self):
+        def refuse(made):
+            made['rows'][0]['gnu'].pop('wall')
+        with tempfile.TemporaryDirectory() as directory:
+            path, data = Path(directory) / 'README.org', Path(directory) / 'results.json'
+            original = ('# perfbench-lead-begin\nOLD\n# perfbench-lead-end\n# perfbench-session-begin\nOLD\n'
+                        '# perfbench-session-end\n')
+            path.write_text(original)
+            data.write_text(json.dumps(lead_results(x=refuse)))
+            with self.assertRaises(SystemExit):
+                readme.main([str(data), str(path)])
+            self.assertEqual(path.read_text(), original)
+
+    def test_a_run_that_measured_none_of_it_keeps_the_block(self):
+        made = results([pb.row('startup', 'batch', 'run', {'wall': 1.0}, {'wall': 1.0}, 3)])
+        self.assertFalse(readme.lead_measured(made))
+        self.assertTrue(readme.lead_measured(lead_results()))
+
+    def test_load_refuses_first_shown_and_key_with_the_wall(self):
+        made = pb.row(readme.VC_HISTORY, 'session', 'run', {'wall': 1.0}, {'wall': 1.0, 'first': .1, 'key': .005}, 3)
+        made['load'] = 12
+        pb.gate_walls([made], 8)
+        self.assertEqual((made['romacs'].get('first'), made['romacs'].get('key')), (None, None))
+
+    def test_a_session_note_gives_first_shown_and_median_key(self):
+        made = pb.row(readme.VC_HISTORY, 'session', 'run', {'first': .2, 'key': .02}, {'first': .1, 'key': .005}, 3)
+        self.assertEqual(readme.session_extras(made), 'first shown GNU 200 ms, Romacs 100 ms; median key GNU 20 ms, Romacs 5 ms')
+        self.assertEqual(readme.session_extras(pb.row('r', 'session', 'run', {}, {}, 3)), '')
+        moded = pb.row('r', 'session', 'run', {'detail': 'c-mode'}, {'detail': 'c-ts-mode'}, 3)
+        self.assertEqual(readme.session_extras(moded), 'mode GNU c-mode, Romacs c-ts-mode')
+
+    def test_the_generated_header_is_the_same_every_time_and_about_its_size(self):
+        text = pb.generated_header(1200)
+        self.assertEqual(text, pb.generated_header(1200))
+        self.assertEqual(text.count('\n'), 1200)
+        self.assertIn('#define REG_000000_CNTL__FIELD_01_MASK', text)
+        self.assertGreater(len(pb.generated_header(pb.HEADER_LINES)), 13_000_000)
+
+    def test_each_engine_has_themes_enough_for_its_rows(self):
+        for cycle, visits in pb.SESSION_THEMES.values():
+            self.assertGreaterEqual(len(cycle), 2)
+            self.assertGreaterEqual(len(visits), 3)
+            self.assertEqual(set(cycle) & set(visits), set())
+
+
 class Ratio(unittest.TestCase):
     def test_a_count_swallowed_by_its_floor_has_no_ratio(self):
         self.assertEqual(pb.ratio(1, 2), .5)
