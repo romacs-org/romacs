@@ -1222,4 +1222,49 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
       (call-interactively command nil keys)
       (setq last-command command))))
 
+;;;; Word motion through `find-word-boundary-function-table'
+
+(defun romacs--word-at-p (position)
+  "Whether the character at POSITION is a word's, as syntax.c scan_words reads it."
+  (let ((class (logand (car (syntax-after position)) 65535)))
+    (or (= class 2) (and words-include-escapes (memq class '(9 10))))))
+
+(defun romacs--scan-words (from count)
+  "syntax.c scan_words: the position COUNT words from FROM, else nil.
+Nil means an edge of the accessible text came first.  A word start or
+end whose character has a function in `find-word-boundary-function-table'
+goes where that says."
+  (let ((beg (point-min)) (end (point-max)) (table find-word-boundary-function-table))
+    (catch 'edge
+      (while (> count 0)
+        (while (progn (when (= from end) (throw 'edge nil))
+                      (prog1 (not (romacs--word-at-p from)) (setq from (1+ from)))))
+        (let ((function (aref table (char-after (1- from)))))
+          (if (fboundp function)
+              (let ((position (funcall function (1- from) end)))
+                (when (and (fixnump position) (< from position) (<= position (point-max)))
+                  (setq from position)))
+            (while (and (/= from end) (romacs--word-at-p from)) (setq from (1+ from)))))
+        (setq count (1- count)))
+      (while (< count 0)
+        (while (progn (when (= from beg) (throw 'edge nil))
+                      (setq from (1- from))
+                      (not (romacs--word-at-p from))))
+        (let ((function (aref table (char-after from))))
+          (if (fboundp function)
+              (let ((position (funcall function from beg)))
+                (when (and (fixnump position) (<= (point-min) position) (< position from))
+                  (setq from position)))
+            (while (and (/= from beg) (romacs--word-at-p (1- from))) (setq from (1- from)))))
+        (setq count (1+ count)))
+      from)))
+
+(defun romacs--forward-word (count)
+  "syntax.c Fforward_word over `romacs--scan-words'."
+  (let* ((reached (romacs--scan-words (point) count))
+         (position (or reached (if (> count 0) (point-max) (point-min))))
+         (kept (constrain-to-field position (point))))
+    (goto-char kept)
+    (eq kept reached)))
+
 ;;; prelude.el ends here

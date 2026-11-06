@@ -44,3 +44,27 @@ fn c_variables_read_as_pinned_gnu() {
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `find-word-boundary-function-table': subword-mode's stops, each way, at
+/// the buffer's edges, and `forward-word-strictly' past them; a field's edge.
+#[test]
+fn subword_mode_moves_as_pinned_gnu() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-subword-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let form = "(with-temp-buffer
+      (insert \"GtkWidget fooBarBaz EmacsFrame_x\") (subword-mode 1) (goto-char 1)
+      (let (r)
+        (dotimes (_ 9) (push (list (forward-word) (point)) r))
+        (dotimes (_ 9) (push (list (forward-word -1) (point)) r))
+        (goto-char 1) (push (list (forward-word 3) (point)) r)
+        (goto-char (point-max)) (push (list (forward-word -2) (point)) r)
+        (goto-char 1) (forward-word-strictly 1) (push (point) r)
+        (goto-char 1) (subword-mode -1) (push (list (forward-word) (point)) r)
+        (subword-mode 1) (goto-char 1) (put-text-property 5 9 'field 'f)
+        (push (list (forward-word 2) (point)) r)
+        (nreverse r)))";
+    assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -615,6 +615,16 @@ pub(super) struct CharTable {
 }
 romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras });
 
+impl CharTable {
+    /// Whether no character has a value, as a new table's: read without
+    /// walking any subdivision, which a table with values has.
+    pub(crate) fn is_empty(&self) -> bool {
+        let nil = |slot: &CharTableSlot| matches!(slot, CharTableSlot::Value(value) if *value == Value::NIL);
+        self.default == Value::NIL && self.parent == Value::NIL
+            && self.root.lock().unwrap_or_else(|poison| poison.into_inner()).slots.iter().all(nil)
+    }
+}
+
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {
     fn clone(&self) -> Self {

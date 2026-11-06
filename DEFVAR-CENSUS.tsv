@@ -73,7 +73,6 @@ face-default-stipple	absent	xfaces.c; no shipped Lisp reads or sets it
 face-filters-always-match	absent	xfaces.c; no shipped Lisp reads or sets it
 face-font-lax-matched-attributes	absent	xfaces.c; no shipped Lisp reads or sets it
 face-near-same-color-threshold	absent	xfaces.c; no shipped Lisp reads or sets it
-find-word-boundary-function-table	needed	syntax.c; read by gnu-lisp/bindings.el and 3 more
 floats-consed	absent	alloc.c; no shipped Lisp reads or sets it
 frame-title-format	needed	xdisp.c; read by gnu-lisp/ansi-osc.el and 10 more
 global-disable-point-adjustment	absent	keyboard.c; no shipped Lisp reads or sets it

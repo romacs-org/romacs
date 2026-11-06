@@ -812,6 +812,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "tool-bar-max-label-size", gnu: "xdisp.c:39005", kind: Kind::Int(14) },
     // tty-colors.el fills it.
     CVariable { name: "tty-defined-color-alist", gnu: "xfaces.c:7687", kind: Kind::Lisp(Init::Nil) },
+    // `forward-word' reads it (prims/word_motion.rs); subword-mode sets it.
+    CVariable { name: "find-word-boundary-function-table", gnu: "syntax.c:3798", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     // No shipped Lisp sets it (VM2-DEFVAR-INERT).
     CVariable { name: "buffer-access-fontify-functions", gnu: "editfns.c:4834", kind: Kind::Lisp(Init::Nil) },
 ];

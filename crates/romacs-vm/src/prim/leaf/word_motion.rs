@@ -2,8 +2,9 @@
 //!
 //! Scope: syntax word runs, including Unicode and syntax text properties,
 //! constrained to point's field as syntax.c Fforward_word constrains them.
-//! GNU words-include-escapes, script/category transitions,
-//! and find-word-boundary-function-table callbacks are not implemented here.
+//! GNU words-include-escapes and script/category transitions are not
+//! implemented here. A find-word-boundary-function-table with entries takes
+//! `forward-word' to rlisp/vm/prelude.el's scan; the case commands stay here.
 //! The regex default boundary lookup is also a no-op, not a script provider.
 use super::*;
 use crate::prim::leaf::Kind;
@@ -30,6 +31,13 @@ impl Leaf<'_> {
             self.goto_char_position(kept.integer_value().expect("a position"))?;
         }
         Ok(if complete && kept == reached { Value::TRUE } else { Value::NIL })
+    }
+
+    /// Whether `find-word-boundary-function-table' has any entry.
+    pub(crate) fn word_boundary_functions(&mut self) -> std::result::Result<bool, Fault> {
+        let name = self.intern("find-word-boundary-function-table");
+        let table = self.variable_value(name)?.unwrap_or(Value::NIL);
+        Ok(matches!(self.vm.object(table), Ok(data::Object::CharTable(table)) if !table.is_empty()))
     }
 
     /// syntax.c scan_words from point: the position COUNT words away
