@@ -909,6 +909,7 @@ Return the database connection, or nil if storage is disabled."
                       (< (caar (sqlite-select db "PRAGMA user_version"))
                          jabber-db--schema-version))
               (jabber-db--migrate db))
+            (unless live (jabber-db--apply-checkpointing db))
             (setq jabber-db--connection db
                   complete t)
             db)
@@ -981,12 +982,26 @@ inside the statement."
       (while (and (< (float-time) end) (jabber-db--intent-fresh-p file)))))
   (apply execute db sql args))
 
+(defvar jabber-db--sharing nil
+  "This VM's role in `jabber-db-share-writes', which outlives a connection.")
+
+(defun jabber-db--apply-checkpointing (db)
+  "Have DB checkpoint as this VM's role says: the session leaves it to the
+worker while a sync writes, since a checkpoint's fsync would run in
+whichever COMMIT crosses the threshold, on the main VM."
+  (when db
+    (ignore-errors
+      (sqlite-select db (format "PRAGMA wal_autocheckpoint=%d"
+                                (if (eq jabber-db--sharing 'announce) 0 1000))))))
+
 (defun jabber-db-share-writes (role)
   "Arrange this VM's writes for another writer of the database.
 ROLE `announce': the live session, while a background sync writes;
 `defer': the worker that writes; nil: alone again."
   (advice-remove 'sqlite-execute #'jabber-db--announce-write)
   (advice-remove 'sqlite-execute #'jabber-db--defer-to-session)
+  (setq jabber-db--sharing role)
+  (jabber-db--apply-checkpointing jabber-db--connection)
   (pcase role
     ('announce (advice-add 'sqlite-execute :around #'jabber-db--announce-write))
     ('defer (advice-add 'sqlite-execute :around #'jabber-db--defer-to-session))))

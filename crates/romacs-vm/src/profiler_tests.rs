@@ -27,7 +27,10 @@ fn lifecycle_matches_gnus_profiler_tests() {
 }
 
 /// A CPU-bound loop under a named function: its samples carry it, in
-/// vectors of `profiler-max-stack-depth' innermost-first frames.
+/// vectors of `profiler-max-stack-depth' innermost-first frames. The loop
+/// runs for CPU time: a sample counts only on a CPU, so wall time on a
+/// loaded host would take too few. A second of it outlasts a spell of the
+/// sampler sharing the thread's CPU, when it sees nothing.
 #[test]
 fn cpu_log_records_the_running_backtrace() {
     let mut vm = Vm::new();
@@ -35,7 +38,8 @@ fn cpu_log_records_the_running_backtrace() {
       (progn
         (setq profiler-max-stack-depth 4)
         (defalias 'pt-leaf (lambda (n) (let ((s 0)) (while (> n 0) (setq s (+ s n) n (1- n))) s)))
-        (defalias 'pt-spin (lambda () (let ((end (+ (float-time) 0.3))) (while (< (float-time) end) (pt-leaf 2000)))))
+        (defalias 'pt-spin (lambda () (let ((end (+ (float-time (get-internal-run-time)) 1.0)))
+                                        (while (< (float-time (get-internal-run-time)) end) (pt-leaf 2000)))))
         (profiler-cpu-start 1000000)
         (pt-spin)
         (let ((log (profiler-cpu-log)) (total 0) (leaf 0) (depths nil))

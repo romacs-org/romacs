@@ -539,6 +539,42 @@ thousandth a stack mark."
              other))
   :body (with-current-buffer it (insert "x")))
 
+;; The same bar with a box, and a context window's line folded in: the
+;; stretches of its box run, and the context's background swept with the
+;; characters, never a walk over the segments for each one.  N stays small
+;; enough to fit: a bar too full drops the context and clips the pills.
+;; The body refuses a run whose bar, at its widest after the last key, has
+;; lost the context, which follows every pill, so the pills are shown too.
+(scaling-probe mode-line-bar-boxed :gui t :n 6 :steps 20
+  :setup (progn
+           (require 'romacs-mode-line)
+           (romacs-mode-line-mode 1)
+           (set-face-attribute 'mode-line nil :box '(:line-width 1 :color "#808080"))
+           (dotimes (i n)
+             (let ((face (intern (format "bar-boxed-face-%d" i))))
+               (make-face face)
+               (set-face-attribute face nil :background (format "#%02x3040" (% (* 5 i) 256))
+                                   :foreground (format "#e0%02xa0" (% (* 3 i) 256)))
+               (eval `(romacs-mode-line-define-segment ,(intern (format "bar-boxed-%d" i)) "A probe."
+                        :pill ,face :pill-text ,face
+                        :format (" " (:propertize "%*" romacs-icon ((?* . modified) (?- . saved))) " "))
+                     t))
+             (push (intern (format "bar-boxed-%d" i)) romacs-mode-line-right))
+           (romacs-mode-line-rebuild)
+           (let ((buffer (scaling--lines-buffer "scaling-bar-boxed" 50)))
+             (switch-to-buffer buffer)
+             (with-selected-window (split-window-below)
+               (switch-to-buffer (get-buffer-create "scaling-bar-context"))
+               (setq-local mode-line-format '("q  " "context")))
+             buffer))
+  :body (progn
+          (with-current-buffer it (insert "x"))
+          (when (= i 19)
+            (let ((shown (romacs-status-bar-string)))
+              (unless (string-search "context" shown)
+                (scaling--mark (list :scaling "unfit" :shown shown))
+                (kill-emacs 3))))))
+
 ;; N pills on one pill face, each a different character in its own text
 ;; colour, all shown (the right side shows whole): the painter's
 ;; recoloured faces and their character bindings.
@@ -2049,9 +2085,9 @@ closures over a mutable variable (each a closure and a cell)."
 ;; compiled, lowered by a call and dropped in each step; the host's idle
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
-;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
-;; and shows a startup message, so the probe supplies the one and clears
-;; the other.  A step with no collection after the last ends the session,
+;; A session no key has reached has no `romacs--idle-collect' (the lazy
+;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; the one and clears the other.  A step with no collection after the last ends the session,
 ;; which fails the measure.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
@@ -2072,6 +2108,14 @@ closures over a mutable variable (each a closure and a cell)."
             (insert (format "step %d\n" i)))
           (message nil)
           (setq scaling--retire-collections gcs-done)))
+
+;; The collections a usage log reads (gc.rs `Vm::note_collection'): N
+;; collections, past what the log keeps at 4N, then its read.  A record
+;; costs the same however many were kept, and past the limit only a count.
+(scaling-probe gc-collection-log :n 100
+  :setup (romacs--take-collections)
+  :body (progn (dotimes (_ n) (garbage-collect))
+               (romacs--take-collections)))
 
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
