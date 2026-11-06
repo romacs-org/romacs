@@ -385,6 +385,9 @@ pub(super) fn is_hash_primitive(p: Primitive) -> bool {
     (Primitive::MakeHashTable as usize..=Primitive::HashValueAt as usize).contains(&(p as usize))
 }
 
+/// The pairs `equal' has met past GNU's depth limit, made when first needed.
+type Seen = Option<HashMap<u64, Vec<u64>>>;
+
 impl Vm {
     fn moving_reference(v: Value) -> bool {
         !Self::image_value(v) && (matches!(v.tag(), 3..=5) || v.tag() == 0 && v != Value::NIL)
@@ -554,7 +557,7 @@ impl Vm {
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
     pub(super) fn equal(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut HashMap::default(), false)
+        self.equal_at(a, b, 0, &mut None, false)
     }
     /// `equal' for a primitive whose faults travel as text
     /// (`primitive_condition').
@@ -577,14 +580,14 @@ impl Vm {
     /// internal_equal with EQUAL_INCLUDING_PROPERTIES: strings must also
     /// carry equal text properties at every position.
     pub(crate) fn equal_including_properties(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut HashMap::default(), true)
+        self.equal_at(a, b, 0, &mut None, true)
     }
     fn equal_at(
         &self,
         mut a: Value,
         mut b: Value,
         mut depth: usize,
-        seen: &mut HashMap<u64, Vec<u64>>,
+        seen: &mut Seen,
         props: bool,
     ) -> Hashed<bool> {
         loop {
@@ -602,7 +605,7 @@ impl Vm {
                         | Shape::Overlay(..)
                         | Shape::Opaque
                 ) {
-                    let pairs = seen.entry(a.0).or_default();
+                    let pairs = seen.get_or_insert_default().entry(a.0).or_default();
                     if pairs.contains(&b.0) {
                         return Ok(true);
                     }
@@ -612,14 +615,10 @@ impl Vm {
             if a == b {
                 return Ok(true);
             }
-            match (self.shape(a), self.shape(b)) {
-                (Shape::Float(x), Shape::Float(y)) => return Ok(x == y),
-                (Shape::Bignum(x), Shape::Bignum(y)) => return Ok(x == y),
-                (Shape::BoolVector(x), Shape::BoolVector(y)) => return Ok(x == y),
-                (Shape::Text { bytes: x, chars: m }, Shape::Text { bytes: y, chars: n }) => {
-                    return Ok(m == n && x == y && (!props || self.string_intervals_equal(a, b)?));
-                }
-                (Shape::Cons, Shape::Cons) => {
+            // Only conses, closures and heap objects compare by content, and
+            // the tag says so without classifying either operand.
+            match (a.tag(), b.tag()) {
+                (3, 3) => {
                     let (tail, other, verdict) = self.equal_spine(a, b, depth, seen, false, props)?;
                     if let Some(verdict) = verdict {
                         return Ok(verdict);
@@ -627,6 +626,17 @@ impl Vm {
                     a = tail;
                     b = other;
                     depth += 1;
+                    continue;
+                }
+                (0, 0) | (4, 4) => {}
+                _ => return Ok(false),
+            }
+            match (self.shape(a), self.shape(b)) {
+                (Shape::Float(x), Shape::Float(y)) => return Ok(x == y),
+                (Shape::Bignum(x), Shape::Bignum(y)) => return Ok(x == y),
+                (Shape::BoolVector(x), Shape::BoolVector(y)) => return Ok(x == y),
+                (Shape::Text { bytes: x, chars: m }, Shape::Text { bytes: y, chars: n }) => {
+                    return Ok(m == n && x == y && (!props || self.string_intervals_equal(a, b)?));
                 }
                 (Shape::Vector(x), Shape::Vector(y))
                 | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen, props),
@@ -680,7 +690,7 @@ impl Vm {
         x: &[Value],
         y: &[Value],
         depth: usize,
-        seen: &mut HashMap<u64, Vec<u64>>,
+        seen: &mut Seen,
         props: bool,
     ) -> Hashed<bool> {
         if x.len() != y.len() {
@@ -701,7 +711,7 @@ impl Vm {
         mut a: Value,
         mut b: Value,
         depth: usize,
-        seen: &mut HashMap<u64, Vec<u64>>,
+        seen: &mut Seen,
         b_circular: bool,
         props: bool,
     ) -> Hashed<(Value, Value, Option<bool>)> {
