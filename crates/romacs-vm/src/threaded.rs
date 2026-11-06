@@ -1952,7 +1952,10 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if e.vm.collection_due() {
         // Due but held (a nested engine): the request stays for the engine
         // that may collect.
-        if e.vm.may_collect(1) { poll_collect(e); }
+        if e.vm.may_collect(1) {
+            poll_collect(e);
+            if e.vm.take_job_exhaustion() { return job_memory_full(e); }
+        }
     } else {
         e.vm.collect_poll = false;
     }
@@ -1963,6 +1966,14 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
         return value;
     }
     unsafe { next(e, r, pc) }
+}
+/// GNU memory_full (alloc.c), for a job over its budget: `memory-signal-data'
+/// is signalled, which `condition-case' catches.
+#[cold]
+#[inline(never)]
+fn job_memory_full(e: &mut Engine<'_>) -> Value {
+    let message = e.vm.make_lisp_string(crate::gc::MEMORY_FULL.as_bytes().to_vec(), true);
+    raise(e, "error", &[message])
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
 /// `quit` signal, else the host's C-g or `quit-flag' (`Vm::maybe_quit').

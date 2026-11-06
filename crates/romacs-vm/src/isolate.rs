@@ -31,6 +31,9 @@ const HEADER: usize = 10;
 /// the text frames.
 const PACKET: usize = crate::frozen::INLINE_LIMIT + 1024;
 const FLAG_SEALED: u8 = 1;
+/// How long a worker has to end after SIGTERM, past `isolate-kill-timeout',
+/// the spawner's own escalation while it lives.
+const TERMINATION_SECONDS: u32 = 2;
 
 /// Frame kinds. `fork' (spawner to zygote: make a child, whose socket
 /// rides beside the frame), `forked' (zygote to spawner: its pid and
@@ -389,6 +392,17 @@ impl Vm {
         crate::host::open_gate(release).map_err(|e| format!("Cannot release a child: {e}"))
     }
 
+    /// Whether a job runs here now, inside its handler.
+    pub(crate) fn isolate_job_running(&self) -> bool {
+        self.isolates.running.is_some()
+    }
+
+    /// In a child: BYTES of growth over the zygote's heap pace its
+    /// collections (`set_job_budget`).
+    pub(crate) fn isolate_job_budget(&mut self, bytes: usize) {
+        self.set_job_budget(bytes);
+    }
+
     /// In a zygote: its children not yet reaped.
     pub(crate) fn isolate_forked(&self) -> usize {
         self.isolates.forked.len()
@@ -442,6 +456,8 @@ impl Vm {
         self.closures.reserve(needed / 16);
         self.cells.reserve(needed / 16);
         self.slots.reserve(needed / 16);
+        // The baseline of its children's budgets.
+        self.measure_retained_payload();
     }
 
     /// In a worker: descriptor FD is the socket to the spawner (peer 0).
@@ -786,6 +802,7 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
         return Err(format!("isolate worker: parent {parent} is gone"));
     }
     crate::host::catch_isolate_signals().map_err(|e| e.to_string())?;
+    crate::host::limit_termination(TERMINATION_SECONDS);
     // SAFETY: the launcher put the socket at FD and nothing else owns it.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }

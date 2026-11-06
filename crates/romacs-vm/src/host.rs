@@ -2351,6 +2351,9 @@ pub fn parent_pid() -> i32 {
 /// one waits in a join), so only the pipe reliably ends a blocked wait.
 static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Seconds a worker has to end after its first SIGTERM, or 0: no limit
+/// (`limit_termination`).
+static TERMINATE_LIMIT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// The wake pipe's read and write ends, or -1.
 static WAKE_READ: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 static WAKE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
@@ -2365,7 +2368,12 @@ extern "C" fn note_interrupt(_: libc::c_int) {
     wake_isolate_wait();
 }
 extern "C" fn note_terminate(_: libc::c_int) {
-    TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+    use std::sync::atomic::Ordering;
+    let first = !TERMINATE.swap(true, Ordering::SeqCst);
+    // alarm(2) is async-signal-safe; SIGALRM's default action ends the
+    // process, whatever it is blocked in.
+    let seconds = TERMINATE_LIMIT.load(Ordering::SeqCst);
+    if first && seconds > 0 { unsafe { libc::alarm(seconds) }; }
     wake_isolate_wait();
 }
 
@@ -2380,6 +2388,13 @@ pub fn drain_isolate_wake() {
         let mut bytes = [0u8; 64];
         while unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) } > 0 {}
     }
+}
+
+/// A worker ends within SECONDS of its first SIGTERM: a termination is a
+/// flag its loop reads, which a worker blocked inside a primitive never
+/// does, and with its spawner gone nothing else would end it.
+pub fn limit_termination(seconds: u32) {
+    TERMINATE_LIMIT.store(seconds, std::sync::atomic::Ordering::SeqCst);
 }
 
 pub fn catch_isolate_signals() -> io::Result<()> {

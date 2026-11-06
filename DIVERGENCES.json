@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "7764c358e34eb3e7dbf4dad61c1e038ba320d3cf34ee9b063dc5c51e158801ac",
+  "input_hash": "5e7db654821905ab09feec39d79a1143db32eba5aca356e761e071b2313a09b0",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 365,
-  "symbols": 1113,
+  "symbols": 1114,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -1647,6 +1647,9 @@
   ],
   "isolate-interrupt": [
    18
+  ],
+  "isolate-job-memory-headroom": [
+   21
   ],
   "isolate-kill": [
    18
@@ -4152,11 +4155,12 @@
    "planned": false,
    "mechanism": "What a worker sees of the spawner",
    "gnu": "n/a (one heap).",
-   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. Where pooled jobs run on forked workers (`isolate-zygotes`; a session by default), each job runs in a fresh child of a zygote prepared once with its `:require` set, in the spawner's `default-directory` unless it names one, and sees nothing an earlier job left; the zygote is retired once an inherited variable, a file it loaded or a `load-path` directory changes. Elsewhere a pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
+   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. Where pooled jobs run on forked workers (`isolate-zygotes`; a session by default), each job runs in a fresh child of a zygote prepared once with its `:require` set, in the spawner's `default-directory` unless it names one, and sees nothing an earlier job left; the zygote is retired once an inherited variable, a file it loaded or a `load-path` directory changes. Such a job runs no collection until it has grown the heap by `isolate-job-memory-headroom` bytes, and live growth past that signals GNU's memory-exhausted `error` in the job. Elsewhere a pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
    "why": "Racket's and Python's contract for isolated interpreters; design §3.5, §7; worker-vms note §2.3-2.4.",
    "symbols": [
     "isolate-inherited-variables",
-    "isolate-zygotes"
+    "isolate-zygotes",
+    "isolate-job-memory-headroom"
    ],
    "symbols_derived": false
   },

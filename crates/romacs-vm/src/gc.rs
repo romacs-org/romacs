@@ -183,6 +183,9 @@ impl Drop for UnwindMark {
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
 const CONS_BYTES: i64 = 16;
+/// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
+/// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
+pub(crate) const MEMORY_FULL: &str = "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs";
 /// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
 const MIN_CONS_THRESHOLD: i64 = 80_000;
 /// A Romacs collection walks compiled code, and some compact, so it costs
@@ -444,6 +447,11 @@ impl Vm {
     pub(crate) fn collection_budget(&self) -> (f64, f64) {
         let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64
             + (self.gc_payload_bytes / CONS_BYTES as usize) as f64;
+        // A job's growth over the heap it was forked with, not the live
+        // heap's share: an ordinary job never collects.
+        if let Some((base, objects, _)) = self.job_budget {
+            return (allocated, objects.saturating_sub(self.job_live().saturating_sub(base)).max(1) as f64);
+        }
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
             return (allocated, self.gc_retained.saturating_mul(2).max(floor).saturating_sub(self.gc_retained) as f64);
@@ -464,6 +472,37 @@ impl Vm {
         });
         (allocated, threshold.max(proportional))
     }
+    /// In a child forked for one job: BYTES of growth over the heap it was
+    /// forked with, at the collector's charge per object, pace its
+    /// collections in place of the default rule. A collection in a child
+    /// rewrites what it shares with its zygote, so an ordinary job should
+    /// never run one; its garbage dies with the process.
+    pub(crate) fn set_job_budget(&mut self, bytes: usize) {
+        let objects = (bytes / CONS_BYTES as usize).max(1);
+        self.job_budget = Some((self.job_live(), objects, objects / 4 + 1));
+    }
+    /// What the last collection kept, in objects at the collector's charge:
+    /// the retained objects and the payload allocation charged for them.
+    fn job_live(&self) -> usize {
+        self.gc_retained + self.gc_retained_payload / CONS_BYTES as usize
+    }
+    /// Measure the payload the heap holds now, for `job_live`: a zygote's
+    /// baseline, a child's after each collection. One pass over the objects.
+    pub(crate) fn measure_retained_payload(&mut self) {
+        self.gc_retained_payload = self.objects.iter().map(crate::data::payload_bytes).sum();
+    }
+    /// Whether what survived the last collection alone exceeds the job's
+    /// budget: its memory is exhausted. That is taken once: the limit
+    /// rises above the live growth by a grace, GNU's spare memory, so the
+    /// handlers and the job's reply can run; growth past it signals again.
+    /// Only a running job is signalled: outside one no handler stands.
+    pub(crate) fn take_job_exhaustion(&mut self) -> bool {
+        let Some((base, objects, grace)) = self.job_budget else { return false };
+        let grown = self.job_live().saturating_sub(base);
+        if grown <= objects || !self.isolate_job_running() { return false; }
+        self.job_budget = Some((base, grown + grace, grace));
+        true
+    }
     /// How far the next automatic collection is along, 1 being due: the
     /// larger of the objects allocated over their trigger and the request
     /// code compiled over its threshold (`finish_request'), which only a
@@ -479,6 +518,7 @@ impl Vm {
         self.gc_payload_bytes = 0;
         self.collect_poll = false;
         self.gc_retained_slots = self.objects.iter().map(crate::data::traced_slots).sum();
+        if self.job_budget.is_some() { self.measure_retained_payload(); }
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {

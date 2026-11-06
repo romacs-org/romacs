@@ -230,3 +230,89 @@ fn a_job_for_a_zygote_still_preparing_waits_for_it_not_the_spawner() {
     assert_eq!(out, "(job ran refused pool)");
     eval(&mut vm, "(isolate-kill-all)");
 }
+
+#[test]
+fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() {
+    let mut vm = vm();
+    // 1 M objects at the collector's 16 bytes each.
+    eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
+    ready_zygote(&mut vm);
+    let job = |count: u32, keep: bool| format!(
+        "(condition-case e
+           (isolate-await
+            (isolate-spawn '(lambda ()
+                              (let ((i 0) kept)
+                                (while (< i {count}) {action} (setq i (1+ i)))
+                                (list 'done gcs-done)))) 30)
+           (error (list 'error (nth 1 e))))",
+        action = if keep { "(setq kept (cons i kept))" } else { "(cons i i)" });
+    // Garbage within the budget: no collection at all, where the default
+    // pacing would run many on a heap this small.
+    assert_eq!(eval(&mut vm, &job(500_000, false)), "(done 0)");
+    // Garbage past it: collected, and the job goes on.
+    let out = eval(&mut vm, &job(3_000_000, false));
+    let collections: i64 = numbers(&out)[0];
+    assert!(out.starts_with("(done ") && (1..=4).contains(&collections), "{out}");
+    // Growth that survives past the budget is memory exhaustion in the job.
+    let out = eval(&mut vm, &job(3_000_000, true));
+    assert!(out.starts_with("(error \"Memory exhausted"), "{out}");
+    // Payload counts as much as objects: strings and vectors that survive
+    // collections exhaust the budget too, across several of them.
+    for item in ["(make-string 1000000 ?x)", "(make-vector 100000 0)", "(make-bool-vector 8000000 nil)"] {
+        let out = eval(&mut vm, &format!("(condition-case e
+                                            (isolate-await (isolate-spawn '(lambda ()
+                                                                             (let ((i 0) kept)
+                                                                               (while (< i 100) (setq kept (cons {item} kept)) (setq i (1+ i)))
+                                                                               'survived))) 30)
+                                            (error (list 'error (nth 1 e))))"));
+        assert!(out.starts_with("(error \"Memory exhausted"), "{item}: {out}");
+    }
+    // An argument past the budget is the job's error, not the child's death.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda (text)
+                                                                (let ((i 0)) (while (< i 200000) (setq i (1+ i))))
+                                                                (length text))
+                                                             (make-string (* 40 1024 1024) ?x)) 30)
+                               (error (list 'error (nth 1 e))))");
+    assert!(out.starts_with("(error \"Memory exhausted"), "{out}");
+    // A job that catches it can still reply, and growing on signals again.
+    let out = eval(&mut vm, "(isolate-await
+                              (isolate-spawn '(lambda ()
+                                                (let ((i 0) (caught 0) kept)
+                                                  (while (< i 4000000)
+                                                    (condition-case nil
+                                                        (while (< i 4000000) (setq kept (cons i kept)) (setq i (1+ i)))
+                                                      (error (setq caught (1+ caught)))))
+                                                  (> caught 1)))) 30)");
+    assert_eq!(out, "t");
+    // A long-lived worker keeps the default pacing.
+    let out = eval(&mut vm, "(let ((iso (isolate-create)))
+                               (prog1 (isolate-await (isolate-spawn '(lambda ()
+                                                                       (let ((i 0)) (while (< i 500000) (cons i i) (setq i (1+ i))))
+                                                                       (> gcs-done 0))
+                                                                    :isolate iso) 30)
+                                 (isolate-kill iso)))");
+    assert_eq!(out, "t");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+#[test]
+fn a_child_blocked_in_a_primitive_ends_within_seconds_of_sigterm() {
+    let mut vm = vm();
+    ready_zygote(&mut vm);
+    // A job blocked in a primitive (the bare VM's `sleep-for' is a plain
+    // sleep): no safepoint sees the termination, and no SIGKILL follows
+    // here. The alarm the handler armed ends it.
+    let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (sleep-for 60))))
+                                    (id (romacs--isolate-id (isolate-future-isolate f)))
+                                    (end (+ (float-time) 10)))
+                               (while (and (null (romacs--isolate-pid id)) (< (float-time) end)) (romacs--isolate-wait 0.05))
+                               (let ((settle (+ (float-time) 0.3))) (while (< (float-time) settle) (romacs--isolate-wait 0.05)))
+                               (romacs--isolate-signal id 15)
+                               (romacs--isolate-pid id))");
+    let child: i64 = out.parse().unwrap_or_else(|_| panic!("{out}"));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(process_exists(child), "the child ended on the flag, not the alarm");
+    assert!(settles(|| !process_exists(child)), "child {child} outlived its termination limit");
+    eval(&mut vm, "(isolate-kill-all)");
+}

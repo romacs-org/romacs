@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "94beb98a920fea6ef43e66f26a7000b165b012dc5cf8e61c6f49532444e405da",
+  "source_fingerprint": "5307e4c3d938885901cf191ced19e30528d97a79bbb46ae5fcc8f83f96c9e077",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1363,
-  "parsed_vm2_only": 1363
+  "parsed_total": 1364,
+  "parsed_vm2_only": 1364
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3177,7 +3177,7 @@
   "make-vector": {
    "name": "make-vector",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:45"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:43"
   },
   "makunbound": {
    "name": "makunbound",
@@ -3970,7 +3970,7 @@
   "propertize": {
    "name": "propertize",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:81"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:79"
   },
   "provide": {
    "name": "provide",
@@ -4513,6 +4513,11 @@
    "name": "romacs--isolate-interrupted-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/isolate.rs:107"
+  },
+  "romacs--isolate-job-budget": {
+   "name": "romacs--isolate-job-budget",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:203"
   },
   "romacs--isolate-name-process": {
    "name": "romacs--isolate-name-process",
@@ -5215,7 +5220,7 @@
   "secure-hash-algorithms": {
    "name": "secure-hash-algorithms",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:118"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:116"
   },
   "select-frame": {
    "name": "select-frame",
@@ -6648,7 +6653,7 @@
   "vconcat": {
    "name": "vconcat",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/frontier.rs:56"
   },
   "vector": {
    "name": "vector",

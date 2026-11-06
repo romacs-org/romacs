@@ -66,6 +66,11 @@ calls FUNCTION once before it forks, so its children inherit what FUNCTION
 caches for the session (a program's version, say) instead of each child
 computing it again.  An error in FUNCTION is ignored.")
 
+(defvar isolate-job-memory-headroom (* 64 1024 1024)
+  "Bytes a job on a forked child may grow its heap by.
+Allocation below this runs no collection, whose garbage dies with the
+child; live growth past it signals memory exhaustion in the job.")
+
 (defvar isolate-zygote-limit 4
   "How many zygotes may live at once; the least recently used one goes first.")
 
@@ -109,6 +114,7 @@ SPARE INPUTS FILES FILES-STAMP DIRECTORIES DIRECTORIES-STAMP USED].")
 (defvar romacs--isolate-forks nil "In a zygote: the generations of the children asked for, oldest first.")
 (defvar romacs--isolate-zygote nil "In a worker: non-nil once it became a zygote.")
 (defvar romacs--isolate-job-worker nil "In a worker: non-nil in a child forked for one job.")
+(defvar romacs--isolate-job-headroom nil "In a zygote: `isolate-job-memory-headroom', from its spawner.")
 (defvar romacs--isolate-baseline nil
   "In a worker: (LOADED TIMERS IDLE-TIMERS) before its preparation, LOADED
 a hash table of the files `load-history' named.")
@@ -457,7 +463,8 @@ copied (`setenv' changes an entry in place)."
     (aset isolate 10 'zygote)
     (puthash require zygote romacs--isolate-zygotes)
     (isolate-on-done (romacs--isolate-submit isolate 'romacs--isolate-become-zygote
-                                             (list (romacs--isolate-warm-functions require)) nil nil nil)
+                                             (list (romacs--isolate-warm-functions require) isolate-job-memory-headroom)
+                                             nil nil nil)
                      (lambda (future) (romacs--isolate-zygote-ready zygote future)))
     zygote))
 
@@ -1009,8 +1016,6 @@ gone gets nothing."
 (defun romacs--isolate-run-job (generation job)
   "Run JOB, (FUNCTION ARGS BINDINGS REQUIRE DIRECTORY), and reply."
   (let* ((function (nth 0 job))
-         (args (thaw (nth 1 job)))
-         (bindings (thaw (nth 2 job)))
          (require (nth 3 job))
          (directory (nth 4 job))
          (before (length features))
@@ -1024,18 +1029,23 @@ gone gets nothing."
            (romacs--isolate-retired
             (list 'error (list 'isolate-retired nil nil '(isolate-retired isolate-error error))))
            (t
-            ;; The job runs under its generation: an interrupt naming it
-            ;; quits here, once (the safepoint clears the mark as it quits).
-            (romacs--isolate-running generation)
             (condition-case err
                 (prog1
                     (progn
-                      (dolist (feature require) (require feature))
-                      (dolist (binding bindings) (set (car binding) (cdr binding)))
-                      (when directory (setq default-directory directory))
-                      (list 'result
-                            (apply (if (and (consp function) (eq (car function) 'lambda)) (eval function t) function)
-                                   args)))
+                      ;; The job runs under its generation, inside this
+                      ;; handler: an interrupt naming it quits here, once
+                      ;; (the safepoint clears the mark as it quits), and
+                      ;; its memory budget binds from here on, thawing its
+                      ;; arguments included.
+                      (romacs--isolate-running generation)
+                      (let ((args (thaw (nth 1 job)))
+                            (bindings (thaw (nth 2 job))))
+                        (dolist (feature require) (require feature))
+                        (dolist (binding bindings) (set (car binding) (cdr binding)))
+                        (when directory (setq default-directory directory))
+                        (list 'result
+                              (apply (if (and (consp function) (eq (car function) 'lambda)) (eval function t) function)
+                                     args))))
                   (romacs--isolate-running nil))
               (quit (romacs--isolate-running nil)
                     (list 'error (list 'quit nil nil '(quit))))
@@ -1126,12 +1136,14 @@ zygote that cannot fork ends, and its spawner forgets it."
                        t))
         (setq romacs--isolate-forks nil romacs--isolate-deferred nil romacs--isolate-inbox nil
               romacs--isolate-cancelled nil romacs--isolate-retired nil
-              romacs--isolate-zygote nil romacs--isolate-job-worker t)))))
+              romacs--isolate-zygote nil romacs--isolate-job-worker t)
+        (romacs--isolate-job-budget romacs--isolate-job-headroom)))))
 
-(defun romacs--isolate-become-zygote (warm)
+(defun romacs--isolate-become-zygote (warm headroom)
   "In a prepared worker: become the zygote of its features, a process that
 only forks a child per job (worker-vms design §2.2).  The functions WARM
-run first, filling the caches the children inherit.  Refused while its
+run first, filling the caches the children inherit; a child's job may grow
+the heap by HEADROOM bytes.  Refused while its
 preparation left a subprocess, a timer or a thread behind, which a child
 would share or lose.  The files the preparation loaded and their stamp."
   (dolist (function warm)
@@ -1145,7 +1157,7 @@ would share or lose.  The files the preparation loaded and their stamp."
   (garbage-collect)
   (romacs--isolate-reserve romacs--isolate-zygote-headroom)
   (romacs--isolate-name-process "romacs-zygote")
-  (setq romacs--isolate-zygote t)
+  (setq romacs--isolate-zygote t romacs--isolate-job-headroom headroom)
   (let ((files (romacs--isolate-prepared-files)))
     (list files (romacs--isolate-stamp files))))
 

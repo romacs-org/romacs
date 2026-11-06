@@ -196,3 +196,12 @@ defsubr! { name = "romacs--isolate-forked", gnu = "romacs:isolate", effect = Rea
 fn isolate_forked(cx) {
     Value::integer(cx.isolate_forked() as i64).map_err(Fault::Error)
 }}
+
+// (romacs--isolate-job-budget BYTES): in a child forked for one job, BYTES
+// of growth over its zygote's heap pace its collections; live growth past
+// them signals memory exhaustion.
+defsubr! { name = "romacs--isolate-job-budget", gnu = "romacs:isolate", effect = Global,
+fn isolate_job_budget(cx, bytes: Value) {
+    cx.isolate_job_budget(id(cx, bytes)? as usize);
+    Ok(Value::NIL)
+}}

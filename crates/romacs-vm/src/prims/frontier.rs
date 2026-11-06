@@ -8,9 +8,7 @@ use super::*;
 use crate::lstring::char_string;
 use std::result::Result;
 
-/// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
-/// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
-const MEMORY_FULL: &str = "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs";
+use crate::gc::MEMORY_FULL;
 
 /// GNU `FOR_EACH_TAIL` (lisp.h:5839) then `CHECK_LIST_END (tail, tail)`: the
 /// elements of LIST, `(wrong-type-argument listp TERMINATOR)` for a dotted

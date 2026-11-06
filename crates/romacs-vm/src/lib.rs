@@ -1467,6 +1467,14 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
+    /// In a child forked for one job: the heap it was forked with, the
+    /// growth over it allowed now, and the grace added after each signal of
+    /// exhaustion, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize, usize)>,
+    /// The payload the last collection kept, as allocation charges it
+    /// (`data::payload_bytes`), measured only for a job's budget
+    /// (`Vm::job_live`).
+    gc_retained_payload: usize,
     /// Open frames that keep heap Values in untraced Rust storage across a
     /// call that can run Lisp: compiler builders and watcher notifications
     /// from native writers (`gc.rs`, `Vm::may_collect`).
@@ -1670,6 +1678,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     free,
     suspended_stacks,
     gc_floor,
+    job_budget,
+    gc_retained_payload,
     names,
     initial_obarray,
     symbol_names,
@@ -1873,6 +1883,8 @@ impl Vm {
             gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
+            job_budget: None,
+            gc_retained_payload: 0,
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,

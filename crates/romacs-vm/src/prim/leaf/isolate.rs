@@ -160,4 +160,8 @@ impl Leaf<'_> {
     pub(crate) fn isolate_forked(&self) -> usize {
         self.vm.isolate_forked()
     }
+
+    pub(crate) fn isolate_job_budget(&mut self, bytes: usize) {
+        self.vm.isolate_job_budget(bytes);
+    }
 }
