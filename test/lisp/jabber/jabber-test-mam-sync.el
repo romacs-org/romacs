@@ -929,6 +929,13 @@ batch open, and none opens during one."
       (jabber-db-close)
       (delete-directory dir t))))
 
+(ert-deftest jabber-test-mam-sync-a-batch-gives-up-the-lock-soon ()
+  "A batch open 20 ms is due at its next result: an open batch holds the
+write lock a live write on the main VM waits for."
+  (let ((jabber-db-path nil)
+        (jabber-mam--batch (list :count 1 :opened (- (float-time) 0.02))))
+    (should (jabber-mam--batch-due-p))))
+
 ;;; Newest messages first, then the backfill (slice 5)
 
 (defconst jabber-test-mam-sync--sync-account
