@@ -936,6 +936,33 @@ write lock a live write on the main VM waits for."
         (jabber-mam--batch (list :count 1 :opened (- (float-time) 0.02))))
     (should (jabber-mam--batch-due-p))))
 
+(ert-deftest jabber-test-mam-sync-session-leaves-checkpoints-to-the-worker ()
+  "While a sync writes, the session's connection checkpoints nothing, so
+no COMMIT on the main VM runs a checkpoint's fsync; alone again, it does."
+  (let* ((dir (make-temp-file "jabber-mam-sync" t))
+         (jabber-db-path (expand-file-name "test.sqlite" dir))
+         (jabber-db--connection nil)
+         (pages (lambda () (caar (sqlite-select jabber-db--connection
+                                                "PRAGMA wal_autocheckpoint")))))
+    (unwind-protect
+        (progn
+          (jabber-db-ensure-open)
+          (should (= 1000 (funcall pages)))
+          (jabber-db-share-writes 'announce)
+          (should (= 0 (funcall pages)))
+          (jabber-db-share-writes nil)
+          (should (= 1000 (funcall pages)))
+          (jabber-db-share-writes 'defer)
+          (should (= 1000 (funcall pages)))
+          ;; A connection opened while a sync writes leaves them too.
+          (jabber-db-close)
+          (jabber-db-share-writes 'announce)
+          (jabber-db-ensure-open)
+          (should (= 0 (funcall pages))))
+      (jabber-db-share-writes nil)
+      (jabber-db-close)
+      (delete-directory dir t))))
+
 ;;; Newest messages first, then the backfill (slice 5)
 
 (defconst jabber-test-mam-sync--sync-account

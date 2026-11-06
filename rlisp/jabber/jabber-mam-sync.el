@@ -1335,6 +1335,9 @@ session never came up."
                  :accepted (reverse accepted)
                  :unposted (hash-table-keys jabber-mam-sync--unposted))))
       (ignore-errors (jabber-mam-batch-commit))
+      ;; The session left checkpoints to this worker: leave it no WAL to
+      ;; checkpoint on the main VM when it takes them back.
+      (ignore-errors (sqlite-select (jabber-db-ensure-open) "PRAGMA wal_checkpoint(PASSIVE)"))
       (dolist (c jabber-connections)
         (ignore-errors (jabber-disconnect-one c)))
       (advice-remove 'jabber-send-sexp--raw #'jabber-mam-sync--gate)
