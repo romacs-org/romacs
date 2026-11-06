@@ -20,7 +20,7 @@ fn lay_out(text: &str, point_byte: usize) -> FrameGlyphBuffer {
 }
 
 fn lay_out_in(text: TextSlice, point_byte: usize, width: u32, faces: Vec<Face>) -> FrameGlyphBuffer {
-    let window = WindowSnapshot { underline_rules: Default::default(), id: 1, width, height: 100, start_byte: 0, point_byte, buffer_version: 1,
+    let window = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id: 1, width, height: 100, start_byte: 0, point_byte, buffer_version: 1,
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(),
         tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         text, faces };

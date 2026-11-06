@@ -22,8 +22,9 @@ Batch probes run as `BINARY -Q --batch -l probes.el --eval (scaling-run ...)'
 sessions restored from a batch world prepared once in a private HOME.  GUI
 probes (:gui) run as `BINARY -Q --loadup' windows in a private headless
 labwc: once idle the session sets the probe up, then runs its R steps from
-a chain of timers, so the host lays out each step's change before the
-next, and counts from before the first step to after the last step's
+a chain of timers, each once the host has redisplayed the step before
+(`romacs--redisplay-since-mark': a paint in flight holds the next one
+back), and counts from before the first step to after the last step's
 layout and paint submission; the steps' work includes the redisplay they
 cause.  A GUI measurement is refused
 unless the host's diagnostics show a paint submitted (laid out by the

@@ -441,10 +441,11 @@ impl Vm {
             // window-point at 7 and selecting the window puts point
             // at 7.
             let pos = {
-                let Object::Buffer(buf) = self.object(buffer)? else {
-                    return Err("buffer required".into());
-                };
-                Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
+                match self.object(buffer)? {
+                    Object::Buffer(buf) => Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?,
+                    Object::ByteBuffer(buf) => Value::integer(buf.point.0 as i64 + 1)?,
+                    _ => return Err("buffer required".into()),
+                }
             };
             self.set_marker_object(point, pos, buffer)?;
             // GNU restores `b->last_window_start` here; VM2 keeps no
@@ -1401,23 +1402,22 @@ impl Vm {
     }
     pub fn display_apply_layout(&mut self, ends: &[crate::WindowEnd]) -> Result<()> {
         // Validate the complete journal before publishing any per-window end.
-        let mut changes = vec![];
+        let (mut changes, mut bytes) = (vec![], vec![]);
         for &crate::WindowEnd { id, end, .. } in ends {
             let index = self.live_window_index(id).ok_or("layout journal names an unknown live window")?;
             let Object::Window(w) = &self.objects[index] else { unreachable!("live window") };
-            let Object::Buffer(b) = self.object(w.buffer)? else {
-                return Err("buffer required".into());
-            };
+            let b = self.shown_text(w.buffer)?;
             // A display with overlay strings ends at a display byte; any
             // other, at a byte of the text it published.
             let end = end + self.display_state.base(id);
             let end = self.display_state.segments(id)
-                .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
+                .map_or(end, |segments| crate::display::shown_end(segments, end, b.len_bytes(), |at| b.newline_at(at)));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
+            bytes.push(end);
         }
         self.display_state.hosted = true;
-        for end in ends { self.display_state.painted_rows(end); }
+        for (end, &byte) in ends.iter().zip(&bytes) { self.display_state.painted_rows(end, byte); }
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()
@@ -2025,9 +2025,8 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         let (start, buffer, distance) = { let x = self.get(w)?; (x.start, x.buffer, x.end_distance as i64) };
         let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
-        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
-            return Err(internal("buffer required".into()));
-        };
+        self.vm.mirror_shown(buffer).map_err(internal)?;
+        let b = self.vm.shown_text(buffer).map_err(internal)?;
         let accessible = b.accessible();
         let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
         let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
@@ -2040,6 +2039,8 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         let hosted = self.vm.display_state.hosted;
         if hosted && !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
+        let buffer = self.get(w)?.buffer;
+        self.vm.mirror_shown(buffer).map_err(internal)?;
         let mut mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
         if hosted && mode_line != 0 {
             mode_line = i64::from(self.vm.host_band_height(w, false).map_err(internal)?);

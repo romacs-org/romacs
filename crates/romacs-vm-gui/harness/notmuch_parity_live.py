@@ -262,7 +262,10 @@ ISEARCH_PLAIN = [
 
 # A thread whose message has an image part: notmuch fetches it into a
 # unibyte buffer and mm shows it inline; motion through the thread keeps
-# point and the window start as GNU's.
+# point and the window start as GNU's.  M-> recentres, as text hidden to
+# the end of the buffer follows the last row showing text, but one row
+# holds a CJK name: GNU's fallback font makes it 3 pixels taller, which
+# Romacs's rows do not follow, so GNU's `recenter' starts a row lower.
 IMAGE = [
     key('hello', [C('x'), T('m')], HELLO),
     key('search-prompt', [T('s')], MINIBUFFER),

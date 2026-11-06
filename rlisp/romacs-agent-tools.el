@@ -453,10 +453,25 @@ default instance."
     (romacs-agent-stop child)
     (romacs-agent-tools--task child)))
 
+(defun romacs-agent-tools--effort-option (instance)
+  "The name INSTANCE's harness's effort goes by in a target's options."
+  (if (eq (plist-get instance :harness) 'codex) "reasoningEffort" "effort"))
+
+(defun romacs-agent-tools--model (instance row)
+  "ROW of `romacs-agent--models' as T3 Code lists a model."
+  (let ((efforts (plist-get (cdr row) :efforts)))
+    (romacs-mcp--object
+     "id" (car row) "label" (or (plist-get (cdr row) :label) (car row))
+     "options" (if efforts
+                   (vector (romacs-mcp--object "id" (romacs-agent-tools--effort-option instance)
+                                               "values" (vconcat efforts)
+                                               "default" (or (plist-get (cdr row) :default-effort) :null)))
+                 []))))
+
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
-directory, program, whether it is enabled and where it comes from; and
-each one Romacs cannot run, with why."
+directory, program, models, whether it is enabled and where it comes
+from; and each one Romacs cannot run, with why."
   (romacs-mcp--instance arguments)
   (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
     (romacs-mcp--object
@@ -475,7 +490,9 @@ each one Romacs cannot run, with why."
                    "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)
                    "program" (plist-get instance :program)
                    "programFound" (if (executable-find (plist-get instance :program)) t :false)
-                   "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
+                   "options" (vector (romacs-agent-tools--effort-option instance))
+                   "models" (vconcat (mapcar (lambda (row) (romacs-agent-tools--model instance row))
+                                             (romacs-agent--models instance))))))
               instances))
      "constraints"
      (vconcat (mapcar (lambda (c) (romacs-mcp--object "source" (symbol-name (plist-get c :source))

@@ -372,8 +372,20 @@ pub struct WindowSnapshot {
     pub chrome: WindowChrome,
     /// Where its underlines go.
     pub underline_rules: UnderlineRules,
+    /// The characters of the header line and of the mode line shown as
+    /// stretches, in byte order: an `:align-to' target counts from the
+    /// text area's left edge, as GNU's display of a band measures it.
+    pub band_stretches: BandStretches,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, images, wrap_flips, line_numbers, chrome, underline_rules });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
+
+/// A window's header-line and mode-line stretches (`WindowSnapshot').
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BandStretches {
+    pub header_line: Vec<Stretch>,
+    pub mode_line: Vec<Stretch>,
+}
+romacs_snapshot::snapshot_struct!(BandStretches { header_line, mode_line });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -543,8 +555,27 @@ romacs_snapshot::snapshot_struct!(Pill { background, radius, foreground });
 
 impl BandMarks {
     /// The bytes of the `right-align' marker, where the band splits.
-    pub fn right_align(&self) -> Option<Range<usize>> {
-        self.segments.iter().find(|s| s.name == "right-align").map(|s| s.bytes.clone())
+    pub fn right_align(&self) -> Option<Range<usize>> { self.marker("right-align") }
+
+    /// The bytes of the `centre-align' marker, where the band's centred zone
+    /// starts.
+    pub fn centre(&self) -> Option<Range<usize>> { self.marker("centre-align") }
+
+    fn marker(&self, name: &str) -> Option<Range<usize>> {
+        self.segments.iter().find(|s| s.name == name).map(|s| s.bytes.clone())
+    }
+
+    /// TEXT's characters by zone, as character index ranges: the left
+    /// zone, the `centre-align' marker's, the centred zone, the `right-align'
+    /// marker's, the right zone. A missing marker is empty, and so is the
+    /// zone it starts.
+    pub fn zones(&self, text: &TextSlice) -> [Range<usize>; 5] {
+        let starts: Vec<usize> = text.utf8.char_indices().map(|(at, _)| at).collect();
+        let n = starts.len();
+        let span = |bytes: Option<Range<usize>>| bytes.map(|b| starts.partition_point(|&at| at < b.start)..starts.partition_point(|&at| at < b.end));
+        let right = span(self.right_align()).unwrap_or(n..n);
+        let centre = span(self.centre()).filter(|c| c.end <= right.start).unwrap_or(right.start..right.start);
+        [0..centre.start, centre.clone(), centre.end..right.start, right.clone(), right.end..n]
     }
 }
 
@@ -552,71 +583,112 @@ impl BandMarks {
 /// character covers.
 pub const STATUS_BAR_ACCENT: f32 = 3.0;
 
+/// The status bar's room at either end, left of its first character and
+/// right of its last (r0 review: 12 px outer padding).
+pub const STATUS_BAR_PAD: f32 = 12.0;
+
+/// The least room between the centred zone and a side zone; a side that
+/// would come closer pushes the centre away (modeline.md §14.2).
+pub const STATUS_BAR_ZONE_GAP: f32 = 24.0;
+
 impl StatusBarSnapshot {
-    /// Where each character goes (`BandMarks::places'), right of the
-    /// accent block. The painter (layout2) and `romacs-status-bar-string'
-    /// (the VM) both place by this.
+    /// Where each character goes (`BandMarks::places'), inside the bar's
+    /// padding. The painter (layout2) and `romacs-status-bar-string' (the
+    /// VM) both place by this.
     pub fn places(&self, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
-        self.marks.places(&self.text, self.width as f32, STATUS_BAR_ACCENT, advances)
+        self.marks.places(&self.text, self.width as f32, STATUS_BAR_PAD, advances)
     }
 
     /// What the bar shows (`BandMarks::shown_text').
     pub fn shown_text(&self, places: &[Option<(f32, f32)>], column: f32) -> String {
         self.marks.shown_text(&self.text, places, column)
     }
+
+    /// The characters the bar fits in COLUMN-wide cells: its width less
+    /// its padding.
+    pub fn columns(width: u32, column: u32) -> usize {
+        ((width as f32 - 2.0 * STATUS_BAR_PAD).max(0.0) / column.max(1) as f32) as usize
+    }
 }
 
 impl BandMarks {
-    /// Where each character of TEXT, a marked band WIDTH wide whose text
-    /// starts INSET from its left edge, goes in text order, given
-    /// ADVANCES, their advances: its x from the band's left edge and its
-    /// advance, or None where the band clips it; the `right-align'
-    /// marker's characters span the room between the two sides. The part
-    /// after the marker is flush with the right edge and shows whole when
-    /// it fits, the part before it from the left, clipped where the right
-    /// part starts.
-    pub fn places(&self, text: &TextSlice, width: f32, inset: f32, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
-        let width = width - inset;
-        let starts: Vec<usize> = text.utf8.char_indices().map(|(at, _)| at).collect();
-        let marker = self.right_align().and_then(|bytes| starts.iter().position(|&at| at == bytes.start)
-            .map(|first| (first, starts.iter().filter(|&&at| bytes.contains(&at)).count())));
-        let (left_end, right_start) = marker.map_or((starts.len(), starts.len()), |(first, count)| (first, first + count));
-        let right: f32 = advances[right_start..].iter().sum();
-        let right_x = if marker.is_some() { (width - right).max(0.0) } else { width };
-        let mut places = Vec::with_capacity(starts.len());
-        let mut x = 0.0;
-        for &advance in &advances[..left_end] {
-            places.push((x + advance <= right_x).then_some((x, advance)));
-            x += advance;
-        }
-        let shown_left: f32 = places.iter().flatten().map(|(_, w)| w).sum();
-        if marker.is_some() {
-            let gap = (right_x - shown_left).max(0.0);
-            for _ in left_end..right_start { places.push(Some((shown_left, gap))); }
-            let mut x = right_x;
-            for &advance in &advances[right_start..] {
-                places.push((x + advance <= width).then_some((x, advance)));
+    /// Where each character of TEXT, a marked band WIDTH wide with PAD of
+    /// room at either end, goes in text order, given ADVANCES, their
+    /// advances: its x from the band's left edge and its advance, or None
+    /// where the band clips it (modeline.md §14). The right zone, after
+    /// the `right-align' marker, is flush with the right end and shows
+    /// whole when it fits. The centred zone, between the `centre-align' marker
+    /// and that one, is centred on the band and held at least
+    /// `STATUS_BAR_ZONE_GAP' from either side, pushed as little as that
+    /// needs; with no room for both gaps it follows the left zone, both
+    /// clipped where the right zone starts. Each zone shows a prefix of
+    /// its characters, and a marker's characters span the room before the
+    /// zone it starts.
+    pub fn places(&self, text: &TextSlice, width: f32, pad: f32, advances: &[f32]) -> Vec<Option<(f32, f32)>> {
+        let inner = (width - 2.0 * pad).max(0.0);
+        let [left, centre_marker, centre, right_marker, right] = self.zones(text);
+        let sum = |range: &Range<usize>| -> f32 { advances[range.clone()].iter().sum() };
+        let (left_w, centre_w, right_w) = (sum(&left), sum(&centre), sum(&right));
+        let right_x = if right_marker.is_empty() { inner } else { (inner - right_w).max(0.0) };
+        // The centred zone's start: centred on the whole band, then pushed
+        // off either side; where both push, after the left zone.
+        let centre_x = (!centre_marker.is_empty()).then(|| {
+            let lo = if left_w > 0.0 { left_w + STATUS_BAR_ZONE_GAP } else { 0.0 };
+            let hi = if right_w > 0.0 { right_x - STATUS_BAR_ZONE_GAP } else { inner } - centre_w;
+            let ideal = width / 2.0 - pad - centre_w / 2.0;
+            if lo <= hi { ideal.clamp(lo, hi) } else { left_w }
+        });
+        let mut places: Vec<Option<(f32, f32)>> = Vec::with_capacity(advances.len());
+        let run = |range: Range<usize>, from: f32, limit: f32, places: &mut Vec<Option<(f32, f32)>>| -> f32 {
+            let mut x = from;
+            let mut end = from;
+            for &advance in &advances[range] {
+                let fits = x + advance <= limit + 0.001 && end == x;
+                places.push(fits.then_some((x, advance)));
+                if fits { end = x + advance; }
                 x += advance;
             }
+            end
+        };
+        let room = |range: Range<usize>, from: f32, to: f32, places: &mut Vec<Option<(f32, f32)>>| {
+            for _ in range { places.push(Some((from, (to - from).max(0.0)))); }
+        };
+        let left_end = run(left, 0.0, right_x, &mut places);
+        let mut end = left_end;
+        if let Some(x) = centre_x {
+            // The centre marker's room reaches the centred zone where that
+            // shows; where it shows nothing, the right marker's room is all.
+            let x = x.max(left_end);
+            let marker = places.len()..places.len() + centre_marker.len();
+            room(centre_marker, left_end, left_end, &mut places);
+            let centre_end = run(centre, x, right_x, &mut places);
+            if centre_end > x {
+                places[marker].fill(Some((left_end, x - left_end)));
+                end = centre_end;
+            }
         }
-        places.into_iter().map(|place| place.map(|(x, w)| (x + inset, w))).collect()
+        if !right_marker.is_empty() {
+            room(right_marker, end, right_x, &mut places);
+            run(right, right_x, inner, &mut places);
+        }
+        places.into_iter().map(|place| place.map(|(x, w)| (x + pad, w))).collect()
     }
 
     /// What a marked band of TEXT shows, placed by PLACES (`places'):
     /// each shown character, an icon's character where it is drawn as
-    /// one, and for the marker's room as many spaces as COLUMN-wide cells
+    /// one, and for each marker's room as many spaces as COLUMN-wide cells
     /// fill it.
     pub fn shown_text(&self, text: &TextSlice, places: &[Option<(f32, f32)>], column: f32) -> String {
-        let marker = self.right_align();
+        let [_, centre_marker, _, right_marker, _] = self.zones(text);
         let mut icons = self.icons.iter().peekable();
         let mut shown = String::new();
-        let mut gap_done = false;
-        for ((byte, ch), place) in text.utf8.char_indices().zip(places) {
+        for (i, ((byte, ch), place)) in text.utf8.char_indices().zip(places).enumerate() {
             while icons.peek().is_some_and(|(at, _)| *at < byte) { icons.next(); }
             let Some((_, width)) = place else { continue };
-            if marker.as_ref().is_some_and(|m| m.contains(&byte)) {
-                if !gap_done { shown.extend(std::iter::repeat_n(' ', (width / column.max(1.0)).floor() as usize)); }
-                gap_done = true;
+            if centre_marker.contains(&i) || right_marker.contains(&i) {
+                if i == centre_marker.start || i == right_marker.start {
+                    shown.extend(std::iter::repeat_n(' ', (width / column.max(1.0)).floor() as usize));
+                }
                 continue;
             }
             shown.push(icons.peek().filter(|(at, _)| *at == byte).map_or(ch, |&&(_, icon)| icon));
@@ -753,11 +825,11 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
             && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
-            && *underline_rules == other.underline_rules
+            && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
     }
 }
 
@@ -824,7 +896,48 @@ pub struct Measured {
 
 #[cfg(test)]
 mod tests {
-    use super::{stretch_advance, tab_advance, StretchWidth};
+    use super::{stretch_advance, tab_advance, BandMarks, Segment, StretchWidth, TextSlice, STATUS_BAR_ZONE_GAP};
+
+    /// A band of TEXT with a `centre-align' marker at byte C and a `right-align'
+    /// one at byte R (each one character), placed WIDTH wide with 12 px
+    /// padding, a 10 px advance each.
+    fn zoned(text: &str, c: usize, r: usize, width: f32) -> Vec<Option<(f32, f32)>> {
+        let marker = |at: usize, name: &str| Segment { bytes: at..at + 1, name: name.into(), pill: None };
+        let marks = BandMarks { segments: vec![marker(c, "centre-align"), marker(r, "right-align")], icons: vec![] };
+        let text = TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] };
+        marks.places(&text, width, 12.0, &vec![10.0; text.utf8.chars().count()])
+    }
+
+    /// The centred zone is centred on the band; a side that would come
+    /// within the gap pushes it away as little as needed; with no room for
+    /// both gaps it follows the left zone, everything clipped where the
+    /// right zone starts; the right zone is flush with the padding.
+    #[test]
+    fn the_centre_zone_centres_yields_and_flows() {
+        // "ab|NAME|xy": left 20, centre 40, right 20 in a 400 px band.
+        let places = zoned("ab NAME xy", 2, 7, 400.0);
+        assert_eq!(places[3], Some((180.0, 10.0)), "centred: 200 - 20");
+        assert_eq!(places[9].map(|(x, w)| x + w), Some(388.0), "flush right inside the padding");
+        assert_eq!(places[2], Some((32.0, 148.0)), "the centre marker spans the room before the name");
+        // A long left side pushes the centre right, the gap kept.
+        let places = zoned(&format!("{} NAME xy", "l".repeat(16)), 16, 21, 400.0);
+        assert_eq!(places[17].map(|(x, _)| x), Some(12.0 + 160.0 + STATUS_BAR_ZONE_GAP));
+        // A long right side pushes it left.
+        let places = zoned(&format!("ab NAME {}", "r".repeat(16)), 2, 7, 400.0);
+        let right_x = places[8].unwrap().0;
+        assert_eq!(places[6].map(|(x, w)| x + w), Some(right_x - STATUS_BAR_ZONE_GAP));
+        // Both: the name follows the left side, the right side whole.
+        let places = zoned(&format!("{} NAME {}", "l".repeat(15), "r".repeat(15)), 15, 20, 400.0);
+        assert_eq!(places[16], Some((12.0 + 150.0, 10.0)), "flows after the left zone");
+        assert!(places[21..].iter().all(Option::is_some));
+        // Too narrow for all: left and centre clipped where the right starts, a prefix each.
+        let places = zoned(&format!("{} NAME xy", "l".repeat(30)), 30, 35, 200.0);
+        let right_x = places[36].unwrap().0;
+        let shown: Vec<usize> = (0..35).filter(|&i| places[i].is_some() && i != 30).collect();
+        assert!(shown.iter().all(|&i| places[i].is_some_and(|(x, w)| x + w <= right_x + 0.01)));
+        assert!(places[31..35].iter().all(Option::is_none), "the name after a clipped left zone does not show");
+        assert!(shown.windows(2).all(|w| w[1] == w[0] + 1), "a prefix");
+    }
 
     /// GNU's stops: the next multiple of TAB_WIDTH spaces, or the one
     /// after when that is less than a space away.

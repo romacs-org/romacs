@@ -14,7 +14,7 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, publish_face_text};
-use romacs_layout_input::{NoFont, ChildFrameSnapshot, STATUS_BAR_ACCENT, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
+use romacs_layout_input::{NoFont, ChildFrameSnapshot, STATUS_BAR_ACCENT, STATUS_BAR_PAD, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured, LineWrap, PointPlace, Row, WindowEnd, StretchWidth, stretch_advance, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
@@ -24,7 +24,7 @@ pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
 
 /// An empty window in FACE alone: what the frame's character cell is.
 fn metrics_snapshot(face: &Face) -> WindowSnapshot {
-    WindowSnapshot { underline_rules: Default::default(),
+    WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
@@ -252,8 +252,9 @@ fn paint_status_bar(frame: &mut FrameGlyphBuffer, bar: &StatusBarSnapshot, focus
     let accent = if bar.focused { focus.unwrap_or(foreground) } else { dimmed };
     let bounds = Rect::new(bar.x as f32, bar.y as f32, bar.width as f32, bar.height as f32);
     let band = Marked { text: &bar.text, faces: &bar.faces, face, marks: &bar.marks, bounds, accent: Some(accent) };
-    paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver, no_font)?;
+    let places = paint_marked(frame, &band, (DisplayWindowId::new(0), GlyphRowRole::StatusBar), resolver, no_font)?;
     frame.status_bar = Some(bounds);
+    frame.status_bar_places = places.into_iter().map(|place| place.map(|(x, w)| (bounds.x + x, w))).collect();
     Ok(())
 }
 
@@ -273,8 +274,9 @@ struct Marked<'a> {
 /// the accent block, each segment's pill, its characters in its faces on
 /// that background (an icon in place of the character it marks, a pill's
 /// text in the pill's foreground), the part after its `right-align'
-/// marker flush with the right edge (`BandMarks::places').
-fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver, no_font: &NoFont) -> Result<(), String> {
+/// marker flush with the right edge (`BandMarks::places'). Where each
+/// character went, from the band's left edge.
+fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWindowId, GlyphRowRole), resolver: &mut FontResolver, no_font: &NoFont) -> Result<Vec<Option<(f32, f32)>>, String> {
     let (text, face, bounds) = (band.text, band.face, band.bounds);
     validate_runs(text, band.faces.len())?;
     if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
@@ -294,7 +296,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         (byte, shown, index, advance(frame, FaceId::new(face_base + index as u32), shown, metrics[index].2))
     }).collect();
     let advances: Vec<f32> = chars.iter().map(|c| c.3).collect();
-    let places = band.marks.places(text, bounds.width, STATUS_BAR_ACCENT, &advances);
+    let places = band.marks.places(text, bounds.width, STATUS_BAR_PAD, &advances);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
@@ -356,10 +358,10 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         }
     }
     frame.set_draw_context(owner.0, owner.1, Some(bounds));
-    let marker = band.marks.right_align();
-    for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
+    let [_, centre_marker, _, right_marker, _] = band.marks.zones(text);
+    for (i, (&(_, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
-        if marker.as_ref().is_some_and(|m| m.contains(&byte)) { continue; }
+        if centre_marker.contains(&i) || right_marker.contains(&i) { continue; }
         let (ascent, height, _, _) = metrics[index];
         if let Some(glyph) = glyphless.get(index, shown) {
             glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true, 0.0)?;
@@ -368,48 +370,16 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
         frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
         *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
     }
-    Ok(())
+    Ok(places)
 }
 
 /// Where each character of BAR is as FRAME paints it, in its text's
 /// order: its left edge in the frame and its width, or None where the bar
-/// clipped it; and the index of the `right-align' marker's space, which
-/// spans the room between the bar's two sides and runs nothing when
-/// clicked.
-pub fn status_bar_extents(frame: &FrameGlyphBuffer, bar: &StatusBarSnapshot) -> (Vec<Option<(f32, f32)>>, Option<usize>) {
-    let drawn: Vec<(f32, f32)> = frame.glyphs.iter().filter_map(|glyph| match glyph {
-        romacs_display_protocol::FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, x, width, .. } => Some((*x, *width)),
-        _ => None,
-    }).collect();
-    marked_extents(&drawn, &bar.text, &bar.marks, bar.x as f32, (bar.x + bar.width) as f32)
-}
-
-/// Where each character of a marked band's TEXT is, from DRAWN, its
-/// painted glyphs in order, in a band from LEFT to RIGHT: its left edge
-/// and width, or None where the band clipped it; and the index of the
-/// `right-align' marker's space, which spans the room between the band's
-/// two sides and runs nothing when clicked.
-fn marked_extents(drawn: &[(f32, f32)], text: &TextSlice, marks: &romacs_layout_input::BandMarks, left_edge: f32, right_edge: f32) -> (Vec<Option<(f32, f32)>>, Option<usize>) {
-    let starts: Vec<usize> = text.utf8.char_indices().map(|(at, _)| at).collect();
-    let marker = marks.right_align();
-    let marker_index = marker.as_ref().and_then(|m| starts.iter().position(|&at| at == m.start));
-    let (left, right) = match (&marker, marker_index) {
-        (Some(m), Some(first)) => (first, starts.iter().filter(|&&at| at >= m.end).count()),
-        _ => (starts.len(), 0),
-    };
-    let marker_count = starts.len() - left - right;
-    // The glyphs are the left side's shown prefix, then the right side's
-    // shown prefix: the right side shows whole unless it is wider than the band.
-    let right_shown = drawn.len().min(right);
-    let left_shown = drawn.len() - right_shown;
-    let mut extents: Vec<Option<(f32, f32)>> = drawn[..left_shown].iter().copied().map(Some).collect();
-    extents.extend(std::iter::repeat_n(None, left - left_shown));
-    let left_end = drawn[..left_shown].last().map_or(left_edge, |(x, w)| x + w);
-    let right_start = drawn.get(left_shown).map_or(right_edge, |(x, _)| *x);
-    extents.extend(std::iter::repeat_n(Some((left_end, (right_start - left_end).max(0.0))), marker_count));
-    extents.extend(drawn[left_shown..].iter().copied().map(Some));
-    extents.extend(std::iter::repeat_n(None, right - right_shown));
-    (extents, marker_index)
+/// clipped it; and the indices of its markers' characters, which span the
+/// room before the zone each starts and run nothing when clicked.
+pub fn status_bar_extents(frame: &FrameGlyphBuffer, bar: &StatusBarSnapshot) -> (Vec<Option<(f32, f32)>>, Vec<usize>) {
+    let [_, centre_marker, _, right_marker, _] = bar.marks.zones(&bar.text);
+    (frame.status_bar_places.clone(), centre_marker.chain(right_marker).collect())
 }
 
 /// CHILD of SNAPSHOT as a frame of its own: its windows inside its border,
@@ -834,6 +804,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             x0 = gutter(byte).0;
             (x, y, row_height, hpos) = (x0, y + row_height, metrics[0].1, 0);
             if starting { (drawing, starting, y) = (true, false, top); }
+            // Continued past the last row, this character is not shown.
+            if drawing && y >= body_height { end_byte = byte; }
             advance_px = width(frame, x0, x0 + continued, x0) + lead + trail;
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
@@ -1077,21 +1049,27 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if let Some(band) = &snapshot.header_line {
         copy += 1;
         let bounds = Rect::new(band_x, window_top, band_width, header_height);
-        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), (&metrics, &glyphless))?;
+        let stretches = (&snapshot.band_stretches.header_line[..], left as f32);
+        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, stretches, GlyphRowRole::HeaderLine, (face_base, copy), (&metrics, &glyphless))?;
     }
     if let Some(band) = &snapshot.mode_line {
         copy += 1;
         let bounds = Rect::new(band_x, oy + body_height, band_width, snapshot.height as f32 - header_height - body_height);
-        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), (&metrics, &glyphless))?;
+        let stretches = (&snapshot.band_stretches.mode_line[..], left as f32);
+        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, stretches, GlyphRowRole::ModeLine, (face_base, copy), (&metrics, &glyphless))?;
     }
     Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, point: place })
 }
 
 /// Paint BAND, a header or mode line, in BOUNDS: its FACE's background,
 /// then its characters in copies of the window's faces on that background,
-/// published from FACE_BASE plus COPY face tables on.
+/// published from FACE_BASE plus COPY face tables on. A character STRETCHES
+/// names is that stretch, blank (produce_stretch_glyph), its `:align-to'
+/// counted from the text area's left edge, TEXT_LEFT into the band, as
+/// GNU's full-width band row measures it (calc_pixel_width_or_height).
 #[allow(clippy::too_many_arguments)]
 fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &TextSlice, face: FaceHandle, bounds: Rect,
+              (stretches, text_left): (&[romacs_layout_input::Stretch], f32),
               role: GlyphRowRole, (face_base, copy): (u32, u32), (metrics, glyphless): (&[Metrics], &Glyphless)) -> Result<(), String> {
     let default = face.0 as usize;
     let background = color(snapshot.faces[default].background);
@@ -1118,13 +1096,37 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
     let first_glyph = frame.glyphs.len();
     // The last glyph painted while a run stays open past it.
     let mut open_glyph = None;
+    let mut stretches = stretches.iter().peekable();
     for (byte, ch) in band.utf8.char_indices() {
         let index = face_at(band, byte, default);
         let id = FaceId::new(face_base + offset + index as u32);
         let (ascent, height, cell, _) = metrics[index];
-        let step = box_step(&snapshot.faces, band, (default, index), byte, ch, true, box_open, fill_boxed);
+        while stretches.peek().is_some_and(|s| s.byte < byte) { stretches.next(); }
+        let stretch = stretches.next_if(|s| s.byte == byte);
+        // A stretch keeps its width in a box run (IT_APPLY_FACE_BOX).
+        let step = box_step(&snapshot.faces, band, (default, index), byte, ch, stretch.is_none(), box_open, fill_boxed);
         let opening = !box_open;
         box_open = step.open;
+        if let Some(stretch) = stretch {
+            let width = match stretch.width {
+                StretchWidth::AlignTo(target) => StretchWidth::AlignTo(target + text_left as i64),
+                width => width,
+            };
+            let advance = stretch_advance(width, f64::from(x), f64::from(x), None) as f32;
+            // Blank, but a face's lines and box run across it (produce_stretch_glyph).
+            if x < bounds.width && advance > 0.0 && snapshot.faces[index].decor != Default::default() {
+                frame.add_stretch(bounds.x + x, bounds.y, advance.min(bounds.width - x), bounds.height, background, id, false);
+                let at = frame.glyphs.len() - 1;
+                if step.boxed {
+                    // No side spacer pads a stretch: it owns the left edge.
+                    set_glyph_box_edges(frame, at, edges(opening, step.ends));
+                    boxed_top |= step.top > 0.0;
+                }
+                open_glyph = step.open.then_some(at);
+            }
+            x += advance;
+            continue;
+        }
         let advance = advance(frame, id, ch, cell);
         if x < bounds.width {
             if step.lead > 0.0 {
