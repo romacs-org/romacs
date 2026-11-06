@@ -591,6 +591,13 @@ fn romacs_backquote_lisp_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-backquote-test.el");
 }
 
+/// `load-theme''s preview (tests/romacs-theme-preview-test.el): what it
+/// shows, what it refuses to read, and that it leaves the session as it was.
+#[test]
+fn romacs_theme_preview_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-preview-test.el");
+}
+
 /// FILE's `romacs-deftest's, in a fresh `--loadup' session.
 fn theme_lisp_tests_pass(file: &'static str) {
     let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {

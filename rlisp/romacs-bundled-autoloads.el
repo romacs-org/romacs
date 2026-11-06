@@ -214,7 +214,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-custom.el
 
-(register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme"))
+(register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme" "romacs-theme-preview"))
 
 
 ;;; Generated autoloads from romacs-defaults.el

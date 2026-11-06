@@ -122,5 +122,107 @@ After THEME has been disabled, runs `disable-theme-functions'."
     ;; Allow callers to react to the disabling.
     (run-hook-with-args 'disable-theme-functions theme)))
 
+;;;; Previewing a theme
+
+(defcustom romacs-theme-preview t
+  "Non-nil to show each theme `load-theme' offers as it is selected.
+Only a theme `load-theme' would load without asking is shown: moving
+through a list must not run code nobody agreed to."
+  :type 'boolean
+  :group 'customize)
+
+(defvar romacs-theme--stock)
+
+(defvar romacs-theme-preview--base nil
+  "The themes enabled when the preview began, highest priority first.")
+
+(defvar romacs-theme-preview--stock nil
+  "`romacs-theme--stock' when the preview began.")
+
+(defvar romacs-theme-preview--names nil
+  "The names of the themes offered.")
+
+(defvar romacs-theme-preview--selected :opening
+  "The theme selected when the selection last changed, nil for none;
+`:opening' until the minibuffer has shown its first.")
+
+(defvar romacs-theme-preview--moved nil
+  "Non-nil once the selection left the one the minibuffer opened on.")
+
+(defun romacs-theme-preview-safe-p (theme)
+  "Whether `load-theme' would load THEME without asking."
+  (or (get theme 'theme-settings)
+      (when-let* ((file (locate-file (concat (symbol-name theme) "-theme.el")
+                                     (custom-theme--load-path) '("" "c"))))
+        (or (eq custom-safe-themes t)
+            (and (memq 'default custom-safe-themes)
+                 (equal (file-name-directory file)
+                        (expand-file-name "themes/" data-directory)))
+            (member (with-temp-buffer
+                      (insert-file-contents file)
+                      (secure-hash 'sha256 (current-buffer)))
+                    custom-safe-themes)))))
+
+(defun romacs-theme-preview--show (theme)
+  "Show THEME as `load-theme' would over the themes the preview began
+with; with THEME nil, or one that may not be read, only those."
+  (let ((safe (and theme (romacs-theme-preview-safe-p theme))))
+    (when (and theme (not safe))
+      (minibuffer-message "Not shown: `load-theme' would ask first"))
+    (with-demoted-errors "Theme preview: %S"
+      (when (and safe (not (get theme 'theme-settings)))
+        (load-theme theme t t))
+      (mapc #'disable-theme custom-enabled-themes)
+      (mapc #'enable-theme (reverse romacs-theme-preview--base))
+      (setq romacs-theme--stock romacs-theme-preview--stock)
+      (when safe (enable-theme theme)))))
+
+(defun romacs-theme-preview--current ()
+  "The theme selected in the minibuffer, nil for none."
+  (let ((name (if (bound-and-true-p romacs-complete--candidates)
+                  (romacs-complete--candidate)
+                (minibuffer-contents-no-properties))))
+    (and (member name romacs-theme-preview--names) (intern name))))
+
+(defun romacs-theme-preview--follow ()
+  "Show the theme selected now, where that is another.  What the
+minibuffer opens on is nobody's choice yet, and shows nothing."
+  (let ((theme (romacs-theme-preview--current))
+        (opening (eq romacs-theme-preview--selected :opening)))
+    (unless (eq theme romacs-theme-preview--selected)
+      (setq romacs-theme-preview--selected theme)
+      (unless opening
+        (setq romacs-theme-preview--moved t)
+        (romacs-theme-preview--show theme)))))
+
+(defun romacs-theme-preview--setup ()
+  "Follow the selection in this minibuffer."
+  (add-hook 'post-command-hook #'romacs-theme-preview--follow 90 t))
+
+(defun romacs-theme-preview-read ()
+  "Read a theme as `load-theme' does, showing what is selected.
+The themes enabled before are back when this returns, however it does:
+what the reader chose, `load-theme' goes on to load."
+  (let ((names (mapcar #'symbol-name (custom-available-themes)))
+        (prompt "Load custom theme: "))
+    (list
+     (intern
+      (if (not romacs-theme-preview)
+          (completing-read prompt names)
+        (let* ((romacs-theme-preview--base custom-enabled-themes)
+               (romacs-theme-preview--names names)
+               (romacs-theme-preview--selected :opening)
+               (romacs-theme-preview--moved nil)
+               (romacs-theme--stock (bound-and-true-p romacs-theme--stock))
+               (romacs-theme-preview--stock romacs-theme--stock))
+          (unwind-protect
+              (minibuffer-with-setup-hook (:append #'romacs-theme-preview--setup)
+                (completing-read prompt names))
+            (when romacs-theme-preview--moved
+              (romacs-theme-preview--show nil))))))
+     nil nil)))
+
+(put 'load-theme 'interactive-form '(interactive (romacs-theme-preview-read)))
+
 (provide 'romacs-custom)
 ;;; romacs-custom.el ends here
