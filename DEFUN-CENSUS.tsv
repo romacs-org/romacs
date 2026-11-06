@@ -273,7 +273,6 @@ pgtk-font-name	absent	no shipped Lisp calls it and it is no command
 pgtk-get-page-setup	absent	no shipped Lisp calls it and it is no command
 pgtk-page-setup-dialog	absent	no shipped Lisp calls it and it is no command
 pgtk-print-frames-dialog	absent	GTK print dialog: Romacs draws no GTK dialogs
-pgtk-register-dnd-targets	needed	lane A (editing, windows, frames, minibuffer readers, display)
 pgtk-set-monitor-scale-factor	absent	no shipped Lisp calls it and it is no command
 pgtk-set-resource	absent	no shipped Lisp calls it and it is no command
 pgtk-update-drop-status	needed	lane A (editing, windows, frames, minibuffer readers, display)

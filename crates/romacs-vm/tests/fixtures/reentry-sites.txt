@@ -99,7 +99,7 @@ mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms wit
 prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs detected_source variable_set 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-prim.rs install_lisp_prelude_raw eval_source_raw 4 boundary  # VM setup: no caller Values
+prim.rs install_lisp_prelude_raw eval_source_raw 5 boundary  # VM setup: no caller Values
 prim.rs make_variable_alias notify 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs notify notify_watchers_at 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
