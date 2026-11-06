@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "52ecf23991fd623dc4d6019804ae9b421bd3724a0b2901781452e888be207673",
+  "source_fingerprint": "a7729b33e3599200f339218fb90f187da9383c719b909ad377cef99af8dc68de",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1368,
-  "parsed_vm2_only": 1368
+  "parsed_total": 1370,
+  "parsed_vm2_only": 1370
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -132,7 +132,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:772"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:780"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -954,7 +954,7 @@
   "command-modes": {
    "name": "command-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:846"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:854"
   },
   "command-remapping": {
    "name": "command-remapping",
@@ -964,7 +964,7 @@
   "commandp": {
    "name": "commandp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:781"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:789"
   },
   "compare-buffer-substrings": {
    "name": "compare-buffer-substrings",
@@ -2603,7 +2603,7 @@
   "internal-complete-buffer": {
    "name": "internal-complete-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:206"
+   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:216"
   },
   "internal-copy-lisp-face": {
    "name": "internal-copy-lisp-face",
@@ -4061,6 +4061,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:201"
   },
+  "read-command": {
+   "name": "read-command",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:206"
+  },
   "read-event": {
    "name": "read-event",
    "implementation": "vm2",
@@ -4090,6 +4095,11 @@
    "name": "read-string",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:39"
+  },
+  "read-variable": {
+   "name": "read-variable",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:211"
   },
   "recent-auto-save-p": {
    "name": "recent-auto-save-p",
@@ -7080,7 +7090,7 @@
   "yes-or-no-p": {
    "name": "yes-or-no-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:211"
+   "registered_at": "crates/romacs-vm/src/prims/minibuf.rs:221"
   },
   "zlib-available-p": {
    "name": "zlib-available-p",

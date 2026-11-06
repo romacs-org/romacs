@@ -300,6 +300,25 @@ prompt's field; elsewhere `point-min'."
                                  'coding-system-history default-coding-system))))
     (if (= (length name) 0) nil (intern name))))
 
+(defvar custom-variable-history nil
+  "History of the options `read-variable' has read.")
+
+(defun romacs--read-symbol (prompt predicate history default-value)
+  "minibuf.c Fread_command, Fread_variable: complete a symbol PREDICATE accepts."
+  (let ((name (completing-read prompt obarray predicate t nil history
+                               (if (and default-value (symbolp default-value))
+                                   (symbol-name default-value)
+                                 default-value))))
+    (and name (intern name))))
+
+(defun romacs--read-command (prompt default-value)
+  "minibuf.c Fread_command: complete the name of a command."
+  (romacs--read-symbol prompt #'commandp nil default-value))
+
+(defun romacs--read-variable (prompt default-value)
+  "minibuf.c Fread_variable: complete the name of a user option."
+  (romacs--read-symbol prompt #'custom-variable-p 'custom-variable-history default-value))
+
 (defun romacs--internal-complete-buffer (string predicate flag)
   "minibuf.c Finternal_complete_buffer: complete STRING over the buffer names."
   (let ((alist (mapcar (lambda (buffer) (cons (buffer-name buffer) buffer)) (buffer-list))))
