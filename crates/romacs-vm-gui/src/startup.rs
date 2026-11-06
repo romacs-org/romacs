@@ -1709,7 +1709,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_publishes_mode_lines_and_exact_rum_faces() {
+    fn startup_publishes_mode_lines_and_the_stock_theme_s_faces() {
         let mut vm = workspace(1);
         let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         for (window, name) in snapshot
@@ -1751,19 +1751,19 @@ mod tests {
         let cases = [
             ("default", "d4c5a0", "000000"),
             ("cursor", "", "9099d9"),
-            ("mode-line", "d4c5a0", "50269a"),
+            ("mode-line", "d4c5a0", "1b1814"),
             ("mode-line-inactive", "756b59", "141414"),
             ("region", "d4c5a0", "3e4451"),
             ("fringe", "000000", "000000"),
             ("highlight", "d4c5a0", "7030af"),
             ("minibuffer-prompt", "d2b580", ""),
-            ("font-lock-keyword-face", "b395db", ""),
+            ("font-lock-keyword-face", "c9a2f2", ""),
             ("font-lock-string-face", "aacb75", ""),
-            ("font-lock-comment-face", "756b59", ""),
-            ("font-lock-function-name-face", "c28fea", ""),
-            ("font-lock-variable-name-face", "00a6a6", ""),
-            ("font-lock-constant-face", "72b6e4", ""),
-            ("font-lock-type-face", "00b8ad", ""),
+            ("font-lock-comment-face", "a99c84", ""),
+            ("font-lock-function-name-face", "e3b56a", ""),
+            ("font-lock-variable-name-face", "a8c6bf", ""),
+            ("font-lock-constant-face", "e8a070", ""),
+            ("font-lock-type-face", "5fb0a8", ""),
             ("font-lock-builtin-face", "d0a3e8", ""),
             ("font-lock-warning-face", "e89e30", ""),
             ("link", "4cc9f0", ""),
