@@ -229,7 +229,7 @@ PARENT-BUFFER is the ordinary conversation view.  The result is
                 (or (plist-get root-msg :body) ""))))))
         (truncate-string-to-width
          (if (string-empty-p body) "(no text)" body)
-         jabber-message-thread--preview-width nil nil "…")))))
+         jabber-message-thread--preview-width nil nil t)))))
 
 (defun jabber-message-thread--buffer-name (parent-name label)
   "Return a thread buffer name from PARENT-NAME and display LABEL."
@@ -561,13 +561,13 @@ PEER and TYPE scope the exact stored message lookup."
               "[Message retracted]"
             (truncate-string-to-width
              (if (string-empty-p body) "(no text)" body)
-             72 nil nil "…")))
+             72 nil nil t)))
          (nick (and (equal (plist-get thread :thread-type) "groupchat")
                     (stringp from)
                     (jabber-jid-resource from))))
     (cond
      ((and (stringp title) (not (string-empty-p title)))
-      (truncate-string-to-width title 72 nil nil "…"))
+      (truncate-string-to-width title 72 nil nil t))
      (nick (format "%s: %s" nick preview))
      (t preview))))
 

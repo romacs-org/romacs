@@ -37,8 +37,40 @@ RESUME is non-nil."
             (romacs-agent--option-words session "--model" "--effort")
             (plist-get instance :arguments))))
 
+(defun romacs-agent--claude-image (file)
+  "FILE as a message's image content block."
+  (romacs-mcp--object
+   "type" "image"
+   "source" (romacs-mcp--object
+             "type" "base64"
+             "media_type" (pcase (downcase (file-name-extension file))
+                            ((or "jpg" "jpeg") "image/jpeg") ("gif" "image/gif") ("webp" "image/webp") (_ "image/png"))
+             "data" (with-temp-buffer
+                      (set-buffer-multibyte nil)
+                      (insert-file-contents-literally file)
+                      (base64-encode-region (point-min) (point-max) t)
+                      (buffer-string)))))
+
 (defun romacs-agent--claude-user (_session text)
-  (romacs-mcp--object "type" "user" "message" (romacs-mcp--object "role" "user" "content" text)))
+  "The harness's message of TEXT, with the images attached to it as content:
+the model is given them, and no file is named for it to open."
+  (let ((images (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
+    (romacs-mcp--object
+     "type" "user"
+     "message" (romacs-mcp--object
+                "role" "user"
+                "content" (if images
+                              (vconcat (list (romacs-mcp--object "type" "text" "text" text))
+                                       (mapcar #'romacs-agent--claude-image images))
+                            text)))))
+
+(defun romacs-agent--claude-reason (result)
+  "Why RESULT, a turn's end, failed, in the harness's words, or nil."
+  (when (eq (gethash "is_error" result) t)
+    (let ((errors (append (romacs-agent--value (gethash "errors" result)) nil)))
+      (if errors
+          (mapconcat (lambda (e) (if (stringp e) e (romacs-agent--json e))) errors "; ")
+        (romacs-agent--value (gethash "result" result))))))
 
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
@@ -109,6 +141,7 @@ RESUME is non-nil."
       ("result"
        (list (list :type 'done :cost (gethash "total_cost_usd" line)
                    :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+                   :reason (romacs-agent--claude-reason line)
                    :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
                    :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
                                      (when (hash-table-p usage)
@@ -158,11 +191,15 @@ start: its answer comes with the other control responses."
     (romacs-agent--line session (romacs-mcp--object "type" "control_request" "request_id" id
                                                     "request" (romacs-mcp--object "subtype" "initialize")))))
 
+;; A record's image files are trusted as what the user attached: the journal
+;; is this user's private state, whoever can rewrite it can read those files
+;; anyway, and a recalled image shows in the tray before anything is sent.
 (defun romacs-agent--claude-input-events (session line)
   "The events of LINE, written to SESSION's harness: a user's prompt, or
 an approval answered."
   (pcase (gethash "type" line)
-    ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))))
+    ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
+                        :images (append (gethash "images" line) nil))))
     ("control_response"
      (let ((id (gethash "request_id" (gethash "response" line))))
        (remhash id (romacs-agent-approvals session))

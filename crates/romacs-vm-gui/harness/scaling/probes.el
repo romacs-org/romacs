@@ -1312,6 +1312,112 @@ thousandth a stack mark."
             (romacs-agent--index session))
           (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
 
+;; A walk through N images: each key reads the matches filtered once.
+;; Keys with the tray's real anchor, hosted, and a composer past a transcript
+;; of N lines: what it measures must not grow with what is out of view.
+(scaling-probe agent-tray-far :gui t :n 20000 :steps 20 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-images)
+                (let ((buffer (get-buffer-create " *scaling-tray-far*")))
+                  (with-current-buffer buffer
+                    (erase-buffer)
+                    (dotimes (_ n) (insert "a line of the transcript\n"))
+                    (setq-local romacs-agent-ui--end (point-max-marker)))
+                  (switch-to-buffer buffer)
+                  (goto-char (point-min))
+                  buffer))
+  :body (with-current-buffer it
+          (unless (> romacs-agent-ui--end (window-end (selected-window)))
+            (error "The composer must be past the window's end"))
+          (dotimes (_ 200) (romacs-agent-images--tray-anchor (selected-window) 3))
+          ;; A key: each step has something to lay out.
+          (insert "x")))
+
+;; A message with a file of N kilobytes attached: what the journal keeps of
+;; it, which a replay parses, does not grow with the image.
+(scaling-probe agent-journal-payload :n 2000 :budget 0.1
+  :setup (progn (scaling--agent)
+                (let ((file (make-temp-file "scaling-payload" nil ".png")))
+                  (with-temp-file file (insert (make-string (* n 1024) ?x)))
+                  file))
+  :body (let ((session (romacs-agent--make :harness 'claude :id "scaling-payload")) (kept nil))
+          (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ _wire journal) (setq kept journal)))
+                    ((symbol-function 'romacs-agent--claude-image) (lambda (_) (romacs-mcp--object "type" "image"))))
+            (dotimes (_ 200)
+              (romacs-agent--input session "see" (list it))
+              (json-parse-string (romacs-agent--json kept))))))
+
+;; The switcher's rows for N sessions, as a prompt shows every match.
+(scaling-probe agent-switch-rows :n 2000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (romacs-agent-ui--session-names
+                 (mapcar (lambda (id) (romacs-agent--make :id id :harness 'claude :provider "claude" :title id
+                                                         :state 'idle :cwd "/tmp/"))
+                         (scaling--names "scaling-session" n))))
+  :body (let* ((table (romacs-agent-ui--session-table (car it) (cdr it) 120))
+               (rows (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
+          (funcall rows (cdr it))))
+
+;; A row with a reply of N characters: it reads what it can show.
+(scaling-probe agent-switch-reply :n 200000 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (romacs-agent--make :id "scaling-reply" :harness 'claude :state 'idle :title "reply"
+                                    :reply (make-string n ?a)))
+  :body (dotimes (_ 200) (romacs-agent-ui--switch-suffix it 120 nil)))
+
+;; The rows of a switcher with N providers configured: a table resolves the
+;; default once, not per row.
+(scaling-probe agent-switch-providers :n 400 :budget 0.1
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (setq romacs-agent-providers
+                      (cons (cons "claude" "~/.claude")
+                            (mapcar (lambda (name) (cons name "~/.claude")) (scaling--names "provider" n))))
+                (romacs-agent-ui--session-names
+                 (mapcar (lambda (id) (romacs-agent--make :id id :harness 'claude :provider "claude" :title id
+                                                         :state 'idle :cwd "/tmp/"))
+                         (scaling--names "scaling-provider" 200))))
+  :body (let* ((table (romacs-agent-ui--session-table (car it) (cdr it) 120))
+               (rows (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
+          (funcall rows (cdr it))))
+
+;; Replaying N images of a transcript lays them out from their headers.
+(scaling-probe agent-image-replay :n 400
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (let ((file (make-temp-file "scaling-image" nil ".png")))
+                  (with-temp-file file
+                    (set-buffer-multibyte nil)
+                    (insert (unibyte-string 137 ?P ?N ?G 13 10 26 10 0 0 0 13 ?I ?H ?D ?R 0 0 3 192 0 0 2 28)
+                            (make-string 9 ?x)
+                            (unibyte-string 0 0 0 0 ?I ?E ?N ?D 174 66 96 130)))
+                  (cons file n)))
+  :body (cl-letf (((symbol-function 'image-size) (lambda (&rest _) (error "Replay decodes nothing"))))
+          (dotimes (_ (cdr it))
+            (or (romacs-agent-ui--image-strips (car it)) (error "No strips")))))
+
+;; N keys in a chat whose draft carries N images: the tray is drawn once.
+(scaling-probe agent-tray-keys :n 2000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-images)
+                (scaling--names "scaling-image" n))
+  :body (let ((romacs-agent-images--tray-shown nil))
+          (cl-letf (((symbol-function 'romacs-agent-images--tray-files) (lambda (_) it))
+                    ((symbol-function 'romacs-agent-images--tray-anchor) (lambda (&rest _) '(10 . 20)))
+                    ((symbol-function 'romacs-agent-images--tray-draw) #'ignore)
+                    ((symbol-function 'romacs-popup-show) #'ignore))
+            (dotimes (_ (length it)) (romacs-agent-images-tray-sync)))))
+
+(scaling-probe agent-images-walk :n 2000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-images)
+                (romacs-agent-images--state (vconcat (scaling--names "scaling-image" n))))
+  :body (let ((state it))
+          (dotimes (_ (length (plist-get state :files)))
+            (setq state (romacs-agent-images--step state ?\C-n)))))
+
 ;; N children of one parent each ending a turn while the parent's turn
 ;; runs: each wake is queued behind it once (the real send and queue).
 (scaling-probe agent-wake :n 200
@@ -1824,7 +1930,7 @@ thousandth a stack mark."
                                             :dir temporary-file-directory))))
            (romacs-agent-show session)
            (with-current-buffer (romacs-agent-buffer session)
-             (setq romacs-agent-ui--history (scaling--names "prompt" n))
+             (setq romacs-agent-ui--history (mapcar #'list (scaling--names "prompt" n)))
              (goto-char (point-max))
              (current-buffer)))
   :body (with-current-buffer it

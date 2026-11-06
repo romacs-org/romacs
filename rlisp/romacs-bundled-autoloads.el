@@ -66,6 +66,11 @@ with the session before its harness starts.  Return the session.
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
 
 
+;;; Generated autoloads from romacs-agent-images.el
+
+(register-definition-prefixes "romacs-agent-images" '("romacs-agent-images-"))
+
+
 ;;; Generated autoloads from romacs-agent-t3.el
 
 (register-definition-prefixes "romacs-agent-t3" '("romacs-agent-t3-"))
@@ -78,6 +83,18 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(autoload 'romacs-agent-switch "romacs-agent-ui"
+"Switch to agent SESSION, in this window, chosen by what each is doing:
+those that want you first, finished delegated tasks last, each with its
+state, last activity, context, model, project and the start of its last
+reply.  A session with no chat yet gets one.
+
+(fn SESSION)" t)
+(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
+"Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
+only sessions whose chat is open.
+
+(fn SESSION)" t)
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
@@ -591,6 +608,16 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-treesit.el
 
 (register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
+
+
+;;; Generated autoloads from romacs-truncate.el
+
+(autoload 'romacs-truncate "romacs-truncate"
+"STRING in at most WIDTH columns, a cut one ending in an ellipsis when
+WIDTH leaves room for more than that.  PADDING, a character, fills a
+shorter STRING to WIDTH.
+
+(fn STRING WIDTH &optional PADDING)")
 
 
 ;;; Generated autoloads from romacs-unidata.el

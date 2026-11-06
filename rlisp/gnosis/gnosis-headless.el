@@ -87,7 +87,8 @@ unaccepted verdict; the durable checkpoint owns progress.")
       (let ((cut (string-match-p "[.!?] [^.!?]*\\'" (substring s 0 limit))))
         (if (and cut (> cut (/ limit 3)))
             (substring s 0 (1+ cut))
-          (concat (string-trim-right (substring s 0 (1- limit))) "…"))))))
+          (let ((dots (truncate-string-ellipsis)))
+            (concat (string-trim-right (substring s 0 (max 0 (- limit (length dots))))) dots)))))))
 
 ;;; Refusals and identity
 
