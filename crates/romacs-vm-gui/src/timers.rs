@@ -161,6 +161,23 @@ mod tests {
                                                   (let ((keys (append (recent-keys) nil))) (nthcdr (- (length keys) 2) keys)))
                                        (setq input-method-function 'list))"),
                    "(120 ((97 \"before\" nil) (98 \"before\" nil)) nil (97 98))");
+        // SECONDS bound the read, however long a method that returned no
+        // event took.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(let ((start (float-time))
+                                          (input-method-function (lambda (_) (sleep-for 0.3) nil)))
+                                      (list (read-event nil t 0.4) (< (- (float-time) start) 0.6)))"),
+                   "(nil t)");
+        // A C-g while the wait's Lisp ran is the read's key: it does not
+        // quit through the caller.
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(progn (run-with-timer 0.01 nil (lambda () (setq quit-flag t)))
+                                            (read-key-sequence-vector nil))"), "[7]");
+        // Nor does a quit from the host's wait, whose redisplay can quit.
+        assert_eq!(printed(&mut vm, "(let ((host (symbol-function 'romacs--host-event)))
+                                       (fset 'romacs--host-event (lambda (&rest _) (signal 'quit nil)))
+                                       (unwind-protect (read-key-sequence-vector nil)
+                                         (fset 'romacs--host-event host)))"), "[7]");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq probe nil)
             (run-with-timer 0.01 nil (lambda () (push 'ordinary probe)))

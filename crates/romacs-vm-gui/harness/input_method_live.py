@@ -28,8 +28,7 @@ the minibuffer's prompt and contents, the buffer's text and point, the method
 and its title, `input-method-function', the mode line's indicator, the
 pending sequence, its overlay's span and face, `recent-keys' (BackSpace and
 Tab as DEL and TAB: the GUI delivers their text) and the last macro.
-Not compared: the echo of `read-key-sequence's keys after its prompt
-(VM2-KBD1), the message a macro's last command left, which GNU has wiped by
+Not compared: the echo of keys read inside a command (VM2-KBD1), the message a macro's last command left, which GNU has wiped by
 the macro's end with or without a method, and the name of the function in the
 logged error of a self-insert into a read-only buffer.
 
@@ -89,7 +88,7 @@ OBSERVE = '''(let* ((b (window-buffer (minibuffer-selected-window)))
    :help (let ((h (get-buffer "*Help*")))
            (and h (with-current-buffer h
                     (seq-take (seq-remove (lambda (line) (string-match-p "^[ \t]*[+]-+[+]$" line))
-                                          (split-string (buffer-string) "\n"))
+                                          (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n"))
                               24))))
    :completions (let ((h (get-buffer "*Quail Completions*"))) (and h (get-buffer-window h) (with-current-buffer h (buffer-substring-no-properties (point-min) (min (point-max) 600)))))
    :macro (list defining-kbd-macro last-kbd-macro)
@@ -170,7 +169,7 @@ WORKFLOWS = {
         ('plain-text', [T('ab')], CONTENTS('ab')),
         ('plain-exit', [K('Return')], GOT('ab')),
         ('read-char', [K('F7')], 't'),
-        ('read-char-keys', [T('ab')], f'(equal im-got (list {ord("α")} ?b))'),
+        ('read-char-keys', [T('ab')], f'(equal im-got (list {ord("α")} ?b))', 'echo'),
         ('quoted', [C('q'), T('a')], TEXT('a')),
         ('password', [K('F8')], PROMPT_STARTS('Password')),
         ('password-keys', [T('ab'), K('Return')], GOT('ab')),
