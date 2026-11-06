@@ -675,7 +675,7 @@ impl Vm {
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) | data::Object::Free => 0,
+                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                     data::Object::Bytes(v) => v.len(),
@@ -727,7 +727,7 @@ impl Vm {
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
                     data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) | data::Object::Free => 0,
+                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
                     data::Object::Process(p) => p.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
@@ -1129,7 +1129,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-                    data::Object::Sqlite(_) | data::Object::Free => {}
+                    data::Object::Sqlite(_) | data::Object::Thread | data::Object::Free => {}
                     data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
                     data::Object::Finalizer(function) => pending.push(*function),
                     data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
@@ -1413,7 +1413,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| rewrite(v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
-                    data::Object::Sqlite(_) | data::Object::Free => {}
+                    data::Object::Sqlite(_) | data::Object::Thread | data::Object::Free => {}
                     data::Object::Treesit(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Finalizer(function) => rewrite(function),
                     data::Object::Process(p) => p.visit_values(&mut |v| rewrite(v)),

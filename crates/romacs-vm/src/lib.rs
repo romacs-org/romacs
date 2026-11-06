@@ -138,6 +138,7 @@ mod intervals;
 mod properties;
 pub mod text;
 mod backtrace;
+mod inspect;
 mod profiler;
 mod threaded;
 
@@ -3728,6 +3729,7 @@ impl Vm {
                             | data::Object::Sqlite(_)
                             | data::Object::Treesit(_)
                             | data::Object::Finalizer(_)
+                            | data::Object::Thread
                             | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
@@ -3770,6 +3772,7 @@ impl Vm {
                 data::Object::Treesit(t) => Ok(crate::treesit::describe(self, t)),
                 // print.c PVEC_FINALIZER.
                 data::Object::Finalizer(function) => Ok(if *function == Value::NIL { "#<finalizer used>" } else { "#<finalizer>" }.into()),
+                data::Object::Thread => Ok("#<thread>".into()),
                 data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok(self.marker_text(v, false).unwrap_or_else(|| "#<marker>".into())),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),

@@ -832,6 +832,17 @@ probe, so the caller can check that the node it deletes is the one probed."
                    (string-match-p "refused" reason)
                    identity)))))))
 
+(defun romacs-mcp--inspect-start (socket)
+  "Serve inspect requests beside SOCKET, off the evaluator's thread.
+This endpoint is what answers while the evaluator is too busy for MCP
+\(`romacs-mcp --inspect'); failing to start it costs nothing else."
+  (when (fboundp 'romacs--inspect-listen)
+    (condition-case failure
+        (romacs--inspect-listen
+         (file-name-directory socket)
+         (expand-file-name "romacs/debug" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+      (error (message "Inspect endpoint not started: %s" (error-message-string failure))))))
+
 ;;;###autoload
 (defun romacs-mcp-start (socket)
   "Start an owner-controlled MCP listener at explicit absolute SOCKET.
@@ -868,6 +879,7 @@ Loading the library alone never starts a listener."
     (setq romacs-mcp--listener listener romacs-mcp--socket socket
           romacs-mcp--socket-identity (romacs-mcp--socket-id socket))
     (add-hook 'kill-emacs-hook #'romacs-mcp-stop)
+    (romacs-mcp--inspect-start socket)
     (romacs-mcp-identity)))
 
 (defun romacs-mcp-start-loopback (token file)
@@ -911,6 +923,7 @@ Keep boot identity and companion receipts until the editor process exits."
   (clrhash romacs-mcp--queued)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
   (when (process-live-p romacs-mcp--listener) (delete-process romacs-mcp--listener))
+  (when (fboundp 'romacs--inspect-stop) (romacs--inspect-stop))
   (when (and romacs-mcp--socket
              (equal (romacs-mcp--socket-id romacs-mcp--socket) romacs-mcp--socket-identity)
              (file-exists-p romacs-mcp--socket))

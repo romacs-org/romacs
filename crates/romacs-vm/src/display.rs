@@ -9,12 +9,12 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
-pub(crate) use mini_window::buffer_of;
+pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
 };
-use romacs_layout_input::{Face, FaceHandle, FaceRun, StatusBarSnapshot, TextSlice, WindowSnapshot};
+use romacs_layout_input::{BandStretches, Face, FaceHandle, FaceRun, StatusBarSnapshot, Stretch, StretchWidth, TextSlice, WindowSnapshot};
 
 /// The face table a snapshot publishes: `default' first, then the theme's
 /// other faces, realized once per theme revision rather than per frame.
@@ -319,12 +319,13 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
-    /// Window END.id's last publication was painted as END reports.
-    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
+    /// Window END.id's last publication was painted as END reports, ending
+    /// at buffer byte BYTE.
+    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
         let base = self.base(end.id);
         let segments = self.segments.get(&end.id).cloned();
         if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv, segments.as_deref())));
+            shown.laid = Some((shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -473,8 +474,11 @@ struct Shown {
     /// The window laid out from its start under a key: by its last paint
     /// under KEY, or by redisplay since under the key then (`window_layout`).
     laid: Option<(ShownKey, Laid)>,
+    /// The key the recorded end was laid out under when redisplay recorded
+    /// it since the last paint (`record_end_laid'), else KEY's.
+    ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -483,32 +487,46 @@ struct Bands {
     header_line: Option<mode_line::Band>,
 }
 
-/// A mode-line band as a text slice whose faces index TABLE.
-fn band_slice(table: &FaceTable, band: mode_line::Band) -> TextSlice {
-    let (utf8, runs) = shown_band(&band.text, band.runs);
-    TextSlice { extends: vec![],
+/// A mode-line band as a text slice whose faces index TABLE, and the
+/// stretches its runs of SPACES make (`Vm::band_spaces').
+fn band_slice(table: &FaceTable, band: mode_line::Band, spaces: &[(std::ops::Range<usize>, StretchWidth)]) -> (TextSlice, Vec<Stretch>) {
+    let (utf8, runs, stretches) = shown_band(&band.text, band.runs, spaces);
+    (TextSlice { extends: vec![],
         face_runs: runs.into_iter()
             .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: table.handle(&face)? }))
             .collect(),
         utf8,
         raw: vec![],
-    }
+    }, stretches)
 }
 
 /// A band's text as the display shows it, with its face runs moved to
 /// match: a C0 control character or DEL as `^X` (`ctl-arrow'), a C1 one as
-/// its octal escape, as GNU's display of a mode or header line shows them.
-/// `format-mode-line' keeps them; a subject with a control character in a
-/// header line is drawn, never refused.
-fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>) -> (String, Vec<(std::ops::Range<usize>, T)>) {
-    if !text.chars().any(char::is_control) {
-        return (text.to_owned(), runs);
+/// its octal escape, as GNU's display of a mode or header line shows them;
+/// each run of SPACES, the characters a `(space ...)' display replaces, as
+/// one placeholder space, the stretch at its byte. `format-mode-line'
+/// keeps them; a subject with a control character in a header line is
+/// drawn, never refused.
+fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>, spaces: &[(std::ops::Range<usize>, StretchWidth)])
+                 -> (String, Vec<(std::ops::Range<usize>, T)>, Vec<Stretch>) {
+    if spaces.is_empty() && !text.chars().any(char::is_control) {
+        return (text.to_owned(), runs, vec![]);
     }
     // (old byte, new byte) at each character, then the end.
     let mut map = Vec::with_capacity(text.len() + 1);
     let mut shown = String::with_capacity(text.len() + 8);
+    let mut stretches = vec![];
+    let mut spaces = spaces.iter().peekable();
     for (at, c) in text.char_indices() {
         map.push((at, shown.len()));
+        while spaces.peek().is_some_and(|(bytes, _)| bytes.end <= at) { spaces.next(); }
+        if let Some((bytes, width)) = spaces.peek().filter(|(bytes, _)| bytes.contains(&at)) {
+            if at == bytes.start {
+                stretches.push(Stretch { byte: shown.len(), width: *width });
+                shown.push(' ');
+            }
+            continue;
+        }
         match c {
             '\u{0}'..='\u{1f}' | '\u{7f}' => { shown.push('^'); shown.push(char::from((c as u8) ^ 0x40)); }
             c if c.is_control() => shown.push_str(&format!("\\{:o}", c as u32)),
@@ -518,7 +536,7 @@ fn shown_band<T>(text: &str, runs: Vec<(std::ops::Range<usize>, T)>) -> (String,
     map.push((text.len(), shown.len()));
     let moved = |byte: usize| map[map.partition_point(|&(old, _)| old < byte)].1;
     let runs = runs.into_iter().map(|(bytes, face)| (moved(bytes.start)..moved(bytes.end), face)).collect();
-    (shown, runs)
+    (shown, runs, stretches)
 }
 
 struct Graph<'a>(&'a Vm);
@@ -1326,6 +1344,7 @@ impl Vm {
         } else {
             (utf8, face_runs, raw, extends, start_byte, point_byte)
         };
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
         let snapshot = WindowSnapshot {
             id,
             width,
@@ -1334,9 +1353,9 @@ impl Vm {
             point_byte,
             buffer_version: self.display_state.version,
             text: TextSlice { extends, utf8, face_runs, raw },
-            mode_line: bands.mode_line.map(|band| band_slice(&table, band)),
+            mode_line,
             mode_line_face: table.handle(&band_face).ok_or("mode-line face required")?,
-            header_line: bands.header_line.map(|band| band_slice(&table, band)),
+            header_line,
             header_line_face: table.handle(&header_face).ok_or("header-line face required")?,
             vscroll_px: self.window(window)?.vscroll_px,
             hscroll: self.window_hscroll_px(window, buffer)?,
@@ -1350,12 +1369,13 @@ impl Vm {
             line_numbers,
             chrome: self.text_chrome(window, &table, base, at_zv)?,
             underline_rules: self.buffer_underline_rules(buffer),
+            band_stretches,
         };
         let len = snapshot.text.utf8.len();
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None, ended: None });
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1369,7 +1389,7 @@ impl Vm {
     /// and its face: the last painted band while it still has one, else one
     /// row of the band's face, else none (CURRENT_MODE_LINE_HEIGHT,
     /// CURRENT_HEADER_LINE_HEIGHT).
-    fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle)> {
+    fn painted_band(&mut self, window: Value, header: bool) -> Result<(Option<TextSlice>, FaceHandle, Vec<Stretch>)> {
         let w = self.window(window)?;
         let id = w.id;
         let wants = if header {
@@ -1378,14 +1398,15 @@ impl Vm {
             self.window_wants_mode_line(window)?
         };
         let shown = self.display_state.previous.get(&id)
-            .map(|p| if header { (p.header_line.clone(), p.header_line_face) } else { (p.mode_line.clone(), p.mode_line_face) });
+            .map(|p| if header { (p.header_line.clone(), p.header_line_face, p.band_stretches.header_line.clone()) }
+                     else { (p.mode_line.clone(), p.mode_line_face, p.band_stretches.mode_line.clone()) });
         Ok(match (wants, shown) {
-            (false, shown) => (None, shown.map_or(FaceHandle(0), |(_, face)| face)),
-            (true, Some((Some(band), face))) => (Some(band), face),
+            (false, shown) => (None, shown.map_or(FaceHandle(0), |(_, face, _)| face), vec![]),
+            (true, Some((Some(band), face, stretches))) => (Some(band), face, stretches),
             (true, _) => {
                 let name = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
                 let face = self.window_faces(window)?.handle(&name).ok_or("band face required")?;
-                (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face)
+                (Some(TextSlice { extends: vec![], utf8: " ".into(), face_runs: vec![], raw: vec![] }), face, vec![])
             }
         })
     }
@@ -1402,9 +1423,35 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
-        let laid = laid(&end, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        let byte = shown.base + end.end;
+        let byte = match (&shown.segments, self.object(self.window(window)?.buffer)?) {
+            (Some(segments), Object::Buffer(b)) => shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)),
+            _ => byte,
+        };
+        let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
         if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
         Ok(Some(laid))
+    }
+    /// Whether the end recorded for WINDOW still holds (GNU's Fwindow_end
+    /// asks `window_end_valid', `clip_changed' and `window_outdated'):
+    /// nothing it showed has changed since, and no `force-window-update'
+    /// waits. Point may have moved.
+    pub(crate) fn window_end_current(&mut self, window: Value) -> Result<bool> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        Ok(w.end_valid && self.display_state.previous.contains_key(&w.id)
+            && self.display_state.shown.get(&w.id).is_some_and(|shown| shown.ended.as_ref().unwrap_or(&shown.key).same_display(&key)))
+    }
+    /// Redisplay recorded WINDOW's end from `window_layout' before any
+    /// paint: it holds for what the window shows now.
+    pub(crate) fn record_end_laid(&mut self, window: Value) -> Result<()> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.ended = Some(key); }
+        self.window_mut(window)?.end_valid = true;
+        Ok(())
     }
     /// WINDOW laid out from its start as `window_layout' lays it out, every
     /// row, and the text it showed; not recorded.
@@ -1415,14 +1462,15 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if shown.key.faces != self.display_state.face_revision || !self.has_layout_host() { return Ok(None); }
         if !self.display_state.previous.contains_key(&id) { return Ok(None) }
-        let (mode_line, mode_line_face) = self.painted_band(window, false)?;
-        let (header_line, header_line_face) = self.painted_band(window, true)?;
+        let (mode_line, mode_line_face, mode_stretches) = self.painted_band(window, false)?;
+        let (header_line, header_line_face, header_stretches) = self.painted_band(window, true)?;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
         let shown = self.window_text(window, height, None)?;
         // Laying rows out reads the fringes' widths, not their bitmaps.
         let table = self.window_faces(window)?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let band_stretches = BandStretches { header_line: header_stretches, mode_line: mode_stretches };
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
             hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false,
             stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -1579,7 +1627,7 @@ impl Vm {
         let height = 1 << 24;
         let table = self.window_faces(window)?;
         let chrome = self.window_chrome(window, &table, false)?;
-        let snapshot = WindowSnapshot { underline_rules: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
+        let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
             vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.clone(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
@@ -2075,9 +2123,9 @@ impl Vm {
         }
         let (face, header_face) = (self.mode_line_face_name(window)?, self.header_line_face_name(window)?);
         let table = self.window_faces(window)?;
-        snapshot.mode_line = bands.mode_line.map(|band| band_slice(&table, band));
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
+        (snapshot.mode_line, snapshot.header_line, snapshot.band_stretches) = (mode_line, header_line, band_stretches);
         snapshot.mode_line_face = table.handle(&face).ok_or("mode-line face required")?;
-        snapshot.header_line = bands.header_line.map(|band| band_slice(&table, band));
         snapshot.header_line_face = table.handle(&header_face).ok_or("header-line face required")?;
         let Some(shown) = self.display_state.shown.get_mut(&id) else { return Ok(None) };
         shown.point = point;
@@ -2407,6 +2455,62 @@ impl Vm {
     /// and face, its `:propertize' face with FACE after it, else FACE.
     /// GNU adds a piece's element number before a FACE it adds but after a
     /// face the piece already had.
+    /// BANDS as the window paints them (`band_slice'), each band's text
+    /// with the stretches its `(space ...)' displays make, resolved with
+    /// the window ROOT holds.
+    fn band_slices(&mut self, root: usize, table: &FaceTable, bands: Bands) -> Result<(Option<TextSlice>, Option<TextSlice>, BandStretches)> {
+        let slice = |vm: &mut Vm, band: Option<mode_line::Band>| -> Result<(Option<TextSlice>, Vec<Stretch>)> {
+            let Some(band) = band else { return Ok((None, vec![])) };
+            let spaces = vm.band_spaces(root, &band)?;
+            let (text, stretches) = band_slice(table, band, &spaces);
+            Ok((Some(text), stretches))
+        };
+        let (mode_line, mode) = slice(self, bands.mode_line)?;
+        let (header_line, header) = slice(self, bands.header_line)?;
+        Ok((mode_line, header_line, BandStretches { header_line: header, mode_line: mode }))
+    }
+    /// The runs of BAND a `display' property shows as a stretch, each run
+    /// of pieces sharing one value once (a display replaces all the text it
+    /// covers), its width as GNU's display of the band of the window ROOT
+    /// holds computes it (`Leaf::band_stretch'). Another display shows the
+    /// text.
+    fn band_spaces(&mut self, root: usize, band: &mode_line::Band) -> Result<Vec<(std::ops::Range<usize>, StretchWidth)>> {
+        let mut props: Vec<&(std::ops::Range<usize>, mode_line::Projected)> = band.props.iter()
+            .filter(|(_, projected)| projected.iter().any(|(name, _)| *name == "display")).collect();
+        if props.is_empty() { return Ok(vec![]); }
+        props.sort_by_key(|(range, _)| range.start);
+        // A run is the adjacent pieces whose value is one object: a string's
+        // own property is the object it carries (split at every face or
+        // help boundary), a `:propertize''s the datum all its pieces share.
+        let identity = |vm: &mut Vm, form: &std::rc::Rc<Form>| -> Result<std::result::Result<Value, *const Form>> {
+            Ok(match &**form { Form::Object(object) => Ok(object.value(vm)?), _ => Err(std::rc::Rc::as_ptr(form)) })
+        };
+        let mut runs: Vec<(std::ops::Range<usize>, &std::rc::Rc<Form>, std::result::Result<Value, *const Form>)> = vec![];
+        for (range, projected) in props {
+            let Some((_, form)) = projected.iter().find(|(name, _)| *name == "display") else { continue };
+            let id = identity(self, form)?;
+            match runs.last_mut() {
+                // One rendering of one string: never across another element's.
+                Some((last, _, last_id)) if last.end == range.start && *last_id == id
+                    && band.element_starts.binary_search(&range.start).is_err() => last.end = range.end,
+                _ => runs.push((range.clone(), form, id)),
+            }
+        }
+        // Every run's value, in one list rooted while the window's display
+        // resolves them all with its geometry read once.
+        let slot = self.slot("#:vm2-band-spaces");
+        self.slots[slot].value = Value::NIL;
+        for (_, form, _) in runs.iter().rev() {
+            let value = self.ml_prop_value(form)?;
+            let cell = self.list_value(&[value]);
+            self.cons_mut(cell)?.1 = self.slots[slot].value;
+            self.slots[slot].value = cell;
+        }
+        let (window, specs) = (self.slots[root].value, self.slots[slot].value);
+        let widths = crate::prim::band_stretches(self, window, specs).unwrap_or_default();
+        self.slots[slot].value = Value::UNBOUND;
+        Ok(runs.into_iter().zip(widths).filter_map(|((range, _, _), width)| Some((range, width?))).collect())
+    }
     fn mode_line_string(&mut self, band: &mode_line::Band, face: Value) -> Result<Value> {
         let text = &band.text;
         // VM2 keys string properties by interned name.
@@ -3046,8 +3150,8 @@ fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
     buffer_of(segments, display, end)
 }
 
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
+fn laid(end: &romacs_layout_input::WindowEnd, byte_end: usize, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
     let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
     let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
-    Laid { end: byte(end.end), visible_end, body_height: end.body_height }
+    Laid { end: byte_end, visible_end, body_height: end.body_height }
 }

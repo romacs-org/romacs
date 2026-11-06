@@ -505,6 +505,7 @@ fn object_kind(o: &Object) -> &'static str {
         Object::Treesit(_) => "treesit object",
         Object::Process(_) => "process",
         Object::Finalizer(_) => "finalizer",
+        Object::Thread => "thread",
         Object::CharTable(_) | Object::SubCharTable(_) => "char-table",
         Object::MapKeymapCursor(_) => "keymap cursor",
         Object::Buffer(_) => "buffer",

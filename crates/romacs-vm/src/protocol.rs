@@ -143,6 +143,7 @@ impl Vm {
                 data::Object::Sqlite(_) => Ok(json!({"type":"sqlite"})),
                 data::Object::Treesit(_) => Ok(json!({"type":"treesit"})),
                 data::Object::Finalizer(_) => Ok(json!({"type":"finalizer"})),
+                data::Object::Thread => Ok(json!({"type":"thread"})),
                 data::Object::Process(_) => Ok(json!({"type":"process"})),
                 data::Object::Marker(_) => Ok(json!({"type":"marker"})),
                 data::Object::Overlay(_) => Ok(json!({"type":"overlay"})),
