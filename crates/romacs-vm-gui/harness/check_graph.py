@@ -52,8 +52,8 @@ def main():
     # which motivated the paired checks. This is later mutant qualification,
     # not a pre-implementation RED claim and not a substitute for Cargo/nm above.
     mutants = [lambda: no_core_symbols('00000 r romacs_core::PDUMP_FINGERPRINT'),
-               lambda: check_tree('romacs-display-runtime\n└── romacs-core v0.0.19', ['romacs-core']),
-               lambda: check_tree('romacs-layout2\n└── romacs-vm v0.0.19', ['romacs-vm'])]
+               lambda: check_tree('romacs-display-runtime\n└── romacs-core v0.0.20', ['romacs-core']),
+               lambda: check_tree('romacs-layout2\n└── romacs-vm v0.0.20', ['romacs-vm'])]
     for mutate in mutants:
         try:
             mutate()

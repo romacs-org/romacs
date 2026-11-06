@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "b66fb0c4f80667c7296c1cee11c22b0c85ae74940829b8ba72e8d395605a2674",
+  "source_fingerprint": "ee01a8ca2a37cb2560b3b27b1177f437bc423c5948bfa3f3e0df314b18083a77",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -161,7 +161,7 @@
   "%": {
    "name": "%",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:159"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:177"
   },
   "*": {
    "name": "*",
@@ -190,7 +190,7 @@
   "/=": {
    "name": "/=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:144"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:162"
   },
   "1+": {
    "name": "1+",
@@ -213,7 +213,7 @@
   "<=": {
    "name": "<=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:127"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:145"
   },
   "=": {
    "name": "=",
@@ -224,12 +224,12 @@
   ">": {
    "name": ">",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:132"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:150"
   },
   ">=": {
    "name": ">=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:137"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:155"
   },
   "abort-recursive-edit": {
    "name": "abort-recursive-edit",
@@ -694,7 +694,7 @@
   "car-less-than-car": {
    "name": "car-less-than-car",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:75"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:100"
   },
   "car-safe": {
    "name": "car-safe",
@@ -3456,7 +3456,7 @@
   "mod": {
    "name": "mod",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:92"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:117"
   },
   "modify-category-entry": {
    "name": "modify-category-entry",

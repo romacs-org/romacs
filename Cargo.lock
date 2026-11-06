@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-allocator"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "mimalloc",
  "tikv-jemalloc-sys",
@@ -4200,7 +4200,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-attach"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -4229,7 +4229,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-diagnostics"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "axum",
  "http-body-util",
@@ -4245,7 +4245,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-display-protocol"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "bitflags 2.13.2",
  "crossbeam-channel",
@@ -4264,7 +4264,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-display-runtime"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "arboard",
  "ash",
@@ -4317,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-face"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-snapshot",
  "rustc-hash 2.1.3",
@@ -4327,7 +4327,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-font"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "cosmic-text",
  "fontconfig",
@@ -4349,7 +4349,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-font-materializer"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "allsorts",
  "cosmic-text",
@@ -4375,11 +4375,11 @@ dependencies = [
 
 [[package]]
 name = "romacs-gnudiff"
-version = "0.0.19"
+version = "0.0.20"
 
 [[package]]
 name = "romacs-grammars"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "tree-sitter-bash",
  "tree-sitter-c",
@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-gui-oracle"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "freetype-rs",
  "png",
@@ -4411,7 +4411,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-gui-tests"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "core-foundation",
  "image",
@@ -4430,11 +4430,11 @@ dependencies = [
 
 [[package]]
 name = "romacs-host-abi"
-version = "0.0.19"
+version = "0.0.20"
 
 [[package]]
 name = "romacs-imaging"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "enum_dispatch",
  "flate2",
@@ -4454,7 +4454,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-infra"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "fs4",
  "getrandom 0.4.3",
@@ -4466,7 +4466,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-introspect"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "regex",
  "serde_json",
@@ -4477,7 +4477,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-introspect-live"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-introspect",
  "romacs-vm",
@@ -4487,14 +4487,14 @@ dependencies = [
 
 [[package]]
 name = "romacs-layout-input"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-snapshot",
 ]
 
 [[package]]
 name = "romacs-layout2"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-display-protocol",
  "romacs-font",
@@ -4508,7 +4508,7 @@ version = "0.1.0"
 
 [[package]]
 name = "romacs-mcp"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "serde_json",
 ]
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-parity-reference"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-infra",
  "sha2",
@@ -4547,7 +4547,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-perf"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "linux-perf-data",
  "rustix 1.1.5",
@@ -4571,7 +4571,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-regex"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "memchr",
  "romacs-chars",
@@ -4579,7 +4579,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-regex-engine"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "libc",
  "memchr",
@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-renderer-wgpu"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "ash",
  "bytemuck",
@@ -4648,7 +4648,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-scene"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "kurbo",
  "proptest",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-snapshot"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "foldhash",
  "num-bigint",
@@ -4669,7 +4669,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-terminfo"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "pkg-config",
  "regex",
@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-test-fonts"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "flate2",
  "fs4",
@@ -4693,7 +4693,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-text"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "memchr",
  "proptest",
@@ -4703,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-tui-tests"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "expect-test",
  "libc",
@@ -4716,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-video"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "ash",
  "bytemuck",
@@ -4747,7 +4747,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-video-model"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "romacs-display-protocol",
  "thiserror 2.0.21",
@@ -4795,7 +4795,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-vm-gui"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -4821,7 +4821,7 @@ dependencies = [
 
 [[package]]
 name = "romacs-webview"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "bindgen",
  "bitflags 2.13.2",
@@ -7618,7 +7618,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "resvg",
  "serde",

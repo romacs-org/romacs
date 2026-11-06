@@ -63,7 +63,7 @@ passthrough = ["CARGO_INCREMENTAL"]
 image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
 
 [workspace.package]
-version = "0.0.19"
+version = "0.0.20"
 edition = "2024"
 authors = ["Thanos Apollo <public@thanosapollo.org>"]
 license = "GPL-3.0-or-later"
