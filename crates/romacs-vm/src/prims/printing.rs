@@ -243,3 +243,9 @@ fn debugging_encoded(cx: &mut Leaf<'_>, encoded: Value, saved: &[Value]) -> Next
     std::io::stderr().write_all(&bytes).map_err(|e| Fault::Error(e.to_string()))?;
     Ok(Step::Done(saved[0]))
 }
+
+defsubr! { name = "print--preprocess", gnu = "print.c:1516", effect = Global,
+fn print_preprocess(cx, object: Value) {
+    cx.print_preprocess_only(object)?;
+    Ok(Value::NIL)
+}}

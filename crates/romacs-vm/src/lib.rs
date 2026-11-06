@@ -51,7 +51,7 @@ pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput, NativeWindow, QUIT_CHAR};
 pub use subprocess::ProcessWatch;
 pub use layout_host::LayoutHost;
-pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, OpenedFont, OtfTable};
+pub use display_host::{DECODE_QUIT, DisplayHost, FaceFont, FontEntity, FontQuery, GlyphMetrics, OpenedFont, OtfTable};
 pub use graphics::{ImageFacts, ImageQuery, ImageSource};
 pub use session_host::SessionHost;
 pub use romacs_layout_input::WindowEnd;
@@ -132,6 +132,7 @@ mod fringe;
 mod tab_bar;
 mod overlay_order;
 mod window;
+mod fontsets;
 mod frame;
 mod hash;
 mod intervals;
@@ -362,7 +363,6 @@ enum Primitive {
     Assq,
     Setcar,
     Setcdr,
-    Remainder,
     CurrentBuffer,
     SetBuffer,
     Insert,
@@ -610,7 +610,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("assq", Primitive::Assq),
     ("setcar", Primitive::Setcar),
     ("setcdr", Primitive::Setcdr),
-    ("%", Primitive::Remainder),
     ("current-buffer", Primitive::CurrentBuffer),
     ("set-buffer", Primitive::SetBuffer),
     // The storage kernel under `insert' (prims/insdel.rs), which runs no hooks.
@@ -3701,7 +3700,7 @@ impl Vm {
         if (p as usize) >= Primitive::DisplayDefineFace as usize {
             return self.display_primitive(p, start, n);
         }
-        if (p as usize) >= Primitive::Remainder as usize {
+        if (p as usize) >= Primitive::CurrentBuffer as usize {
             return self.buffer_primitive(p, start, n);
         }
         let a = &self.stack[start..start + n];

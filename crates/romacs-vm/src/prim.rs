@@ -202,6 +202,12 @@ mod leaf {
         pub(crate) fn collection_budget(&self) -> (f64, f64) {
             self.vm.collection_budget()
         }
+        /// `memory-use-counts': (CONSES FLOATS VECTOR-CELLS SYMBOLS STRING-CHARS INTERVALS STRINGS).
+        pub(crate) fn consed(&self) -> [u64; 7] {
+            let c = &self.vm.free.consed;
+            let symbols = (self.vm.slots.len() - self.vm.local_binding_slots.len()) as u64 + c.reused_symbols;
+            [c.conses, c.floats, c.vector_cells, symbols, c.string_chars, 0, c.strings]
+        }
         /// `Vm::collection_share'.
         pub(crate) fn collection_share(&self) -> f64 {
             self.vm.collection_share()
@@ -1590,6 +1596,69 @@ mod leaf {
             self.vm.char_table_get(table, index).map_err(Fault::Error)
         }
         /// The value of a VM-private `#:vm2-' slot, unbound reading as nil.
+        pub fn marker_last_position(&mut self, marker: Value) -> super::Out {
+            let last = match self.vm.object_if(marker) {
+                Some(data::Object::Marker(m)) => m.last_position,
+                _ => return Err(Fault::Wrong("markerp", marker)),
+            };
+            match self.vm.marker_position_value(marker).map_err(Fault::Error)? {
+                Value::NIL => Value::integer(last).map_err(Fault::Error),
+                position => Ok(position),
+            }
+        }
+        /// The fontset registry.
+        pub fn fontsets(&self) -> &crate::fontsets::Registry { &self.vm.display_state.fontsets }
+        pub fn fontsets_mut(&mut self) -> &mut crate::fontsets::Registry { &mut self.vm.display_state.fontsets }
+        /// What painting reads, the host brought up to date.
+        pub fn fontset_state(&mut self) -> std::sync::Arc<romacs_layout_input::FontsetState> { self.vm.fontset_state() }
+        /// free_realized_fontsets: rules changed, so what was resolved from
+        /// them goes, and every window lays out again.
+        pub fn note_fontset_change(&mut self) {
+            self.vm.fontset_state();
+            self.clear_face_cache();
+        }
+        pub fn char_table_edits(&self, table: Value) -> std::result::Result<u64, Fault> {
+            self.vm.char_table_edits(table).map_err(Fault::Error)
+        }
+        /// TABLE's runs of one value, in character order.
+        pub fn char_table_runs(&self, table: Value) -> std::result::Result<Vec<(u32, u32, Value)>, Fault> {
+            self.vm.char_table_runs(table).map_err(Fault::Error)
+        }
+        /// Fset or Fset_default of a plain global variable.
+        pub fn set_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
+            let symbol = self.intern(name);
+            self.variable_set(symbol, value)
+        }
+        /// The one string naming font NAME: GNU's font-object holds its name,
+        /// and face-font and query-font answer that very string, which
+        /// display-fill-column-indicator.el compares with eq.
+        pub fn font_name_string(&mut self, name: &str) -> super::Out {
+            const NAMES: &str = "#:vm2-font-names";
+            let table = match self.hidden_value(NAMES) {
+                Value::NIL => {
+                    let table = self.vm.allocate_object(data::Object::HashTable(Box::new(crate::hash::HashTable::new(crate::hash::Test::Equal, crate::hash::Weakness::None, 0))));
+                    self.set_hidden_value(NAMES, table);
+                    table
+                }
+                table => table,
+            };
+            let text = self.string(name);
+            match self.vm.declaration_hash_get(table, text).map_err(Fault::Error)? {
+                Some(shared) => Ok(shared),
+                None => {
+                    self.vm.declaration_hash_put(table, text, text).map_err(Fault::Error)?;
+                    Ok(text)
+                }
+            }
+        }
+        /// SYMBOL, an alias, made plain and void.
+        pub fn delete_variable_alias(&mut self, symbol: Value) {
+            if let Some(slot) = symbol.index_if(7).and_then(|n| n.checked_sub(1)) { self.vm.delete_variable_alias(slot); }
+        }
+        /// Fprint_preprocess.
+        pub fn print_preprocess_only(&mut self, object: Value) -> std::result::Result<(), Fault> {
+            self.vm.print_preprocess_only(object).map_err(Fault::Error)
+        }
         pub fn hidden_value(&mut self, name: &str) -> Value {
             let slot = self.vm.slot(name);
             match self.vm.slots[slot].value { Value::UNBOUND => Value::NIL, value => value }

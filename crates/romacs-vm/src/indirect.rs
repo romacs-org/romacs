@@ -197,7 +197,7 @@ impl Vm {
             && let Some(anchor) = m.anchor
         {
             let (bias, at) = (m.bias, self.marker_anchors(base)?.resolve(anchor).ok_or("invalid mark")?);
-            let copy = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer, anchor: None, bias })));
+            let copy = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer, anchor: None, bias, last_position: 0 })));
             let anchor = self.marker_anchors_mut(buffer)?.create(at, bias).ok_or("invalid mark")?;
             let Object::Marker(m) = &mut self.objects[arena(copy)?] else { unreachable!("new marker") };
             m.anchor = Some(anchor);

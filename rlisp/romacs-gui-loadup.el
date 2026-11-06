@@ -95,7 +95,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; button's :box) never matches.
         (when initial-window-system
           (frame-set-background-mode (selected-frame) t)
-          (face-set-after-frame-default (selected-frame)))
+          (face-set-after-frame-default (selected-frame))
+          ;; x-win.el and pgtk-win.el's window-system initialization, and
+          ;; fontset_from_font for the frame's font.
+          (romacs--setup-fontsets))
         ;; The root frame's windows are drawn as panes, with a status bar,
         ;; on a window system, in the chrome colours of the faces this
         ;; display shows (romacs-chrome.el, DIVERGENCES.md VM2-PANE-CHROME

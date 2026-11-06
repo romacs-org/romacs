@@ -1793,6 +1793,7 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("insert", 1) => Some(insert_string),
             ("listp", 1) => Some(listp),
             ("numberp", 1) => Some(numberp),
+            ("%", 2) => Some(remainder),
             ("cdr-safe", 1) => Some(cdr_safe),
             ("nconc", 2) => Some(nconc2),
             ("plist-get", 2) => Some(traversal::plist_get),
@@ -1818,7 +1819,6 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
         (Primitive::Less, 2) => less,
         (Primitive::Equal, 2) => equal,
         (Primitive::Cons, 2) => cons,
-        (Primitive::Remainder, 2) => remainder,
         (Primitive::Consp, 1) => consp,
         (Primitive::Symbolp, 1) => symbolp,
         (Primitive::Stringp, 1) => stringp,
@@ -3540,7 +3540,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         | InsertInherit | KillNew | CurrentKill | YankPart | YankFinalize | YankPropertyRun
         | YankFontLockFace | YankCategory | GetProperty => Vm::annotation_primitive,
         p if (List as usize..=Memq as usize).contains(&(p as usize)) => Vm::bootstrap_primitive,
-        p if (p as usize) >= Remainder as usize => Vm::buffer_primitive,
+        p if (p as usize) >= CurrentBuffer as usize => Vm::buffer_primitive,
         _ => Vm::primitive,
     }
 }

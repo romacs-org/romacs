@@ -23,6 +23,16 @@ fn set_charset_priority(cx, first: Value; rest others) {
     cx.set_charset_priority(&charsets)
 }}
 
+defsubr! { name = "charset-id-internal", gnu = "charset.c:2218", effect = Reads,
+fn charset_id_internal(cx; optional charset: Value) { cx.charset_id_internal(charset) }}
+
+// Fclear_charset_maps frees temacs's charset work area; there is none.
+defsubr! { name = "clear-charset-maps", gnu = "charset.c:2124", effect = Pure,
+fn clear_charset_maps(cx) { let _ = cx; Ok(Value::NIL) }}
+
+defsubr! { name = "sort-charsets", gnu = "charset.c:2246", effect = Global,
+fn sort_charsets(cx, charsets: Value) { cx.sort_charsets(charsets) }}
+
 defsubr! { name = "charset-priority-list", gnu = "charset.c:2146", effect = Reads,
 fn charset_priority_list(cx; optional highestp: Value) { cx.charset_priority_list(highestp) }}
 
