@@ -81,10 +81,17 @@ MEASURE = r''';;; -*- lexical-binding: t -*-
 (defun ofl-final ()
   "Whether the selected window's text all has its final faces: every
 character `fontified', or a buffer jit-lock does not fontify."
-  (let ((start (window-start)) (end (window-end nil t)))
+  (let* ((start (window-start))
+         (unfontified (lambda (end)
+                        (with-current-buffer (window-buffer)
+                          (text-property-any start (min end (point-max)) 'fontified nil)))))
     (with-current-buffer (window-buffer)
       (or (not (memq 'jit-lock-function fontification-functions))
-          (not (text-property-any start (min end (point-max)) 'fontified nil))))))
+          ;; The end the redisplay left costs nothing to poll; a timer may
+          ;; have moved the start since, so the answer is the updated end's.
+          ;; Updating it lays the window out in Romacs, once, not every poll.
+          (and (not (funcall unfontified (window-end)))
+               (not (funcall unfontified (window-end nil t))))))))
 (defvar ofl-redisplays 0 "The redisplays GNU has begun.")
 (unless (fboundp 'romacs--redisplay-since-mark)
   (add-function :before pre-redisplay-function
@@ -110,12 +117,12 @@ log the command's start, its end, that moment and how many polls it took."
            0 0.002
            (lambda ()
              (setq polls (1+ polls))
-             (let ((final (and (funcall redisplayed) (ofl-final))))
+             (let* ((now (float-time)) (final (and (funcall redisplayed) (ofl-final))))
                (when (or final (> (- (float-time) t0) 300))
                  (cancel-timer timer)
                  (when (eq ofl-poll timer) (setq ofl-poll nil))
                  (ofl-log "{\"event\":\"command\",\"command\":\"%s\",\"t0\":%.6f,\"post\":%.6f,\"t1\":%.6f,\"polls\":%d,\"buffer\":\"%s\",\"mode\":\"%s\",\"final\":%s,\"start\":%d,\"end\":%d}"
-                          command t0 post (float-time) polls (buffer-name (window-buffer))
+                          command t0 post now polls (buffer-name (window-buffer))
                           (with-current-buffer (window-buffer) major-mode)
                           (if final "true" "false") (window-start) (window-end nil t)))))))
     (setq ofl-poll timer)))
