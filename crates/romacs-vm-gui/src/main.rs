@@ -595,7 +595,12 @@ fn run() -> Result<Option<exit::Exit>, String> {
         match arg.as_str() {
             "--world-build" => world_build = true,
             // The server a client started (client.rs): no window until a client asks.
-            "--serve" => serve = Some(client::server_name(&args.next().ok_or("--serve needs a NAME")?)?),
+            // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
+            "--serve" => {
+                let name = client::server_name(&args.next().ok_or("--serve needs a NAME")?)?;
+                romacs_vm::host::set_daemon(&name);
+                serve = Some(name);
+            }
             // The client that starts a server and asks for its window: the
             // window comes up while the world restores, as a session's does.
             "--serve-frame" => serve_frame = true,

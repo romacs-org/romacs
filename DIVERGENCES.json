@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "cb64e7766402580e47f1b1e3377b7c53bdbb6be20a58f3bdb38d2750382d3ca4",
+  "input_hash": "4e78d79f571193547de845a8f866e3e7994af983ba07b9eba6d031045c3d6916",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 363,
-  "symbols": 1102,
+  "rows": 364,
+  "symbols": 1106,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -69,7 +69,7 @@
    91
   ],
   "[:class:]": [
-   362
+   363
   ],
   "\\": [
    278
@@ -91,7 +91,7 @@
   ],
   "add-text-properties": [
    302,
-   347
+   348
   ],
   "add-variable-watcher": [
    316,
@@ -108,7 +108,7 @@
    209
   ],
   "after-insert-file-set-coding": [
-   348
+   349
   ],
   "after-load-alist": [
    332
@@ -162,8 +162,8 @@
   ],
   "autoload": [
    320,
-   351,
-   352
+   352,
+   353
   ],
   "autoload-do-load": [
    320,
@@ -180,6 +180,9 @@
   ],
   "backtrace--locals": [
    345
+  ],
+  "backtrace-debug": [
+   347
   ],
   "backtrace-get-frames": [
    346
@@ -241,7 +244,7 @@
   ],
   "buffer-file-coding-system": [
    125,
-   348
+   349
   ],
   "buffer-file-name": [
    125
@@ -566,7 +569,7 @@
    245
   ],
   "custom-reevaluate-setting": [
-   351
+   352
   ],
   "custom-set": [
    174
@@ -594,6 +597,9 @@
   ],
   "debug-on-event": [
    33
+  ],
+  "debug-on-next-call": [
+   347
   ],
   "debug-on-quit": [
    32
@@ -630,7 +636,7 @@
    117
   ],
   "default-file-name-coding-system": [
-   348
+   349
   ],
   "default-value": [
    327,
@@ -647,8 +653,8 @@
    164,
    192,
    226,
-   354,
-   358
+   355,
+   359
   ],
   "define-category": [
    309
@@ -661,7 +667,7 @@
    306
   ],
   "define-coding-system": [
-   348
+   349
   ],
   "define-coding-system-alias": [
    307
@@ -733,6 +739,7 @@
    250
   ],
   "ding": [
+   22,
    181
   ],
   "directory-file-name": [
@@ -836,7 +843,7 @@
    343
   ],
   "downcase_char_code_emacs_compat": [
-   361
+   362
   ],
   "elt": [
    35,
@@ -845,13 +852,13 @@
    66
   ],
   "emacs-build-time": [
-   349
+   350
   ],
   "emacs-lisp-mode": [
    200
   ],
   "emacs_downcase_compat": [
-   361
+   362
   ],
   "emoji": [
    29
@@ -909,7 +916,7 @@
   "eval-after-load": [
    143,
    332,
-   352
+   353
   ],
   "eval-and-compile": [
    141
@@ -983,17 +990,17 @@
    161,
    162,
    163,
-   354,
    355,
-   358
+   356,
+   359
   ],
   "face-family": [
    159,
-   357
+   358
   ],
   "face-font": [
    158,
-   356
+   357
   ],
   "face-remap-add-relative": [
    254
@@ -1003,7 +1010,7 @@
    162,
    163,
    254,
-   360
+   361
   ],
   "face-spec-recalc": [
    256
@@ -1056,7 +1063,7 @@
    124
   ],
   "find-auto-coding": [
-   348
+   349
   ],
   "find-composition": [
    280
@@ -1706,7 +1713,7 @@
   ],
   "last-coding-system-used": [
    125,
-   348
+   349
   ],
   "last-command": [
    94
@@ -1719,7 +1726,7 @@
    255
   ],
   "latin-extra-code-table": [
-   348
+   349
   ],
   "length": [
    66,
@@ -1812,7 +1819,7 @@
    110,
    111,
    121,
-   351
+   352
   ],
   "load-prefer-newer": [
    140
@@ -2139,10 +2146,10 @@
    165
   ],
   "next-property-change": [
-   347
+   348
   ],
   "next-single-char-property-change": [
-   347
+   348
   ],
   "no-byte-compile": [
    144
@@ -2158,6 +2165,9 @@
   ],
   "nobreak-space": [
    278
+  ],
+  "noninteractive": [
+   237
   ],
   "normal-top-level-add-to-load-path": [
    111
@@ -2395,6 +2405,10 @@
    221,
    228
   ],
+  "process-thread": [
+   223,
+   229
+  ],
   "produce_glyphs": [
    278
   ],
@@ -2600,11 +2614,11 @@
    332,
    333,
    334,
-   351
+   352
   ],
   "reset": [
    161,
-   353
+   354
   ],
   "resize-mini-windows": [
    341
@@ -2750,7 +2764,7 @@
    127
   ],
   "romacs-init-layer-exclude": [
-   352
+   353
   ],
   "romacs-layer-animation romacs-layer-show": [
    268
@@ -2928,7 +2942,7 @@
    213
   ],
   "romacs-unsafe-coding": [
-   348
+   349
   ],
   "round": [
    282
@@ -2995,13 +3009,13 @@
    256
   ],
   "select-safe-coding-system": [
-   348
+   349
   ],
   "select-safe-coding-system-function": [
    125
   ],
   "select-safe-coding-system-interactively": [
-   348
+   349
   ],
   "selected-frame": [
    192,
@@ -3043,7 +3057,7 @@
    328
   ],
   "set-auto-coding": [
-   348
+   349
   ],
   "set-buffer": [
    66
@@ -3072,7 +3086,7 @@
   ],
   "set-coding-system-priority": [
    307,
-   348
+   349
   ],
   "set-default": [
    328
@@ -3082,10 +3096,10 @@
    157,
    158,
    159,
-   355,
    356,
    357,
-   359
+   358,
+   360
   ],
   "set-file-acl": [
    11
@@ -3115,8 +3129,8 @@
    93
   ],
   "set-process-thread": [
-   221,
-   228
+   223,
+   229
   ],
   "set-standard-case-table current-case-table": [
    54
@@ -3195,10 +3209,10 @@
    33
   ],
   "skip-chars-backward": [
-   362
+   363
   ],
   "skip-chars-forward": [
-   362
+   363
   ],
   "sleep-for": [
    221,
@@ -3511,7 +3525,7 @@
    77
   ],
   "use-package": [
-   352
+   353
   ],
   "usize": [
    107
@@ -4126,12 +4140,13 @@
    "section": "Observable by a package: isolates and frozen values",
    "observable": true,
    "planned": false,
-   "mechanism": "Frame and window queries in a worker",
+   "mechanism": "Frame and window queries, and standard output, in a worker",
    "gnu": "n/a.",
-   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`.",
-   "why": "A worker owns no display.",
+   "romacs": "A worker has the batch session's initial frame and terminal: `display-graphic-p` is nil, `frame-width` and friends answer as in `emacs --batch`. Its standard output is null (`host::spawn_isolate`): `ding`'s batch BEL and `princ` to `t` go nowhere, never into the spawner's output (a server's journal); `message` still reaches its stderr",
+   "why": "A worker owns no display and no output of the session's.",
    "symbols": [
-    "display-graphic-p"
+    "display-graphic-p",
+    "ding"
    ],
    "symbols_derived": false
   },
@@ -4920,7 +4935,7 @@
    "planned": false,
    "mechanism": "profiler.c's CPU and memory profilers: where samples are taken and what they weigh",
    "gnu": "`SIGPROF` on a `CLOCK_THREAD_CPUTIME_ID` timer interrupts the main thread every SAMPLING-INTERVAL of its CPU time, and the handler records the specpdl backtrace (`get_backtrace`) at that instant, including GNU's `redisplay_internal (C function)` frame during redisplay; a sample inside GC counts in `[Automatic\\ GC nil]`. The memory profiler probes `xmalloc`/`lisp_malloc` with the bytes asked for, so a small object counts only when its block is allocated, and after each GC it probes the bytes the collection freed (`alloc.c:6019`) under the caller's backtrace.",
-   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is running then (its `/proc` state is `R`, which also holds while it is runnable but preempted), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
+   "romacs": "A thread (`host::cpu_sampler`) wakes every SAMPLING-INTERVAL of wall time and counts a sample only when the Lisp thread is on a CPU then (its CPU clock advances between two reads; a thread allowed a single CPU, which the sampler shares, counts as running while its `/proc` state is `R`), so no sample falls in a wait; the evaluator charges the count at its next call boundary, the entry or exit of a traced call (`Vm::trace_enter`, `Vm::trace_leave`), to the stack that boundary sees. The backtrace changes only there, so the stack charged is the one that ran. A collection (`Vm::collect`) first charges what came before it, and the ticks it takes are `[Automatic\\ GC nil]`. The memory profiler weighs, at the same boundaries, the bytes the heap's arenas grew by (conses, cells, closures, objects with their string and vector payloads), so every allocation counts, in Romacs sizes; reclaimed bytes are not probed. Frames VM2 does not trace are not in any sample: sealed byte-op calls (VM2-SEALED1, as GNU's byte-ops), inlined bodies, and redisplay, which has no pseudo-frame, so its CPU time falls under the Lisp frame that started it or the empty backtrace. Log format, `profiler-max-stack-depth`, `profiler-log-size`, eviction of the lower half into `[Discarded\\ Samples nil]` and `function-equal` are GNU's.",
    "why": "A CPU-time timer is not used: under a zero `RLIMIT_RTTIME` hard limit (agent scopes have one) Linux kills a thread whose CPU timer fires, as it kills pinned GNU there. Same report shape, different counts: a call-dense hot path is charged where it runs; work inside a long primitive is charged to the primitive at its exit. Not running costs one flag test per call boundary; running at 10 ms adds a relaxed load per boundary and a thread wake per interval. Tests: `crates/romacs-vm/src/profiler_tests.rs`, GNU's `test/src/profiler-tests.el`.",
    "symbols": [
     "profiler-cpu-start",
@@ -5862,9 +5877,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "A `let` compiled before its variable is special",
-   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now), so a function that let-binds a package's variable binds it dynamically once the package's `defvar` has run, however early the function was defined",
-   "romacs": "Romacs compiles a top-level form whole and decides then. A lambda inside another lambda's body that sees no lexical binding (a `defun` that `with-eval-after-load` or `use-package :config` wraps) now compiles at its first call (`Vm::lambda`, `lambda_depth`), after the package loaded, so it binds as GNU's does (`tests/late_special.rs`); a top-level function compiled before the `defvar` still binds lexically, as a byte-compiled one would in GNU",
-   "why": "An init `defun` at top level that let-binds a not yet loaded package's variable (for example `smtpmail-smtp-server`) must sit in that package's `with-eval-after-load`/`:config`, or `defvar` the name first",
+   "gnu": "GNU's interpreter decides at each `let` whether it binds dynamically (`Flet`, `src/eval.c:1109`: `declared_special` now): `eval`'d forms and files read as source (readevalloop), so `(progn (require 'org) (let ((org-yank-dnd-method 'attach)) ...))` and a function let-binding a variable its file declares later bind dynamically. Bytecomp takes a top-level `progn`'s children in order, evaluating `require` and declaring `defvar` as it goes (`byte-compile-file-form-progn`), so the `progn` idiom binds dynamically in an `.elc` too, while a function compiled before the `defvar` binds lexically",
+   "romacs": "Romacs compiles every form. Code `eval` compiles (`eval`, `--eval`, `eval-expression`, `eval-buffer` and the closures it makes) and code of a file GNU would read as source (no `.elc`, outside the installation's Lisp trees: `Vm::gnu_loads_compiled`, `interpreting_source`) bind late: a `let` of a symbol not special when it compiled is checked as it binds (`Op::BindLate`), made dynamically if the symbol is special then, its reads, writes and the closures sharing it then going to the dynamic value, except that a lexical binding of the name it hides (one a closure captured) is still what its body's references and `setq` reach, as GNU's lexical environment lookup finds it first. A file GNU would load compiled (the installation's Lisp, or one beside a current `.elc`), read as source or through the compiled-Lisp store's compile process (rlisp/romacs-compile.el walks it by bytecomp's rules), binds as bytecomp would. `tests/late_special_eval.rs` compares every path with GNU's `.el` and `.elc` loads. A late `let` loop costs about 2.8x a lexical one, still some 30x faster than GNU's interpreter; compiled-load code pays nothing. A lambda's parameters decide when it compiles. GNU's cconv drops a captured variable its closure's body never uses freely, so there a late `let` that turns dynamic hides nothing; Romacs still finds the captured binding",
+   "why": "**Package-observable** only for a lambda parameter named as a variable made special after the lambda compiled, and for a closure that rebinds, without otherwise using, a name it captured lexically that became special since",
    "symbols": [
     "let",
     "let*"
@@ -7682,7 +7697,7 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does; `make-serial-process`, `process-attributes`, `list-system-processes` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
    "why": "**Package-observable:** asynchronous network code beyond TCP and serial ports cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
@@ -7696,7 +7711,6 @@
     "call-process-region",
     "process-attributes",
     "list-system-processes",
-    "set-process-thread",
     "sleep-for"
    ],
    "symbols_derived": false
@@ -7730,12 +7744,14 @@
    "planned": false,
    "mechanism": "Lisp threads",
    "gnu": "The pinned GNU is built with threads (`THREADS_ENABLED`): `make-thread`, mutexes and condition variables (`src/thread.c`), `(featurep 'threads)`, and `main-thread` the main thread's object; a build without threads keeps `main-thread` and binds it to nil (`thread.c:1307-1312`), and url-http.el keys its connection pool on it (`url-http-find-free-connection`)",
-   "romacs": "VM2 has no thread objects and does not provide `threads`, so `main-thread` is the threadless build's nil: url-http keys connections by host and port, as GNU without threads does",
-   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread primitives' absence. `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
+   "romacs": "VM2 is GNU's threadless build: it does not provide `threads`, so `main-thread` is nil and the thread.c primitives are void, and url-http keys connections by host and port, as GNU without threads does. `process-thread` and `set-process-thread` are process.c's, in every GNU build: each process holds the one thread object of the VM (type `thread`, printed `#<thread 0x...>`), which `make_process` stores from `Fcurrent_thread` there too",
+   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread.c primitives' absence; `list-processes` shows `--` in its Thread column, as threadless GNU does (pinned GNU shows `Main`). `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
    "symbols": [
     "main-thread",
     "current-thread",
-    "make-thread"
+    "make-thread",
+    "process-thread",
+    "set-process-thread"
    ],
    "symbols_derived": false
   },
@@ -7829,7 +7845,7 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP and local (Unix domain) stream servers and clients, refusing datagrams, Internet `:local`/`:remote` addresses (a string address is a local socket's path, as GNU's), numeric families, non-numeric service names and `:tls-parameters`; `:use-external-socket` names the socket a daemon was started with, of which there is none; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does, and one whose connect fails at once has GNU's `(failed ERROR)` status and no sentinel; an accepted connection's name, contact and `open from` sentinel are GNU's for each family (a local peer has host `t`, no service and a connection-counter name); `delete-process` leaves a local server's socket file, as GNU does (server.el and `romacs-mcp-stop` delete theirs); `format-network-address` is Lisp (`rlisp/vm/subprocess.el`); `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)`, `(:family local)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP and local (Unix domain) stream servers and clients, refusing datagrams, Internet `:local`/`:remote` addresses (a string address is a local socket's path, as GNU's), numeric families, non-numeric service names and `:tls-parameters`; `:use-external-socket` names the socket a daemon was started with, of which there is none; a `:nowait` client connects without blocking and the wait reports its outcome (the `open` sentinel or `failed`, after trying each further address) as GNU does, and one whose connect fails at once has GNU's `(failed ERROR)` status and no sentinel; an accepted connection's name, contact and `open from` sentinel are GNU's for each family (a local peer has host `t`, no service and a connection-counter name); `delete-process` leaves a local server's socket file, as GNU does (server.el and `romacs-mcp-stop` delete theirs); `format-network-address` is Lisp (`rlisp/vm/subprocess.el`); `make-serial-process`, `process-attributes`, `list-system-processes` and the datagram functions are void. Lisp waits never read the keyboard. Timers are keyboard.c's `timer_check` in Lisp (`rlisp/vm/subprocess.el`), shared by those waits, the GUI host's command loop and its key reads (prompts, and `read-event` with a time limit, hence `sit-for`): ordinary timers run as they fall due; while the GUI waits idle for a key (`timer_start_idle` until the next key press, `timer_stop_idle`), idle timers run too and `current-idle-time` is the idle duration; Lisp a command runs is never idle, so its waits run idle timers only inside a timer that itself runs while idle, as GNU's. The command loop's idle wait and the host's key reads (`romacs--read-host-char`) also read the processes' ready output, finish their connections and report their status changes (`romacs--process-idle`), as read_char's wait_reading_process_output does with the keyboard; the command loop redisplays after any timer ran or process output came and otherwise blocks until the next timer, key, ready process descriptor (`Vm::process_wait_fds`, `ProcessWatch`) or native wake. `make-network-process` is provided with the subfeatures it supports: `(:server t)`, `(:service t)`, `(:family ipv6)`, `(:family ipv4)`, `(:family local)` and `(:nowait t)`. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD; children a dropped VM leaves are reaped by the host's one shared reaper thread where GNU's exit leaves them to init. Process output is decoded per VM2-PROC2",
    "why": "**Package-observable:** asynchronous network code beyond TCP and local stream sockets (datagrams, TLS, serial ports) cannot run; batch runs have no keyboard wait, so idle timers never run there and `current-idle-time` is nil (keyboard.c:4949 answers nil whenever Emacs is not idle); process filters and sentinels run while the GUI waits for a key, never during a command except inside its Lisp waits, as GNU's",
    "symbols": [
     "current-idle-time",
@@ -7843,7 +7859,6 @@
     "call-process-region",
     "process-attributes",
     "list-system-processes",
-    "set-process-thread",
     "sleep-for"
    ],
    "symbols_derived": false
@@ -7856,12 +7871,14 @@
    "planned": false,
    "mechanism": "Lisp threads",
    "gnu": "The pinned GNU is built with threads (`THREADS_ENABLED`): `make-thread`, mutexes and condition variables (`src/thread.c`), `(featurep 'threads)`, and `main-thread` the main thread's object; a build without threads keeps `main-thread` and binds it to nil (`thread.c:1307-1312`), and url-http.el keys its connection pool on it (`url-http-find-free-connection`)",
-   "romacs": "VM2 has no thread objects and does not provide `threads`, so `main-thread` is the threadless build's nil: url-http keys connections by host and port, as GNU without threads does",
-   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread primitives' absence. `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
+   "romacs": "VM2 is GNU's threadless build: it does not provide `threads`, so `main-thread` is nil and the thread.c primitives are void, and url-http keys connections by host and port, as GNU without threads does. `process-thread` and `set-process-thread` are process.c's, in every GNU build: each process holds the one thread object of the VM (type `thread`, printed `#<thread 0x...>`), which `make_process` stores from `Fcurrent_thread` there too",
+   "why": "**Package-observable**: `main-thread`, `(featurep 'threads)` and the thread.c primitives' absence; `list-processes` shows `--` in its Thread column, as threadless GNU does (pinned GNU shows `Main`). `crates/romacs-vm-gui/tests/url_retrieve.rs` matches pinned GNU through the connection pool",
    "symbols": [
     "main-thread",
     "current-thread",
-    "make-thread"
+    "make-thread",
+    "process-thread",
+    "set-process-thread"
    ],
    "symbols_derived": false
   },
@@ -8026,13 +8043,14 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "VM2 is not an Emacs daemon",
-   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized` inspect daemon state and reject initialization in a non-daemon",
-   "romacs": "`(daemonp)` is nil; `(daemon-initialized)` errors that this function requires daemon mode (both measured). No daemon state is fabricated",
-   "why": "Matches GNU non-daemon behavior; daemon startup is not implemented",
+   "mechanism": "Which process is an Emacs daemon",
+   "gnu": "`emacs.c:Fdaemonp/Fdaemon_initialized`: a `--fg-daemon=NAME` process answers NAME from its start, with `noninteractive` nil, and `daemon-initialized` signals \"The daemon has already been initialized\" once startup ran; any other process answers nil and is told the function needs daemon mode",
+   "romacs": "A server (`--serve NAME`, SERVER2) is GNU's `--fg-daemon=NAME`: `daemonp` answers NAME from the command line on (`host::set_daemon`), so the user's init sees it, `noninteractive` is nil, and `daemon-initialized` signals as an initialized daemon's. Every other process is no daemon, as GNU's. Its frames stay SERVER2's: no initial terminal frame, so `frame-list` differs and server.el's \"only the daemon's terminal frame\" branches never apply. `crates/romacs-vm-gui/harness/server_live.py` (daemon) compares both, and that `ding` in a server, with or without a frame, writes no BEL",
+   "why": "Matches GNU's daemon for `daemonp`, `daemon-initialized` and `noninteractive`; `frame-list` is SERVER2's",
    "symbols": [
     "daemonp",
-    "daemon-initialized"
+    "daemon-initialized",
+    "noninteractive"
    ],
    "symbols_derived": false
   },
@@ -10059,6 +10077,22 @@
    "symbols": [
     "backtrace-get-frames",
     "backtrace--frames-and-locals"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "DBG-NEXT-CALL",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "`debug-on-next-call` and debug-on-exit observe Lisp calls only",
+   "gnu": "bytecode.c's call opcode and Ffuncall call the debugger with `(lambda)` at the next call of any function, primitives included, and with `(exit VALUE)` when any flagged activation returns, a primitive's too",
+   "romacs": "The call boundary's hooks (`threaded.rs` `arm_debug_on_call`, `debug_on_exit`) stop at the next Lisp function call, with GNU byte-code's `(lambda)`; `debug-on-next-call` stays set through the primitive calls before it, which run as GNU opcodes do. A flagged primitive activation (`j` on a `mapcar` frame) returns without entering the debugger; its flag is dropped as it leaves. Normal returns of Lisp activations, and throws and errors out of them, match GNU byte-code (`tests/debugger_entry.rs`). `debug-on-next-call` is a forwarded boolean, as GNU's DEFVAR_BOOL",
+   "why": "One test on the call path (`profiler.active`) covers profiling and both hooks; primitive calls stay off it",
+   "symbols": [
+    "debug-on-next-call",
+    "backtrace-debug"
    ],
    "symbols_derived": false
   },

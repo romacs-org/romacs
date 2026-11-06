@@ -29,6 +29,12 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
   probe      clients x files: finishing one buffer and retiring one client
              with many pending buffers, at 1, 10 and 100 in each dimension
              (the costs must not grow with the other dimension).
+  daemon     pinned GNU `--fg-daemon=dm' and a Romacs server dm, in turn in
+             the same tree: `noninteractive', `daemonp' and
+             `daemon-initialized' before and after `emacsclient -c' are
+             GNU's, and `ding' with no frame, with one and in a worker
+             isolate writes no BEL to the server's output; with its window
+             shown, `server-stop-automatically' `empty' keeps the server.
 
 usage: server_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
@@ -522,12 +528,64 @@ def build(args, base):
         s.close()
 
 
+DAEMON_PROBE = '(list noninteractive (daemonp) (condition-case e (daemon-initialized) (error (cadr e))))'
+
+
+def daemon(args, base):
+    """GNU's daemon and Romacs's server, asked the same before and after a
+    client's frame; `ding' rings in both states.  The frame counts are
+    recorded, not compared: Romacs's frames are its own (DIVERGENCES.md)."""
+    s = Server(args, base, 'dm')
+    try:
+        ask = lambda form: s.emacsclient('-e', form).stdout.strip()
+
+        def states(shown):
+            before = (ask(DAEMON_PROBE), ask('(length (frame-list))'))
+            ask('(ding)')
+            s.emacsclient('-c', '-n')
+            until(lambda: ask(shown) == 't', 30, 'the client frame shown')
+            after = (ask(DAEMON_PROBE), ask('(length (frame-list))'))
+            ask('(ding)')
+            return before, after
+        gnu_out = s.root / 'gnu-daemon.out'
+        with gnu_out.open('wb') as out:
+            gnu = subprocess.Popen([args.gnu, '-Q', '--fg-daemon=dm'], env=s.env, cwd=s.root / 'work',
+                                   stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+            try:
+                until(lambda: s.emacsclient('-e', 't', check=False).returncode == 0, 60, 'GNU daemon listening')
+                gnu_states = states('(and (cdr (frame-list)) t)')
+                s.emacsclient('-e', '(kill-emacs)', check=False)
+                gnu.wait(timeout=30)
+            finally:
+                gnu.kill()
+        s.client('-e', 't')
+        s.pid = int(s.eval('(emacs-pid)'))
+        romacs_states = states("(romacs--native-window 'query)")
+        # A worker isolate is batch Lisp, but its output is no one's: the
+        # line ends so a written BEL would reach the server's log.
+        worker = ask("(isolate-await (isolate-spawn '(lambda () (ding) (terpri) noninteractive) :fresh t :allow-source-boot t) 120)")
+        gnu_bells, romacs_bells = gnu_out.read_bytes().count(b'\x07'), s.log().count('\x07')
+        # As a daemon, server.el's `server-stop-automatically' applies: `empty'
+        # stops a session left with no client frame; one showing its window
+        # is past the timer's first run (10 s) and still serving.
+        ask("(customize-set-variable 'server-stop-automatically 'empty)")
+        time.sleep(13)
+        survived = s.emacsclient('-e', '(list (emacs-pid) (timerp server-stop-automatically--timer))',
+                                 check=False).stdout.strip() == f'({s.pid} t)'
+        result = {'gnu': gnu_states, 'romacs': romacs_states, 'worker_noninteractive': worker,
+                  'gnu_bells': gnu_bells, 'romacs_bells': romacs_bells, 'stop_automatically_survived': survived}
+        result['ok'] = ([b[0] for b in gnu_states] == [b[0] for b in romacs_states]
+                        and worker == 't' and gnu_bells == 0 and romacs_bells == 0 and survived)
+        return result
+    finally:
+        s.close()
+
 def lisp_read(text):
     return parity_live.read_sexp(text) if text.startswith('"') else text
 
 
 WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
-             'probe': probe}
+             'probe': probe, 'daemon': daemon}
 
 
 def main():
@@ -536,6 +594,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default=str(Path(os.environ.get('ROMACS_GNU_ORACLE', 'emacs')).parent / 'emacsclient'))
+    parser.add_argument('--gnu', default=os.environ.get('ROMACS_GNU_ORACLE', 'emacs'))
     parser.add_argument('--workflow', action='append', choices=sorted(WORKFLOWS))
     args = parser.parse_args()
     out = Path(args.output)

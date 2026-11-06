@@ -456,6 +456,29 @@ impl Vm {
         }
         Ok(())
     }
+    /// `special-variable-p' of SLOT's symbol: declared special now.
+    pub(crate) fn slot_is_special(&self, slot: usize) -> bool {
+        self.slots[slot].declared_special
+            || (self.names.get(&self.symbol_names[slot]) == Some(&slot) && self.specials.contains(&self.symbol_names[slot]))
+    }
+    /// What `special_cache' answers hold under: a specials change since
+    /// moves it (an insertion that matters grows `specials').
+    fn special_key(&self) -> u64 {
+        ((self.specials.len() as u64) << 24 ^ self.special_changes) + 1
+    }
+    /// `slot_is_special', remembered per slot until specials change: the
+    /// check each late binding makes as it binds.
+    #[inline]
+    pub(crate) fn slot_is_special_now(&mut self, slot: usize) -> bool {
+        let key = self.special_key();
+        if let Some(&cached) = self.special_cache.get(slot) && cached >> 1 == key {
+            return cached & 1 == 1;
+        }
+        let special = self.slot_is_special(slot);
+        if self.special_cache.len() <= slot { self.special_cache.resize(slot + 1, 0); }
+        self.special_cache[slot] = key << 1 | u64::from(special);
+        special
+    }
     pub(super) fn variable_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         if n != if matches!(p, DefvarSetDefault | Set) { 2 } else { 1 } { return Err("wrong primitive arity".into()); }
@@ -499,7 +522,7 @@ impl Vm {
                 let value = self.variable_value(slot)?;
                 if value == Value::UNBOUND { Err("unbound variable".into()) } else { Ok(value) }
             }
-            SpecialVariableP => Ok(truth(self.slots[slot].declared_special || (self.names.get(&self.symbol_names[slot]) == Some(&slot) && self.specials.contains(&self.symbol_names[slot])))),
+            SpecialVariableP => Ok(truth(self.slot_is_special(slot))),
             CustomVariableP => {
                 let property = self.intern("standard-value");
                 Ok(truth(self.symbol_property(symbol, property)? != Value::NIL))

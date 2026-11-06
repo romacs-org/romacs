@@ -183,6 +183,7 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        Thread,
         TreesitParser,
         TreesitNode,
         TreesitQuery,
@@ -1183,6 +1184,7 @@ mod leaf {
             } else {
                 let slot = self.symbol_slot(symbol)?;
                 self.vm.slots[slot].declared_special = true;
+                self.vm.special_changes += 1;
                 if self.vm.names.get(&name) == Some(&slot) {
                     self.vm.specials.insert(name);
                 }
@@ -1192,6 +1194,7 @@ mod leaf {
         /// Clear the symbol's declaration without following a variable alias.
         pub fn make_variable_non_special(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
             let name = self.symbol_name(symbol)?;
+            self.vm.special_changes += 1;
             if symbol == Value::NIL || symbol == Value::TRUE {
                 self.vm.specials.remove(&name);
             } else {
@@ -1519,6 +1522,7 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Thread) => Kind::Thread,
                     Some(data::Object::Treesit(t)) => match &**t {
                         crate::treesit::Object::Parser(_) => Kind::TreesitParser,
                         crate::treesit::Object::Node(_) => Kind::TreesitNode,

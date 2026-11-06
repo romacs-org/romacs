@@ -856,8 +856,10 @@ thousandth a stack mark."
 ;; retired by the next poll.
 (scaling-probe agent-withdraw-deferred :n 64
   :setup (progn (require 'romacs-mcp) (number-sequence 0 (1- n)))
+  ;; An inactive timer: none is scheduled, and retiring the last call
+  ;; cancels it as it would the real one.
   :body (let ((romacs-mcp--deferred nil) (romacs-mcp--deferred-index (make-hash-table :test #'equal))
-              (romacs-mcp--deferred-timer t))
+              (romacs-mcp--deferred-timer (timer-create)))
           (dolist (i it)
             (romacs-mcp--defer-request (list :peer 'scaling-peer :cancelled nil) i #'ignore nil))
           (cl-letf (((symbol-function 'romacs-mcp--send) #'ignore))
