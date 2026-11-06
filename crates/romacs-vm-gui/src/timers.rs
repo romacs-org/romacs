@@ -151,6 +151,40 @@ mod tests {
             (run-with-idle-timer 0.03 nil (lambda () (push (list 'idle (and (current-idle-time) t)) probe)))");
         assert_eq!(printed(&mut vm, "(list (read-string \"P: \") (reverse probe) (current-idle-time))"),
                    "(\"a\" (ordinary (idle t)) nil)");
+        // A keyboard key is recorded as typed before the input method runs,
+        // and a method that returns no event brings the message back.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Key('b')].into()))));
+        printed(&mut vm, "(setq probe nil input-method-function
+                  (lambda (k) (push (list k input-method-previous-message (current-message)) probe) (and (= k ?b) (list ?x))))
+            (message \"before\")");
+        assert_eq!(printed(&mut vm, "(prog1 (list (read-event nil t) (reverse probe) (current-message)
+                                                  (let ((keys (append (recent-keys) nil))) (nthcdr (- (length keys) 2) keys)))
+                                       (setq input-method-function 'list))"),
+                   "(120 ((97 \"before\" nil) (98 \"before\" nil)) nil (97 98))");
+        // SECONDS bound the read, however long a method that returned no
+        // event took.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(let ((start (float-time))
+                                          (input-method-function (lambda (_) (sleep-for 0.3) nil)))
+                                      (list (read-event nil t 0.4) (< (- (float-time) start) 0.6)))"),
+                   "(nil t)");
+        // A C-g while the wait's Lisp ran is the read's key: it does not
+        // quit through the caller.
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(progn (run-with-timer 0.01 nil (lambda () (setq quit-flag t)))
+                                            (read-key-sequence-vector nil))"), "[7]");
+        // Nor does a quit from the wait's redisplay, in a recursive edit
+        // too, which a closed frame's quit leaves first.
+        let quit_in_wait = |data: &str| format!("(let ((host (symbol-function 'romacs--read-host-event))
+                                                       (depth (symbol-function 'recursion-depth)))
+                                                   (fset 'romacs--read-host-event (lambda (&rest _) (signal 'quit '{data})))
+                                                   (fset 'recursion-depth (lambda () 1))
+                                                   (unwind-protect
+                                                       (catch 'exit (read-key-sequence-vector nil))
+                                                     (fset 'romacs--read-host-event host)
+                                                     (fset 'recursion-depth depth)))");
+        assert_eq!(printed(&mut vm, &quit_in_wait("nil")), "[7]");
+        assert_eq!(printed(&mut vm, &format!("(functionp {})", quit_in_wait("frame-closed"))), "t");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq probe nil)
             (run-with-timer 0.01 nil (lambda () (push 'ordinary probe)))

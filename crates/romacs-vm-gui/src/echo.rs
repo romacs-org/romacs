@@ -91,6 +91,11 @@ pub fn clear(vm: &mut Vm) -> Result<(), String> {
         vm.eval_source("(and (fboundp 'romacs--safe-run-hooks) (romacs--safe-run-hooks 'echo-area-clear-hook))")?;
     }
     vm.set_echo_area_message(None);
+    hide(vm)
+}
+
+/// Take the message off the display, leaving it current.
+pub fn hide(vm: &mut Vm) -> Result<(), String> {
     display(vm, "(romacs--echo-display nil)")
 }
 

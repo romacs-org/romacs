@@ -110,10 +110,15 @@ on.  A VM without the process prelude runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
         (save-at (and auto-save (+ (float-time) auto-save)))
         (timers (fboundp 'romacs--timer-check))
+        (outer-inhibit inhibit-quit)
         (c nil) (waiting t) (shown nil) (collect-ok t))
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
-        (while waiting
+        ;; The wait's own Lisp does not quit: as GNU's, a C-g typed meanwhile
+        ;; is this read's key (keyboard.c quit_throw_to_read_char), not a
+        ;; `quit' through the read's caller, an input method among them.
+        (let ((inhibit-quit t))
+         (while waiting
           ;; Each round, as wait_reading_process_output's: completed
           ;; background commands' callbacks (before every block, not only
           ;; after a completion's wake, which a minibuffer read may have
@@ -162,9 +167,13 @@ on.  A VM without the process prelude runs no timers."
                 ;; A user signal (SIGUSR1, SIGUSR2) is an event before the
                 ;; host's (kbd_buffer_get_event).
                 (setq c (or (romacs--take-user-signal)
-                            (romacs--host-event
-                             (if (and delay left) (min delay left) (or delay left))
-                             current))
+                            ;; `debug-on-event' and a third C-g clear
+                            ;; `inhibit-quit': those do quit.
+                            (and inhibit-quit (eq quit-flag t) (progn (setq quit-flag nil) ?\C-g))
+                            (let ((inhibit-quit outer-inhibit))
+                              (romacs--host-event
+                               (if (and delay left) (min delay left) (or delay left))
+                               current)))
                       shown ran)
                 ;; read_char: an event `special-event-map' binds (focus, a
                 ;; user signal) runs its binding at once and is never input;
@@ -174,7 +183,7 @@ on.  A VM without the process prelude runs no timers."
                            (lookup-key special-event-map (vector (if (consp c) (car c) c))))
                   (romacs--special-event c)
                   (setq c nil shown nil))
-                (setq waiting (null c))))))
+                (setq waiting (null c)))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 
@@ -192,14 +201,17 @@ requeued, or, without SECONDS, no watch is left."
           (romacs--wait-reading-process-output (or left 'forever) nil 0 t))))))
 
 (defun romacs--host-event (seconds display)
-  "`romacs--read-host-event', whose `quit' once the frame has closed leaves
-the innermost recursive edit first, as end of input does: the command loop
-there reports every signal (GNU's C `error' handler), so it would read, and
-quit, again.  Each level quits in turn, down to the host's command."
-  (if (> (recursion-depth) 0)
-      (condition-case nil (romacs--read-host-event seconds display)
-        (quit (throw 'exit (lambda () (signal 'quit nil)))))
-    (romacs--read-host-event seconds display)))
+  "`romacs--read-host-event', whose `quit' is one of two.  A C-g that quit the
+wait's redisplay is the read's key, as one typed in the wait itself.  Once the
+frame has closed (the quit's data says so) it leaves the innermost recursive
+edit first, as end of input does: the command loop there reports every signal
+(GNU's C `error' handler), so it would read, and quit, again.  Each level
+quits in turn, down to the host's command."
+  (condition-case err (romacs--read-host-event seconds display)
+    ((debug quit)
+     (cond ((null (cdr err)) ?\C-g)
+           ((> (recursion-depth) 0) (throw 'exit (lambda () (signal 'quit nil))))
+           (t (signal 'quit nil))))))
 
 (defvar romacs--last-auto-save 0
   "keyboard.c last_auto_save: `num-nonmacro-input-events' at the command
@@ -313,14 +325,8 @@ command's binds it.")
 
 (defun romacs--clear-echo ()
   "read_char's wipe of the echo area, `echo-area-clear-hook' first."
-  (when (current-message)
-    (romacs--safe-run-hooks 'echo-area-clear-hook)
-    (message nil)))
-
-(defun romacs--input-method-char-p (c)
-  "Whether read_char hands the event C to an input method: printable and
-one byte wide."
-  (and (integerp c) (>= c 32) (< c 256) (/= c 127)))
+  (romacs--safe-run-hooks 'echo-area-clear-hook)
+  (message nil))
 
 (defun romacs--record-char (c)
   "keyboard.c record_char: `recent-keys' and the macro being defined leave
@@ -339,8 +345,11 @@ command's keys are kept from them.  Unless KEYMAP-READ, the read is not one
 of a key sequence and the method must not use the echo area."
   (let ((keys romacs--command-keys) (start romacs--single-command-key-start))
     (setq romacs--command-keys [] romacs--single-command-key-start 0)
-    (romacs--clear-echo)
-    (prog1 (let ((input-method-use-echo-area (or input-method-use-echo-area (not keymap-read))))
+    (when (current-message) (romacs--clear-echo))
+    (prog1 (let ((input-method-use-echo-area (or input-method-use-echo-area (not keymap-read)))
+                 ;; Quail's translation is half done in the buffer: no
+                 ;; background callback runs inside it.
+                 (romacs--reading-command-keys nil))
              (funcall input-method-function c))
       ;; A C-g the method read was the method's key.
       (setq romacs--command-keys keys romacs--single-command-key-start start
@@ -359,7 +368,8 @@ A character from anywhere but `unread-post-input-method-events' goes through
 `input-method-function' unless PREV-EVENT, the event before it in its key
 sequence, says it is not the first; that function's default `list' changes
 nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
-  (let ((reread nil) (recorded nil) (post nil) (previous nil) c (again t))
+  (let ((reread nil) (recorded nil) (post nil) (previous nil) c (again t)
+        (end (and seconds (+ (float-time) seconds))))
    (setq romacs--keyboard-quit nil)
    (while again
     (setq again nil reread nil recorded nil post nil c nil)
@@ -418,14 +428,15 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
           (romacs--record-char c)
           (setq recorded t))
         ;; What the echo area held, for an input method to refer to.
-        (when (and input-method-function (romacs--input-method-char-p c))
+        (when (and input-method-function (integerp c) (>= c 32) (< c 256) (/= c 127))
           (setq previous (current-message)
                 input-method-previous-message previous))
         ;; read_char wipes the echo area for each event from the keyboard,
         ;; other than help, frame and window selection events
         ;; (keyboard.c:3231): a prompt `read-event' showed goes once its
         ;; event comes.
-        (unless (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))
+        (when (and (current-message)
+                   (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
           (romacs--clear-echo))))
      ;; Without a host keyboard a user signal is still an event
      ;; (kbd_buffer_get_event); a special one runs its binding and the read
@@ -448,11 +459,11 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
      ((> (recursion-depth) 0)
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
      (t (signal 'end-of-file '("Error reading from stdin"))))
-    ;; reread_for_input_method.
+    ;; reread_for_input_method, for a printable one-byte character.
     (when (and input-method-function (not post) (null prev-event)
-               (romacs--input-method-char-p c))
+               (integerp c) (>= c 32) (< c 256) (/= c 127))
       (if (eq input-method-function 'list)
-          (romacs--clear-echo)
+          (when (current-message) (romacs--clear-echo))
         (let ((events (romacs--call-input-method c keymap-read)))
           (if (consp events)
               (setq c (car events)
@@ -461,6 +472,8 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
             ;; No event: the message comes back, and the read goes on.
             (when previous
               (let ((message-log-max nil)) (message "%s" previous)))
+            ;; SECONDS bound the whole read, the method's time included.
+            (when end (setq seconds (max 0 (- end (float-time)))))
             (setq c nil again t))))))
     (when c
       (unless recorded (romacs--record-char c))

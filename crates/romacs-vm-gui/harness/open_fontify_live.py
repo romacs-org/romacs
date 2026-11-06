@@ -42,7 +42,8 @@ landed.
 
 Romacs sessions run an installation's compiled Lisp: the store beside the
 binary is filled first, as an installer does (--no-compile-lisp reuses it).
-GNU runs -Q with tree-sitter modes (`treesit-enabled-modes' t, grammars
+GNU runs -Q, with `save-place-mode' as Romacs's defaults have it, and
+tree-sitter modes (`treesit-enabled-modes' t, grammars
 from --grammars: `tools/treesit_grammars.py so --out DIR') or, for
 reference, its regex modes; Romacs runs its interactive defaults, whose
 tree-sitter modes are the shipped grammars'.
@@ -80,10 +81,17 @@ MEASURE = r''';;; -*- lexical-binding: t -*-
 (defun ofl-final ()
   "Whether the selected window's text all has its final faces: every
 character `fontified', or a buffer jit-lock does not fontify."
-  (let ((start (window-start)) (end (window-end nil t)))
+  (let* ((start (window-start))
+         (unfontified (lambda (end)
+                        (with-current-buffer (window-buffer)
+                          (text-property-any start (min end (point-max)) 'fontified nil)))))
     (with-current-buffer (window-buffer)
       (or (not (memq 'jit-lock-function fontification-functions))
-          (not (text-property-any start (min end (point-max)) 'fontified nil))))))
+          ;; The end the redisplay left costs nothing to poll; a timer may
+          ;; have moved the start since, so the answer is the updated end's.
+          ;; Updating it lays the window out in Romacs, once, not every poll.
+          (and (not (funcall unfontified (window-end)))
+               (not (funcall unfontified (window-end nil t))))))))
 (defvar ofl-redisplays 0 "The redisplays GNU has begun.")
 (unless (fboundp 'romacs--redisplay-since-mark)
   (add-function :before pre-redisplay-function
@@ -109,12 +117,12 @@ log the command's start, its end, that moment and how many polls it took."
            0 0.002
            (lambda ()
              (setq polls (1+ polls))
-             (let ((final (and (funcall redisplayed) (ofl-final))))
+             (let* ((now (float-time)) (final (and (funcall redisplayed) (ofl-final))))
                (when (or final (> (- (float-time) t0) 300))
                  (cancel-timer timer)
                  (when (eq ofl-poll timer) (setq ofl-poll nil))
                  (ofl-log "{\"event\":\"command\",\"command\":\"%s\",\"t0\":%.6f,\"post\":%.6f,\"t1\":%.6f,\"polls\":%d,\"buffer\":\"%s\",\"mode\":\"%s\",\"final\":%s,\"start\":%d,\"end\":%d}"
-                          command t0 post (float-time) polls (buffer-name (window-buffer))
+                          command t0 post now polls (buffer-name (window-buffer))
                           (with-current-buffer (window-buffer) major-mode)
                           (if final "true" "false") (window-start) (window-end nil t)))))))
     (setq ofl-poll timer)))
@@ -269,7 +277,9 @@ class Session:
             argv = [self.args.romacs, '--loadup', '--trace-latency']
         else:
             setup = self.root / 'ofl-gnu.el'
-            body = '(setq inhibit-startup-screen t native-comp-jit-compilation nil)\n'
+            # Romacs's defaults restore a visited file's place, which a re-open
+            # after scrolling then pays for: the same visit in both.
+            body = '(setq inhibit-startup-screen t native-comp-jit-compilation nil)\n(save-place-mode 1)\n'
             if self.engine == 'gnu-ts':
                 body += GNU_TS.format(grammars=json.dumps(self.args.grammars))
             setup.write_text(body + f'(load {json.dumps(str(measure))} nil t)\n')

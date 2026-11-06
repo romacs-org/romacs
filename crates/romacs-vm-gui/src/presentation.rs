@@ -58,13 +58,15 @@ impl Presentation {
     ) -> Result<Option<romacs_vm::CommandOutcome>, String> {
         let in_prefix = commands.in_prefix();
         let first = event.clone();
-        self.around(vm, in_prefix, Some(&first), |vm| commands.dispatch(vm, event))
+        self.around(vm, in_prefix, Some(&first), crate::echo::clear, |vm| commands.dispatch(vm, event))
     }
 
     /// One command whose keys the Lisp command loop reads (`command::run'),
     /// FIRST being the host key that starts it, if one does.
     pub fn host_command(&mut self, vm: &mut romacs_vm::Vm, first: Option<&romacs_vm::CommandEvent>) -> Result<Option<romacs_vm::CommandOutcome>, String> {
-        self.around(vm, false, first, |vm| crate::command::run(vm).map(Some))
+        // read_char ends the message when it reads the key, once an input
+        // method can still refer to it.
+        self.around(vm, false, first, crate::echo::hide, |vm| crate::command::run(vm).map(Some))
     }
 
     fn around(
@@ -72,6 +74,7 @@ impl Presentation {
         vm: &mut romacs_vm::Vm,
         in_prefix: bool,
         first: Option<&romacs_vm::CommandEvent>,
+        clear: fn(&mut romacs_vm::Vm) -> Result<(), String>,
         run: impl FnOnce(&mut romacs_vm::Vm) -> Result<Option<romacs_vm::CommandOutcome>, String>,
     ) -> Result<Option<romacs_vm::CommandOutcome>, String> {
         self.changed();
@@ -88,7 +91,7 @@ impl Presentation {
         })?;
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
-        if !in_prefix { crate::echo::clear(vm)?; }
+        if !in_prefix { clear(vm)?; }
         // A command's signal reached `command-error-function' in the
         // command loop, whose default left its message like any other.
         let outcome = run(vm);

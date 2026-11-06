@@ -100,7 +100,13 @@ impl Elem {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Slot { pub pre: Option<i64>, pub elem: Option<Elem> }
 
+/// Elements walked between polls.
+const POLL_ELEMENTS: usize = 1024;
+
 pub(super) trait Elements {
+    /// A long native loop's poll (`Vm::native_poll'), for walks over elements
+    /// already generated, which generation's own polls do not see.
+    fn poll(&mut self) -> R<()>;
     fn slot(&mut self, index: usize) -> R<Slot>;
     /// handle_line_prefix before element INDEX: a pushed prefix's id,
     /// and whether it aligns visually (a wrap-prefix space spec).
@@ -177,6 +183,9 @@ fn element<E: Elements>(src: &mut E, it: &It) -> R<Option<Elem>> {
 
 /// get_next_display_element.
 fn load<E: Elements>(src: &mut E, it: &mut It) -> R<Option<Elem>> {
+    // Generated elements are walked again and again: a test of the cursor
+    // that moves, the prefix's inside one, costs the path no count of its own.
+    if it.prefix.map_or(it.index, |(_, k)| k) % POLL_ELEMENTS == 0 { src.poll()?; }
     it.loaded = true;
     element(src, it)
 }
@@ -955,4 +964,43 @@ pub(super) fn window_end<E: Lines>(src: &mut E, cx: &Ctx, mut it: It, dy: i64) -
     if it.current_y >= dy { return Ok(at); }
     if move_in_line(src, cx, &mut it, cx.zv, 0, POS)? == Move::NewlineOrCr { advance(src, &mut it); }
     charpos(src, &it)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Cached { polls: usize }
+    impl Elements for Cached {
+        fn poll(&mut self) -> R<()> { self.polls += 1; Ok(()) }
+        fn slot(&mut self, _: usize) -> R<Slot> { Ok(Slot { pre: None, elem: None }) }
+        fn prefix(&mut self, _: usize, _: bool, _: bool) -> R<Option<(usize, bool)>> { Ok(None) }
+        fn prefix_elem(&self, _: usize, _: usize) -> Option<Elem> { None }
+        fn line_at(&mut self, _: usize) -> R<i64> { Ok(0) }
+    }
+
+    /// A walk over elements generated earlier generates nothing, as a long
+    /// replacement string's or `row_start''s replay do: it polls all the same.
+    #[test]
+    fn a_walk_over_generated_elements_polls() {
+        let mut source = Cached { polls: 0 };
+        let mut it = It::default();
+        for index in 0..10 * POLL_ELEMENTS {
+            it.index = index;
+            assert!(load(&mut source, &mut it).is_ok());
+        }
+        assert_eq!(source.polls, 10);
+    }
+
+    /// A long prefix advances its own cursor, at one main index.
+    #[test]
+    fn a_walk_over_a_generated_prefix_polls() {
+        let mut source = Cached { polls: 0 };
+        let mut it = It { index: 1, ..It::default() };
+        for k in 0..10 * POLL_ELEMENTS {
+            it.prefix = Some((0, k));
+            assert!(load(&mut source, &mut it).is_ok());
+        }
+        assert_eq!(source.polls, 10);
+    }
 }
