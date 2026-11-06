@@ -20,7 +20,7 @@
 ;; writes back exactly what the user answered.
 ;;
 ;; Events are plists with a :type (session status delta thinking tool
-;; approval done error input exit unknown), the session and the journal
+;; compacted approval done error input exit unknown), the session and the journal
 ;; :seq; `romacs-agent-event-functions' receive them (romacs-agent-ui.el
 ;; renders them).
 
@@ -168,7 +168,9 @@ not started, `outcome unknown' when it had)."
   ;; not yet journaled back, whether the records seen are the live ones
   ;; (the supervisor's replay acknowledged), and the lines written to the
   ;; harness so far, every run's (request ids count on from them).
-  driver-state startup-pending caught-up (inputs 0) models-request)
+  driver-state startup-pending caught-up (inputs 0) models-request
+  ;; Whether the last line was a compaction's boundary: its summary is next.
+  compacting)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -366,12 +368,13 @@ and that nothing answers at."
              romacs-agent--sessions)
     ;; A route whose session's record is gone: its record is made before
     ;; its route (romacs-agent--create, then the launch), so a session
-    ;; another process is creating keeps its route.
+    ;; another process is creating keeps its route.  One that still answers
+    ;; stays too: a process with another state root sees no records at all.
     (let ((routes (expand-file-name "route/" runtime)))
       (when (romacs-agent--own-directory-p routes)
         (dolist (route (directory-files routes t "\\.sock\\'"))
           (unless (file-directory-p (expand-file-name (file-name-base route) (romacs-agent--state-root)))
-            (when (file-symlink-p route) (delete-file route))))))
+            (when (and (file-symlink-p route) (romacs-agent--stale-p route)) (delete-file route))))))
     (let ((editor (expand-file-name "editor/" runtime)))
       (when (romacs-agent--own-directory-p editor)
         (dolist (socket (directory-files editor t "\\`[0-9]+\\.sock\\'"))

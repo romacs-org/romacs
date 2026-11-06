@@ -143,9 +143,11 @@ while they name no prompt."
                         events)
                   (setq turn nil))))
       (dolist (line objects)
-        (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t)
-                    (eq (gethash "isCompactSummary" line) t))
+        (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t))
           (pcase (gethash "type" line)
+            ((and "user" (guard (eq (gethash "isCompactSummary" line) t)))
+             (push (list :type 'compacted :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))
+                   events))
             ("user"
              (let* ((content (gethash "content" (gethash "message" line)))
                     (prompt (romacs-agent-history--prompt content)))

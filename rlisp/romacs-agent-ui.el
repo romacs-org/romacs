@@ -268,6 +268,13 @@ a brief of INPUT."
   (propertize "↗ thread" 'face 'romacs-agent-link 'mouse-face 'highlight 'help-echo "Open this task's thread"
               'keymap romacs-agent-ui--link-map 'romacs-agent-task id))
 
+(defvar romacs-agent-ui--compaction-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'romacs-agent-chat-show-compaction)
+    (define-key map [mouse-1] #'romacs-agent-chat-show-compaction)
+    map)
+  "Keys of a compaction's row.")
+
 (defun romacs-agent-ui--task-record (output)
   "The task record a delegate call's OUTPUT holds, or nil."
   (let ((record (ignore-errors (json-parse-string output))))
@@ -534,6 +541,12 @@ or a repeat."
                (setq romacs-agent-ui--open 'thinking))
              (romacs-agent-ui--insert text 'face 'romacs-agent-dim))))
         ('tool (romacs-agent-ui--tool session event))
+        ('compacted
+         (romacs-agent-ui--line session event
+                                (concat (propertize "  · " 'face 'romacs-agent-dim)
+                                        (propertize "Session compacted" 'face 'romacs-agent-link 'mouse-face 'highlight))
+                                'keymap romacs-agent-ui--compaction-map 'help-echo "Show what the session kept"
+                                'romacs-agent-compaction (plist-get event :text)))
         ('approval
          (romacs-agent-ui--line session event
                                 (format "◆ %s asks: %s  %s   [y] allow  [N] deny"
@@ -918,6 +931,36 @@ transcript, scroll back, as hermes's chat does."
     (cond (session (romacs-agent-show session))
           (id (user-error "Task %s is gone" id))
           (t (user-error "No delegated task on this row")))))
+
+(define-derived-mode romacs-agent-compaction-mode special-mode "Compaction"
+  "A compaction's summary."
+  (visual-line-mode))
+
+(defun romacs-agent-ui--compaction-buffer ()
+  "The buffer to show a summary in: never one that holds something else."
+  (let* ((name "*agent compaction*") (buffer (get-buffer name)))
+    (if (and buffer (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-compaction-mode))
+        buffer
+      (generate-new-buffer name))))
+
+(defun romacs-agent-chat-show-compaction (&optional event)
+  "Show the summary of the compaction on this row, or at mouse EVENT."
+  (interactive (list last-nonmenu-event) romacs-agent-chat-mode)
+  (let* ((posn (and (consp event) (event-end event)))
+         (summary (if posn
+                      (get-text-property (posn-point posn) 'romacs-agent-compaction (window-buffer (posn-window posn)))
+                    (get-text-property (point) 'romacs-agent-compaction)))
+         (width (romacs-agent-ui--table-width)))
+    (unless summary (user-error "No compaction on this row"))
+    (romacs-agent-ui--helpers)
+    (let ((buffer (romacs-agent-ui--compaction-buffer)))
+      (with-current-buffer buffer
+        (romacs-agent-compaction-mode)
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (romacs-agent-ui--markdown summary width)))
+        (goto-char (point-min)))
+      (pop-to-buffer buffer))))
 
 (defun romacs-agent-chat-composer ()
   "Go to the composer."
