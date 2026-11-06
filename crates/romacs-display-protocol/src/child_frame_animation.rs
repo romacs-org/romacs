@@ -248,8 +248,11 @@ pub struct Layer {
     /// The colour it glows in, outside its edge (graphics.md's "light,
     /// not chrome": a raised layer glows, it is not outlined).
     pub glow: Option<crate::Color>,
-    /// Whether it casts a soft shadow onto what lies beneath.
-    pub shadow: bool,
+    /// How far its glow reaches, in logical pixels, and how opaque it is.
+    pub glow_light: [f32; 2],
+    /// The soft shadow it casts onto what lies beneath, when it casts one:
+    /// its reach and drop in logical pixels, and its opacity.
+    pub shadow: Option<[f32; 3]>,
     /// A 1px hairline round its edge in this colour, glowing or not (an
     /// error toast's, which must read apart from an ordinary one).
     pub outline: Option<crate::Color>,

@@ -49,7 +49,9 @@ fails unless each of the 200 has a sample.
 With --light the default face is dark on light (#202020 on #f0f0f0),
 where a corner blended wrongly shows.
 
-With --themes A,B the three panes then show each theme in turn, every
+With --themes A,B (by default, on a plain run with none of --classic,
+--scenes, --gpu-frames, --theme or --light, DEFAULT_THEMES; `--themes ""'
+for none) the three panes then show each theme in turn, every
 other theme disabled first (`load-theme'), each recorded and probed as
 above: the focus edge must show the colour `romacs-chrome-state' reports
 for that theme, and every theme's focus colour must differ from the
@@ -58,7 +60,7 @@ others' and from the one before any theme (romacs-chrome.el
 
 usage: chrome_live.py --binary BIN --output DIR [--classic] [--scale 1.5]
        [--slowdown 8] [--mode 1600x1000] [--gpu-frames 200] [--light]
-       [--themes modus-operandi,tango-dark | --scenes]
+       [--themes catppuccin-latte,tokyonight-night | --scenes]
 """
 import argparse
 import hashlib
@@ -72,10 +74,19 @@ import time
 
 import live_oracle as live
 
+# Shipped themes with different focus colours: the first two box the mode
+# line, so the bar is taller and draws a box; the last does not.
+DEFAULT_THEMES = 'catppuccin-latte,tokyonight-night,omarchy-gruvbox'
+
 INIT = r'''
 (defvar chrome-live-dir (getenv "CHROME_LIVE_DIR"))
 (defun chrome-live--hex (color)
   (and color (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) (color-values color)))))
+(defun chrome-live--note-laid-out (name)
+  "Note NAME once the host has redisplayed since the mark: a theme's rows take
+effect in the layout, which the bar's height and the windows' edges report."
+  (if (romacs--redisplay-since-mark) (chrome-live--note name)
+    (run-with-timer 0.05 nil #'chrome-live--note-laid-out name)))
 (defun chrome-live--note (name)
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
@@ -108,7 +119,7 @@ STEPS = r'''
 '''
 THEME = r'''
 (run-at-time {at} nil (lambda () (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t)
-                        (chrome-live--note "{theme}")))
+                        (romacs--redisplay-since-mark t) (chrome-live--note-laid-out "{theme}")))
 '''
 SCENES = r'''
 (setq trusted-content :all)
@@ -245,8 +256,8 @@ def main():
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--gpu-frames', type=int, default=0)
     ap.add_argument('--light', action='store_true')
-    ap.add_argument('--theme', help='a theme to load in the init (a real light theme: modus-operandi)')
-    ap.add_argument('--themes', default='', help='comma-separated themes to load in turn after the splits')
+    ap.add_argument('--theme', help='a theme to load in the init (a real light theme: catppuccin-latte)')
+    ap.add_argument('--themes', help='comma-separated themes to load in turn after the splits')
     ap.add_argument('--scenes', action='store_true')
     ap.add_argument('--top', action='store_true', help="the status bar at the top (`romacs-status-bar-position')")
     ap.add_argument('--labwc', default=live.LABWC)
@@ -254,7 +265,9 @@ def main():
     args = ap.parse_args()
     if args.gpu_frames and args.gpu_frames < MEASURED:
         ap.error(f'--gpu-frames measures the last {MEASURED} presentations')
-    themes = [t for t in args.themes.split(',') if t]
+    variant = args.classic or args.scenes or args.gpu_frames or args.theme or args.light
+    given = ('' if variant else DEFAULT_THEMES) if args.themes is None else args.themes
+    themes = [t for t in given.split(',') if t]
     if args.classic and themes:
         ap.error('--themes probes the focus edge, which --classic does not draw')
     if args.scenes and themes:
@@ -363,7 +376,7 @@ def main():
                         # accent block at its left edge.
                         x0, x1, top, height = state['border'], state['native_width'] - state['border'], state['bar_top'], state['bar_height']
                         mid = round((top + height / 2) * s)
-                        # The middle of the line: the right-align marker's room.
+                        # The middle of the line, above the identity's pill.
                         checks[f'line-{step}'] = [pixel(png, round((x0 + x1) / 2 * s), round((top + 2) * s)), state['bar_background']]
                         checks[f'accent-{step}'] = [pixel(png, round((x0 + 1) * s), mid), state['focus']]
                         # No window draws a band of its own: the bar is the mode line.

@@ -92,6 +92,20 @@ fn scrolling_past_invisible_text_as_pinned_gnu() {
     replay(include_str!("scroll_invisible.el"), include_str!("scroll_invisible.gnu"), 2000);
 }
 
+/// format_mode_line.el: `format-mode-line' of another buffer reads that
+/// buffer's point, not the selected window's.
+#[test]
+fn format_mode_line_of_another_buffer_as_pinned_gnu() {
+    replay(include_str!("format_mode_line.el"), include_str!("format_mode_line.gnu"), 0);
+}
+
+/// pre_redisplay.el: `pre-redisplay-function' and its hook run with the
+/// windows GNU's prepare_menu_bars passes, under `inhibit-redisplay'.
+#[test]
+fn pre_redisplay_function_runs_as_pinned_gnu() {
+    replay(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30);
+}
+
 /// unibyte_window.el: a window shows a unibyte buffer, visited literally
 /// or made unibyte while shown, its raw bytes as escapes: motion,
 /// scrolling, edits and narrowing keep every position as GNU's.

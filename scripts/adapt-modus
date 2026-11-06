@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Adapt modus-themes.el into rlisp/romacs-theme-modus.el: the Modus
 theming machinery (helper faces, the five live style options, the common
-mappings, four core palettes, the overrides presets, the face table and the
+mappings, the vivendi core palette Rum derives from, the face table and the
 theme variables, the style helpers and the palette generator) under Romacs's
-names, as data and code romacs-theme.el builds its themes with.
+names, as data and code romacs-theme.el builds its themes with.  Romacs offers
+no Modus palette: of Modus's cores it takes only that one.
 
 The output is generated once and committed; a newer Modus is a deliberate
 regeneration.  Forms are taken whole, by name, from the source; symbols are
@@ -66,11 +67,44 @@ EXCLUDE = {
     'modus-themes--declared-p', 'modus-themes-get-all-known-themes', 'modus-themes--modus-theme-p',
     'modus-themes--disable-themes', 'modus-themes--get-color-schemes', 'modus-themes-sort',
     'modus-themes-known-p', 'modus-themes--belongs-to-family-p', 'modus-themes--background-p',
+    'modus-themes-operandi-palette', 'modus-themes-operandi-tinted-palette', 'modus-themes-vivendi-tinted-palette',
+    'modus-themes-preset-overrides-faint', 'modus-themes-preset-overrides-intense',
+    'modus-themes-preset-overrides-cooler', 'modus-themes-preset-overrides-warmer',
     'modus-themes-operandi-deuteranopia-palette', 'modus-themes-operandi-tritanopia-palette',
     'modus-themes-vivendi-deuteranopia-palette', 'modus-themes-vivendi-tritanopia-palette',
     # Named in docstrings only.
     'modus-themes-items', 'modus-themes-faces-deuteranopia', 'modus-themes-faces-tritanopia',
 }
+
+# The colours the face table and theme variables write literally, as names:
+# a theme with roles of its own sets them, romacs-theme.el's
+# `romacs-theme--modus-constants' keeps Modus's values for the rest.
+TABLE_LITERALS = {'"gray50"': ',fg-table-dim', '"#595959"': ',term-dim', '"#a6a6a6"': ',term-light'}
+
+
+def active_mode_line(form):
+    """The face table FORM with the active window's line `mode-line' itself, so
+    a buffer's remapping of `mode-line' (`face-remap-add-relative') reaches it."""
+    form, found = re.subn(r"`\(mode-line-active\n.*?\(t :underline ,border-mode-line-active\)\)\)",
+                          ";; The active window's line is `mode-line' itself, so a buffer's\n"
+                          "    ;; remapping of `mode-line' (`face-remap-add-relative') reaches it.\n"
+                          "    `(mode-line-active ((,c :inherit mode-line)))", form, count=1, flags=re.S)
+    if not found:
+        raise SystemExit('modus-themes-faces: mode-line-active moved')
+    return form
+
+
+def required_core(form):
+    """The generator FORM with the core a caller names: Modus infers one of
+    the cores Romacs does not take."""
+    form, inferred = re.subn(r'\(core \(or core-palette\n.*?palette\)\)\)\)\n',
+                             '(core (or core-palette (error "A core palette is required")))\n', form, flags=re.S)
+    form, documented = re.subn(r'With optional CORE-PALETTE use it.*?(?=With optional MAPPINGS)',
+                               'CORE-PALETTE fills in any of the remaining entries.\n\n', form, flags=re.S)
+    if not (inferred and documented):
+        raise SystemExit('modus-themes-generate-palette: the core inference moved')
+    return form.replace('like `modus-themes-operandi-palette\'', 'like `modus-themes-vivendi-palette\'')
+
 
 # The forms taken, by (head, name); the order is the output's.
 KEEP = [
@@ -80,14 +114,7 @@ KEEP = [
     ('defcustom', 'modus-themes-common-palette-user'),
     ('defcustom', 'modus-themes-common-palette-overrides'),
     ('defconst', 'modus-themes-common-palette-mappings'),
-    ('defconst', 'modus-themes-operandi-palette'),
-    ('defconst', 'modus-themes-operandi-tinted-palette'),
     ('defconst', 'modus-themes-vivendi-palette'),
-    ('defconst', 'modus-themes-vivendi-tinted-palette'),
-    ('defvar', 'modus-themes-preset-overrides-faint'),
-    ('defvar', 'modus-themes-preset-overrides-intense'),
-    ('defvar', 'modus-themes-preset-overrides-cooler'),
-    ('defvar', 'modus-themes-preset-overrides-warmer'),
     ('defun', 'modus-themes-retrieve-palette-value'),
     ('defun', 'modus-themes--bold-weight'),
     ('defun', 'modus-themes--slant'),
@@ -226,6 +253,13 @@ def adapt(source):
         # the face table, which go to different names.
         form = form.replace(":group 'modus-themes-faces", ":group 'romacs-theme-faces")
         form = re.sub(r":group 'modus-themes\b(?!-)", ":group 'romacs-theme", form)
+        if key[1] == 'modus-themes-generate-palette':
+            form = required_core(form)
+        if key[1] in ('modus-themes-faces', 'modus-themes-custom-variables'):
+            for literal, name in TABLE_LITERALS.items():
+                form = form.replace(literal, name)
+        if key[1] == 'modus-themes-faces':
+            form = active_mode_line(form)
         out.append(rename(form))
     header = f''';;; romacs-theme-modus.el --- The Modus theming machinery, for Romacs's themes  -*- lexical-binding: t -*-
 

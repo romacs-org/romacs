@@ -280,6 +280,13 @@ impl Leaf<'_> {
         Self::position_or_nil(self.vm.rows_shown_from(window, start).map_err(Fault::Error)?)
     }
 
+    /// The windows argument `pre-redisplay-function' takes now, if a host
+    /// lays the frame out and it has anything to do.
+    pub(crate) fn pre_redisplay_call(&mut self) -> std::result::Result<Option<Value>, Fault> {
+        if !self.vm.has_layout_host() { return Ok(None); }
+        self.vm.pre_redisplay_call().map_err(Fault::Error)
+    }
+
     /// Settle each live window's start as the next layout will
     /// (`Vm::redisplay_point_visibility_now'), and record the end that
     /// layout will show, so `window-end' without UPDATE (isearch's
@@ -882,8 +889,8 @@ impl Leaf<'_> {
             return Err(unsupported("in a unibyte buffer"));
         };
         let r = b.accessible();
-        let at = b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0.clamp(r.start.0, r.end.0);
-        Ok(b.as_str().as_bytes()[r.start.0..at].iter().filter(|&&c| c == b'\n').count() as i64)
+        let at = b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.max(r.start).min(r.end);
+        Ok((b.line_of_byte(at).map_err(Fault::Error)? - b.line_of_byte(r.start).map_err(Fault::Error)?) as i64)
     }
 
     /// How WINDOW labels its lines from its start, its buffer current.

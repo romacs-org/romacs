@@ -252,6 +252,7 @@ fn a_context_marker_does_not_align_the_bar() {
 #[test]
 fn only_the_owners_pill_reads_its_modified_state() {
     let mut vm = session();
+    vm.set_gc_stress(1);
     eval(&mut vm, "(set-face-attribute 'error nil :foreground \"#ff0000\")");
     let pill = "(:propertize \"ID\" romacs-segment id romacs-pill mode-line-highlight romacs-pill-modified error)";
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
@@ -298,6 +299,7 @@ fn projected_values_are_the_formats_data() {
 #[test]
 fn a_collecting_line_keeps_its_windows() {
     let mut vm = session();
+    vm.set_gc_stress(1);
     eval(&mut vm, "(put 'gc-probe 'risky-local-variable t)");
     eval(&mut vm, "(setq-default mode-line-format '(:eval (progn (garbage-collect) \"MAIN\")))");
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below) w3 (split-window-right))");

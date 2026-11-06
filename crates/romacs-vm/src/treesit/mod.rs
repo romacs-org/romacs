@@ -7,12 +7,15 @@
 //! 1-based ones; `TextBody` offsets are 0-based.
 pub(crate) mod native;
 
-use crate::text::TextBody;
+use crate::text::{FrozenText, TextBody};
 use std::sync::OnceLock;
 use crate::Value;
 use native::{TSInputEdit, TSPoint, Tree};
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 /// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
 /// GNU's language symbol name, its `tree_sitter_LANG` function, and the
@@ -61,6 +64,9 @@ pub(crate) const EMPTY_LINECOL: Linecol = Linecol { line: 0, col: 0, bytepos: 0 
 pub(crate) struct Core {
     pub tree: Option<Rc<Tree>>,
     pub need_reparse: bool,
+    /// Whether TREE came from no earlier tree. An incremental parse need
+    /// not build what a parse from nothing would: error recovery differs.
+    pub fresh: bool,
     /// `visible_beg/end`: the text the tree sees, 1-based bytes.
     pub visible: (i64, i64),
     /// `visi_beg/end_linecol`; None unless the parser tracks linecols.
@@ -82,6 +88,8 @@ pub(crate) struct Change {
 #[derive(Default)]
 pub(crate) struct Registry {
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
+    /// A first parse started before a parser asks for it.
+    pub early: Option<Early>,
 }
 /// A copy of a text (a snapshot or a cloned buffer) has no parsers.
 impl Clone for Registry {
@@ -90,12 +98,117 @@ impl Clone for Registry {
     }
 }
 // SAFETY: a world image holds no parser: live treesit objects refuse world
-// capture (`Object::foreign_resource`), so a captured registry is empty.
+// capture (`Object::foreign_resource`) and `world_quiescent` an early
+// parse, so a captured registry is empty.
 unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
+
+/// The most first parses running at once, whatever a session visits.
+const EARLY_LIMIT: usize = 4;
+static EARLY_RUNNING: AtomicUsize = AtomicUsize::new(0);
+/// Whether a first parse ended since `take_early_landed'.
+static EARLY_LANDED: AtomicBool = AtomicBool::new(false);
+/// Whether a first parse ended since the last call.
+pub(crate) fn take_early_landed() -> bool {
+    EARLY_LANDED.swap(false, Ordering::Relaxed)
+}
+/// A first parse is over: a window left plain for it can have its faces.
+pub(crate) fn note_early_landed() {
+    EARLY_LANDED.store(true, Ordering::Relaxed);
+}
+/// One running first parse, counted until its thread ends.
+pub(crate) struct EarlySlot;
+impl EarlySlot {
+    /// A slot, unless too many are running.
+    pub(crate) fn take() -> Option<Self> {
+        EARLY_RUNNING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < EARLY_LIMIT).then_some(n + 1)).ok().map(|_| EarlySlot)
+    }
+}
+/// Whether no thread holds a frozen text, which shares its rope's reference
+/// counts with the live one.
+pub(crate) fn early_idle() -> bool {
+    EARLY_RUNNING.load(Ordering::Relaxed) == 0
+}
+impl Drop for EarlySlot {
+    fn drop(&mut self) {
+        EARLY_RUNNING.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// The most edits a tree from an early parse catches up with: more, and a
+/// parse from nothing is as good.
+const EARLY_CHANGES_LIMIT: usize = 1024;
+
+/// A first parse on a thread of its own, overlapping what a visit does
+/// before a parser asks for the tree (`set-auto-mode', the mode's body),
+/// and whatever a person types while it runs: it reads a frozen copy of the
+/// text, and the changes made since are kept to edit its tree with. Dropped,
+/// the thread ends alone.
+pub(crate) struct Early {
+    pub language: native::Language,
+    pub visible: (i64, i64),
+    /// The text's changes since the copy; None past EARLY_CHANGES_LIMIT.
+    changes: RefCell<Option<Vec<Change>>>,
+    result: mpsc::Receiver<Option<native::Loose>>,
+    /// What the thread sent, once `ready' saw it.
+    landed: Option<Option<native::Loose>>,
+}
+impl Early {
+    /// The parse of TEXT's VISIBLE region (1-based bytes) in SLOT, calling
+    /// WAKE when it ends.
+    pub(crate) fn start(slot: EarlySlot, language: native::Language, text: FrozenText, visible: (i64, i64),
+                        wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Self> {
+        let (sender, result) = mpsc::channel();
+        std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
+            // The slot outlives the text.
+            let _slot = slot;
+            let text = text;
+            let mut parser = native::Parser::new();
+            parser.set_language(language);
+            let mut reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+            let _ = sender.send(parser.parse(None, &mut reader).map(Tree::loose));
+            note_early_landed();
+            if let Some(wake) = wake { wake(); }
+        }).ok()?;
+        Some(Self { language, visible, changes: RefCell::new(Some(Vec::new())), result, landed: None })
+    }
+    /// Whether the thread has sent its result.
+    pub(crate) fn ready(&mut self) -> bool {
+        if self.landed.is_none() {
+            self.landed = self.result.try_recv().ok();
+        }
+        self.landed.is_some()
+    }
+    /// Whether a parser asking now would wait for a tree it can use.
+    pub(crate) fn pending(&mut self) -> bool {
+        self.changes.borrow().is_some() && !self.ready()
+    }
+    fn record(&self, change: Change) {
+        let mut changes = self.changes.borrow_mut();
+        if let Some(list) = changes.as_mut() {
+            list.push(change);
+            if list.len() > EARLY_CHANGES_LIMIT {
+                *changes = None;
+            }
+        }
+    }
+    /// The tree, waiting for the thread, as `Core::record' left it after the
+    /// text's changes since the copy, with the region those left and whether
+    /// there were any.
+    pub(crate) fn finish(mut self, text: &TextBody) -> Option<(Tree, (i64, i64), bool)> {
+        let changes = self.changes.take()?;
+        let tree = self.landed.take().or_else(|| self.result.recv().ok()).flatten()?.tree();
+        let mut core = Core::new(self.visible, None);
+        core.tree = Some(Rc::new(tree));
+        for change in &changes {
+            core.record(Change { linecols: None, ..*change }, text);
+        }
+        Rc::into_inner(core.tree.take()?).map(|tree| (tree, core.visible, !changes.is_empty()))
+    }
+}
 
 impl Registry {
     pub(crate) fn is_empty(&self) -> bool {
-        self.parsers.is_empty()
+        self.parsers.is_empty() && self.early.is_none()
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for (parser, _) in &mut self.parsers {
@@ -106,6 +219,9 @@ impl Registry {
     pub(crate) fn record(&self, change: Change, text: &TextBody) {
         for (_, core) in &self.parsers {
             core.borrow_mut().record(change, text);
+        }
+        if let Some(early) = &self.early {
+            early.record(change);
         }
     }
 }
@@ -123,7 +239,7 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 
 impl Core {
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, visible, linecols }
+        Self { tree: None, need_reparse: true, fresh: false, visible, linecols }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.
@@ -267,21 +383,29 @@ pub(crate) fn linecol_of_pos(text: &TextBody, target: i64, cache: Linecol) -> Li
     Linecol { line: cache.line + delta, col, bytepos: target }
 }
 
+/// A text a parse can read.
+pub(crate) trait Chunks {
+    /// The bytes from AT to the end of their chunk; empty at the end.
+    fn chunk_from(&self, at: usize) -> &[u8];
+    /// The offsets of the raw-byte placeholders inside R.
+    fn raw_in(&self, r: Range<usize>) -> &[u32];
+}
+
 /// The text a parse reads: TEXT's bytes in the visible region, chunk by
 /// chunk, raw-byte placeholders as GNU's internal bytes (§2.3).
-pub(crate) struct Reader<'a> {
+pub(crate) struct Reader<'a, T> {
     /// None for a killed buffer, which reads as empty.
-    pub text: Option<&'a TextBody>,
+    pub text: Option<&'a T>,
     /// 0-based bytes.
     pub visible: (usize, usize),
     raw: [u8; 2],
 }
-impl<'a> Reader<'a> {
-    pub(crate) fn new(text: Option<&'a TextBody>, visible: (usize, usize)) -> Self {
+impl<'a, T> Reader<'a, T> {
+    pub(crate) fn new(text: Option<&'a T>, visible: (usize, usize)) -> Self {
         Self { text, visible, raw: [0; 2] }
     }
 }
-impl native::Source for Reader<'_> {
+impl<T: Chunks> native::Source for Reader<'_, T> {
     fn read(&mut self, offset: usize) -> &[u8] {
         let at = self.visible.0 + offset;
         let Some(text) = self.text.filter(|_| at < self.visible.1) else { return &[] };
@@ -539,3 +663,18 @@ pub(crate) fn describe(vm: &crate::Vm, object: &Object) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{EARLY_LIMIT, EarlySlot, early_idle};
+
+    #[test]
+    fn early_slots_stop_at_the_limit_and_all_come_back() {
+        let slots: Vec<_> = std::iter::from_fn(EarlySlot::take).collect();
+        assert_eq!(slots.len(), EARLY_LIMIT);
+        assert!(EarlySlot::take().is_none() && EarlySlot::take().is_none());
+        drop(slots);
+        assert!(early_idle());
+        assert!(EarlySlot::take().is_some());
+        assert!(early_idle());
+    }
+}

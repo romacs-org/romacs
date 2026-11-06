@@ -314,14 +314,14 @@ class Session:
                       ' (flymake-make-diagnostic (current-buffer) 5 6 :note "n"))))',
                       '(setq-local flymake-diagnostic-functions (list (quote perkey--diagnostics)))',
                       '(flymake-mode 1)']
-        if self.args.split > 1:
+        if getattr(self.args, 'split', 1) > 1:
             # The measured buffer stays selected; the other windows show
             # other buffers, each drawing its own mode line.
             # Stacked, full width: line motion measures what it does alone.
             forms.append('(let ((others (list (get-buffer-create "*perkey-other*") (messages-buffer))))'
                          ' (save-selected-window (select-window (split-window-below))'
                          ' (switch-to-buffer (car others))'
-                         f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if self.args.split > 2 else ""}))')
+                         f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if getattr(self.args, 'split', 1) > 2 else ""}))')
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):

@@ -298,6 +298,10 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     let advances: Vec<f32> = chars.iter().map(|c| c.3).collect();
     let places = band.marks.places(text, bounds.width, STATUS_BAR_PAD, &advances);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(background));
+    // The band's own overline runs across it, as GNU's does across a mode line.
+    if let Some(line) = band.faces[face].decor.overline {
+        frame.add_background(bounds.x, bounds.y, bounds.width, 1.0, color(line.color.unwrap_or(band.faces[face].foreground)));
+    }
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
     // text in the pill's own foreground where it has one.
@@ -359,16 +363,65 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     }
     frame.set_draw_context(owner.0, owner.1, Some(bounds));
     let [_, centre_marker, _, right_marker, _] = band.marks.zones(text);
-    for (i, (&(_, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
+    // A boxed band is one box run, as a mode line is: stretches of its face
+    // fill the room between the characters and lie under those whose faces
+    // have no box (a mode line's faces merge over its own, so they inherit
+    // it), and every cell of a row with a box is the band's height on one
+    // baseline (the tallest ascent, a box's top included), so the box's
+    // lines run straight.
+    let band_box = faces[face].decor.boxed;
+    let boxes = band_box.is_some() || chars.iter().any(|c| faces[c.2].decor.boxed.is_some());
+    let row_ascent = chars.iter().map(|c| metrics[c.2].0).fold(metrics[face].0, f32::max);
+    let band_id = FaceId::new(face_base + face as u32);
+    let mut run: Vec<(usize, f32, f32, Option<romacs_layout_input::BoxLine>)> = vec![];
+    let fill = |frame: &mut FrameGlyphBuffer, run: &mut Vec<_>, from: f32, to: f32, under: [u8; 3]| {
+        if band_box.is_some() && to > from {
+            frame.add_stretch(from, bounds.y, to - from, bounds.height, color(under), band_id, false);
+            run.push((frame.glyphs.len() - 1, from, to - from, band_box));
+        }
+    };
+    // The context segments, swept with the characters in byte order.
+    let mut contexts: Vec<&std::ops::Range<usize>> = band.marks.segments.iter().filter(|s| band_box.is_some() && s.name == "context").map(|s| &s.bytes).collect();
+    contexts.sort_by_key(|bytes| bytes.start);
+    let mut contexts = contexts.into_iter().peekable();
+    let mut filled = bounds.x + band.accent.map_or(0.0, |_| STATUS_BAR_ACCENT);
+    for (i, (&(byte, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
         if centre_marker.contains(&i) || right_marker.contains(&i) { continue; }
-        let (ascent, height, _, _) = metrics[index];
-        if let Some(glyph) = glyphless.get(index, shown) {
-            glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true, 0.0)?;
-            continue;
+        let (ascent, height) = if boxes { (row_ascent, bounds.height) } else { (metrics[index].0, metrics[index].1) };
+        let left = bounds.x + x;
+        fill(frame, &mut run, filled, left, background);
+        let own = faces[index].decor.boxed;
+        if own.is_none() && band_box.is_some() {
+            while contexts.next_if(|bytes| bytes.end <= byte).is_some() {}
+            let context = contexts.peek().is_some_and(|bytes| bytes.contains(&byte));
+            fill(frame, &mut run, left, left + width, if context { band.faces[index].background } else { background });
         }
-        frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
-        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
+        let at = match glyphless.get(index, shown) {
+            Some(glyph) => {
+                let at = glyphless.paint(frame, index, glyph, left, bounds.y, (ascent, height), ids[i], true, 0.0)?;
+                // Its blank character is no cell of the run.
+                if boxes && matches!(frame.glyphs.get(at + 1), Some(romacs_display_protocol::FrameGlyph::Char { .. })) { frame.glyphs.remove(at + 1); }
+                at
+            }
+            None => {
+                frame.add_char(shown, left, bounds.y, width, height, ascent, false);
+                *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
+                frame.glyphs.len() - 1
+            }
+        };
+        if own.is_some() || band_box.is_none() { run.push((at, left, width, own)); }
+        filled = filled.max(left + width);
+    }
+    fill(frame, &mut run, filled, bounds.x + bounds.width, background);
+    // Ends of a run: a neighbour painted against it that shares its box goes on.
+    let joins = |a: Option<&(usize, f32, f32, Option<romacs_layout_input::BoxLine>)>, b: &(usize, f32, f32, Option<romacs_layout_input::BoxLine>)|
+        a.is_some_and(|a| a.3 == b.3 && (a.1 + a.2 - b.1).abs() < 0.01);
+    for k in 0..run.len() {
+        if run[k].3.is_none() { continue; }
+        let open_left = joins(k.checked_sub(1).and_then(|p| run.get(p)), &run[k]);
+        let open_right = run.get(k + 1).is_some_and(|next| joins(Some(&run[k]), next));
+        set_glyph_box_edges(frame, run[k].0, edges(!open_left, !open_right));
     }
     Ok(places)
 }
@@ -405,7 +458,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
-    frame.layer = layer_motion(child, &ends);
+    frame.layer = layer_motion(child, &ends, &snapshot.chrome.style);
     // A rounded layer is light, not chrome: its border is padding, unpainted,
     // and a hairline parts its stacked windows (a picker's input from its list).
     if child.radius > 0 {
@@ -417,7 +470,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
 
 /// How CHILD animates and looks, with its selection band where ENDS laid
 /// its rows.
-fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_display_protocol::Layer {
+fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd], style: &romacs_layout_input::Style) -> romacs_display_protocol::Layer {
     use romacs_display_protocol::{LayerAnimation, LayerEdge, Layer};
     Layer {
         animation: match child.animation {
@@ -429,10 +482,11 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_displa
             romacs_layout_input::LayerEdge::Bottom => LayerEdge::Bottom,
             romacs_layout_input::LayerEdge::Top => LayerEdge::Top,
         },
-        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row)),
+        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row, style)),
         radius: child.radius as f32,
         glow: child.glow.map(color),
-        shadow: child.shadow,
+        glow_light: style.glow,
+        shadow: child.shadow.then_some(style.shadow),
         outline: child.outline.map(color),
     }
 }
@@ -451,9 +505,9 @@ fn separate_windows(child: &ChildFrameSnapshot, frame: &mut FrameGlyphBuffer) {
 /// The band row ROW of CHILD's first window shows its selection in, laid
 /// out as END: a picker's selected row (Zed's inset `ListItem`, ideas and
 /// values only): the window's width and up to 4px of the padding either
-/// side, the row's height, corners of 4px, in the background of the face
+/// side, the row's height, STYLE's corners, in the background of the face
 /// at the row's start; none past the rows shown or under a header line.
-fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Option<romacs_display_protocol::SelectionBand> {
+fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32, style: &romacs_layout_input::Style) -> Option<romacs_display_protocol::SelectionBand> {
     let placed = child.windows.first()?;
     let window = &placed.snapshot;
     let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
@@ -461,7 +515,7 @@ fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Opti
     let inset = (placed.x as f32).min(4.0);
     Some(romacs_display_protocol::SelectionBand {
         x: placed.x as f32 - inset, y: placed.y as f32 + row.y, width: window.width as f32 + 2.0 * inset, height: row.height,
-        radius: 4.0,
+        radius: style.band_radius,
         color: color(window.faces.get(face)?.background), base: color(window.faces.first()?.background),
     })
 }
