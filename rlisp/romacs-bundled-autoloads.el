@@ -605,6 +605,16 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
 
 
+;;; Generated autoloads from romacs-truncate.el
+
+(autoload 'romacs-truncate "romacs-truncate"
+"STRING in at most WIDTH columns, a cut one ending in an ellipsis when
+WIDTH leaves room for more than that.  PADDING, a character, fills a
+shorter STRING to WIDTH.
+
+(fn STRING WIDTH &optional PADDING)")
+
+
 ;;; Generated autoloads from romacs-unidata.el
 
 (register-definition-prefixes "romacs-unidata" '("romacs-unidata-"))

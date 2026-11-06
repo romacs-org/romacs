@@ -1225,8 +1225,10 @@ Fill EXCHANGES settled exchanges first, then stream into a fresh reply."
     (setq hermes-chat--status-state '(:status error)
           hermes-chat--runtime-flags '(:yolo t))
     (dolist (width '(1 8 12 20 30 50 120 240))
-      (let ((plain (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) nil)))
-                     (hermes-chat--header-line width))))
+      ;; The brand is what varies here: the ellipsis would follow the mock.
+      (let* ((truncate-string-ellipsis "...")
+             (plain (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) nil)))
+                      (hermes-chat--header-line width))))
         (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
           (let ((branded (hermes-chat--header-line width)))
             (should (equal (substring-no-properties branded)

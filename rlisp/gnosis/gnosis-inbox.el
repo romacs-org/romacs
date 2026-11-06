@@ -868,7 +868,7 @@ file contents, approving into the current `gnosis-db'."
                     (if thema
                         (gnosis-cloze-remove-tags (nth 2 thema))
                       (or (plist-get entry :title) "")))))
-     48 nil nil "…")))
+     48 nil nil t)))
 
 (defun gnosis-inbox--close (entry state &optional ids extra)
   "Replace ENTRY with a STATE ledger heading for IDS; refresh the view.

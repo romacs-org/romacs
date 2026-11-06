@@ -61,6 +61,14 @@
     (should (equal (substring-no-properties (car row)) title))
     (should (= (string-width (get-text-property 0 'display (car row))) 44))))
 
+(ert-deftest romacs-agent-switch-cuts-a-title-with-the-session-s-ellipsis ()
+  (let* ((truncate-string-ellipsis "...")
+         (row (romacs-agent-ui--switch-row
+               (make-string 60 ?x) (romacs-agent-switch-tests--session "s") 44 120 nil))
+         (shown (get-text-property 0 'display (car row))))
+    (should (string-suffix-p "..." shown))
+    (should (= (string-width shown) 44))))
+
 (ert-deftest romacs-agent-switch-row-fits-its-width ()
   (let ((session (romacs-agent-switch-tests--session
                   "s" :model "claude-opus-5-5" :provider "a-long-provider" :context-used 250000 :context-window 1000000

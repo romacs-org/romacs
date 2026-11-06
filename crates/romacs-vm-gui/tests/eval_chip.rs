@@ -192,7 +192,7 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         // A long value is cut to the chip's width.
         vm.eval_source("(progn (goto-char (point-max)) (insert \"\n(make-string 200 ?x)\"))").unwrap();
         keys(&mut vm, &engine, &[24, 5]);
-        report.push(printed(&mut vm, "(with-current-buffer (romacs-eval-chip--buffer) (list (string-width (buffer-string)) (string-suffix-p \"…\" (buffer-string))))"));
+        report.push(printed(&mut vm, "(with-current-buffer (romacs-eval-chip--buffer) (list (string-width (buffer-string)) (string-suffix-p \"...\" (buffer-string))))"));
         keys(&mut vm, &engine, &[2]);
         // The claim is the chip's own text, once: another message (a timer's,
         // one synced during the evaluation) is a toast, and the value's

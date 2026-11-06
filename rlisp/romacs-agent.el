@@ -699,7 +699,7 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
                                     :model (car row) :efforts efforts
                                     :default-effort (plist-get (cdr row) :default-effort)
                                     :note (or missing
-                                              (and efforts (format "effort %s…%s" (car efforts) (car (last efforts))))
+                                              (and efforts (format "effort %s...%s" (car efforts) (car (last efforts))))
                                               ""))
                               common)))
                   models))))
@@ -988,7 +988,7 @@ other; empty for none."
   "Name SESSION, whose title was generated, after its first prompt TEXT."
   (let ((line (romacs-agent--task-line text)))
     (unless (string-empty-p line)
-      (setf (romacs-agent-title session) (truncate-string-to-width line 60 nil nil "…")
+      (setf (romacs-agent-title session) (truncate-string-to-width line 60 nil nil t)
             (romacs-agent-title-auto session) nil)
       (romacs-agent--update-manifest session))))
 
