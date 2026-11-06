@@ -991,3 +991,28 @@ fn overlay_calls_that_change_nothing_keep_the_window() {
     }
     assert!(walks(&mut vm) > before);
 }
+
+/// A buffer's `cursor-type' nil means no cursor (xdisp.c
+/// get_window_cursor_type: NO_CURSOR, selected or not), whichever way
+/// redisplay comes: a full one, or one that reuses the window's rows.
+#[test]
+fn a_buffers_nil_cursor_type_shows_no_cursor() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (set-buffer (get-buffer-create "landing")) (insert "one\ntwo\n")
+                          (set-window-buffer nil (current-buffer)) (goto-char 1))"#);
+    let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    assert!(!snapshot(&mut vm).cursor_off);
+    run(&mut vm, "(setq cursor-type nil)");
+    assert!(snapshot(&mut vm).cursor_off, "the full redisplay");
+    assert!(snapshot(&mut vm).cursor_off, "the reused rows");
+    run(&mut vm, "(forward-line 1)");
+    assert!(snapshot(&mut vm).cursor_off, "point moved");
+    // A blink's end does not bring it back.
+    run(&mut vm, "(internal-show-cursor nil t)");
+    assert!(snapshot(&mut vm).cursor_off);
+    run(&mut vm, "(setq cursor-type t)");
+    assert!(!snapshot(&mut vm).cursor_off, "back to the default");
+}

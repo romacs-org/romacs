@@ -1290,6 +1290,12 @@ impl Vm {
         self.slots[self.buffer_slot].value = saved;
         value
     }
+    /// Whether WINDOW shows no cursor: `internal-show-cursor' turned it off,
+    /// or its BUFFER's `cursor-type' is nil (xdisp.c get_window_cursor_type,
+    /// selected or not).  Its other values are not drawn yet: a box.
+    fn window_cursor_off(&mut self, window: Value, buffer: Value) -> Result<bool> {
+        Ok(self.window(window)?.cursor_off || self.buffer_variable(buffer, "cursor-type")? == Value::NIL)
+    }
     /// WINDOW's horizontal scroll in pixels for its BUFFER's rows: its
     /// columns times the frame's column width, limited as
     /// window_hscroll_limited limits them; under `auto-hscroll-mode'
@@ -1437,7 +1443,7 @@ impl Vm {
             faces: faces.published(),
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
-            cursor_off: self.window(window)?.cursor_off,
+            cursor_off: self.window_cursor_off(window, buffer)?,
             stretches,
             images,
             wrap_flips,
@@ -2146,7 +2152,8 @@ impl Vm {
     fn reuse_shown(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<Option<WindowSnapshot>> {
         let window = self.slots[root].value;
         let w = self.window(window)?;
-        let (id, mini, forced, cursor_off) = (w.id, w.mini, w.force_start, w.cursor_off);
+        let (id, mini, forced, buffer) = (w.id, w.mini, w.force_start, w.buffer);
+        let cursor_off = self.window_cursor_off(window, buffer)?;
         if forced || !self.display_state.previous.contains_key(&id) {
             return Ok(None);
         }
