@@ -120,6 +120,7 @@ fn mouse_position_with_no_pointer_is_pinned_gnu() {
             (condition-case e (set-mouse-pixel-position (selected-frame) 1 2) (error e))
             (condition-case e (set-mouse-position nil 1 2) (error e))
             (condition-case e (set-mouse-pixel-position (selected-frame) 'a 2) (error e))
+            (condition-case e (set-mouse-position (selected-frame) 2147483648 2) (error e))
             (let ((mouse-position-function seen)) (list (mouse-position) (mouse-pixel-position)))))";
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
     let _ = std::fs::remove_dir_all(&dir);
