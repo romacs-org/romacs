@@ -42,7 +42,8 @@ landed.
 
 Romacs sessions run an installation's compiled Lisp: the store beside the
 binary is filled first, as an installer does (--no-compile-lisp reuses it).
-GNU runs -Q with tree-sitter modes (`treesit-enabled-modes' t, grammars
+GNU runs -Q, with `save-place-mode' as Romacs's defaults have it, and
+tree-sitter modes (`treesit-enabled-modes' t, grammars
 from --grammars: `tools/treesit_grammars.py so --out DIR') or, for
 reference, its regex modes; Romacs runs its interactive defaults, whose
 tree-sitter modes are the shipped grammars'.
@@ -269,7 +270,9 @@ class Session:
             argv = [self.args.romacs, '--loadup', '--trace-latency']
         else:
             setup = self.root / 'ofl-gnu.el'
-            body = '(setq inhibit-startup-screen t native-comp-jit-compilation nil)\n'
+            # Romacs's defaults restore a visited file's place, which a re-open
+            # after scrolling then pays for: the same visit in both.
+            body = '(setq inhibit-startup-screen t native-comp-jit-compilation nil)\n(save-place-mode 1)\n'
             if self.engine == 'gnu-ts':
                 body += GNU_TS.format(grammars=json.dumps(self.args.grammars))
             setup.write_text(body + f'(load {json.dumps(str(measure))} nil t)\n')
