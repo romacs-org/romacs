@@ -132,7 +132,6 @@ make-window-start-visible	absent	xdisp.c; no shipped Lisp reads or sets it
 max-redisplay-ticks	absent	xdisp.c; no shipped Lisp reads or sets it
 memory-signal-data	needed	alloc.c; read by gnu-lisp/startup.el
 menu-prompt-more-char	absent	keyboard.c; no shipped Lisp reads or sets it
-module-file-suffix	needed	lread.c; read by gnu-lisp/files.el and 2 more
 motif-version-string	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 mouse-position-function	needed	frame.c; read by gnu-lisp/loadhist.el and 1 more
 multiple-frames	absent	xdisp.c; no shipped Lisp reads or sets it
