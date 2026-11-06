@@ -172,6 +172,29 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
     assert_eq!(painted.faces[&face].background, romacs_display_protocol::Color::from_pixel(0x1e2832));
 }
 
+/// A band's own overline is a rule across it, in the line's colour, not only
+/// over its text; a band without one has none.
+#[test]
+fn the_status_bar_s_overline_runs_across_it() {
+    let bar = |line: Option<romacs_layout_input::Line>| {
+        let mut bar_face = face([0; 3], [30, 40, 50]);
+        bar_face.decor.overline = line;
+        let mut snapshot = frame(window("x", LineWrap::Window), None);
+        snapshot.status_bar = Some(StatusBarSnapshot {
+            x: 4, y: 150, width: 108, height: 20,
+            text: TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
+            face: FaceHandle(0), faces: vec![bar_face], window: 1, focused: true, marks: Default::default(),
+        });
+        lay_out(snapshot).glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Background { bounds, color } if bounds.height == 1.0 => Some((bounds.x, bounds.y, bounds.width, *color)),
+            _ => None,
+        }).collect::<Vec<_>>()
+    };
+    let line = romacs_layout_input::Line { style: 1, color: Some([0x2e, 0x29, 0x22]), position: None };
+    assert_eq!(bar(Some(line)), [(4.0, 150.0, 108.0, romacs_display_protocol::Color::from_pixel(0x2e2922))]);
+    assert_eq!(bar(None), []);
+}
+
 /// The status bar's marks (VM2-STATUS-BAR): the part after the
 /// `right-align' marker flush with the right edge and whole, the part
 /// before it clipped where that starts, the marker spanning the room; a
@@ -320,7 +343,7 @@ fn every_window_but_the_mini_window_is_a_pane() {
     snapshot.windows.push(PlacedWindowSnapshot { x: 8, y: 0, snapshot: mini });
     assert!(lay_out(snapshot.clone()).panes.is_empty(), "GNU_LOOK_DRAWS_NO_PANES");
     snapshot.chrome = romacs_layout_input::FrameChrome { internal_border: 6, radius: 6, dim: 0.12, focus: Some([212, 138, 32]),
-                                                         border: Some([40, 40, 40]), selected: 1, minibuffer: 3 };
+                                                         border: Some([40, 40, 40]), cursor: None, selected: 1, minibuffer: 3, style: Default::default() };
     let panes = lay_out(snapshot).panes;
     let accent = romacs_display_protocol::Color::from_pixel(0xd48a20);
     let line = romacs_display_protocol::Color::from_pixel(0x282828);

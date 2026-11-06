@@ -70,13 +70,15 @@ them GNU's square child-frame border."
 (defun romacs-layer-glass-parameters (glass &optional face padding radius)
   "Frame parameters that make a layer glass when GLASS is non-nil, else
 the ones that make it GNU's square child frame again.  The host rounds a
-glass layer's corners (`romacs-layer-radius', RADIUS pixels, default 8),
+glass layer's corners (`romacs-layer-radius', RADIUS pixels, default t,
+the style's `:radius-layer' whichever is in force),
 lights it (`romacs-layer-shadow'), leaves its border, there PADDING
 pixels (default 10), unpainted, and paints it in faces: its background
 FACE's (default `romacs-layer-glass'), its glow `romacs-layer-glow''s
 foreground."
   (if glass
-      `((romacs-layer-radius . ,(or radius 8)) (romacs-layer-shadow . t)
+      `((romacs-layer-radius . ,(or radius t))
+        (romacs-layer-shadow . t)
         (romacs-layer-face . ,(or face 'romacs-layer-glass))
         (child-frame-border-width . ,(or padding 10)))
     `((romacs-layer-radius) (romacs-layer-shadow) (romacs-layer-face)

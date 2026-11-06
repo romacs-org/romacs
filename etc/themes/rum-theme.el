@@ -18,6 +18,6 @@
 
 (apply #'romacs-theme-define
        'rum "Rum: warm parchment and restrained accents on black, as GNU shows it on Modus 5.3.0."
-       :family 'rum romacs-theme-rum)
+       :family 'rum :style 'flat romacs-theme-rum)
 
 ;;; rum-theme.el ends here

@@ -710,15 +710,38 @@ impl Vm {
         let (focus, border) = if drawn {
             (Some(self.display_face("romacs-pane-focus")?.foreground), Some(self.display_face("romacs-pane-border")?.foreground))
         } else { (None, None) };
+        let cursor = self.frame_colour_parameter(frame, "cursor-color")?;
+        let style = self.frame_style(frame)?;
         let selected = self.status_bar_owner()?.0;
         let selected = self.window(selected)?.id;
         let minibuffer = self.window(self.mini_window())?.id;
-        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, selected, minibuffer })
+        Ok(romacs_layout_input::FrameChrome { internal_border: self.host_border(), radius, dim, focus, border, cursor, selected, minibuffer , style})
     }
     /// FRAME's parameter NAME, if it has one.
     pub(crate) fn frame_parameter_of(&mut self, frame: Value, name: &str) -> Result<Option<Value>> {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
+    }
+    /// FRAME's material (`romacs-style'), a vector of its numbers
+    /// (`romacs-style--wire'), else the `flat' style.
+    fn frame_style(&mut self, frame: Value) -> Result<romacs_layout_input::Style> {
+        let value = self.frame_parameter_of(frame, "romacs-style")?;
+        let Some(Object::Vector(slots)) = value.and_then(|v| self.object_if(v)) else { return Ok(Default::default()) };
+        let &[layer, band, reach, drop, opacity, glow_reach, glow_opacity] = &slots[..] else { return Ok(Default::default()) };
+        let number = |v: Value| match self.object_if(v) {
+            Some(Object::Float(f)) => Some(*f as f32),
+            _ => v.integer_value().map(|n| n as f32),
+        };
+        let numbers = [layer, band, reach, drop, opacity, glow_reach, glow_opacity].map(number);
+        let [Some(layer_radius), Some(band_radius), Some(reach), Some(drop), Some(opacity), Some(glow_reach), Some(glow_opacity)] = numbers
+        else { return Ok(Default::default()) };
+        Ok(romacs_layout_input::Style { layer_radius, band_radius, shadow: [reach, drop, opacity], glow: [glow_reach, glow_opacity] })
+    }
+    /// FRAME's parameter NAME when it names a colour.
+    fn frame_colour_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
+        let value = self.frame_parameter_of(frame, name)?;
+        let Some(text) = value.and_then(|v| self.source_string_if(v)) else { return Ok(None) };
+        Ok(romacs_display_protocol::x11_colors::x11_color_value(&text).map(|(r, g, b)| [r, g, b]))
     }
     /// FRAME's parameter NAME when it is a `#RRGGBB' colour.
     fn frame_hex_parameter(&mut self, frame: Value, name: &str) -> Result<Option<[u8; 3]>> {
@@ -732,6 +755,9 @@ impl Vm {
     /// their ids: a window's redisplay runs Lisp, which may collect and
     /// move them, or delete one.
     fn child_frame_snapshots(&mut self) -> Result<Vec<romacs_layout_input::ChildFrameSnapshot>> {
+        let root = self.host_frame_peek();
+        let style = self.frame_style(root)?;
+        let by_style = self.intern("t");
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let ids: Vec<u64> = self.child_frames_bottom_up().into_iter().filter_map(|f| self.frame(f).ok().map(|f| f.id)).collect();
         let mut children = vec![];
@@ -746,8 +772,12 @@ impl Vm {
             let edge = self.display_face("child-frame-border")?;
             // An unspecified border face draws in the default foreground.
             let border_color = if edge.background == default.background { default.foreground } else { edge.background };
-            let radius = self.frame_parameter_of(frame, "romacs-layer-radius")?
-                .and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0);
+            // A number is the layer's own; `t' is the style's, whichever is
+            // in force now.
+            let radius = match self.frame_parameter_of(frame, "romacs-layer-radius")? {
+                Some(value) if value == by_style => style.layer_radius as u32,
+                value => value.and_then(|v| v.integer_value()).and_then(|r| u32::try_from(r).ok()).unwrap_or(0),
+            };
             // A glass layer (one with rounded corners) takes its colours
             // from faces: its background from `romacs-layer-glass', or the
             // face its `romacs-layer-face' parameter names (a toast's), and

@@ -107,15 +107,70 @@ thousandth a stack mark."
             (setq k (1+ k)))))
 
 ;; A theme application over N more package faces: loading and enabling
-;; modus-operandi in a -Q window, ~1.3 G instructions, most of it loading
-;; the theme file; nearly flat in the faces, which only the root frame
+;; catppuccin-latte in a -Q window, most of it loading the theme file; nearly flat in the faces, which only the root frame
 ;; recomputes (VM2-CHILD-FRAME).
 (scaling-probe faces-theme :gui t :n 50 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces)
              (custom-declare-face face '((t :inherit font-lock-keyword-face)) "A package face." :group 'scaling))
            faces)
-  :body (load-theme 'modus-operandi t))
+  :body (load-theme 'catppuccin-latte t))
+
+;; N Omarchy themes Romacs does not ship, made one after another, the first
+;; made again: Custom's theme list and `features' grow by one each.  Sessions
+;; meet tens of them.
+(scaling-probe omarchy-generated-themes :n 40
+  :setup (progn
+           (require 'romacs-omarchy)
+           (cons (mapcar #'intern (scaling--names "omarchy-scaling" n))
+                 '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                   (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))))
+  :body (let ((palette (cdr it)))
+          (dolist (theme (car it)) (omarchy--define theme "scaling" palette))
+          (omarchy--define (car (car it)) "scaling" palette)))
+
+;; Registering N bundled themes, as a load of romacs-theme.el does: a property
+;; each, no scan of the table per theme.
+(scaling-probe theme-bundled-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme)
+           (mapcar (lambda (name) (list (intern name) 'dark (intern (concat name "-family"))))
+                   (scaling--names "scaling-theme" n)))
+  :body (romacs-theme--register it))
+
+;; A theme's role resolution over N more palette rows: an index, not a scan
+;; per name.
+(scaling-probe theme-palette-rows :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (append '((mode dark) (bg "#101418") (fg "#d8dee9") (red "#e06c75") (green "#98c379")
+                     (yellow "#e5c07b") (blue "#61afef") (magenta "#c678dd") (cyan "#56b6c2"))
+                   (mapcar (lambda (name) (list (intern name) "#123456")) (scaling--names "scaling-slot" n))))
+  :body (romacs-theme-roles-resolve it))
+
+;; The floor pass and its merge over N face rows, a tenth of them failing on
+;; one pair: each pair is computed once, each row merged once.
+(scaling-probe theme-floor-rows :n 4000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (mapcar (lambda (name)
+                     (list (intern name) (list (list t :foreground (if (string-suffix-p "1" name) "#333333" "#eeeeee")))))
+                   (scaling--names "scaling-floor" n)))
+  :body (let ((moves (romacs-theme-roles-floors it '((bg . "#101418")))))
+          (romacs-theme--apply-delta it (mapcar (lambda (move) (list (car move) :foreground (nth 2 move))) moves))))
+
+;; The floor pass over an `:inherit' chain N deep: each ancestor is read once.
+(scaling-probe theme-inherit-depth :n 2000
+  :setup (progn
+           (require 'romacs-theme-roles)
+           (let ((names (mapcar #'intern (scaling--names "scaling-inherit" n))) (rows nil) (parent nil))
+             (dolist (name names (nreverse rows))
+               (push (list name (list (if parent
+                                          (list t :inherit parent :background "#101418")
+                                        (list t :foreground "#eeeeee"))))
+                     rows)
+               (setq parent name))))
+  :body (romacs-theme-roles-floors it '((bg . "#101418"))))
 
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))

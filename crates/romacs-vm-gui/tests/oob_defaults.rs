@@ -166,7 +166,7 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         "(pgtk t t)",
-        "(nil t nil nil t (savehist-mode global-auto-revert-mode))",
+        "(nil t nil nil t (savehist-mode global-auto-revert-mode omarchy-mode))",
         "(t t nil t)",
         "(t t t t nil nil t t custom t t command-completion-default-include-p t prefix)",
         "(global-auto-revert-mode)",
