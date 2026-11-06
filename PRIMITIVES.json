@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "10692335cc0dc9476a2f5258b2e51dd849cb9f41a0818e77059c6488df3c9523",
+  "source_fingerprint": "cae87f222981e834a5fdb8cc7c7e64175e558e261842568eee229ab2dc7628d3",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1368,
-  "parsed_vm2_only": 1368
+  "parsed_total": 1369,
+  "parsed_vm2_only": 1369
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3063,7 +3063,7 @@
   "make-finalizer": {
    "name": "make-finalizer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:52"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:59"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -3303,7 +3303,7 @@
   "memory-info": {
    "name": "memory-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:98"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:105"
   },
   "memq": {
    "name": "memq",
@@ -4237,7 +4237,7 @@
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:84"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
@@ -4980,10 +4980,15 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/call_test.rs:15"
   },
+  "romacs--take-collections": {
+   "name": "romacs--take-collections",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:54"
+  },
   "romacs--take-doomed-finalizers": {
    "name": "romacs--take-doomed-finalizers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:60"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:67"
   },
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",

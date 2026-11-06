@@ -23,6 +23,19 @@
     (mapcar (lambda (line) (json-parse-string line :object-type 'plist))
             (split-string (buffer-string) "\n" t))))
 
+(ert-deftest romacs-usage-log-records-each-collection ()
+  (romacs-usage-log-test--isolated
+   (let ((file (expand-file-name "usage.jsonl" state)))
+     (romacs--take-collections)
+     (romacs-usage-log--enable file)
+     (garbage-collect)
+     (romacs-usage-log-flush)
+     (let ((record (seq-find (lambda (line) (equal (plist-get line :kind) "collection"))
+                             (romacs-usage-log-test--lines file))))
+       (should (equal (plist-get record :collection) "explicit"))
+       (should (natnump (plist-get record :pause_ms)))
+       (should-not (plist-get record :met))))))
+
 (ert-deftest romacs-usage-log-server-keeps-its-own-session-record ()
   (romacs-usage-log-test--isolated
    (let* ((root (expand-file-name "romacs/sessions/" state)))
