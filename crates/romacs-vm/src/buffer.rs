@@ -559,7 +559,7 @@ impl Vm {
                 let w = self.window_mut(window)?;
                 // replace_buffer_in_windows_safely undedicates the window.
                 w.dedicated = Value::NIL;
-                w.buffer = replacement;
+                w.show(replacement);
                 w.end_distance = 0;
                 w.end_valid = false;
                 w.vscroll_px = 0;
