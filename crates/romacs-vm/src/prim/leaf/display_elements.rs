@@ -1093,6 +1093,9 @@ impl Leaf<'_> {
 }
 
 impl super::display_motion::Lines for Source<'_, '_> {
+    fn delivered(&mut self, index: usize) -> R<super::display_motion::Slot> {
+        super::display_motion::Elements::slot(self, index)
+    }
     fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
     fn line_start_before(&mut self, pos: i64) -> R<i64> { self.visible_line_start(pos) }
     fn begv(&self) -> i64 { self.view.begv }
