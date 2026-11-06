@@ -438,7 +438,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
         ParentFrameRect::new(child.x as f32, child.y as f32, frame.width, frame.height).map_err(|e| e.to_string())?, z,
     );
     hide_cursors_off(&mut frame, &frame_snapshot);
-    frame.layer = layer_motion(child, &ends);
+    frame.layer = layer_motion(child, &ends, &snapshot.chrome.style);
     // A rounded layer is light, not chrome: its border is padding, unpainted,
     // and a hairline parts its stacked windows (a picker's input from its list).
     if child.radius > 0 {
@@ -450,7 +450,7 @@ fn layout_child(snapshot: &FrameSnapshot, child: &ChildFrameSnapshot, presentati
 
 /// How CHILD animates and looks, with its selection band where ENDS laid
 /// its rows.
-fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_display_protocol::Layer {
+fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd], style: &romacs_layout_input::Style) -> romacs_display_protocol::Layer {
     use romacs_display_protocol::{LayerAnimation, LayerEdge, Layer};
     Layer {
         animation: match child.animation {
@@ -462,10 +462,11 @@ fn layer_motion(child: &ChildFrameSnapshot, ends: &[WindowEnd]) -> romacs_displa
             romacs_layout_input::LayerEdge::Bottom => LayerEdge::Bottom,
             romacs_layout_input::LayerEdge::Top => LayerEdge::Top,
         },
-        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row)),
+        selection: child.selection.and_then(|row| selection_band(child, ends.first()?, row, style)),
         radius: child.radius as f32,
         glow: child.glow.map(color),
-        shadow: child.shadow,
+        glow_light: style.glow,
+        shadow: child.shadow.then_some(style.shadow),
         outline: child.outline.map(color),
     }
 }
@@ -484,9 +485,9 @@ fn separate_windows(child: &ChildFrameSnapshot, frame: &mut FrameGlyphBuffer) {
 /// The band row ROW of CHILD's first window shows its selection in, laid
 /// out as END: a picker's selected row (Zed's inset `ListItem`, ideas and
 /// values only): the window's width and up to 4px of the padding either
-/// side, the row's height, corners of 4px, in the background of the face
+/// side, the row's height, STYLE's corners, in the background of the face
 /// at the row's start; none past the rows shown or under a header line.
-fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Option<romacs_display_protocol::SelectionBand> {
+fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32, style: &romacs_layout_input::Style) -> Option<romacs_display_protocol::SelectionBand> {
     let placed = child.windows.first()?;
     let window = &placed.snapshot;
     let row = end.rows.get(row as usize).filter(|_| window.header_line.is_none())?;
@@ -494,7 +495,7 @@ fn selection_band(child: &ChildFrameSnapshot, end: &WindowEnd, row: u32) -> Opti
     let inset = (placed.x as f32).min(4.0);
     Some(romacs_display_protocol::SelectionBand {
         x: placed.x as f32 - inset, y: placed.y as f32 + row.y, width: window.width as f32 + 2.0 * inset, height: row.height,
-        radius: 4.0,
+        radius: style.band_radius,
         color: color(window.faces.get(face)?.background), base: color(window.faces.first()?.background),
     })
 }

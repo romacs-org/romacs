@@ -415,18 +415,28 @@ mod frame_tests {
         assert_eq!(attribute(&mut vm, "font-lock-variable-use-face", ":foreground"), "\"#d4c5a0\"");
     }
 
-    /// A frame differing only in its cursor's colour paints differently, for
-    /// the paint and the prompt host alike.
+    /// A frame differing only in one chrome value paints differently, for
+    /// the paint and the prompt host alike: its cursor's colour, a pane's
+    /// corners or dimming, or a token of its style.
     #[test]
-    fn a_cursor_colour_alone_repaints() {
+    fn a_chrome_value_alone_repaints() {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
         let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
-        let mut other = painted.snapshot.clone();
-        assert!(super::frames_alike(&painted.snapshot, &other));
-        other.chrome.cursor = Some([1, 2, 3]);
-        assert!(!super::frames_alike(&painted.snapshot, &other));
+        assert!(super::frames_alike(&painted.snapshot, &painted.snapshot.clone()));
+        let changes: [fn(&mut romacs_layout_input::FrameChrome); 5] = [
+            |c| c.cursor = Some([1, 2, 3]),
+            |c| c.radius += 1,
+            |c| c.dim += 0.01,
+            |c| c.style.band_radius += 1.0,
+            |c| c.style.layer_radius += 1.0,
+        ];
+        for change in changes {
+            let mut other = painted.snapshot.clone();
+            change(&mut other.chrome);
+            assert!(!super::frames_alike(&painted.snapshot, &other));
+        }
     }
 
     /// Selecting the buffer a window already shows resets its end, though its
@@ -478,11 +488,11 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
     a.font_selection == b.font_selection
         && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
-        && a.chrome.cursor == b.chrome.cursor
+        && a.chrome == b.chrome
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
-        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
-            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha)
+        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha, a.radius)
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha, b.radius)
             && (a.animation, a.edge, a.selection) == (b.animation, b.edge, b.selection) && windows_alike(&a.windows, &b.windows))
 }
 

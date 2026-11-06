@@ -318,7 +318,7 @@ fn every_window_but_the_mini_window_is_a_pane() {
     snapshot.windows.push(PlacedWindowSnapshot { x: 8, y: 0, snapshot: mini });
     assert!(lay_out(snapshot.clone()).panes.is_empty(), "GNU_LOOK_DRAWS_NO_PANES");
     snapshot.chrome = romacs_layout_input::FrameChrome { internal_border: 6, radius: 6, dim: 0.12, focus: Some([212, 138, 32]),
-                                                         border: Some([40, 40, 40]), cursor: None, selected: 1, minibuffer: 3 };
+                                                         border: Some([40, 40, 40]), cursor: None, selected: 1, minibuffer: 3, style: Default::default() };
     let panes = lay_out(snapshot).panes;
     let accent = romacs_display_protocol::Color::from_pixel(0xd48a20);
     let line = romacs_display_protocol::Color::from_pixel(0x282828);

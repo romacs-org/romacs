@@ -58,7 +58,7 @@
 (let ((modus (plist-get romacs-theme-rum :modus)))
   (romacs-theme-define
    'default "Romacs's stock look: warm parchment and restrained accents on black."
-   :family 'default :mode (plist-get romacs-theme-rum :mode) :floor t
+   :family 'default :style 'modern :mode (plist-get romacs-theme-rum :mode) :floor t
    :modus (plist-put (copy-sequence modus) :overrides
                      (append romacs-theme-default-roles (plist-get modus :overrides)))
    :palette (append romacs-theme-default-slots (plist-get romacs-theme-rum :palette))

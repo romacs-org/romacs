@@ -229,6 +229,48 @@
     (romacs-should (equal (funcall face 'rum 'font-lock-variable-name-face :foreground) "#00a6a6"))
     (romacs-should (null (plist-get (romacs-theme-rows 'rum) :floors)))))
 
+(romacs-deftest romacs-style-a-theme-declares-its-own ()
+  (let ((enabled custom-enabled-themes) (romacs-style-overrides nil))
+    (unwind-protect
+        (let ((tokens (lambda () (romacs-style-resolve))))
+          (mapc #'disable-theme custom-enabled-themes)
+          ;; Nothing declares `modern' yet beyond flat's tokens.
+          (romacs-should (equal (funcall tokens) (romacs-style--over romacs-style-flat romacs-style-modern)))
+          (load-theme 'rum t)
+          (romacs-should (eq (romacs-style--scheme) 'rum))
+          (romacs-should (equal (funcall tokens) romacs-style-flat))
+          ;; A theme's plist, then the user's, each over the last.
+          (deftheme romacs-style-test)
+          (custom-theme-set-faces 'romacs-style-test '(default ((t :background "#101010"))))
+          (put 'romacs-style-test 'romacs-style '(:radius-band 9 :radius-layer 3))
+          (enable-theme 'romacs-style-test)
+          (romacs-should (eq (romacs-style--scheme) 'romacs-style-test))
+          (romacs-should (eql (plist-get (funcall tokens) :radius-band) 9))
+          (let ((romacs-style-overrides '(:radius-band 2)))
+            (romacs-should (eql (plist-get (funcall tokens) :radius-band) 2))
+            (romacs-should (eql (plist-get (funcall tokens) :radius-layer) 3)))
+          ;; Disabling it gives the style back.
+          (disable-theme 'romacs-style-test)
+          (romacs-should (eql (plist-get (funcall tokens) :radius-band) 4)))
+      (mapc #'disable-theme custom-enabled-themes)
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-style-a-user-s-option-wins ()
+  (let ((style (romacs-style--over romacs-style-flat '(:radius-pane 10))))
+    (let ((romacs-pane-radius 6))
+      (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 10)))
+    (let ((romacs-pane-radius 3))
+      (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 3)))))
+
+(romacs-deftest romacs-style-the-wire-is-numbers ()
+  (romacs-should (equal (romacs-style--wire romacs-style-flat) [8 4 18 6 0.55 14 0.35])))
+
+(romacs-deftest romacs-style-classic-chrome-is-flat ()
+  ;; No theme's or user's tokens reach GNU's look.
+  (let ((romacs-style--resolved (romacs-style--over romacs-style-flat '(:radius-layer 17 :radius-band 9))))
+    (romacs-should (equal (cdr (assq 'romacs-style (romacs-chrome--parameters t))) (romacs-style--wire romacs-style-flat)))
+    (romacs-should (equal (aref (cdr (assq 'romacs-style (romacs-chrome--parameters nil))) 0) 17))))
+
 (romacs-deftest romacs-theme-gnu-s-themes-are-not-offered ()
   ;; Romacs offers its own colour schemes.  GNU's are a package away, and
   ;; `newcomers-presets', which sets options rather than colours, stays.

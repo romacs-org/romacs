@@ -390,6 +390,20 @@ fn without_romacs_chrome_no_pane_chrome_is_drawn() {
     assert!(!chrome(&mut vm).drawn());
 }
 
+/// A frame's `romacs-style' reaches its snapshot; without one, or with one
+/// that is not its numbers, the frame is `flat'.
+#[test]
+fn a_style_reaches_the_snapshot() {
+    let mut vm = themed_session();
+    let style = |vm: &mut Vm| vm.frame_snapshot(1216, 876).unwrap().chrome.style;
+    let flat = romacs_layout_input::Style::default();
+    assert_eq!(style(&mut vm), flat);
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-style [12 6 24 10 0.45 16 0.25])");
+    assert_eq!(style(&mut vm), romacs_layout_input::Style { layer_radius: 12.0, band_radius: 6.0, shadow: [24.0, 10.0, 0.45], glow: [16.0, 0.25] });
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-style [6 24])");
+    assert_eq!(style(&mut vm), flat);
+}
+
 /// The cursor shows the frame's `cursor-color', which the `cursor' face sets
 /// whatever the theme, on a classic frame too, a colour's name as well.
 #[test]
