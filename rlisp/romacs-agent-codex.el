@@ -11,6 +11,15 @@
 
 (require 'romacs-agent)
 
+(defun romacs-agent--codex-image-words (session)
+  "Codex's arguments for the images of SESSION's prompt: it is given a
+turn's images on its command line, and does not open a file a prompt names."
+  (let ((input (expand-file-name "input" (romacs-agent-dir session))))
+    (when (file-readable-p input)
+      (mapcan (lambda (file) (list "--image" file))
+              (romacs-agent-image-files
+               (with-temp-buffer (insert-file-contents input) (buffer-string)))))))
+
 (defun romacs-agent--codex-argv (session resume)
   "`codex exec''s command line for one turn of SESSION, its prompt on
 stdin; RESUME non-nil continues its thread."
@@ -19,6 +28,7 @@ stdin; RESUME non-nil continues its thread."
     (append (romacs-agent--environment-words session)
             (list (plist-get instance :program) "exec")
             (when (and resume thread) (list "resume" thread))
+            (romacs-agent--codex-image-words session)
             (list "--json" "--skip-git-repo-check")
             ;; Romacs's tools, through the reconnecting relay.
             (romacs-agent--codex-mcp-words session)

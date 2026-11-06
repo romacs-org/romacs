@@ -591,6 +591,25 @@ so: it resumes with `romacs-agent-resume'."
   (if (stringp content) content
     (mapconcat (lambda (block) (or (and (hash-table-p block) (gethash "text" block)) "")) content "")))
 
+(defconst romacs-agent-image-token "\\[image: \\(/[^],\n]+\\)\\]"
+  "A message's image: its absolute file, which holds no ], newline or comma
+\(Codex's --image splits its value at commas).")
+
+(defun romacs-agent-image-file-p (file)
+  "Whether FILE is a regular file with an image's name."
+  (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
+       (file-regular-p file) (file-readable-p file)))
+
+(defun romacs-agent-image-files (text)
+  "The image files TEXT's tokens name, in order.  A token whose file is no
+image stays plain words."
+  (let ((files nil) (start 0))
+    (while (string-match romacs-agent-image-token text start)
+      (setq start (match-end 0))
+      (when (romacs-agent-image-file-p (match-string 1 text))
+        (push (match-string 1 text) files)))
+    (nreverse files)))
+
 (defun romacs-agent--value (value)
   "VALUE, with JSON null and false as nil."
   (unless (memq value '(:null :false)) value))

@@ -24,7 +24,7 @@
 ;;   sends, C-c C-c interrupts, C-c C-k stops, C-c C-r resumes, M-p recalls;
 ;;   in the transcript TAB folds a tool's output and n and p move between
 ;;   prompts.  An approval the harness asks for is answered with y or N (or
-;;   C-c C-a).
+;;   the actions menu).  C-c C-a attaches an image.
 ;;
 ;; The chat is rebuilt from the journal, so a new server shows what the
 ;; session did while no server was there.
@@ -161,6 +161,20 @@ is always taken after its own text is in."
   (if (and (stringp name) (string-match "\\`mcp__[^_]+\\(?:_[^_]+\\)*__\\(.+\\)\\'" name))
       (match-string 1 name)
     (or name "tool")))
+
+(defun romacs-agent-ui--show-images (start end)
+  "Show each [image: FILE] token between START and END as its image.  The
+text stays beneath it, for copying and editing the turn; a file that is
+gone stays text."
+  (when (display-images-p)
+    (save-excursion
+      (goto-char start)
+      (while (re-search-forward romacs-agent-image-token end t)
+        (when (romacs-agent-image-file-p (match-string 1))
+          ;; A prompt may only quote a token: what will not load stays text.
+          (let ((inhibit-read-only t)
+                (image (ignore-errors (create-image (match-string 1) nil nil :max-width 480 :max-height 270))))
+            (when image (put-text-property (match-beginning 0) (match-end 0) 'display image))))))))
 
 (defun romacs-agent-ui--delegation (name input)
   "What a card shows for tool NAME's INPUT, (TITLE DETAIL), or nil when
@@ -396,7 +410,9 @@ or a repeat."
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
-             (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
+             (let ((start (+ 0 romacs-agent-ui--end)))
+               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
+               (romacs-agent-ui--show-images start (+ 0 romacs-agent-ui--end)))
              (romacs-agent-ui--insert "\n")))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
@@ -601,7 +617,7 @@ or a repeat."
     (define-key map (kbd "C-c C-k") #'romacs-agent-chat-interrupt-and-send)
     (define-key map (kbd "C-c C-q") #'romacs-agent-chat-queue)
     (define-key map (kbd "C-c C-s") #'romacs-agent-chat-steer)
-    (define-key map (kbd "C-c C-a") #'romacs-agent-chat-respond)
+    (define-key map (kbd "C-c C-a") #'romacs-agent-chat-attach)
     (define-key map (kbd "C-c C-d") #'romacs-agent-chat-deny)
     (define-key map (kbd "C-c C-o") #'romacs-agent-chat-actions-map-popup)
     (define-key map (kbd "C-c C-/") #'romacs-agent-chat-show-commands)
@@ -868,13 +884,6 @@ PROPERTY: the previous one is the run point is in, past its start."
     (unless id (user-error "No approval here"))
     (romacs-agent-respond romacs-agent-ui--session id nil)))
 
-(defun romacs-agent-chat-respond ()
-  "Answer the approval the harness waits for."
-  (interactive)
-  (pcase (read-char-choice "Allow this tool call? (y/n) " '(?y ?n))
-    (?y (romacs-agent-chat-allow))
-    (?n (romacs-agent-chat-deny))))
-
 ;;; emacs-hermes's chat actions
 
 (defun romacs-agent-ui--running-p ()
@@ -977,6 +986,57 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
     (goto-char (point-max))
     (insert prompt)))
 
+(defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
+  "Where `romacs-agent-chat-attach' looks for an image file first."
+  :type 'directory :group 'romacs-agent)
+
+(defun romacs-agent-ui--clipboard-image-type ()
+  "The clipboard's image MIME type, or nil."
+  (seq-find (lambda (type) (string-prefix-p "image/" type))
+            (ignore-errors (process-lines "wl-paste" "--list-types"))))
+
+(defun romacs-agent-ui--save-clipboard-image (session type)
+  "Save the clipboard's image of MIME TYPE with SESSION; return its file."
+  (let* ((dir (expand-file-name "attachments" (romacs-agent-dir session)))
+         (file (progn (make-directory dir t)
+                      (make-temp-file (expand-file-name "clipboard-" dir) nil
+                                      (concat "." (substring type (length "image/"))))))
+         (saved nil))
+    (unwind-protect
+        (progn
+          (unless (eql 0 (call-process "wl-paste" nil (list :file file) nil "--type" type))
+            (user-error "Could not read the clipboard's image"))
+          (setq saved t)
+          file)
+      (unless saved (delete-file file)))))
+
+(defun romacs-agent-ui--newest-image (dir)
+  "The newest image file directly in DIR, or nil."
+  (when (file-directory-p dir)
+    (car (sort (seq-filter #'romacs-agent-image-file-p (directory-files dir t nil t))
+               #'file-newer-than-file-p))))
+
+(defun romacs-agent-ui--read-image-file ()
+  "Read an image file, the newest in `romacs-agent-image-directory' by default."
+  (let* ((dir (file-name-as-directory (expand-file-name romacs-agent-image-directory)))
+         (dir (if (file-directory-p dir) dir default-directory)))
+    (expand-file-name (read-file-name "Attach image: " dir (romacs-agent-ui--newest-image dir) t))))
+
+(defun romacs-agent-chat-attach (file)
+  "Put image FILE in the composer as an [image: FILE] token: the harness
+reads the file, and the transcript shows it.  Interactively the clipboard's
+image, saved with the session; with a prefix argument, or when the
+clipboard holds none, a file."
+  (interactive
+   (let ((type (and (not current-prefix-arg) (romacs-agent-ui--clipboard-image-type))))
+     (list (if type (romacs-agent-ui--save-clipboard-image romacs-agent-ui--session type)
+             (romacs-agent-ui--read-image-file)))))
+  (when (string-match-p "[],\n]" file)
+    (user-error "An image's file name cannot hold ], a comma or a newline: %s" file))
+  (unless (romacs-agent-ui--in-composer-p) (goto-char (point-max)))
+  (insert (format "[image: %s] " file))
+  (romacs-agent-ui--composer-update))
+
 (defun romacs-agent-chat-quote-region ()
   "Quote the region in the composer, each line after \"> \"."
   (interactive)
@@ -1054,6 +1114,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   "q" (#'romacs-agent-ui--queue-label romacs-agent-chat-queue)
   :group "Compose"
   "RET" ("Send" romacs-agent-chat-return)
+  "A" ("Attach image" romacs-agent-chat-attach)
   "Q" ("Quote region" romacs-agent-chat-quote-region :inapt-if (lambda () (not (use-region-p))))
   "e" ("Edit turn at point" romacs-agent-chat-edit-turn)
   "w" ("Copy turn or region" romacs-agent-chat-copy)
