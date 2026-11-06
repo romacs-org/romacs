@@ -284,7 +284,8 @@ macro_rules! half {
     };
 }
 macro_rules! handler {
-    ($name:ident, $p:ident) => {
+    ($(#[$attribute:meta])* $name:ident, $p:ident) => {
+        $(#[$attribute])*
         pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
@@ -299,8 +300,9 @@ macro_rules! handler {
         }
     };
 }
-handler!(mapped_car, Car);
-handler!(mapped_cdr, Cdr);
+// Never inlined into `car' and `cdr': their calls would give those a frame.
+handler!(#[inline(never)] mapped_car, Car);
+handler!(#[inline(never)] mapped_cdr, Cdr);
 half!(car, mapped_car, 0);
 half!(cdr, mapped_cdr, 1);
 handler!(null, Null);

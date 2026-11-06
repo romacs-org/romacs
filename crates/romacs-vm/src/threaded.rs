@@ -4271,15 +4271,20 @@ unsafe fn not_fixnums<const KERNEL: u8>(e: &mut Engine<'_>, r: *mut Value, pc: *
         advance(e, r, pc)
     }
 }
+// Binary by default: the kernel table gives each handler one argument count.
 macro_rules! numeric {
     ($name:ident,$kernel:expr,$body:expr) => {
+        numeric!($name, $kernel, $body, |r: *mut Value, i: &Inst| *r.add(i.d + 1));
+    };
+    ($name:ident,$kernel:expr,$body:expr,$second:expr) => {
         #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), unsafe(link_section = concat!(".text.vm2.", stringify!($name))))]
         unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
-                let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
-                if x.0 & 3 != 1 || y.0 & 3 != 1 {
+                let y: Value = ($second)(r, i);
+                // Both tags at once: a fixnum less one has clear low bits.
+                if (x.0.wrapping_sub(1) | y.0.wrapping_sub(1)) & 3 != 0 {
                     return not_fixnums::<{ $kernel }>(e, r, pc);
                 }
                 let result: Option<Value> = ($body)(x, y);
@@ -4305,10 +4310,10 @@ numeric!(sub, numbers::op::SUB, |x: Value, y: Value| (x.0 as i64)
     .map(|n| Value(n as u64)));
 numeric!(inc, numbers::op::ADD, |x: Value, _y: Value| (x.0 as i64)
     .checked_add(4)
-    .map(|n| Value(n as u64)));
+    .map(|n| Value(n as u64)), |_, _| Value(5));
 numeric!(dec, numbers::op::SUB, |x: Value, _y: Value| (x.0 as i64)
     .checked_sub(4)
-    .map(|n| Value(n as u64)));
+    .map(|n| Value(n as u64)), |_, _| Value(5));
 fn boolean(holds: bool) -> Option<Value> {
     Some(if holds { Value::TRUE } else { Value::NIL })
 }
@@ -4674,7 +4679,9 @@ unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         advance(e, r, pc)
     }
 }
+// Never inlined: its call would give every handler that leaves here a frame.
 #[cold]
+#[inline(never)]
 unsafe fn cold(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         if cold_step(e, r, pc) {
