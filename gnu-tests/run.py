@@ -622,7 +622,8 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for name in skip:
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
-        env = dict(os.environ, HOME=str(scratch), EMACS_TEST_DIRECTORY=str(RUN_TESTS))
+        env = dict(os.environ, HOME=str(scratch), EMACS_TEST_DIRECTORY=str(RUN_TESTS),
+                   ROMACS_SOURCE_DIRECTORY=str(ROOT))
         proc = subprocess.Popen(cmd, cwd=(RUN_TESTS / rel).parent, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, errors='replace')
         lines: queue.Queue = queue.Queue()
@@ -1082,7 +1083,8 @@ def cmd_scoreboard(args) -> int:
                         path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'gnu-lisp' / f'{link}.el'
                         cmd += ['--preload', str(path)]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          text=True, errors='replace', env=gnu_env(home),
+                                          text=True, errors='replace',
+                                          env=dict(gnu_env(home), ROMACS_SOURCE_DIRECTORY=str(ROOT)),
                                           timeout=args.setup_timeout, cwd=target.parent)
                     logs.append(proc.stdout)
                     report = parse_report(proc.stdout, proc.returncode)
