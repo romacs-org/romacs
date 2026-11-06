@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b63d95b273df1bc228a7d3af01ba62717f464f83a529054d5e72db9151a5f4c9",
+  "input_hash": "c03dffaab77d2946b8aa10d811f81f30c472adf78193a965077184a998f2c710",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -9045,7 +9045,7 @@
    "planned": false,
    "mechanism": "`pre-redisplay-function`",
    "gnu": "GNU's `prepare_menu_bars` (`xdisp.c:14264`) calls it on every redisplay, and `simple.el`'s default runs `pre-redisplay-functions`, whose default member makes the region's overlay. A second call after point moved during redisplay (`xdisp.c:20911`) lets the region follow",
-   "romacs": "Called from `frame_snapshot` and from `redisplay` under `inhibit-redisplay` and `inhibit-quit`, with GNU's windows (`crates/romacs-vm/tests/pre_redisplay.el`). A gate in Rust skips the call for nil, `ignore`, and the default while no shown buffer has work on the hook, so a key costs no Lisp. The region stays native: `redisplay-highlight-region-function` defaults to `romacs--native-region`, which makes no overlay, so `internal-region-overlay` stays nil",
+   "romacs": "Called from `frame_snapshot` and from `redisplay` under `inhibit-redisplay` and `inhibit-quit`, with GNU's windows (`crates/romacs-vm/tests/pre_redisplay.el`). A gate in Rust skips the call for nil, `ignore`, and the default while no shown buffer has work on the hook, so a key with no active region runs no Lisp; `rect.el`, preloaded, wraps `redisplay-highlight-region-function`, so an active region runs it on each redisplay. The region stays native: `redisplay-highlight-region-function` defaults to `romacs--native-region`, which makes no overlay, so `internal-region-overlay` stays nil",
    "why": "**Package-observable**: no region overlay shows in `overlays-in`; a package wrapping the variable (`rect.el`) has its overlays drawn beside the native region; no second call after a redisplay moves point; GNU's t for a frame change without a new window arrives as a list of the windows concerned",
    "symbols": [
     "pre-redisplay-function",
