@@ -122,6 +122,43 @@ fn a_slow_client_does_not_hold_the_listener() {
 }
 
 #[test]
+fn a_long_motion_is_inspected_and_finishes() {
+    let session = session("motion", r#"(switch-to-buffer (generate-new-buffer "big"))
+(insert (make-string 5000000 ?\n))
+(goto-char 1)
+(with-temp-file (expand-file-name "moving" (getenv "MARK")) (insert "moving"))
+(let ((moved (vertical-motion 5000000)))
+  (with-temp-file (expand-file-name "moved" (getenv "MARK")) (insert (format "%d" moved))))
+(inspect-spin "marker")"#);
+    let start = Instant::now();
+    while !session.dir.join("moving").exists() {
+        assert!(start.elapsed() < Duration::from_secs(60), "the motion never began");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let (answer, _) = inspect(&session.dir);
+    assert_eq!(answer["status"], "ok", "{answer}");
+    let in_motion = answer["snapshot"]["frames"].as_array().unwrap().iter().any(|frame| frame["fn"] == "vertical-motion");
+    assert!(in_motion, "{answer}");
+    while !session.dir.join("moved").exists() {
+        assert!(start.elapsed() < Duration::from_secs(120), "the motion never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read_to_string(session.dir.join("moved")).unwrap(), "5000000");
+}
+
+#[test]
+fn a_long_search_is_inspected_and_goes_on() {
+    let mut session = session("search", r#"(string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b"))"#);
+    let (answer, took) = inspect(&session.dir);
+    assert_eq!(answer["status"], "ok", "{answer}");
+    assert_eq!(answer["snapshot"]["in"], "regexp", "{answer}");
+    let names: Vec<_> = answer["snapshot"]["frames"].as_array().unwrap().iter().filter_map(|frame| frame["fn"].as_str()).collect();
+    assert!(names.contains(&"string-match"), "{names:?}");
+    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert!(session.child.try_wait().unwrap().is_none(), "the session ended");
+}
+
+#[test]
 fn only_the_one_verb_is_answered() {
     let session = session("verb", r#"(inspect-spin "marker")"#);
     let mut stream = UnixStream::connect(session.dir.join("inspect.sock")).unwrap();

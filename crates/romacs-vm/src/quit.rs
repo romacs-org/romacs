@@ -152,6 +152,27 @@ impl Vm {
         self.quit.due() || (self.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
     }
 
+    /// A long native loop's poll, between steps it can stop at: an inspect
+    /// request is answered and the loop goes on; a quit, in a Lisp-called
+    /// motion only, is `maybe_quit''s, so what it holds stays held. A C-g
+    /// counts only while `inhibit-quit' is nil, a debug event whatever it
+    /// is, as handle_user_signal clears it.
+    pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
+        if crate::host::inspect_pending() { self.inspect_capture(); }
+        if !self.motion_quit || !self.native_quit_reached() { return Ok(()); }
+        let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
+        if !press && !crate::host::user_signal_waiting(self.debug_event_mask()) { return Ok(()); }
+        match self.maybe_quit() {
+            Some(crate::threaded::Escape::Signal(condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
+            _ => Ok(()),
+        }
+    }
+    /// Whether a quit raised in a native loop would be acted on: the
+    /// evaluator is busy, and no form is compiling.
+    pub(crate) fn native_quit_reached(&self) -> bool {
+        self.quit.busy() && self.compile_depth == 0 && self.expanding.is_empty()
+    }
+
     /// GNU maybe_quit at a safepoint, with handle_interrupt for each press
     /// the host counted: the escape to raise, or None to go on. A macro
     /// expanding while a form compiles quits too: the expansion runs where

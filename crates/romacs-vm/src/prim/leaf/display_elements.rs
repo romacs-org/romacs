@@ -42,6 +42,11 @@ struct Look {
     unibyte_via_language: bool,
 }
 
+/// Steps of generating elements between the iterator's polls.
+const POLL_STEPS: u32 = 1024;
+/// A display string's bytes decoded between polls.
+const DECODE_BYTES: usize = 1 << 20;
+
 pub(super) struct Source<'l, 'a> {
     leaf: &'l mut Leaf<'a>,
     view: View,
@@ -65,6 +70,8 @@ pub(super) struct Source<'l, 'a> {
     rule: crate::width_rule::WidthRule,
     /// The images the elements show (Shape::Image's AT), with their specs.
     images: Vec<(romacs_layout_input::InlineImage, Value)>,
+    /// Steps taken, for `poll'.
+    polls: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -100,7 +107,14 @@ impl<'l, 'a> Source<'l, 'a> {
         let byte = leaf.buffer_byte(view.buffer, start)?;
         let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, rule, images: vec![] })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, rule, images: vec![], polls: 0 })
+    }
+
+    /// Between steps of generating elements, which can walk far inside one
+    /// slot: a motion answers inspect requests and, if Lisp asked, quits.
+    fn step(&mut self) -> R<()> {
+        self.polls = self.polls.wrapping_add(1);
+        if self.polls % POLL_STEPS == 0 { self.leaf.vm.native_poll() } else { Ok(()) }
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
@@ -143,6 +157,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let begv = self.view.begv;
         let mut p = pos;
         while p > begv {
+            self.step()?;
             p = self.line_start_before(p)?;
             if p <= begv { break; }
             let invisible = self.property(p - 1, self.syms.invisible)?.0;
@@ -231,6 +246,8 @@ impl<'l, 'a> Source<'l, 'a> {
     fn generate(&mut self) -> R<()> {
         let before = self.slots.len();
         while self.slots.len() == before && !self.ended {
+            // Text can show as nothing: this may walk far inside one slot.
+            self.step()?;
             if self.stop_due || self.next >= self.run_end {
                 self.handle_stop()?;
                 continue;
@@ -324,6 +341,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let zv_byte = self.leaf.buffer_byte(self.view.buffer, self.view.zv)?;
         let mut pos = p;
         loop {
+            self.step()?;
             let byte = self.leaf.buffer_byte(self.view.buffer, pos)?;
             let next = self.leaf.vm.next_property_boundary(self.view.buffer, ByteOffset(byte), ByteOffset(zv_byte))
                 .map_err(Fault::Error)?;
@@ -396,28 +414,40 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(())
     }
 
-    /// A string's characters with its own invisible and, unless it came
-    /// from a display property, display properties.
-    fn string(&mut self, string: Value, origin: Origin) -> R<()> {
-        let (chars, unibyte): (Vec<(usize, u32)>, bool) = {
+    /// STRING's (byte, character) pairs and whether it is unibyte, decoded in
+    /// bounded chunks with a poll between, the string borrowed only within one.
+    fn string_chars(&mut self, string: Value) -> R<(Vec<(usize, u32)>, bool)> {
+        let (mut at, mut out) = (0, vec![]);
+        loop {
             let view = self.leaf.vm.str_view(string).ok_or_else(|| fault("display string required"))?;
-            if !view.is_multibyte() { (view.bytes().iter().enumerate().map(|(i, &b)| (i, unibyte_char(b))).collect(), true) }
-            else {
-                let (bytes, mut at, mut out) = (view.bytes(), 0, vec![]);
-                while at < bytes.len() {
+            let (bytes, unibyte) = (view.bytes(), !view.is_multibyte());
+            let end = bytes.len().min(at + DECODE_BYTES);
+            while at < end {
+                if unibyte {
+                    out.push((at, unibyte_char(bytes[at])));
+                    at += 1;
+                } else {
                     let (c, width) = crate::lstring::string_char(&bytes[at..]);
                     out.push((at, c));
                     at += width;
                 }
-                (out, false)
             }
-        };
+            if at >= bytes.len() { return Ok((out, unibyte)); }
+            self.leaf.vm.native_poll()?;
+        }
+    }
+
+    /// A string's characters with its own invisible and, unless it came
+    /// from a display property, display properties.
+    fn string(&mut self, string: Value, origin: Origin) -> R<()> {
+        let (chars, unibyte) = self.string_chars(string)?;
         if self.look.unibyte_via_language && unibyte && chars.iter().any(|&(_, c)| c > 0x7f) {
             return Err(unsupported("of a unibyte string with `unibyte-display-via-language-environment'"));
         }
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());
         let mut i = 0;
         while i < chars.len() {
+            self.step()?;
             let here = Origin { strpos: Some(i), ..origin };
             composition_refusal(self.leaf.vm.property_textget(string, i as i64, self.syms.composition)?)?;
             let spec = self.leaf.vm.property_textget(string, i as i64, self.syms.display)?;
@@ -440,6 +470,7 @@ impl<'l, 'a> Source<'l, 'a> {
                 continue;
             }
             for (k, &(_, c)) in chars.iter().enumerate().take(run).skip(i) {
+                self.step()?;
                 self.character(c, Origin { strpos: Some(k), whitespace_under: origin.whitespace_under || matches!(c, 0x20 | 0x09), ..origin })?;
             }
             i = run;
@@ -454,6 +485,7 @@ impl<'l, 'a> Source<'l, 'a> {
     fn string_run_end(&mut self, string: Value, at: usize, prop: Value, value: Value, chars: &[(usize, u32)], end_byte: usize) -> R<usize> {
         let mut byte = chars[at].0;
         loop {
+            self.step()?;
             let next = self.leaf.vm.next_property_boundary(string, ByteOffset(byte), ByteOffset(end_byte)).map_err(Fault::Error)?.0;
             if next >= end_byte { return Ok(chars.len()) }
             let k = char_at_byte(chars, next);
@@ -465,6 +497,7 @@ impl<'l, 'a> Source<'l, 'a> {
     fn skip_invisible_string(&mut self, string: Value, mut at: usize, chars: &[(usize, u32)], mut ellipsis: bool) -> R<(usize, bool)> {
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());
         while at < chars.len() {
+            self.step()?;
             let property = self.leaf.vm.property_textget(string, at as i64, self.syms.invisible)?;
             match self.leaf.invisible_kind(property)? {
                 0 => break,
@@ -973,6 +1006,7 @@ impl Source<'_, '_> {
 }
 
 impl Elements for Source<'_, '_> {
+    fn poll(&mut self) -> R<()> { self.leaf.vm.native_poll() }
     fn line_at(&mut self, index: usize) -> R<i64> {
         let slot = self.slot(index)?;
         // Where the element shows, past text the row start skips.

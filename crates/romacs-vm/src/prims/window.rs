@@ -401,7 +401,7 @@ fn redisplay_settled(cx: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 
 defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
 fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {
-    cx.pos_visible_in_window_p(pos, window, partially)
+    cx.quittable_motion(|cx| cx.pos_visible_in_window_p(pos, window, partially))
 }}
 
 defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
@@ -423,17 +423,17 @@ fn romacs_layout_refusals(cx) { cx.take_layout_refusals() }}
 // layout once a host lays the frame out (DIVERGENCES.md VM2-WTPS1).
 defsubr! { name = "window-text-pixel-size", gnu = "xdisp.c:12078", effect = Reads,
 fn window_text_pixel_size(cx; optional window: Value, from: Value, to: Value, x_limit: Value, y_limit: Value, mode_lines: Value, ignore_line_at_end: Value) {
-    cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end })
+    cx.quittable_motion(|cx| cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end }))
 }}
 
 defsubr! { name = "buffer-text-pixel-size", gnu = "xdisp.c:12158", effect = Reads,
 fn buffer_text_pixel_size(cx; optional buffer_or_name: Value, window: Value, x_limit: Value, y_limit: Value, from: Value, to: Value) {
-    cx.buffer_text_pixel_size(buffer_or_name, window, x_limit, y_limit, from, to)
+    cx.quittable_motion(|cx| cx.buffer_text_pixel_size(buffer_or_name, window, x_limit, y_limit, from, to))
 }}
 
 defsubr! { name = "posn-at-point", gnu = "keyboard.c:13054", effect = Reads,
 fn posn_at_point(cx; optional pos: Value, window: Value) {
-    cx.posn_at_point(pos, window)
+    cx.quittable_motion(|cx| cx.posn_at_point(pos, window))
 }}
 
 defsubr! { name = "frame-native-width", gnu = "frame.c:4381", effect = Reads,
@@ -450,12 +450,12 @@ fn frame_native_height(cx; optional frame: Value) {
 // a host lays the frame out (DIVERGENCES.md VM2-VMOTION1).
 defsubr! { name = "vertical-motion", gnu = "indent.c:2207", effect = Global,
 fn vertical_motion(cx, lines: Value; optional window: Value, cur_col: Value) {
-    cx.vertical_motion(lines, window, cur_col)
+    cx.quittable_motion(|cx| cx.vertical_motion(lines, window, cur_col))
 }}
 
 defsubr! { name = "line-pixel-height", gnu = "xdisp.c:1545", effect = Reads,
 fn line_pixel_height(cx) {
-    cx.line_pixel_height()
+    cx.quittable_motion(|cx| cx.line_pixel_height())
 }}
 
 defsubr! { name = "window-scroll-bars", gnu = "window.c:8898", effect = Reads,

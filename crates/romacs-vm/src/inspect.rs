@@ -80,6 +80,27 @@ fn object_kind(object: &Object) -> &'static str {
     }
 }
 
+/// The frames by name, for a poll inside a native loop that holds other
+/// parts of the VM: only what never changes while it runs, with no values.
+pub(crate) fn snapshot_names(backtrace: &backtrace::Backtrace, symbols: &[String], place: &str) -> String {
+    let frames = &backtrace.frames;
+    let mut out = String::from(r#"{"frames":["#);
+    for (at, frame) in frames.iter().rev().take(FRAMES).enumerate() {
+        if at > 0 { out.push(','); }
+        let symbol = frame.function.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| symbols.get(n));
+        out.push_str(r#"{"fn":"#);
+        match symbol {
+            Some(symbol) => name(&mut out, symbol),
+            None => out.push_str(r#"{"type":"function"}"#),
+        }
+        out.push_str(r#","args":"unavailable: in native"}"#);
+    }
+    out.push_str(&format!(r#"],"depth":{},"in":"#, frames.len()));
+    json_string(&mut out, place);
+    out.push('}');
+    out
+}
+
 impl Vm {
     fn inspect_symbol(&self, value: Value) -> Option<&str> {
         self.symbol_names.get(value.index_if(7)?.checked_sub(1)?).map(String::as_str)
@@ -196,5 +217,54 @@ impl Vm {
     pub(crate) fn inspect_capture(&self) {
         let generation = crate::host::inspect_generation();
         crate::host::inspect_publish(generation, self.inspect_snapshot());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Redisplay reaches the display iterator without `quittable_motion`,
+    /// through the route the host's layout takes. A press waits for it, and
+    /// an inspection is answered inside it. The same press ends a motion
+    /// Lisp asked for: the iterator does poll here.
+    #[test]
+    fn redisplay_keeps_a_quit_pending_and_answers_inspection() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let signal = std::sync::Arc::new(QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        vm.eval_source("(progn (insert (make-string 20000 ?x)) (goto-char 1))").unwrap();
+        let window = vm.selected_window_value().unwrap();
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        crate::host::inspect_request();
+        let shown = crate::prim::window_shown_elements(&mut vm, window, 1, 20001);
+        assert_eq!(shown.map(|(elements, _)| elements.len()).ok(), Some(20000));
+        assert!(vm.quit.due(), "redisplay took the quit");
+        assert!(!crate::host::inspect_pending(), "redisplay left the inspection unanswered");
+        vm.motion_quit = true;
+        assert!(crate::prim::window_shown_elements(&mut vm, window, 1, 20001).is_err(), "a Lisp-called motion did not quit");
+    }
+
+    /// A display span's end is found past every other run inside it: the walk
+    /// polls, for a motion that wants a quit and for an inspection.
+    #[test]
+    fn a_property_walk_over_many_runs_polls() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let signal = std::sync::Arc::new(QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        vm.eval_source("(progn (insert (make-string 8000 ?x)) (put-text-property 1 8000 'display \"d\")
+          (let ((i 1)) (while (< i 8000) (put-text-property i (1+ i) 'face (if (= 0 (% i 2)) 'bold 'italic)) (setq i (1+ i)))))").unwrap();
+        let (display, buffer) = (vm.intern("display"), vm.slots[vm.buffer_slot].value);
+        let start = Value::integer(1).unwrap();
+        crate::host::inspect_request();
+        assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_ok());
+        assert!(!crate::host::inspect_pending(), "the walk left the inspection unanswered");
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        vm.motion_quit = true;
+        assert!(vm.next_single_char_property_change_values(start, display, buffer, Value::NIL).is_err(), "the walk did not quit");
     }
 }
