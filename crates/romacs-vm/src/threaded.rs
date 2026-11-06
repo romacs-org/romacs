@@ -1399,6 +1399,10 @@ impl Vm {
         } else {
             vec![function, self.list_value(args)]
         };
+        // Every call of Lisp from native code comes here, so Lisp a leaf
+        // reaches sees the leaf's frame, whatever way it got here.
+        let site = std::mem::replace(&mut self.site_leaf, (0, 0));
+        let mark = self.record_site_leaf(site);
         self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
@@ -1408,7 +1412,37 @@ impl Vm {
         self.propagate_next = false;
         self.resume_stack();
         self.end_nested_execution();
+        if let Some(mark) = mark {
+            self.backtrace.leave(mark);
+        }
+        self.site_leaf = site;
         result
+    }
+    /// The activation `trace_call' would have made for the leaf at SITE.
+    fn record_site_leaf(&mut self, site: (usize, usize)) -> Option<usize> {
+        let (pc, r) = (site.0 as *const Inst, site.1 as *mut Value);
+        if pc.is_null() {
+            return None;
+        }
+        // SAFETY: `leaf_call' set SITE and is still running: the instruction
+        // and its registers are live, and nothing has widened them.
+        unsafe {
+            let (function, resolved, start, argc) = match (*pc).op {
+                Op::Direct(_, slot, _, start, argc) => (Value::reference(slot + 1, 7), self.slots[slot].function, start, argc),
+                Op::Sealed(_, slot, start, argc) => (Value::reference(slot + 1, 7), (*pc).value, start, argc),
+                Op::Call(_, function, start, argc) => {
+                    let function = *r.add(function);
+                    (function, self.backtrace_resolve(function).unwrap_or(function), start, argc)
+                }
+                _ => return None,
+            };
+            let args = backtrace::Arguments::Registers {
+                stack: self.suspended_stacks.len(),
+                offset: r.add(start).offset_from(self.stack.as_ptr()) as usize,
+                count: argc,
+            };
+            Some(self.backtrace.enter(function, resolved, args, self.dynamic.len()))
+        }
     }
     /// The permanent function a native call of N arguments enters:
     /// `(lambda (f a1 .. aN) (funcall f a1 .. aN))`, or for more than
@@ -3737,7 +3771,9 @@ unsafe fn leaf_call(
             return enter_generated(e, r, pc, target, start, argc);
         }
         let leaf: prim::LeafBody = std::mem::transmute(e.entries.get_unchecked((*pc).site).function);
+        e.vm.site_leaf = (pc as usize, r as usize);
         let value = e.vm.leaf_value(leaf, r.add(start), argc, &mut e.leaf_fault);
+        e.vm.site_leaf = (0, 0);
         if value == Value::UNBOUND && e.leaf_fault.is_some() {
             return leaf_failed(e, r, pc, target, start, argc);
         }

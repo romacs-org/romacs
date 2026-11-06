@@ -2055,10 +2055,10 @@ pub(crate) fn generated(v: Value) -> Option<&'static PrimDesc> {
 pub(crate) const LEAF_ARGUMENTS: usize = 8;
 
 /// Whether a call site may run D with ARGC arguments and no activation:
-/// nothing can see the missing frame. A leaf with no effect beyond reading
-/// runs no Lisp and leaves the stack alone; stack readers are `Step'
-/// primitives (`stack_readers_keep_their_frame'). A leaf that writes can
-/// run a variable watcher, which would see the frame gone.
+/// nothing can see the missing frame. Stack readers are `Step' primitives
+/// (`stack_readers_keep_their_frame'), and Lisp the leaf reaches records the
+/// frame first (`Vm::record_site_leaf'). A leaf that writes is kept out all
+/// the same: what it touches has not been audited for this.
 pub(crate) fn site_leaf(d: &PrimDesc, argc: usize) -> Option<LeafBody> {
     let Body::Leaf(f) = d.body else { return None };
     (matches!(d.effect, Effect::Pure | Effect::Reads)
