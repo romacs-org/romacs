@@ -332,6 +332,10 @@ impl Text {
         }
     }
     /// The text this view reads.
+    /// Whether byte AT is a newline.
+    pub(crate) fn newline_at(&self, at: usize) -> bool {
+        self.body().chunk_from(at).first() == Some(&b'\n')
+    }
     pub(crate) fn body(&self) -> &TextBody {
         &self.body
     }
