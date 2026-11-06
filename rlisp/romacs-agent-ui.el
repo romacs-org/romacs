@@ -31,6 +31,7 @@
 ;; session did while no server was there.
 
 ;;; Code:
+(require 'romacs-truncate)
 (require 'cl-lib)
 (require 'romacs-agent)
 
@@ -157,7 +158,7 @@ is always taken after its own text is in."
                     ((gethash "code" input))
                     ((zerop (hash-table-count input)) "")
                     (t (romacs-agent--json input)))))
-    (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " (format "%s" text)) 100 nil nil "…")))
+    (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " (format "%s" text)) 100 nil nil t)))
 
 (defun romacs-agent-ui--tool-name (name)
   "A tool's NAME as a row shows it: an MCP tool by its own name."
@@ -318,7 +319,7 @@ never a prompt, the result folded below it, and its card settled."
   (let* ((id (plist-get wake :id)) (state (plist-get wake :state))
          (result (string-trim (plist-get wake :result)))
          (key (format "%s:%s" id (plist-get event :seq)))
-         (preview (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " result) 72 nil nil "…")))
+         (preview (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " result) 72 nil nil t)))
     (romacs-agent-ui--settle-task id state)
     (romacs-agent-ui--line
      session event
@@ -745,7 +746,7 @@ turn starts, and last turn's failures have been seen."
                                     (propertize "YOLO" 'face 'warning 'help-echo mode)
                                   (propertize mode 'face 'romacs-agent-mode)))
                       (propertize (mapconcat #'identity
-                                             (delq nil (list (or (romacs-agent-model session) "…")
+                                             (delq nil (list (or (romacs-agent-model session) "...")
                                                              (plist-get (romacs-agent-options session) :effort)))
                                              " · ")
                                   'face 'romacs-agent-model)
@@ -756,7 +757,7 @@ turn starts, and last turn's failures have been seen."
                       (and context (propertize context 'face 'romacs-agent-context))
                       (romacs-agent-ui--state-label session))))
          (text (mapconcat #'identity segments separator)))
-    (string-replace "%" "%%" (truncate-string-to-width text (max 1 (window-body-width)) nil nil "…"))))
+    (string-replace "%" "%%" (romacs-truncate text (max 1 (window-body-width))))))
 
 ;;; The composer
 
@@ -772,7 +773,7 @@ turn starts, and last turn's failures have been seen."
   (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint))))
 
 (defun romacs-agent-ui--make-hint ()
-  (let ((hint (concat "Message… · " (romacs-agent-ui--key #'romacs-agent-chat-return) " send · "
+  (let ((hint (concat "Message... · " (romacs-agent-ui--key #'romacs-agent-chat-return) " send · "
                       (romacs-agent-ui--key #'romacs-agent-chat-interrupt) " interrupt · "
                       (romacs-agent-ui--key #'romacs-agent-chat-history-previous) " history")))
     (add-face-text-property 0 (length hint) 'romacs-agent-dim t hint)
@@ -1441,9 +1442,9 @@ what was there."
   "TEXT on one line, shortened to WIDTH, reading no more of it than that
 can show: a reply can be long."
   (let ((text (or text "")))
-    (truncate-string-to-width
+    (romacs-truncate
      (string-trim (replace-regexp-in-string "[\n\t ]+" " " (substring text 0 (min (length text) (* 4 (max 0 width))))))
-     (max 0 width) nil nil "…")))
+     width)))
 
 (defun romacs-agent-ui--switch-facts (session default)
   "What is worth knowing of SESSION at a glance, the most useful first;
@@ -1469,8 +1470,8 @@ DEFAULT is the provider not worth naming."
                                          'face 'romacs-agent-dim)
                              (if unread (propertize "● " 'face 'romacs-agent-unread) "  ")))
                (space (- width (string-width head)))
-               (facts (truncate-string-to-width
-                       (mapconcat #'identity (romacs-agent-ui--switch-facts session default) " · ") (max 0 space) nil nil "…"))
+               (facts (romacs-truncate
+                       (mapconcat #'identity (romacs-agent-ui--switch-facts session default) " · ") space))
                (room (- space (string-width facts) 2)))
     (truncate-string-to-width
      (concat head (propertize facts 'face 'romacs-agent-dim)
@@ -1500,7 +1501,7 @@ needs, then a count: every name stands for one session."
   "NAME's row for SESSION: the affixation of a candidate, whose value stays
 NAME and whose shown form fits COLUMN.  DEFAULT is the provider not worth
 naming."
-  (let ((shown (truncate-string-to-width name column nil nil "…")))
+  (let ((shown (romacs-truncate name column)))
     (list (if (equal shown name) name (propertize name 'display shown))
           (concat (romacs-agent-ui--status-mark session) " ")
           (concat (make-string (max 1 (- (+ column 2) (string-width shown))) ?\s)
@@ -1704,7 +1705,7 @@ task's chat, or a harness's own subagent's card in this one."
           (t '("○" romacs-agent-dim "idle")))))
 
 (defun romacs-agent-ui--column (text width)
-  (truncate-string-to-width (or text "") width nil ?\s "…"))
+  (romacs-truncate (or text "") width ?\s))
 
 (defconst romacs-agent-ui--word-width 10 "The status column: its longest word and a space.")
 (defconst romacs-agent-ui--instance-width 20 "The model column, shown on a page 72 columns wide or more.")
@@ -1734,7 +1735,7 @@ age and model columns leave; a narrow page drops the model."
             " " (propertize (romacs-agent-ui--column (plist-get row :word) romacs-agent-ui--word-width) 'face face)
             (propertize (romacs-agent-ui--column (plist-get row :ago) 5) 'face 'romacs-agent-dim)
             (if show-instance
-                (propertize (truncate-string-to-width (plist-get row :instance) romacs-agent-ui--instance-width nil nil "…")
+                (propertize (truncate-string-to-width (plist-get row :instance) romacs-agent-ui--instance-width nil nil t)
                             'face 'romacs-agent-dim)
               "")
             "\n")))

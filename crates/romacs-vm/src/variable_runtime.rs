@@ -197,6 +197,12 @@ impl Vm {
         self.variable_redirects.resize(self.variable_redirects.len().max(new.max(base) + 1), None);
         self.variable_redirects[new] = Some(VariableRedirect::Alias(base));
     }
+    /// SYMBOL's alias undone (Finternal_delete_indirect_variable): plain and
+    /// void.
+    pub(super) fn delete_variable_alias(&mut self, slot: usize) {
+        self.variable_redirects[slot] = None;
+        self.slots[slot].value = Value::UNBOUND;
+    }
     // Redirects contain stable slot IDs, never untraced moving-heap Values.
     // Publication is set-only: GNU data.c:2385-2408 removes a local entry
     // without reverting SYMBOL_LOCALIZED. GC owner reclamation must likewise

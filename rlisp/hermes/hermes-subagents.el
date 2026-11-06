@@ -34,6 +34,7 @@
 
 ;;; Code:
 
+(require 'romacs-truncate)
 (require 'tabulated-list)
 (require 'hermes-transport)
 (require 'hermes-dashboard-transport)
@@ -159,7 +160,7 @@ Open Workers from the owning chat to request a session-qualified interrupt."
 
 (defun hermes-work--fit (text width)
   "Return TEXT truncated to WIDTH columns with an ellipsis."
-  (truncate-string-to-width (or text "") (max 1 width) nil nil "…"))
+  (romacs-truncate (or text "") (max 1 width)))
 
 (defun hermes-work--flat (text)
   "Return TEXT on one line."

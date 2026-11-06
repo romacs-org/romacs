@@ -193,6 +193,31 @@ fn late_native_notifications_are_drained_after_the_last_terminal_closes() {
     assert!(!Vm::new().poll_terminal_output().unwrap(), "NO_HOST_REMAINS_A_NOOP");
 }
 
+/// `buffer-swap-text' moves text, not identity: the terminal stays with
+/// its buffer, and what it colours stays out of the shared faces.
+#[test]
+fn a_terminal_stays_with_its_buffer_through_a_swap_of_text() {
+    use romacs_vm::{TerminalColor, TerminalStyle, TerminalStyleRun};
+    let (mut vm, state) = setup();
+    let style = TerminalStyle { foreground: TerminalColor::Rgb([12, 34, 56]), background: TerminalColor::Rgb([65, 43, 21]), inverse: false, hidden: false };
+    state.borrow_mut().snapshot.styles = vec![TerminalStyleRun { bytes: 0..3, style }].into();
+    vm.poll_terminal_output().unwrap();
+    vm.eval_source("(setq swapped (get-buffer-create \"swapped\") third (get-buffer-create \"third\")) \
+                    (with-current-buffer swapped (insert \"abc\")) \
+                    (with-current-buffer terminal-buffer (buffer-swap-text swapped))").unwrap();
+    let show = |vm: &mut Vm, buffer: &str| {
+        vm.eval_source(&format!("(progn (set-window-buffer (selected-window) {buffer}) (set-buffer {buffer}))")).unwrap();
+        vm.frame_snapshot(800, 600).unwrap().windows.remove(0).snapshot.faces.len()
+    };
+    let swapped = show(&mut vm, "swapped");
+    assert_eq!(show(&mut vm, "terminal-buffer"), swapped + 1, "THE_TERMINAL_KEEPS_ITS_OWN_FACES");
+    assert_eq!(show(&mut vm, "third"), swapped, "ITS_STYLES_STAY_OUT_OF_THE_SHARED_FACES");
+    vm.eval_source("(romacs--term-close terminal-id)").unwrap();
+    assert!(!vm.has_terminals());
+    assert_eq!(show(&mut vm, "swapped"), swapped, "THE_OTHER_BUFFER_NEVER_HAD_A_TERMINAL");
+    show(&mut vm, "terminal-buffer");
+}
+
 #[test]
 fn terminal_styles_are_buffer_owned_and_invalid_ranges_do_not_mutate_the_buffer() {
     use romacs_vm::{TerminalColor, TerminalStyle, TerminalStyleRun};

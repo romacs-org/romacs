@@ -23,8 +23,8 @@ fn for_each_tail_safe(cx: &Leaf<'_>, mut tail: Value, mut body: impl FnMut(Value
 }
 
 defsubr! { name = "nthcdr", gnu = "fns.c:1749", effect = Pure,
-fn nthcdr(cx, n: Integer, list: Value) {
-    let Integer(n) = n;
+fn nthcdr(cx, n: Value, list: Value) {
+    let n = nth_count(cx, n, list)?;
     let mut tail = list;
     if n <= 127 {
         // GNU's SMALL_LIST_LEN_MAX path: no cycle check.
@@ -117,3 +117,36 @@ fn take(cx, n: Value, list: Value) {
     }
     Ok(items.iter().rev().fold(Value::NIL, |acc, &car| cx.cons(car, acc)))
 }}
+
+/// N as a step count: a fixnum as it is; a negative bignum none at all; a
+/// positive bignum, which no list reaches, its equivalent on LIST's cycle, or
+/// the largest count, which walks to the end of a list that has none.
+fn nth_count(cx: &Leaf<'_>, n: Value, list: Value) -> std::result::Result<i64, Fault> {
+    if let Some(n) = n.integer_value() {
+        return Ok(n);
+    }
+    let big = cx.bigint_value(n).ok_or(Fault::Wrong("integerp", n))?;
+    Ok(big_nth_count(&big, list, |tail| cx.pair(tail).map(|(_, cdr)| cdr)) as i64)
+}
+
+/// The steps from LIST, along NEXT, that land where BIG steps would.
+pub(crate) fn big_nth_count(big: &num_bigint::BigInt, list: Value, next: impl Fn(Value) -> Option<Value>) -> u64 {
+    use num_bigint::{BigInt, Sign};
+    if big.sign() == Sign::Minus {
+        return 0;
+    }
+    let (mut tail, mut anchor, mut steps, mut period, mut power) = (list, list, 0u64, 0u64, 1u64);
+    while let Some(cdr) = next(tail) {
+        tail = cdr;
+        steps += 1;
+        period += 1;
+        if tail == anchor {
+            let reduced = (big - BigInt::from(steps)) % BigInt::from(period);
+            return steps + u64::try_from(reduced).expect("a positive bignum exceeds any walked length");
+        }
+        if period == power {
+            (anchor, period, power) = (tail, 0, power * 2);
+        }
+    }
+    i64::MAX as u64
+}

@@ -28,10 +28,8 @@ impl Leaf<'_> {
     /// (buffer.c:4045): by start, and among equal starts newest first.
     pub fn current_overlays(&mut self) -> std::result::Result<Vec<Value>, Fault> {
         let buffer = self.current_buffer()?;
-        let mut overlays = match self.vm.object(buffer).map_err(|e| Fault::Error(e.to_string()))? {
-            Object::Buffer(b) => b.intervals.query_with_end(0, b.anchors.extent(), false, true, &b.anchors).0,
-            _ => return Ok(Vec::new()),
-        };
+        let Some(b) = self.vm.overlay_store(buffer) else { return Ok(Vec::new()) };
+        let mut overlays = b.intervals.query_with_end(0, b.anchors.extent(), false, true, &b.anchors).0;
         let mut keyed = Vec::with_capacity(overlays.len());
         for overlay in overlays.drain(..) {
             let (start, _) = self.vm.overlay_range(overlay).map_err(Fault::Error)?.unwrap_or((0, 0));
@@ -45,18 +43,8 @@ impl Leaf<'_> {
         let buffer = self.decode_buffer(buffer)?;
         // Overlays are display state no buffer modification tick counts.
         self.vm.display_state.overlays += 1;
-        let overlays = match self
-            .vm
-            .object(buffer)
-            .map_err(|e| Fault::Error(e.to_string()))?
-        {
-            Object::Buffer(b) => {
-                b.intervals
-                    .query_with_end(0, b.anchors.extent(), false, true, &b.anchors)
-                    .0
-            }
-            _ => return Ok(Value::NIL),
-        };
+        let Some(b) = self.vm.overlay_store(buffer) else { return Ok(Value::NIL) };
+        let overlays = b.intervals.query_with_end(0, b.anchors.extent(), false, true, &b.anchors).0;
         // Deletion changes anchors, not the object table, and retains the plist.
         // No collection occurs while these buffer-owned identities are borrowed.
         for overlay in overlays {
@@ -87,17 +75,12 @@ impl Leaf<'_> {
             }
         };
         let buffer = self.decode_buffer(Value::NIL)?;
-        let b = match self
-            .vm
-            .object(buffer)
-            .map_err(|e| Fault::Error(e.to_string()))?
-        {
-            Object::Buffer(b) => b,
-            Object::ByteBuffer(b) => {
-                return Value::integer(b.restriction.start.0 as i64 + 1)
-                    .map_err(|e| Fault::Error(e.to_string()));
-            }
-            _ => unreachable!("decode_buffer validated the buffer"),
+        if self.vm.overlay_store(buffer).is_some() { self.vm.mirror_shown(buffer).map_err(Fault::Error)?; }
+        let Some(b) = self.vm.overlay_store(buffer) else {
+            let Object::ByteBuffer(b) = self.vm.object(buffer).map_err(Fault::Error)? else {
+                unreachable!("decode_buffer validated the buffer")
+            };
+            return Value::integer(b.restriction.start.0 as i64 + 1).map_err(|e| Fault::Error(e.to_string()));
         };
         // GNU bounds the search below by BEGV, not above by ZV. POS can
         // lie outside the buffer, so clamp only for character-to-byte conversion.

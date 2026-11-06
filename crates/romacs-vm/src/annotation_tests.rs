@@ -92,7 +92,7 @@ fn annotation_graphs_compact_and_dead_marker_slots_are_reused() {
     let marker = vm.allocate_object(Object::Marker(Box::new(Marker {
         buffer,
         anchor: Some(anchor),
-        bias: Bias::Right,
+        bias: Bias::Right, last_position: 0
     })));
     let overlay = vm.allocate_object(Object::Overlay(Box::new(Overlay {
         buffer: Value::NIL,

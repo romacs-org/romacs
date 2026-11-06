@@ -267,7 +267,7 @@ impl Leaf<'_> {
                 data::Object::ByteBuffer(b) => {
                     let byte = Self::byte_case_result(out[0], code, matches!(case, RegionCase::Down));
                     if u32::from(byte) == code { continue; }
-                    b.bytes[at as usize] = byte;
+                    b.set_byte(at as usize, byte).map_err(Fault::Error)?;
                     last = at + 2;
                 }
                 _ => unreachable!("buffer_index validates"),

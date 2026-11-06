@@ -1365,8 +1365,11 @@ pub(crate) struct Marker {
     pub buffer: Value,
     pub anchor: Option<Anchor>,
     pub bias: Bias,
+    /// GNU's charpos where a marker left its buffer: what
+    /// `marker-last-position' answers; 0 for one never placed.
+    pub last_position: i64,
 }
-romacs_snapshot::snapshot_struct!(Marker { buffer, anchor, bias });
+romacs_snapshot::snapshot_struct!(Marker { buffer, anchor, bias, last_position });
 #[derive(Clone)]
 pub(crate) struct Overlay {
     pub buffer: Value,

@@ -17,6 +17,7 @@
 
 ;;; Code:
 
+(require 'romacs-truncate)
 (require 'seq)
 (require 'romacs-popup)
 (require 'romacs-agent)
@@ -102,7 +103,7 @@ shows images."
 
 (defun romacs-agent-images--row-text (name age columns)
   "A row's text in COLUMNS: NAME, shortened to leave room for AGE, and AGE."
-  (concat "  " (truncate-string-to-width name (- columns 4 (string-width age)) nil nil "…")
+  (concat "  " (romacs-truncate name (- columns 4 (string-width age)))
           (propertize (concat "  " age) 'face 'shadow)))
 
 (defun romacs-agent-images--insert-row (file selected)
@@ -237,11 +238,11 @@ frame too small for the cards browses, at once or when it shrinks."
 
 (defun romacs-agent-images--tray-text (names columns)
   "The tray's hint line for NAMES within COLUMNS."
-  (truncate-string-to-width
+  (romacs-truncate
    (format (substitute-command-keys
             "%d image%s · \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-remove-image] removes the last, N \\[romacs-agent-chat-remove-image] the Nth")
            (length names) (if (cdr names) "s" ""))
-   columns nil nil "…"))
+   columns))
 
 (defun romacs-agent-images--tray-draw (files columns)
   "Fill the current buffer, the tray, from FILES within COLUMNS."
@@ -254,7 +255,7 @@ frame too small for the cards browses, at once or when it shrinks."
       (insert (propertize (format "%d " index) 'face 'minibuffer-prompt))
       (romacs-agent-images--insert-image file (* 2 romacs-agent-images--tray-thumbnail)
                                          romacs-agent-images--tray-thumbnail)
-      (insert " " (truncate-string-to-width (file-name-nondirectory file) name-width nil nil "…") "  "))
+      (insert " " (romacs-truncate (file-name-nondirectory file) name-width) "  "))
     (goto-char (point-min))))
 
 (defvar romacs-agent-images--tray-shown nil

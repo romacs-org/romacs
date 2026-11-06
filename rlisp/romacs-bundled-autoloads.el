@@ -229,6 +229,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-custom.el
+
+(register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme" "romacs-theme-preview"))
+
+
 ;;; Generated autoloads from romacs-defaults.el
 
 (register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
@@ -304,7 +309,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-frame.el
 
-(register-definition-prefixes "romacs-frame" '("color-" "defined-colors" "display-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
+(register-definition-prefixes "romacs-frame" '("color-" "custom-theme-recalc-face" "display-" "face-" "find-composition-internal" "fontset-" "frame-" "romacs-" "set-fontset-font" "suspend-emacs" "tty-color-alist" "use-default-font-for-symbols" "x-list-fonts"))
 
 
 ;;; Generated autoloads from romacs-fzf.el
@@ -370,7 +375,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el
@@ -603,6 +608,16 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-treesit.el
 
 (register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
+
+
+;;; Generated autoloads from romacs-truncate.el
+
+(autoload 'romacs-truncate "romacs-truncate"
+"STRING in at most WIDTH columns, a cut one ending in an ellipsis when
+WIDTH leaves room for more than that.  PADDING, a character, fills a
+shorter STRING to WIDTH.
+
+(fn STRING WIDTH &optional PADDING)")
 
 
 ;;; Generated autoloads from romacs-unidata.el

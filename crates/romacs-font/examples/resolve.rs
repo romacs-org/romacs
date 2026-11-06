@@ -7,8 +7,7 @@
 //! U+1F300..U+1FAFF (the test carries GNU's exact emoji ranges). `--bold` and `--italic` change the requested style.
 
 use romacs_font::{
-    FontRequest, FontResolver, FontsetEntry, FontsetFontSpec, FontsetMode, FontsetPolicy,
-    FontsetTarget,
+    FontDef, FontRequest, FontResolver, Fontset, FontsetMode, FontsetState, FontsetTarget,
 };
 
 fn main() {
@@ -28,15 +27,17 @@ fn main() {
         .unwrap_or(16.0);
     let text = args.get(2).map_or("Ωμέγα Привет Hello", String::as_str);
 
-    let mut policy = FontsetPolicy::new();
+    let mut fontset = Fontset::new("example");
     if owner_emoji {
-        policy.set_font(
+        fontset.add(
             FontsetTarget::Range(0x1F300, 0x1FAFF),
-            FontsetEntry::Font(FontsetFontSpec::family("Noto Color Emoji")),
+            Some(std::sync::Arc::new(FontDef::family("Noto Color Emoji"))),
             FontsetMode::Prepend,
         );
     }
     let mut resolver = FontResolver::new().expect("platform font catalog");
+    let fontset = std::sync::Arc::new(fontset);
+    resolver.set_fontsets(std::sync::Arc::new(FontsetState::new(fontset.clone(), fontset, Default::default(), 0, 1)));
     let mut request = FontRequest::new(family, size);
     if bold {
         request = request.with_weight(700);
@@ -44,7 +45,7 @@ fn main() {
     if italic {
         request = request.with_slant(romacs_display_protocol::font::FontSlantKind::Italic);
     }
-    match resolver.resolve_primary(&request, &policy) {
+    match resolver.resolve_primary(&request) {
         Ok(font) => println!(
             "primary {family:?} -> {} | {} | w{} {:?} wc{} | asc {} desc {} space {} | {:?}",
             font.family,
@@ -71,7 +72,7 @@ fn main() {
             continue;
         }
         seen.push(ch);
-        match resolver.resolve_char(&request, ch, &policy) {
+        match resolver.resolve_char(&request, ch) {
             Ok(found) => println!(
                 "U+{:04X} {ch} -> {:?} {} glyph {} adv {}",
                 u32::from(ch),

@@ -687,3 +687,24 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       ;; Its name below, should the image draw blank.
       (forward-line 1)
       (should (looking-at-p "  ▣ a.png\n")))))
+
+(ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
+  "A process of another HOME has no record of a live session: its route stays."
+  (let* ((root (file-name-as-directory (make-temp-file "sweep" t)))
+         (routes (expand-file-name "route/" root))
+         (socket (expand-file-name "s.sock" root))
+         (server nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--runtime-root) (lambda () root))
+                  ((symbol-function 'romacs-agent--state-root) (lambda () (expand-file-name "state/" root)))
+                  ((symbol-function 'romacs-agent--sessions-base) (lambda () (expand-file-name "none/" root))))
+          (make-directory routes)
+          (set-file-modes routes #o700)
+          (setq server (make-network-process :name "sweep" :family 'local :service socket :server t :noquery t))
+          (make-symbolic-link socket (expand-file-name "live.sock" routes))
+          (make-symbolic-link (expand-file-name "gone.sock" root) (expand-file-name "dead.sock" routes))
+          (romacs-agent--sweep)
+          (should (file-symlink-p (expand-file-name "live.sock" routes)))
+          (should-not (file-symlink-p (expand-file-name "dead.sock" routes))))
+      (when server (delete-process server))
+      (delete-directory root t))))

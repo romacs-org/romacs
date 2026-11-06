@@ -136,7 +136,7 @@
       (should (equal (plist-get (cdr (assoc "Codex · default" rows)) :note) "harness's own"))
       (should (string-suffix-p "default" (plist-get (cdr (car rows)) :group)))
       (should (equal (plist-get (cdr (assoc "Claude · default" rows)) :note) "a · high"))
-      (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :note) "effort low…high"))
+      (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :note) "effort low...high"))
       (should (equal (plist-get (cdr (assoc "Claude (claude2) · default" rows)) :note) "dir missing"))
       (should (equal (plist-get (cdr (assoc "Claude · Model A" rows)) :model) "a"))
       (should-not (plist-get (cdr (assoc "Claude · default" rows)) :model)))))
@@ -171,7 +171,7 @@ affixation it saw pushed on the list in cell ASKED."
       (pcase-let ((`(,prompt ,group ,note ,all) (car (car asked))))
         (should (string-match-p "Agent.*Claude · default" prompt))
         (should (string-prefix-p "Claude  " group))
-        (should (string-search "effort low…high" note))
+        (should (string-search "effort low...high" note))
         (should (equal (car all) "Claude · default")))
       ;; An instance's defaults: nothing named.
       (setcar answers (list "Codex · default"))

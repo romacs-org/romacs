@@ -45,6 +45,24 @@ pub(super) fn payload_bytes(object: &Object) -> usize {
     }
 }
 
+impl super::gc::Consed {
+    /// OBJECT was allocated: a float, a string, or anything else as vector cells.
+    pub(super) fn count(&mut self, object: &Object) {
+        match object {
+            Object::Float(_) => self.floats += 1,
+            Object::String(s) | Object::RawString(s) => {
+                self.strings += 1;
+                self.string_chars += s.bytes.len() as u64;
+            }
+            Object::Bytes(bytes) => {
+                self.strings += 1;
+                self.string_chars += bytes.len() as u64;
+            }
+            other => self.vector_cells += (profiled_bytes(other) / size_of::<Value>()) as u64,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex_engine::SyntaxClass>),
@@ -453,6 +471,7 @@ impl Vm {
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
         self.charge_payload(payload_bytes(&object));
         self.free.allocated += profiled_bytes(&object) as u64;
+        self.free.consed.count(&object);
         let index = match self.free.objects.pop() {
             Some(index) => {
                 self.objects[index as usize] = object;
@@ -470,6 +489,7 @@ impl Vm {
     #[inline]
     pub(super) fn alloc_cons(&mut self, car: Value, cdr: Value) -> Value {
         self.free.allocated += size_of::<(Value, Value)>() as u64;
+        self.free.consed.conses += 1;
         let index = match self.free.conses.pop() {
             Some(index) => {
                 self.conses[index as usize] = (car, cdr);
@@ -501,6 +521,7 @@ impl Vm {
     #[inline]
     pub(super) fn alloc_closure(&mut self, closure: Closure) -> Value {
         self.free.allocated += (size_of::<Closure>() + (closure.captures.len() + closure.metadata.len()) * size_of::<Value>()) as u64;
+        self.free.consed.vector_cells += (size_of::<Closure>() / size_of::<Value>() + closure.captures.len() + closure.metadata.len()) as u64;
         let index = match self.free.closures.pop() {
             Some(index) => {
                 self.closures[index as usize] = closure;
@@ -794,12 +815,12 @@ impl Vm {
                 Require | Provide | Featurep => ("symbolp", x),
                 Car | Cdr => ("listp", x),
                 Memq | Assq => ("listp", y),
-                Nth if x.integer_value().is_none() => ("integerp", x),
+                Nth if self.bigint_value(x).is_none() => ("integerp", x),
                 Nth => {
                     // nthcdr errors blame the original list; a final car error
                     // blames the reached atom. Rewalk only on this cold path.
                     let mut tail = y;
-                    let mut remaining = x.integer_value().unwrap().max(0) as usize;
+                    let mut remaining = x.integer_value().map_or(usize::MAX, |n| n.max(0) as usize);
                     while remaining != 0 {
                         let Ok((_, next)) = self.cons_pair(tail) else {
                             break;
