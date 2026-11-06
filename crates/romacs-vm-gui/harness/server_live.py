@@ -610,6 +610,11 @@ def title(args, base):
         until(lambda: 'renamed.txt (1)' in titles(), 30, 'the size in the title')
         s.eval('(with-current-buffer "renamed.txt" (insert "b"))')
         until(lambda: 'renamed.txt (2)' in titles(), 30, 'the next size in the title')
+        # %* reads `buffer-read-only' and the modified state.
+        s.eval('(with-current-buffer "renamed.txt" (setq frame-title-format "%b %*") (set-buffer-modified-p nil))')
+        until(lambda: 'renamed.txt -' in titles(), 30, 'the unmodified mark')
+        s.eval('(with-current-buffer "renamed.txt" (setq buffer-read-only t))')
+        until(lambda: 'renamed.txt %' in titles(), 30, 'the read-only mark')
         return {'titles': titles(), 'ok': True}
     finally:
         s.close()

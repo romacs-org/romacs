@@ -121,10 +121,10 @@ impl Vm {
         self.display_state.bar_cache = Some((key, bar.clone()));
         Ok(Some(place(bar)))
     }
-    /// The window title's format, and what a format of `%b', `%*' and `%+'
-    /// depends on (`romacs--title-format-static-p'): the selected window's
-    /// buffer, its name and modified state, and what moves mode lines.
-    /// Not point, so a key that only moves it pays nothing.
+    /// The window title's format, and what a format of `%b' depends on
+    /// (`romacs--title-format-static-p'): the selected window's buffer, its
+    /// name, and what moves mode lines.  Not point, so a key that only
+    /// moves it pays nothing.
     pub fn frame_title_key(&mut self) -> Result<(u64, u64)> {
         use std::hash::{Hash, Hasher};
         let window = self.selected_window_value()?;
@@ -135,7 +135,7 @@ impl Vm {
             _ => return Err("buffer required".into()),
         };
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (buffer.0, &state.name, state.modified()).hash(&mut hasher);
+        (buffer.0, &state.name).hash(&mut hasher);
         let format = self.slot("frame-title-format");
         let format = self.variable_value(format)?.0;
         (format, self.display_state.mode_line_epoch, self.gc_stats.collections).hash(&mut hasher);

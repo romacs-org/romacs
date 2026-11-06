@@ -1225,10 +1225,10 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
 ;;;; The window title
 
 (defun romacs--title-format-static-p (format)
-  "Whether the mode-line FORMAT reads only `%b', `%*', `%+' and `%%', the
-symbols of GNU's default, and fixed text: its expansion moves only with
-what `Vm::frame_title_key' covers."
-  (cond ((stringp format) (not (string-match-p "%[^b*+%]" format)))
+  "Whether the mode-line FORMAT reads only `%b', `%%', the symbols of GNU's
+default, and fixed text: its expansion moves only with what
+`Vm::frame_title_key' covers."
+  (cond ((stringp format) (not (string-match-p "%[^b%]" format)))
         ((consp format) (and (not (keywordp (car format)))
                              (romacs--title-format-static-p (car format))
                              (romacs--title-format-static-p (cdr format))))
