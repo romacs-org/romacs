@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "6aa455211c16425026893335e06d155a825b4f041a31690072d1e263ecce24ec",
+  "source_fingerprint": "c13fa7b6938f818efef5bab6e85d250d76cefe60f022043dcc1aa3e0f8be4d05",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1363,
-  "parsed_vm2_only": 1363
+  "parsed_total": 1364,
+  "parsed_vm2_only": 1364
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4253,6 +4253,11 @@
    "name": "romacs--auto-saved-tick",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/autosave.rs:107"
+  },
+  "romacs--backquote-process": {
+   "name": "romacs--backquote-process",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/backquote.rs:19"
   },
   "romacs--backtrace-rewind": {
    "name": "romacs--backtrace-rewind",

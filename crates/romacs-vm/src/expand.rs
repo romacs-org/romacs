@@ -116,105 +116,217 @@ fn quote(form: Form) -> Form {
     call("quote", vec![form])
 }
 
-fn backquote(form: &Form, depth: usize, fresh: &mut Fresh) -> Result<Form> {
-    if let Form::List(items) = form {
-        if let Some(Form::Sym(head)) = items.first()
-            && matches!(head.as_str(), "`" | "," | ",@")
-            && items.len() == 2
-        {
-            if head == "," && depth == 1 {
-                return Ok(items[1].clone());
-            }
-            if head == ",@" && depth == 1 {
-                return Err("unquote-splicing outside list or vector".into());
-            }
-            let nested = if head == "`" { depth + 1 } else { depth - 1 };
-            return Ok(call(
-                "list",
-                vec![quote(s(head)), backquote(&items[1], nested, fresh)?],
-            ));
-        }
-        return backquote_list(items, &s("nil"), depth, fresh);
+/// What a part of a template expands to (backquote.el's tags 0, 1 and 2).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Kind {
+    Constant,
+    Computed,
+    Spliced,
+}
+
+pub(crate) struct Part {
+    pub(crate) kind: Kind,
+    pub(crate) form: Form,
+}
+
+/// A template `backquote' refuses.
+pub(crate) enum BadTemplate {
+    /// A comma of this spelling given more than one operand.
+    Operands(&'static str, Form),
+    /// A comma form ending in this dotted tail, which `length' refuses.
+    Dotted(Form),
+}
+
+fn is_nil(form: &Form) -> bool {
+    matches!(form, Form::Sym(name) if name == "nil") || matches!(form, Form::List(items) if items.is_empty())
+}
+
+fn headed(form: &Form, head: &str) -> bool {
+    matches!(form, Form::List(items) if matches!(items.first(), Some(Form::Sym(name)) if name == head))
+}
+
+fn nil() -> Form {
+    s("nil")
+}
+
+impl Part {
+    fn constant(form: Form) -> Part {
+        Part { kind: Kind::Constant, form }
     }
-    match form {
-        Form::Dotted(items, tail) => backquote_list(items, tail, depth, fresh),
-        Form::Vector(items) => Ok(call(
-            "apply",
-            vec![
-                quote(s("vector")),
-                backquote_list(items, &s("nil"), depth, fresh)?,
-            ],
-        )),
-        _ => Ok(quote(form.clone())),
+    /// FORM, constant when it is a quotation.
+    fn of(form: Form) -> Part {
+        Part { kind: if headed(&form, "quote") { Kind::Constant } else { Kind::Computed }, form }
     }
 }
 
-fn backquote_list(items: &[Form], tail: &Form, depth: usize, fresh: &mut Fresh) -> Result<Form> {
-    let Some((first, rest)) = items.split_first() else {
-        return backquote(tail, depth, fresh);
-    };
-    // Cdrs are Lisp data too: (a . ,x) has the same structure as (a , x).
-    if matches!(first, Form::Sym(h) if matches!(h.as_str(), "`" | "," | ",@"))
-        && items.len() == 2
-        && matches!(tail, Form::Sym(h) if h == "nil")
-    {
-        return backquote(&l(items.to_vec()), depth, fresh);
-    }
-    let end = backquote_list(rest, tail, depth, fresh)?;
-    if depth == 1
-        && let Form::List(splice) = first
-        && splice.len() == 2
-        && matches!(&splice[0], Form::Sym(h) if h == ",@")
-    {
-        if rest.is_empty() && matches!(tail, Form::Sym(h) if h == "nil") {
-            return Ok(splice[1].clone());
+/// What is left of a list: ITEMS, then TAIL unless that is nil. With no
+/// ITEMS, TAIL is an atom of the template.
+#[derive(Clone, Copy)]
+struct Rest<'a> {
+    items: &'a [Form],
+    tail: Option<&'a Form>,
+}
+
+impl<'a> Rest<'a> {
+    const END: Rest<'static> = Rest { items: &[], tail: None };
+
+    fn of(form: &'a Form) -> Rest<'a> {
+        match form {
+            Form::List(items) => Rest { items, tail: None },
+            Form::Dotted(items, tail) if items.is_empty() => Rest::of(tail),
+            Form::Dotted(items, tail) => Rest { items, tail: (!is_nil(tail)).then_some(&**tail) },
+            atom if is_nil(atom) => Rest::END,
+            atom => Rest { items: &[], tail: Some(atom) },
         }
-        let seq = fresh.symbol();
-        let result = fresh.symbol();
-        let rev = fresh.symbol();
-        return Ok(call(
-            "let*",
-            vec![
-                l(vec![
-                    l(vec![seq.clone(), splice[1].clone()]),
-                    l(vec![result.clone(), end]),
-                    l(vec![rev.clone(), s("nil")]),
-                ]),
-                call(
-                    "while",
-                    vec![
-                        seq.clone(),
-                        call(
-                            "setq",
-                            vec![
-                                rev.clone(),
-                                call("cons", vec![call("car", vec![seq.clone()]), rev.clone()]),
-                                seq.clone(),
-                                call("cdr", vec![seq]),
-                            ],
-                        ),
-                    ],
-                ),
-                call(
-                    "while",
-                    vec![
-                        rev.clone(),
-                        call(
-                            "setq",
-                            vec![
-                                result.clone(),
-                                call("cons", vec![call("car", vec![rev.clone()]), result.clone()]),
-                                rev.clone(),
-                                call("cdr", vec![rev]),
-                            ],
-                        ),
-                    ],
-                ),
-                result,
-            ],
-        ));
     }
-    Ok(call("cons", vec![backquote(first, depth, fresh)?, end]))
+    fn next(self) -> Rest<'a> {
+        match self.items {
+            [] | [_] => self.tail.map_or(Rest::END, Rest::of),
+            [_, items @ ..] => Rest { items, tail: self.tail },
+        }
+    }
+    fn form(self) -> Form {
+        match self.tail {
+            Some(tail) => Form::Dotted(self.items.to_vec(), Box::new(tail.clone())),
+            None => l(self.items.to_vec()),
+        }
+    }
+}
+
+type Processed = std::result::Result<Part, BadTemplate>;
+
+/// What a template `(quote X)' or atom evaluates to (`backquote-listify's
+/// `eval').
+fn constant_value(form: Form) -> Form {
+    match form {
+        Form::List(mut items) if items.len() == 2 && matches!(&items[0], Form::Sym(name) if name == "quote") =>
+            items.pop().expect("two items"),
+        form => form,
+    }
+}
+
+/// VALUES, last first, consed onto END.
+fn prepended(values: Vec<Form>, end: Form) -> Form {
+    if values.is_empty() { return end; }
+    let mut items: Vec<Form> = values.into_iter().rev().collect();
+    match end {
+        Form::List(rest) => { items.extend(rest); Form::List(items) }
+        Form::Dotted(rest, tail) => { items.extend(rest); Form::Dotted(items, tail) }
+        end if is_nil(&end) => Form::List(items),
+        end => Form::Dotted(items, Box::new(end)),
+    }
+}
+
+/// `backquote-listify': the code for PARTS, in template order, before
+/// TAIL: `list', `cons' or `backquote-list*' as the parts need, and the
+/// constants at the end folded into one quotation.
+fn listify(parts: Vec<Part>, tail: Part) -> Form {
+    let constant_tail = tail.kind == Kind::Constant;
+    let end = if constant_tail { constant_value(tail.form) } else { tail.form };
+    let (mut heads, mut values) = (vec![], vec![]);
+    for part in parts.into_iter().rev() {
+        if !heads.is_empty() || !constant_tail || part.kind != Kind::Constant {
+            heads.push(part.form);
+        } else {
+            values.push(constant_value(part.form));
+        }
+    }
+    heads.reverse();
+    let end = prepended(values, end);
+    if is_nil(&end) { return call("list", heads); }
+    let end = if constant_tail { quote(end) } else { end };
+    if heads.is_empty() { return end; }
+    let spread = heads.len() > 1 || headed(&heads[0], ",@");
+    heads.push(end);
+    call(if spread { "backquote-list*" } else { "cons" }, heads)
+}
+
+/// The operand of the comma form S.
+fn operand(s: Rest, comma: &'static str) -> std::result::Result<Form, BadTemplate> {
+    if let Some(tail) = s.tail { return Err(BadTemplate::Dotted(tail.clone())); }
+    if s.items.len() > 2 { return Err(BadTemplate::Operands(comma, s.form())); }
+    Ok(s.items.get(1).cloned().unwrap_or_else(nil))
+}
+
+/// `backquote-delay-process': a comma or backquote kept for a later level.
+fn delayed(s: Rest, level: i64) -> Processed {
+    let head = Part::constant(quote(s.items[0].clone()));
+    Ok(Part::of(listify(vec![head], process(s.next(), level)?)))
+}
+
+fn vector(vector: &Form, items: &[Form], level: i64) -> Processed {
+    let shown = process(Rest { items, tail: None }, level)?;
+    if shown.kind == Kind::Constant { return Ok(Part::constant(vector.clone())); }
+    let form = match shown.form {
+        Form::List(mut items) if matches!(items.first(), Some(Form::Sym(name)) if name == "list" || name == "append") => {
+            let vectored = if matches!(&items[0], Form::Sym(name) if name == "list") { "vector" } else { "vconcat" };
+            items[0] = s(vectored);
+            Form::List(items)
+        }
+        form @ (Form::List(_) | Form::Dotted(..)) => call("apply", vec![call("function", vec![s("vector")]), form]),
+        form if is_nil(&form) => call("apply", vec![call("function", vec![s("vector")]), form]),
+        form => call("vconcat", vec![form]),
+    };
+    Ok(Part { kind: Kind::Computed, form })
+}
+
+fn atom(form: Option<&Form>, level: i64) -> Processed {
+    match form {
+        None => Ok(Part::constant(nil())),
+        Some(whole @ Form::Vector(items)) => vector(whole, items, level),
+        Some(Form::Sym(name)) if name == "t" => Ok(Part::constant(s("t"))),
+        Some(symbol @ (Form::Sym(_) | Form::Generated(_))) => Ok(Part::constant(quote(symbol.clone()))),
+        Some(other) => Ok(Part::constant(other.clone())),
+    }
+}
+
+/// One list level: what is not spliced gathers into lists, and the lists
+/// join under `append'.
+fn list(s: Rest, level: i64) -> Processed {
+    let (mut rest, mut first, mut pending, mut lists) = (s, vec![], vec![], vec![]);
+    // A comma or backquote in a cdr heads the rest of the list: `(a . ,b)'.
+    while let Some(item) = rest.items.first() && !matches!(item, Form::Sym(name) if name == "," || name == "`") {
+        let part = process(Rest::of(item), level)?;
+        if part.kind == Kind::Spliced {
+            if lists.is_empty() { first = std::mem::take(&mut pending); }
+            if !pending.is_empty() { lists.push(listify(std::mem::take(&mut pending), Part::constant(nil()))); }
+            lists.push(part.form);
+        } else {
+            pending.push(part);
+        }
+        rest = rest.next();
+    }
+    if !rest.items.is_empty() || rest.tail.is_some() || !pending.is_empty() {
+        lists.push(listify(pending, process(rest, level)?));
+    }
+    let spliced = lists.last().is_some_and(|form| headed(form, ",@"));
+    let mut expression = if lists.len() > 1 || spliced {
+        lists.insert(0, self::s("append"));
+        l(lists)
+    } else {
+        lists.pop().unwrap_or_else(nil)
+    };
+    if !first.is_empty() {
+        expression = listify(first, Part { kind: Kind::Computed, form: expression });
+    }
+    Ok(Part::of(expression))
+}
+
+fn process(s: Rest, level: i64) -> Processed {
+    match s.items.first() {
+        None => atom(s.tail, level),
+        Some(Form::Sym(name)) if name == "," && level <= 0 => Ok(Part::of(operand(s, ",")?)),
+        Some(Form::Sym(name)) if name == ",@" && level <= 0 => Ok(Part { kind: Kind::Spliced, form: operand(s, ",@")? }),
+        Some(Form::Sym(name)) if name == "," || name == ",@" => delayed(s, level - 1),
+        Some(Form::Sym(name)) if name == "`" => delayed(s, level + 1),
+        Some(_) => list(s, level),
+    }
+}
+
+/// `backquote-process' on STRUCTURE at nesting LEVEL (backquote.el, whose
+/// expansions these equal; DIVERGENCES.md VM2-BACKQUOTE).
+pub(crate) fn backquote_process(structure: &Form, level: i64) -> Processed {
+    process(Rest::of(structure), level)
 }
 
 pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
@@ -256,7 +368,12 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             progn(args),
         ),
         "declare" => s("nil"),
-        "`" if args.len() == 1 => backquote(&args[0], 1, &mut fresh)?,
+        "`" if args.len() == 1 => backquote_process(&args[0], 0)
+            .map_err(|_| "malformed backquote template".to_string())?.form,
+        "backquote-list*" if !args.is_empty() => {
+            let (last, rest) = args.split_last().expect("an argument");
+            rest.iter().rev().fold(last.clone(), |tail, head| call("cons", vec![head.clone(), tail]))
+        }
         "with-temp-buffer" => {
             let temp = fresh.symbol();
             binding(temp.clone(), call("#:vm2-temp-buffer", vec![]),

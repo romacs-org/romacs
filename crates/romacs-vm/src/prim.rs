@@ -1418,6 +1418,14 @@ mod leaf {
             self.vm.permanent_symbol_names.insert(symbol.0, value);
             Ok(value)
         }
+        /// VALUE as the compiler reads a macro's expansion.
+        pub fn expansion_datum(&self, value: Value) -> std::result::Result<Form, Fault> {
+            self.vm.expansion_form(value, 0).map_err(Fault::Error)
+        }
+        /// FORM as a Lisp object.
+        pub fn form_value(&mut self, form: &Form) -> std::result::Result<Value, Fault> {
+            self.vm.literal(form).map_err(Fault::Error)
+        }
         pub fn intern(&mut self, name: &str) -> Value {
             self.vm.intern(name)
         }

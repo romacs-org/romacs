@@ -523,6 +523,16 @@ impl Vm {
         }
         self.expanded_macros.push((slot, self.slots[slot].version));
         let function = self.slots[slot].function;
+        // The standard `backquote' needs no call: a malformed template
+        // goes on to signal from it (VM2-BACKQUOTE).
+        if let [Form::Sym(head), template] = items.as_slice()
+            && matches!(head.as_str(), "`" | "backquote")
+            && self.standard_backquote(function)
+            && let Ok(part) = expand::backquote_process(template, 0)
+        {
+            collect_symbols(&part.form, &mut self.expanded_symbols);
+            return Ok(Some(part.form));
+        }
         self.expanding.push(slot);
         // Inside a compilation, the open builder holds collection while it
         // keeps unrooted constants. At a load's top level nothing does: ITEMS
@@ -561,6 +571,15 @@ impl Vm {
     }
 }
 impl Vm {
+    /// Whether FUNCTION is the `backquote' the bootstrap left, over the
+    /// native `backquote-process': a redefinition or advice is called.
+    fn standard_backquote(&self, function: Value) -> bool {
+        let cell = |name: &str| self.names.get(name).map(|&slot| self.slots[slot].function);
+        let symbol = |name: &str| self.names.get(name).map(|&slot| Value::reference(slot + 1, 7));
+        let (Some(process), Some(native)) = (cell("backquote-process"), cell("romacs--backquote-process")) else { return false };
+        let (Some(backquote), Some(property)) = (symbol("backquote"), symbol("romacs--standard-macro")) else { return false };
+        process == native && self.symbol_property(backquote, property).is_ok_and(|standard| standard == function)
+    }
     /// Whether a call headed by SLOT expands as a macro now: the end of its
     /// alias chain is a macro or a macro autoload. A cached compilation is
     /// valid only while this is unchanged for every symbol it mentions, so a

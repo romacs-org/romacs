@@ -584,6 +584,13 @@ fn romacs_theme_rum_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-rum-test.el");
 }
 
+/// The native `backquote-process' and the compiler's use of it, against
+/// GNU's backquote.el (tests/romacs-backquote-test.el).
+#[test]
+fn romacs_backquote_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-backquote-test.el");
+}
+
 /// FILE's `romacs-deftest's, in a fresh `--loadup' session.
 fn theme_lisp_tests_pass(file: &'static str) {
     let summary = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
