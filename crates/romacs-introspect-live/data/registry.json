@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "42cb97c099f0e00d3ee6f5b15ff061c5de578cea38e36abcfc3ccc20b0a29469",
+    "input_hash": "081777297c30c5d85dc24992db2d1f5621a6eb494f9774d2d228ebc108f625d4",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8339
+    "vm2_universe": 8394
   },
   "schema": 2,
   "vm2": {
-    "count": 1384,
+    "count": 1391,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -883,6 +883,9 @@
       "romacs--insert-file-contents-format",
       "romacs--insert-file-contents-undecide",
       "romacs--insert-printed",
+      "romacs--inspect-frames",
+      "romacs--inspect-listen",
+      "romacs--inspect-stop",
       "romacs--isolate-children",
       "romacs--isolate-close",
       "romacs--isolate-compact-next",
@@ -987,6 +990,7 @@
       "romacs--startup-phase",
       "romacs--status-bar-target",
       "romacs--status-bar-text",
+      "romacs--take-collections",
       "romacs--take-doomed-finalizers",
       "romacs--take-user-signal",
       "romacs--term-close",
@@ -1004,6 +1008,8 @@
       "romacs--timer-next",
       "romacs--timer-time",
       "romacs--treesit-detach",
+      "romacs--treesit-parse-early",
+      "romacs--treesit-parsing-p",
       "romacs--validate-region",
       "romacs--wait-status",
       "romacs--world-layer-deferred-by",
@@ -1016,6 +1022,7 @@
       "romacs-instructions",
       "romacs-json-read",
       "romacs-native-stack-room",
+      "romacs-pbkdf2-hmac",
       "romacs-status-bar-height",
       "romacs-status-bar-window",
       "romacs-treesit-bundled-grammars",

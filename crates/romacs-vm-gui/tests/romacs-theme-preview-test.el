@@ -39,35 +39,35 @@ enabled now back after it."
 (romacs-deftest romacs-theme-preview-leaves-the-session-as-it-found-it ()
   (let ((before (romacs-preview-test--state)))
     (romacs-theme-preview--session
-      (romacs-theme-preview--show 'modus-operandi)
-      (romacs-should (memq 'modus-operandi custom-enabled-themes))
+      (romacs-theme-preview--show 'catppuccin-latte)
+      (romacs-should (memq 'catppuccin-latte custom-enabled-themes))
       (romacs-should (eq (frame-parameter nil 'background-mode) 'light))
       (romacs-should-not (equal (face-attribute 'default :background)
                                 (nth 2 (assq 'default (nth 3 before)))))
-      (romacs-theme-preview--show 'tango-dark)
-      (romacs-should (memq 'tango-dark custom-enabled-themes))
-      (romacs-should-not (memq 'modus-operandi custom-enabled-themes)))
+      (romacs-theme-preview--show 'tokyonight-night)
+      (romacs-should (memq 'tokyonight-night custom-enabled-themes))
+      (romacs-should-not (memq 'catppuccin-latte custom-enabled-themes)))
     (romacs-should (equal (romacs-preview-test--state) before))))
 
 (romacs-deftest romacs-theme-preview-shows-what-load-theme-gives ()
   ;; The stock theme gives way to a colour scheme in a preview as it does
   ;; to `load-theme', on the second candidate as on the first.
   (romacs-theme-preview--session
-    (romacs-theme-preview--show 'tango-dark)
+    (romacs-theme-preview--show 'tokyonight-night)
     (let ((shown custom-enabled-themes))
-      (romacs-theme-preview--show 'modus-operandi)
-      (romacs-theme-preview--show 'tango-dark)
+      (romacs-theme-preview--show 'catppuccin-latte)
+      (romacs-theme-preview--show 'tokyonight-night)
       (romacs-should (equal custom-enabled-themes shown))))
   (let ((stock romacs-theme--stock) (themes custom-enabled-themes))
     (unwind-protect
         (progn
-          (load-theme 'tango-dark t)
+          (load-theme 'tokyonight-night t)
           (let ((loaded custom-enabled-themes))
             (mapc #'disable-theme custom-enabled-themes)
             (mapc #'enable-theme (reverse themes))
             (setq romacs-theme--stock stock)
             (romacs-theme-preview--session
-              (romacs-theme-preview--show 'tango-dark)
+              (romacs-theme-preview--show 'tokyonight-night)
               (romacs-should (equal custom-enabled-themes loaded)))))
       (mapc #'disable-theme custom-enabled-themes)
       (mapc #'enable-theme (reverse themes))
@@ -79,7 +79,7 @@ enabled now back after it."
     (unwind-protect
         (progn
           (romacs-theme-preview--session
-            (romacs-theme-preview--show 'modus-operandi)
+            (romacs-theme-preview--show 'catppuccin-latte)
             (romacs-should-not (eq (face-attribute 'region :underline frame) t)))
           (romacs-should (eq (face-attribute 'region :underline frame) t)))
       (set-face-attribute 'region frame :underline 'unspecified))))
@@ -90,7 +90,7 @@ enabled now back after it."
   (romacs-preview-test--themes (directory)
     (mapc #'disable-theme custom-enabled-themes)
     (let ((pills (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)))
-      (romacs-theme-preview--session (romacs-theme-preview--show 'modus-operandi))
+      (romacs-theme-preview--session (romacs-theme-preview--show 'catppuccin-latte))
       (romacs-should (equal (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)
                             pills)))))
 
@@ -108,20 +108,20 @@ enabled now back after it."
       (unwind-protect
           (progn
             (romacs-theme-preview--session
-              (romacs-theme-preview--show 'tango-dark)
+              (romacs-theme-preview--show 'tokyonight-night)
               (romacs-should-not (equal seen background)))
             (romacs-should (equal seen background))
             ;; What they are told of is what stays: a local edit included.
             (set-face-attribute 'default (selected-frame) :background "#123456")
             (romacs-theme-preview--session
-              (romacs-theme-preview--show 'tango-dark))
+              (romacs-theme-preview--show 'tokyonight-night))
             (romacs-should (equal seen "#123456"))
             (romacs-should (equal (face-background 'default) "#123456"))
             ;; So is a local edit over a face `user' sets.
             (custom-theme-set-faces 'user '(default ((t :background "#334455"))))
             (set-face-attribute 'default (selected-frame) :background "#123456")
             (romacs-theme-preview--session
-              (romacs-theme-preview--show 'tango-dark))
+              (romacs-theme-preview--show 'tokyonight-night))
             (romacs-should (equal seen "#123456"))
             (romacs-should (equal (face-background 'default) "#123456")))
         (remove-hook 'enable-theme-functions hook)
@@ -179,7 +179,7 @@ enabled now back after it."
        "(custom-theme-set-faces 'romacs-preview-reader `(highlight ((t :background ,(face-background 'default)))))")
       (put 'romacs-preview-reader 'theme-settings nil)
       (romacs-theme-preview--session
-        (romacs-theme-preview--show 'tango-dark)
+        (romacs-theme-preview--show 'tokyonight-night)
         (romacs-theme-preview--show 'romacs-preview-reader)
         (romacs-should (equal (face-background 'highlight) background))))))
 
@@ -248,7 +248,7 @@ enabled now back after it."
   (let* ((before (romacs-preview-test--state))
          (hook (lambda (&rest _) (error "A hook failed"))))
     (romacs-theme-preview--session
-      (romacs-theme-preview--show 'tango-dark)
+      (romacs-theme-preview--show 'tokyonight-night)
       (add-hook 'disable-theme-functions hook))
     (remove-hook 'disable-theme-functions hook)
     (romacs-should (equal (romacs-preview-test--state) before))))
@@ -275,9 +275,9 @@ enabled now back after it."
   (romacs-should (equal (interactive-form 'load-theme) '(interactive (romacs-theme-preview-read))))
   (let ((romacs-theme-preview nil) (asked nil))
     (cl-letf (((symbol-function 'completing-read)
-               (lambda (prompt names &rest _) (setq asked (list prompt names)) "tango-dark")))
-      (romacs-should (equal (romacs-theme-preview-read) '(tango-dark nil nil))))
+               (lambda (prompt names &rest _) (setq asked (list prompt names)) "tokyonight-night")))
+      (romacs-should (equal (romacs-theme-preview-read) '(tokyonight-night nil nil))))
     (romacs-should (equal (car asked) "Load custom theme: "))
-    (romacs-should (member "tango-dark" (cadr asked)))))
+    (romacs-should (member "tokyonight-night" (cadr asked)))))
 
 ;;; romacs-theme-preview-test.el ends here

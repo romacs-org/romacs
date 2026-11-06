@@ -122,7 +122,8 @@ romacs_snapshot::snapshot_enum!(NoFont {
 /// and the window SELECTED's edge in FOCUS instead, and every other
 /// window's colours blended DIM of the way toward the frame background.
 /// INTERNAL_BORDER is the gap the windows are placed inside. The default
-/// (classic) draws none of it.
+/// (classic) draws none of it. CURSOR is the frame's `cursor-color',
+/// which every frame shows, classic ones too.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FrameChrome {
     pub internal_border: u32,
@@ -130,8 +131,29 @@ pub struct FrameChrome {
     pub dim: f32,
     pub focus: Option<[u8; 3]>,
     pub border: Option<[u8; 3]>,
+    pub cursor: Option<[u8; 3]>,
     pub selected: u64,
     pub minibuffer: u64,
+    pub style: Style,
+}
+
+/// The material a frame's layers are drawn in, from its `romacs-style'
+/// parameter (rlisp/romacs-chrome.el); the default is the `flat' style.
+/// LAYER_RADIUS is the corners of a layer that names none, BAND_RADIUS of a
+/// picker's selected row; SHADOW is a layer's (reach, drop, opacity), GLOW
+/// its (reach, opacity), in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    pub layer_radius: f32,
+    pub band_radius: f32,
+    pub shadow: [f32; 3],
+    pub glow: [f32; 2],
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Style { layer_radius: 8.0, band_radius: 4.0, shadow: [18.0, 6.0, 0.55], glow: [14.0, 0.35] }
+    }
 }
 
 impl FrameChrome {

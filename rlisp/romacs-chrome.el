@@ -74,6 +74,68 @@ frame background, from 0 to 0.3."
            (user-error "`%s' must be a number from 0 to 0.3" option))
          (romacs-chrome--set option value)))
 
+(defconst romacs-style-flat
+  '(:radius-pane 6 :radius-layer 8 :radius-band 4
+    :shadow-layer (18 6 0.55) :glow-layer (14 0.35) :dim-inactive 0.12)
+  "The `flat' style's tokens, which every style starts from: corners in
+pixels, a layer's shadow as (REACH DROP OPACITY) and its glow as (REACH
+OPACITY), and how far an unselected pane is blended into the frame.")
+
+(defconst romacs-style-modern nil
+  "What the `modern' style changes of `romacs-style-flat'.")
+
+(defcustom romacs-style-overrides nil
+  "Style tokens, a property list, over the enabled theme's style."
+  :type 'plist
+  :initialize #'custom-initialize-default
+  :set #'romacs-chrome--set)
+
+(defvar romacs-style--resolved romacs-style-flat
+  "The tokens last published (`romacs-chrome--style-sync').")
+
+(defun romacs-style--scheme ()
+  "The enabled colour scheme of highest precedence, or nil."
+  (let ((found nil))
+    (when (fboundp 'romacs-theme--colour-scheme-p)
+      (dolist (theme (and (boundp 'custom-enabled-themes) custom-enabled-themes))
+        (when (and (null found) (not (eq theme 'user)) (romacs-theme--colour-scheme-p theme))
+          (setq found theme))))
+    found))
+
+(defun romacs-style--tokens (style)
+  "The tokens STYLE, a theme's declared `romacs-style', sets over flat's: a
+style's name or a property list; a theme that declares none is `modern'."
+  (cond ((memq style '(nil modern)) romacs-style-modern)
+        ((eq style 'flat) nil)
+        (t style)))
+
+(defun romacs-style--over (&rest styles)
+  "STYLES, property lists, each later one's tokens over the earlier ones'."
+  (let ((merged nil))
+    (dolist (style styles merged)
+      (setq merged (copy-sequence merged))
+      (while style
+        (setq merged (plist-put merged (car style) (car (cdr style)))
+              style (cdr (cdr style)))))))
+
+(defun romacs-style-resolve ()
+  "The style in force: `romacs-style-flat', under the enabled colour
+scheme's own, under `romacs-style-overrides'."
+  (let ((scheme (romacs-style--scheme)))
+    (romacs-style--over romacs-style-flat
+                        (romacs-style--tokens (and scheme (get scheme 'romacs-style)))
+                        romacs-style-overrides)))
+
+(defun romacs-style--wire (style)
+  "STYLE as the host reads it from the `romacs-style' frame parameter."
+  (vconcat (list (plist-get style :radius-layer) (plist-get style :radius-band))
+           (plist-get style :shadow-layer) (plist-get style :glow-layer)))
+
+(defun romacs-style--option (option token style)
+  "OPTION's value where the user changed it from flat's TOKEN, else STYLE's."
+  (let ((value (symbol-value option)))
+    (if (equal value (plist-get romacs-style-flat token)) (plist-get style token) value)))
+
 (defun romacs-chrome--root-frame ()
   "The root frame: the selected frame's outermost parent."
   (let ((frame (selected-frame)))
@@ -169,19 +231,23 @@ Run from `enable-theme-functions' and `disable-theme-functions'."
         (face-spec-set face spec 'face-defface-spec)))))
 
 (defun romacs-chrome--parameters (classic)
-  "The root frame's chrome parameters, GNU's look when CLASSIC."
-  (let ((gap (if classic 0 romacs-pane-gap)))
+  "The root frame's chrome parameters, GNU's look when CLASSIC, which no
+theme's or user's tokens change."
+  (let ((gap (if classic 0 romacs-pane-gap)) (style (if classic romacs-style-flat romacs-style--resolved)))
     `((right-divider-width . ,gap)
       (bottom-divider-width . ,gap)
       (internal-border-width . ,gap)
-      (romacs-pane-radius . ,(if classic 0 romacs-pane-radius))
-      (romacs-pane-dim . ,(if classic 0.0 (float romacs-pane-dim)))
-      (romacs-pane-chrome . ,(not classic)))))
+      (romacs-pane-radius . ,(if classic 0 (romacs-style--option 'romacs-pane-radius :radius-pane style)))
+      (romacs-pane-dim . ,(if classic 0.0 (float (romacs-style--option 'romacs-pane-dim :dim-inactive style))))
+      (romacs-pane-chrome . ,(not classic))
+      (romacs-style . ,(romacs-style--wire style)))))
 
 (defvar romacs-classic-chrome)
 
 (defun romacs-chrome-apply (&rest _)
-  "Apply the chrome options to the root frame, on a window system only."
+  "Apply the chrome options and the style in force to the root frame, on a
+window system only."
+  (setq romacs-style--resolved (romacs-style-resolve))
   (let ((frame (romacs-chrome--root-frame)))
     (when (window-system frame)
       (let ((classic (bound-and-true-p romacs-classic-chrome)))
@@ -192,6 +258,12 @@ Run from `enable-theme-functions' and `disable-theme-functions'."
         ;; Toasts shown keep clear of where the bar is now.
         (when (and (bound-and-true-p romacs-layer--toasts) (fboundp 'romacs-layer--toast-stack))
           (romacs-layer--toast-stack))))))
+
+(defun romacs-chrome--style-sync (&rest _)
+  "Publish the style in force, if it changed: from
+`enable-theme-functions' and `disable-theme-functions'."
+  (unless (equal (romacs-style-resolve) romacs-style--resolved)
+    (romacs-chrome-apply)))
 
 (defun romacs-chrome-refresh (&rest _)
   "Derive the chrome faces a theme leaves unset and apply the chrome to
@@ -285,6 +357,8 @@ the window whose line it is, at that column of the bar's text
 
 (add-hook 'enable-theme-functions #'romacs-chrome--set-faces)
 (add-hook 'disable-theme-functions #'romacs-chrome--set-faces)
+(add-hook 'enable-theme-functions #'romacs-chrome--style-sync)
+(add-hook 'disable-theme-functions #'romacs-chrome--style-sync)
 (add-hook 'after-init-hook #'romacs-chrome-refresh)
 
 (provide 'romacs-chrome)

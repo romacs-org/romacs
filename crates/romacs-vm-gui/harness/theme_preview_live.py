@@ -45,8 +45,8 @@ SETUP = r'''(progn
   (defun theme-preview-cycle (rounds)
     (romacs-theme-preview--session
       (dotimes (_ rounds)
-        (romacs-theme-preview--show 'tango-dark)
-        (romacs-theme-preview--show 'modus-operandi))))
+        (romacs-theme-preview--show 'tokyonight-night)
+        (romacs-theme-preview--show 'catppuccin-latte))))
   t)'''
 
 UNSAFE = '''(deftheme theme-preview-unsafe "Nobody agreed to this.")
@@ -145,12 +145,12 @@ def main():
             journey.prompt()
             opened = journey.state()
             journey.shot('open')
-            journey.choose('tango-dark')
-            tango = journey.state()
-            journey.shot('tango-dark')
-            journey.choose('modus-operandi')
-            modus = journey.state()
-            journey.shot('modus-operandi')
+            journey.choose('tokyonight-night')
+            dark = journey.state()
+            journey.shot('tokyonight-night')
+            journey.choose('catppuccin-latte')
+            light = journey.state()
+            journey.shot('catppuccin-latte')
             journey.choose('theme-preview-unsafe')
             unsafe = journey.state()
             journey.ctrl('g')
@@ -161,22 +161,22 @@ def main():
             pixels = differing(before, after, args.magick)
 
             journey.prompt()
-            journey.choose('tango-dark')
+            journey.choose('tokyonight-night')
             journey.key('-k', 'Return')
             time.sleep(1)
             chosen = journey.state()
             journey.shot('chosen')
-            session.eval_form("(progn (mapc #'disable-theme custom-enabled-themes) (load-theme 'modus-operandi t) (enable-theme 'default))")
+            session.eval_form("(progn (mapc #'disable-theme custom-enabled-themes) (load-theme 'catppuccin-latte t) (enable-theme 'default))")
 
-            report.update(base=base, opened=opened, tango=tango, modus=modus, unsafe=unsafe, quit=quit_state,
+            report.update(base=base, opened=opened, dark=dark, light=light, unsafe=unsafe, quit=quit_state,
                           chosen=chosen, pixels_after_quit=pixels)
             check(opened == base, f'opening the prompt changed {base} to {opened}')
-            check('(tango-dark' in tango and '"#2e3436"' in tango, f'tango-dark not shown: {tango}')
-            check('(modus-operandi' in modus and 'light' in modus and 'tango-dark' not in modus, f'modus-operandi not shown: {modus}')
+            check('(tokyonight-night' in dark and '"#1a1b26"' in dark, f'tokyonight-night not shown: {dark}')
+            check('(catppuccin-latte' in light and 'light' in light and 'tokyonight-night' not in light, f'catppuccin-latte not shown: {light}')
             check('theme-preview-unsafe' not in unsafe and unsafe.endswith('nil)'), f'an unsafe theme was read: {unsafe}')
             check(quit_state == base, f'C-g left {quit_state}, not {base}')
             check(pixels == 0, f'{pixels} pixels differ after C-g')
-            check('(tango-dark)' in chosen, f'RET left {chosen}')
+            check('(tokyonight-night)' in chosen, f'RET left {chosen}')
 
             def cycle(rounds):
                 form = f'(theme-preview-cycle {rounds:02d})'

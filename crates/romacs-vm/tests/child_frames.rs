@@ -149,6 +149,9 @@ fn child_frame_snapshots_survive_a_collecting_mode_line() {
           (let ((c (romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3) (left . ,(* 100 i)) \
                                            (background-color . ,(format \"#10203%d\" i)))))) \
             (set-window-buffer (frame-root-window c) (if (= i 0) \"gc\" \"plain\")))))").unwrap();
+    // Stress moves every live object; a plain compaction leaves the frames,
+    // with no garbage below them, where they are.
+    vm.set_gc_stress(1);
     for _ in 0..3 {
         let children = vm.frame_snapshot(800, 600).unwrap().children;
         let seen: Vec<_> = children.iter().map(|c| (c.x, c.background)).collect();

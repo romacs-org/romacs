@@ -74,10 +74,12 @@ mod control_tests {
         }
         program.code.push(instructions[..2].to_vec());
         program.code.push(instructions[2..].to_vec());
-        program.release_entry(0);
+        program.retire_code(&[false, true]);
         assert!(program.inline_bodies[..2].iter().all(Option::is_none));
         assert_eq!(program.free_entries, [0, 1]);
-        program.retire_code(&[false, true]);
+        assert_eq!(program.entries.len(), 3, "retiring keeps the sites where they are");
+        assert_eq!(program.code[1][0].site, 2);
+        program.close_sites();
         assert_eq!(program.entries.len(), 1);
         assert_eq!(program.inline_bodies.len(), 1);
         assert_eq!(program.code[1][0].site, 0);
@@ -87,6 +89,17 @@ mod control_tests {
             unsafe { program.inline_bodies[0].unwrap().evaluate(std::ptr::null()) },
             Some(Value::integer(12).unwrap())
         );
+        // Past half free, retiring closes the tables and keeps no free list.
+        let dead = 3 * SPARE_SITES;
+        program.code.insert(0, vec![instructions[0]; dead]);
+        for (site, inst) in program.code[0].iter_mut().enumerate() {
+            inst.site = site + 1;
+        }
+        program.entries.resize(dead + 1, entry);
+        program.inline_bodies.resize(dead + 1, None);
+        program.retire_code(&[false, true, true]);
+        assert_eq!(program.entries.len(), 1);
+        assert_eq!(program.free_entries.capacity(), 0);
     }
 
     #[test]
@@ -584,7 +597,7 @@ impl Program {
     }
     #[cfg(test)]
     pub(super) fn code_is_empty(&self) -> bool {
-        self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
+        self.code.iter().all(Vec::is_empty) && self.entries.len() == self.free_entries.len()
     }
     /// Drop the lowered code an idle program caches; it is lowered again on
     /// first use. The per-site tables keep room for SPARE_SITES at most, so a
@@ -603,6 +616,10 @@ impl Program {
     }
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()
+    }
+    #[cfg(test)]
+    pub(super) fn sites(&self) -> usize {
+        self.entries.len()
     }
     pub(super) fn trace_function(
         &self,
@@ -635,25 +652,31 @@ impl Program {
             }
         }
     }
+    /// Drop the code of every function MARKS leaves out, its sites free for
+    /// reuse: the work follows what died, not what lives. Past half free
+    /// the site tables close up, so a peak is not kept and the cost of
+    /// closing them amortises over the sites freed.
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
-        // Nothing to drop or compact: keep the entry table as it is.
-        if self.free_entries.is_empty() && self.code.iter().enumerate().all(|(id, code)| code.is_empty() || marks[id]) {
-            return;
+        for id in 0..self.code.len() {
+            // Writing an empty slot would dirty a forked worker's pages.
+            if !marks[id] && !self.code[id].is_empty() {
+                self.release_entry(id);
+            }
         }
+        if self.free_entries.len() > (self.entries.len() - self.free_entries.len()).max(SPARE_SITES) {
+            self.close_sites();
+        }
+    }
+    /// Renumber the live sites densely, leaving none free.
+    fn close_sites(&mut self) {
         let old = std::mem::take(&mut self.entries);
         let old_inline = std::mem::take(&mut self.inline_bodies);
-        self.free_entries.clear();
-        for (id, code) in self.code.iter_mut().enumerate() {
-            if !marks[id] {
-                *code = Vec::new();
-            } else {
-                for inst in code {
-                    let entry = old[inst.site];
-                    self.inline_bodies.push(old_inline[inst.site]);
-                    inst.site = self.entries.len();
-                    self.entries.push(entry);
-                }
-            }
+        self.free_entries = Vec::new();
+        for inst in self.code.iter_mut().flatten() {
+            let entry = old[inst.site];
+            self.inline_bodies.push(old_inline[inst.site]);
+            inst.site = self.entries.len();
+            self.entries.push(entry);
         }
     }
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
@@ -1946,6 +1969,9 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
+    // Before the debugger and collection: an inspection changes nothing and
+    // answers from any engine, nested or not.
+    if crate::host::inspect_pending() { e.vm.inspect_capture(); }
     if e.vm.profiler.debug_call {
         return unsafe { debug_on_call(e, r, pc) };
     }
@@ -3053,6 +3079,7 @@ unsafe fn take_step(
             Ok(prim::Step::Collect) => {
                 leave_native(e);
                 if e.vm.may_collect(1) {
+                    e.vm.collection_log.explicit = true;
                     poll_collect(e);
                     let statistics = e.vm.garbage_collect_statistics();
                     // garbage_collect's run_finalizers, before it returns.

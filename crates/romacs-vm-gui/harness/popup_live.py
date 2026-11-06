@@ -955,7 +955,7 @@ def main():
     parser.add_argument('--indicators', action='store_true', help="packages' indicators in the status bar")
     parser.add_argument('--toasts', action='store_true', help='messages as toasts')
     parser.add_argument('--prompts', action='store_true', help='read-from-minibuffer menus in the minibuffer layer')
-    parser.add_argument('--theme', help='a theme loaded first (modus-operandi: a light one)')
+    parser.add_argument('--theme', help='a theme loaded first (catppuccin-latte: a light one)')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()

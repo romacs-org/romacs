@@ -15,15 +15,26 @@
 //!   withdrawn with `romacs/cancel': answered `not executed' when the
 //!   server says it was still queued, else `outcome unknown'; a reply that
 //!   comes after is dropped, as the call's outcome is the server's record;
-//! - it reconnects, says hello and replays the handshake, dropping the
-//!   replies the harness already had, and copies lines again.
+//! - it reconnects, says hello and replays the handshake, and copies lines
+//!   again; a reply is forwarded only to a call still waiting for it;
+//! - a writer thread owns the server's socket behind a bounded queue, so a
+//!   busy server that stops reading never stops the relay reading the
+//!   harness: past the queue a call is refused `not executed';
+//! - it answers `romacs_debug_inspect' itself, from the session's inspect
+//!   endpoint, and answers `initialize' and `tools/list' itself when the
+//!   server is silent, so a harness that starts against a frozen session
+//!   can still ask where it is stuck, and says the list changed once the
+//!   server answers. The tool's answer is diagnostics: a timed-out call
+//!   keeps its own outcome.
 //!
 //! The harness never sees its MCP server end.
 use serde_json::{Value as Json, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -37,27 +48,69 @@ pub struct Config {
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
 
 /// A call sent upstream and not answered.
+/// Lines waiting for the server; past it a call is refused.
+const QUEUE: usize = 64;
+/// How long `initialize' and `tools/list' wait for the server.
+const DISCOVERY: Duration = Duration::from_secs(2);
+/// The tool the relay answers itself.
+const INSPECT_TOOL: &str = "romacs_debug_inspect";
+/// Inspections at once; past them one is refused.
+const INSPECTIONS: usize = 4;
+/// How long an inspection may take, its connect included.
+const INSPECT_LIMIT: Duration = Duration::from_secs(10);
+
 struct Call {
     id: Json,
     method: String,
     sent: Instant,
     /// The withdrawal sent for it, and when.
     cancel: Option<(String, Instant)>,
+    /// The writer has taken it: the server may have it. Until then a
+    /// withdrawn call is simply not sent.
+    written: bool,
+    /// What the writer knows this admission by, as an id can be reused.
+    token: u64,
+    /// `initialize''s requested protocol version.
+    version: Option<Json>,
+}
+
+impl Call {
+    /// A call the relay can answer itself when the server is silent.
+    fn discovery(&self) -> bool { matches!(self.method.as_str(), "initialize" | "tools/list") }
+}
+
+/// A line for the server. With a call, the writer sends it only while that
+/// admission is still waiting.
+struct Line {
+    text: String,
+    call: Option<(String, u64)>,
+}
+
+/// The server connection: the queue to its writer, its number, and a handle
+/// that shuts both halves down.
+struct Upstream {
+    number: u64,
+    queue: SyncSender<Line>,
+    control: UnixStream,
 }
 
 #[derive(Default)]
 struct State {
-    /// The server connection while there is one, and its number.
-    upstream: Option<(u64, UnixStream)>,
+    /// The server connection while there is one.
+    upstream: Option<Upstream>,
     connections: u64,
+    tokens: u64,
     /// By the call's id as JSON text.
     inflight: HashMap<String, Call>,
     /// A withdrawal's id to the call it withdraws.
     cancels: HashMap<String, String>,
-    /// Ids whose replies the harness already had or never asked for.
-    swallow: HashSet<String>,
     initialize: Option<Json>,
     initialized: Option<String>,
+    /// The harness holds the relay's own tool list, not the server's.
+    provisional: bool,
+    /// The relay's `tools/list' probe, which ends that.
+    probe: Option<String>,
+    probes: u64,
 }
 
 fn key(id: &Json) -> String { id.to_string() }
@@ -70,6 +123,44 @@ fn refusal(id: &Json, method: &str, text: &str) -> String {
     } else {
         json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": text}})
     }.to_string()
+}
+
+fn tool_answer(id: &Json, text: &str, failed: bool) -> String {
+    json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": text}], "isError": failed}}).to_string()
+}
+
+/// The tool's description, as `tools/list' gives it.
+fn inspect_tool() -> Json {
+    json!({"name": INSPECT_TOOL,
+           "description": "Read the session's Lisp call stack, even while its evaluator is too busy to answer \
+                           any other tool. Diagnostics only: it says nothing about a call that timed out.",
+           "inputSchema": {"type": "object", "properties": {}},
+           "annotations": {"readOnlyHint": true}})
+}
+
+/// The server's `tools/list' reply LINE, with the relay's own tool.
+fn with_inspect_tool(line: &str) -> String {
+    let Ok(mut reply) = serde_json::from_str::<Json>(line) else { return line.to_owned() };
+    let Some(tools) = reply.pointer_mut("/result/tools").and_then(Json::as_array_mut) else { return line.to_owned() };
+    tools.push(inspect_tool());
+    reply.to_string()
+}
+
+/// `tools/list' answered with the server silent: the relay's tool alone.
+fn local_list(id: &Json) -> String {
+    json!({"jsonrpc": "2.0", "id": id, "result": {"tools": [inspect_tool()]}}).to_string()
+}
+
+/// `initialize' answered with the server silent.
+fn local_initialize(id: &Json, version: Option<&Json>) -> String {
+    let version = version.cloned().unwrap_or(json!("2025-06-18"));
+    json!({"jsonrpc": "2.0", "id": id,
+           "result": {"protocolVersion": version, "capabilities": {"tools": {"listChanged": true}},
+                      "serverInfo": {"name": "Romacs", "version": "1"}}}).to_string()
+}
+
+fn list_changed() -> String {
+    json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}).to_string()
 }
 
 fn unknown(id: &Json, why: &str) -> String {
@@ -86,6 +177,7 @@ struct Relay {
     stdout: Mutex<std::io::Stdout>,
     config: Config,
     incarnation: String,
+    inspections: AtomicUsize,
 }
 
 impl Relay {
@@ -97,47 +189,131 @@ impl Relay {
         let _ = out.flush();
     }
 
+    /// Queue a line for the server, without waiting.
+    fn send(state: &State, text: String, call: Option<(String, u64)>) -> bool {
+        state.upstream.as_ref().is_some_and(|upstream| upstream.queue.try_send(Line { text, call }).is_ok())
+    }
+
+    /// The harness has the relay's list: ask the server for its own, to
+    /// say when the list changed.
+    fn probe(state: &mut State) {
+        if !state.provisional || state.probe.is_some() { return; }
+        state.probes += 1;
+        let id = format!("romacs-relay-probe-{}", state.probes);
+        let request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"}).to_string();
+        if Self::send(state, request, None) { state.probe = Some(key(&json!(id))); }
+    }
+
+    /// The server is silent or gone: the relay's answer to a discovery call.
+    fn settled(call: &Call) -> String {
+        if call.method == "initialize" { local_initialize(&call.id, call.version.as_ref()) } else { local_list(&call.id) }
+    }
+
+    /// The harness has been given the relay's list. Only now, so that the
+    /// change a probe reports always comes after the list it replaces.
+    fn listed_locally(&self) {
+        let mut state = self.lock();
+        state.provisional = true;
+        Self::probe(&mut state);
+    }
+
+    /// Answer the inspect tool, within its bounds, off the harness's thread:
+    /// it waits on the session's endpoint, never on the server's connection.
+    fn inspect(self: &Arc<Self>, id: Json) {
+        if self.inspections.fetch_add(1, Ordering::SeqCst) >= INSPECTIONS {
+            self.inspections.fetch_sub(1, Ordering::SeqCst);
+            return self.to_harness(&tool_answer(&id, "too many inspections at once; try again", true));
+        }
+        let (done, answer) = std::sync::mpsc::channel();
+        let relay = self.clone();
+        std::thread::spawn(move || {
+            let result = crate::inspect_answer(&relay.config.socket);
+            relay.inspections.fetch_sub(1, Ordering::SeqCst);
+            let _ = done.send(result);
+        });
+        let relay = self.clone();
+        std::thread::spawn(move || {
+            let (text, failed) = match answer.recv_timeout(INSPECT_LIMIT) {
+                Ok(Ok(answer)) => (String::from_utf8_lossy(&answer).into_owned(), false),
+                Ok(Err(error)) => (format!("no inspect endpoint: {error}"), true),
+                Err(_) => ("the inspect endpoint did not answer in time".to_owned(), true),
+            };
+            relay.to_harness(&tool_answer(&id, &text, failed));
+        });
+    }
+
     /// One line from the harness.
-    fn from_harness(&self, line: &str) {
+    fn from_harness(self: &Arc<Self>, line: &str) {
         let message: Option<Json> = serde_json::from_str(line).ok();
         let id = message.as_ref().and_then(|m| m.get("id")).filter(|id| !id.is_null()).cloned();
         let method = message.as_ref().and_then(|m| m.get("method")).and_then(Json::as_str).unwrap_or("").to_owned();
+        if method == "tools/call" && message.as_ref().and_then(|m| m.pointer("/params/name")).and_then(Json::as_str) == Some(INSPECT_TOOL) {
+            if let Some(id) = id { self.inspect(id); }
+            return;
+        }
         let mut state = self.lock();
         if method == "initialize" { state.initialize = message.clone(); }
         if method == "notifications/initialized" { state.initialized = Some(line.to_owned()); }
-        let sent = match state.upstream.as_mut() {
-            Some((_, stream)) => stream.write_all(format!("{line}\n").as_bytes()).is_ok(),
-            None => false,
+        let Some(id) = id else {
+            Self::send(&state, line.to_owned(), None);
+            return;
         };
-        match id {
-            Some(id) if sent => { state.inflight.insert(key(&id), Call { id, method, sent: Instant::now(), cancel: None }); }
-            Some(id) => { drop(state); self.to_harness(&refusal(&id, &method, NOT_EXECUTED)); }
-            None => {}
+        state.tokens += 1;
+        let token = state.tokens;
+        let version = message.as_ref().and_then(|m| m.pointer("/params/protocolVersion")).cloned();
+        let call = Call { id, method, sent: Instant::now(), cancel: None, written: false, token, version };
+        // `initialize' reaches the server even when answered here first:
+        // the calls after it need the handshake.
+        let tracked = (call.method != "initialize").then(|| (key(&call.id), token));
+        if Self::send(&state, line.to_owned(), tracked) {
+            // Under the lock the writer needs, so it finds the call.
+            state.inflight.insert(key(&call.id), call);
+            return;
+        }
+        drop(state);
+        if call.discovery() {
+            self.to_harness(&Self::settled(&call));
+            if call.method == "tools/list" { self.listed_locally(); }
+        } else {
+            self.to_harness(&refusal(&call.id, &call.method, NOT_EXECUTED));
         }
     }
 
     /// One line from the server.
     fn from_server(&self, line: &str) {
         let message: Option<Json> = serde_json::from_str(line).ok();
-        let Some(id) = message.as_ref().and_then(|m| m.get("id")).filter(|id| !id.is_null()).cloned() else {
+        let id = message.as_ref().and_then(|m| m.get("id")).filter(|id| !id.is_null()).cloned();
+        // Notifications, and the server's own requests, are the harness's.
+        let (Some(id), None) = (id, message.as_ref().and_then(|m| m.get("method"))) else {
             return self.to_harness(line);
         };
         let mut state = self.lock();
+        if state.probe.as_deref() == Some(key(&id).as_str()) {
+            state.probe = None;
+            if message.as_ref().is_some_and(|m| m.get("result").is_some()) && std::mem::take(&mut state.provisional) {
+                drop(state);
+                self.to_harness(&list_changed());
+            }
+            return;
+        }
         if let Some(call_key) = state.cancels.remove(&key(&id)) {
             // A withdrawal's answer: the call it names is answered now.
             let withdrawn = message.as_ref().and_then(|m| m.pointer("/result/cancelled")) == Some(&Json::Bool(true));
             if let Some(call) = state.inflight.remove(&call_key) {
-                state.swallow.insert(call_key);
                 drop(state);
                 let text = if withdrawn { WITHDRAWN.to_owned() } else { unknown(&call.id, "it ran past the reply timeout") };
                 self.to_harness(&refusal(&call.id, &call.method, &text));
             }
             return;
         }
-        if state.swallow.remove(&key(&id)) { return; }
-        state.inflight.remove(&key(&id));
+        // No call waits for it: the relay's own, or one already answered.
+        let Some(call) = state.inflight.remove(&key(&id)) else { return };
         drop(state);
-        self.to_harness(line);
+        if call.method == "tools/list" {
+            self.to_harness(&with_inspect_tool(line));
+        } else {
+            self.to_harness(line);
+        }
     }
 
     /// Withdraw calls past the reply timeout; answer those whose withdrawal
@@ -146,18 +322,36 @@ impl Relay {
         let now = Instant::now();
         let mut answers = Vec::new();
         let mut state = self.lock();
+        // A silent server: discovery is answered here. The call goes, so its
+        // reply finds no one, and a queued `tools/list' is not sent.
+        let silent: Vec<String> = state.inflight.iter()
+            .filter(|(_, call)| call.discovery() && now.duration_since(call.sent) >= DISCOVERY)
+            .map(|(k, _)| k.clone()).collect();
+        let mut listed = false;
+        for call_key in silent {
+            if let Some(call) = state.inflight.remove(&call_key) {
+                listed |= call.method == "tools/list";
+                answers.push(Self::settled(&call));
+            }
+        }
+        // A full queue refused the last probe: try again while it matters.
+        Self::probe(&mut state);
         let late: Vec<String> = state.inflight.iter()
-            .filter(|(_, call)| call.cancel.is_none() && now.duration_since(call.sent) >= self.config.reply_timeout)
+            .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && now.duration_since(call.sent) >= self.config.reply_timeout)
             .map(|(k, _)| k.clone()).collect();
         for call_key in late {
+            // Still queued: the writer finds it gone and never sends it.
+            if !state.inflight[&call_key].written {
+                if let Some(call) = state.inflight.remove(&call_key) { answers.push(refusal(&call.id, &call.method, WITHDRAWN)); }
+                continue;
+            }
             let cancel_id = format!("romacs-relay-cancel-{call_key}");
             let request = json!({"jsonrpc": "2.0", "id": cancel_id, "method": "romacs/cancel",
                                  "params": {"id": state.inflight[&call_key].id}}).to_string();
-            let sent = state.upstream.as_mut().is_some_and(|(_, s)| s.write_all(format!("{request}\n").as_bytes()).is_ok());
-            if sent {
-                state.cancels.insert(key(&json!(cancel_id)), call_key.clone());
-                if let Some(call) = state.inflight.get_mut(&call_key) { call.cancel = Some((cancel_id, now)); }
-            }
+            // A full queue is a server not reading: the grace ends it too.
+            Self::send(&state, request, None);
+            state.cancels.insert(key(&json!(cancel_id)), call_key.clone());
+            if let Some(call) = state.inflight.get_mut(&call_key) { call.cancel = Some((cancel_id, now)); }
         }
         let unanswered: Vec<String> = state.inflight.iter()
             .filter(|(_, call)| call.cancel.as_ref().is_some_and(|(_, at)| now.duration_since(*at) >= CANCEL_GRACE))
@@ -165,24 +359,56 @@ impl Relay {
         for call_key in unanswered {
             if let Some(call) = state.inflight.remove(&call_key) {
                 if let Some((cancel_id, _)) = &call.cancel { state.cancels.remove(&key(&json!(cancel_id))); }
-                state.swallow.insert(call_key);
                 answers.push(refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stayed busy past the reply timeout")));
             }
         }
         drop(state);
         for answer in answers { self.to_harness(&answer); }
+        if listed { self.listed_locally(); }
     }
 
-    /// Connection NUMBER ended: answer what it left unanswered.
+    /// Connection NUMBER ended: answer what it left unanswered, and release
+    /// its writer, which may be stuck on a peer that stopped reading.
     fn lost(&self, number: u64) {
-        let left: Vec<Call> = {
+        let mut answers = Vec::new();
+        let mut listed = false;
+        {
             let mut state = self.lock();
-            if state.upstream.as_ref().map(|(n, _)| *n) != Some(number) { return; }
-            state.upstream = None;
+            if state.upstream.as_ref().map(|upstream| upstream.number) != Some(number) { return; }
+            if let Some(upstream) = state.upstream.take() { let _ = upstream.control.shutdown(std::net::Shutdown::Both); }
             state.cancels.clear();
-            state.inflight.drain().map(|(_, call)| call).collect()
-        };
-        for call in left { self.to_harness(&refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran"))); }
+            state.probe = None;
+            let left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
+            for call in left {
+                listed |= call.method == "tools/list";
+                answers.push(if call.discovery() {
+                    Self::settled(&call)
+                } else if call.written {
+                    refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran"))
+                } else {
+                    refusal(&call.id, &call.method, NOT_EXECUTED)
+                });
+            }
+        }
+        for answer in answers { self.to_harness(&answer); }
+        if listed { self.listed_locally(); }
+    }
+
+    /// The server's socket: lines in order, the blocking writes here, with
+    /// no lock held. A call no longer waiting is skipped.
+    fn write_lines(&self, lines: Receiver<Line>, mut stream: UnixStream) {
+        for line in lines {
+            if let Some((call, token)) = &line.call {
+                match self.lock().inflight.get_mut(call).filter(|call| call.token == *token) {
+                    Some(call) => call.written = true,
+                    None => continue,
+                }
+            }
+            if stream.write_all(format!("{}\n", line.text).as_bytes()).is_err() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                return;
+            }
+        }
     }
 
     /// Connect, say hello and replay the handshake; the connection's
@@ -190,27 +416,28 @@ impl Relay {
     fn connect(self: &Arc<Self>) -> bool {
         let Ok(stream) = UnixStream::connect(&self.config.socket) else { return false };
         let Ok(reading) = stream.try_clone() else { return false };
+        let Ok(control) = stream.try_clone() else { return false };
         let mut state = self.lock();
         state.connections += 1;
         let number = state.connections;
         let hello_id = json!(format!("romacs-relay-hello-{number}"));
         let mut lines = vec![json!({"jsonrpc": "2.0", "id": hello_id, "method": "romacs/hello",
                                     "params": {"session": self.config.session, "relay": self.incarnation}}).to_string()];
-        state.swallow.insert(key(&hello_id));
         // After the first, the handshake is replayed under an id of its own.
         if let Some(mut initialize) = state.initialize.clone() {
-            let id = json!(format!("romacs-relay-initialize-{number}"));
-            initialize["id"] = id.clone();
-            state.swallow.insert(key(&id));
+            initialize["id"] = json!(format!("romacs-relay-initialize-{number}"));
             lines.push(initialize.to_string());
             lines.extend(state.initialized.clone());
         }
-        let mut writer = stream;
-        for line in lines {
-            if writer.write_all(format!("{line}\n").as_bytes()).is_err() { return false; }
+        let (queue, waiting) = sync_channel(QUEUE);
+        for text in lines {
+            if queue.try_send(Line { text, call: None }).is_err() { return false; }
         }
-        state.upstream = Some((number, writer));
+        state.upstream = Some(Upstream { number, queue, control });
+        Self::probe(&mut state);
         drop(state);
+        let relay = self.clone();
+        std::thread::spawn(move || relay.write_lines(waiting, stream));
         let relay = self.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(reading).lines().map_while(Result::ok) { relay.from_server(&line); }
@@ -225,7 +452,7 @@ impl Relay {
 pub fn main(config: Config) -> ! {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let incarnation = format!("{}-{now}", std::process::id());
-    let relay = Arc::new(Relay { state: Mutex::default(), stdout: Mutex::new(std::io::stdout()), config, incarnation });
+    let relay = Arc::new(Relay { state: Mutex::default(), stdout: Mutex::new(std::io::stdout()), config, incarnation, inspections: AtomicUsize::new(0) });
     let keeper = relay.clone();
     // Reconnect for as long as the harness runs, backing off to 2 s, and
     // watch the calls' reply timeout.

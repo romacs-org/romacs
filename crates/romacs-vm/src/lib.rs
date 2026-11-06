@@ -138,6 +138,7 @@ mod intervals;
 mod properties;
 pub mod text;
 mod backtrace;
+mod inspect;
 mod profiler;
 mod threaded;
 
@@ -1343,6 +1344,8 @@ pub struct Vm {
     /// `romacs--redisplay-since-mark': None unmarked; marked, the first
     /// redisplay's microseconds after the mark, None until it runs.
     redisplay_since_mark: Option<Option<u64>>,
+    /// The windows redisplay left plain for a first parse (`land_treesit').
+    treesit_plain: Vec<u64>,
     /// The host's `C-g', shared with its input thread (quit.rs).
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
@@ -1450,6 +1453,8 @@ pub struct Vm {
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
+    /// The collections since the usage log last read them.
+    collection_log: gc::CollectionLog,
     gc_retained: usize,
     /// Payload bytes (string text, vector slots) allocated since the last
     /// collection, which GNU charges to `consing_until_gc' with the objects
@@ -1660,6 +1665,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
+    collection_log,
     gc_retained,
     gc_payload_bytes,
     collect_poll,
@@ -1718,6 +1724,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit,
     force_quit_count,
     redisplay_since_mark,
+    treesit_plain,
     quit_slots,
     face_keys,
     debug_event_slots,
@@ -1823,6 +1830,7 @@ impl Vm {
             session_host: None,
             idle_since: None,
             redisplay_since_mark: None,
+            treesit_plain: Vec::new(),
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
             quit_slots: [0; 3],
@@ -1871,6 +1879,7 @@ impl Vm {
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
+            collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
             collect_poll: false,

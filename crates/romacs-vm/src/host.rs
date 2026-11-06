@@ -887,7 +887,10 @@ impl Input {
             return captured.take(usize::try_from(limit).unwrap_or(usize::MAX)).map(<[u8]>::to_vec);
         }
         self.0.seek(SeekFrom::Start(offset))?;
-        let mut bytes = Vec::new();
+        // Sized for the file: growing by doubling copies it and faults its
+        // pages in again.
+        let size = self.0.metadata().map_or(0, |m| m.len()).saturating_sub(offset).min(limit);
+        let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
         (&mut self.0).take(limit).read_to_end(&mut bytes)?;
         Ok(bytes)
     }
@@ -2433,6 +2436,10 @@ extern "C" fn note_user_signal(signal: libc::c_int) {
     let index = usize::from(signal == libc::SIGUSR1);
     USER_SIGNALS[index].fetch_add(1, Ordering::SeqCst);
     USER_SIGNAL_ARRIVED.store(true, Ordering::SeqCst);
+    // SIGUSR2 also asks for a snapshot, which `debug-on-event' leaves alone.
+    if signal == libc::SIGUSR2 && INSPECT_ENABLED.load(Ordering::SeqCst) {
+        INSPECT_REQUESTED.fetch_add(1, Ordering::SeqCst);
+    }
     // A waiting session wakes to read it, as GNU's select returns on a
     // signal; write(2) is async-signal-safe, and the end is non-blocking.
     let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
@@ -3079,4 +3086,259 @@ pub mod call_deadline {
         let current = CURRENT.load(Ordering::Acquire);
         current != 0 && EXPIRED.load(Ordering::Acquire) == current
     }
+}
+
+// Inspecting a busy evaluator (inspect.rs). A request is a generation: the
+// listener and SIGUSR2 raise REQUESTED, the evaluator's next poll answers
+// with a snapshot and raises SERVED. The bytes are in the slot before any
+// disk work, so a stalled store never delays a reply. Each process has one
+// evaluator, and only a session's own process starts a listener.
+static INSPECT_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static INSPECT_REQUESTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INSPECT_SERVED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INSPECT_SLOT: std::sync::Mutex<Option<InspectSnapshot>> = std::sync::Mutex::new(None);
+static INSPECT_LISTENER: std::sync::Mutex<Option<InspectListener>> = std::sync::Mutex::new(None);
+/// How long a client waits for the evaluator's next safe point.
+const INSPECT_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a client has to send its line, and to take the reply. Absolute,
+/// as one client at a time is served.
+const INSPECT_IO: std::time::Duration = std::time::Duration::from_millis(500);
+/// Snapshots waiting for the store; past it the oldest goes.
+const INSPECT_PENDING: usize = 4;
+/// The snapshot files kept.
+const INSPECT_KEEP: usize = 8;
+
+#[derive(Clone)]
+struct InspectSnapshot {
+    generation: u64,
+    at: Instant,
+    json: std::sync::Arc<str>,
+}
+
+/// One listener's store queue, so a stopped writer never takes a later
+/// listener's snapshots.
+#[derive(Default)]
+struct InspectStore {
+    queue: std::sync::Mutex<InspectQueue>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct InspectQueue {
+    pending: std::collections::VecDeque<InspectSnapshot>,
+    stopped: bool,
+}
+
+impl InspectStore {
+    fn lock(&self) -> std::sync::MutexGuard<'_, InspectQueue> {
+        self.queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+    fn push(&self, snapshot: InspectSnapshot) {
+        let mut queue = self.lock();
+        if queue.pending.len() >= INSPECT_PENDING { queue.pending.pop_front(); }
+        queue.pending.push_back(snapshot);
+        self.changed.notify_one();
+    }
+    fn stop(&self) {
+        self.lock().stopped = true;
+        self.changed.notify_all();
+    }
+    /// The next snapshot to save, or None once stopped.
+    fn next(&self) -> Option<InspectSnapshot> {
+        let mut queue = self.lock();
+        loop {
+            if queue.stopped { return None; }
+            if let Some(snapshot) = queue.pending.pop_front() { return Some(snapshot); }
+            queue = self.changed.wait(queue).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+}
+
+struct InspectListener {
+    path: PathBuf,
+    /// The socket's device and inode: a path another process has since
+    /// taken is not unlinked.
+    identity: (u64, u64),
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    store: Option<std::sync::Arc<InspectStore>>,
+}
+
+fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard<'static, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A request the evaluator has not answered. Two relaxed loads per poll.
+#[inline(always)]
+pub fn inspect_pending() -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+}
+/// The newest request, which a snapshot taken now answers.
+pub fn inspect_generation() -> u64 {
+    INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// Publish JSON as the answer to GENERATION, then queue it for the store.
+pub fn inspect_publish(generation: u64, json: String) {
+    let snapshot = InspectSnapshot { generation, at: Instant::now(), json: json.into() };
+    *inspect_lock(&INSPECT_SLOT) = Some(snapshot.clone());
+    INSPECT_SERVED.store(generation, std::sync::atomic::Ordering::SeqCst);
+    if let Some(store) = inspect_lock(&INSPECT_LISTENER).as_ref().and_then(|listener| listener.store.as_ref()) {
+        store.push(snapshot);
+    }
+}
+
+fn inspect_reply(answered: bool) -> String {
+    let status = if answered { r#""status":"ok""# } else { r#""status":"busy","detail":"no safe point""# };
+    match &*inspect_lock(&INSPECT_SLOT) {
+        Some(s) => format!(r#"{{"v":1,{status},"generation":{},"age_ms":{},"snapshot":{}}}"#, s.generation, s.at.elapsed().as_millis(), s.json),
+        None => format!(r#"{{"v":1,{status},"snapshot":null}}"#),
+    }
+}
+
+/// The peer's uid, from the kernel's record of who connected.
+fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let got = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut credentials).cast(), &mut size)
+    };
+    (got == 0).then_some(credentials.uid)
+}
+
+/// The client's line, within DEADLINE however slowly it comes.
+fn inspect_line(stream: &mut std::os::unix::net::UnixStream, deadline: Instant) -> Option<([u8; 16], usize)> {
+    use std::io::Read;
+    let mut line = [0u8; 16];
+    let mut length = 0;
+    while length < line.len() && !line[..length].contains(&b'\n') {
+        let left = deadline.checked_duration_since(Instant::now()).filter(|left| !left.is_zero())?;
+        stream.set_read_timeout(Some(left)).ok()?;
+        match stream.read(&mut line[length..]) {
+            Ok(n) if n > 0 => length += n,
+            _ => return None,
+        }
+    }
+    Some((line, length))
+}
+
+/// BYTES to the client, within DEADLINE however slowly it reads.
+fn inspect_write(stream: &mut std::os::unix::net::UnixStream, mut bytes: &[u8], deadline: Instant) {
+    use std::io::Write;
+    while !bytes.is_empty() {
+        let Some(left) = deadline.checked_duration_since(Instant::now()).filter(|left| !left.is_zero()) else { return };
+        if stream.set_write_timeout(Some(left)).is_err() { return; }
+        match stream.write(bytes) {
+            Ok(n) if n > 0 => bytes = &bytes[n..],
+            _ => return,
+        }
+    }
+}
+
+/// One client: the line `inspect', answered once. STOP ends the wait.
+fn inspect_serve(mut stream: std::os::unix::net::UnixStream, stop: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) { return; }
+    let Some((line, length)) = inspect_line(&mut stream, Instant::now() + INSPECT_IO) else { return };
+    if &line[..length] != b"inspect\n" { return; }
+    let generation = INSPECT_REQUESTED.fetch_add(1, SeqCst) + 1;
+    let deadline = Instant::now() + INSPECT_WAIT;
+    while INSPECT_SERVED.load(SeqCst) < generation && Instant::now() < deadline && !stop.load(SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let mut reply = inspect_reply(INSPECT_SERVED.load(SeqCst) >= generation);
+    reply.push('\n');
+    inspect_write(&mut stream, reply.as_bytes(), Instant::now() + INSPECT_IO);
+}
+
+/// A store directory is used only if it is a real directory of ours that
+/// no one else may read.
+fn inspect_store_ready(store: &Path) -> bool {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    if std::fs::DirBuilder::new().recursive(true).mode(0o700).create(store).is_err() { return false; }
+    std::fs::symlink_metadata(store).is_ok_and(|meta| {
+        meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0
+    })
+}
+
+fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let pid = std::process::id();
+    let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let name = format!("inspect-{pid}-{}.json", snapshot.generation);
+    let temporary = store.join(format!(".{name}.tmp"));
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+    write!(file, r#"{{"v":1,"pid":{pid},"time":{time},"generation":{},"snapshot":{}}}"#, snapshot.generation, snapshot.json)?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, store.join(name))?;
+    let mut saved: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(store)?.filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("inspect-"))
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    saved.sort();
+    let surplus = saved.len().saturating_sub(INSPECT_KEEP);
+    for (_, path) in &saved[..surplus] { let _ = std::fs::remove_file(path); }
+    Ok(())
+}
+
+fn inspect_store_thread(directory: PathBuf, store: std::sync::Arc<InspectStore>) {
+    if !inspect_store_ready(&directory) { return; }
+    while let Some(snapshot) = store.next() {
+        let _ = inspect_save(&directory, &snapshot);
+    }
+}
+
+/// Listen for inspect requests at DIRECTORY/inspect.sock, and keep snapshots
+/// in STORE when given. DIRECTORY is private to this user (`romacs-mcp-start'
+/// checks it). A socket no one answers on is a dead session's and is replaced.
+pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::sync::atomic::Ordering::SeqCst;
+    effect(|| "inspect listener".into())?;
+    inspect_stop();
+    let path = Path::new(directory).join("inspect.sock");
+    match UnixStream::connect(&path) {
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AddrInUse)),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => std::fs::remove_file(&path)?,
+        Err(_) => {}
+    }
+    let listener = UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let meta = std::fs::symlink_metadata(&path)?;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let accepting = stop.clone();
+    std::thread::Builder::new().name("romacs-inspect".into()).spawn(move || {
+        for stream in listener.incoming() {
+            if accepting.load(SeqCst) { return; }
+            if let Ok(stream) = stream { inspect_serve(stream, &accepting); }
+        }
+    })?;
+    let store = match store.map(PathBuf::from) {
+        Some(directory) => {
+            let store = std::sync::Arc::<InspectStore>::default();
+            let storing = store.clone();
+            std::thread::Builder::new().name("romacs-inspect-store".into()).spawn(move || inspect_store_thread(directory, storing))?;
+            Some(store)
+        }
+        None => None,
+    };
+    *inspect_lock(&INSPECT_LISTENER) = Some(InspectListener { path, identity: (meta.dev(), meta.ino()), stop, store });
+    INSPECT_ENABLED.store(true, SeqCst);
+    Ok(())
+}
+
+/// Stop listening: the threads end and the socket goes, if it is still ours.
+pub fn inspect_stop() {
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::atomic::Ordering::SeqCst;
+    let Some(listener) = inspect_lock(&INSPECT_LISTENER).take() else { return };
+    INSPECT_ENABLED.store(false, SeqCst);
+    listener.stop.store(true, SeqCst);
+    if let Some(store) = &listener.store { store.stop(); }
+    // The accept loop looks at its flag once a connection wakes it.
+    let _ = std::os::unix::net::UnixStream::connect(&listener.path);
+    let ours = std::fs::symlink_metadata(&listener.path).is_ok_and(|meta| (meta.dev(), meta.ino()) == listener.identity);
+    if ours { let _ = std::fs::remove_file(&listener.path); }
 }

@@ -95,10 +95,10 @@
       (progn
         (disable-theme 'default)
         (romacs-should (null custom-enabled-themes))
-        (romacs-should (not (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#b395db")))
+        (romacs-should (not (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#c9a2f2")))
         (romacs-should (not (equal (face-attribute 'default :background nil t) "#000000"))))
     (enable-theme 'default))
-  (romacs-should (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#b395db")))
+  (romacs-should (equal (face-attribute 'font-lock-keyword-face :foreground nil t) "#c9a2f2")))
 
 (romacs-deftest romacs-theme-a-colour-scheme-replaces-the-stock-theme-once ()
   (unwind-protect
@@ -229,6 +229,92 @@
            (bg (funcall attr 'default :background)))
       (dolist (face '(fringe window-divider window-divider-first-pixel window-divider-last-pixel vertical-border))
         (romacs-should (equal (list theme face (funcall attr face :background)) (list theme face bg)))))))
+
+(romacs-deftest romacs-theme-the-stock-theme-is-romacs-s-own ()
+  ;; `default' grows from Rum, which stays exact.
+  (load-theme 'rum t t)
+  (let ((face (lambda (theme name key)
+                (plist-get (romacs-theme-roles--attributes
+                            (nth 1 (assq name (plist-get (romacs-theme-rows theme) :faces))))
+                           key))))
+    ;; Code: structure carries the colour, a variable's uses stay text.
+    (romacs-should (equal (funcall face 'default 'font-lock-variable-use-face :foreground)
+                          (funcall face 'default 'default :foreground)))
+    (romacs-should (not (equal (funcall face 'default 'font-lock-number-face :foreground)
+                               (funcall face 'default 'default :foreground))))
+    (romacs-should (> (romacs-color-contrast (funcall face 'default 'font-lock-keyword-face :foreground) "#000000")
+                      (romacs-color-contrast (funcall face 'default 'font-lock-type-face :foreground) "#000000")))
+    ;; Secondary text reads, and line numbers sit below it.
+    (romacs-should (>= (romacs-color-contrast (funcall face 'default 'font-lock-comment-face :foreground) "#000000") 7.0))
+    (romacs-should (< (romacs-color-contrast (funcall face 'default 'line-number :foreground) "#000000")
+                      (romacs-color-contrast (funcall face 'default 'font-lock-comment-face :foreground) "#000000")))
+    ;; The bar is quiet, its dim segments read, purple is the pill's alone.
+    (let ((bar (funcall face 'default 'mode-line :background)))
+      (romacs-should (equal bar "#1b1814"))
+      (romacs-should (stringp (funcall face 'default 'mode-line-active :overline)))
+      ;; On the active line alone: `header-line' and others inherit `mode-line'.
+      (romacs-should (null (funcall face 'default 'mode-line :overline)))
+      (romacs-should (>= (romacs-color-contrast (funcall face 'default 'romacs-mode-line-dim :foreground) bar) 4.5)))
+    (romacs-should (equal (funcall face 'default 'romacs-mode-line-pill :background) "#50269a"))
+    ;; Rum keeps its bar and its code colours.
+    (romacs-should (equal (funcall face 'rum 'mode-line :background) "#50269a"))
+    (romacs-should (equal (funcall face 'rum 'font-lock-variable-name-face :foreground) "#00a6a6"))
+    (romacs-should (null (plist-get (romacs-theme-rows 'rum) :floors)))))
+
+(romacs-deftest romacs-style-a-theme-declares-its-own ()
+  (let ((enabled custom-enabled-themes) (romacs-style-overrides nil))
+    (unwind-protect
+        (let ((tokens (lambda () (romacs-style-resolve))))
+          (mapc #'disable-theme custom-enabled-themes)
+          ;; Nothing declares `modern' yet beyond flat's tokens.
+          (romacs-should (equal (funcall tokens) (romacs-style--over romacs-style-flat romacs-style-modern)))
+          (load-theme 'rum t)
+          (romacs-should (eq (romacs-style--scheme) 'rum))
+          (romacs-should (equal (funcall tokens) romacs-style-flat))
+          ;; A theme's plist, then the user's, each over the last.
+          (deftheme romacs-style-test)
+          (custom-theme-set-faces 'romacs-style-test '(default ((t :background "#101010"))))
+          (put 'romacs-style-test 'romacs-style '(:radius-band 9 :radius-layer 3))
+          (enable-theme 'romacs-style-test)
+          (romacs-should (eq (romacs-style--scheme) 'romacs-style-test))
+          (romacs-should (eql (plist-get (funcall tokens) :radius-band) 9))
+          (let ((romacs-style-overrides '(:radius-band 2)))
+            (romacs-should (eql (plist-get (funcall tokens) :radius-band) 2))
+            (romacs-should (eql (plist-get (funcall tokens) :radius-layer) 3)))
+          ;; Disabling it gives the style back.
+          (disable-theme 'romacs-style-test)
+          (romacs-should (eql (plist-get (funcall tokens) :radius-band) 4)))
+      (mapc #'disable-theme custom-enabled-themes)
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-style-a-user-s-option-wins ()
+  (let ((style (romacs-style--over romacs-style-flat '(:radius-pane 10))))
+    (let ((romacs-pane-radius 6))
+      (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 10)))
+    (let ((romacs-pane-radius 3))
+      (romacs-should (eql (romacs-style--option 'romacs-pane-radius :radius-pane style) 3)))))
+
+(romacs-deftest romacs-style-the-wire-is-numbers ()
+  (romacs-should (equal (romacs-style--wire romacs-style-flat) [8 4 18 6 0.55 14 0.35])))
+
+(romacs-deftest romacs-style-classic-chrome-is-flat ()
+  ;; No theme's or user's tokens reach GNU's look.
+  (let ((romacs-style--resolved (romacs-style--over romacs-style-flat '(:radius-layer 17 :radius-band 9))))
+    (romacs-should (equal (cdr (assq 'romacs-style (romacs-chrome--parameters t))) (romacs-style--wire romacs-style-flat)))
+    (romacs-should (equal (aref (cdr (assq 'romacs-style (romacs-chrome--parameters nil))) 0) 17))))
+
+(romacs-deftest romacs-theme-gnu-s-themes-are-not-offered ()
+  ;; Romacs offers its own colour schemes.  GNU's are a package away, and
+  ;; `newcomers-presets', which sets options rather than colours, stays.
+  (let ((available (custom-available-themes)))
+    (dolist (theme '(adwaita deeper-blue dichromacy leuven leuven-dark light-blue manoj-dark misterioso
+                     tango tango-dark tsdh-dark tsdh-light wheatgrass whiteboard wombat
+                     modus-operandi modus-operandi-tinted modus-operandi-deuteranopia modus-operandi-tritanopia
+                     modus-vivendi modus-vivendi-tinted modus-vivendi-deuteranopia modus-vivendi-tritanopia))
+      (romacs-should (equal (list theme (memq theme available)) (list theme nil))))
+    (dolist (theme '(default rum tokyonight-night catppuccin-latte newcomers-presets))
+      (romacs-should (memq theme available))))
+  (romacs-should (eq (condition-case nil (progn (load-theme 'tango-dark t t) 'loaded) (error 'refused)) 'refused)))
 
 (romacs-deftest romacs-theme-a-variant-is-found-before-it-is-loaded ()
   (unwind-protect

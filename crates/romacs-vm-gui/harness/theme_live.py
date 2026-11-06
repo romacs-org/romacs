@@ -41,7 +41,7 @@ The run fails when
     The stock theme has no counterpart in GNU and is reported only;
   * `C-g' during a long cycle takes more than --quit-limit to end it.
 
-usage: theme_live.py --binary PATH --output DIR [--themes default,modus-vivendi,tango-dark]
+usage: theme_live.py --binary PATH --output DIR [--themes default,catppuccin-latte,tokyonight-night]
                      [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 40]
                      [--tools DIR:DIR]
 """
@@ -56,13 +56,12 @@ import time
 
 import perkey_live as perkey
 
-# 1.2 x pinned GNU's `load-theme' with a redisplay, whole process, from a key
-# in a -Q session: modus-vivendi 788 M on a first visit, which reads the
-# library, and 311 M to 380 M on a repeat; tango-dark 96 M to disable it and
-# load it again.  GNU's -Q has no theme to disable on a first visit, so its
-# 16 M there is not this session's first visit; the repeat's budget holds.
-LOAD_BUDGETS = {'first': {'modus-vivendi': 946e6, 'tango-dark': 115e6},
-                'repeat': {'modus-vivendi': 373e6, 'tango-dark': 115e6}}
+# 1.2 x pinned GNU's `load-theme' of modus-vivendi with a redisplay, whole
+# process, from a key in a -Q session: 788 M on a first visit, which reads
+# its library, and 311 M to 380 M on a repeat.  It is the nearest GNU has to
+# a port: a table of every package's faces.  The ports are judged by it.
+LOAD_BUDGETS = {'first': {'catppuccin-latte': 946e6, 'tokyonight-night': 946e6},
+                'repeat': {'catppuccin-latte': 373e6, 'tokyonight-night': 373e6}}
 
 SETUP = r'''(progn
   (setq auto-save-timeout nil)
@@ -198,7 +197,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--themes', default='default,modus-vivendi,tango-dark')
+    ap.add_argument('--themes', default='default,catppuccin-latte,tokyonight-night')
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
     ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)

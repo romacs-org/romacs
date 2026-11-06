@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 37] = [
+        let checks: [(&str, bool); 38] = [
             ("stack", self.stack.is_empty()),
             ("images", self.images.is_empty()),
             ("dynamic", self.dynamic.is_empty()),
@@ -52,6 +52,8 @@ impl Vm {
             ("status_bar_line", self.status_bar_line.is_none()),
             ("idle_since", self.idle_since.is_none()),
             ("profiler", self.profiler.is_idle()),
+            // A thread of this process: the running parse of a visit.
+            ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
             ("suspended_code", self.suspended_code.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.

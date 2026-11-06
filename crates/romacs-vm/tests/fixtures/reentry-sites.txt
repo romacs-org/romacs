@@ -48,6 +48,7 @@ handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: argume
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 host_input.rs host_wait_state call_prepared_source_raw 1 clean  # no arguments; its value is printed before anything else allocates
 host_input.rs read_host_event_with call_prepared_source_raw 1 clean  # no arguments; its value is discarded, and the wait holds no Value across it
+host_input.rs run_pre_redisplay call_prepared_source_raw 1 clean  # WINDOWS is only the call's argument; its value is discarded, and frame_snapshot holds no Value across it
 host_input.rs run_window_change_functions call_prepared_source_raw 1 clean  # no arguments; its value is discarded
 insdel.rs mark_deactivated set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 lib.rs execute_raw execute_rooted 1 clean  # no roots

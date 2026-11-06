@@ -9,8 +9,10 @@ directory holding a plain file, a file whose name is non-ASCII UTF-8, and a
 file whose name is not UTF-8 (the byte 0xE9).
 
 The journeys: `message' of a string with a raw byte (the echo area and
-*Messages* show it as \\351), and `dired' of the work directory, then the
-raw-named file visited with RET (listing text, buffer names, the visit).
+*Messages* show it as \\351), `dired' of the work directory, then the
+raw-named file visited with RET (listing text, buffer names, the visit),
+and `find-file-literally' of a file of every kind of byte, a unibyte buffer
+in a window: motion, scrolling, an edit, and in `literal-search' isearch.
 
 usage: raw_bytes_parity_live.py --romacs BIN [--gnu EMACS] --output DIR
                                 [--workflow NAME]... [--debug-on-error]
@@ -25,7 +27,7 @@ path compare, and the whole-buffer text hash is taken with the root as
 import os
 import sys
 
-from parity_live import (ROOT, Harness, K, M, MODE_IS, T, gnu_engine, key, lisp_string, main, mx,
+from parity_live import (ROOT, C, Harness, K, M, MODE_IS, T, gnu_engine, key, lisp_string, main, mx,
                          private_tree, romacs_engine, typed)
 import parity_live
 
@@ -60,6 +62,7 @@ def work_tree(root):
     (work / 'plain.txt').write_text('plain\n')
     (work / 'é.txt').write_text('accent\n')
     (work / RAW_NAME).write_text('raw name\n')
+    (work / 'bytes.bin').write_bytes(b''.join(b'%03d caf\xc3\xa9 \xff\x80 ending\tline\n' % i + bytes(range(128, 200)) + b'\n' for i in range(40)))
 
 
 def launch(engine, base, args):
@@ -84,7 +87,32 @@ def evaluated(name, form, ready):
 MESSAGE_FORM = '(message "%s" (string #x3fffe9 ?x))'
 VISIT_FORM = '(progn (goto-char (point-min)) (re-search-forward "x\\\\.txt$") (dired-move-to-filename) (dired-find-file))'
 
+# A file of every kind of byte, visited literally: its buffer is unibyte.
+LITERAL = '(and (not enable-multibyte-characters) (equal (buffer-name) "bytes.bin"))'
+LITERAL_VISIT = [
+    dict(name='open', **mx('find-file-literally'), ready='(minibufferp)'),
+    typed('file', 'bytes.bin', [K('Return')], LITERAL, settle=1),
+]
+
 WORKFLOWS = {
+    'literal': LITERAL_VISIT + [
+        *[key(f'line-{i}', [C('n')], LITERAL) for i in range(6)],
+        *[key(f'char-{i}', [C('f')], LITERAL) for i in range(5)],
+        key('end-of-line', [C('e')], LITERAL),
+        key('scroll', [C('v')], LITERAL),
+        key('scroll-back', [M('v')], LITERAL),
+        key('end', [M('>')], LITERAL),
+        key('previous', [C('p')], LITERAL),
+        key('insert', [T('x')], LITERAL),
+        key('undo', [C('/')], LITERAL),
+        key('beginning', [M('<')], LITERAL),
+    ],
+    'literal-search': LITERAL_VISIT + [
+        key('search', [C('s')], '(and (boundp (quote isearch-mode)) isearch-mode)'),
+        dict(name='needle', keys=[T('endin')], keys_ready='(equal isearch-string "endin")',
+             trigger=[T('g')], ready='(equal isearch-string "ending")', settle=1),
+        key('exit', [K('Return')], '(not isearch-mode)', settle=1),
+    ],
     'message': [
         evaluated('message', MESSAGE_FORM, '(and (not (minibufferp)) (stringp (current-message)))'),
     ],

@@ -390,13 +390,48 @@ fn without_romacs_chrome_no_pane_chrome_is_drawn() {
     assert!(!chrome(&mut vm).drawn());
 }
 
+/// A frame's `romacs-style' reaches its snapshot; without one, or with one
+/// that is not its numbers, the frame is `flat'.
+#[test]
+fn a_style_reaches_the_snapshot() {
+    let mut vm = themed_session();
+    let style = |vm: &mut Vm| vm.frame_snapshot(1216, 876).unwrap().chrome.style;
+    let flat = romacs_layout_input::Style::default();
+    assert_eq!(style(&mut vm), flat);
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-style [12 6 24 10 0.45 16 0.25])");
+    assert_eq!(style(&mut vm), romacs_layout_input::Style { layer_radius: 12.0, band_radius: 6.0, shadow: [24.0, 10.0, 0.45], glow: [16.0, 0.25] });
+    eval(&mut vm, "(set-frame-parameter nil 'romacs-style [6 24])");
+    assert_eq!(style(&mut vm), flat);
+}
+
+/// The cursor shows the frame's `cursor-color', which the `cursor' face sets
+/// whatever the theme, on a classic frame too, a colour's name as well.
+#[test]
+fn the_cursor_follows_the_theme() {
+    let mut vm = themed_session();
+    let cursor = |vm: &mut Vm| vm.frame_snapshot(1216, 876).unwrap().chrome.cursor;
+    eval(&mut vm, r##"(progn (deftheme fc-cursor)
+                         (custom-theme-set-faces 'fc-cursor '(cursor ((t :background "#dc8a78"))))
+                         (enable-theme 'fc-cursor))"##);
+    assert_eq!(cursor(&mut vm), Some([0xdc, 0x8a, 0x78]));
+    eval(&mut vm, r##"(set-face-background 'cursor "#123456")"##);
+    assert_eq!(cursor(&mut vm), Some([0x12, 0x34, 0x56]));
+    eval(&mut vm, "(romacs-classic-chrome 1)");
+    assert_eq!(cursor(&mut vm), Some([0x12, 0x34, 0x56]), "classic chrome keeps the cursor's colour");
+    eval(&mut vm, r##"(set-face-background 'cursor "red")"##);
+    assert_eq!(cursor(&mut vm), Some([0xff, 0, 0]));
+}
+
 /// Under pane chrome a window's fringes are part of its pane: painted in
-/// its default background whatever the theme gives `fringe' (here Modus
-/// Vivendi's dimmer one); classic chrome paints the `fringe' face, as GNU.
+/// its default background whatever the theme gives `fringe' (here a dimmer
+/// one); classic chrome paints the `fringe' face, as GNU.
 #[test]
 fn pane_chrome_paints_fringes_in_the_window_background() {
     let mut vm = themed_session();
-    eval(&mut vm, "(load-theme 'modus-vivendi t)");
+    eval(&mut vm, r##"(progn (deftheme fc-strip)
+                         (custom-theme-set-faces 'fc-strip '(default ((t :background "#000000" :foreground "#ffffff")))
+                                                 '(fringe ((t :background "#1e1e1e"))))
+                         (enable-theme 'fc-strip))"##);
     let fringe_and_default = |vm: &mut Vm| {
         let frame = vm.frame_snapshot(1216, 876).unwrap();
         let window = &frame.windows[0].snapshot;

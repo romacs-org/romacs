@@ -51,12 +51,47 @@ pub(crate) struct Stress {
     /// `ROMACS_GC_VERIFY': a freed entry is poisoned and never reused
     /// (`sweep_tables'), so a stale reference to it is seen, not hidden by
     /// the entry's next tenant.
-    verify: bool,
+    pub(crate) verify: bool,
     /// Every collection compacts ([`Vm::set_gc_moving`]): the fixtures that
     /// prove rooting under the moving collector.
     moving: bool,
 }
 romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving });
+
+/// Records a session keeps between its usage log's writes: at one a minute
+/// or so, this holds a burst; past it collections are only counted.
+pub(crate) const COLLECTION_RECORDS: usize = 256;
+
+/// A finished collection, for a real pause to name itself in the usage log
+/// (rlisp/romacs-usage-log.el). MS bounds what a key or command waited.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CollectionRecord {
+    /// The idle pass's or a prompt's: it gave way to no key while marking.
+    pub(crate) idle: bool,
+    /// Asked for by `garbage-collect' or the host.
+    pub(crate) explicit: bool,
+    pub(crate) ms: u32,
+    /// The command it ran in or at the end of, "anonymous" for a closure: a
+    /// key ended the last idleness and nothing has begun another.
+    pub(crate) command: Option<String>,
+    /// Outside a command, a key press was queued when it ended.
+    pub(crate) key: bool,
+    /// In a prompt's redisplay, the host taken for the read: no key can be
+    /// seen, and one pressed waits.
+    pub(crate) redisplay: bool,
+}
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+
+/// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CollectionLog {
+    records: Vec<CollectionRecord>,
+    /// Collections past the limit.
+    dropped: u64,
+    /// The running collection was asked for.
+    pub(crate) explicit: bool,
+}
+romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
 
 /// The tables' free entries (design note §4.4, S3.1): collections leave
 /// every live entry where it is and list the others here, one stack per
@@ -793,6 +828,57 @@ impl Vm {
         self.cells.shrink_to(self.cells.len().saturating_mul(2).max(1024));
         self.closures.shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.free.shrink();
+    }
+    /// Keep a finished collection's record, ELAPSED_NS long, IDLE as in
+    /// `collect_until_key'. One look at the host and one at the command
+    /// variable, per collection: a key pays nothing.
+    pub(super) fn note_collection(&mut self, elapsed_ns: u64, idle: bool) {
+        let explicit = std::mem::take(&mut self.collection_log.explicit);
+        if self.collection_log.records.len() >= COLLECTION_RECORDS {
+            self.collection_log.dropped += 1;
+            return;
+        }
+        let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
+        let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
+        let key = command.is_none() && self.host_key_pending();
+        let ms = (elapsed_ns / 1_000_000).min(u32::MAX as u64) as u32;
+        self.collection_log.records.push(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+    }
+    /// The running command's name, or the last one's in the command loop's
+    /// tail (`romacs--command-loop-top' has cleared the running one).
+    fn command_name(&mut self) -> Option<String> {
+        let mut bound = |name: &str| {
+            let slot = self.names.get(name).copied()?;
+            // Through the variable: `real-last-command' is keyboard-local.
+            self.variable_value(slot).ok().filter(|&value| value != Value::NIL && value != Value::UNBOUND)
+        };
+        let binding = bound("real-this-command").or_else(|| bound("real-last-command"))?;
+        Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
+    }
+    /// The records since the last call, emptied: (DROPPED RECORD...), each
+    /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
+    /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
+    pub(crate) fn take_collections(&mut self) -> Value {
+        let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
+        let mut result = Value::NIL;
+        for record in records.into_iter().rev() {
+            let kind = if record.idle { "idle" } else if record.explicit { "explicit" } else { "automatic" };
+            let met = match (&record.command, record.key, record.redisplay) {
+                (Some(_), ..) => self.intern("command"),
+                (None, true, _) => self.intern("key"),
+                (None, false, true) => self.intern("redisplay"),
+                (None, false, false) => Value::NIL,
+            };
+            let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
+            let kind = self.intern(kind);
+            let ms = Value::integer(record.ms as i64).expect("milliseconds fit fixnum");
+            let mut row = self.keymap_cons(command, Value::NIL);
+            row = self.keymap_cons(met, row);
+            row = self.keymap_cons(ms, row);
+            row = self.keymap_cons(kind, row);
+            result = self.keymap_cons(row, result);
+        }
+        self.keymap_cons(Value::integer(dropped as i64).expect("a count fits fixnum"), result)
     }
     /// Whether the host has a key press queued (`HostInput::key_pending').
     fn host_key_pending(&mut self) -> bool {

@@ -100,8 +100,17 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     let (children, _) = engine.layout_children(&snapshot, 5, None).unwrap();
     let child = &children[0];
     assert_eq!((child.layer.radius, child.layer.shadow, child.layer.glow),
-               (12.0, true, Some(romacs_display_protocol::Color::from_pixel(0xd48a20))));
+               (12.0, Some([18.0, 6.0, 0.55]), Some(romacs_display_protocol::Color::from_pixel(0xd48a20))));
     assert_eq!(child.border_width, 0.0);
+    // A layer that names no radius takes the style's, whichever is in force,
+    // so a style published later reaches a layer already shown.
+    let radius = |vm: &mut romacs_vm::Vm| vm.frame_snapshot(400, 300).unwrap().children[0].radius;
+    vm.eval_source("(modify-frame-parameters c '((romacs-layer-radius . t)))").unwrap();
+    assert_eq!(radius(&mut vm), 8);
+    vm.eval_source("(modify-frame-parameters (selected-frame) '((romacs-style . [17 4 18 6 0.55 14 0.35])))").unwrap();
+    assert_eq!(radius(&mut vm), 17);
+    vm.eval_source("(modify-frame-parameters c '((romacs-layer-radius . 12)))").unwrap();
+    assert_eq!(radius(&mut vm), 12);
     let glass = romacs_display_protocol::Color::from_pixel(0x102030);
     assert!(child.glyphs.iter().any(|g| matches!(g, FrameGlyph::Char { char: 'o', face_id, .. }
         if child.resolved_face(*face_id).bg == glass)), "text shows the frame's background");

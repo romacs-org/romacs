@@ -449,6 +449,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-oclosure" '("oclosure-type"))
 
 
+;;; Generated autoloads from romacs-omarchy.el
+
+(register-definition-prefixes "romacs-omarchy" '("omarchy-"))
+
+
 ;;; Generated autoloads from romacs-orderless.el
 
 (autoload 'orderless-all-completions "romacs-orderless"
@@ -496,6 +501,11 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-project.el
 
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
+
+
+;;; Generated autoloads from romacs-sasl-scram.el
+
+(register-definition-prefixes "romacs-sasl-scram" '("sasl-scram-"))
 
 
 ;;; Generated autoloads from romacs-server.el
@@ -565,12 +575,22 @@ recompiling; signals an error if no frame shader is installed
 
 ;;; Generated autoloads from romacs-theme.el
 
-(register-definition-prefixes "romacs-theme" '("romacs-"))
+(register-definition-prefixes "romacs-theme" '("def-romacs-theme" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-theme-modus.el
 
 (register-definition-prefixes "romacs-theme-modus" '("romacs-theme-"))
+
+
+;;; Generated autoloads from romacs-theme-roles.el
+
+(register-definition-prefixes "romacs-theme-roles" '("romacs-theme-"))
+
+
+;;; Generated autoloads from romacs-treesit.el
+
+(register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
 
 
 ;;; Generated autoloads from romacs-unidata.el
