@@ -28,7 +28,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, no_cursor: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -123,11 +123,14 @@ pub fn layout_frame_with_cursors(snapshot: &FrameSnapshot, presentation: u64, se
 }
 
 /// No cursor in a window of SNAPSHOT whose cursor `internal-show-cursor'
-/// turned off.
+/// turned off, which is a blink, or whose buffer has none, which is not.
 fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
-    let off: Vec<i64> = snapshot.windows.iter().filter(|w| w.snapshot.cursor_off).map(|w| w.snapshot.id as i64).collect();
-    frame.cursor_blinked_off = frame.window_cursors.iter().any(|c| c.active && off.contains(&c.window_id.get()));
-    frame.window_cursors.retain(|c| !off.contains(&c.window_id.get()));
+    let ids = |hidden: fn(&WindowSnapshot) -> bool| -> Vec<i64> {
+        snapshot.windows.iter().filter(|w| hidden(&w.snapshot)).map(|w| w.snapshot.id as i64).collect()
+    };
+    let (blinked, none) = (ids(|w| w.cursor_off && !w.no_cursor), ids(|w| w.no_cursor));
+    frame.cursor_blinked_off = frame.window_cursors.iter().any(|c| c.active && blinked.contains(&c.window_id.get()));
+    frame.window_cursors.retain(|c| !blinked.contains(&c.window_id.get()) && !none.contains(&c.window_id.get()));
 }
 
 /// SNAPSHOT laid out with every cursor its windows own, on or off.

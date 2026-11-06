@@ -1004,15 +1004,15 @@ fn a_buffers_nil_cursor_type_shows_no_cursor() {
     run(&mut vm, r#"(progn (set-buffer (get-buffer-create "landing")) (insert "one\ntwo\n")
                           (set-window-buffer nil (current-buffer)) (goto-char 1))"#);
     let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
-    assert!(!snapshot(&mut vm).cursor_off);
+    assert!(!snapshot(&mut vm).no_cursor);
     run(&mut vm, "(setq cursor-type nil)");
-    assert!(snapshot(&mut vm).cursor_off, "the full redisplay");
-    assert!(snapshot(&mut vm).cursor_off, "the reused rows");
+    assert!(snapshot(&mut vm).no_cursor, "the full redisplay");
+    assert!(snapshot(&mut vm).no_cursor, "the reused rows");
     run(&mut vm, "(forward-line 1)");
-    assert!(snapshot(&mut vm).cursor_off, "point moved");
+    assert!(snapshot(&mut vm).no_cursor, "point moved");
     // A blink's end does not bring it back.
     run(&mut vm, "(internal-show-cursor nil t)");
-    assert!(snapshot(&mut vm).cursor_off);
+    assert!(snapshot(&mut vm).no_cursor);
     run(&mut vm, "(setq cursor-type t)");
-    assert!(!snapshot(&mut vm).cursor_off, "back to the default");
+    assert!(!snapshot(&mut vm).no_cursor, "back to the default");
 }

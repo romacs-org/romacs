@@ -284,11 +284,14 @@ client's end does not delete it."
     (process-put proc 'no-delete-terminal t)
     frame))
 
-(defun romacs-server--execute (_proc files _nowait commands evalexprs _dontkill frame _tty)
-  "After `server-execute', whose client opened only a frame and was shown
-*scratch* (`emacsclient -c'): `romacs-server--landing'."
-  (when (and frame (not (or files commands evalexprs)))
-    (romacs-server--landing)))
+(defun romacs-server--execute (orig proc files nowait commands evalexprs dontkill frame tty)
+  "Around `server-execute': a client that opened only a frame (`emacsclient
+-c') and was shown *scratch* lands (`romacs-server--landing').  Not where
+`initial-buffer-choice' chose: its function may clear it."
+  (let ((chosen initial-buffer-choice))
+    (funcall orig proc files nowait commands evalexprs dontkill frame tty)
+    (when (and frame (not chosen) (not (or files commands evalexprs)))
+      (romacs-server--landing))))
 
 (defun romacs-server--filter (orig proc string)
   "Around `server-process-filter': emacsclient's -c asks for a window,
@@ -411,7 +414,7 @@ beside its build.json), or nil."
     (advice-add 'server-create-window-system-frame :override #'romacs-server--create-frame)
     (advice-add 'server-create-tty-frame :override #'romacs-server--refuse-tty)
     (advice-add 'server-process-filter :around #'romacs-server--filter)
-    (advice-add 'server-execute :after #'romacs-server--execute)
+    (advice-add 'server-execute :around #'romacs-server--execute)
     (advice-add 'save-buffers-kill-terminal :around #'romacs-server--kill-terminal)
     ;; An endpoint started before this (agent sessions restored at
     ;; startup) gives way: a server serves its own name's.

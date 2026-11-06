@@ -294,15 +294,35 @@ def landing(args, base):
         client = current()
         # Not where the user chose otherwise, nor beside work.
         quit_landing()
+        def clients():
+            """Where each kind of client leaves the window, judged alone."""
+            s.client('-n')
+            native = current()
+            s.emacsclient('-c', '-n')
+            return [native, current()]
+
         s.eval('(setq initial-buffer-choice t)')
-        s.client('-n')
-        s.emacsclient('-c', '-n')
-        chosen = current()
+        chosen = clients()
         s.eval('(setq initial-buffer-choice nil inhibit-startup-screen t)')
-        s.client('-n')
-        s.emacsclient('-c', '-n')
-        inhibited = current()
+        inhibited = clients()
         s.eval('(setq inhibit-startup-screen nil)')
+        # A function that clears the choice still chose.
+        s.eval('(setq initial-buffer-choice (lambda () (setq initial-buffer-choice nil) (get-scratch-buffer-create)))')
+        s.emacsclient('-c', '-n')
+        cleared = current()
+        # A client arriving over a prompt or a search leaves it be.
+        s.keys('-M', 'alt', '-k', 'x', '-m', 'alt')
+        until(lambda: s.eval('(and (active-minibuffer-window) t)') == 't', 15, 'a prompt opens')
+        s.client('-n')
+        prompt = s.eval('(list (and (active-minibuffer-window) t) (minibufferp (window-buffer (selected-window))))')
+        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: s.eval('(active-minibuffer-window)') == 'nil', 15, 'the prompt closes')
+        s.keys('-M', 'ctrl', '-k', 's', '-m', 'ctrl')
+        until(lambda: s.eval('isearch-mode') != 'nil', 15, 'a search starts')
+        s.client('-n')
+        search = [s.eval('(and isearch-mode t)'), current()]
+        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: s.eval('isearch-mode') == 'nil', 15, 'the search ends')
         a = s.file('a.txt')
         s.client('-n', str(a))
         s.client('-n')
@@ -311,9 +331,11 @@ def landing(args, base):
         beside_client = current()
         s.client('--stop=none')
         result = {'started': started, 'buffers': buffers, 'state': state, 'reused': reused, 'native': native,
-                  'emacsclient': client, 'chosen': chosen, 'inhibited': inhibited, 'beside_native': beside_native, 'beside_client': beside_client}
+                  'emacsclient': client, 'chosen': chosen, 'inhibited': inhibited, 'cleared': cleared, 'prompt': prompt,
+                  'search': search, 'beside_native': beside_native, 'beside_client': beside_client}
         result['ok'] = (started == '"*Romacs*"' and state == '(t nil romacs-landing-pause exit-splash-screen t t)'
-                        and reused == 't' and native == client == '"*Romacs*"' and chosen == inhibited == '"*scratch*"'
+                        and reused == 't' and native == client == '"*Romacs*"' and chosen == inhibited == ['"*scratch*"'] * 2
+                        and cleared == '"*scratch*"' and prompt == '(t t)' and search == ['t', '"*scratch*"']
                         and beside_native == '"a.txt"' and beside_client == '"*scratch*"')
         return result
     finally:

@@ -378,6 +378,10 @@ pub struct WindowSnapshot {
     /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
     /// cursor, as blink-cursor-mode's timer does every other blink.
     pub cursor_off: bool,
+    /// This window's buffer has no cursor (`cursor-type' nil,
+    /// get_window_cursor_type's NO_CURSOR): not a blink, so nothing of a
+    /// cursor stands, an IME's anchor included.
+    pub no_cursor: bool,
     /// The characters of TEXT shown as stretches, in byte order.
     pub stretches: Vec<Stretch>,
     /// The characters of TEXT shown as images, in byte order.
@@ -399,7 +403,7 @@ pub struct WindowSnapshot {
     /// text area's left edge, as GNU's display of a band measures it.
     pub band_stretches: BandStretches,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, no_cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
 
 /// A window's header-line and mode-line stretches (`WindowSnapshot').
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -855,7 +859,7 @@ impl WindowSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, no_cursor: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
             && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && faces_agree(faces, &other.faces) && *chrome == other.chrome

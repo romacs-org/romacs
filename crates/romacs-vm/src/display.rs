@@ -1290,12 +1290,6 @@ impl Vm {
         self.slots[self.buffer_slot].value = saved;
         value
     }
-    /// Whether WINDOW shows no cursor: `internal-show-cursor' turned it off,
-    /// or its BUFFER's `cursor-type' is nil (xdisp.c get_window_cursor_type,
-    /// selected or not).  Its other values are not drawn yet: a box.
-    fn window_cursor_off(&mut self, window: Value, buffer: Value) -> Result<bool> {
-        Ok(self.window(window)?.cursor_off || self.buffer_variable(buffer, "cursor-type")? == Value::NIL)
-    }
     /// WINDOW's horizontal scroll in pixels for its BUFFER's rows: its
     /// columns times the frame's column width, limited as
     /// window_hscroll_limited limits them; under `auto-hscroll-mode'
@@ -1443,7 +1437,11 @@ impl Vm {
             faces: faces.published(),
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
-            cursor_off: self.window_cursor_off(window, buffer)?,
+            cursor_off: self.window(window)?.cursor_off,
+            // xdisp.c get_window_cursor_type, selected or not; its other
+            // values are not drawn yet: a box.  `cursor-type' is in the
+            // window's key, so rows reused keep this.
+            no_cursor: self.buffer_variable(buffer, "cursor-type")? == Value::NIL,
             stretches,
             images,
             wrap_flips,
@@ -1554,7 +1552,7 @@ impl Vm {
         let band_stretches = BandStretches { header_line: header_stretches, mode_line: mode_stretches };
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
-            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false,
+            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, no_cursor: false,
             stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         Ok(Some((self.lay_out_alone(snapshot)?, shown)))
     }
@@ -1711,7 +1709,7 @@ impl Vm {
         let chrome = self.window_chrome(window, &table, false)?;
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
+            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, no_cursor: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         let end = self.lay_out_alone(snapshot)?;
         Ok(Some((end, shown)))
@@ -2072,7 +2070,8 @@ impl Vm {
         let id = snapshot.id;
         if let Some(previous) = self.display_state.previous.get(&id) {
             // A table grows as other windows show faces: that changes nothing here.
-            let changed = !previous.lays_out_like(&snapshot) || previous.cursor_off != snapshot.cursor_off;
+            let changed = !previous.lays_out_like(&snapshot) || previous.cursor_off != snapshot.cursor_off
+                || previous.no_cursor != snapshot.no_cursor;
             if changed {
                 self.display_state.version += 1;
             }
@@ -2152,8 +2151,7 @@ impl Vm {
     fn reuse_shown(&mut self, root: usize, slot: usize, width: u32, height: u32) -> Result<Option<WindowSnapshot>> {
         let window = self.slots[root].value;
         let w = self.window(window)?;
-        let (id, mini, forced, buffer) = (w.id, w.mini, w.force_start, w.buffer);
-        let cursor_off = self.window_cursor_off(window, buffer)?;
+        let (id, mini, forced, cursor_off) = (w.id, w.mini, w.force_start, w.cursor_off);
         if forced || !self.display_state.previous.contains_key(&id) {
             return Ok(None);
         }

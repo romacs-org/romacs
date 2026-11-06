@@ -142,8 +142,9 @@ Hidden buffers, *Messages*, the landing and an untouched *scratch*."
 (defun romacs-landing-new-client ()
   "Show the landing to a client with nothing to visit, on an empty session.
 Where startup would: not with `initial-buffer-choice' or
-`inhibit-startup-screen' set."
+`inhibit-startup-screen' set; and not over a prompt or a search under way."
   (when (and (not initial-buffer-choice) (not inhibit-startup-screen)
+             (not isearch-mode) (not (active-minibuffer-window))
              (romacs-landing--empty-session-p))
     (romacs-landing-show)))
 
