@@ -613,6 +613,19 @@ the current buffer's major mode."
         (funcall function)))
     nil))
 
+(defun romacs--pre-redisplay (windows)
+  "xdisp.c prepare_menu_bars's call of `pre-redisplay-function' on WINDOWS,
+as safe_call makes it."
+  (let ((inhibit-redisplay t)
+        (inhibit-quit t))
+    (condition-case err
+        (funcall pre-redisplay-function windows)
+      (error (message "Error during redisplay: %S" err)))))
+
+(defun romacs--native-region (_start _end _window _overlay)
+  "`redisplay-highlight-region-function' while Romacs draws the region itself."
+  nil)
+
 (defun insert-buffer-substring (buffer &optional start end)
   "Insert before point a substring of the contents of BUFFER.
 BUFFER may be a buffer or a buffer name.
@@ -932,7 +945,8 @@ CONDITIONS or has a regexp matching ERROR's message."
 (defun romacs--run-finalizers (&optional value)
   "alloc.c run_finalizers: call the function of each finalizer the
 collections since the last run found unreachable, once each, with quits
-inhibited; a signal is logged to *Messages*, as `add_to_log' does.
+inhibited; a signal is logged to *Messages*, as `add_to_log' does.  Then
+`post-gc-hook', if a collection ended since it last ran.
 Return VALUE, the statistics of the collection that ran it."
   (dolist (function (romacs--take-doomed-finalizers))
     (let ((inhibit-quit t))
@@ -940,6 +954,11 @@ Return VALUE, the statistics of the collection that ran it."
           (funcall function)
         (t (let ((inhibit-message t))
              (message "finalizer failed: %S" err))))))
+  ;; garbage_collect's end, with collection inhibited.
+  (when (romacs--take-post-gc)
+    (romacs--hold-collection t)
+    (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
+      (romacs--hold-collection nil)))
   value)
 
 ;;; Evaluating buffer text: lread.c readevalloop
@@ -1221,5 +1240,157 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
             this-command command)
       (call-interactively command nil keys)
       (setq last-command command))))
+
+;;;; The mouse: frame.c, over what the host says of the pointer
+
+(defun romacs--mouse (x y)
+  "(FRAME X . Y) on the selected frame, through `mouse-position-function'."
+  (let ((position (cons (selected-frame) (cons x y))))
+    (if mouse-position-function (funcall mouse-position-function position) position)))
+
+(defun mouse-pixel-position ()
+  "Return a list (FRAME X . Y) giving the mouse frame and position in pixels.
+X and Y are nil when the mouse is not over the frame, or there is none."
+  (let ((at (romacs--pointer)))
+    (romacs--mouse (car at) (cdr at))))
+
+(defun mouse-position ()
+  "Return a list (FRAME X . Y) giving the mouse frame and position in characters.
+X and Y are nil when the mouse is not over the frame, or there is none."
+  (let ((at (romacs--pointer)))
+    (if at
+        (let ((border (frame-internal-border-width)))
+          (romacs--mouse (floor (- (car at) border) (frame-char-width))
+                         (floor (- (cdr at) border) (frame-char-height))))
+      (romacs--mouse nil nil))))
+
+(defun mouse-position-in-root-frame ()
+  "Return (X . Y), `mouse-position' on the root frame.
+Romacs's frames measure from the root frame's corner, as a Wayland
+frame's position is not known."
+  (let ((position (mouse-position)))
+    (and (framep (car position))
+         (cons (or (car (cdr position)) 0) (or (cdr (cdr position)) 0)))))
+
+(defun romacs--check-mouse-target (frame x y)
+  "frame.c's checks of FRAME, X and Y, which nothing warps with.
+pgtkterm.c frame_set_mouse_pixel_position is empty: Wayland has no warp."
+  (unless (frame-live-p frame) (signal 'wrong-type-argument (list 'frame-live-p frame)))
+  (dolist (n (list x y))
+    (unless (integerp n) (signal 'wrong-type-argument (list 'integerp n)))
+    (unless (<= -2147483648 n 2147483647)
+      (signal 'args-out-of-range (list n -2147483648 2147483647)))))
+
+(defun set-mouse-position (frame x y)
+  "Ask to move the mouse pointer to character X, Y of FRAME.
+Wayland lets no client do it, so nothing moves, as pgtk's."
+  (romacs--check-mouse-target frame x y))
+
+(defun set-mouse-pixel-position (frame x y)
+  "Ask to move the mouse pointer to pixel X, Y of FRAME.
+Wayland lets no client do it, so nothing moves, as pgtk's."
+  (romacs--check-mouse-target frame x y))
+
+;;;; The window title
+
+(defun romacs--title-format-static-p (format)
+  "Whether the mode-line FORMAT reads only `%b', `%%', the symbols of GNU's
+default, and fixed text: its expansion moves only with what
+`Vm::frame_title_key' covers."
+  (cond ((stringp format) (not (string-match-p "%[^b%]" format)))
+        ((consp format) (and (not (keywordp (car format)))
+                             (romacs--title-format-static-p (car format))
+                             (romacs--title-format-static-p (cdr format))))
+        ((integerp format) t)
+        (t (memq format '(nil t multiple-frames system-name)))))
+
+;;;; Word motion through `find-word-boundary-function-table'
+
+(defun romacs--word-at-p (position)
+  "Whether the character at POSITION is a word's, as syntax.c scan_words reads it."
+  (let ((class (logand (car (syntax-after position)) 65535)))
+    (or (= class 2) (and words-include-escapes (memq class '(9 10))))))
+
+(defun romacs--scan-words (from count)
+  "syntax.c scan_words: the position COUNT words from FROM, else nil.
+Nil means an edge of the accessible text came first.  A word start or
+end whose character has a function in `find-word-boundary-function-table'
+goes where that says."
+  (let ((beg (point-min)) (end (point-max)) (table find-word-boundary-function-table))
+    (catch 'edge
+      (while (> count 0)
+        (while (progn (when (= from end) (throw 'edge nil))
+                      (prog1 (not (romacs--word-at-p from)) (setq from (1+ from)))))
+        (let ((function (aref table (char-after (1- from)))))
+          (if (fboundp function)
+              (let ((position (funcall function (1- from) end)))
+                (when (and (fixnump position) (< from position) (<= position (point-max)))
+                  (setq from position)))
+            (while (and (/= from end) (romacs--word-at-p from)) (setq from (1+ from)))))
+        (setq count (1- count)))
+      (while (< count 0)
+        (while (progn (when (= from beg) (throw 'edge nil))
+                      (setq from (1- from))
+                      (not (romacs--word-at-p from))))
+        (let ((function (aref table (char-after from))))
+          (if (fboundp function)
+              (let ((position (funcall function from beg)))
+                (when (and (fixnump position) (<= (point-min) position) (< position from))
+                  (setq from position)))
+            (while (and (/= from beg) (romacs--word-at-p (1- from))) (setq from (1- from)))))
+        (setq count (1+ count)))
+      from)))
+
+(defun romacs--forward-word (count)
+  "syntax.c Fforward_word over `romacs--scan-words'."
+  (let* ((reached (romacs--scan-words (point) count))
+         (position (or reached (if (> count 0) (point-max) (point-min))))
+         (kept (constrain-to-field position (point))))
+    (goto-char kept)
+    (eq kept reached)))
+
+;; lread.c substitute_object_recurse, for edebug.el's reader of `#N=': PLACEHOLDER
+;; replaced by OBJECT everywhere in OBJECT.  With COMPLETED t every node is
+;; remembered; a hash table names the nodes that can start a cycle.
+(defun lread--substitute-object-in-subtree (object placeholder completed)
+  "Replace PLACEHOLDER with OBJECT in OBJECT, as the reader does for `#N='.
+COMPLETED is t, or a hash table of the nodes that may be cycle entry points."
+  (let ((seen (make-hash-table :test 'eq)) (absent (list nil)) recurse)
+    (setq recurse
+          (lambda (tree)
+            (cond
+             ((eq tree placeholder) object)
+             ((or (symbolp tree) (numberp tree) (bool-vector-p tree) (gethash tree seen)) tree)
+             (t
+              (when (or (eq completed t) (not (eq (gethash tree completed absent) absent)))
+                (puthash tree t seen))
+              (cond
+               ((consp tree)
+                (let ((cell tree) (going t))
+                  (while going
+                    (setcar cell (funcall recurse (car cell)))
+                    (let ((next (cdr cell)))
+                      (if (and (consp next) (not (eq next placeholder)) (not (gethash next seen)))
+                          (progn
+                            (when (or (eq completed t) (not (eq (gethash next completed absent) absent)))
+                              (puthash next t seen))
+                            (setq cell next))
+                        (setcdr cell (funcall recurse next))
+                        (setq going nil))))))
+               ((or (vectorp tree) (recordp tree))
+                (dotimes (i (length tree))
+                  (aset tree i (funcall recurse (aref tree i)))))
+               ((hash-table-p tree)
+                (maphash (lambda (key value) (puthash key (funcall recurse value) tree)) tree))
+               ((stringp tree)
+                (dolist (interval (object-intervals tree))
+                  (set-text-properties (nth 0 interval) (nth 1 interval)
+                                       (funcall recurse (nth 2 interval)) tree)))
+               ((or (char-table-p tree) (closurep tree)))
+               (t (signal 'wrong-type-argument (list 'sequencep tree))))
+              tree))))
+    (unless (eq (funcall recurse object) object)
+      (error "Unexpected mutation error in reader"))
+    nil))
 
 ;;; prelude.el ends here

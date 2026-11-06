@@ -646,6 +646,18 @@ Bound on `down-mouse-1' over a model so the press never starts
     (apply #'romacs-model-set-view model
            (romacs-model--entry-initial-view (romacs-model--entry model)))))
 
+(defun romacs-model--command-p (_symbol buffer)
+  "Whether BUFFER has a model at point for the camera commands."
+  (with-current-buffer buffer (ignore-error user-error (romacs-model--at-point))))
+
+(dolist (command '( romacs-model-yaw-forward romacs-model-yaw-backward romacs-model-pitch-next
+                    romacs-model-pitch-previous romacs-model-zoom-in romacs-model-zoom-out
+                    romacs-model-reset-view))
+  (put command 'completion-predicate #'romacs-model--command-p))
+
+;; Its press on a glyph is what it needs: M-x has no event to give it.
+(put 'romacs-model-mouse-select 'completion-predicate #'ignore)
+
 (defvar romacs-model-view-map
   (let ((map (make-sparse-keymap)))
     (define-key map "f" #'romacs-model-yaw-forward)
@@ -668,7 +680,8 @@ Bound on `down-mouse-1' over a model so the press never starts
 
 (define-derived-mode romacs-model-view-mode special-mode "Model"
   "Major mode of a standalone native model buffer.
-\\{romacs-model-view-mode-map}")
+\\{romacs-model-view-mode-map}"
+  :interactive nil)
 
 ;;;; Insertion
 

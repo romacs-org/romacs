@@ -321,7 +321,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
               ;; Its outer width, the glass padding included.
               (push (list (<= (frame-pixel-width f) 420)
                           (<= (frame-text-height f) (* 2 (frame-char-height f)))
-                          (and (string-match-p \"\\\\`Wrote\\n~/…/[a-z/]*romacs-defaults\\\\.el …\\\\'\" text) t) (string-suffix-p \"…\" text))
+                          (and (string-match-p \"\\\\`Wrote\\n~/.../[a-z/]*romacs-defaults\\\\.el ...\\\\'\" text) t) (string-suffix-p \"...\" text))
                     r))
             (romacs-layer-toast-clear)
             ;; The minibuffer's layer over the toasts' corner: the toast
@@ -340,7 +340,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         // A toast's text as the window shows it: rows wrapped at words, a
         // file name's directories cut (only that name: a URL's path stays),
         // a long basename kept whole at its end, at most two rows, the last
-        // ending in `…' where more follow (pinned GNU 32 batch: the same).
+        // ending in `...' where more follow (pinned GNU 32 batch: the same).
         report.push(printed(&mut vm, "(progn
             (mapcar (lambda (c) (string-to-multibyte (romacs-layer--toast-text (car c) (cadr c))))
                     (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/rlisp/romacs-defaults.el\" \"~\")) 36)
@@ -355,7 +355,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                           (list (concat \"! \" (make-string 35 ?a) \"\\nsecond\") 37))))"));
         // A toast's tab stops are its own, whatever the caller's `tab-width':
         // the line is 39 columns at the toast's 8, so it wraps and the third
-        // row is cut with `…'; the toast buffer renders at 8.
+        // row is cut with `...'; the toast buffer renders at 8.
         report.push(printed(&mut vm, "(let ((tab-width 4))
             (list (string-to-multibyte (romacs-layer--toast-text (concat \"a\\t\" (make-string 31 ?b) \"\\nlast row\") 37))
                   (with-current-buffer (romacs-layer--toast-buffer) tab-width)))"));
@@ -431,8 +431,8 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
                         "(200 7 0)", "(\"cand-06\" (5 5 60 180 200) 2 t)",
                         "((\"four\" \"three\" \"two\") t (top t) nil)",
                         "((1 t \"second\") nil romacs-layer-toast-error romacs-layer-toast-error nil (t t t t) t)",
-                        "(\"Wrote ~/…/rlisp/romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/…/aaaaaaaaaaaa…aaaaaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv …\" \"line one\\nline two …\" \"Wrote\\n/…/界界界界界…界界界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
-                        "(\"a      \\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb …\" 8)",
+                        "(\"Wrote ~/.../rlisp/romacs-defaults.el\" \"Open /tmp/long-directory/test.el or\\nhttps://example.org/tmp/long-directory/test.el\" \"Wrote\\n/.../aaaaaaaaaaa...aaaaaaaaaaaaaaaaa.txt\" \"abcdefghijk\\nlmnopqrstuv ...\" \"line one\\nline two ...\" \"Wrote\\n/.../界界界界界...界界界界界界界.txt\" \"aaaaaaa\\tbbbbbbb\\tccccccc\\tddddddd\\nlast row\" \"! aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nsecond\")",
+                        "(\"a      \\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ...\" 8)",
                         "(\"band.rs  docs/\" (0 1 2 3) (9 10 11 12 13))",
                         // 500 pixels less the fringes and the pane gap's internal
                         // border (VM2-PANE-CHROME), centred on the native 500.
@@ -609,11 +609,32 @@ fn romacs_theme_rum_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-rum-test.el");
 }
 
+/// The native `backquote-process' and the compiler's use of it, against
+/// GNU's backquote.el (tests/romacs-backquote-test.el).
+#[test]
+fn romacs_backquote_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-backquote-test.el");
+}
+
+/// `load-theme''s preview (tests/romacs-theme-preview-test.el): what it
+/// shows, what it refuses to read, and that it leaves the session as it was.
+#[test]
+fn romacs_theme_preview_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-preview-test.el");
+}
+
 /// `def-romacs-theme' and the role table (tests/romacs-theme-author-test.el),
 /// and the blocks of doc/themes.org.
 #[test]
 fn romacs_theme_author_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
+}
+
+/// rlisp's commands declare where they apply and its key hints come from
+/// bindings (tests/romacs-idioms-test.el).
+#[test]
+fn romacs_idioms_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-idioms-test.el");
 }
 
 /// `omarchy-mode' over a fake Omarchy state directory

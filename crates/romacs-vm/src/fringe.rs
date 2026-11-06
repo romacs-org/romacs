@@ -67,14 +67,14 @@ impl Vm {
         let (left_margin, right_margin, outside_margins) = (w.left_margin * column, w.right_margin * column, w.fringes_outside_margins);
         let (x, frame, buffer, mini) = (w.x, w.frame, w.buffer, w.mini);
         let root_x = self.frame(frame).ok().and_then(|f| self.window(f.root).ok()).map_or(0, |r| r.x);
-        let fringe_face = table.handle("fringe").unwrap_or_default();
+        let fringe_face = self.named(&table, "fringe").unwrap_or_default();
         let host = self.host_frame_peek();
         let pane = self.frame_parameter_of(host, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
-        let fringe_background = if pane { table.handle("default").unwrap_or_default() } else { fringe_face };
+        let fringe_background = if pane { self.named(&table, "default").unwrap_or_default() } else { fringe_face };
         let [right_divider, bottom_divider] = self.window_dividers(window)?;
         // A frame with right dividers draws them instead (gui_draw_vertical_border).
         let dividers = self.frame(frame).map_or(0, |f| f.dividers[0]);
-        let border = if x > root_x && dividers == 0 { table.handle("vertical-border") } else { None };
+        let border = if x > root_x && dividers == 0 { self.named(&table, "vertical-border") } else { None };
         let indicators = if left_fringe + right_fringe == 0 || !indicators {
             Indicators::default()
         } else {
@@ -191,7 +191,7 @@ impl Vm {
     pub(crate) fn fringe_bitmap(&mut self, symbol: Value, face: FaceHandle, table: &FaceTable) -> Result<Option<FringeBitmap>> {
         let Some(number) = self.property(symbol, "fringe")?.integer_value() else { return Ok(None) };
         let name = self.property(symbol, FACE)?;
-        let face = if name == Value::NIL { face } else { self.display(name).ok().and_then(|n| table.handle(&n)).unwrap_or(face) };
+        let face = if name == Value::NIL { face } else { self.display(name).ok().and_then(|n| self.named(&table, &n)).unwrap_or(face) };
         let number16 = u16::try_from(number).map_err(|e| e.to_string())?;
         let definition = self.property(symbol, DEFINITION)?;
         if definition == Value::NIL && (1..FIRST_USER_BITMAP).contains(&number) {

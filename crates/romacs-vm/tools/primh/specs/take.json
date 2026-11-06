@@ -1,1 +1,1 @@
-{"name": "take", "arity": [2, 2], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:1671", "rust": "src/prims/fns.rs:95", "args": []}
+{"name": "take", "arity": [2, 2], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:1671", "rust": "src/prims/fns.rs:92", "args": []}

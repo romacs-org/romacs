@@ -58,6 +58,41 @@ pub(crate) struct Stress {
 }
 romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving });
 
+/// Records a session keeps between its usage log's writes: at one a minute
+/// or so, this holds a burst; past it collections are only counted.
+pub(crate) const COLLECTION_RECORDS: usize = 256;
+
+/// A finished collection, for a real pause to name itself in the usage log
+/// (rlisp/romacs-usage-log.el). MS bounds what a key or command waited.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CollectionRecord {
+    /// The idle pass's or a prompt's: it gave way to no key while marking.
+    pub(crate) idle: bool,
+    /// Asked for by `garbage-collect' or the host.
+    pub(crate) explicit: bool,
+    pub(crate) ms: u32,
+    /// The command it ran in or at the end of, "anonymous" for a closure: a
+    /// key ended the last idleness and nothing has begun another.
+    pub(crate) command: Option<String>,
+    /// Outside a command, a key press was queued when it ended.
+    pub(crate) key: bool,
+    /// In a prompt's redisplay, the host taken for the read: no key can be
+    /// seen, and one pressed waits.
+    pub(crate) redisplay: bool,
+}
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+
+/// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CollectionLog {
+    records: Vec<CollectionRecord>,
+    /// Collections past the limit.
+    dropped: u64,
+    /// The running collection was asked for.
+    pub(crate) explicit: bool,
+}
+romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
+
 /// The tables' free entries (design note §4.4, S3.1): collections leave
 /// every live entry where it is and list the others here, one stack per
 /// table with the lowest index on top, which the allocation funnels pop
@@ -75,12 +110,28 @@ pub(crate) struct FreeEntries {
     /// Bytes the funnels have handed out, ever: the memory profiler's
     /// meter (profiler.rs), which table growth no longer measures.
     pub(crate) allocated: u64,
+    /// GNU's consing counters, ever (`memory-use-counts').
+    pub(crate) consed: Consed,
     /// The next collection compacts (`Vm::collect_compacting').
     pub(crate) compact: bool,
     /// Collections a due compaction has waited for an idle one.
     deferred: u8,
 }
-romacs_snapshot::snapshot_struct!(FreeEntries { conses, closures, cells, objects, quarantined, allocated, compact, deferred });
+romacs_snapshot::snapshot_struct!(FreeEntries { conses, closures, cells, objects, quarantined, allocated, consed, compact, deferred });
+
+/// What `memory-use-counts' reports, in its units; symbols are counted from
+/// the symbol table, less its private binding slots, and VM2 has no intervals
+/// to count (VM2-MEMCOUNT1).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Consed {
+    pub(crate) conses: u64,
+    pub(crate) floats: u64,
+    pub(crate) vector_cells: u64,
+    pub(crate) reused_symbols: u64,
+    pub(crate) string_chars: u64,
+    pub(crate) strings: u64,
+}
+romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_symbols, string_chars, strings });
 
 impl FreeEntries {
     /// Free entries, in all four tables.
@@ -185,6 +236,9 @@ impl Drop for UnwindMark {
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
 const CONS_BYTES: i64 = 16;
+/// alloc.c:7508, the C initializer of `memory-signal-data`. VM2 has no such
+/// variable, so GNU's startup.el:1738 rewrite is not observable (VM2-FR5-2).
+pub(crate) const MEMORY_FULL: &str = "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs";
 /// GNU's floor under `gc-cons-threshold' (alloc.c:5747, GC_DEFAULT_THRESHOLD / 10).
 const MIN_CONS_THRESHOLD: i64 = 80_000;
 /// A Romacs collection walks compiled code, and some compact, so it costs
@@ -447,6 +501,11 @@ impl Vm {
     pub(crate) fn collection_budget(&self) -> (f64, f64) {
         let allocated = self.heap_objects().saturating_sub(self.gc_retained) as f64
             + (self.gc_payload_bytes / CONS_BYTES as usize) as f64;
+        // A job's growth over the heap it was forked with, not the live
+        // heap's share: an ordinary job never collects.
+        if let Some((base, objects, _)) = self.job_budget {
+            return (allocated, objects.saturating_sub(self.job_live().saturating_sub(base)).max(1) as f64);
+        }
         // An embedder's floor overrides, as GNU's memory-full state does.
         if let Some(floor) = self.gc_floor {
             return (allocated, self.gc_retained.saturating_mul(2).max(floor).saturating_sub(self.gc_retained) as f64);
@@ -467,6 +526,37 @@ impl Vm {
         });
         (allocated, threshold.max(proportional))
     }
+    /// In a child forked for one job: BYTES of growth over the heap it was
+    /// forked with, at the collector's charge per object, pace its
+    /// collections in place of the default rule. A collection in a child
+    /// rewrites what it shares with its zygote, so an ordinary job should
+    /// never run one; its garbage dies with the process.
+    pub(crate) fn set_job_budget(&mut self, bytes: usize) {
+        let objects = (bytes / CONS_BYTES as usize).max(1);
+        self.job_budget = Some((self.job_live(), objects, objects / 4 + 1));
+    }
+    /// What the last collection kept, in objects at the collector's charge:
+    /// the retained objects and the payload allocation charged for them.
+    fn job_live(&self) -> usize {
+        self.gc_retained + self.gc_retained_payload / CONS_BYTES as usize
+    }
+    /// Measure the payload the heap holds now, for `job_live`: a zygote's
+    /// baseline, a child's after each collection. One pass over the objects.
+    pub(crate) fn measure_retained_payload(&mut self) {
+        self.gc_retained_payload = self.objects.iter().map(crate::data::payload_bytes).sum();
+    }
+    /// Whether what survived the last collection alone exceeds the job's
+    /// budget: its memory is exhausted. That is taken once: the limit
+    /// rises above the live growth by a grace, GNU's spare memory, so the
+    /// handlers and the job's reply can run; growth past it signals again.
+    /// Only a running job is signalled: outside one no handler stands.
+    pub(crate) fn take_job_exhaustion(&mut self) -> bool {
+        let Some((base, objects, grace)) = self.job_budget else { return false };
+        let grown = self.job_live().saturating_sub(base);
+        if grown <= objects || !self.isolate_job_running() { return false; }
+        self.job_budget = Some((base, grown + grace, grace));
+        true
+    }
     /// How far the next automatic collection is along, 1 being due: the
     /// larger of the objects allocated over their trigger and the request
     /// code compiled over its threshold (`finish_request'), which only a
@@ -482,6 +572,7 @@ impl Vm {
         self.gc_payload_bytes = 0;
         self.collect_poll = false;
         self.gc_retained_slots = self.objects.iter().map(crate::data::traced_slots).sum();
+        if self.job_budget.is_some() { self.measure_retained_payload(); }
     }
     /// A forced stress collection is due at this Lisp entry.
     pub(crate) fn stress_due(&mut self) -> bool {
@@ -550,10 +641,18 @@ impl Vm {
             _ => true,
         }
     }
-    /// `romacs--run-finalizers' when a collection has doomed finalizers
-    /// and the prelude defines it.
+    /// Whether `post-gc-hook' has something to run for a collection that
+    /// ended.  Lisp runs it, never the collector (`romacs--run-finalizers').
+    pub(crate) fn post_gc_runs(&mut self) -> bool {
+        if !self.post_gc_due { return false; }
+        let hook = self.slot("post-gc-hook");
+        self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
+        self.post_gc_due
+    }
+    /// `romacs--run-finalizers' when a collection has doomed finalizers or
+    /// a `post-gc-hook' to run, and the prelude defines it.
     pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
-        if self.doomed_finalizers.is_empty() { return None; }
+        if self.doomed_finalizers.is_empty() && !self.post_gc_runs() { return None; }
         let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
         let slot = runner.payload() as usize - 1;
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
@@ -796,6 +895,57 @@ impl Vm {
         self.cells.shrink_to(self.cells.len().saturating_mul(2).max(1024));
         self.closures.shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.free.shrink();
+    }
+    /// Keep a finished collection's record, ELAPSED_NS long, IDLE as in
+    /// `collect_until_key'. One look at the host and one at the command
+    /// variable, per collection: a key pays nothing.
+    pub(super) fn note_collection(&mut self, elapsed_ns: u64, idle: bool) {
+        let explicit = std::mem::take(&mut self.collection_log.explicit);
+        if self.collection_log.records.len() >= COLLECTION_RECORDS {
+            self.collection_log.dropped += 1;
+            return;
+        }
+        let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
+        let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
+        let key = command.is_none() && self.host_key_pending();
+        let ms = (elapsed_ns / 1_000_000).min(u32::MAX as u64) as u32;
+        self.collection_log.records.push(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+    }
+    /// The running command's name, or the last one's in the command loop's
+    /// tail (`romacs--command-loop-top' has cleared the running one).
+    fn command_name(&mut self) -> Option<String> {
+        let mut bound = |name: &str| {
+            let slot = self.names.get(name).copied()?;
+            // Through the variable: `real-last-command' is keyboard-local.
+            self.variable_value(slot).ok().filter(|&value| value != Value::NIL && value != Value::UNBOUND)
+        };
+        let binding = bound("real-this-command").or_else(|| bound("real-last-command"))?;
+        Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
+    }
+    /// The records since the last call, emptied: (DROPPED RECORD...), each
+    /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
+    /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
+    pub(crate) fn take_collections(&mut self) -> Value {
+        let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
+        let mut result = Value::NIL;
+        for record in records.into_iter().rev() {
+            let kind = if record.idle { "idle" } else if record.explicit { "explicit" } else { "automatic" };
+            let met = match (&record.command, record.key, record.redisplay) {
+                (Some(_), ..) => self.intern("command"),
+                (None, true, _) => self.intern("key"),
+                (None, false, true) => self.intern("redisplay"),
+                (None, false, false) => Value::NIL,
+            };
+            let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
+            let kind = self.intern(kind);
+            let ms = Value::integer(record.ms as i64).expect("milliseconds fit fixnum");
+            let mut row = self.keymap_cons(command, Value::NIL);
+            row = self.keymap_cons(met, row);
+            row = self.keymap_cons(ms, row);
+            row = self.keymap_cons(kind, row);
+            result = self.keymap_cons(row, result);
+        }
+        self.keymap_cons(Value::integer(dropped as i64).expect("a count fits fixnum"), result)
     }
     /// Whether the host has a key press queued (`HostInput::key_pending').
     fn host_key_pending(&mut self) -> bool {

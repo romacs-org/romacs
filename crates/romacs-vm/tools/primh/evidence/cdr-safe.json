@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "cdr-safe",
- "spec_sha256": "e28b7d05ebafb17aca1d79ea7074790bb673d384f2b4ad0b64d37537edfb5513",
+ "spec_sha256": "3b17b5386471c91f5eed811b4fc020fbbe33da86d1231048a84e036429f0ba5f",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
  "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",

@@ -19,7 +19,9 @@
 ;;
 ;; Everything here is plain Elisp over numbers and strings, without
 ;; color.el, cl-lib or seq: it also runs in the launches whose only Lisp
-;; is the machine's own prelude.
+;; is the machine's own prelude.  The machine does the colour arithmetic
+;; (`romacs-color-oklab', `romacs-color-from-oklab', `romacs-color--oklch',
+;; `romacs-color-luminance'); the rules are here.
 
 ;;; Code:
 
@@ -28,77 +30,6 @@
 (defun romacs-theme--second (list)
   "LIST's second element (the machine's own prelude has no `cadr')."
   (car (cdr list)))
-
-(defun romacs-color--channels (hex)
-  "HEX, \"#rrggbb\", as (R G B), each from 0.0 to 1.0."
-  (list (/ (string-to-number (substring hex 1 3) 16) 255.0)
-        (/ (string-to-number (substring hex 3 5) 16) 255.0)
-        (/ (string-to-number (substring hex 5 7) 16) 255.0)))
-
-(defun romacs-color--hex (rgb)
-  "RGB, three numbers from 0.0 to 1.0 (clamped), as \"#rrggbb\"."
-  (apply #'format "#%02x%02x%02x"
-         (mapcar (lambda (c) (round (* 255 (min 1.0 (max 0.0 c))))) rgb)))
-
-(defun romacs-color--linear (c)
-  "sRGB channel C made linear, as color.el's `color-srgb-to-xyz'."
-  (if (<= c 0.04045) (/ c 12.95) (expt (/ (+ c 0.055) 1.055) 2.4)))
-
-(defun romacs-color--gamma (c)
-  "Linear channel C as sRGB, as color.el's `color-xyz-to-srgb'."
-  (if (<= c 0.0031308) (* 12.92 c) (- (* 1.055 (expt c (/ 2.4))) 0.055)))
-
-(defun romacs-color--cbrt (f)
-  "The real cube root of F."
-  (if (< f 0) (- (expt (- f) (/ 1.0 3.0))) (expt f (/ 1.0 3.0))))
-
-(defun romacs-color-oklab (hex)
-  "HEX as Oklab (L A B), through CIE XYZ as color.el's `color-srgb-to-oklab'."
-  (let* ((rgb (mapcar #'romacs-color--linear (romacs-color--channels hex)))
-         (r (nth 0 rgb)) (g (nth 1 rgb)) (b (nth 2 rgb))
-         (x (+ (* 0.4124564 r) (* 0.3575761 g) (* 0.1804375 b)))
-         (y (+ (* 0.21266729 r) (* 0.7151522 g) (* 0.0721750 b)))
-         (z (+ (* 0.0193339 r) (* 0.1191920 g) (* 0.9503041 b)))
-         (l (romacs-color--cbrt (+ (* x 0.8189330101) (* y 0.3618667424) (* z -0.1288597137))))
-         (m (romacs-color--cbrt (+ (* x 0.0329845436) (* y 0.9293118715) (* z 0.0361456387))))
-         (s (romacs-color--cbrt (+ (* x 0.0482003018) (* y 0.2643662691) (* z 0.6338517070)))))
-    (list (+ (* l 0.2104542553) (* m 0.7936177850) (* s -0.0040720468))
-          (+ (* l 1.9779984951) (* m -2.4285922050) (* s 0.4505937099))
-          (+ (* l 0.0259040371) (* m 0.7827717662) (* s -0.8086757660)))))
-
-(defun romacs-color--oklab-linear (lab)
-  "Oklab LAB as linear sRGB (R G B), not clamped, as color.el's
-`color-oklab-to-xyz' and `color-xyz-to-srgb' before the transfer curve."
-  (let* ((L (nth 0 lab)) (a (nth 1 lab)) (b (nth 2 lab))
-         (l (expt (+ (* 1.0 L) (* 0.39633779 a) (* 0.21580376 b)) 3))
-         (m (expt (+ (* 1.00000001 L) (* -0.10556134 a) (* -0.06385417 b)) 3))
-         (s (expt (+ (* 1.00000005 L) (* -0.08948418 a) (* -1.29148554 b)) 3))
-         (x (+ (* l 1.22701385) (* m -0.55779998) (* s 0.28125615)))
-         (y (+ (* l -0.04058018) (* m 1.11225687) (* s -0.07167668)))
-         (z (+ (* l -0.07638128) (* m -0.42148198) (* s 1.58616322))))
-    (list (+ (* 3.2404542 x) (* -1.5371385 y) (* -0.4985314 z))
-          (+ (* -0.9692660 x) (* 1.8760108 y) (* 0.0415560 z))
-          (+ (* 0.0556434 x) (* -0.2040259 y) (* 1.0572252 z)))))
-
-(defun romacs-color-from-oklab (lab)
-  "Oklab LAB as \"#rrggbb\", each channel clamped into sRGB."
-  (romacs-color--hex (mapcar (lambda (c) (romacs-color--gamma (min 1.0 (max 0.0 c))))
-                             (romacs-color--oklab-linear lab))))
-
-(defun romacs-color--in-gamut (lab)
-  "Whether Oklab LAB lies inside sRGB."
-  (let ((inside t))
-    (dolist (c (romacs-color--oklab-linear lab) inside)
-      (when (or (< c -0.0001) (> c 1.0001)) (setq inside nil)))))
-
-(defun romacs-color--oklch (L chroma hue)
-  "The Oklab colour of lightness L, CHROMA and HUE (radians), brought into
-sRGB by reducing its chroma, hue and lightness kept."
-  (let ((lab (list L (* chroma (cos hue)) (* chroma (sin hue)))))
-    (while (and (> chroma 0.0001) (null (romacs-color--in-gamut lab)))
-      (setq chroma (* chroma 0.95)
-            lab (list L (* chroma (cos hue)) (* chroma (sin hue)))))
-    lab))
 
 (defun romacs-color-mix (a b amount)
   "The colour AMOUNT (0 to 1) of the way from A to B, mixed in Oklab."
@@ -149,11 +80,15 @@ TARGET, in degrees."
   "The colour AMOUNT (0 to 1) of the way from A to B, in Oklab."
   (romacs-color-mix a b amount))
 
-(defun romacs-color-luminance (hex)
-  "HEX's relative luminance, as WCAG 2 defines it."
-  (let ((lin (mapcar (lambda (c) (if (<= c 0.03928) (/ c 12.92) (expt (/ (+ c 0.055) 1.055) 2.4)))
-                     (romacs-color--channels hex))))
-    (+ (* 0.2126 (nth 0 lin)) (* 0.7152 (nth 1 lin)) (* 0.0722 (nth 2 lin)))))
+(defvar romacs-color--memo (make-hash-table :test 'equal)
+  "What the pure colour functions below answered, by their arguments: a
+theme's floors ask the same questions many times over.")
+
+(defun romacs-color--remember (key value)
+  "Keep VALUE under KEY in `romacs-color--memo', which stays small, and
+answer VALUE."
+  (when (> (hash-table-count romacs-color--memo) 20000) (clrhash romacs-color--memo))
+  (puthash key value romacs-color--memo))
 
 (defun romacs-color-contrast (a b)
   "The WCAG 2 contrast ratio of colours A and B, from 1 to 21."
@@ -184,6 +119,12 @@ the colours it is drawn over, FG moved in Oklab lightness until it
 reaches it on all of them: away from the one it shows worst on first,
 then the other way; when neither reaches it, the end that comes closest.
 Only the foreground moves."
+  (let ((key (list fg backgrounds minimum)))
+    (or (gethash key romacs-color--memo)
+        (romacs-color--remember key (romacs-color--floor-on fg backgrounds minimum)))))
+
+(defun romacs-color--floor-on (fg backgrounds minimum)
+  "`romacs-color-floor-on', computed."
   (if (>= (romacs-color--worst fg backgrounds) minimum) fg
     (let* ((worst (car backgrounds)))
       (dolist (bg (cdr backgrounds))
@@ -728,6 +669,29 @@ does."
                 (cons name (if (stringp value) value 'unspecified))))
             (reverse names))))
 
+(defvar romacs-theme--table nil
+  "Modus's table as a function of a vector of its names' values and a mode,
+built once: a world holds it, so a session's first theme does not pay for
+it.  (`romacs-theme--table-names' lists the names.)")
+
+(defvar romacs-theme--table-names nil
+  "The names `romacs-theme--table''s vector holds, in order.")
+
+(defun romacs-theme--table ()
+  "`romacs-theme--table', built on first use."
+  (or romacs-theme--table
+      (let ((names (mapcar #'car (append romacs-theme-modus-vivendi-palette romacs-theme--modus-constants)))
+            (slot -1))
+        (setq romacs-theme--table-names names
+              romacs-theme--table
+              (eval `(lambda (values mode)
+                       (let* ((c t)
+                              ,@(mapcar (lambda (name) (list name `(aref values ,(setq slot (1+ slot))))) names))
+                         (cons (list ,@romacs-theme-modus-faces)
+                               (list ,@romacs-theme-modus-custom-variables
+                                     (list 'frame-background-mode (list 'quote mode))))))
+                    t)))))
+
 (defun romacs-theme--table-settings (bindings mode)
   "The faces and variables Modus's table gives BINDINGS, (NAME . VALUE),
 for a theme of MODE, as (FACES . VARIABLES): `modus-themes-theme''s
@@ -735,14 +699,14 @@ evaluation.  VARIABLES are (VARIABLE VALUE), evaluated."
   ;; Modus writes its specs for a colour display of 256 colours or more;
   ;; Romacs draws only on one, and builds its world on a frame without a
   ;; window system, so the specs apply to every display.
-  (let ((settings
-         (eval `(let* ((c t)
-                       ,@(mapcar (lambda (binding) (list (car binding) (list 'quote (cdr binding)))) bindings))
-                  (cons (list ,@romacs-theme-modus-faces)
-                        (list ,@romacs-theme-modus-custom-variables '(frame-background-mode ',mode))))
-               t)))
-    (cons (car settings)
-          (mapcar (lambda (row) (list (car row) (eval (romacs-theme--second row) t))) (cdr settings)))))
+  (let ((table (romacs-theme--table)) (index (make-hash-table :test 'eq)))
+    (dolist (binding bindings) (puthash (car binding) (cdr binding) index))
+    (let ((settings (funcall table
+                             (vconcat (mapcar (lambda (name) (gethash name index 'unspecified))
+                                              romacs-theme--table-names))
+                             mode)))
+      (cons (car settings)
+            (mapcar (lambda (row) (list (car row) (eval (romacs-theme--second row) t))) (cdr settings))))))
 
 (defun romacs-theme--modus-settings (modus mode)
   "The faces and variables Modus's table gives the palette MODUS

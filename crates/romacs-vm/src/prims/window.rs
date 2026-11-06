@@ -381,18 +381,27 @@ fn lower_frame(cx; optional frame: Value) {
 // after the command (VM2-REDISPLAY1), but settles each window's start now,
 // so what Lisp asks of the display after it is credible.
 defsubr! { name = "redisplay", gnu = "dispnew.c:7020", effect = Global,
-fn redisplay(cx; optional _force: Value) {
+fn redisplay(cx; optional _force: Value) -> Step {
     let macro_ = cx.intern("executing-kbd-macro");
-    if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { return Ok(Value::NIL); }
+    if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { return Ok(Step::Done(Value::NIL)); }
     // Under `inhibit-redisplay' GNU's redisplay does nothing.
     let inhibit = cx.intern("inhibit-redisplay");
-    if cx.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) { cx.redisplay_point_visibility_now()?; }
-    Ok(Value::TRUE)
+    if cx.variable_value(inhibit)?.is_some_and(|v| v != Value::NIL) { return Ok(Step::Done(Value::TRUE)); }
+    // Lisp runs through the evaluator here, not nested in this primitive.
+    if let Some(windows) = cx.pre_redisplay_call()? {
+        let f = cx.intern("romacs--pre-redisplay");
+        return Ok(Step::Call { f, args: vec![windows], then: redisplay_settled, saved: vec![] });
+    }
+    redisplay_settled(cx, Value::NIL, &[])
 }}
+fn redisplay_settled(cx: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
+    cx.redisplay_point_visibility_now()?;
+    Ok(Step::Done(Value::TRUE))
+}
 
 defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
 fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {
-    cx.pos_visible_in_window_p(pos, window, partially)
+    cx.quittable_motion(|cx| cx.pos_visible_in_window_p(pos, window, partially))
 }}
 
 defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
@@ -414,17 +423,17 @@ fn romacs_layout_refusals(cx) { cx.take_layout_refusals() }}
 // layout once a host lays the frame out (DIVERGENCES.md VM2-WTPS1).
 defsubr! { name = "window-text-pixel-size", gnu = "xdisp.c:12078", effect = Reads,
 fn window_text_pixel_size(cx; optional window: Value, from: Value, to: Value, x_limit: Value, y_limit: Value, mode_lines: Value, ignore_line_at_end: Value) {
-    cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end })
+    cx.quittable_motion(|cx| cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end }))
 }}
 
 defsubr! { name = "buffer-text-pixel-size", gnu = "xdisp.c:12158", effect = Reads,
 fn buffer_text_pixel_size(cx; optional buffer_or_name: Value, window: Value, x_limit: Value, y_limit: Value, from: Value, to: Value) {
-    cx.buffer_text_pixel_size(buffer_or_name, window, x_limit, y_limit, from, to)
+    cx.quittable_motion(|cx| cx.buffer_text_pixel_size(buffer_or_name, window, x_limit, y_limit, from, to))
 }}
 
 defsubr! { name = "posn-at-point", gnu = "keyboard.c:13054", effect = Reads,
 fn posn_at_point(cx; optional pos: Value, window: Value) {
-    cx.posn_at_point(pos, window)
+    cx.quittable_motion(|cx| cx.posn_at_point(pos, window))
 }}
 
 defsubr! { name = "frame-native-width", gnu = "frame.c:4381", effect = Reads,
@@ -441,12 +450,12 @@ fn frame_native_height(cx; optional frame: Value) {
 // a host lays the frame out (DIVERGENCES.md VM2-VMOTION1).
 defsubr! { name = "vertical-motion", gnu = "indent.c:2207", effect = Global,
 fn vertical_motion(cx, lines: Value; optional window: Value, cur_col: Value) {
-    cx.vertical_motion(lines, window, cur_col)
+    cx.quittable_motion(|cx| cx.vertical_motion(lines, window, cur_col))
 }}
 
 defsubr! { name = "line-pixel-height", gnu = "xdisp.c:1545", effect = Reads,
 fn line_pixel_height(cx) {
-    cx.line_pixel_height()
+    cx.quittable_motion(|cx| cx.line_pixel_height())
 }}
 
 defsubr! { name = "window-scroll-bars", gnu = "window.c:8898", effect = Reads,

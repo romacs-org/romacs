@@ -1,1 +1,1 @@
-{"name": "safe-length", "arity": [1, 1], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:162", "rust": "src/prims/fns.rs:83", "args": []}
+{"name": "safe-length", "arity": [1, 1], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:162", "rust": "src/prims/fns.rs:80", "args": []}

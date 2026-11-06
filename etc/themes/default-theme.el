@@ -46,7 +46,8 @@
   '((font-lock-variable-use-face :foreground fg)
     ;; The active line alone: `header-line' and others inherit `mode-line'.
     (mode-line-active :overline "#2e2922")
-    (romacs-mode-line-pill :background "#50269a")
+    ;; A pair: under another theme's bar, the pill still reads.
+    (romacs-mode-line-pill :background "#50269a" :foreground "#d4c5a0")
     (org-document-title :height 1.4 :weight bold)
     (org-table-header :weight bold)
     (dired-header :weight bold)

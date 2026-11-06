@@ -220,21 +220,6 @@ impl Vm {
         };
         self.allocate_object(data::Object::Float(float_arithmetic(kernel, a, b)))
     }
-    /// GNU Frem: integers or markers, of any size.
-    pub(super) fn remainder(&mut self, x: Value, y: Value) -> Result<Value> {
-        let (x, y) = (self.integer_operand(x)?, self.integer_operand(y)?);
-        if y.sign() == Sign::NoSign {
-            return Err("arithmetic error".into());
-        }
-        Ok(self.bigint(x % y))
-    }
-    fn integer_operand(&self, v: Value) -> Result<BigInt> {
-        let v = if matches!(self.object_if(v), Some(data::Object::Marker(_))) { self.coerce_number(v, true)? } else { v };
-        self.bigint_value(v).ok_or_else(|| "integer or marker required".into())
-    }
-    pub(super) fn integer_operand_ok(&self, v: Value) -> bool {
-        self.integer_operand(v).is_ok()
-    }
     /// V, a marker read as its position (GNU coerce_marker).
     fn coerce_marker(&self, v: Value) -> Result<Value> {
         if matches!(self.object_if(v), Some(data::Object::Marker(_))) { self.coerce_number(v, true) } else { Ok(v) }

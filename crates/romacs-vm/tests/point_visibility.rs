@@ -99,6 +99,13 @@ fn format_mode_line_of_another_buffer_as_pinned_gnu() {
     replay(include_str!("format_mode_line.el"), include_str!("format_mode_line.gnu"), 0);
 }
 
+/// pre_redisplay.el: `pre-redisplay-function' and its hook run with the
+/// windows GNU's prepare_menu_bars passes, under `inhibit-redisplay'.
+#[test]
+fn pre_redisplay_function_runs_as_pinned_gnu() {
+    replay(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30);
+}
+
 /// unibyte_window.el: a window shows a unibyte buffer, visited literally
 /// or made unibyte while shown, its raw bytes as escapes: motion,
 /// scrolling, edits and narrowing keep every position as GNU's.
@@ -116,11 +123,23 @@ fn window_end_and_recentring_over_a_hidden_tail_as_pinned_gnu() {
     replay(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500);
 }
 
+/// A collection moves every object but changes no answer: what a window
+/// recorded about its display must survive one.
+#[test]
+fn a_collection_changes_no_recorded_display() {
+    replay_stressed(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500, 100);
+    replay_stressed(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30, 100);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
-fn replay(probe: &str, answers: &str, least: usize) {
+fn replay(probe: &str, answers: &str, least: usize) { replay_stressed(probe, answers, least, 0) }
+
+/// `replay' collecting at every STRESSth Lisp entry.
+fn replay_stressed(probe: &str, answers: &str, least: usize, stress: u32) {
     assert_eq!(forms(probe).count(), forms(answers).count(), "the .gnu answers are stale: rerun child_frames_oracle.py --probe");
     let mut s = session();
+    if stress != 0 { s.vm.set_gc_stress(stress); }
     let (mut sequence, mut mismatches, mut invariant, mut steps) = ("", vec![], vec![], 0);
     let mut gnu = forms(answers);
     for line in probe.lines().filter(|line| !line.is_empty()) {
@@ -252,6 +271,80 @@ fn first_display_and_margin_changes_scroll_without_point_moving() {
 
 /// `window-line-height' answers nil while the window's display is out of
 /// date, as GNU's does, so callers ask `pos-visible-in-window-p'.
+/// A newline the display table shows as a space does not end its row, so
+/// moving up cannot add a line's rows to those below it: it counts from the
+/// origin, and stops at the first with enough. Five lines of 70 characters
+/// run on across the 100 columns; one row up from the sixth line's start
+/// stops at the fourth's, not somewhere in the second.
+#[test]
+fn rows_over_newlines_shown_as_spaces_do_not_add_up_by_line() {
+    let mut s = session();
+    let found = s.vm.eval_source("(progn
+        (switch-to-buffer (get-buffer-create \"run-on\"))
+        (dolist (c '(?a ?b ?c ?d ?e)) (insert (make-string 70 c) \"\\n\"))
+        (insert \"f\")
+        (setq buffer-display-table (make-display-table) truncate-lines nil word-wrap nil)
+        (aset buffer-display-table ?\\n [32])
+        (goto-char 356)
+        (list (vertical-motion -1) (point)))").and_then(|v| v.display());
+    assert_eq!(found.as_deref(), Ok("(-1 214)"));
+}
+
+/// An overlay string can make a walk count past where it stops, so moving
+/// up across one counts each origin by a walk to point, as GNU does.
+#[test]
+fn rows_over_an_overlay_string_do_not_add_up_by_line() {
+    let mut s = session();
+    let found = s.vm.eval_source("(progn
+        (switch-to-buffer (get-buffer-create \"before\"))
+        (insert \"q\\na\\nbXc\\n\")
+        (overlay-put (make-overlay 6 7) 'before-string (make-string 150 ?s))
+        (setq truncate-lines nil word-wrap nil)
+        (goto-char 6)
+        (list (vertical-motion -3) (point)))").and_then(|v| v.display());
+    assert_eq!(found.as_deref(), Ok("(-3 1)"));
+}
+
+/// A walk that crossed an overlay string stands at a line start with the
+/// string behind it; a reseat there delivers the string again, so the two
+/// counts must not be added.
+#[test]
+fn a_reseat_delivers_the_overlay_string_a_walk_passed() {
+    let mut s = session();
+    let found = s.vm.eval_source("(progn
+        (switch-to-buffer (get-buffer-create \"replayed\"))
+        (insert \"q\\na\\nbc\\nd\")
+        (setq buffer-display-table (make-display-table) truncate-lines nil word-wrap nil)
+        (aset buffer-display-table ?\\n [32])
+        (aset buffer-display-table ?\\r [10])
+        (overlay-put (make-overlay 5 6) 'before-string \"\\r\")
+        (goto-char 6)
+        (list (vertical-motion -2) (point)))").and_then(|v| v.display());
+    assert_eq!(found.as_deref(), Ok("(-1 1)"));
+}
+
+/// A newline the display table removes leaves no element, yet what follows
+/// it is delivered differently from what precedes it: after U+0301, U+FE0F
+/// joins it at no width, and alone it shows as a thin space. A zero-width
+/// line prefix takes the motion to character cells, where one column
+/// decides the row. Moving up counts such a line by a walk to point.
+#[test]
+fn a_newline_the_display_table_removes_is_no_row_boundary() {
+    let mut s = session();
+    let found = s.vm.eval_source("(progn
+        (set-char-table-range glyphless-char-display #xFE0F 'thin-space)
+        (mapcar (lambda (w)
+                  (switch-to-buffer (get-buffer-create (format \"seam-%d\" w)))
+                  (insert \"\\u0301\\n\\ufe0f\" (make-string w ?x))
+                  (setq buffer-display-table (make-display-table)
+                        truncate-lines nil word-wrap nil line-prefix \"\\u0301\")
+                  (aset buffer-display-table ?\\n [])
+                  (goto-char (point-max))
+                  (list (vertical-motion -2) (point)))
+                '(97 98 99 100 101 102)))").and_then(|v| v.display());
+    assert_eq!(found.as_deref(), Ok("((0 1) (0 1) (0 1) (0 1) (0 1) (-1 1))"));
+}
+
 #[test]
 fn window_line_height_is_nil_until_redisplay() {
     let mut s = session();

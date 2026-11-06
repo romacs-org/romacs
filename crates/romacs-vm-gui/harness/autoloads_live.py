@@ -169,13 +169,13 @@ def main():
                     echo = scene_rows(log_path.read_text(errors='replace'), 'Text')[-1:]
                     report['checks'].append({'command': command, 'shown': buffer, 'echo': echo})
 
-                fio.wait(state.exists, args.timeout, 'init.el after --loadup', process)
+                fio.wait(lambda: state.exists() and state.read_text(), args.timeout, 'init.el after --loadup', process)
                 at_init = state.read_text()
                 report['checks'].append({'init_state': at_init})
                 expected = '((hermes t t nil) (gnosis-dashboard t t nil))'
                 if at_init != expected:
                     raise AssertionError(f'at init: {at_init}, expected {expected}')
-                fio.wait(session.exists, args.timeout, 'session state after init', process)
+                fio.wait(lambda: session.exists() and session.read_text(), args.timeout, 'session state after init', process)
                 at_init = session.read_text()
                 report['checks'].append({'session_state': at_init})
                 config_dir = f'{home}/config/romacs/'

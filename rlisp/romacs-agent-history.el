@@ -86,7 +86,7 @@ instructions)."
   (let ((text (and (stringp text) (string-trim text))))
     (unless (or (null text) (string-empty-p text) (string-prefix-p "<" text)
                 (string-prefix-p "# AGENTS.md instructions" text))
-      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil "…"))))
+      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil t))))
 
 (defun romacs-agent-history--prompt (content)
   "The user's typed text in a Claude Code message CONTENT, or nil (a tool
@@ -143,9 +143,11 @@ while they name no prompt."
                         events)
                   (setq turn nil))))
       (dolist (line objects)
-        (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t)
-                    (eq (gethash "isCompactSummary" line) t))
+        (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t))
           (pcase (gethash "type" line)
+            ((and "user" (guard (eq (gethash "isCompactSummary" line) t)))
+             (push (list :type 'compacted :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))
+                   events))
             ("user"
              (let* ((content (gethash "content" (gethash "message" line)))
                     (prompt (romacs-agent-history--prompt content)))
@@ -367,7 +369,7 @@ T3 ran it: its first prompt is then T3's preamble."
                                                                        titles))))
                                               ;; T3's title as T3 shows it, cut to fit.
                                               (and title (not (string-empty-p (string-trim title)))
-                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil "…"))))
+                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil t))))
                                             (list :path path :size size :mtime mtime
                                                   :provider provider :config-dir config-dir)
                                             description))))))
@@ -454,6 +456,7 @@ buffer, for SESSION: its end, from a prompt on."
 (define-derived-mode romacs-agent-history-mode romacs-agent-chat-mode "Agent history"
   "A harness's own transcript, read-only: \\[romacs-agent-history-resume-this] goes on with it.
 \\{romacs-agent-history-mode-map}"
+  :interactive nil
   (setq-local desktop-save-buffer nil)
   (setq buffer-read-only t))
 
@@ -474,6 +477,7 @@ buffer, for SESSION: its end, from a prompt on."
                                         :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
                                         :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history)
               romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
+              romacs-agent-ui--tasks (make-hash-table :test #'equal)
               romacs-agent-ui--messages (make-hash-table :test #'equal)
               romacs-agent-ui--end (point-marker)))
       ;; Shown first: its rules fit its window.
@@ -500,7 +504,7 @@ with it, when there is one, attached or resumed."
 
 (defun romacs-agent-history-resume-this ()
   "Go on with this transcript as a Romacs session."
-  (interactive)
+  (interactive nil romacs-agent-history-mode)
   (let ((item romacs-agent-history--item) (view (current-buffer)))
     (romacs-agent-history-resume item)
     (kill-buffer view)))

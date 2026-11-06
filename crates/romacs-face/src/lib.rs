@@ -18,6 +18,10 @@
 //! This crate depends on no evaluator and no layout engine. It holds no
 //! Lisp handles: the moving collector has nothing here to trace.
 //! GNU-DIVERGENCES.md lists every deliberate behavioural difference.
+//!
+//! The evaluator keeps faces in GNU's lface vectors and realises them through
+//! this crate's merge on demand ([`LiveView`]). [`Theme`] and spec collapse
+//! are the reference model the parity tests hold against pinned GNU.
 
 pub mod attr;
 pub mod cache;
@@ -32,7 +36,7 @@ pub use attr::{Attribute, Attrs, AttrsBuilder, Height, Slot, Value};
 pub use cache::FaceCache;
 pub use datum::{BoundedDatum, Datum, DatumError, LispGraph, NodeView};
 pub use palette::{Palette, PaletteError, PaletteValue};
-pub use remap::{FaceRef, Remap, View};
+pub use remap::{FaceRef, FaceSource, LiveView, Remap, View};
 pub use spec::{Background, Collapsed, FaceDef, FaceError};
 pub use theme::{
     ActiveTheme, Base, Deffaces, Generation, Inherit, Theme, ThemeSpec, UserOverrides,

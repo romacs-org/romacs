@@ -231,6 +231,22 @@ fn set_local_toplevel_cell(cx, symbol: Value, buffer: Value, value: Value) {
     Ok(if cx.local_toplevel_cell_set(symbol, buffer, value)? { Value::TRUE } else { Value::NIL })
 }}
 
+// Finternal_delete_indirect_variable: SYMBOL no longer an alias, void and
+// undocumented; its base keeps its value.
+defsubr! { name = "internal-delete-indirect-variable", gnu = "eval.c:728", effect = Global,
+fn internal_delete_indirect_variable(cx, symbol: Value) {
+    let symbol = self::symbol(cx, symbol)?;
+    if cx.variable_alias(symbol)?.is_none() {
+        let text = cx.byte_string(b"Cannot undeclare a variable that is not an alias");
+        let data = cx.coding_list(&[text, symbol]);
+        return Err(Fault::Signal(cx.intern("error"), data));
+    }
+    cx.delete_variable_alias(symbol);
+    let key = cx.intern("variable-documentation");
+    cx.put_symbol_property(symbol, key, Value::NIL)?;
+    Ok(symbol)
+}}
+
 // Findirect_variable: the end of OBJECT's variable-alias chain; anything
 // else is itself. defvaralias refuses cycles, so the chain ends.
 defsubr! { name = "indirect-variable", gnu = "data.c:1291", effect = Reads,

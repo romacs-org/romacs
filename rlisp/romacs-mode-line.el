@@ -69,9 +69,6 @@ toward the frame's (`romacs-mode-line-pill-faces').")
 (defface romacs-mode-line-modified '((t :inherit warning))
   "The buffer's identity on its pill while the buffer is modified.")
 
-(defvar romacs-mode-line--pill-colors nil
-  "The colours `romacs-mode-line-pill-faces' last gave the pill faces.")
-
 (defun romacs-mode-line--mix (a b fraction)
   "Colour A blended FRACTION of the way toward colour B, as #RRGGBB."
   (let ((a (color-values a)) (b (color-values b)))
@@ -79,25 +76,27 @@ toward the frame's (`romacs-mode-line-pill-faces').")
                     (cl-mapcar (lambda (x y) (round (/ (+ (* (- 1 fraction) x) (* fraction y)) 257.0))) a b)))))
 
 (defun romacs-mode-line-pill-faces (&rest _)
-  "Give the pill faces the colours the theme leaves them: a pill the bar's
-background blended 40% toward the frame's; the state the accent
-\(`romacs-pane-focus'), and its pill the accent with the frame's
-background as its text.  A face the theme or the user set keeps its
-colours."
+  "Give the pill faces their colours as their default specs: a pill the
+bar's background blended 40% toward the frame's, with the bar's text; the
+state the accent \(`romacs-pane-focus'), and its pill the accent with the
+frame's background as its text.  A spec, so no frame's colours or new
+frames' defaults outlast a theme: a theme's row replaces it whole, as GNU's
+rows replace a `defface' spec.  A face set outside Custom (`face-modified')
+is left as it is."
   (let* ((bar (face-background 'mode-line-active nil t))
          (frame (face-background 'default nil t))
          (accent (or (and (facep 'romacs-pane-focus) (face-foreground 'romacs-pane-focus nil t))
                      (face-foreground 'default nil t)))
-         (colors (list (list 'romacs-mode-line-pill :background (romacs-mode-line--mix bar frame 0.4))
-                       (list 'romacs-mode-line-state :foreground accent)
+         (colors (list (list 'romacs-mode-line-pill :background (romacs-mode-line--mix bar frame 0.4)
+                             :foreground (face-foreground 'mode-line-active nil t))
+                       (list 'romacs-mode-line-state :inherit 'bold :foreground accent)
                        (list 'romacs-mode-line-state-pill :background accent :foreground frame))))
     (dolist (entry colors)
-      (let ((face (car entry)) (last (assq (car entry) romacs-mode-line--pill-colors)))
-        (cl-loop for (attribute value) on (cdr entry) by #'cddr
-                 for current = (face-attribute face attribute nil)
-                 when (and value (or (eq current 'unspecified) (equal current (plist-get (cdr last) attribute))))
-                 do (set-face-attribute face nil attribute value))))
-    (setq romacs-mode-line--pill-colors colors)))
+      (let ((face (car entry))
+            (spec `((t ,@(cl-loop for (attribute value) on (cdr entry) by #'cddr
+                                  when value append (list attribute value))))))
+        (unless (or (get face 'face-modified) (equal spec (get face 'face-defface-spec)))
+          (face-spec-set face spec 'face-defface-spec))))))
 
 (defface romacs-mode-line-error '((t :inherit error)) "An error state.")
 (defface romacs-mode-line-warning '((t :inherit warning)) "A warning state.")
@@ -141,7 +140,8 @@ DOC documents it.  SPEC is a plist:
   :face FACE         the face the segment shows in where it gives none;
   :pill FACE         in the status bar, a rounded pill on FACE's
                      background behind the segment (VM2-STATUS-BAR);
-  :pill-text FACE    the segment's text on its pill in FACE's foreground;
+  :pill-text FACE    the segment's text on its pill in FACE's foreground,
+                     an icon that reads there keeping a colour of its own;
   :pill-modified FACE  in the status bar's own line while its buffer is
                      modified, the text on the pill in FACE's foreground;
   :priority N        where a narrow window's line drops segments to fit,
@@ -325,13 +325,14 @@ is cut in its middle."
   :type 'natnum)
 
 (defun romacs-mode-line--middle-cut (name width)
-  "NAME, cut in its middle with `…' to at most WIDTH columns."
+  "NAME, cut in its middle with an ellipsis to at most WIDTH columns."
   (cond
    ((<= (string-width name) width) name)
-   ((zerop width) "")
+   ((<= width (string-width (truncate-string-ellipsis))) (truncate-string-to-width name width))
    (t
-    (let* ((room (1- width)) (tail (/ room 2)) (head (- room tail)))
-      (concat (truncate-string-to-width name head) "…"
+    (let* ((dots (truncate-string-ellipsis))
+           (room (- width (string-width dots))) (tail (/ room 2)) (head (- room tail)))
+      (concat (truncate-string-to-width name head) dots
               (let ((end (length name)) (start (length name)))
                 (while (and (> start 0) (<= (string-width name (1- start) end) tail)) (setq start (1- start)))
                 (substring name start)))))))
@@ -404,6 +405,7 @@ icon, its name, its remote and narrowed glyphs, and its modified or
 read-only glyph (none while unmodified); in a modified colour while it is
 modified."
   :pill romacs-mode-line-pill
+  :pill-text romacs-mode-line-pill
   :pill-modified romacs-mode-line-modified
   :format (" " romacs-mode-line-mode-icon romacs-mode-line-buffer-name romacs-mode-line-buffer-remote
            (:propertize "%n" romacs-icon ((?N . narrow) (?a . none) (?r . none) (?o . none) (?w . none)))
@@ -822,6 +824,7 @@ Off, GNU's default returns where this mode's is installed."
 
 (romacs-mode-line-rebuild)
 (add-hook 'enable-theme-functions #'romacs-mode-line-pill-faces)
+(add-hook 'disable-theme-functions #'romacs-mode-line-pill-faces)
 
 (provide 'romacs-mode-line)
 ;;; romacs-mode-line.el ends here

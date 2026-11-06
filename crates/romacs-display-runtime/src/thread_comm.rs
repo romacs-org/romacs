@@ -62,6 +62,28 @@ pub struct PointerPosition {
     pub target_frame_id: u64,
 }
 
+/// Where the pointer is over the primary window, in logical pixels: what a
+/// display answers GNU's `mouse_position_hook' with, read at the moment it
+/// is asked.  Nothing while the pointer is elsewhere.
+#[derive(Debug)]
+pub struct PointerCell(std::sync::atomic::AtomicU64);
+
+impl Default for PointerCell {
+    fn default() -> Self { Self(std::sync::atomic::AtomicU64::new(Self::OUTSIDE)) }
+}
+
+impl PointerCell {
+    const OUTSIDE: u64 = u64::MAX;
+    pub fn set(&self, at: Option<(i32, i32)>) {
+        let packed = at.map_or(Self::OUTSIDE, |(x, y)| u64::from(x as u32) << 32 | u64::from(y as u32));
+        self.0.store(packed, std::sync::atomic::Ordering::Relaxed);
+    }
+    pub fn get(&self) -> Option<(i32, i32)> {
+        let packed = self.0.load(std::sync::atomic::Ordering::Relaxed);
+        (packed != Self::OUTSIDE).then_some(((packed >> 32) as u32 as i32, packed as u32 as i32))
+    }
+}
+
 /// How a pointer position relates to the immutable presentation on screen.
 ///
 /// `Unpresented` is explicit for exposed/native surface area. A producer cannot
@@ -1008,6 +1030,9 @@ impl SharedRenderCapabilities {
 
 /// Communication channels between threads
 pub struct ThreadComms {
+    /// The pointer over the primary window: Render → Emacs.
+    pub pointer: Arc<PointerCell>,
+
     /// Frame display state: Emacs → Render
     pub frame_tx: FrameSender,
     pub frame_rx: FrameReceiver,
@@ -1043,6 +1068,7 @@ impl ThreadComms {
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         let capabilities = Arc::new(SharedRenderCapabilities::default());
         Self {
+            pointer: Arc::default(),
             frame_tx,
             frame_rx,
             cmd_tx,
@@ -1059,6 +1085,7 @@ impl ThreadComms {
     /// Split into Emacs-side and Render-side handles
     pub fn split(self) -> (EmacsComms, RenderComms) {
         let emacs = EmacsComms {
+            pointer: self.pointer.clone(),
             tooltip_context: self.tooltip_context.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
@@ -1069,6 +1096,7 @@ impl ThreadComms {
         };
 
         let render = RenderComms {
+            pointer: self.pointer,
             input_interrupt: None,
             keep_alive_without_frames: false,
             native_window_waits: None,
@@ -1096,6 +1124,7 @@ impl Default for ThreadComms {
 
 /// Emacs thread communication handle
 pub struct EmacsComms {
+    pub pointer: Arc<PointerCell>,
     pub frame_tx: FrameSender,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
@@ -1120,6 +1149,7 @@ pub trait InputInterrupt: Send + Sync {
 
 /// Render thread communication handle
 pub struct RenderComms {
+    pub pointer: Arc<PointerCell>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
     #[cfg(feature = "core-free")]

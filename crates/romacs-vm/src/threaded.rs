@@ -1562,7 +1562,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         .and_then(|n| n.checked_add(vm.spread_reserve))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
-    vm.stack.resize(size, Value::NIL);
+    // They come back all NIL, however far the last run widened them: cut to
+    // SIZE, every run past MIN_FRAMES would fill them again.
+    if vm.stack.len() < size {
+        vm.stack.resize(size, Value::NIL);
+    }
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
     let mark = vm.dynamic.len();
@@ -1890,6 +1894,7 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("insert", 1) => Some(insert_string),
             ("listp", 1) => Some(listp),
             ("numberp", 1) => Some(numberp),
+            ("%", 2) => Some(remainder),
             ("cdr-safe", 1) => Some(cdr_safe),
             ("nconc", 2) => Some(nconc2),
             ("plist-get", 2) => Some(traversal::plist_get),
@@ -1919,7 +1924,6 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
         (Primitive::Less, 2) => less,
         (Primitive::Equal, 2) => equal,
         (Primitive::Cons, 2) => cons,
-        (Primitive::Remainder, 2) => remainder,
         (Primitive::Div, 2) => divide,
         (Primitive::Max, 2) => max,
         (Primitive::Min, 2) => min,
@@ -2088,7 +2092,10 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if e.vm.collection_due() {
         // Due but held (a nested engine): the request stays for the engine
         // that may collect.
-        if e.vm.may_collect(1) { poll_collect(e); }
+        if e.vm.may_collect(1) {
+            poll_collect(e);
+            if e.vm.take_job_exhaustion() { return job_memory_full(e); }
+        }
     } else {
         e.vm.collect_poll = false;
     }
@@ -2099,6 +2106,14 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
         return value;
     }
     unsafe { next(e, r, pc) }
+}
+/// GNU memory_full (alloc.c), for a job over its budget: `memory-signal-data'
+/// is signalled, which `condition-case' catches.
+#[cold]
+#[inline(never)]
+fn job_memory_full(e: &mut Engine<'_>) -> Value {
+    let message = e.vm.make_lisp_string(crate::gc::MEMORY_FULL.as_bytes().to_vec(), true);
+    raise(e, "error", &[message])
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
 /// `quit` signal, else the host's C-g or `quit-flag' (`Vm::maybe_quit').
@@ -3201,6 +3216,7 @@ unsafe fn take_step(
             Ok(prim::Step::Collect) => {
                 leave_native(e);
                 if e.vm.may_collect(1) {
+                    e.vm.collection_log.explicit = true;
                     poll_collect(e);
                     let statistics = e.vm.garbage_collect_statistics();
                     // garbage_collect's run_finalizers, before it returns.
@@ -3650,7 +3666,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         | InsertInherit | KillNew | CurrentKill | YankPart | YankFinalize | YankPropertyRun
         | YankFontLockFace | YankCategory | GetProperty => Vm::annotation_primitive,
         p if (List as usize..=Memq as usize).contains(&(p as usize)) => Vm::bootstrap_primitive,
-        p if (p as usize) >= Remainder as usize => Vm::buffer_primitive,
+        p if (p as usize) >= CurrentBuffer as usize => Vm::buffer_primitive,
         _ => Vm::primitive,
     }
 }
@@ -5017,6 +5033,20 @@ mod register_tests {
             vm.register_width, expected,
             "definition must update register width, not the next call"
         );
+    }
+
+    #[test]
+    fn registers_stay_widened_and_nil_across_runs() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defun register-probe (n) (if (> n 0) (1+ (register-probe (1- n))) 0))")
+            .unwrap();
+        vm.eval_source_raw("(register-probe 100)").unwrap();
+        let widened = vm.execution.registers.len();
+        assert!(widened > vm.register_width * MIN_FRAMES, "the recursion went past MIN_FRAMES");
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
+        vm.eval_source_raw("(register-probe 1)").unwrap();
+        assert_eq!(vm.execution.registers.len(), widened);
+        assert!(vm.execution.registers.iter().all(|&value| value == Value::NIL));
     }
 
     #[test]

@@ -559,13 +559,22 @@ impl Vm {
                 let w = self.window_mut(window)?;
                 // replace_buffer_in_windows_safely undedicates the window.
                 w.dedicated = Value::NIL;
-                w.buffer = replacement;
+                w.show(replacement);
                 w.end_distance = 0;
                 w.end_valid = false;
                 w.vscroll_px = 0;
             }
             if self.slots[self.buffer_slot].value == value {
                 self.slots[self.buffer_slot].value = replacement;
+            }
+        }
+        // A killed buffer's markers keep where they were, as charpos does:
+        // read now, while their anchors stand.
+        let mut last_positions = std::collections::HashMap::new();
+        for i in self.buffer_referrers(index) {
+            if matches!(&self.objects[i], Object::Marker(m) if m.buffer == value)
+                && let Some(position) = self.marker_position_value(Value::reference(i + 1, 0))?.integer_value() {
+                last_positions.insert(i, position);
             }
         }
         self.leave_base(value)?;
@@ -576,7 +585,11 @@ impl Vm {
         if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
         for i in self.buffer_referrers(index) {
             match &mut self.objects[i] {
-                Object::Marker(m) if m.buffer == value => { m.buffer = Value::NIL; m.anchor = None; }
+                Object::Marker(m) if m.buffer == value => {
+                    m.buffer = Value::NIL;
+                    m.anchor = None;
+                    if let Some(&position) = last_positions.get(&i) { m.last_position = position; }
+                }
                 Object::Overlay(o) if o.buffer == value => {
                     o.buffer = Value::NIL; o.start = None; o.end = None;
                 }
@@ -730,7 +743,7 @@ impl Vm {
         }
         let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
-            Remainder | DeleteRegion | Substring | Narrow => n == 2,
+            DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
             CurrentBuffer | Point | PointMin | PointMax | Widen => {
                 n == 0
@@ -743,9 +756,6 @@ impl Vm {
         };
         if !valid {
             return Err("wrong primitive arity".into());
-        }
-        if p == Remainder {
-            return self.remainder(args[0], args[1]);
         }
         if p == SetBuffer {
             let mut v = args[0];
@@ -965,11 +975,12 @@ impl Vm {
         Ok(args)
     }
     pub(crate) fn byte_string(&mut self, bytes: &[u8]) -> Value {
-        self.allocate_object(Object::Bytes(bytes.to_vec()))
+        self.allocate_object(data::unibyte_object(bytes.to_vec()))
     }
     pub(crate) fn bytes_value(&self, v: Value) -> Result<&[u8]> {
         match self.object(v)? {
             Object::Bytes(b) => Ok(b),
+            Object::String(s) | Object::RawString(s) if !s.is_multibyte() => Ok(s.bytes()),
             _ => Err("bytes required".into()),
         }
     }
@@ -986,7 +997,7 @@ impl Vm {
                 .iter()
                 .map(|v| u8::try_from(v.as_integer()?).map_err(|_| "invalid octet".into()))
                 .collect::<Result<Vec<_>>>()?;
-            return Ok(self.allocate_object(Object::Bytes(b)));
+            return Ok(self.allocate_object(data::unibyte_object(b)));
         }
         if n != if p == BufferString { 0 } else { 1 } {
             return Err("wrong primitive arity".into());
@@ -1019,14 +1030,14 @@ impl Vm {
                 }
                 bytes
             };
-            return Ok(self.allocate_object(Object::Bytes(b)));
+            return Ok(self.allocate_object(data::unibyte_object(b)));
         }
         let index = self.buffer_index()?;
         if p == BufferString {
             let o = match &self.objects[index] {
                 Object::Buffer(t) => data::string_object(t.lisp_string(t.accessible())?),
                 Object::ByteBuffer(b) => {
-                    Object::Bytes(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
+                    data::unibyte_object(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
                 }
                 _ => unreachable!(),
             };
@@ -1060,8 +1071,18 @@ impl Vm {
         }
         // This is an explicit text/byte boundary, not a second text encoding.
         // Conversion preserves octets and byte-canonical metadata or fails atomically.
+        let buffer = self.slots[self.buffer_slot].value;
+        let mut overlays = self.overlay_ends(buffer)?;
         let replacement = match (&self.objects[index], text) {
-            (Object::Buffer(t), false) => Some(Object::ByteBuffer(Box::new(Self::unibyte_buffer(t)?))),
+            (Object::Buffer(t), false) => {
+                let mut b = Self::unibyte_storage(t)?;
+                for (overlay, start, end) in &mut overlays {
+                    let o = self.overlay(*overlay)?;
+                    for anchor in [o.start, o.end].into_iter().flatten() { b.anchors.remove(anchor); }
+                    (*start, *end) = (t.raw_compaction(*start), t.raw_compaction(*end));
+                }
+                Some(Object::ByteBuffer(Box::new(b)))
+            }
             (Object::ByteBuffer(b), true) => {
                 // VM2-IFC-HELD1: insert-file-contents holds its text buffer.
                 if b.held.is_some() {
@@ -1077,6 +1098,9 @@ impl Vm {
                     && (1..b.bytes.len()).any(|i| (text[map(i)] & 0xc0) == 0x80 && b.anchors.any_between(i as u32, i as u32)) {
                     return Err("cannot decode buffer with a marker inside a character".into());
                 }
+                // An overlay's end inside a character moves past it.
+                let character = |i: usize| (map(i)..).find(|&at| text.get(at).is_none_or(|c| c & 0xc0 != 0x80)).unwrap_or(text.len());
+                for (_, start, end) in &mut overlays { (*start, *end) = (character(*start), character(*end)); }
                 *a.anchors = b.anchors.clone();
                 for &g in grown.iter().rev() {
                     assert!(a.anchors.insert(g as u32 + 1, 1, true));
@@ -1091,18 +1115,23 @@ impl Vm {
         };
         if let Some(o) = replacement {
             self.objects[index] = o;
+            self.adopt_overlays(buffer, overlays)?;
         }
         Ok(if text { Value::TRUE } else { Value::NIL })
     }
-    /// T's unibyte storage: the same bytes, per-buffer variables and
-    /// markers.  Overlays have no unibyte storage (VM2-MD2).
+    /// T's unibyte storage, where its overlays cannot follow (VM2-MD2).
     fn unibyte_buffer(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
+        if !t.intervals.is_empty() {
+            return Err("cannot encode buffer with overlays".into());
+        }
+        Self::unibyte_storage(t)
+    }
+    /// T's unibyte storage: the same bytes, per-buffer variables and
+    /// markers.  Its overlays stay with T.
+    fn unibyte_storage(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
         // DIVERGENCES.md VM2-INDIRECT1.
         if t.base != Value::NIL || !t.indirect.is_empty() {
             return Err("VM2 cannot make a buffer sharing its text unibyte".into());
-        }
-        if !t.intervals.is_empty() {
-            return Err("cannot encode buffer with overlays".into());
         }
         let mut b = t.binary();
         b.state = t.state.clone();
@@ -1138,7 +1167,8 @@ impl Vm {
                 continue;
             }
             match self.object(v)? {
-                Object::String(s) | Object::RawString(s) if s.is_multibyte() => {
+                // ASCII is the same bytes either way.
+                Object::String(s) | Object::RawString(s) if s.is_multibyte() || s.bytes().is_ascii() => {
                     properties.copy_into(ByteOffset(bytes.len()), &s.properties);
                     bytes.extend_from_slice(s.bytes());
                 }
@@ -1284,13 +1314,16 @@ impl Vm {
                 }
             }
             DeleteRegion => {
-                b.replace(region(args[0], args[1])?, b"")?;
+                let deleted = region(args[0], args[1])?;
+                let at = deleted.start;
+                b.replace(deleted, b"")?;
+                self.evaporate_unibyte(self.slots[self.buffer_slot].value, at..at)?;
                 Ok(Value::NIL)
             }
             Substring => {
                 let r = region(args[0], args[1])?;
                 let bytes = b.bytes[r.start.0..r.end.0].to_vec();
-                Ok(self.allocate_object(Object::Bytes(bytes)))
+                Ok(self.allocate_object(data::unibyte_object(bytes)))
             }
             Narrow => {
                 let a = pos(args[0])?;
@@ -2009,7 +2042,7 @@ impl Vm {
     /// there with ADVANCES (insertion-type t).
     pub(crate) fn watch_marker(&mut self, buffer: Value, position: i64, advances: bool) -> std::result::Result<Value, crate::prim::Fault> {
         let bias = if advances { crate::anchors::Bias::Right } else { crate::anchors::Bias::Left };
-        let marker = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer: Value::NIL, anchor: None, bias })));
+        let marker = self.allocate_object(Object::Marker(Box::new(crate::annotations::Marker { buffer: Value::NIL, anchor: None, bias, last_position: 0 })));
         let position = Value::integer(position).map_err(crate::prim::Fault::Error)?;
         self.set_marker_object(marker, position, buffer).map_err(crate::prim::Fault::Error)?;
         Ok(marker)

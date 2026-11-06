@@ -132,7 +132,7 @@ mod tests {
         for source in ["(symbol-name 'wide-name)", "(symbol-name nil)", "(symbol-name t)", "(symbol-name (intern \"\"))"] {
             let mut vm = Vm::new();
             let value = vm.eval_source_raw(source).expect("symbol-name result");
-            assert!(matches!(vm.object_if(value), Some(data::Object::Bytes(_))), "{source}: ASCII symbol name must be unibyte");
+            assert!(vm.str_view(value).is_some_and(|view| !view.is_multibyte()), "{source}: ASCII symbol name must be unibyte");
         }
     }
 

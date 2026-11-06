@@ -161,6 +161,53 @@ fn the_bar_expands_the_mode_line_at_its_own_columns() {
 /// `window-mode-line-height' is 0 and its body takes that line; header
 /// lines stay. Without the bar (a batch frame) GNU's bands and geometry
 /// return.
+/// A face that sets nothing merges nothing (xfaces.c merge_named_face):
+/// text in one keeps the bar's colours, and a coloured face makes a run.
+#[test]
+fn a_face_that_sets_nothing_leaves_the_bars_colours() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (defface blank-face '((t)) "b")
+                             (defface coloured-face '((t :foreground "#0000ff")) "c")
+                             (setq mode-line-format (list (propertize "x" 'face 'blank-face)
+                                                          (propertize "y" 'face 'coloured-face))))"##);
+    let shown = bar(&mut vm);
+    let at = |c: char| shown.text.utf8.find(c).unwrap_or_else(|| panic!("{c} in {:?}", shown.text.utf8));
+    let run_at = |byte: usize| shown.text.face_runs.iter().find(|run| run.bytes.contains(&byte));
+    assert!(run_at(at('x')).is_none(), "the bar's own face shows");
+    let run = run_at(at('y')).expect("a run for the face with colours");
+    assert_eq!(shown.faces[run.face.0 as usize].foreground, [0, 0, 255]);
+}
+
+/// The tab bar publishes each distinct face once, however many runs use it.
+#[test]
+fn each_distinct_face_in_the_tab_bar_is_published_once() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (defface tab-one '((t :foreground "#010101")) "1") (defface tab-two '((t :foreground "#020202")) "2")
+                             (setq row (concat (propertize "a" 'face 'tab-one) (propertize "b" 'face 'tab-two) (propertize "c" 'face 'tab-one)))
+                             (defalias 'romacs--tab-bar-string (lambda () row))
+                             (modify-frame-parameters nil '((tab-bar-lines . 1))))"##);
+    let tabs = snapshot(&mut vm).tab_bar.expect("a tab bar");
+    assert_eq!((tabs.text.face_runs.len(), tabs.faces.len()), (3, 3), "the bar's face and the two");
+}
+
+/// A face over the bar takes what it leaves unset from the bar, not from
+/// `default' (xdisp.c face_at_string_position's base face): bold text on a
+/// light bar over a dark frame stays dark.
+#[test]
+fn a_face_over_the_bar_takes_what_it_leaves_from_the_bar() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (set-face-attribute 'default nil :foreground "#eeeeee" :background "#111111")
+                             (set-face-attribute 'mode-line nil :foreground "#222222" :background "#dddddd")
+                             (set-face-attribute 'mode-line-active nil :foreground "#222222" :background "#dddddd")
+                             (defface weight-face '((t :weight bold)) "w")
+                             (setq mode-line-format (list (propertize "x" 'face 'weight-face))))"##);
+    let shown = bar(&mut vm);
+    let at = shown.text.utf8.find('x').unwrap_or_else(|| panic!("x in {:?}", shown.text.utf8));
+    let run = shown.text.face_runs.iter().find(|run| run.bytes.contains(&at)).expect("a run for the bold text");
+    let face = &shown.faces[run.face.0 as usize];
+    assert_eq!((face.foreground, face.background), ([0x22, 0x22, 0x22], [0xdd, 0xdd, 0xdd]));
+}
+
 #[test]
 fn no_window_draws_a_band_of_its_own() {
     let mut vm = session();
@@ -252,6 +299,7 @@ fn a_context_marker_does_not_align_the_bar() {
 #[test]
 fn only_the_owners_pill_reads_its_modified_state() {
     let mut vm = session();
+    vm.set_gc_stress(1);
     eval(&mut vm, "(set-face-attribute 'error nil :foreground \"#ff0000\")");
     let pill = "(:propertize \"ID\" romacs-segment id romacs-pill mode-line-highlight romacs-pill-modified error)";
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
@@ -298,6 +346,7 @@ fn projected_values_are_the_formats_data() {
 #[test]
 fn a_collecting_line_keeps_its_windows() {
     let mut vm = session();
+    vm.set_gc_stress(1);
     eval(&mut vm, "(put 'gc-probe 'risky-local-variable t)");
     eval(&mut vm, "(setq-default mode-line-format '(:eval (progn (garbage-collect) \"MAIN\")))");
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below) w3 (split-window-right))");
@@ -359,7 +408,7 @@ struct Rows;
 impl romacs_vm::LayoutHost for Rows {
     fn measure(&mut self, input: &romacs_layout_input::MeasureInput) -> Result<romacs_layout_input::Measured, String> {
         let heights: Vec<u32> = input.faces.iter().map(|f| if f.pixel_size <= 20.0 { 25 } else { (f.pixel_size * 5.0 / 3.0).round() as u32 }).collect();
-        Ok(romacs_layout_input::Measured { glyphs: input.text.utf8.chars().map(|_| (10, heights[0])).collect(), ascents: input.text.utf8.chars().map(|_| heights[0] * 4 / 5).collect(), face_ascents: heights.iter().map(|h| h * 4 / 5).collect(), face_heights: heights })
+        Ok(romacs_layout_input::Measured { glyphs: input.text.utf8.chars().map(|_| (10, heights[0])).collect(), ascents: input.text.utf8.chars().map(|_| heights[0] * 4 / 5).collect(), face_ascents: heights.iter().map(|h| h * 4 / 5).collect(), face_heights: heights, fallback: input.text.utf8.chars().map(|_| false).collect() })
     }
     fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         Ok(frame.windows.iter().map(|w| {
@@ -476,6 +525,30 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 /// `romacs-mode-line-modified' while the buffer is modified, `%*' drawn
 /// as an icon while Romacs Icons is there; `romacs-status-bar-string' is
 /// what the bar shows, the right side flush with its right edge.
+/// The buffer's pill names the pill's foreground for its text, and the mark
+/// stays in its own face for the layout to keep.
+#[test]
+fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
+    let mut vm = session();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
+        vm.load_file(&root.join(file)).unwrap();
+    }
+    eval(&mut vm, "(progn (setq romacs-icons--font t) (romacs-mode-line-mode 1)
+                     (set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\" :foreground \"#d4c5a0\")
+                     (set-face-attribute 'romacs-mode-line-mark nil :foreground \"#e06c75\")
+                     (fundamental-mode) (romacs-mode-line-refresh-mode-icon))");
+    let shown = bar(&mut vm);
+    let foreground = |byte: usize| {
+        let run = shown.text.face_runs.iter().find(|run| run.bytes.contains(&byte)).expect("a face");
+        shown.faces[run.face.0 as usize].foreground
+    };
+    let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
+    assert_eq!(buffer.pill.and_then(|p| p.foreground), Some([0xd4, 0xc5, 0xa0]), "the text");
+    let (mark, _) = shown.text.utf8.char_indices().find(|(_, c)| ('\u{FE000}'..='\u{FE0FF}').contains(c)).expect("the mark");
+    assert_eq!(foreground(mark), [0xe0, 0x6c, 0x75], "the mark");
+}
+
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
@@ -484,7 +557,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
         vm.load_file(&root.join(file)).unwrap();
     }
     eval(&mut vm, "(progn (setq romacs-icons--font t) (romacs-mode-line-mode 1))");
-    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\")");
+    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\" :foreground \"#d4c5a0\")");
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
     for name in ["buffer", "position", "centre-align", "right-align", "major-mode"] {
@@ -492,10 +565,10 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     }
     // The default coding says nothing.
     assert!(!names.contains(&"encoding"), "{names:?}");
-    // The buffer's identity on its pill, in its own faces while unmodified.
+    // The buffer's identity on its pill, in the pill's text while unmodified.
     eval(&mut vm, "(set-face-attribute 'romacs-mode-line-modified nil :foreground \"#e0a030\")");
     let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
-    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], None)));
+    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], Some([0xd4, 0xc5, 0xa0]))));
     assert!(shown.text.utf8[buffer.bytes.clone()].contains("*scratch*"));
     // `%*' of the unmodified *scratch*: nothing, its `-' dropped.
     assert!(shown.marks.icons.is_empty(), "{:?}", shown.marks.icons);
@@ -554,7 +627,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     eval(&mut vm, "(flymake-mode -1)");
     // The state reads in the accent on a band; its pill inverts it.
     eval(&mut vm, "(set-face-attribute 'romacs-pane-focus nil :foreground \"#d48a20\")");
-    eval(&mut vm, "(setq romacs-mode-line--pill-colors nil) (set-face-attribute 'romacs-mode-line-state nil :foreground 'unspecified) (romacs-mode-line-pill-faces)");
+    eval(&mut vm, "(progn (put 'romacs-mode-line-state 'theme-face nil) (romacs-mode-line-pill-faces))");
     assert_eq!(eval(&mut vm, "(face-foreground 'romacs-mode-line-state)"), "\"#d48a20\"");
     eval(&mut vm, "(start-kbd-macro nil)");
     let state = bar(&mut vm).marks.segments.iter().find(|s| s.name == "state").cloned().expect("a state segment");

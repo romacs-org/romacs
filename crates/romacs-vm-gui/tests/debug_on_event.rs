@@ -10,12 +10,16 @@ use std::time::{Duration, Instant};
 
 /// Run BODY after `debug-on-event' and a debugger that prints its
 /// arguments and exits; SIGUSR2 once BODY has begun. The debugger's line.
-fn debugger_line(name: &str, body: &str) -> String {
+fn debugger_line(name: &str, body: &str) -> String { debugger_line_after(name, "", body) }
+
+/// `debugger_line' with SETUP run before the session counts as begun.
+fn debugger_line_after(name: &str, setup: &str, body: &str) -> String {
     let dir = std::env::temp_dir().join(format!("romacs-debug-on-event-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let source = format!(r#"(setq debug-on-event 'sigusr2)
 (setq debugger (lambda (&rest args) (princ (format "DEBUGGER %S\n" args)) (kill-emacs 0)))
+{setup}
 (with-temp-file (expand-file-name "busy" (getenv "MARK")) (insert "busy"))
 {body}
 (princ "ENDED\n")
@@ -68,6 +72,33 @@ fn sigusr2_breaks_a_loop_and_a_search_under_inhibit_quit() {
     assert_eq!(debugger_line("inhibited-regexp",
                              r#"(let ((inhibit-quit t)) (string-match "^\\(\\(a\\)\\2?\\)*$" (concat (make-string 48 ?a) "b")))"#),
                "DEBUGGER (error (quit))");
+}
+
+#[test]
+fn sigusr2_breaks_a_long_motion_into_the_debugger() {
+    // Nothing polls in Lisp here: the signal lands inside the one call.
+    assert_eq!(debugger_line_after("motion", r#"(switch-to-buffer (generate-new-buffer "big"))
+(insert (make-string 100000000 ?\n))
+(goto-char 1)"#, "(vertical-motion 100000000)"), "DEBUGGER (error (quit))");
+}
+
+#[test]
+fn sigusr2_breaks_text_that_shows_as_nothing() {
+    // One element's generation walks the whole buffer, loading nothing.
+    assert_eq!(debugger_line_after("hidden", r#"(require 'disp-table)
+(switch-to-buffer (generate-new-buffer "big"))
+(insert (make-string 300000000 ?x))
+(setq buffer-display-table (make-display-table))
+(aset buffer-display-table ?x [])
+(goto-char 1)"#, "(vertical-motion 1)"), "DEBUGGER (error (quit))");
+}
+
+#[test]
+fn sigusr2_breaks_a_huge_replacement_string() {
+    assert_eq!(debugger_line_after("replacement", r#"(switch-to-buffer (generate-new-buffer "big"))
+(insert "ab")
+(put-text-property 1 2 'display (make-string 30000000 ?y))
+(goto-char 1)"#, "(vertical-motion 1)"), "DEBUGGER (error (quit))");
 }
 
 #[test]

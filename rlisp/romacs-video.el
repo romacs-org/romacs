@@ -320,5 +320,18 @@ Like `romacs-video-show-floating' but with automatic looping."
       (romacs-video-loop handle t))
     handle))
 
+(defun romacs-video--command-p (_symbol buffer)
+  "Whether BUFFER has a video at point for the commands that act on one."
+  (with-current-buffer buffer (romacs-video-at-point)))
+
+(dolist (command '( romacs-video-toggle-pause romacs-video-play-at-point romacs-video-pause-at-point
+                    romacs-video-stop-at-point romacs-video-hide-floating romacs-video-loop
+                    romacs-video-loop-infinite romacs-video-loop-disable))
+  (put command 'completion-predicate #'romacs-video--command-p))
+
+;; Floating presentation is not implemented: these only say so.
+(put 'romacs-video-show-floating 'completion-predicate #'ignore)
+(put 'romacs-video-show-floating-loop 'completion-predicate #'ignore)
+
 (provide 'romacs-video)
 ;;; romacs-video.el ends here
