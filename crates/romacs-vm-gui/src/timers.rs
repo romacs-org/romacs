@@ -173,11 +173,18 @@ mod tests {
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         assert_eq!(printed(&mut vm, "(progn (run-with-timer 0.01 nil (lambda () (setq quit-flag t)))
                                             (read-key-sequence-vector nil))"), "[7]");
-        // Nor does a quit from the host's wait, whose redisplay can quit.
-        assert_eq!(printed(&mut vm, "(let ((host (symbol-function 'romacs--host-event)))
-                                       (fset 'romacs--host-event (lambda (&rest _) (signal 'quit nil)))
-                                       (unwind-protect (read-key-sequence-vector nil)
-                                         (fset 'romacs--host-event host)))"), "[7]");
+        // Nor does a quit from the wait's redisplay, in a recursive edit
+        // too, which a closed frame's quit leaves first.
+        let quit_in_wait = |data: &str| format!("(let ((host (symbol-function 'romacs--read-host-event))
+                                                       (depth (symbol-function 'recursion-depth)))
+                                                   (fset 'romacs--read-host-event (lambda (&rest _) (signal 'quit '{data})))
+                                                   (fset 'recursion-depth (lambda () 1))
+                                                   (unwind-protect
+                                                       (catch 'exit (read-key-sequence-vector nil))
+                                                     (fset 'romacs--read-host-event host)
+                                                     (fset 'recursion-depth depth)))");
+        assert_eq!(printed(&mut vm, &quit_in_wait("nil")), "[7]");
+        assert_eq!(printed(&mut vm, &format!("(functionp {})", quit_in_wait("frame-closed"))), "t");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq probe nil)
             (run-with-timer 0.01 nil (lambda () (push 'ordinary probe)))

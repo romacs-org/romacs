@@ -170,14 +170,10 @@ on.  A VM without the process prelude runs no timers."
                             ;; `debug-on-event' and a third C-g clear
                             ;; `inhibit-quit': those do quit.
                             (and inhibit-quit (eq quit-flag t) (progn (setq quit-flag nil) ?\C-g))
-                            ;; The redisplay in this wait can quit; that
-                            ;; press too is the read's key.
-                            (condition-case nil
-                                (let ((inhibit-quit outer-inhibit))
-                                  (romacs--host-event
-                                   (if (and delay left) (min delay left) (or delay left))
-                                   current))
-                              ((debug quit) ?\C-g)))
+                            (let ((inhibit-quit outer-inhibit))
+                              (romacs--host-event
+                               (if (and delay left) (min delay left) (or delay left))
+                               current)))
                       shown ran)
                 ;; read_char: an event `special-event-map' binds (focus, a
                 ;; user signal) runs its binding at once and is never input;
@@ -205,14 +201,17 @@ requeued, or, without SECONDS, no watch is left."
           (romacs--wait-reading-process-output (or left 'forever) nil 0 t))))))
 
 (defun romacs--host-event (seconds display)
-  "`romacs--read-host-event', whose `quit' once the frame has closed leaves
-the innermost recursive edit first, as end of input does: the command loop
-there reports every signal (GNU's C `error' handler), so it would read, and
-quit, again.  Each level quits in turn, down to the host's command."
-  (if (> (recursion-depth) 0)
-      (condition-case nil (romacs--read-host-event seconds display)
-        (quit (throw 'exit (lambda () (signal 'quit nil)))))
-    (romacs--read-host-event seconds display)))
+  "`romacs--read-host-event', whose `quit' is one of two.  A C-g that quit the
+wait's redisplay is the read's key, as one typed in the wait itself.  Once the
+frame has closed (the quit's data says so) it leaves the innermost recursive
+edit first, as end of input does: the command loop there reports every signal
+(GNU's C `error' handler), so it would read, and quit, again.  Each level
+quits in turn, down to the host's command."
+  (condition-case err (romacs--read-host-event seconds display)
+    ((debug quit)
+     (cond ((null (cdr err)) ?\C-g)
+           ((> (recursion-depth) 0) (throw 'exit (lambda () (signal 'quit nil))))
+           (t (signal 'quit nil))))))
 
 (defvar romacs--last-auto-save 0
   "keyboard.c last_auto_save: `num-nonmacro-input-events' at the command
