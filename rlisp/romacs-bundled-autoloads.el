@@ -66,6 +66,11 @@ with the session before its harness starts.  Return the session.
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
 
 
+;;; Generated autoloads from romacs-agent-images.el
+
+(register-definition-prefixes "romacs-agent-images" '("romacs-agent-images-"))
+
+
 ;;; Generated autoloads from romacs-agent-t3.el
 
 (register-definition-prefixes "romacs-agent-t3" '("romacs-agent-t3-"))

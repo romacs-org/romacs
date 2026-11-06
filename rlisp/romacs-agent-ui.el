@@ -987,7 +987,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
     (insert prompt)))
 
 (defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
-  "Where `romacs-agent-chat-attach' looks for an image file first."
+  "Where `romacs-agent-chat-attach' offers images from."
   :type 'directory :group 'romacs-agent)
 
 (defun romacs-agent-ui--clipboard-image-type ()
@@ -1010,23 +1010,23 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
           file)
       (unless saved (delete-file file)))))
 
-(defun romacs-agent-ui--newest-image (dir)
-  "The newest image file directly in DIR, or nil."
-  (when (file-directory-p dir)
-    (car (sort (seq-filter #'romacs-agent-image-file-p (directory-files dir t nil t))
-               #'file-newer-than-file-p))))
-
 (defun romacs-agent-ui--read-image-file ()
-  "Read an image file, the newest in `romacs-agent-image-directory' by default."
+  "An image file, chosen by sight in `romacs-agent-image-directory', or
+named when it holds none or the user asks to browse."
+  (require 'romacs-agent-images)
   (let* ((dir (file-name-as-directory (expand-file-name romacs-agent-image-directory)))
-         (dir (if (file-directory-p dir) dir default-directory)))
-    (expand-file-name (read-file-name "Attach image: " dir (romacs-agent-ui--newest-image dir) t))))
+         (dir (if (file-directory-p dir) dir default-directory))
+         (choice (if (romacs-agent-images--files dir) (romacs-agent-images-pick dir) 'browse)))
+    (pcase choice
+      ('cancel (keyboard-quit))
+      ('browse (expand-file-name (read-file-name "Attach image: " dir nil t)))
+      (_ choice))))
 
 (defun romacs-agent-chat-attach (file)
   "Put image FILE in the composer as an [image: FILE] token: the harness
 reads the file, and the transcript shows it.  Interactively the clipboard's
 image, saved with the session; with a prefix argument, or when the
-clipboard holds none, a file."
+clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
   (interactive
    (let ((type (and (not current-prefix-arg) (romacs-agent-ui--clipboard-image-type))))
      (list (if type (romacs-agent-ui--save-clipboard-image romacs-agent-ui--session type)

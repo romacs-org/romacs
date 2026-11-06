@@ -794,6 +794,15 @@ thousandth a stack mark."
             (romacs-agent--index session))
           (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
 
+;; A walk through N images: each key reads the matches filtered once.
+(scaling-probe agent-images-walk :n 2000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-images)
+                (romacs-agent-images--state (vconcat (scaling--names "scaling-image" n))))
+  :body (let ((state it))
+          (dotimes (_ (length (plist-get state :files)))
+            (setq state (romacs-agent-images--step state ?\C-n)))))
+
 ;; N children of one parent each ending a turn while the parent's turn
 ;; runs: each wake is queued behind it once (the real send and queue).
 (scaling-probe agent-wake :n 200
