@@ -133,6 +133,28 @@ off, so `elc' stays bytecode."
                                             (with-current-buffer "*Occur*" (count-lines (point-min) (point-max))))))
     (how-many-xdisp . ,(perfbench--in-buffer "emacs-45b0f769/src/xdisp.c"
                                              (lambda () (how-many "\\_<int\\_>" (point-min) (point-max)))))
+    (find-file-xdisp
+     . ,(lambda () (require 'cc-mode)
+          (lambda () (with-current-buffer (find-file-noselect (perfbench--fixture "emacs-45b0f769/src/xdisp.c"))
+                       (buffer-size)))))
+    (describe-function
+     . ,(lambda () (require 'help-fns)
+          (lambda () (describe-function 'find-file)
+            (with-current-buffer "*Help*"
+              (goto-char (point-min))
+              (if (search-forward "FILENAME" nil t) 1 0)))))
+    (shell-command
+     . ,(lambda () (lambda () (let ((length 0))
+                                (dotimes (_ 20) (setq length (+ length (length (shell-command-to-string "echo perfbench")))))
+                                length))))
+    (eshell-commands
+     . ,(lambda () (require 'eshell)
+          ;; Off the user's Emacs directory, as `project-list-file' above:
+          ;; making that directory changes what a Romacs world starts from.
+          (setq eshell-directory-name (expand-file-name "eshell/" temporary-file-directory))
+          (lambda () (let ((length 0))
+                       (dotimes (_ 20) (setq length (+ length (length (eshell-command-result "echo perfbench")))))
+                       length))))
     (micro . ,(lambda () (load (getenv "PERFBENCH_MICRO") nil t)
                 (lambda () (m-run (string-to-number (getenv "PERFBENCH_N"))))))
     (elb-prepare . ,(lambda () (let ((entries (perfbench--elb-load t))) (lambda () entries))))
