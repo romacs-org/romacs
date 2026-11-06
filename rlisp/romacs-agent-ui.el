@@ -165,16 +165,27 @@ is always taken after its own text is in."
     (or name "tool")))
 
 (defun romacs-agent-ui--png-size (file)
-  "FILE's width and height from its header, (W . H), or nil if no PNG: reading
-24 bytes, where `image-size' decodes the image."
+  "FILE's width and height, (W . H), from its header, or nil unless it is a
+whole PNG by what can be read cheaply: signature, an IHDR of sizes above
+zero, and an IEND closing it.  Where `image-size' decodes the image, this
+reads 33 bytes and the last 12."
   (with-temp-buffer
     (set-buffer-multibyte nil)
-    (insert-file-contents-literally file nil 0 24)
-    (when (and (= (buffer-size) 24) (= (char-after 1) 137) (= (char-after 2) ?P)
-               (= (char-after 3) ?N) (= (char-after 4) ?G))
-      (let ((word (lambda (at) (+ (ash (char-after at) 24) (ash (char-after (+ at 1)) 16)
-                                  (ash (char-after (+ at 2)) 8) (char-after (+ at 3))))))
-        (cons (funcall word 17) (funcall word 21))))))
+    (let ((length (file-attribute-size (file-attributes file))))
+      (when (and length (>= length 45))
+        (insert-file-contents-literally file nil 0 24)
+        (let ((bytes (lambda (from) (mapcar #'char-after (number-sequence from (+ from 7)))))
+              (word (lambda (at) (+ (ash (char-after at) 24) (ash (char-after (+ at 1)) 16)
+                                    (ash (char-after (+ at 2)) 8) (char-after (+ at 3))))))
+          (when (and (= (buffer-size) 24)
+                     (equal (funcall bytes 1) '(137 80 78 71 13 10 26 10))
+                     (equal (funcall bytes 9) '(0 0 0 13 73 72 68 82)))
+            (let ((width (funcall word 17)) (height (funcall word 21)))
+              (erase-buffer)
+              (insert-file-contents-literally file nil (- length 12) length)
+              (when (and (> width 0) (> height 0) (= (buffer-size) 12)
+                         (equal (mapcar #'char-after (number-sequence 5 8)) '(73 69 78 68)))
+                (cons width height)))))))))
 
 (defun romacs-agent-ui--fitted-size (size width height)
   "SIZE, (W . H), as :max-width WIDTH and :max-height HEIGHT shrink it."
@@ -191,7 +202,7 @@ a seam.  Centred on the line, a strip's row measures as it draws, one line
 tall.  A PNG is laid out from its header, so a transcript's images are
 decoded as they come into view, not when it is replayed."
   (ignore-errors
-    (let* ((image (create-image file nil nil :max-width 480 :max-height 270 :ascent 'center))
+    (let* ((image (create-image file nil nil :max-width 480 :max-height 270 :ascent 'center :scale 1))
            (png (romacs-agent-ui--png-size file))
            (size (if png (romacs-agent-ui--fitted-size png 480 270) (image-size image t)))
            (line (default-line-height))
@@ -205,25 +216,12 @@ decoded as they come into view, not when it is replayed."
                 strips)))
       (apply #'concat (nreverse strips)))))
 
-(defun romacs-agent-ui--show-images (start end)
-  "Show the images of the [image: FILE] tokens between START and END below
-them, at the transcript's end, each token hidden.  Its text stays beneath,
-for copying and editing the turn; a token that loads nothing stays text."
-  (when (display-images-p)
-    (let ((strips nil))
-      (save-excursion
-        (goto-char start)
-        (while (re-search-forward romacs-agent-image-token end t)
-          (when (romacs-agent-image-file-p (match-string 1))
-            (let ((rows (romacs-agent-ui--image-strips (match-string 1))) (inhibit-read-only t))
-              (when rows
-                (push rows strips)
-                ;; With the blank lines a message puts before its images.
-                (let ((from (save-excursion (goto-char (match-beginning 0))
-                                            (skip-chars-backward " \n" start)
-                                            (point))))
-                  (put-text-property from (match-end 0) 'invisible 'romacs-agent-token)))))))
-      (dolist (rows (nreverse strips)) (romacs-agent-ui--insert-at romacs-agent-ui--end rows)))))
+(defun romacs-agent-ui--image-rows (file)
+  "What the transcript shows for attached image FILE: its rows, or a line
+saying it cannot, so an image is never silently missing."
+  (or (and (display-images-p) (romacs-agent-image-file-p file) (romacs-agent-ui--image-strips file))
+      (propertize (format "  ▣ %s (cannot show)\n" (file-name-nondirectory file))
+                  'face 'romacs-agent-dim 'romacs-agent-strip t)))
 
 (defun romacs-agent-ui--delegation (name input)
   "What a card shows for tool NAME's INPUT, (TITLE DETAIL), or nil when
@@ -497,11 +495,12 @@ or a repeat."
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
-             (let ((start (+ 0 romacs-agent-ui--end)))
-               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t)
-               (let ((end (+ 0 romacs-agent-ui--end)))
-                 (romacs-agent-ui--insert "\n")
-                 (romacs-agent-ui--show-images start end)))))
+             (let ((images (romacs-agent-attachments session (plist-get event :text))))
+               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t
+                                        'romacs-agent-images images)
+               (romacs-agent-ui--insert "\n")
+               (dolist (file images)
+                 (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file))))))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
            (unless (or (not (overlayp romacs-agent-ui--composer)) (string-prefix-p (substring name 0 -1) (buffer-name)))
@@ -734,7 +733,7 @@ or a repeat."
   "An agent session's transcript and composer."
   (setq-local desktop-save-buffer #'romacs-agent-ui--desktop-save)
   (setq-local header-line-format '(:eval (romacs-agent-ui--header-line)))
-  (setq-local buffer-invisibility-spec (list 'romacs-agent-output 'romacs-agent-token))
+  (setq-local buffer-invisibility-spec (list 'romacs-agent-output))
   ;; Wrapped at words, C-k still killing to the line's end.
   (setq-local truncate-lines nil word-wrap t)
   ;; New turns scroll the chat just enough, the composer at the bottom.
@@ -974,12 +973,15 @@ PROPERTY: the previous one is the run point is in, past its start."
   (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
 
 (defun romacs-agent-ui--deliver (send)
-  "Call SEND with the message and its attached images, then empty the composer into its
+  "Call SEND with the composer's text and attached images, then empty it into its
 history; when SEND fails, the draft stays.  Nothing when it is empty."
-  (let ((text (romacs-agent-ui--draft-message)))
+  (let* ((images romacs-agent-ui--draft-images)
+         (written (romacs-agent-ui--composer-text))
+         ;; A harness wants words: an image alone gets these.
+         (text (if (and images (string-empty-p written)) "See the attached image." written)))
     (unless (string-empty-p text)
-      (funcall send text romacs-agent-ui--draft-images)
-      (push text romacs-agent-ui--history)
+      (funcall send text images)
+      (push (cons text images) romacs-agent-ui--history)
       (romacs-agent-ui--history-reset)
       (delete-region romacs-agent-ui--end (point-max))
       (setq romacs-agent-ui--draft-images nil)
@@ -1033,7 +1035,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
               (cons (buffer-substring-no-properties romacs-agent-ui--end (point-max)) romacs-agent-ui--draft-images)))
       (push romacs-agent-ui--history-at romacs-agent-ui--history-back)
       (setq romacs-agent-ui--history-at next)
-      (romacs-agent-ui--set-draft (car next)))))
+      (romacs-agent-ui--set-draft-parts (caar next) (cdar next)))))
 
 (defun romacs-agent-chat-history-next ()
   "Put the next prompt in the composer; past the newest, the draft."
@@ -1041,7 +1043,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   (when romacs-agent-ui--history-at
     (setq romacs-agent-ui--history-at (pop romacs-agent-ui--history-back))
     (if romacs-agent-ui--history-at
-        (romacs-agent-ui--set-draft (car romacs-agent-ui--history-at))
+        (romacs-agent-ui--set-draft-parts (caar romacs-agent-ui--history-at) (cdar romacs-agent-ui--history-at))
       (romacs-agent-ui--set-draft-parts (or (car romacs-agent-ui--history-draft) "")
                                         (cdr romacs-agent-ui--history-draft)))))
 
@@ -1080,9 +1082,10 @@ A buffer of this mode no session shows has no turns."
                   ;; Before the first prompt: nothing to edit, and the draft stays.
                   (unless (get-text-property start 'romacs-agent-turn) (user-error "No turn here"))
                   start))
+         (images (get-text-property (+ start 2) 'romacs-agent-images))
          (end (or (next-single-property-change start 'romacs-agent-turn nil romacs-agent-ui--end) romacs-agent-ui--end))
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
-    (romacs-agent-ui--set-draft prompt)))
+    (romacs-agent-ui--set-draft-parts prompt images)))
 
 (defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
   "Where `romacs-agent-chat-attach' offers images from."
@@ -1130,8 +1133,9 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
      (list (if type (romacs-agent-ui--save-clipboard-image romacs-agent-ui--session type)
              (romacs-agent-ui--read-image-file))))
    romacs-agent-chat-mode)
-  (when (string-match-p "[],\n]" file)
-    (user-error "An image's file name cannot hold ], a comma or a newline: %s" file))
+  ;; Codex's --image splits its value at commas.
+  (when (string-match-p "," file)
+    (user-error "An image's file name cannot hold a comma: %s" file))
   (require 'romacs-agent-images)
   (setq romacs-agent-ui--draft-images (append romacs-agent-ui--draft-images (list file)))
   (romacs-agent-ui--tray))
@@ -1146,27 +1150,6 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
     (setq romacs-agent-ui--draft-images (append (seq-take images index) (nthcdr (1+ index) images)))
     (romacs-agent-ui--tray)))
 
-(defun romacs-agent-ui--message (text images)
-  "The message of composer TEXT and IMAGES: each image a token, which the
-harness's driver and the transcript read."
-  (mapconcat #'identity
-             (delq nil (list (and (not (string-empty-p text)) text)
-                             (and images (mapconcat (lambda (file) (format "[image: %s]" file)) images " "))))
-             "\n\n"))
-
-(defun romacs-agent-ui--split-message (message)
-  "MESSAGE as (TEXT . IMAGES): `romacs-agent-ui--message' undone."
-  (let ((images nil) (start 0))
-    (while (string-match romacs-agent-image-token message start)
-      (push (match-string 1 message) images)
-      (setq start (match-end 0)))
-    (cons (string-trim (replace-regexp-in-string romacs-agent-image-token "" message t t))
-          (nreverse images))))
-
-(defun romacs-agent-ui--draft-message ()
-  "The message being written, its images with it."
-  (romacs-agent-ui--message (romacs-agent-ui--composer-text) romacs-agent-ui--draft-images))
-
 (defun romacs-agent-ui--set-draft-parts (text images)
   "Make TEXT, as it is, the composer's and IMAGES the tray's, in place of
 what was there."
@@ -1176,11 +1159,6 @@ what was there."
   (setq romacs-agent-ui--draft-images images)
   (when images (require 'romacs-agent-images))
   (romacs-agent-ui--tray))
-
-(defun romacs-agent-ui--set-draft (message)
-  "Make a message sent before the one being written."
-  (pcase-let ((`(,text . ,images) (romacs-agent-ui--split-message message)))
-    (romacs-agent-ui--set-draft-parts text images)))
 
 (defun romacs-agent-ui--tray (&rest _)
   "Bring the tray up to date."

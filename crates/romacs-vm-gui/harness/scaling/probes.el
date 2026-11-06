@@ -994,9 +994,9 @@ thousandth a stack mark."
           (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
 
 ;; A walk through N images: each key reads the matches filtered once.
-;; 200 keys with the tray's real anchor and a composer past a transcript
+;; Keys with the tray's real anchor, hosted, and a composer past a transcript
 ;; of N lines: what it measures must not grow with what is out of view.
-(scaling-probe agent-tray-far :n 20000
+(scaling-probe agent-tray-far :gui t :n 20000 :steps 20 :budget 0.1
   :setup (progn (scaling--agent)
                 (require 'romacs-agent-images)
                 (let ((buffer (get-buffer-create " *scaling-tray-far*")))
@@ -1004,12 +1004,15 @@ thousandth a stack mark."
                     (erase-buffer)
                     (dotimes (_ n) (insert "a line of the transcript\n"))
                     (setq-local romacs-agent-ui--end (point-max-marker)))
-                  (set-window-buffer (selected-window) buffer)
-                  (set-window-start (selected-window) 1)
+                  (switch-to-buffer buffer)
+                  (goto-char (point-min))
                   buffer))
   :body (with-current-buffer it
-          (goto-char (point-min))
-          (dotimes (_ 200) (romacs-agent-images--tray-anchor (selected-window) 3))))
+          (unless (> romacs-agent-ui--end (window-end (selected-window)))
+            (error "The composer must be past the window's end"))
+          (dotimes (_ 200) (romacs-agent-images--tray-anchor (selected-window) 3))
+          ;; A key: each step has something to lay out.
+          (insert "x")))
 
 ;; Replaying N images of a transcript lays them out from their headers.
 (scaling-probe agent-image-replay :n 400
@@ -1018,7 +1021,9 @@ thousandth a stack mark."
                 (let ((file (make-temp-file "scaling-image" nil ".png")))
                   (with-temp-file file
                     (set-buffer-multibyte nil)
-                    (insert (unibyte-string 137 ?P ?N ?G 13 10 26 10 0 0 0 13 ?I ?H ?D ?R 0 0 3 192 0 0 2 28)))
+                    (insert (unibyte-string 137 ?P ?N ?G 13 10 26 10 0 0 0 13 ?I ?H ?D ?R 0 0 3 192 0 0 2 28)
+                            (make-string 9 ?x)
+                            (unibyte-string 0 0 0 0 ?I ?E ?N ?D 174 66 96 130)))
                   (cons file n)))
   :body (cl-letf (((symbol-function 'image-size) (lambda (&rest _) (error "Replay decodes nothing"))))
           (dotimes (_ (cdr it))

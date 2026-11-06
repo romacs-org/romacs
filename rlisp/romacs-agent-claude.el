@@ -37,8 +37,32 @@ RESUME is non-nil."
             (romacs-agent--option-words session "--model" "--effort")
             (plist-get instance :arguments))))
 
+(defun romacs-agent--claude-image (file)
+  "FILE as a message's image content block."
+  (romacs-mcp--object
+   "type" "image"
+   "source" (romacs-mcp--object
+             "type" "base64"
+             "media_type" (pcase (downcase (file-name-extension file))
+                            ((or "jpg" "jpeg") "image/jpeg") ("gif" "image/gif") ("webp" "image/webp") (_ "image/png"))
+             "data" (with-temp-buffer
+                      (set-buffer-multibyte nil)
+                      (insert-file-contents-literally file)
+                      (base64-encode-region (point-min) (point-max) t)
+                      (buffer-string)))))
+
 (defun romacs-agent--claude-user (_session text)
-  (romacs-mcp--object "type" "user" "message" (romacs-mcp--object "role" "user" "content" text)))
+  "The harness's message of TEXT, with the images attached to it as content:
+the model is given them, and no file is named for it to open."
+  (let ((images (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
+    (romacs-mcp--object
+     "type" "user"
+     "message" (romacs-mcp--object
+                "role" "user"
+                "content" (if images
+                              (vconcat (list (romacs-mcp--object "type" "text" "text" text))
+                                       (mapcar #'romacs-agent--claude-image images))
+                            text)))))
 
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."

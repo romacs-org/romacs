@@ -17,7 +17,7 @@ on its command line, and does not open a file a prompt names.  Attached,
 never read from the prompt: `--image' uploads the file."
   (ignore session)
   (mapcan (lambda (file) (list "--image" file))
-          (seq-filter #'romacs-agent-image-file-p romacs-agent--turn-images)))
+          (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
 
 (defun romacs-agent--codex-argv (session resume)
   "`codex exec''s command line for one turn of SESSION, its prompt on

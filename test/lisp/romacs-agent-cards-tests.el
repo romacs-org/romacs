@@ -4,7 +4,8 @@
 
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
-  (require 'romacs-agent))
+  (require 'romacs-agent)
+  (require 'romacs-agent-history))
 
 (defconst romacs-agent-cards-tests--parent "11111111-2222-4333-8444-555555555555")
 (defconst romacs-agent-cards-tests--child "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")

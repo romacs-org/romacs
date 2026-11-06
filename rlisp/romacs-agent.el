@@ -782,10 +782,6 @@ so: it resumes with `romacs-agent-resume'."
   (if (stringp content) content
     (mapconcat (lambda (block) (or (and (hash-table-p block) (gethash "text" block)) "")) content "")))
 
-(defconst romacs-agent-image-token "\\[image: \\(/[^],\n]+\\)\\]"
-  "A message's image: its absolute file, which holds no ], newline or comma
-\(Codex's --image splits its value at commas).")
-
 (defun romacs-agent-image-file-p (file)
   "Whether FILE is a regular file with an image's name."
   (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
@@ -804,9 +800,11 @@ so: it resumes with `romacs-agent-resume'."
   "SESSION's harness's command line, RESUME going on with its conversation."
   (funcall (romacs-agent--harness-get session :argv) session resume))
 
-(defun romacs-agent--input (session text)
-  "Write TEXT to SESSION's persistent harness as the user's message."
-  (romacs-agent--line session (funcall (romacs-agent--harness-get session :input) session text)))
+(defun romacs-agent--input (session text &optional images)
+  "Write TEXT to SESSION's persistent harness as the user's message, with
+the attached IMAGES."
+  (romacs-agent--line session (let ((romacs-agent--message-images images))
+                                (funcall (romacs-agent--harness-get session :input) session text))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -843,10 +841,38 @@ a digest of its identity, UUID-shaped."
                               key)))
                 (hash-table-values romacs-agent--sessions))))
 
-(defvar romacs-agent--turn-images nil
-  "The images the user attached to the turn whose command line is built.
-Only what was attached: a message's text, which a child's result or a quote
-can fill, never names a file to send.")
+(defvar romacs-agent--message-images nil
+  "The images the user attached to the message being written to a harness,
+for its driver.  Only what was attached: nothing is ever read from a
+message's text, which a child's result or a quote can fill.")
+
+(defvar romacs-agent--attachments (make-hash-table :test #'equal)
+  "A session's id to its table of a message's text to its attached images,
+read once from its `attachments.jsonl'.")
+
+(defun romacs-agent--attachments-file (session)
+  (expand-file-name "attachments.jsonl" (romacs-agent-dir session)))
+
+(defun romacs-agent--attachment-table (session)
+  (or (gethash (romacs-agent-id session) romacs-agent--attachments)
+      (let ((table (make-hash-table :test #'equal)) (file (romacs-agent--attachments-file session)))
+        (when (file-readable-p file)
+          (dolist (line (split-string (with-temp-buffer (insert-file-contents file) (buffer-string)) "\n" t))
+            (let ((entry (json-parse-string line :array-type 'list)))
+              (puthash (gethash "text" entry) (gethash "images" entry) table))))
+        (puthash (romacs-agent-id session) table romacs-agent--attachments))))
+
+(defun romacs-agent--note-attachments (session text images)
+  "Remember that the user sent TEXT to SESSION with IMAGES: the journal has
+only what the harness was given, and a transcript shows and edits a turn."
+  (when images
+    (puthash text images (romacs-agent--attachment-table session))
+    (write-region (concat (json-serialize (romacs-mcp--object "text" text "images" (vconcat images))) "\n")
+                  nil (romacs-agent--attachments-file session) t 'silent)))
+
+(defun romacs-agent-attachments (session text)
+  "The images the user attached to the message TEXT sent to SESSION."
+  (gethash text (romacs-agent--attachment-table session)))
 
 (defun romacs-agent--turn (session text &optional images)
   "Run one turn of SESSION's per-turn harness on prompt TEXT with the
@@ -859,7 +885,7 @@ itself, so the turn goes on whatever becomes of this server."
     (set-file-modes input #o600)
     (setf (romacs-agent-journal-start session)
           (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-    (romacs-agent--launch session (let ((romacs-agent--turn-images images)) (romacs-agent--argv session t)) input))
+    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t)) input))
   (setf (romacs-agent-state session) 'starting)
   (romacs-agent--attach session 50))
 
@@ -1170,7 +1196,7 @@ for the next, sent once this one is off the queue."
                     ;; or resume.
                     (if (romacs-agent--per-turn-p session)
                         (romacs-agent--turn session (car next) (nth 3 next))
-                      (romacs-agent--input session (car next)))
+                      (romacs-agent--input session (car next) (nth 3 next)))
                     (drop)
                     (when (nth 1 next) (funcall (nth 1 next)))
                     (setq more (eq (romacs-agent-dispatch session) 'again) force nil)
@@ -1183,6 +1209,7 @@ ends, now when none runs; FIRST puts it ahead of the messages already
 waiting."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
       (romacs-agent-send session text nil nil images)
+    (romacs-agent--note-attachments session text images)
     (if (and first (romacs-agent-queue session))
         (progn (push (list text nil nil images) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
@@ -1441,8 +1468,9 @@ DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
 given, then says it is no longer wanted.  IMAGES are the files the user
 attached to it."
+  (romacs-agent--note-attachments session text images)
   (cond ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
-         (romacs-agent--input session text)
+         (romacs-agent--input session text images)
          (when delivered (funcall delivered)))
         ;; Starting up: it goes once the harness is ready.
         ((not (romacs-agent--per-turn-p session))
