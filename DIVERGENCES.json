@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "6f60a40a15294962ae76beb6a972c94cde86856255299df9fbcf5622d82c4b05",
+  "input_hash": "67c570cfbdfe622c91022c94aa501d93a3867b91b8e2f361f1427899c432372e",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 368,
-  "symbols": 1120,
+  "symbols": 1124,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -1651,11 +1651,20 @@
   "isolate-interrupt": [
    18
   ],
+  "isolate-job-memory-headroom": [
+   21
+  ],
   "isolate-kill": [
    18
   ],
   "isolate-on-done": [
    18
+  ],
+  "isolate-pool-memory-limit": [
+   21
+  ],
+  "isolate-pool-size": [
+   21
   ],
   "isolate-receive": [
    18
@@ -1675,6 +1684,9 @@
   ],
   "isolate-zygote-list": [
    18
+  ],
+  "isolate-zygote-memory-limit": [
+   21
   ],
   "isolate-zygotes": [
    21
@@ -4174,11 +4186,15 @@
    "planned": false,
    "mechanism": "What a worker sees of the spawner",
    "gnu": "n/a (one heap).",
-   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. Where pooled jobs run on forked workers (`isolate-zygotes`; a session by default), each job runs in a fresh child of a zygote prepared once with its `:require` set, in the spawner's `default-directory` unless it names one, and sees nothing an earlier job left; the zygote is retired once an inherited variable, a file it loaded or a `load-path` directory changes. Elsewhere a pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
+   "romacs": "A worker starts from the world's globals plus `isolate-inherited-variables` (thawed into worker-owned copies) and a job's `:bindings`; it never sees the spawner's later `setq`s, loaded packages or user init. Where pooled jobs run on forked workers (`isolate-zygotes`; a session by default), each job runs in a fresh child of a zygote prepared once with its `:require` set, in the spawner's `default-directory` unless it names one, and sees nothing an earlier job left; the zygote is retired once an inherited variable, a file it loaded or a `load-path` directory changes. Such a job runs no collection until it has grown the heap by `isolate-job-memory-headroom` bytes, and live growth past that signals GNU's memory-exhausted `error` in the job. With no room in the pool (`isolate-pool-size`, by default the processors of the zygote's forking thread minus one, or `isolate-pool-memory-limit`) a job waits, its future on no isolate until it is dispatched; a zygote past `isolate-zygote-memory-limit` is refused and its features run on pooled workers. Elsewhere a pooled worker keeps its own symbol values between jobs of the same `:require` set; a job that changed `features` retires its worker from the pool.",
    "why": "Racket's and Python's contract for isolated interpreters; design §3.5, §7; worker-vms note §2.3-2.4.",
    "symbols": [
     "isolate-inherited-variables",
-    "isolate-zygotes"
+    "isolate-zygotes",
+    "isolate-job-memory-headroom",
+    "isolate-pool-size",
+    "isolate-pool-memory-limit",
+    "isolate-zygote-memory-limit"
    ],
    "symbols_derived": false
   },
