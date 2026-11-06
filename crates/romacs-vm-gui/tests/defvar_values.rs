@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Printed alike in both sessions.
 const SAME: &[&str] = &[
-    "buffer-access-fontify-functions", "dynamic-library-alist", "emacs-copyright",
+    "buffer-access-fontify-functions", "dynamic-library-alist", "echo-area-clear-hook", "emacs-copyright",
     "face-ignored-fonts", "font-log", "font-slant-table", "font-weight-table", "font-width-table", "fontset-alias-alist",
     "inhibit-compacting-font-caches", "inhibit-load-charset-map", "internal-make-interpreted-closure-function",
     "load-force-doc-strings", "load-source-file-function", "mouse-position-function", "mwheel-coalesce-scroll-events",

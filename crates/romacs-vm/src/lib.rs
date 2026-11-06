@@ -3457,6 +3457,11 @@ impl Vm {
         let slot = self.slot(prim::ECHO_AREA_MESSAGE);
         self.slots[slot].value = value;
     }
+    /// Whether the echo area shows a message for `current-message'.
+    pub fn echo_area_message_shown(&mut self) -> bool {
+        let slot = self.slot(prim::ECHO_AREA_MESSAGE);
+        self.slots[slot].value != Value::NIL
+    }
     /// Unwinding pops every binding; one whose restore signals keeps its
     /// value, as GNU's popped entry does. That signal is dropped and the
     /// escape already in flight kept (see `unbind_one`).

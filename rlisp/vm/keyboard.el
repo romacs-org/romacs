@@ -370,7 +370,7 @@ reports it, raised from the innermost recursive edit when there is one."
         ;; event comes.
         (when (and (current-message)
                    (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
-          (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
+          (romacs--safe-run-hooks 'echo-area-clear-hook)
           (message nil))))
      ;; Without a host keyboard a user signal is still an event
      ;; (kbd_buffer_get_event); a special one runs its binding and the read

@@ -68,7 +68,6 @@ dos-timezone-offset	absent	platform: MS-DOS build only
 dos-unsupported-char-glyph	absent	platform: MS-DOS build only
 dos-version	absent	platform: MS-DOS build only
 dos-windows-version	absent	platform: MS-DOS build only
-echo-area-clear-hook	needed	keyboard.c; read by gnu-lisp/nxml/rng-valid.el and 1 more
 extra-keyboard-modifiers	absent	keyboard.c; no shipped Lisp reads or sets it
 face-default-stipple	absent	xfaces.c; no shipped Lisp reads or sets it
 face-filters-always-match	absent	xfaces.c; no shipped Lisp reads or sets it

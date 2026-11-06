@@ -425,6 +425,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "use-system-tooltips", gnu: "frame.c:7727", kind: Kind::Bool(true) },
     CVariable { name: "user-init-file", gnu: "lread.c:5684", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "values", gnu: "lread.c:5555", kind: Kind::Lisp(Init::Nil) },
+    // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
+    // the command loop's run it (rlisp/vm/keyboard.el, echo.rs).
+    CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "visible-bell", gnu: "dispnew.c:7496", kind: Kind::Bool(false) },
     CVariable { name: "visible-cursor", gnu: "term.c:5347", kind: Kind::Bool(true) },
     CVariable { name: "void-text-area-pointer", gnu: "xdisp.c:38689", kind: Kind::Lisp(Init::Symbol("arrow")) },
@@ -847,8 +850,9 @@ static FONT_WIDTH_TABLE: &[Init] = &[
 ];
 
 /// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears
-/// `declared_special' on `values', so a `let' of it is lexical.
-pub(crate) const NOT_SPECIAL: &[&str] = &["values"];
+/// `declared_special' on `values', so a `let' of it is lexical, and
+/// keyboard.c:14099 only sets `echo-area-clear-hook'.
+pub(crate) const NOT_SPECIAL: &[&str] = &["values", "echo-area-clear-hook"];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
 pub(crate) struct Forwarded {
