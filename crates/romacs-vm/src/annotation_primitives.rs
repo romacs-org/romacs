@@ -32,7 +32,14 @@ impl Vm {
             }
             Object::ByteBuffer(b) => {
                 let properties = crate::properties::Properties::from_map(&b.properties);
-                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, vec![])
+                let overlays = match b.shown() {
+                    Some(text) => {
+                        let at = text.byte_of_char(CharOffset(b.point.0))?.0;
+                        text.intervals.query_with_end(at as u32, at as u32, true, at == text.len_bytes(), &text.anchors).0
+                    }
+                    None => vec![],
+                };
+                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, overlays)
             }
             _ => unreachable!(),
         };
@@ -53,7 +60,8 @@ impl Vm {
     }
 
     fn insertion_overlay_property(&self, buffer: Value, at: usize, property: Value) -> Result<Value> {
-        let Object::Buffer(text) = self.object(buffer)? else { return Ok(Value::NIL); };
+        let Some(text) = self.overlay_store(buffer) else { return Ok(Value::NIL); };
+        let at = if matches!(self.object(buffer)?, Object::ByteBuffer(_)) { text.byte_of_char(CharOffset(at))?.0 } else { at };
         let mut candidates = text.intervals.query_with_end(at.saturating_sub(1) as u32,
             (at + 1).min(text.len_bytes()) as u32, false, true, &text.anchors).0;
         candidates.retain(|&overlay| {
@@ -168,14 +176,22 @@ impl Vm {
         buffer: Value,
         position: ByteOffset,
     ) -> Result<ByteOffset> {
-        // A unibyte buffer has no overlays.
-        if matches!(self.object_if(buffer), Some(Object::ByteBuffer(_))) { return Ok(ByteOffset(usize::MAX)); }
+        if self.overlay_store(buffer).is_none() && matches!(self.object_if(buffer), Some(Object::ByteBuffer(_))) {
+            return Ok(ByteOffset(usize::MAX));
+        }
         let b = self.annotated(buffer)?;
         b.char_of_byte(position)?;
         Ok(ByteOffset(
             b.intervals
                 .next(position.0 as u32, b.len_bytes() as u32, &b.anchors) as usize,
         ))
+    }
+    /// `next_overlay_change_byte' in OBJECT's own bytes.
+    fn next_overlay_change_own(&self, object: Value, at: ByteOffset) -> Result<ByteOffset> {
+        let Some(Object::ByteBuffer(_)) = self.object_if(object) else { return self.next_overlay_change_byte(object, at) };
+        let Some(text) = self.overlay_store(object) else { return Ok(ByteOffset(usize::MAX)) };
+        let next = self.next_overlay_change_byte(object, text.byte_of_char(CharOffset(at.0))?)?;
+        Ok(ByteOffset(text.char_of_byte(next)?.0))
     }
     /// Read one overlay property by symbol name without Lisp evaluation or interning.
     /// An absent property returns nil; the returned Value follows normal GC rooting rules.
@@ -191,8 +207,68 @@ impl Vm {
             .map_or(Value::NIL, |(_, v)| *v))
     }
     fn annotated(&self, buffer: Value) -> Result<&annotations::AnnotatedBuffer> {
-        // A shown unibyte buffer has no overlays, as its mirror has none.
         self.shown_text(buffer).map_err(|_| "text buffer required".into())
+    }
+    /// What holds BUFFER's overlays: a text buffer, or a unibyte buffer's
+    /// mirror once it has one (before that it has no overlays).
+    pub(crate) fn overlay_store(&self, buffer: Value) -> Option<&annotations::AnnotatedBuffer> {
+        match self.object_if(buffer)? {
+            Object::Buffer(b) => Some(b),
+            Object::ByteBuffer(b) => b.shown(),
+            _ => None,
+        }
+    }
+    pub(crate) fn overlay_store_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
+        let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
+        match self.objects.get_mut(i) {
+            Some(Object::Buffer(b)) => Ok(b),
+            Some(Object::ByteBuffer(b)) => b.shown_mut().ok_or_else(|| "unibyte buffer not mirrored".into()),
+            _ => Err("text buffer required".into()),
+        }
+    }
+    /// `buffer_position' in the coordinates of BUFFER's overlay store.
+    fn overlay_position(&self, buffer: Value, v: Value, clip: bool) -> Result<u32> {
+        let at = self.buffer_position(buffer, v, clip)?;
+        let Object::ByteBuffer(b) = self.object(buffer)? else { return Ok(at) };
+        let text = b.shown().ok_or("unibyte buffer not mirrored")?;
+        u32::try_from(text.byte_of_char(CharOffset(at as usize))?.0).map_err(|_| "buffer too large".into())
+    }
+    /// Every overlay of BUFFER with its ends in BUFFER's own text: bytes,
+    /// which for a unibyte buffer are its characters.
+    pub(crate) fn overlay_ends(&self, buffer: Value) -> Result<Vec<(Value, usize, usize)>> {
+        let Some(t) = self.overlay_store(buffer) else { return Ok(vec![]) };
+        let unibyte = matches!(self.object(buffer)?, Object::ByteBuffer(_));
+        let own = |at: u32| if unibyte { t.char_of_byte(ByteOffset(at as usize)).map(|c| c.0) } else { Ok(at as usize) };
+        t.intervals.query_with_end(0, t.anchors.extent(), false, true, &t.anchors).0.into_iter().map(|o| {
+            let (a, b) = self.overlay_range(o)?.ok_or("overlay without a buffer")?;
+            Ok((o, own(a)?, own(b)?))
+        }).collect()
+    }
+    /// OVERLAYS, as `overlay_ends' gave them, into BUFFER's store: the text
+    /// that held them was replaced.
+    pub(crate) fn adopt_overlays(&mut self, buffer: Value, overlays: Vec<(Value, usize, usize)>) -> Result<()> {
+        if overlays.is_empty() { return Ok(()); }
+        self.mirror_shown(buffer)?;
+        let unibyte = matches!(self.object(buffer)?, Object::ByteBuffer(_));
+        for (v, start, end) in overlays {
+            let (front, rear) = { let o = self.overlay(v)?; (o.front, o.rear) };
+            let evaporates = self.overlay_property_named(v, "evaporate")? != Value::NIL;
+            let target = self.overlay_store_mut(buffer)?;
+            let store = |t: &annotations::AnnotatedBuffer, at: usize| -> Result<u32> {
+                let at = if unibyte { t.byte_of_char(CharOffset(at))?.0 } else { at };
+                u32::try_from(at).map_err(|_| "buffer too large".into())
+            };
+            let (start, end) = (store(target, start)?, store(target, end)?);
+            let a = target.anchors.create(start, front).ok_or("anchor limit")?;
+            let b = target.anchors.create(end, rear).ok_or("anchor limit")?;
+            if front == Bias::Right && rear == Bias::Left { target.reversed_pairs.insert(a, b); }
+            target.intervals.insert(v, a, b, &target.anchors);
+            if evaporates { target.evaporating.insert(a, v); }
+            let Object::Overlay(o) = self.object_mut(v)? else { unreachable!() };
+            o.start = Some(a);
+            o.end = Some(b);
+        }
+        Ok(())
     }
     pub(super) fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
@@ -238,6 +314,7 @@ impl Vm {
     fn current_annotation_buffer(&mut self) -> Result<Value> {
         self.buffer_index()?;
         let v = self.slots[self.buffer_slot].value;
+        self.mirror_shown(v)?;
         self.annotated(v)?;
         Ok(v)
     }
@@ -326,6 +403,7 @@ impl Vm {
             assert!(self.marker_anchors_mut(buffer)?.set(a, p, m.bias));
             return Ok(v);
         }
+        let last_position = self.marker_position_value(v)?.integer_value();
         if let Some(a) = m.anchor {
             self.marker_anchors_mut(m.buffer)?.remove(a);
         }
@@ -335,6 +413,7 @@ impl Vm {
         };
         target.buffer = if anchor.is_some() { buffer } else { Value::NIL };
         target.anchor = anchor;
+        if let Some(position) = last_position { target.last_position = position; }
         if anchor.is_some() { self.note_referrer(buffer, v.index(0)? - 1); }
         Ok(v)
     }
@@ -376,7 +455,7 @@ impl Vm {
             inserted: source.inserted,
         };
         if o.buffer != Value::NIL {
-            let b = self.annotated_mut(o.buffer)?;
+            let b = self.overlay_store_mut(o.buffer)?;
             if let Some(a) = o.start {
                 b.intervals.remove(a, &b.anchors);
                 b.reversed_pairs.remove(&a);
@@ -404,8 +483,10 @@ impl Vm {
         b: Value,
         buffer: Value,
     ) -> Result<Value> {
-        let mut start = self.buffer_position(buffer, a, true)?;
-        let mut end = self.buffer_position(buffer, b, true)?;
+        self.require_live_buffer(buffer)?;
+        self.mirror_shown(buffer)?;
+        let mut start = self.overlay_position(buffer, a, true)?;
+        let mut end = self.overlay_position(buffer, b, true)?;
         if start > end {
             std::mem::swap(&mut start, &mut end);
         }
@@ -428,7 +509,7 @@ impl Vm {
         // itree_node_set_region reinserts a node whose start moves.
         let reinserted = o.buffer != buffer || self.overlay_range(v)?.is_none_or(|(old, _)| old != start);
         if o.buffer == buffer {
-            let target = self.annotated_mut(buffer)?;
+            let target = self.overlay_store_mut(buffer)?;
             target.intervals.remove(o.start.unwrap(), &target.anchors);
             assert!(target.anchors.set(o.start.unwrap(), start, o.front));
             assert!(target.anchors.set(o.end.unwrap(), end, o.rear));
@@ -437,7 +518,7 @@ impl Vm {
                 .insert(v, o.start.unwrap(), o.end.unwrap(), &target.anchors);
         } else {
             self.delete_overlay_object(v)?;
-            let target = self.annotated_mut(buffer)?;
+            let target = self.overlay_store_mut(buffer)?;
             let a = target
                 .anchors
                 .create(start, o.front)
@@ -466,7 +547,7 @@ impl Vm {
     }
     /// Count OVERLAY as BUFFER's latest insertion into its overlay tree.
     pub(crate) fn note_overlay_insertion(&mut self, buffer: Value, overlay: Value) -> Result<()> {
-        let target = self.annotated_mut(buffer)?;
+        let target = self.overlay_store_mut(buffer)?;
         target.overlay_insertions += 1;
         let count = target.overlay_insertions;
         let Object::Overlay(o) = self.object_mut(overlay)? else { return Err("overlay required".into()) };
@@ -500,6 +581,12 @@ impl Vm {
             self.delete_overlay_object(v)?;
         }
         Ok(())
+    }
+    /// `evaporate_overlays_at' for BYTES of a unibyte BUFFER's own text.
+    pub(crate) fn evaporate_unibyte(&mut self, buffer: Value, bytes: std::ops::Range<ByteOffset>) -> Result<()> {
+        let Some(text) = self.overlay_store(buffer) else { return Ok(()) };
+        let range = text.byte_of_char(CharOffset(bytes.start.0))?..text.byte_of_char(CharOffset(bytes.end.0))?;
+        self.evaporate_overlays_at(buffer, range)
     }
     /// Whether OVERLAY is empty and has a non-nil `evaporate'.
     fn overlay_evaporates(&self, overlay: Value) -> Result<bool> {
@@ -575,8 +662,8 @@ impl Vm {
             Some(Object::Window(w)) => (w.buffer, Some(object)),
             _ => (object, None),
         };
-        let at = if matches!(self.object_if(object), Some(Object::Buffer(_))) {
-            let byte = self.buffer_position(object, position, false)?;
+        let at = if self.overlay_store(object).is_some() {
+            let byte = self.overlay_position(object, position, false)?;
             let buffer = self.annotated(object)?;
             let found = buffer
                 .intervals
@@ -698,9 +785,10 @@ impl Vm {
             let raw = raw_at(vm, at)?;
             vm.annotation_resolve(&raw, key).map_err(Fault::Error)
         };
-        if !matches!(self.object_if(object), Some(Object::Buffer(_))) {
+        if self.overlay_store(object).is_none() {
             return text_property(self, pos, property);
         }
+        self.mirror_shown(object).map_err(Fault::Error)?;
         let b = self.annotated(object).map_err(Fault::Error)?;
         let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
         let max = b.len_chars() as i64 + 1;
@@ -827,7 +915,7 @@ impl Vm {
             MakeMarker => Ok(self.allocate_object(Object::Marker(Box::new(Marker {
                 buffer: Value::NIL,
                 anchor: None,
-                bias: Bias::Left,
+                bias: Bias::Left, last_position: 0
             })))),
             SetMarker => {
                 let buffer = if n == 3 && args[2] != Value::NIL {
@@ -841,7 +929,7 @@ impl Vm {
                 // Fcopy_marker: no MARKER makes a marker pointing nowhere.
                 if x == Value::NIL {
                     let bias = if n == 2 { bias(args[1]) } else { Bias::Left };
-                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias }))));
+                    return Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer: Value::NIL, anchor: None, bias, last_position: 0 }))));
                 }
                 let pos = if x.as_integer().is_ok() {
                     x
@@ -857,6 +945,7 @@ impl Vm {
                     buffer: Value::NIL,
                     anchor: None,
                     bias: if n == 2 { bias(args[1]) } else { Bias::Left },
+                    last_position: 0,
                 })));
                 self.set_marker_object(m, pos, buffer)
             }
@@ -904,8 +993,10 @@ impl Vm {
                     self.current_annotation_buffer()?
                 };
                 // Validate before creating identity.
-                self.buffer_position(buffer, args[0], true)?;
-                self.buffer_position(buffer, args[1], true)?;
+                self.require_live_buffer(buffer)?;
+                self.mirror_shown(buffer)?;
+                self.overlay_position(buffer, args[0], true)?;
+                self.overlay_position(buffer, args[1], true)?;
                 let o = self.allocate_object(Object::Overlay(Box::new(Overlay {
                     buffer: Value::NIL,
                     start: None,
@@ -966,7 +1057,7 @@ impl Vm {
                     && buffer != Value::NIL
                 {
                     let anchor = self.overlay(x)?.start.unwrap();
-                    let list = &mut self.annotated_mut(buffer)?.evaporating;
+                    let list = &mut self.overlay_store_mut(buffer)?.evaporating;
                     list.remove(&anchor);
                     if args[2] != Value::NIL {
                         list.insert(anchor, x);
@@ -983,23 +1074,23 @@ impl Vm {
                         if n == 0 || args[0] == Value::NIL {
                             t.accessible().start.0 as u32
                         } else {
-                            self.buffer_position(buffer, args[0], false)?
+                            self.overlay_position(buffer, args[0], false)?
                         },
                         if n < 2 || args[1] == Value::NIL {
                             t.accessible().end.0 as u32
                         } else {
-                            self.buffer_position(buffer, args[1], false)?
+                            self.overlay_position(buffer, args[1], false)?
                         },
                     )
                 } else {
-                    let a = match self.buffer_position(buffer, x, false) {
+                    let a = match self.overlay_position(buffer, x, false) {
                         // Any position may be asked; none outside the
                         // buffer is inside an overlay.
                         Err(e) if p == OverlaysAt && e == "index out of range" => return Ok(Value::NIL),
                         a => a?,
                     };
                     let b = if p == OverlaysIn {
-                        self.buffer_position(buffer, args[1], false)?
+                        self.overlay_position(buffer, args[1], false)?
                     } else {
                         a
                     };
@@ -1331,6 +1422,19 @@ impl Vm {
                 at = b.previous_property_change(at, low);
                 if at > low { positions.push(at.0 as i64 + 1); }
             }
+            if let Some(text) = b.shown() {
+                let byte = |n: i64| text.byte_of_char(CharOffset((n - 1).clamp(0, b.bytes.len() as i64) as usize)).map(|at| at.0 as u32).map_err(Fault::Error);
+                let (from, to) = (byte(low.0 as i64 + 1)?, byte(position)?);
+                let mut ends = Vec::new();
+                text.intervals.visit(from, to, false, &text.anchors, |_, start, end| {
+                    ends.extend([start, end].into_iter().filter(|&e| e > from && e < to));
+                });
+                for end in ends {
+                    positions.push(text.char_of_byte(ByteOffset(end as usize)).map_err(Fault::Error)?.0 as i64 + 1);
+                }
+                positions.sort_unstable_by(|a, b| b.cmp(a));
+                positions.dedup();
+            }
             return Ok(positions);
         }
         let b = self.annotated(object).map_err(Fault::Error)?;
@@ -1391,7 +1495,7 @@ impl Vm {
             let mut next = self.property_next_text_boundary(object, at, bytes.end);
             if !string {
                 next = next.min(
-                    self.next_overlay_change_byte(object, at)
+                    self.next_overlay_change_own(object, at)
                         .map_err(Fault::Error)?,
                 );
             }
@@ -1589,6 +1693,14 @@ impl Vm {
     /// The first byte after AT, at most END, where OBJECT's text properties
     /// or, in a buffer, its overlays may change: compute_stop_pos's bound.
     pub(crate) fn next_property_boundary(&self, object: Value, at: ByteOffset, end: ByteOffset) -> Result<ByteOffset> {
+        // AT and END are the mirror's; a unibyte buffer's properties are by its own bytes.
+        if let Some(Object::ByteBuffer(b)) = self.object_if(object) && let Some(shown) = b.shown() {
+            let end = end.min(ByteOffset(shown.len_bytes()));
+            let own = |at: ByteOffset| shown.char_of_byte(at).map(|c| ByteOffset(c.0));
+            let text = self.property_next_text_boundary(object, own(at)?, own(end)?);
+            let text = shown.byte_of_char(CharOffset(text.0))?;
+            return Ok(text.min(self.next_overlay_change_byte(object, at)?).min(end));
+        }
         let text = self.property_next_text_boundary(object, at, end);
         if !matches!(self.object_if(object), Some(Object::Buffer(_))) { return Ok(text); }
         Ok(text.min(self.next_overlay_change_byte(object, at)?).min(end))

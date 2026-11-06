@@ -76,7 +76,7 @@ jobs:
           gh release upload nightly "dist/$ASSET" dist/SHA256SUMS --clobber
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
             -f sha="$GITHUB_SHA" -F force=true
-          gh release edit nightly --notes "Built from $GITHUB_SHA, the latest push to master. Install steps: README.org."
+          gh release edit nightly --notes "Built from $GITHUB_SHA, the latest push to master. Install steps: README.md."
 
       - name: Publish release
         if: github.ref_type == 'tag'

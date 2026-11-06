@@ -12,8 +12,8 @@ use romacs_display_protocol::{
     DeviceScale, GeometrySize, LogicalPixels, PresentMapping, PresentationExtent, SurfaceState,
 };
 use romacs_font::{
-    CharResolutionSource, FontRequest, FontResolver, FontsetEntry, FontsetFontSpec, FontsetMode,
-    FontsetPolicy, FontsetTarget, publish_face_text,
+    CharResolutionSource, FontDef, FontRequest, FontResolver, Fontset, FontsetMode, FontsetState,
+    FontsetTarget, publish_face_text,
 };
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 
@@ -129,16 +129,25 @@ const GNU_EMOJI_SCRIPT: &[(u32, u32)] = &[
 /// A user's init.el: `(set-fontset-font t 'emoji "Noto Color Emoji" nil
 /// 'prepend)` and `(set-fontset-font t #x1f5dc "Noto Color Emoji" nil
 /// 'prepend)`, as plain data.
-fn owner_policy() -> FontsetPolicy {
-    let mut policy = FontsetPolicy::new();
+fn owner_rules() -> Fontset {
+    let mut rules = Fontset::new("default");
     for &(from, to) in GNU_EMOJI_SCRIPT.iter().chain(&[(0x1F5DC, 0x1F5DC)]) {
-        policy.set_font(
+        rules.add(
             FontsetTarget::Range(from, to),
-            FontsetEntry::Font(FontsetFontSpec::family("Noto Color Emoji")),
+            Some(std::sync::Arc::new(FontDef::family("Noto Color Emoji"))),
             FontsetMode::Prepend,
         );
     }
-    policy
+    rules
+}
+
+/// RULES as the default fontset of a frame whose own fontset is GNU's
+/// fontset_from_font: any font of the face's registry as its fallback.
+fn publish_rules(resolver: &mut FontResolver, rules: Fontset, revision: u64) {
+    let mut frame = Fontset::new("startup");
+    let def = FontDef { registry: Some("iso10646-1".into()), ..FontDef::default() };
+    frame.add(FontsetTarget::Fallback, Some(std::sync::Arc::new(def)), FontsetMode::Overwrite);
+    resolver.set_fontsets(std::sync::Arc::new(FontsetState::new(rules.into(), frame.into(), Default::default(), 0, revision)));
 }
 
 struct Scene {
@@ -149,7 +158,7 @@ struct Scene {
 
 /// Lay LINES out on fixed rows, each `(face, clusters)`; all ink is the
 /// face's foreground. Advances come from the published font answers.
-fn scene(resolver: &mut FontResolver, policy: &FontsetPolicy, lines: &[Vec<&str>]) -> Scene {
+fn scene(resolver: &mut FontResolver, lines: &[Vec<&str>]) -> Scene {
     let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
     frame.background = Color::BLACK;
     let face = FaceId::new(1);
@@ -172,7 +181,7 @@ fn scene(resolver: &mut FontResolver, policy: &FontsetPolicy, lines: &[Vec<&str>
     );
     let request = FontRequest::new(FAMILY, PX);
     let all: String = lines.iter().flatten().copied().collect();
-    let published = publish_face_text(resolver, &mut frame, face, &request, policy, &all)
+    let published = publish_face_text(resolver, &mut frame, face, &request, &all)
         .expect("the fixture family resolves");
     assert!(
         published.unresolved.is_empty(),
@@ -356,9 +365,8 @@ fn solid_colour(pixels: &[u8], (y0, y1): (u32, u32)) -> usize {
 fn greek_english_and_cyrillic_render_with_no_emergency_font_lookup() {
     fixtures();
     let mut resolver = FontResolver::new().expect("Fontconfig");
-    let policy = FontsetPolicy::new();
     let lines = vec![clusters(ENGLISH), clusters(GREEK), clusters(CYRILLIC)];
-    let Scene { frame, bands } = scene(&mut resolver, &policy, &lines);
+    let Scene { frame, bands } = scene(&mut resolver, &lines);
 
     let rendered = render(&frame);
     assert_eq!(
@@ -380,7 +388,7 @@ fn greek_english_and_cyrillic_render_with_no_emergency_font_lookup() {
             .unwrap_or_else(|| panic!("{ch} unbound"));
         assert_ne!(glyph.glyph_id.get(), 0, "{ch} bound to .notdef");
         let resolution = resolver
-            .resolve_char(&FontRequest::new(FAMILY, PX), ch, &policy)
+            .resolve_char(&FontRequest::new(FAMILY, PX), ch)
             .expect("resolved");
         assert_eq!(
             resolution.source,
@@ -399,11 +407,11 @@ fn greek_english_and_cyrillic_render_with_no_emergency_font_lookup() {
 fn emoji_zwj_vs16_and_keycap_take_the_fontset_font_without_emergency_lookup() {
     fixtures();
     let mut resolver = FontResolver::new().expect("Fontconfig");
-    let policy = owner_policy();
+    publish_rules(&mut resolver, owner_rules(), 1);
     // 😀, woman-technologist (ZWJ), red heart + VS16, keycap one.
     let emoji = vec!["😀", "👩\u{200D}💻", "❤\u{FE0F}", "1\u{FE0F}\u{20E3}"];
     let lines = vec![clusters("Ωμέγα Hello Привет"), emoji];
-    let Scene { frame, bands } = scene(&mut resolver, &policy, &lines);
+    let Scene { frame, bands } = scene(&mut resolver, &lines);
 
     let face = FaceId::new(1);
     for ch in ['😀', '👩', '💻', '\u{1F600}'] {
@@ -452,7 +460,7 @@ fn without_a_fontset_rule_emoji_still_reach_a_colour_font() {
     fixtures();
     let mut resolver = FontResolver::new().expect("Fontconfig");
     let found = resolver
-        .resolve_char(&FontRequest::new(FAMILY, PX), '😀', &FontsetPolicy::new())
+        .resolve_char(&FontRequest::new(FAMILY, PX), '😀')
         .expect("resolved");
     assert_eq!(found.source, CharResolutionSource::Fallback);
     assert_eq!(found.font.family, "Noto Color Emoji");
@@ -489,15 +497,14 @@ fn an_installed_dejavu_family_resolves_to_itself_as_gnu_does() {
 
 fn assert_gnu_family_and_width(request: FontRequest, family: &str, greek_width: f32) {
     let mut resolver = FontResolver::new().expect("Fontconfig");
-    let policy = FontsetPolicy::new();
     let font = resolver
-        .resolve_primary(&request, &policy)
+        .resolve_primary(&request)
         .expect("GNU resolves the requested family or its substitute");
     assert_eq!(font.family, family, "{request:?}");
     let mut width = 0.0;
     for ch in "Καλημέρα Жж A".chars() {
         let found = resolver
-            .resolve_char(&request, ch, &policy)
+            .resolve_char(&request, ch)
             .expect("resolved");
         assert_eq!(found.font.family, family, "{request:?} {ch}");
         if "Καλημέρα".contains(ch) {
@@ -511,7 +518,7 @@ fn assert_gnu_family_and_width(request: FontRequest, family: &str, greek_width: 
 fn generic_families_resolve_through_fontconfig_aliases() {
     let mut resolver = FontResolver::new().expect("Fontconfig");
     let font = resolver
-        .resolve_primary(&FontRequest::new("monospace", PX), &FontsetPolicy::new())
+        .resolve_primary(&FontRequest::new("monospace", PX))
         .expect("`monospace` is an alias every Fontconfig install defines");
     assert!(font.identity.file_path.is_some());
     assert!(
@@ -525,42 +532,36 @@ fn an_explicit_fontset_family_wins_over_the_primary_font() {
     fixtures();
     let mut resolver = FontResolver::new().expect("Fontconfig");
     let request = FontRequest::new(FAMILY, PX);
-    let mut policy = FontsetPolicy::new();
+    let mut rules = Fontset::new("default");
     // GNU: (set-fontset-font t 'greek "Noto Color Emoji") is honoured even
     // though the face's own font covers Greek — but this one has no Ω, so
-    // the search moves on to the face's font, exactly as GNU's next entry.
-    policy.set_font(
+    // the search moves on to the frame fontset's fallback, the face's font.
+    rules.add(
         FontsetTarget::Range(0x370, 0x3FF),
-        FontsetEntry::Font(FontsetFontSpec::family("Noto Color Emoji")),
+        Some(std::sync::Arc::new(FontDef::family("Noto Color Emoji"))),
         FontsetMode::Overwrite,
     );
-    let omega = resolver
-        .resolve_char(&request, 'Ω', &policy)
-        .expect("resolved");
-    assert_eq!(omega.source, CharResolutionSource::Primary);
+    publish_rules(&mut resolver, rules.clone(), 1);
+    let omega = resolver.resolve_char(&request, 'Ω').expect("resolved");
+    assert!(matches!(omega.source, CharResolutionSource::Fontset(_)));
+    assert_eq!(omega.font.family, FAMILY);
 
     // An entry that covers the character is taken before the face's font.
-    policy.set_font(
+    rules.add(
         FontsetTarget::Range(0x2600, 0x26FF),
-        FontsetEntry::Font(FontsetFontSpec::family("Noto Color Emoji")),
+        Some(std::sync::Arc::new(FontDef::family("Noto Color Emoji"))),
         FontsetMode::Overwrite,
     );
-    let sun = resolver
-        .resolve_char(&request, '☀', &policy)
-        .expect("resolved");
+    publish_rules(&mut resolver, rules.clone(), 2);
+    let sun = resolver.resolve_char(&request, '☀').expect("resolved");
     assert_eq!(sun.source, CharResolutionSource::Fontset(0));
     assert_eq!(sun.font.family, "Noto Color Emoji");
 
-    // `nil` leaves the range without a font of its own; GNU still draws
-    // Ж with the face's font (PGTK transcript, `(set-fontset-font t
-    // 'cyrillic nil)` under Iosevka). So does this resolver.
-    policy.set_font(
-        FontsetTarget::Range(0x416, 0x416),
-        FontsetEntry::ExplicitNone,
-        FontsetMode::Overwrite,
-    );
-    let zhe = resolver
-        .resolve_char(&request, 'Ж', &policy)
-        .expect("resolved");
-    assert_eq!(zhe.source, CharResolutionSource::Primary);
+    // `nil` in the default fontset ends that fontset's search; GNU still
+    // draws Ж with the face's font (PGTK transcript, `(set-fontset-font t
+    // 'cyrillic nil)` under Iosevka), by the frame fontset's fallback.
+    rules.add(FontsetTarget::Range(0x416, 0x416), None, FontsetMode::Overwrite);
+    publish_rules(&mut resolver, rules, 3);
+    let zhe = resolver.resolve_char(&request, 'Ж').expect("resolved");
+    assert_eq!(zhe.font.family, FAMILY);
 }

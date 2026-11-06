@@ -35,6 +35,7 @@ impl Leaf<'_> {
             return Err(Fault::Error("Terminal session identity exhausted".into()));
         };
         self.vm.terminal_bindings.push(TerminalBinding::new(buffer, session, columns, rows));
+        self.vm.buffer_state_mut(buffer).map_err(Fault::Error)?.terminal = Some(session);
         Ok(value)
     }
 
@@ -97,10 +98,11 @@ impl Leaf<'_> {
 
     pub(crate) fn terminal_close(&mut self, session: i64) -> Out {
         let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
-        if self.vm.terminal_bindings.iter().any(|b| b.session == id) {
+        if let Some(buffer) = self.vm.terminal_bindings.iter().find(|b| b.session == id).map(|b| b.buffer) {
             self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?
                 .close(id).map_err(Fault::Error)?;
             self.vm.terminal_bindings.retain(|b| b.session != id);
+            self.vm.terminal_ended(id, buffer);
         }
         Ok(Value::NIL)
     }

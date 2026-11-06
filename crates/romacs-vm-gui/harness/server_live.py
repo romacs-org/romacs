@@ -35,14 +35,21 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
              GNU's, and `ding' with no frame, with one and in a worker
              isolate writes no BEL to the server's output; with its window
              shown, `server-stop-automatically' `empty' keeps the server.
+  title      `frame-title-format' reaches the window, again when the buffer's
+             name and the format change.
+  mouse      `mouse-pixel-position' follows the real pointer over the window,
+             and `mouse-position' finds characters from it as pinned GNU's.
 
 usage: server_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -83,9 +90,9 @@ class Server:
         log = (self.root / 'compositor.log').open('w')
         self.compositor = subprocess.Popen([f'{args.tools}/labwc', '-C', str(self.root / 'labwc')],
                                            env=self.env, stdout=log, stderr=log)
-        socket = wait(lambda: next((p for p in self.runtime.glob('wayland-*') if p.is_socket()), None),
+        display = wait(lambda: next((p for p in self.runtime.glob('wayland-*') if p.is_socket()), None),
                       15, 'compositor', self.compositor)
-        self.env['WAYLAND_DISPLAY'] = socket.name
+        self.env['WAYLAND_DISPLAY'] = display.name
         subprocess.run([f'{args.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x900'],
                        env=self.env, check=True, timeout=15, capture_output=True)
         # A virtual keyboard held open, as parity_live's engines do, so later
@@ -529,6 +536,14 @@ def build(args, base):
 
 
 DAEMON_PROBE = '(list noninteractive (daemonp) (condition-case e (daemon-initialized) (error (cadr e))))'
+# What `make-frame' reaches (`pgtk-dnd-init-frame'), and the primitive's
+# checks, on a window frame.
+DND_PROBE = '''(let ((f (car (filtered-frame-list #'display-graphic-p))))
+  (append
+   (mapcar (lambda (targets) (condition-case e (pgtk-register-dnd-targets f targets) (error e)))
+           (list '("text/plain") nil 'x '("a" . "b") '("a" 3)))
+   (let ((made (make-frame `((parent-frame . ,f) (visibility . nil)))))
+     (prog1 (list (frame-live-p made)) (delete-frame made)))))'''
 
 
 def daemon(args, base):
@@ -546,7 +561,7 @@ def daemon(args, base):
             until(lambda: ask(shown) == 't', 30, 'the client frame shown')
             after = (ask(DAEMON_PROBE), ask('(length (frame-list))'))
             ask('(ding)')
-            return before, after
+            return before, after, ask(DND_PROBE)
         gnu_out = s.root / 'gnu-daemon.out'
         with gnu_out.open('wb') as out:
             gnu = subprocess.Popen([args.gnu, '-Q', '--fg-daemon=dm'], env=s.env, cwd=s.root / 'work',
@@ -574,18 +589,156 @@ def daemon(args, base):
                                  check=False).stdout.strip() == f'({s.pid} t)'
         result = {'gnu': gnu_states, 'romacs': romacs_states, 'worker_noninteractive': worker,
                   'gnu_bells': gnu_bells, 'romacs_bells': romacs_bells, 'stop_automatically_survived': survived}
-        result['ok'] = ([b[0] for b in gnu_states] == [b[0] for b in romacs_states]
+        result['ok'] = ([b[0] for b in gnu_states[:2]] == [b[0] for b in romacs_states[:2]] and gnu_states[2] == romacs_states[2]
                         and worker == 't' and gnu_bells == 0 and romacs_bells == 0 and survived)
         return result
     finally:
         s.close()
+
+def title(args, base):
+    """`frame-title-format' reaches the window: what a Romacs server tells
+    its host after a client's frame shows and the buffer changes, against
+    GNU's `format-mode-line' of the same format in the same buffer names."""
+    s = Server(args, base, 'tt', {'ROMACS_DIAGNOSTICS': '1'})
+    try:
+        a = s.file('a.txt')
+        s.client('-n', str(a))
+        s.pid = int(s.eval('(emacs-pid)'))
+        titles = lambda: [json.loads(line)['window_title'] for line in s.log().splitlines() if line.startswith('{"window_title"')]
+        host = s.eval('(system-name)').strip('"')
+        wanted = f'a.txt - Romacs at {host}'
+        until(lambda: wanted in titles(), 30, f'the title {wanted}')
+        s.eval('(with-current-buffer "a.txt" (rename-buffer "renamed.txt"))')
+        renamed = f'renamed.txt - Romacs at {host}'
+        s.eval('(force-mode-line-update t)')
+        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: renamed in titles(), 30, f'the title {renamed}')
+        # With nothing to paint: a client's form, then a timer's.
+        s.eval("(setq frame-title-format \"custom %b\")")
+        until(lambda: 'custom renamed.txt' in titles(), 30, 'the custom title')
+        s.eval("(run-at-time 0.1 nil (lambda () (setq frame-title-format \"timer %b\")))")
+        until(lambda: 'timer renamed.txt' in titles(), 30, 'the timer title')
+        # A construct the key does not cover: the size follows each edit.
+        s.eval('(with-current-buffer "renamed.txt" (setq frame-title-format "%b (%i)") (set-buffer-modified-p t) (erase-buffer) (insert "a"))')
+        until(lambda: 'renamed.txt (1)' in titles(), 30, 'the size in the title')
+        s.eval('(with-current-buffer "renamed.txt" (insert "b"))')
+        until(lambda: 'renamed.txt (2)' in titles(), 30, 'the next size in the title')
+        # %* reads `buffer-read-only' and the modified state.
+        s.eval('(with-current-buffer "renamed.txt" (setq frame-title-format "%b %*") (set-buffer-modified-p nil))')
+        until(lambda: 'renamed.txt -' in titles(), 30, 'the unmodified mark')
+        s.eval('(with-current-buffer "renamed.txt" (setq buffer-read-only t))')
+        until(lambda: 'renamed.txt %' in titles(), 30, 'the read-only mark')
+        return {'titles': titles(), 'ok': True}
+    finally:
+        s.close()
+
+
+class VirtualPointer:
+    """A pointer on the private compositor, over zwlr_virtual_pointer_v1:
+    the Wayland wire protocol by hand, as the tools have no pointer and a
+    seat without one sends a client no pointer events."""
+
+    def __init__(self, env):
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.connect(str(Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']))
+        self.send(1, 1, struct.pack('<I', 2))  # wl_display.get_registry -> 2
+        self.send(1, 0, struct.pack('<I', 3))  # wl_display.sync -> 3
+        name = None
+        for sender, opcode, body in self.events(3):
+            if sender == 2 and opcode == 0:  # wl_registry.global
+                length = struct.unpack_from('<I', body, 4)[0]
+                if body[8:8 + length - 1] == b'zwlr_virtual_pointer_manager_v1':
+                    name = struct.unpack_from('<I', body)[0]
+        if name is None:
+            raise RuntimeError('the compositor has no virtual pointer')
+        interface = b'zwlr_virtual_pointer_manager_v1\0'
+        padded = interface + bytes(-len(interface) % 4)
+        self.send(2, 0, struct.pack('<I', name) + struct.pack('<I', len(interface)) + padded + struct.pack('<II', 1, 4))
+        self.send(4, 0, struct.pack('<II', 0, 5))  # create_virtual_pointer (no seat) -> 5
+
+    def send(self, target, opcode, body=b''):
+        self.sock.sendall(struct.pack('<II', target, (8 + len(body)) << 16 | opcode) + body)
+
+    def events(self, until_callback):
+        data = b''
+        while True:
+            data += self.sock.recv(65536)
+            while len(data) >= 8 and len(data) >= (struct.unpack_from('<I', data, 4)[0] >> 16):
+                sender, word = struct.unpack_from('<II', data)
+                size = word >> 16
+                yield sender, word & 0xffff, data[8:size]
+                data = data[size:]
+                if sender == until_callback:
+                    return
+
+    def move(self, x, y, extent=(1280, 900)):
+        """motion_absolute, then frame."""
+        self.send(5, 1, struct.pack('<IIIII', int(time.time() * 1000) & 0xffffffff, x, y, *extent))
+        self.send(5, 4)
+
+
+MOUSE_PROBE = """(with-selected-frame (car (filtered-frame-list #'display-graphic-p))
+  (list (cdr (mouse-pixel-position)) (cdr (mouse-position))
+        (frame-char-width) (frame-char-height) (frame-internal-border-width)))"""
+
+
+def mouse(args, base):
+    """`mouse-pixel-position' and `mouse-position' read the real pointer,
+    moved by a virtual pointer: in pinned GNU's daemon, then a Romacs
+    server, each frame's characters found from its pixels the same way."""
+    s = Server(args, base, 'ms')
+    try:
+        def seen(ask):
+            pointer = VirtualPointer(s.env)
+            answers = []
+            for at in ((100, 60), (300, 200)):
+                before, last = ask(), []
+
+                def moved():
+                    pointer.move(*at)
+                    last[:] = [ask()]
+                    return last[0] if last[0] != before else None
+                answers.append(until(moved, 15, f'the pointer at {at}: {last}'))
+            return answers
+
+        def consistent(answer):
+            x, y, column, row, width, height, border = map(int, re.findall(r'-?\d+', answer))
+            return (column, row) == ((x - border) // width, (y - border) // height)
+        ask = lambda: s.emacsclient('-e', MOUSE_PROBE).stdout.strip().replace('\n', ' ')
+        gnu = subprocess.Popen([args.gnu, '-Q', '--fg-daemon=ms'], env=s.env, cwd=s.root / 'work',
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            until(lambda: s.emacsclient('-e', 't', check=False).returncode == 0, 60, 'GNU daemon listening')
+            s.emacsclient('-c', '-n')
+            until(lambda: s.emacsclient('-e', '(and (filtered-frame-list (function display-graphic-p)) t)').stdout.strip() == 't',
+                  30, 'the client frame')
+            gnu_seen = seen(ask)
+            s.emacsclient('-e', '(kill-emacs)', check=False)
+            gnu.wait(timeout=30)
+        finally:
+            gnu.kill()
+        s.client('-n', str(s.file('a.txt')))
+        s.pid = int(s.eval('(emacs-pid)'))
+        s.keyboard_ready()
+        romacs_seen = seen(ask)
+        # A hidden window has no pointer over it, nor a shown one till it moves.
+        s.eval("(romacs--native-window 'hide)")
+        hidden = s.eval('(cdr (mouse-pixel-position))')
+        s.eval("(romacs--native-window 'show)")
+        shown = s.eval('(cdr (mouse-pixel-position))')
+        pixels = [re.match(r'\(\(\d+ \. \d+\)', answer).group() for answer in romacs_seen]
+        return {'gnu': gnu_seen, 'romacs': romacs_seen, 'hidden': hidden, 'shown': shown,
+                'ok': all(map(consistent, gnu_seen + romacs_seen)) and pixels == ['((100 . 60)', '((300 . 200)'] and hidden == '(nil)'}
+    finally:
+        s.close()
+
 
 def lisp_read(text):
     return parity_live.read_sexp(text) if text.startswith('"') else text
 
 
 WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
-             'probe': probe, 'daemon': daemon}
+             'probe': probe, 'daemon': daemon, 'title': title, 'mouse': mouse}
 
 
 def main():

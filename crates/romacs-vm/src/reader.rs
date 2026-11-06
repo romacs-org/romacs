@@ -1038,9 +1038,9 @@ impl Reader<'_, '_> {
                         }
                     }
                 }
-                // Preserve the host-source compiler adapter during migration;
-                // Lisp stream literals follow GNU content-based multibyteness.
-                if !unicode && !(matches!(self.input, Input::Host { .. }) && s.iter().all(|c| *c < 128)) {
+                // GNU read_string_literal: multibyte only for a character
+                // above 127 that is not a raw byte, whatever the source.
+                if !unicode {
                     let bytes = s
                         .into_iter()
                         .map(|c| {
@@ -1434,6 +1434,9 @@ impl Vm {
                 Object::String(s) | Object::RawString(s) if !s.properties.is_empty() => {
                     Ok(Form::Object(crate::handle::FormObject::new(self, value)))
                 }
+                // A source literal's ASCII unibyte text is a cacheable
+                // constant; other unibyte strings keep their identity.
+                Object::String(s) if !s.is_multibyte() && mode == Datum::Source && s.bytes().is_ascii() => Ok(Form::Bytes(s.bytes().to_vec())),
                 Object::String(s) | Object::RawString(s) if !s.is_multibyte() => Ok(Form::Object(crate::handle::FormObject::new(self, value))),
                 Object::String(_) => Ok(Form::String(
                     String::from_utf8(self.string_bytes(value)?).map_err(|e| e.to_string())?,

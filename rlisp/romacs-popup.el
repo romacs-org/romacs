@@ -228,7 +228,7 @@ map activated with hints inhibited.  `internal-push-keymap' composes
 (defun romacs-popup--hint-label (binding)
   "What a hint says BINDING does, or nil to leave it out."
   (cond ((null binding) nil)
-        ((keymapp binding) "+…")
+        ((keymapp binding) "+...")
         ((and (consp binding) (eq (car binding) 'menu-item)) (and (stringp (nth 1 binding)) (nth 1 binding)))
         ((symbolp binding)
          (let ((name (symbol-name binding)))
@@ -327,10 +327,9 @@ its MESSAGE (shown once, here, while the hints show)."
                                               (propertize (cdr e) 'face 'romacs-popup-description)))
                           (romacs-popup--hint-entries map) "   "))
          (columns (max 10 (- (window-body-width window) 4)))
-         ;; Cut with room for the `…' as the font paints it (Iosevka's is
-         ;; two cells).
+         (dots (truncate-string-ellipsis))
          (text (if (> (romacs-layer--toast-width text) columns)
-                   (concat (truncate-string-to-width text (- columns (romacs-layer--toast-width "…"))) "…")
+                   (concat (truncate-string-to-width text (- columns (romacs-layer--toast-width dots))) dots)
                  text))
          (buffer (romacs-popup--hints-buffer))
          (message (gethash map romacs-popup--hint-maps)))
@@ -660,7 +659,7 @@ column, two spaces, the label, cut with `…' past WIDTH columns."
     (mapcar (lambda (e)
               (let* ((label (if (nth 2 e) (concat "+" (nth 1 e)) (nth 1 e)))
                      (room (- width key-width 2))
-                     (label (if (> (string-width label) room) (concat (truncate-string-to-width label (max 1 (- room 2))) "…") label)))
+                     (label (if (> (string-width label) room) (truncate-string-to-width label (max 1 room) nil nil t) label)))
                 (concat (make-string (- key-width (string-width (car e))) ?\s)
                         (propertize (car e) 'face 'romacs-popup-key) "  "
                         (propertize label 'face (if (nth 2 e) 'romacs-popup-group 'romacs-popup-description)))))
@@ -689,7 +688,7 @@ each, GAP apart, each page but the last ending in `… N more · C-h'."
              (widths (mapcar (lambda (g) (min column-width (romacs-popup--card-natural g))) groups))
              (text (romacs-popup--card-join groups widths gap)))
         (push (if (< shown n)
-                  (concat text "\n" (propertize (format "… %d more · %s" (- n shown) (key-description (vector help-char)))
+                  (concat text "\n" (propertize (format "... %d more · %s" (- n shown) (key-description (vector help-char)))
                                                 'face 'romacs-popup-dim))
                 text)
               result)))))

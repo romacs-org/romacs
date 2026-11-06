@@ -29,15 +29,15 @@ crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds 
 crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
-crates/romacs-vm/src/display.rs:400 delayed-variable the window record's display variables, read through variable_value, which checks the fence
-crates/romacs-vm/src/display.rs:1301 delayed-variable reads through variable_value, which checks the fence
-crates/romacs-vm/src/forwarded.rs:724 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/forwarded.rs:1482 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/forwarded.rs:1679 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/gc.rs:260 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
-crates/romacs-vm/src/gc.rs:261 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:964 dynamic:saved collector: marks the saved values
-crates/romacs-vm/src/gc.rs:1391 dynamic:saved collector: forwards the saved values
+crates/romacs-vm/src/display.rs:410 delayed-variable the window record's display variables, read through variable_value, which checks the fence
+crates/romacs-vm/src/display.rs:1319 delayed-variable reads through variable_value, which checks the fence
+crates/romacs-vm/src/forwarded.rs:737 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/forwarded.rs:1611 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/forwarded.rs:1808 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/gc.rs:279 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
+crates/romacs-vm/src/gc.rs:280 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs:1028 dynamic:saved collector: marks the saved values
+crates/romacs-vm/src/gc.rs:1455 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/hash.rs:891 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:173 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
@@ -51,25 +51,25 @@ crates/romacs-vm/src/image.rs:383 std::fs the code-image store, reached only thr
 crates/romacs-vm/src/image.rs:386 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:392 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:397 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
-crates/romacs-vm/src/lib.rs:1967 slot:exec-path declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:1967 slot:initial-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:1967 slot:process-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2046 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/lib.rs:3500 dynamic:saved unbind: restores the saved value as the binding ends
-crates/romacs-vm/src/prim.rs:1000 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/lib.rs:1986 slot:exec-path declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1986 slot:initial-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1986 slot:process-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:2066 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/lib.rs:3525 dynamic:saved unbind: restores the saved value as the binding ends
 crates/romacs-vm/src/prim.rs:1010 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1022 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1031 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
-crates/romacs-vm/src/prim.rs:1131 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/prim.rs:1020 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1032 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1041 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
+crates/romacs-vm/src/prim.rs:1141 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/prim/leaf/editor_mark.rs:41 delayed-variable reads through variable_value, which checks the fence
 crates/romacs-vm/src/subprocess.rs:509 std::net ProcessWatch's cancel pair: a socket pair private to this process that stops its own poll thread; it reaches no host fact
 crates/romacs-vm/src/variable_runtime.rs:137 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/variable_runtime.rs:151 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:268 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/variable_runtime.rs:382 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
-crates/romacs-vm/src/variable_runtime.rs:413 dynamic:saved specbind: pushes a new binding, saving the value it shadows
-crates/romacs-vm/src/variable_runtime.rs:563 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
-crates/romacs-vm/src/variable_runtime.rs:583 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/variable_runtime.rs:274 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/variable_runtime.rs:388 dynamic:saved reads saved values of a localized Boolean, which the fence never holds
+crates/romacs-vm/src/variable_runtime.rs:419 dynamic:saved specbind: pushes a new binding, saving the value it shadows
+crates/romacs-vm/src/variable_runtime.rs:569 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
+crates/romacs-vm/src/variable_runtime.rs:589 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
 crates/romacs-vm/src/world/arena.rs:464 libc::getenv the world allocator reads whether it runs in a builder at its first allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
 crates/romacs-vm/src/world/arena.rs:472 libc::getrandom the world allocator picks a random arena address at its first allocation; no Lisp value depends on it
 crates/romacs-vm/src/world/arena.rs:501 libc::file a builder backs its arena with an unlinked memory file at its first allocation, before host.rs can run; no Lisp value depends on it

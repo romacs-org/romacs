@@ -86,7 +86,7 @@
                            "[ \t\n\r]+" " " text))))
               ((not (string-empty-p text))))
     (if limit
-        (truncate-string-to-width text limit nil nil "…")
+        (truncate-string-to-width text limit nil nil t)
       text)))
 (defun jabber-link-preview--meta-content (dom attribute value)
   "Return content of the first meta node in DOM whose ATTRIBUTE is VALUE."

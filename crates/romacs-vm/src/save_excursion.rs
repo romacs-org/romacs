@@ -71,7 +71,7 @@ impl Vm {
             _ => return Err("buffer required".into()),
         };
         let anchor = self.marker_anchors_mut(buffer)?.create(point.0 as u32, Bias::Left).expect("excursion anchor");
-        Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias: Bias::Left }))))
+        Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias: Bias::Left , last_position: 0 }))))
     }
 
     /// editfns.c save_excursion_restore's buffer and point half: unless the
@@ -128,7 +128,7 @@ impl Vm {
         let beg = tree.create(bounds.start.0 as u32, Bias::Left).expect("restriction anchor");
         let end = tree.create(bounds.end.0 as u32, Bias::Right).expect("restriction anchor");
         let [beg, end] = [(beg, Bias::Left), (end, Bias::Right)].map(|(anchor, bias)| {
-            self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias })))
+            self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias, last_position: 0 })))
         });
         Ok(self.alloc_cons(beg, end))
     }

@@ -486,7 +486,7 @@ class GateArguments(unittest.TestCase):
     def test_staged_snapshot_excludes_other_work_without_changing_the_index(self):
         (self.root / 'captured-new').write_text('staged')
         subprocess.run(['git', 'add', 'captured-new'], cwd=self.root, check=True)
-        (self.root / 'README.org').write_text('owner work')
+        (self.root / 'README.md').write_text('other work')
         (self.root / 'untracked').write_text('not staged')
         path = self.root / 'scripts/gate'
         path.write_bytes(path.read_bytes() + b'\n# unstaged fixture\n')
@@ -495,13 +495,13 @@ class GateArguments(unittest.TestCase):
         self.assertEqual((self.root / '.git/index').read_bytes(), before)
         names = gate.out('git', 'ls-tree', '-r', '--name-only', staged, cwd=self.root).decode().splitlines()
         self.assertIn('captured-new', names)
-        self.assertNotIn('README.org', names)
+        self.assertNotIn('README.md', names)
         self.assertNotIn('untracked', names)
         self.assertNotIn(b'unstaged fixture', gate.out('git', 'show', staged + ':scripts/gate', cwd=self.root))
         total = gate.freeze(self.root)
         self.assertEqual((self.root / '.git/index').read_bytes(), before)
         names = gate.out('git', 'ls-tree', '-r', '--name-only', total, cwd=self.root).decode().splitlines()
-        self.assertIn('README.org', names)
+        self.assertIn('README.md', names)
         self.assertIn('untracked', names)
         self.assertIn(b'unstaged fixture', gate.out('git', 'show', total + ':scripts/gate', cwd=self.root))
 
@@ -766,16 +766,16 @@ class Receipts(unittest.TestCase):
     def test_staged_candidate_and_receipt_preserve_unrelated_work(self):
         (self.wt / 'f.rs').write_text('candidate')
         self.git('add', 'f.rs')
-        (self.wt / 'README.org').write_text('owner work')
+        (self.wt / 'README.md').write_text('other work')
         self.assertEqual(self.submit('full', '--staged'), 0)
         self.assertEqual(self.captured, ['candidate'])
         receipt = json.loads((self.run_dir / 'receipt.json').read_text())
         names = self.git('ls-tree', '-r', '--name-only', receipt['tree']).decode().splitlines()
-        self.assertNotIn('README.org', names)
+        self.assertNotIn('README.md', names)
         self.assertEqual(self.reuse('--staged'), 0)
         self.git('commit', '-m', 'candidate')
         self.assertEqual(self.reuse('--staged'), 0)
-        self.assertEqual((self.wt / 'README.org').read_text(), 'owner work')
+        self.assertEqual((self.wt / 'README.md').read_text(), 'other work')
 
     def test_vacuity_root_absent_or_invalid_refuses(self):
         with mock.patch.dict(os.environ, ROMACS_VACUITY_GIT_ROOT=str(self.wt)):

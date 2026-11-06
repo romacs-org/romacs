@@ -31,6 +31,7 @@
 
 ;;; Code:
 
+(require 'romacs-truncate)
 (require 'hermes-buffer)
 (require 'button)
 (require 'cl-lib)
@@ -383,7 +384,7 @@ one line instead of appending."
   "Return TEXT's first line, trimmed and truncated for a one-line summary."
   (truncate-string-to-width
    (string-trim (car (split-string text "\n")))
-   hermes-chat--transient-summary-width nil nil "…"))
+   hermes-chat--transient-summary-width nil nil t))
 
 (defun hermes-chat--insert-transient-toggle (entry summary expanded &optional face help)
   "Insert a toggle labeled SUMMARY for transient ENTRY in EXPANDED state.
@@ -2149,7 +2150,7 @@ for the same still-current attachment is not repeated."
 
 (defun hermes-chat--preview (content)
   "Return a compact preview for CONTENT."
-  (truncate-string-to-width (string-replace "\n" " " content) 80 nil nil "…"))
+  (truncate-string-to-width (string-replace "\n" " " content) 80 nil nil t))
 
 (defvar hermes-chat--submit-function #'ignore
   "Function submitting CONTENT as a new user turn, set by `hermes-chat'.
@@ -2890,7 +2891,7 @@ name handler."
                 (equal (hermes-chat--directory-key (car linked)) root-key)
                 (not (string-prefix-p (concat root-key "/")
                                       (hermes-chat--directory-key directory))))
-           (concat "…/" (hermes-chat--directory-label
+           (concat (truncate-string-ellipsis) "/" (hermes-chat--directory-label
                          directory (hermes-chat--with-local-files
                                      (file-name-directory
                                       (hermes-chat--directory-key
@@ -2936,9 +2937,9 @@ With LABEL, budget the complete action label, not only its value."
     (concat
      prefix
      (propertize
-      (concat (truncate-string-to-width
+      (concat (romacs-truncate
                (replace-regexp-in-string "[\n\r\t]" " " (or value "unknown"))
-               (- 40 (string-width (or prefix "")) (length suffix)) nil nil "…")
+               (- 40 (string-width (or prefix "")) (length suffix)))
               suffix)
       'face (cond ((null value) 'shadow) (pending 'warning)
                   (t 'keymap-popup-value))
@@ -3535,14 +3536,16 @@ Use COMPACT notation when non-nil."
 A path's final components are its most specific part."
   (if (<= (string-width string) width)
       string
-    (let ((start (length string))
-          (used 0))
+    (let* ((start (length string))
+           (used 0)
+           (dots (truncate-string-ellipsis))
+           (mark (if (> width (string-width dots)) dots "")))
       (while (and (> start 0)
                   (<= (+ used (char-width (aref string (1- start))))
-                      (- width (string-width "…"))))
+                      (- width (string-width mark))))
         (setq start (1- start)
               used (+ used (char-width (aref string start)))))
-      (concat (propertize "…" 'face (get-text-property 0 'face string))
+      (concat (propertize mark 'face (get-text-property 0 'face string))
               (substring string start)))))
 
 (defun hermes-chat--header-fit (width status yolo directory optional &optional work)
@@ -3900,7 +3903,7 @@ truncation column, so a binary search over columns suffices."
           best)
       (while (<= low high)
         (let* ((middle (/ (+ low high) 2))
-               (candidate (truncate-string-to-width string middle nil nil "…")))
+               (candidate (romacs-truncate string middle)))
           (if (funcall fits candidate)
               (setq best candidate low (1+ middle))
             (setq high (1- middle)))))
@@ -4070,7 +4073,7 @@ FITS is a predicate on a line's text, or a column count."
                           (if (plist-get entry :rejected-p) "Not sent: " "")
                           (string-trim (hermes-chat--status-rule-one-line first)))))
        (concat (make-text-button
-                (or (hermes-chat--status-rule-truncate text fits) "…") nil
+                (or (hermes-chat--status-rule-truncate text fits) (truncate-string-ellipsis)) nil
                 'face (if (plist-get entry :rejected-p) 'warning 'shadow)
                 'mouse-face 'highlight 'follow-link t
                 'help-echo "Open the queue panel at this message"

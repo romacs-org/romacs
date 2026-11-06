@@ -1787,7 +1787,7 @@ is in the body the reply context is already visible inline."
   "Return the first line of TEXT, truncated to LIMIT characters."
   (let ((line (car (split-string text "\n"))))
     (if (> (length line) limit)
-        (concat (substring line 0 limit) "…")
+        (concat (substring line 0 limit) (truncate-string-ellipsis))
       line)))
 
 (defun jabber-chat--reply-context-snippet (msg)
