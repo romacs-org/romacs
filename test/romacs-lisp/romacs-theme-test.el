@@ -29,8 +29,11 @@
   "A light palette whose muted colour is too faint to read on its background.")
 
 (defun romacs-theme-test--hex-p (value)
-  (and (stringp value) (= (length value) 7) (equal (substring value 0 1) "#")
-       (equal (romacs-color--hex (romacs-color--channels value)) value)))
+  (and (stringp value) (string-match-p "\\`#[0-9a-f]\\{6\\}\\'" value)))
+
+(defun romacs-theme-test--channels (hex)
+  "HEX, \"#rrggbb\", as (R G B), each from 0.0 to 1.0."
+  (mapcar (lambda (at) (/ (string-to-number (substring hex at (+ at 2)) 16) 255.0)) '(1 3 5)))
 
 (romacs-deftest romacs-theme-colour-functions-give-color-el-s-values ()
   ;; Each computed by pinned GNU's color.el, which these match bit for bit.
@@ -45,8 +48,8 @@
 
 (romacs-deftest romacs-theme-srgb-round-trips-within-a-step ()
   (dolist (hex '("#000000" "#ffffff" "#d48a20" "#7030af" "#9cbd6f"))
-    (let ((back (romacs-color--channels (romacs-color-from-oklab (romacs-color-oklab hex))))
-          (there (romacs-color--channels hex)))
+    (let ((back (romacs-theme-test--channels (romacs-color-from-oklab (romacs-color-oklab hex))))
+          (there (romacs-theme-test--channels hex)))
       (romacs-should (< (apply #'max (mapcar #'abs (list (- (nth 0 back) (nth 0 there)) (- (nth 1 back) (nth 1 there))
                                                          (- (nth 2 back) (nth 2 there)))))
                         (/ 1.5 255))))))

@@ -51,7 +51,10 @@ impl Vm {
                 Ok(y)
             }
             Nth => {
-                let count = x.as_integer()?.max(0) as usize;
+                let count = match self.bigint_value(x).filter(|_| x.integer_value().is_none()) {
+                    Some(big) => prim::prims::fns::big_nth_count(&big, y, |t| self.cons_pair(t).ok().map(|p| p.1)) as usize,
+                    None => x.as_integer()?.max(0) as usize,
+                };
                 let mut tail = y;
                 // Brent's cycle detector is needed only for counts larger than
                 // the heap's possible proper-list length. Reduce the remaining

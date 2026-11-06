@@ -106,6 +106,12 @@ pub trait HostInput {
     fn native_window(&mut self, _action: NativeWindow) -> Option<bool> {
         None
     }
+
+    /// Where the pointer is over the host frame, in pixels: GNU's
+    /// `mouse_position_hook'.  None with no pointer there, or no display.
+    fn pointer(&mut self) -> Option<(i32, i32)> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -184,8 +190,9 @@ impl Vm {
             }
             HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
-                let quit = self.intern("quit");
-                self.propagated_escape = Some(threaded::Escape::Signal(quit, Value::NIL));
+                // Its data tells it from a C-g's (`romacs--host-event').
+                let (quit, closed) = (self.intern("quit"), self.intern("frame-closed"));
+                self.propagated_escape = Some(threaded::Escape::Signal(quit, closed));
                 Err("quit: frame closed while reading input".into())
             }
         }
@@ -465,6 +472,23 @@ mod tests {
         assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
         let first: u64 = words[2].parse().expect(&got);
         assert!((5_000..40_000).contains(&first), "{got}");
+    }
+
+    /// A collection in a prompt's redisplay runs with the host taken for the
+    /// read, so no key can be seen: its record says so rather than nothing.
+    #[test]
+    fn a_collection_in_a_prompts_redisplay_is_recorded_as_met() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120], vec![0]))));
+        vm.eval_source("(setq mode-line-format '(:eval (progn (garbage-collect) \"m\")))").unwrap();
+        vm.take_collections();
+        vm.idle_since = Some(crate::host::monotonic());
+        vm.eval_source("(romacs--read-host-event)").unwrap();
+        let taken = vm.take_collections();
+        let got = vm.display(taken).unwrap();
+        assert!(got.contains(" redisplay "), "{got}");
     }
 
     /// The T2 continuation path (`t2_dispatch`) also routes the read to engine

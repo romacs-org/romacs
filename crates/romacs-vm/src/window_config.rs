@@ -229,7 +229,8 @@ impl Vm {
             point_marker
         };
         let w = self.window_mut(window)?;
-        w.buffer = buffer;
+        w.show(buffer);
+        w.end_valid = false;
         w.start = start_marker;
         w.point = point_marker;
         Ok(())

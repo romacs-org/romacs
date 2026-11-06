@@ -2354,6 +2354,9 @@ pub fn parent_pid() -> i32 {
 /// one waits in a join), so only the pipe reliably ends a blocked wait.
 static INTERRUPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Seconds a worker has to end after its first SIGTERM, or 0: no limit
+/// (`limit_termination`).
+static TERMINATE_LIMIT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// The wake pipe's read and write ends, or -1.
 static WAKE_READ: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 static WAKE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
@@ -2368,7 +2371,12 @@ extern "C" fn note_interrupt(_: libc::c_int) {
     wake_isolate_wait();
 }
 extern "C" fn note_terminate(_: libc::c_int) {
-    TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+    use std::sync::atomic::Ordering;
+    let first = !TERMINATE.swap(true, Ordering::SeqCst);
+    // alarm(2) is async-signal-safe; SIGALRM's default action ends the
+    // process, whatever it is blocked in.
+    let seconds = TERMINATE_LIMIT.load(Ordering::SeqCst);
+    if first && seconds > 0 { unsafe { libc::alarm(seconds) }; }
     wake_isolate_wait();
 }
 
@@ -2383,6 +2391,13 @@ pub fn drain_isolate_wake() {
         let mut bytes = [0u8; 64];
         while unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) } > 0 {}
     }
+}
+
+/// A worker ends within SECONDS of its first SIGTERM: a termination is a
+/// flag its loop reads, which a worker blocked inside a primitive never
+/// does, and with its spawner gone nothing else would end it.
+pub fn limit_termination(seconds: u32) {
+    TERMINATE_LIMIT.store(seconds, std::sync::atomic::Ordering::SeqCst);
 }
 
 pub fn catch_isolate_signals() -> io::Result<()> {
@@ -2564,6 +2579,33 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     Ok(())
 }
 
+/// The calling thread's id.
+pub fn thread_id() -> i32 {
+    unsafe { libc::gettid() }
+}
+
+/// The processors thread TID may run on: how many, and a digest of which;
+/// None once it is gone.
+pub fn thread_affinity(tid: i32) -> Option<(u32, u64)> {
+    use std::hash::{Hash, Hasher};
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sched_getaffinity(tid, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) } != 0 { return None; }
+    let (mut count, mut digest) = (0, std::collections::hash_map::DefaultHasher::new());
+    for cpu in 0..libc::CPU_SETSIZE as usize {
+        let set = unsafe { libc::CPU_ISSET(cpu, &cpus) };
+        count += u32::from(set);
+        set.hash(&mut digest);
+    }
+    Some((count, digest.finish()))
+}
+
+/// PID's proportional set size, in kilobytes (/proc/PID/smaps_rollup);
+/// None once it is gone.
+pub fn process_pss(pid: i32) -> Option<u64> {
+    let rollup = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
+    rollup.lines().find_map(|line| line.strip_prefix("Pss:")?.split_whitespace().next()?.parse().ok())
+}
+
 /// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
 /// write end closes unwritten (false); a termination ends the wait too.
 pub fn await_gate(gate: OwnedFd) -> bool {
@@ -2734,6 +2776,18 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// uname's release (editfns.c init_editfns).
+pub fn os_release() -> String {
+    let mut name: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut name) } != 0 { return String::new(); }
+    unsafe { std::ffi::CStr::from_ptr(name.release.as_ptr()) }.to_string_lossy().into_owned()
+}
+
+/// sysconf (_SC_ARG_MAX) / 4, GNU's crude bytes to characters (callproc.c:2249).
+pub fn command_line_max() -> i64 {
+    match unsafe { libc::sysconf(libc::_SC_ARG_MAX) } { n if n > 0 => n as i64 / 4, _ => 4096 }
 }
 
 /// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
@@ -3172,6 +3226,15 @@ fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard
 pub fn inspect_pending() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+}
+/// Whether a listener runs, so that a native loop should poll for requests.
+pub fn inspect_enabled() -> bool {
+    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Raise a request, as a client does.
+#[cfg(test)]
+pub fn inspect_request() {
+    INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 /// The newest request, which a snapshot taken now answers.
 pub fn inspect_generation() -> u64 {

@@ -206,3 +206,11 @@ fn module_file_suffix_is_bound_and_nil_without_modules() {
     let v = vm.eval_source_raw("(list (boundp 'module-file-suffix) module-file-suffix)").unwrap();
     assert_eq!(vm.display(v).unwrap(), "(t nil)");
 }
+
+/// keyboard.c only sets `echo-area-clear-hook': bound, not special.
+#[test]
+fn echo_area_clear_hook_is_bound_and_not_special() {
+    let mut vm = Vm::new();
+    let v = vm.eval_source_raw("(list (boundp 'echo-area-clear-hook) (special-variable-p 'echo-area-clear-hook))").unwrap();
+    assert_eq!(vm.display(v).unwrap(), "(t nil)");
+}

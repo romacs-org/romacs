@@ -238,7 +238,7 @@ fn menus_share_one_look_and_motion() {
             (funcall exit-outer) (push (romacs-popup--hint-target) r)
             (nreverse r))"));
         // Labels: one traversal; a closure by its doc's first line, a prefix as
-        // +…, a range split around the keys a child rebinds, remaps left out.
+        // +..., a range split around the keys a child rebinds, remaps left out.
         report.push(printed(&mut vm, "(let* ((parent (make-keymap)) (child (make-sparse-keymap)))
             (define-key parent [remap undo] #'ignore)
             (set-char-table-range (nth 1 parent) '(?a . ?e) #'self-insert-command)
@@ -264,17 +264,17 @@ fn menus_share_one_look_and_motion() {
                 (push (frame-visible-p f) chip-hint-hidden))))"));
         report.push(printed(&mut vm, "chip-hint-hidden"));
         // A hint too long for the window is cut where the font paints the
-        // `…', and its frame holds the painted row plus the reserved column.
+        // `...', and its frame holds the painted row plus the reserved column.
         report.push(printed(&mut vm, "(let* ((map (make-sparse-keymap)))
             (dotimes (i 40) (define-key map (string (+ ?a i)) #'indent-rigidly-right))
             (romacs-popup--hints-show map)
             (let* ((buf (romacs-popup--hints-buffer)) (f (romacs-layer--frame-of buf))
                    (text (with-current-buffer buf (buffer-string)))
                    (painted (romacs-layer--toast-width text)))
-              (prog1 (list (string-suffix-p \"…\" text)
+              (prog1 (list (string-suffix-p \"...\" text)
                            (<= painted (- (window-body-width (selected-window)) 4))
                            (>= (window-body-width (frame-root-window f)) (1+ painted))
-                           (romacs-layer--toast-width \"…\"))
+                           (romacs-layer--toast-width \"...\"))
                 (romacs-popup--hints-hide))))"));
         report.push(printed(&mut vm, "(let ((map (define-keymap \"o\" #'other-window \"O\" #'ignore)) r)
             (let ((romacs-popup-hints-mode nil)) (romacs-popup-repeat-echo map)
@@ -381,10 +381,10 @@ fn menus_share_one_look_and_motion() {
         "(nil t)",
         "t",
         "(t t t t nil t nil)",
-        "((\"w\" . \"left\") (\"p\" . \"+…\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
+        "((\"w\" . \"left\") (\"p\" . \"+...\") (\"x\" . \"Do the thing.\") (\"a..b\" . \"self-insert-command\") (\"d..e\" . \"self-insert-command\"))",
         "(hints t \"<right> indent-rigidly-right   <left> indent-rigidly-left\" t t nil t)",
         "(nil)",
-        "(t t t 2)",
+        "(t t t 3)",
         // The status bar's repeat segment: the keys without hints, nothing with them.
         "(\"\" nil)",
         "(((\"a..e\" . \"backward-char\") (\"f..h\" . \"ignore\")) ((\"<f2>\" . \"ignore\") (\"b\" . \"backward-char\") (\"<f1>\" . \"ignore\") (\"d\" . \"forward-char\") (\"a\" . \"undo\") (\"c\" . \"undo\") (\"e\" . \"undo\")))",
@@ -471,7 +471,7 @@ fn key_hint_cards() {
             (let* ((w (frame-root-window (romacs-layer--frame-of which-key--buffer)))
                    (lines (with-current-buffer which-key--buffer (split-string (buffer-substring-no-properties (point-min) (point-max)) \"\\n\"))))
               (prog1 (list (>= (window-max-chars-per-line w) (seq-max (mapcar #'string-width lines)))
-                           (seq-some (lambda (l) (and (string-search \"…\" l) (not (string-search \"more\" l)))) lines))
+                           (seq-some (lambda (l) (and (string-search \"...\" l) (not (string-search \"more\" l)))) lines))
                 (romacs-popup-which-key-hide))))"));
         // which-key's automatic hint for C-x: the card, titled C-x, at the
         // selected pane's bottom right 12 px in, which-key told the prefix
@@ -576,7 +576,7 @@ fn key_hint_cards() {
     assert_eq!(report, [
         "((\"p\" \"prefix\" t global) (\"d\" \"undo\" nil mode) (\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global))",
         "((\"4\" . \"other-window\") (\"m\" . \"Do the menu thing\") (\"r\" . \"copy\") (\"w\" . \"card-thing\"))",
-        "(1 (4 \"… 22 more · C-h\") nil)",
+        "(1 (4 \"... 22 more · C-h\") nil)",
         "((\"ESC\" . \"meta\") (\"8\" . \"char\") (\"v\" . \"vc\") (\"4\" . \"other-window\") (\"r\" . \"register\"))",
         "(t nil)",
         "(card t \"C-x\" t t t t t t)",

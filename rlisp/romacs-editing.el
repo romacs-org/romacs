@@ -18,6 +18,25 @@
   `(unless (and (fboundp 'symbol-file) (symbol-file ',name 'defun))
      (defun ,name ,arglist ,@body)))
 
+(romacs-editing--stand-in substitute-command-keys (string &optional _no-face _include-menus)
+  "STRING with each \\=\\[COMMAND] as its key and each \\=\\`KEYS' as KEYS, in
+`help-key-binding'; a \\=\\<MAP> names the keymap commands after it are
+looked up in.  The part of help.el's function Romacs's own hints use."
+  (let ((map nil) (start 0) (parts nil))
+    (while (string-match "\\\\\\(?:<\\([^>]+\\)>\\|\\[\\([^]]+\\)\\]\\|`\\([^']+\\)'\\)" string start)
+      (let ((text (substring string start (match-beginning 0))))
+        (cond ((match-beginning 1)
+               (setq map (symbol-value (intern (substring string (match-beginning 1) (match-end 1))))
+                     parts (cons text parts)))
+              (t (let* ((command (and (match-beginning 2) (intern (substring string (match-beginning 2) (match-end 2)))))
+                        (key (and command (where-is-internal command map t)))
+                        (shown (cond (key (key-description key))
+                                     (command (concat "M-x " (symbol-name command)))
+                                     (t (substring string (match-beginning 3) (match-end 3))))))
+                   (setq parts (cons (propertize shown 'face 'help-key-binding) (cons text parts)))))))
+      (setq start (match-end 0)))
+    (apply #'concat (reverse (cons (substring string start) parts)))))
+
 (defvar values nil)
 (defvar read-expression-history nil)
 (defvar eval-expression-print-length 12)
@@ -161,7 +180,7 @@ A numeric ARG selects tenths from the end; a universal prefix suppresses mark pu
 
 (defun romacs-prompt-previous-history ()
   "Recall an older entry from the active prompt's history variable."
-  (interactive)
+  (interactive nil minibuffer-mode)
   (when (null romacs-prompt--history-position)
     (setq romacs-prompt--history-input
           (buffer-substring-no-properties romacs-prompt--input-start (point-max))))
@@ -173,7 +192,7 @@ A numeric ARG selects tenths from the end; a universal prefix suppresses mark pu
 
 (defun romacs-prompt-next-history ()
   "Recall a newer history entry, or restore the input preceding recall."
-  (interactive)
+  (interactive nil minibuffer-mode)
   (when romacs-prompt--history-position
     (if (= romacs-prompt--history-position 0)
         (progn (setq romacs-prompt--history-position nil)
@@ -338,7 +357,7 @@ Read-only text is copied before deletion signals its ordinary read-only error."
 
 (defun romacs-register-read-key ()
   "Accept one register character through the ordinary minibuffer command loop."
-  (interactive)
+  (interactive nil minibuffer-mode)
   (unless (and (integerp last-command-event) (<= 0 last-command-event) (<= last-command-event 1114111))
     (signal 'user-error '("Use a character to name a register")))
   (setq romacs-register-key last-command-event)
@@ -455,3 +474,4 @@ Read-only text is copied before deletion signals its ordinary read-only error."
   (let ((last-command-event ?\n))
     (self-insert-command n)))
 (unless (fboundp 'newline) (global-set-key [13] 'romacs-newline))
+(put 'romacs-newline 'completion-predicate #'ignore)

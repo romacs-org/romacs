@@ -14,7 +14,8 @@
 ;; stay with Emacs.  A command that moves a window's point off the cursor,
 ;; or scrolls it back, leaves that window a plain read-only Emacs buffer
 ;; over the scrollback; typing there puts it back on the cursor and sends
-;; the key.
+;; the key.  While the shell has the terminal, M-p and M-n recall its
+;; history, as in eshell.
 ;;
 ;; The keymap is chosen once per key sequence, when its first event is
 ;; read (`romacs--sequence-start-functions'), and is the buffer's local map
@@ -28,6 +29,15 @@
 ;; this is the passthrough part.
 
 ;;; Code:
+
+(defface romacs-term-dim '((t :inherit shadow))
+  "What a terminal's mode line says around its state and keys.")
+
+(defface romacs-term-running '((t :inherit success))
+  "A terminal's state in its mode line while its program runs.")
+
+(defface romacs-term-exited '((t :inherit warning))
+  "A terminal's state in its mode line once its program has exited.")
 
 (defvar romacs-term-shell nil
   "Shell override; nil uses the native host's configured user shell ($SHELL).")
@@ -46,9 +56,9 @@ changing this outside Customize, run `romacs-term-update-keymaps'.")
   "Keys that also keep their Emacs bindings while the shell itself has the
 terminal: its process group is the terminal's foreground one, as at its
 prompt.  They move point, as in shell-mode, which leaves the cursor for
-the scrollback until typing returns; the shell's history stays on Up and
-Down.  A program the shell runs in the foreground (a REPL, a pager, fzf)
-gets them.  Each is a `kbd' string.  After changing this outside
+the scrollback until typing returns; the shell's history is on M-p and
+M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
+in the foreground (a REPL, a pager, fzf) gets them.  Each is a `kbd' string.  After changing this outside
 Customize, run `romacs-term-update-keymaps'.")
 
 (defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
@@ -85,13 +95,26 @@ rebuild the generated keymaps."
 cursor and returns to it, and C-y and M-y send kills.  While a program runs, a binding made here wins over the keys sent
 to it, and survives `romacs-term-update-keymaps'.")
 
+;; The key the mode line names, of the two that interrupt.
+(put 'romacs-term-interrupt :advertised-binding [3 3])
+
 (defvar romacs-term--passthrough (list 'keymap romacs-term-mode-map (make-sparse-keymap))
   "The passthrough route's keymap: `romacs-term-mode-map' composed over
 the generated bindings (its third element, `romacs-term--passthrough-base').")
-(defvar romacs-term--shell (list 'keymap romacs-term-mode-map (make-sparse-keymap))
-  "The shell route's keymap: `romacs-term-mode-map' composed over the
-generated bindings that keep `romacs-term-shell-exceptions' too (its third
-element, `romacs-term--shell-base').")
+(defvar romacs-term-history-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [?\M-p] 'romacs-term-previous-input)
+    (define-key map [?\M-n] 'romacs-term-next-input)
+    map)
+  "Keys that recall the shell's history.  They are bound while the shell
+has the terminal and away from its cursor; a program the shell runs gets
+them.")
+(defvar romacs-term--shell
+  (list 'keymap romacs-term-mode-map romacs-term-history-map (make-sparse-keymap))
+  "The shell route's keymap: `romacs-term-mode-map', whose bindings win, and
+`romacs-term-history-map' composed over the generated bindings that keep
+`romacs-term-shell-exceptions' too (its fourth element,
+`romacs-term--shell-base').")
 (defvar romacs-term-alternate-map (make-sparse-keymap)
   "Keys of a terminal on its alternate screen, above the generated ones.")
 (defvar romacs-term-away-map
@@ -105,9 +128,10 @@ element, `romacs-term--shell-base').")
   "Keys of a terminal window moved off its cursor: Emacs's, except that
 typing puts the window back on the cursor and sends the key.")
 
-(defvar romacs-term--away (list 'keymap romacs-term-away-map romacs-term-mode-map)
-  "The away route's keymap: `romacs-term-away-map' composed over
-`romacs-term-mode-map'.")
+(defvar romacs-term--away
+  (list 'keymap romacs-term-away-map romacs-term-mode-map romacs-term-history-map)
+  "The away route's keymap: `romacs-term-away-map' and
+`romacs-term-mode-map' composed over `romacs-term-history-map'.")
 
 (defun romacs-term--route-map (route)
   "The local keymap of a key sequence read on ROUTE."
@@ -210,7 +234,7 @@ kept."
         romacs-term--shell-base (romacs-term--passthrough-keymap (append romacs-term-keymap-exceptions romacs-term-shell-exceptions))
         romacs-term--alternate-base (romacs-term--passthrough-keymap romacs-term-alternate-exceptions))
   (setcar (cdr (cdr romacs-term--passthrough)) romacs-term--passthrough-base)
-  (setcar (cdr (cdr romacs-term--shell)) romacs-term--shell-base)
+  (setcar (nthcdr 3 romacs-term--shell) romacs-term--shell-base)
   (set-keymap-parent romacs-term-alternate-map romacs-term--alternate-base))
 
 (defun romacs-term--ensure-keymaps ()
@@ -278,10 +302,16 @@ cursor, or scrolled back, becomes a plain Emacs buffer."
       (progn (romacs--term-track) (romacs-term--motion-hint))
     (error nil)))
 
+(defun romacs-term--away-keys ()
+  "How keys work away from the cursor.  C-p and C-n are named as keys, not
+looked up: `romacs-term-shell-exceptions' keeps those keys, whatever they
+run."
+  (substitute-command-keys
+   "\\`C-p'/\\`C-n' move; type or \\<romacs-term-mode-map>\\[romacs-term-leave] to return; there \\<romacs-term-history-map>\\[romacs-term-previous-input]/\\[romacs-term-next-input] recall history"))
+
 (defun romacs-term--motion-hint ()
   "The first time a command leaves a terminal's cursor, say once how keys
-work there: motion moves, typing or C-c C-j returns, and Up and Down at
-the cursor recall the shell's history.  A command's own message (M-<'s
+work there (`romacs-term--away-keys').  A command's own message (M-<'s
 \"Mark set\") keeps the echo area; the hint waits for a later command."
   (when (and romacs-term-session (not romacs-term--motion-hinted)
              (eq (window-buffer (selected-window)) (current-buffer)))
@@ -289,7 +319,7 @@ the cursor recall the shell's history.  A command's own message (M-<'s
       (when (and (plist-get state :running) (not (plist-get state :alternate))
                  (not (plist-get state :following)) (not (current-message)))
         (setq romacs-term--motion-hinted t)
-        (message "C-p/C-n move; type or C-c C-j to return; there Up/Down recall history")))))
+        (message "%s" (romacs-term--away-keys))))))
 
 ;;;; Commands
 
@@ -307,7 +337,7 @@ While the window follows the cursor, stop following it: point stays at
 the cursor and the buffer is an ordinary Emacs buffer, its scrollback
 there to move through, search and copy.  Typing, or this command again,
 puts the window back on the cursor, as GNU term's line mode key does."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (let* ((session (romacs-term--session))
          (state (romacs--term-state session)))
     (cond ((not (plist-get state :running)) (signal 'user-error '("The terminal has exited")))
@@ -316,13 +346,13 @@ puts the window back on the cursor, as GNU term's line mode key does."
           ((not (plist-get state :following)) (romacs-term--snap))
           (t (romacs--term-follow session nil)
              (setq romacs-term--motion-hinted t)
-             (message "Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there Up/Down recall history")))))
+             (message "Terminal left at its cursor: %s" (romacs-term--away-keys))))))
 
 (defun romacs-term-send-key ()
   "Send the key that ran this command to the terminal, as the terminal's
 bytes for it: an ESC prefix before it (a meta key typed as ESC KEY)
 makes it a meta key.  The selected window follows the cursor again."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (let* ((session (romacs-term--session))
          (keys (this-command-keys-vector))
          (event last-command-event))
@@ -332,6 +362,21 @@ makes it a meta key.  The selected window follows the cursor again."
                     (intern (concat "M-" (symbol-name event))))))
     (romacs-term--snap)
     (romacs--term-send-event session event)))
+
+(defun romacs-term--recall (event)
+  "Put the selected window back on the cursor and send EVENT, a history key."
+  (romacs-term--snap)
+  (romacs--term-send-event (romacs-term--session) event))
+
+(defun romacs-term-previous-input ()
+  "Recall the previous line of the shell's history, on the shell's prompt."
+  (interactive nil romacs-term-mode)
+  (romacs-term--recall 'up))
+
+(defun romacs-term-next-input ()
+  "Recall the next line of the shell's history, on the shell's prompt."
+  (interactive nil romacs-term-mode)
+  (romacs-term--recall 'down))
 
 (defun romacs-term--paste (text)
   "Send TEXT to the terminal as a paste, after `yank-transform-functions'."
@@ -347,13 +392,13 @@ makes it a meta key.  The selected window follows the cursor again."
   "Send the most recent kill to the terminal, as `yank' would insert it:
 the clipboard first, through `interprogram-paste-function'.  With ARG,
 the ARGth most recent kill.  Bracketed when the program asked for it."
-  (interactive "P")
+  (interactive "P" romacs-term-mode)
   (romacs-term--paste (current-kill (cond ((listp arg) 0) ((eq arg '-) -2) (t (1- arg))))))
 
 (defun romacs-term-yank-pop ()
   "Choose a kill from the kill ring and send it to the terminal.
 Text sent to a program cannot be taken back, so nothing is replaced."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (romacs-term--paste
    (if (fboundp 'read-from-kill-ring)
        (read-from-kill-ring "Send from kill-ring: ")
@@ -362,7 +407,7 @@ Text sent to a program cannot be taken back, so nothing is replaced."
 (defun romacs-term-interrupt ()
   "Send Ctrl-C (ETX) to the terminal; its line discipline normally
 delivers SIGINT."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (romacs--term-send (romacs-term--session) "\003"))
 
 (defun romacs-term--kill-query ()
@@ -378,16 +423,64 @@ delivers SIGINT."
     (romacs--term-close romacs-term-session)
     (setq romacs-term-session nil)))
 
-(defun romacs-term (&optional shell)
-  "Open a native Alacritty-backed terminal running SHELL in `default-directory'.
+(defun romacs-term--hint ()
+  "The mode line's keys."
+  (romacs-key-hint "\\<romacs-term-mode-map>\\[romacs-term-interrupt] interrupt  \\[romacs-term-leave] leave"
+                   'romacs-term-dim))
+
+(defconst romacs-term--mode-line
+  (let ((separator (propertize "  |  " 'face 'romacs-term-dim))
+        (running (propertize "running" 'face 'romacs-term-running))
+        (exited (propertize "exited" 'face 'romacs-term-exited)))
+    `("  " (:propertize "%b" face mode-line-buffer-id) ,separator mode-name "  "
+      (:eval (if (romacs-term-running-p) ,running ,exited)) ,separator (:eval (romacs-term--hint))))
+  "A terminal's `mode-line-format'.")
+
+(defun romacs-term--buffer-name (arg)
+  "The terminal buffer's name for prefix ARG, as `eshell' chooses its
+buffer: a number N names *romacs-term*<N>, any other non-nil ARG a new
+buffer, and nil *romacs-term*."
+  (cond ((numberp arg) (format "*romacs-term*<%d>" arg))
+        (arg (generate-new-buffer-name "*romacs-term*"))
+        (t "*romacs-term*")))
+
+(defun romacs-term--retire (buffer)
+  "Make way for a new terminal: kill BUFFER, a terminal whose program has
+exited.  Any other buffer of that name is someone's text: a `user-error'."
+  (when buffer
+    (unless (buffer-local-value 'romacs-term-session buffer)
+      (signal 'user-error (list (format "Buffer %s is not a terminal" (buffer-name buffer)))))
+    (kill-buffer buffer)))
+
+(defun romacs-term--running-buffer (name)
+  "The buffer called NAME, if a terminal runs in it."
+  (let ((buffer (get-buffer name)))
+    (and buffer (with-current-buffer buffer (romacs-term-running-p)) buffer)))
+
+(defun romacs-term (&optional shell arg)
+  "Switch to the terminal *romacs-term*, or start it running SHELL in
+`default-directory'.  With a numeric prefix ARG N, *romacs-term*<N> instead;
+with \\[universal-argument] alone, a new terminal.  A terminal whose program
+has exited starts afresh.
 Keys go to the program, except `romacs-term-keymap-exceptions'.  C-c C-c
-sends Ctrl-C; C-y and M-y send kills.  C-c C-j, moving point off the
-cursor, or scrolling back makes the window a plain Emacs buffer until you
-type or press C-c C-j again."
-  (interactive)
+sends Ctrl-C; C-y and M-y send kills; M-p and M-n recall the shell's
+history.  C-c C-j, moving point off the cursor, or scrolling back makes the
+window a plain Emacs buffer until you type or press C-c C-j again."
+  (interactive (list nil current-prefix-arg))
   (romacs-term--ensure-keymaps)
-  (let* ((directory (or (and (boundp 'default-directory) default-directory) "/"))
-         (buffer (get-buffer-create (generate-new-buffer-name "*romacs-term*")))
+  (let* ((name (romacs-term--buffer-name arg))
+         (running (romacs-term--running-buffer name))
+         ;; Read first: the buffer retired may be the current one.
+         (directory (or (and (boundp 'default-directory) default-directory) "/")))
+    (if running
+        (progn (romacs-select-buffer running) running)
+      (romacs-term--retire (get-buffer name))
+      (romacs-term--start name shell directory))))
+
+(defun romacs-term--start (name shell directory)
+  "Start a terminal running SHELL in DIRECTORY, in a new buffer called NAME,
+and show it."
+  (let* ((buffer (get-buffer-create name))
          (completed nil))
     (unwind-protect
         (progn
@@ -408,9 +501,7 @@ type or press C-c C-j again."
             (setq romacs-term-session (romacs--term-create (or shell romacs-term-shell "") directory))
             (setq kill-buffer-hook '(romacs-term--close)
                   kill-buffer-query-functions '(romacs-term--kill-query)
-                  mode-line-format '("  %b  |  " mode-name "  "
-                                     (:eval (if (romacs-term-running-p) "running" "exited"))
-                                     "  |  C-c C-c interrupt  C-c C-j leave"))
+                  mode-line-format romacs-term--mode-line)
             (run-hooks 'romacs-term-mode-hook))
           (setq completed t)
           buffer)

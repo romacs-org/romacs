@@ -66,6 +66,11 @@ with the session before its harness starts.  Return the session.
 (register-definition-prefixes "romacs-agent-history" '("romacs-agent-history-"))
 
 
+;;; Generated autoloads from romacs-agent-images.el
+
+(register-definition-prefixes "romacs-agent-images" '("romacs-agent-images-"))
+
+
 ;;; Generated autoloads from romacs-agent-t3.el
 
 (register-definition-prefixes "romacs-agent-t3" '("romacs-agent-t3-"))
@@ -78,6 +83,18 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(autoload 'romacs-agent-switch "romacs-agent-ui"
+"Switch to agent SESSION, in this window, chosen by what each is doing:
+those that want you first, finished delegated tasks last, each with its
+state, last activity, context, model, project and the start of its last
+reply.  A session with no chat yet gets one.
+
+(fn SESSION)" t)
+(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
+"Switch to agent SESSION as `romacs-agent-switch' does, the prompt offering
+only sessions whose chat is open.
+
+(fn SESSION)" t)
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
@@ -128,6 +145,8 @@ they are typed: any other key closes it and runs as usual.
 (fn THING &key SIBLINGS CONTEXT)")
 (autoload 'romacs-attach-test-host "romacs-attach"
 "Show a composer-shaped buffer that takes attachments." t)
+(put 'romacs-attach-file 'completion-predicate (lambda (_symbol buffer) (with-current-buffer buffer (or (bound-and-true-p romacs-attach--tray) (derived-mode-p 'message-mode 'org-mode)))))
+(put 'romacs-attach-edit 'completion-predicate (lambda (_symbol buffer) (with-current-buffer buffer (bound-and-true-p romacs-attach-items))))
 (register-definition-prefixes "romacs-attach" '("romacs-attach-"))
 
 
@@ -214,12 +233,12 @@ disabled.
 
 ;;; Generated autoloads from romacs-custom.el
 
-(register-definition-prefixes "romacs-custom" '("romacs-custom-"))
+(register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme" "romacs-theme-preview"))
 
 
 ;;; Generated autoloads from romacs-defaults.el
 
-(register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
+(register-definition-prefixes "romacs-defaults" '("romacs-defaults-" "vc-log-show-limit"))
 
 
 ;;; Generated autoloads from romacs-dired.el
@@ -292,7 +311,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-frame.el
 
-(register-definition-prefixes "romacs-frame" '("color-" "defined-colors" "display-" "find-composition-internal" "frame-" "romacs-" "tty-color-alist"))
+(register-definition-prefixes "romacs-frame" '("color-" "custom-theme-recalc-face" "display-" "face-" "find-composition-internal" "fontset-" "frame-" "romacs-" "set-fontset-font" "suspend-emacs" "tty-color-alist" "use-default-font-for-symbols" "x-list-fonts"))
 
 
 ;;; Generated autoloads from romacs-fzf.el
@@ -341,6 +360,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
 
 
+;;; Generated autoloads from romacs-key-hint.el
+
+(register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))
+
+
 ;;; Generated autoloads from romacs-keymap.el
 
 (register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
@@ -358,7 +382,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-loadup-bootstrap.el
 
-(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "minibuffer--sort-by-" "romacs-"))
+(register-definition-prefixes "romacs-loadup-bootstrap" '("Snarf-documentation" "backquote-process" "minibuffer--sort-by-" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-mcp.el
@@ -508,6 +532,16 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
 
 
+;;; Generated autoloads from romacs-sasl-scram.el
+
+(register-definition-prefixes "romacs-sasl-scram" '("sasl-scram-"))
+
+
+;;; Generated autoloads from romacs-saved-settings.el
+
+(register-definition-prefixes "romacs-saved-settings" '("romacs-saved-settings-"))
+
+
 ;;; Generated autoloads from romacs-server.el
 
 (autoload 'romacs-server-start "romacs-server"
@@ -591,6 +625,16 @@ recompiling; signals an error if no frame shader is installed
 ;;; Generated autoloads from romacs-treesit.el
 
 (register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
+
+
+;;; Generated autoloads from romacs-truncate.el
+
+(autoload 'romacs-truncate "romacs-truncate"
+"STRING in at most WIDTH columns, a cut one ending in an ellipsis when
+WIDTH leaves room for more than that.  PADDING, a character, fills a
+shorter STRING to WIDTH.
+
+(fn STRING WIDTH &optional PADDING)")
 
 
 ;;; Generated autoloads from romacs-unidata.el

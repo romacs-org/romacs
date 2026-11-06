@@ -57,8 +57,9 @@ innermost-loop checks, which need recursive minibuffers)."
 (unless (lookup-key minibuffer-local-map "\r")
   (define-key minibuffer-local-map "\r" 'exit-minibuffer))
 
-(defun romacs--read-minibuf (prompt keymap initial pos histvar default)
-  "minibuf.c read_minibuf (minibuf.c:573) after its argument checks."
+(defun romacs--read-minibuf (prompt keymap initial pos histvar default inherit)
+  "minibuf.c read_minibuf (minibuf.c:573) after its argument checks.
+INHERIT is INHERIT-INPUT-METHOD."
   (when (and (> romacs--minibuf-level 0) (not enable-recursive-minibuffers))
     (if (eq (selected-window) (minibuffer-window))
         (signal 'user-error '("Command attempted to use minibuffer while in minibuffer"))
@@ -93,6 +94,8 @@ innermost-loop checks, which need recursive minibuffers)."
          (buffer (get-buffer-create (format " *Minibuf-%d*" level)))
          (calling-buffer (current-buffer))
          (calling-window (selected-window))
+         ;; minibuf.c:783: `current-input-method' is buffer local.
+         (input-method (and inherit (boundp 'current-input-method) current-input-method))
          (mini (minibuffer-window))
          (mini-buffer (window-buffer mini))
          (prompt-end 1)
@@ -168,6 +171,8 @@ innermost-loop checks, which need recursive minibuffers)."
           ;; area's message.
           (message nil)
           (use-local-map keymap)
+          (when (and (stringp input-method) (fboundp 'activate-input-method))
+            (activate-input-method input-method))
           (when (and minibuffer-setup-hook (fboundp 'run-hooks))
             (run-hooks 'minibuffer-setup-hook))
           ;; keyboard.el's command loop, reading the macro or the host.

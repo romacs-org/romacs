@@ -9,7 +9,7 @@
   "floatfns.c"
  ],
  "gnu_def": "floatfns.c:542",
- "rust": "src/prims/rounding.rs:204",
+ "rust": "src/prims/rounding.rs:171",
  "args": [
   "any",
   "any"

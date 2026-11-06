@@ -20,6 +20,30 @@ fn subr_name(cx, subr: Value) {
     Ok(cx.byte_string(name.as_bytes()))
 }}
 
+// Fmarker_last_position: where MARKER is, or was when it left its buffer.
+defsubr! { name = "marker-last-position", gnu = "marker.c:458", effect = Reads,
+fn marker_last_position(cx, marker: Value) { cx.marker_last_position(marker) }}
+
+// Fgap_size: a buffer's text is a rope, with no gap.
+defsubr! { name = "gap-size", gnu = "editfns.c:925", effect = Pure,
+fn gap_size(cx) { let _ = cx; Ok(Value::integer(0).unwrap()) }}
+
+// Fsubr_type: a native-compiled subr's declared type; no subr here has one.
+defsubr! { name = "subr-type", gnu = "data.c:1089", effect = Pure,
+fn subr_type(cx, subr: Value) {
+    let _ = cx;
+    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    Ok(Value::NIL)
+}}
+
+// Fsubr_native_lambda_list: t for a subr that is no dynamic native function.
+defsubr! { name = "subr-native-lambda-list", gnu = "data.c:1074", effect = Pure,
+fn subr_native_lambda_list(cx, subr: Value) {
+    let _ = cx;
+    crate::prim::arity(subr).ok_or(Fault::Wrong("subrp", subr))?;
+    Ok(Value::TRUE)
+}}
+
 // Where Rust defines OBJECT, as help-fns.el's `help-C-file-name' finds a
 // DEFUN or DEFVAR in GNU's DOC file: for KIND `defvar', OBJECT a symbol
 // Rust forwards (its C_VARIABLES entry); else OBJECT a primitive (its

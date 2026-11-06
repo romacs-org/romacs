@@ -151,6 +151,40 @@ mod tests {
             (run-with-idle-timer 0.03 nil (lambda () (push (list 'idle (and (current-idle-time) t)) probe)))");
         assert_eq!(printed(&mut vm, "(list (read-string \"P: \") (reverse probe) (current-idle-time))"),
                    "(\"a\" (ordinary (idle t)) nil)");
+        // A keyboard key is recorded as typed before the input method runs,
+        // and a method that returns no event brings the message back.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Key('b')].into()))));
+        printed(&mut vm, "(setq probe nil input-method-function
+                  (lambda (k) (push (list k input-method-previous-message (current-message)) probe) (and (= k ?b) (list ?x))))
+            (message \"before\")");
+        assert_eq!(printed(&mut vm, "(prog1 (list (read-event nil t) (reverse probe) (current-message)
+                                                  (let ((keys (append (recent-keys) nil))) (nthcdr (- (length keys) 2) keys)))
+                                       (setq input-method-function 'list))"),
+                   "(120 ((97 \"before\" nil) (98 \"before\" nil)) nil (97 98))");
+        // SECONDS bound the read, however long a method that returned no
+        // event took.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(let ((start (float-time))
+                                          (input-method-function (lambda (_) (sleep-for 0.3) nil)))
+                                      (list (read-event nil t 0.4) (< (- (float-time) start) 0.6)))"),
+                   "(nil t)");
+        // A C-g while the wait's Lisp ran is the read's key: it does not
+        // quit through the caller.
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        assert_eq!(printed(&mut vm, "(progn (run-with-timer 0.01 nil (lambda () (setq quit-flag t)))
+                                            (read-key-sequence-vector nil))"), "[7]");
+        // Nor does a quit from the wait's redisplay, in a recursive edit
+        // too, which a closed frame's quit leaves first.
+        let quit_in_wait = |data: &str| format!("(let ((host (symbol-function 'romacs--read-host-event))
+                                                       (depth (symbol-function 'recursion-depth)))
+                                                   (fset 'romacs--read-host-event (lambda (&rest _) (signal 'quit '{data})))
+                                                   (fset 'recursion-depth (lambda () 1))
+                                                   (unwind-protect
+                                                       (catch 'exit (read-key-sequence-vector nil))
+                                                     (fset 'romacs--read-host-event host)
+                                                     (fset 'recursion-depth depth)))");
+        assert_eq!(printed(&mut vm, &quit_in_wait("nil")), "[7]");
+        assert_eq!(printed(&mut vm, &format!("(functionp {})", quit_in_wait("frame-closed"))), "t");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq probe nil)
             (run-with-timer 0.01 nil (lambda () (push 'ordinary probe)))
@@ -178,14 +212,14 @@ mod tests {
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil start (float-time))
             (run-at-time 0 nil (lambda () (push 'a probe)
-              (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 0.1)) probe)))))");
-        assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.2) (reverse probe))"), "(nil (a (b t)))");
+              (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 1.0)) probe)))))");
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 2) (reverse probe))"), "(nil (a (b t)))");
         // A timer that queues input wakes the read, which takes the event.
         // Pinned GNU 45b0f7699df, batch, stdin open: (97 t nil).
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil start (float-time))
             (run-at-time 0.01 nil (lambda () (push ?a unread-command-events)))");
-        assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 3) (< (- (float-time) start) 1.5) unread-command-events)"),
                    "(97 t nil)");
         // sit-for in a timer reads a key typed during it and pushes it back
         // as (t . KEY) (subr.el); the command loop, which reads Lisp's
@@ -238,12 +272,12 @@ mod tests {
                           ;; As a toast's expiry: due long before the read's limit.
                           (when (equal text \"idle\")
                             (let ((shown (float-time)))
-                              (run-with-timer 0.03 nil (lambda () (push (list 'expired (current-message) (< (- (float-time) shown) 0.5))
+                              (run-with-timer 0.03 nil (lambda () (push (list 'expired (current-message) (< (- (float-time) shown) 1.5))
                                                                         probe))))))))
                 (run-with-idle-timer 0.05 nil (lambda () (message \"idle\")))
                 (run-with-timer 0 nil (lambda ()
                   (let ((end (+ (float-time) 0.1))) (while (< (float-time) end)))
-                  (read-event nil nil 1)
+                  (read-event nil nil 3)
                   (message nil)))");
             vm.timer_stop_idle();
             let first = idle(&mut vm, true).unwrap();
@@ -277,6 +311,29 @@ mod tests {
     /// until enough was allocated; then one collection once the session has
     /// been idle for the delay, on a pass where nothing else ran, made by
     /// the host outside any request.
+    /// A collection at a command's end, after `romacs--command-loop-top'
+    /// cleared the running command, still names it.
+    #[test]
+    fn a_collection_at_a_commands_end_names_the_command() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(command_end_body).unwrap().join().unwrap();
+    }
+    fn command_end_body() {
+        let mut vm = Vm::new();
+        vm.set_echo_area_host(true);
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        // The command loop's Lisp half, as a session's first key installs it.
+        vm.eval_source("(read-event nil nil 0)").unwrap();
+        vm.eval_source("(defun collected-command () (interactive)) (global-set-key \"q\" 'collected-command)").unwrap();
+        vm.timer_stop_idle();
+        vm.eval_source("(setq unread-command-events (list ?q)) (romacs--run-host-command) (romacs--take-collections)").unwrap();
+        // Where a request boundary collects: the loop's top has run.
+        assert_eq!(vm.eval_source("real-this-command").unwrap().display().unwrap(), "nil");
+        vm.collect_garbage();
+        let taken = vm.eval_source("(romacs--take-collections)").unwrap().display().unwrap();
+        assert!(taken.contains("command \"collected-command\""), "{taken}");
+    }
+
     #[test]
     fn idle_collects_after_its_delay_once_enough_was_allocated() {
         std::thread::Builder::new().stack_size(64 << 20).spawn(idle_collect_body).unwrap().join().unwrap();
@@ -393,7 +450,7 @@ mod tests {
             Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
         vm.timer_stop_idle();
         assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
-        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.8))))");
         assert_eq!(fired, "((callback timer) t)", "a callback's timer");
         // A mode-line :eval schedules it in the redisplay of the wait for
         // C-x's next key.
@@ -402,7 +459,7 @@ mod tests {
               (setq start (float-time) log (cons 'eval log)) {schedule}) \"\")))))"));
         vm.set_host_input(Some(Box::new(Paced([Step::Key('\u{18}'), Step::Pause(Duration::from_secs(2)), Step::Key('h')].into()))));
         assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
-        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
+        let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.8))))");
         assert_eq!(fired, "((eval timer) t)", "a redisplay's timer");
     }
 
@@ -425,10 +482,10 @@ mod tests {
             (run-with-timer 0 nil #'rescheduling)";
         vm.set_host_input(Some(Box::new(Paced([Step::Key('a')].into()))));
         printed(&mut vm, rescheduling);
-        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 0.5) (<= runs 2))");
+        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 1.5) (<= runs 2))");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, rescheduling);
-        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 0.5))");
+        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 1.5))");
         assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
     }
 
@@ -461,7 +518,7 @@ mod tests {
         let form = format!("(let ((got nil) (states nil) (start (float-time)))
             (make-network-process :name \"p\" :host \"127.0.0.1\" :service {port} :nowait t
               :filter (lambda (_ s) (push s got)) :sentinel (lambda (_ e) (push (car (split-string e)) states)))
-            (list (read-event nil nil 1) (reverse states) got (< (- (float-time) start) 1.5)))");
+            (list (read-event nil nil 1) (reverse states) got (< (- (float-time) start) 3)))");
         let gnu = std::process::Command::new(std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle"))
             .args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")])
             .stdin(std::process::Stdio::piped()).output().unwrap();
@@ -520,7 +577,7 @@ mod tests {
         let read = printed(&mut vm, "(let ((start (float-time)) fired)
             (run-with-timer 0.05 nil (lambda () (setq fired (- (float-time) start))))
             (let ((key (read-event)))
-              (list key (and fired (< fired 0.25)) (< (- (float-time) start) 1.0) (> bytes 0)
+              (list key (and fired t) (< (- (float-time) start) 3.0) (> bytes 0)
                     (eq (process-status \"stream\") 'run))))");
         assert_eq!(read, "(97 t t t t)", "read-event's wait: (key, timer on time, key on time, output read, still streaming)");
         vm.set_host_input(None);

@@ -145,3 +145,20 @@ defsubr! { name = "/=", gnu = "data.c:2916", effect = Pure,
 fn neq(cx, num1: Value, num2: Value) {
     Ok(if arithcompare(cx, num1, num2)? & EQ != 0 { Value::NIL } else { Value::TRUE })
 }}
+
+/// CHECK_INTEGER_COERCE_MARKER.
+fn integer_or_marker(cx: &Leaf<'_>, v: Value) -> std::result::Result<num_bigint::BigInt, Fault> {
+    match number(cx, v) {
+        Ok(Num::Int(n)) => Ok(n),
+        Ok(Num::Float(_)) | Err(Fault::Wrong(..)) => Err(Fault::Wrong("integer-or-marker-p", v)),
+        Err(fault) => Err(fault),
+    }
+}
+
+// Frem: the remainder with X's sign, of integers of any size.
+defsubr! { name = "%", gnu = "data.c:3438", effect = Reads,
+fn rem(cx, x: Value, y: Value) {
+    let (a, b) = (integer_or_marker(cx, x)?, integer_or_marker(cx, y)?);
+    if b == num_bigint::BigInt::from(0) { return Err(Fault::Signal(cx.intern("arith-error"), Value::NIL)); }
+    Ok(cx.bigint(a % b))
+}}

@@ -83,6 +83,37 @@ impl FaceDef {
         self.inherit.as_deref()
     }
 
+    /// One attribute of a live registry's vector: `Err` for a value this
+    /// model cannot hold, which leaves the definition as it was.
+    pub fn set(&mut self, face: &str, keyword: &str, value: &BoundedDatum) -> Result<(), FaceError> {
+        let pair = [Datum::symbol(keyword), (**value).clone()];
+        let mut next = self.clone();
+        next.apply_plist(face, &pair)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// `default' as `face-spec-reset-face' leaves it on a graphical frame:
+    /// its decorations start at nil, whatever else it specifies.
+    pub fn reset_default(&mut self) {
+        if self.inherit.is_none() {
+            self.inherit = Some(Vec::new());
+        }
+        for a in [
+            Attribute::Underline,
+            Attribute::Overline,
+            Attribute::StrikeThrough,
+            Attribute::Box,
+            Attribute::InverseVideo,
+            Attribute::Stipple,
+            Attribute::Extend,
+        ] {
+            if matches!(self.attrs.get(a), Slot::Unspecified) {
+                self.attrs = self.attrs.with(a, Slot::Set(crate::attr::Value::Bool(false)));
+            }
+        }
+    }
+
     pub(crate) fn parents(&self) -> &[Arc<str>] {
         self.inherit.as_deref().unwrap_or(&[])
     }

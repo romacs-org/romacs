@@ -60,6 +60,14 @@ impl Leaf<'_> {
     /// Interactive use never signals a layout refusal (VM2-WTPS1): where a
     /// displayed window's measurement refuses, the refusal is counted
     /// (`count_refusal') and APPROXIMATE answers; batch signals it.
+    /// BODY, a motion Lisp called, which may quit at its polls. GNU's
+    /// iterator quits nowhere; `vertical-motion' over a long buffer should.
+    pub(crate) fn quittable_motion<T>(&mut self, body: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
+        let outer = std::mem::replace(&mut self.vm.motion_quit, true);
+        let result = body(self);
+        self.vm.motion_quit = outer;
+        result
+    }
     fn or_approximate<T>(&mut self, outcome: std::result::Result<T, Fault>,
                          approximate: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
         match outcome {
@@ -262,6 +270,22 @@ impl Leaf<'_> {
             let lnum = leaf.line_numbers(&area, top, point)?;
             leaf.shown_elements(Self::view(&area, buffer, begv, zv, lnum), from, to)
         })
+    }
+
+    pub(crate) fn vm_selected_window(&mut self) -> std::result::Result<Value, Fault> {
+        self.vm.selected_window_value().map_err(Fault::Error)
+    }
+    fn position_or_nil(position: Option<i64>) -> super::super::Out {
+        position.map_or(Ok(Value::NIL), |p| Value::integer(p).map_err(Fault::Error))
+    }
+    pub(crate) fn window_recenter_start(&mut self, window: Value, arg: Option<i64>, lines: (i64, i64)) -> super::super::Out {
+        Self::position_or_nil(self.vm.recenter_start(window, arg, lines).map_err(Fault::Error)?)
+    }
+    pub(crate) fn window_scroll_start(&mut self, window: Value, start: i64, forward: bool, context: i64) -> super::super::Out {
+        Self::position_or_nil(self.vm.scroll_start(window, start, forward, context).map_err(Fault::Error)?)
+    }
+    pub(crate) fn window_rows_shown_from(&mut self, window: Value, start: i64) -> super::super::Out {
+        Self::position_or_nil(self.vm.rows_shown_from(window, start).map_err(Fault::Error)?)
     }
 
     /// The windows argument `pre-redisplay-function' takes now, if a host

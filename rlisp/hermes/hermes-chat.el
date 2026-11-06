@@ -3685,7 +3685,7 @@ With negative N, move backward."
       (let* ((text (buffer-substring-no-properties
                     (min (+ pos 2) (point-max))
                     (save-excursion (goto-char pos) (line-end-position))))
-             (name (truncate-string-to-width (string-trim text) 60 nil nil "…")))
+             (name (truncate-string-to-width (string-trim text) 60 nil nil t)))
         (push (cons (format "%d. %s" (1+ (length index))
                             (if (string-empty-p name) "(empty)" name))
                     pos)

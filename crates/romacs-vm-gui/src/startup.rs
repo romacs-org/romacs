@@ -498,6 +498,7 @@ fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool)
     policy(vm, root, "romacs-workspace-completion.el", include_str!("../../../rlisp/romacs-workspace-completion.el"))?;
     initialize_coding(vm, root)?;
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
+    policy(vm, root, "romacs-key-hint.el", include_str!("../../../rlisp/romacs-key-hint.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
     policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
     policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
@@ -614,6 +615,7 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         }
     }
     vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-key-hint.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
     // The session's command log, which each interactive process starts

@@ -111,11 +111,15 @@
     col = mix(col, vec3<f32>(col.g, col.b, col.r), wave * 0.6);
     return vec4<f32>(col, 1.0);
 }")))
-    (insert "\n\nFrame effects: M-x romacs-shaders-crt / -glow / -matrix / -off\n")
+    (insert "\n\n" (substitute-command-keys "Frame effects: \\[romacs-shaders-crt] / \\[romacs-shaders-glow] / \\[romacs-shaders-matrix] / \\[romacs-shaders-off]\n"))
     (goto-char (point-min))
     (pop-to-buffer (current-buffer))))
 
 ;;;; Frame shaders
+
+(defun romacs-shaders--note (state)
+  "Say STATE, and how to remove the frame shader."
+  (message "%s — %s" state (substitute-command-keys "\\[romacs-shaders-off] to remove")))
 
 (defconst romacs-shaders--crt-glsl
   "void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -181,7 +185,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   (interactive)
   (romacs-frame-shader romacs-shaders--crt-glsl 'glsl
                         '((curvature . 0.10)))
-  (message "CRT on — M-x romacs-shaders-crt-curvature tunes it, M-x romacs-shaders-off removes"))
+  (message "%s" (substitute-command-keys "CRT on — \\[romacs-shaders-crt-curvature] tunes it, \\[romacs-shaders-off] removes")))
 
 ;;;###autoload
 (defun romacs-shaders-crt-curvature (amount)
@@ -199,14 +203,14 @@ recompiling; signals an error if no frame shader is installed
   "Apply the bloom frame shader to the whole editor."
   (interactive)
   (romacs-frame-shader romacs-shaders--glow-wgsl)
-  (message "Glow on — M-x romacs-shaders-off to remove"))
+  (romacs-shaders--note "Glow on"))
 
 ;;;###autoload
 (defun romacs-shaders-matrix ()
   "Apply the digital-rain frame shader to the whole editor."
   (interactive)
   (romacs-frame-shader romacs-shaders--matrix-glsl 'glsl)
-  (message "Rain on — M-x romacs-shaders-off to remove"))
+  (romacs-shaders--note "Rain on"))
 
 ;;;###autoload
 (defun romacs-shaders-off ()
@@ -753,21 +757,21 @@ scanlines, shadow mask, vignette.  From
   "Apply the Ghostty starfield shader over the whole editor."
   (interactive)
   (romacs-frame-shader romacs-shaders--ghostty-starfield-glsl 'glsl)
-  (message "Ghostty starfield on — M-x romacs-shaders-off to remove"))
+  (romacs-shaders--note "Ghostty starfield on"))
 
 ;;;###autoload
 (defun romacs-shaders-ghostty-gradient ()
   "Apply the Ghostty animated-gradient shader over the whole editor."
   (interactive)
   (romacs-frame-shader romacs-shaders--ghostty-gradient-glsl 'glsl)
-  (message "Ghostty gradient on — M-x romacs-shaders-off to remove"))
+  (romacs-shaders--note "Ghostty gradient on"))
 
 ;;;###autoload
 (defun romacs-shaders-ghostty-crt ()
   "Apply the Ghostty (Lottes) CRT shader over the whole editor."
   (interactive)
   (romacs-frame-shader romacs-shaders--ghostty-crt-glsl 'glsl)
-  (message "Ghostty CRT on — M-x romacs-shaders-off to remove"))
+  (romacs-shaders--note "Ghostty CRT on"))
 
 (provide 'romacs-shaders)
 ;;; romacs-shaders.el ends here

@@ -309,7 +309,7 @@ message replaces the shown one in place."
   :type 'natnum)
 
 (defcustom romacs-layer-toast-lines 2
-  "Most rows a toast shows; longer text ends in `…' (*Messages* has it all)."
+  "Most rows a toast shows; longer text ends in an ellipsis (*Messages* has it all)."
   :type 'natnum)
 
 (defcustom romacs-layer-toast-position 'window
@@ -351,7 +351,7 @@ message, COLUMNS SHOWN's widest line as painted, measured once.")
 
 (defun romacs-layer--toast-width (string)
   "STRING's width in the root frame's columns as the display paints it:
-a glyph the font draws wider than a cell (Iosevka's `…') counts as
+a glyph the font draws wider than a cell counts as
 painted, which `string-width' does not know; ASCII, and anything where
 the display cannot measure, by `string-width'."
   (or (and (string-match-p "[^[:ascii:]]" string) (display-graphic-p) (fboundp 'string-pixel-width)
@@ -360,25 +360,26 @@ the display cannot measure, by `string-width'."
 
 (defun romacs-layer--toast-shorten (name room)
   "NAME, a file name, at most ROOM columns where it can be: its
-directories dropped from the front behind `…/', then, for a basename
+directories dropped from the front behind an ellipsis, then, for a basename
 wider than that, the basename's middle, keeping its end."
   (if (<= (romacs-layer--toast-width name) room) name
     (let* ((head (if (string-match "\\`\\(?:/\\|~[^/]*/\\)" name) (match-string 0 name) ""))
+           (dots (truncate-string-ellipsis))
            (base (file-name-nondirectory name))
            (dirs (split-string (substring (or (file-name-directory name) head) (length head)) "/" t))
-           (fixed (+ (romacs-layer--toast-width head) (romacs-layer--toast-width "…/") (romacs-layer--toast-width base)))
+           (fixed (+ (romacs-layer--toast-width head) (romacs-layer--toast-width (concat dots "/")) (romacs-layer--toast-width base)))
            (widths (mapcar (lambda (d) (1+ (romacs-layer--toast-width d))) dirs))
            (total (apply #'+ widths)))
       ;; Drop directories from the front, each measured once.
       (while (and dirs (> (+ fixed total) room))
         (setq total (- total (pop widths)) dirs (cdr dirs)))
       (if (<= (+ fixed total) room)
-          (concat head "…/" (mapconcat (lambda (d) (concat d "/")) dirs "") base)
-        (let* ((lead (concat head "…/"))
-               (left (- room (romacs-layer--toast-width lead) (romacs-layer--toast-width "…")))
+          (concat head dots "/" (mapconcat (lambda (d) (concat d "/")) dirs "") base)
+        (let* ((lead (concat head dots "/"))
+               (left (- room (romacs-layer--toast-width lead) (romacs-layer--toast-width dots)))
                (suffix (romacs-layer--toast-tail base (max 1 (/ (* 2 left) 3))))
                (front (truncate-string-to-width base (max 0 (- left (romacs-layer--toast-width suffix))))))
-          (concat lead front "…" suffix))))))
+          (concat lead front dots suffix))))))
 
 (defun romacs-layer--toast-tail (string columns)
   "The longest end of STRING at most COLUMNS wide as painted (one
@@ -423,7 +424,7 @@ rows, as the window breaks it."
                (room (- columns (- total (nth path widths))))
                (lead (if (string-match "\\`[\"'`(]" word) (match-string 0 word) ""))
                (base (file-name-nondirectory (substring word (length lead)))))
-          (when (>= room (+ (length lead) (romacs-layer--toast-width "…/") (romacs-layer--toast-width base)))
+          (when (>= room (+ (length lead) (romacs-layer--toast-width (concat (truncate-string-ellipsis) "/")) (romacs-layer--toast-width base)))
             (setf (nth path words) (concat lead (romacs-layer--toast-shorten (substring word (length lead)) (- room (length lead)))))))))
     (dolist (word words)
       (let* ((word (if (and (> (romacs-layer--toast-width word) columns) (romacs-layer--toast-path-word-p word))
@@ -447,7 +448,7 @@ rows, as the window breaks it."
 \(`abbreviate-file-name'), its lines wrapped at words into rows as the
 window wraps them, a file name too wide for a row cut in its
 directories, and at most `romacs-layer-toast-lines' rows, the last ending
-in `…' where more follow, never inside a file name.  TEXT itself when it
+in an ellipsis where more follow, never inside a file name.  TEXT itself when it
 fits unchanged; else the rows, one per line."
   (let* ((abbreviated (replace-regexp-in-string
                        romacs-layer--toast-path-regexp
@@ -466,9 +467,10 @@ fits unchanged; else the rows, one per line."
      (t
       (let* ((kept (seq-take rows budget))
              (last (car (last kept)))
-             (ellipsis (romacs-layer--toast-width "…"))
+             (dots (truncate-string-ellipsis))
+             (ellipsis (romacs-layer--toast-width dots))
              (words (split-string last " ")))
-        ;; The last row, its words dropped from the end until `…' fits;
+        ;; The last row, its words dropped from the end until the ellipsis fits;
         ;; a file name is dropped whole, never cut.
         (while (and (cdr words) (> (+ (romacs-layer--toast-width (string-join words " ")) 1 ellipsis) columns))
           (setq words (butlast words)))
@@ -478,7 +480,12 @@ fits unchanged; else the rows, one per line."
                             (romacs-layer--toast-shorten row (- columns 1 ellipsis))
                           (truncate-string-to-width row (- columns 1 ellipsis)))
                       row)))
-          (string-join (append (butlast kept) (list (concat row " …"))) "\n")))))))
+          ;; A narrow toast has no room for the ellipsis, or a path for its own.
+          (string-join (append (butlast kept)
+                               (list (if (> columns (1+ ellipsis))
+                                         (concat (truncate-string-to-width row (- columns 1 ellipsis)) " " dots)
+                                       (truncate-string-to-width row columns))))
+                       "\n")))))))
 
 (defun romacs-layer--toast-columns (text columns)
   "The columns a toast of TEXT takes, at most COLUMNS: its widest line's,

@@ -33,7 +33,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
 fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnapshot {
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
         windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(), status_bar: None,
     }
 }
@@ -195,6 +195,33 @@ fn the_status_bar_s_overline_runs_across_it() {
     assert_eq!(bar(None), []);
 }
 
+/// A pill's text takes its foreground; an icon in a colour of its own keeps
+/// it where it reads there. Solarized Light's state on its state pill is
+/// 1.5:1, so its icons take the pill's text; the last pair is just under 3:1.
+#[test]
+fn an_icon_keeps_its_colour_on_a_pill_where_it_reads() {
+    let (own, faint, under, pill, text) = ([0xff; 3], [0x0a, 0x6d, 0xaa], [0x76, 0x05, 0x4e], [0x26, 0x8b, 0xd2], [1, 2, 3]);
+    let run = |bytes: std::ops::Range<usize>, face: u32| romacs_layout_input::FaceRun { bytes, face: FaceHandle(face) };
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 4, y: 150, width: 108, height: 20,
+        text: TextSlice { extends: vec![], utf8: "\u{FE001}\u{FE002}\u{FE003}\u{FE004}a".into(),
+                          face_runs: vec![run(0..4, 1), run(4..8, 2), run(8..12, 3), run(16..17, 1)], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([9; 3], [30, 40, 50]), face(own, [30, 40, 50]), face(faint, [30, 40, 50]), face(under, [30, 40, 50])],
+        window: 1, focused: true,
+        marks: BandMarks { segments: vec![Segment { bytes: 0..17, name: "buffer".into(),
+                                                    pill: Some(Pill { background: pill, radius: 6, foreground: Some(text) }) }],
+                           icons: vec![] },
+    });
+    let painted = lay_out(snapshot);
+    let colours: Vec<_> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, face_id, .. } => Some(painted.faces[face_id].foreground),
+        _ => None,
+    }).collect();
+    let pixel = |[r, g, b]: [u8; 3]| romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]));
+    assert_eq!(colours, [pixel(own), pixel(text), pixel(text), pixel(text), pixel(text)]);
+}
+
 /// The status bar's marks (VM2-STATUS-BAR): the part after the
 /// `right-align' marker flush with the right edge and whole, the part
 /// before it clipped where that starts, the marker spanning the room; a
@@ -301,7 +328,7 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
     assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
     let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(),
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(),
         faces: snapshot.faces.clone(), text: snapshot.text.clone(),
     }).unwrap();
     let advances: Vec<u32> = measured.glyphs.iter().map(|g| g.0).collect();
@@ -349,6 +376,24 @@ fn every_window_but_the_mini_window_is_a_pane() {
     let line = romacs_display_protocol::Color::from_pixel(0x282828);
     assert_eq!(panes.iter().map(|p| (p.bounds.x, p.bounds.width, p.bounds.height, p.radius, p.edge, p.dim)).collect::<Vec<_>>(),
                [(0.0, 116.0, 200.0, 6.0, Some(accent), 0.0), (152.0, 116.0, 200.0, 6.0, Some(line), 0.12)]);
+}
+
+/// Boxed characters side by side in the tab bar are one box run, with no
+/// edge inside it: text over a boxed `tab-bar' takes its box.
+#[test]
+fn the_tab_bar_s_boxed_text_is_one_box_run() {
+    use romacs_display_protocol::BoxVerticalEdges::{self, Left, Neither, Right};
+    use romacs_layout_input::{BoxLine, Decor};
+    let boxed = Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some([200, 10, 10]), style: 1 }), ..Default::default() },
+                       ..face([200; 3], [30, 40, 50]) };
+    let text = TextSlice { extends: vec![], utf8: "abc d".into(), raw: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
+    let tabs = TabBarSnapshot { height: 20, text, face: FaceHandle(0), faces: vec![face([200; 3], [30, 40, 50]), boxed] };
+    let painted = lay_out(frame(window("x", LineWrap::Window), Some(tabs)));
+    let cells: Vec<BoxVerticalEdges> = painted.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. } => Some(*box_vertical_edges),
+        _ => None,
+    }).collect();
+    assert_eq!(cells[..3], [Left, Neither, Right]);
 }
 
 /// A boxed band is one box run, as a mode line is: its characters and the

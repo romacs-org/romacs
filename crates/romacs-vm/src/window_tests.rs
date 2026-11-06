@@ -262,6 +262,8 @@ fn g3a_resize_axis_and_nested_tree() {
 #[test]
 fn g3a_collections_and_three_size_retention() {
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_collection_floor(1_000_000);
     run(&mut vm, "(selected-window)");
     let mut retained = vec![];
@@ -326,6 +328,8 @@ fn g3a_surviving_parent_does_not_retain_peak_child_storage() {
         (set-window-new-pixel a (+ (window-pixel-height a) 64)) \
         (delete-window-internal (car ws)) (setq ws (cdr ws)))";
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_frame_geometry(800, 2048 + 24, 24, 12).unwrap();
     vm.set_collection_floor(1_000_000);
     run(&mut vm, "(setq a (selected-window) ws nil)");
@@ -759,6 +763,10 @@ fn unchanged_windows_redisplay_only_their_cursor_and_mode_line() {
 #[test]
 fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
     let mut vm = Vm::new();
+    // Compaction, not stress: a collection before this redisplay would
+    // drop the reuse it is here to reach.
+    vm.set_gc_stress(0);
+    vm.set_gc_moving(true);
     vm.set_frame_geometry(800, 600, 24, 12).unwrap();
     // Garbage below the window the redisplay reuses, so a collection moves it.
     run(&mut vm, r#"(progn (setq junk (list (make-string 9 ?j) (make-vector 9 0) (make-string 9 ?k)))
@@ -776,9 +784,12 @@ fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
     vm.frame_snapshot(800, 576).unwrap();
     // Dead only now: the reused redisplay's collection moves the window down.
     run(&mut vm, "(setq junk nil collect t)");
-    let before = vm.heap_stats().collections;
+    let (before, evals, window) = (vm.heap_stats().collections, vm.mode_line_evals(), vm.selected_window_value().unwrap());
     let again = vm.frame_snapshot(800, 576).expect("a redisplay that collected");
     assert!(vm.heap_stats().collections > before, "the mode line collected");
+    assert_ne!(vm.selected_window_value().unwrap(), window, "the collection moved the window");
+    // Reuse ran the band, saw the collection and went on to a full redisplay.
+    assert_eq!(vm.mode_line_evals() - evals, 2, "the reused redisplay ran the band");
     assert!(again.windows.iter().any(|w| w.snapshot.text.utf8 == "a\nb\nc\n"));
 }
 
@@ -789,7 +800,7 @@ fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
 #[test]
 fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
     for (change, color) in [("(internal-set-lisp-face-attribute 'reuse-face :foreground \"#ff0000\" nil)", [255, 0, 0]),
-                            ("(defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\")", [0, 255, 0])] {
+                            ("(progn (defface reuse-new '((t (:foreground \"#00ff00\"))) \"n\") (put-text-property 1 2 'face 'reuse-new))", [0, 255, 0])] {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         vm.set_frame_geometry(800, 600, 24, 12).unwrap();
@@ -804,6 +815,94 @@ fn face_changes_in_a_reused_windows_mode_line_redisplay_it_fully() {
         let changed = vm.frame_snapshot(800, 576).expect(change).windows[0].snapshot.clone();
         assert!(changed.faces.iter().any(|face| face.foreground == color), "{change} did not reach the published faces");
     }
+}
+
+/// A remapping makes another face table with no change of face: a band's
+/// handle indexes the table it was published with, so it is not reused
+/// with another, and the window is published afresh.
+#[test]
+fn a_remapping_added_after_a_paint_makes_a_band_new() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface band-face '((t (:foreground "#0000ff"))) "b")
+                           (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'band-face))))"##);
+    let first = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    vm.display_apply_layout(&[whole(&first)]).unwrap();
+    assert!(first.mode_line.is_some(), "the band is shown");
+    run(&mut vm, r##"(set (make-local-variable 'face-remapping-alist) '((default :foreground "#00ff00")))"##);
+    let window = vm.selected_window_value().unwrap();
+    let (band, face, _) = vm.painted_band(window, false).unwrap();
+    let table = vm.window_faces(window).unwrap();
+    assert!((face.0 as usize) < table.len(), "the handle indexes the table a layout will read");
+    assert!(band.is_some_and(|band| band.face_runs.iter().all(|run| (run.face.0 as usize) < table.len())), "so do its runs");
+    let changed = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    assert_eq!(changed.faces[0].foreground, [0, 255, 0], "the window shows the new table");
+}
+
+/// A face in a window's band takes what it leaves unset from the band's
+/// face, not from `default' (xdisp.c face_at_string_position).
+#[test]
+fn a_face_in_a_band_takes_what_it_leaves_from_the_band() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface band-weight '((t :weight bold)) "w")
+                           (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'band-weight))))"##);
+    let shown = vm.frame_snapshot(800, 600).unwrap().windows[0].snapshot.clone();
+    let band = shown.mode_line.as_ref().expect("the band is shown");
+    let face = &shown.faces[band.face_runs[0].face.0 as usize];
+    assert_eq!(face.background, shown.faces[shown.mode_line_face.0 as usize].background, "the band's");
+    assert_ne!(face.background, shown.faces[0].background, "not the default's");
+}
+
+/// A run in `default' over a band: whole, unless a remapping replaces
+/// `default' with less, when the band gives the rest (face-remap-set-base).
+#[test]
+fn a_run_in_default_over_a_band_follows_its_remapping() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'default))))"##);
+    let run_face = |vm: &mut Vm| {
+        let shown = vm.frame_snapshot(800, 600).unwrap().windows[0].snapshot.clone();
+        let band = shown.mode_line.as_ref().expect("the band is shown");
+        let face = band.face_runs[0].face.0 as usize;
+        (shown.faces[face].background, shown.faces[shown.mode_line_face.0 as usize].background, shown.faces[face].weight)
+    };
+    let (whole, band, _) = run_face(&mut vm);
+    assert_ne!(whole, band, "unremapped, `default' sets its background");
+    run(&mut vm, r##"(set (make-local-variable 'face-remapping-alist) '((default (:weight bold))))"##);
+    let (remapped, band, weight) = run_face(&mut vm);
+    assert_eq!(remapped, band, "remapped to a weight alone, the band's background stays");
+    assert_eq!(weight, 700);
+}
+
+/// A face that sets nothing merges nothing (xfaces.c merge_named_face): in
+/// a band its text keeps the band's face, not `default''s, and in a window
+/// it stays on the window's own default row.
+#[test]
+fn a_face_that_sets_nothing_leaves_the_face_under_it_showing() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface blank-face '((t)) "b")
+                           (defface band-face '((t (:foreground "#0000ff"))) "b")
+                           (set-buffer (get-buffer-create "faces"))
+                           (insert (propertize "text" 'face 'blank-face))
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "a" 'face 'blank-face)
+                                                        (propertize "b" 'face 'band-face))))"##);
+    let shown = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    let band = shown.mode_line.as_ref().expect("the band is shown");
+    assert_eq!(band.face_runs.iter().map(|run| run.bytes.clone()).collect::<Vec<_>>(), vec![1..2], "only the face with colours makes a run");
+    assert!(shown.text.face_runs.iter().all(|run| run.face.0 == 0), "the text stays on the default row");
 }
 
 /// The header line takes the mode line's shortcut: a redisplay that keeps

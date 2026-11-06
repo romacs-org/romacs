@@ -425,6 +425,11 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "use-system-tooltips", gnu: "frame.c:7727", kind: Kind::Bool(true) },
     CVariable { name: "user-init-file", gnu: "lread.c:5684", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "values", gnu: "lread.c:5555", kind: Kind::Lisp(Init::Nil) },
+    // Run after a collection, at the next safe point (`romacs--run-finalizers').
+    CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
+    // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
+    // the command loop's run it (rlisp/vm/keyboard.el, echo.rs).
+    CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "visible-bell", gnu: "dispnew.c:7496", kind: Kind::Bool(false) },
     CVariable { name: "visible-cursor", gnu: "term.c:5347", kind: Kind::Bool(true) },
     CVariable { name: "void-text-area-pointer", gnu: "xdisp.c:38689", kind: Kind::Lisp(Init::Symbol("arrow")) },
@@ -478,6 +483,14 @@ pub(crate) enum Init {
     List(&'static [Init]),
     /// make_nil_vector (N).
     NilVector(usize),
+    /// A vector of the given elements.
+    Vector(&'static [Init]),
+    /// Every DEFVAR_BOOL's symbol (lread.c defvar_bool).
+    BooleanVars,
+    /// init_editfns: uname's release.
+    OsRelease,
+    /// sysconf (_SC_ARG_MAX) / 4 (callproc.c:2249).
+    CommandLineMax,
     /// A file name under `host::runtime_root` (GNU's installation-relative
     /// directories). The flag adds a
     /// final slash, as file-name-as-directory does.
@@ -751,11 +764,112 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Read when a profiler log is made (`profiler.rs').
     CVariable { name: "profiler-max-stack-depth", gnu: "profiler.c:708", kind: Kind::Int(16) },
     CVariable { name: "profiler-log-size", gnu: "profiler.c:711", kind: Kind::Int(10000) },
+    // The chain sets this one as loadup.el does (romacs-loadup-bootstrap.el);
+    // Romacs's loader does the conversion itself (VM2-DEFVAR-INERT).
+    CVariable { name: "load-source-file-function", gnu: "lread.c:5706", kind: Kind::Lisp(Init::Nil) },
+    // Doc strings stay in the forms Romacs reads: nothing to force.
+    CVariable { name: "load-force-doc-strings", gnu: "lread.c:5719", kind: Kind::Bool(false) },
+    // Filled as the chain ends (romacs-loadup-bootstrap.el); apropos.el reads it.
+    CVariable { name: "preloaded-file-list", gnu: "lread.c:5731", kind: Kind::Lisp(Init::Nil) },
+    // byte-opt.el: variables only nil or t, every DEFVAR_BOOL Romacs has.
+    CVariable { name: "byte-boolean-vars", gnu: "lread.c:5735", kind: Kind::Lisp(Init::BooleanVars) },
+    CVariable { name: "inhibit-load-charset-map", gnu: "charset.c:2422", kind: Kind::Bool(false) },
+    // The chain sets it as loadup.el does; Romacs's `eval' prunes a closure's
+    // captures as it compiles, so nothing calls it (VM2-DEFVAR-INERT).
+    CVariable { name: "internal-make-interpreted-closure-function", gnu: "eval.c:4599", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "emacs-copyright", gnu: "emacs.c:3600", kind: Kind::Lisp(Init::Str("Copyright (C) 2026 Free Software Foundation, Inc.")) },
+    // GNU's configure writes this; Romacs has no such build, as
+    // `system-configuration-options'.
+    CVariable { name: "system-configuration-features", gnu: "emacs.c:3525", kind: Kind::Lisp(Init::Str("")) },
+    CVariable { name: "operating-system-release", gnu: "editfns.c:4872", kind: Kind::Lisp(Init::OsRelease) },
+    CVariable { name: "command-line-max-length", gnu: "callproc.c:2240", kind: Kind::Lisp(Init::CommandLineMax) },
+    CVariable { name: "dynamic-library-alist", gnu: "emacs.c:3620", kind: Kind::Lisp(Init::Nil) },
+    // startup.el spells the key out; Romacs never signals it (VM2-DEFVAR-INERT).
+    CVariable { name: "memory-signal-data", gnu: "alloc.c:7504", kind: Kind::Lisp(Init::List(&[Init::Symbol("error"), Init::Str("Memory exhausted--use M-x save-some-buffers then exit and restart Emacs")])) },
+    // No toolkit: scroll-bar.el and version.el take nil as GNU's no-toolkit build.
+    CVariable { name: "x-toolkit-scroll-bars", gnu: "pgtkterm.c:7527", kind: Kind::Lisp(Init::Nil) },
+    // Declared for the Lisp that reads them; Romacs's font stack keeps its own
+    // tables and logs nothing (VM2-DEFVAR-INERT).  faces.el reads the three
+    // tables; each entry is GNU's [NUMERIC NAME ALIAS...].
+    CVariable { name: "font-weight-table", gnu: "font.c:5982", kind: Kind::Lisp(Init::Vector(FONT_WEIGHT_TABLE)) },
+    CVariable { name: "font-slant-table", gnu: "font.c:5991", kind: Kind::Lisp(Init::Vector(FONT_SLANT_TABLE)) },
+    CVariable { name: "font-width-table", gnu: "font.c:5998", kind: Kind::Lisp(Init::Vector(FONT_WIDTH_TABLE)) },
+    // t suppresses logging (font.c:6090); EMACS_FONT_LOG asks for a log
+    // Romacs does not keep.
+    CVariable { name: "font-log", gnu: "font.c:6012", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "inhibit-compacting-font-caches", gnu: "font.c:6019", kind: Kind::Bool(false) },
+    CVariable { name: "face-ignored-fonts", gnu: "xfaces.c:7702", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "fontset-alias-alist", gnu: "fontset.c:2231", kind: Kind::Lisp(Init::List(&[Init::Cons(&Init::Str("-*-*-*-*-*-*-*-*-*-*-*-*-fontset-default"), &Init::Str("fontset-default"))])) },
+    // Set per process by the batch startup, nil in a window session, as
+    // frame.el leaves it (romacs-loadup-bootstrap.el, romacs-gui-loadup.el).
+    CVariable { name: "terminal-frame", gnu: "frame.c:7477", kind: Kind::Lisp(Init::Nil) },
+    // `mouse-position' and `mouse-pixel-position' call it (prelude.el).
+    CVariable { name: "mouse-position-function", gnu: "frame.c:7480", kind: Kind::Lisp(Init::Nil) },
+    // The window host sends every wheel event (VM2-DEFVAR-INERT).
+    CVariable { name: "mwheel-coalesce-scroll-events", gnu: "keyboard.c:14439", kind: Kind::Bool(true) },
+    // After the chain: loadup.el sets GNU's C `true' to nil as it ends.
+    CVariable { name: "redisplay--inhibit-bidi", gnu: "xdisp.c:39445", kind: Kind::Bool(false) },
+    // Romacs has no tool bar (VM2-DEFVAR-INERT).
+    CVariable { name: "tool-bar-button-margin", gnu: "xdisp.c:38980", kind: Kind::Lisp(Init::Fixnum(4)) },
+    CVariable { name: "tool-bar-max-label-size", gnu: "xdisp.c:39005", kind: Kind::Int(14) },
+    // tty-colors.el fills it.
+    CVariable { name: "tty-defined-color-alist", gnu: "xfaces.c:7687", kind: Kind::Lisp(Init::Nil) },
+    // The window title's format (romacs-vm-gui title.rs).  Romacs shows one
+    // top-level window, so `multiple-frames' stays nil; Wayland does not say
+    // when a window is minimised, so the icon format is never the one used.
+    CVariable { name: "multiple-frames", gnu: "xdisp.c:38825", kind: Kind::Bool(false) },
+    CVariable { name: "frame-title-format", gnu: "xdisp.c:38831", kind: Kind::Lisp(Init::List(TITLE_FORMAT)) },
+    CVariable { name: "icon-title-format", gnu: "xdisp.c:38839", kind: Kind::Lisp(Init::List(TITLE_FORMAT)) },
+    // `forward-word' reads it (prims/word_motion.rs); subword-mode sets it.
+    CVariable { name: "find-word-boundary-function-table", gnu: "syntax.c:3798", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
+    // No shipped Lisp sets it (VM2-DEFVAR-INERT).
+    CVariable { name: "buffer-access-fontify-functions", gnu: "editfns.c:4834", kind: Kind::Lisp(Init::Nil) },
+];
+
+/// xdisp.c:38853's shape, in Romacs's name (VM2-TITLE):
+/// (multiple-frames "%b" ("" "%b - Romacs at " system-name)).
+static TITLE_FORMAT: &[Init] = &[
+    Init::Symbol("multiple-frames"), Init::Str("%b"),
+    Init::List(&[Init::Str(""), Init::Str("%b - Romacs at "), Init::Symbol("system-name")]),
+];
+
+const fn font_entry(entry: &'static [Init]) -> Init { Init::Vector(entry) }
+static FONT_WEIGHT_TABLE: &[Init] = &[
+    font_entry(&[Init::Fixnum(0), Init::Symbol("thin")]),
+    font_entry(&[Init::Fixnum(40), Init::Symbol("ultra-light"), Init::Symbol("ultralight"), Init::Symbol("extra-light"), Init::Symbol("extralight")]),
+    font_entry(&[Init::Fixnum(50), Init::Symbol("light")]),
+    font_entry(&[Init::Fixnum(55), Init::Symbol("semi-light"), Init::Symbol("semilight"), Init::Symbol("demilight")]),
+    font_entry(&[Init::Fixnum(80), Init::Symbol("regular"), Init::Symbol("normal"), Init::Symbol("unspecified"), Init::Symbol("book")]),
+    font_entry(&[Init::Fixnum(100), Init::Symbol("medium")]),
+    font_entry(&[Init::Fixnum(180), Init::Symbol("semi-bold"), Init::Symbol("semibold"), Init::Symbol("demibold"), Init::Symbol("demi-bold"), Init::Symbol("demi")]),
+    font_entry(&[Init::Fixnum(200), Init::Symbol("bold")]),
+    font_entry(&[Init::Fixnum(205), Init::Symbol("extra-bold"), Init::Symbol("extrabold"), Init::Symbol("ultra-bold"), Init::Symbol("ultrabold")]),
+    font_entry(&[Init::Fixnum(210), Init::Symbol("black"), Init::Symbol("heavy")]),
+    font_entry(&[Init::Fixnum(250), Init::Symbol("ultra-heavy"), Init::Symbol("ultraheavy")]),
+];
+static FONT_SLANT_TABLE: &[Init] = &[
+    font_entry(&[Init::Fixnum(0), Init::Symbol("reverse-oblique"), Init::Symbol("ro")]),
+    font_entry(&[Init::Fixnum(10), Init::Symbol("reverse-italic"), Init::Symbol("ri")]),
+    font_entry(&[Init::Fixnum(100), Init::Symbol("normal"), Init::Symbol("r"), Init::Symbol("unspecified")]),
+    font_entry(&[Init::Fixnum(200), Init::Symbol("italic"), Init::Symbol("i"), Init::Symbol("ot")]),
+    font_entry(&[Init::Fixnum(210), Init::Symbol("oblique"), Init::Symbol("o")]),
+];
+static FONT_WIDTH_TABLE: &[Init] = &[
+    font_entry(&[Init::Fixnum(50), Init::Symbol("ultra-condensed"), Init::Symbol("ultracondensed")]),
+    font_entry(&[Init::Fixnum(63), Init::Symbol("extra-condensed"), Init::Symbol("extracondensed")]),
+    font_entry(&[Init::Fixnum(75), Init::Symbol("condensed"), Init::Symbol("compressed"), Init::Symbol("narrow")]),
+    font_entry(&[Init::Fixnum(87), Init::Symbol("semi-condensed"), Init::Symbol("semicondensed"), Init::Symbol("demicondensed")]),
+    font_entry(&[Init::Fixnum(100), Init::Symbol("normal"), Init::Symbol("medium"), Init::Symbol("regular"), Init::Symbol("unspecified")]),
+    font_entry(&[Init::Fixnum(113), Init::Symbol("semi-expanded"), Init::Symbol("semiexpanded"), Init::Symbol("demiexpanded")]),
+    font_entry(&[Init::Fixnum(125), Init::Symbol("expanded")]),
+    font_entry(&[Init::Fixnum(150), Init::Symbol("extra-expanded"), Init::Symbol("extraexpanded")]),
+    font_entry(&[Init::Fixnum(200), Init::Symbol("ultra-expanded"), Init::Symbol("ultraexpanded"), Init::Symbol("wide")]),
 ];
 
 /// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears
-/// `declared_special' on `values', so a `let' of it is lexical.
-pub(crate) const NOT_SPECIAL: &[&str] = &["values"];
+/// `declared_special' on `values', so a `let' of it is lexical, and
+/// keyboard.c:14099 only sets `echo-area-clear-hook'.
+pub(crate) const NOT_SPECIAL: &[&str] = &["values", "echo-area-clear-hook"];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
 pub(crate) struct Forwarded {
@@ -1007,6 +1121,7 @@ impl Vm {
     pub(super) fn count_collection(&mut self, elapsed_ns: u64) {
         let (done, elapsed) = self.forwarded.gc_done;
         self.forwarded.ints[done] = self.forwarded.ints[done].saturating_add(1);
+        self.post_gc_due = true;
         let value = self.forwarded.objects[elapsed];
         if value == Value::UNBOUND || matches!(self.object_if(value), Some(data::Object::Float(_))) {
             self.gc_stats.elapsed_ns += elapsed_ns;
@@ -1016,6 +1131,7 @@ impl Vm {
     /// GNU `init_alloc', at each process's start: no collection done yet.
     pub(crate) fn reset_collection_counters(&mut self) {
         self.gc_stats.elapsed_ns = 0;
+        self.collection_log = Default::default();
         let (done, elapsed) = self.forwarded.gc_done;
         self.forwarded.ints[done] = 0;
         self.forwarded.objects[elapsed] = Value::UNBOUND;
@@ -1147,6 +1263,20 @@ impl Vm {
                 let values: Vec<Value> = items.iter().map(|&i| self.materialize(i)).collect();
                 self.list_value(&values)
             }
+            Init::Vector(items) => {
+                let values: Vec<Value> = items.iter().map(|&i| self.materialize(i)).collect();
+                self.allocate_object(data::Object::Vector(values))
+            }
+            Init::BooleanVars => {
+                let names = C_SPECIALS.iter().chain(C_VARIABLES).filter(|v| matches!(v.kind, Kind::Bool(_))).map(|v| v.name);
+                let values: Vec<Value> = names.map(|name| self.intern(name)).collect();
+                self.list_value(&values)
+            }
+            Init::OsRelease => {
+                let release = crate::host::os_release();
+                self.make_lisp_string(release.as_bytes().to_vec(), !release.is_ascii())
+            }
+            Init::CommandLineMax => Value::integer(crate::host::command_line_max()).expect("a length is a fixnum"),
             Init::RuntimeFile(name, slash) => {
                 let text = format!("{}{}", crate::host::runtime_root().join(name).display(), if slash { "/" } else { "" });
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
