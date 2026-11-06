@@ -176,6 +176,14 @@ class Engine:
         self.probe_dir = root / 'probe'
 
     def start(self, tools):
+        """Start the compositor and the editor; a failure leaves neither running."""
+        try:
+            return self.launch(tools)
+        except Exception:
+            self.stop()
+            raise
+
+    def launch(self, tools):
         self.tools = tools
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
@@ -355,6 +363,13 @@ def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
     (home / '.config/emacs/init.el').write_text(init)
     (home / '.config/emacs/custom.el').write_text('')
     return (cls or Engine)('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
+
+
+def neomacs_engine(neomacs, root, home, env, init, lisp, timeout, tools, cls=None):
+    """NEOMACS as it installs, on INIT, as `-l' after `-Q'."""
+    (root / 'init.el').write_text(init)
+    return (cls or Engine)('neomacs', [neomacs, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'init.el')],
+                           root, lisp, env, timeout).start(tools)
 
 
 def prepare_world(romacs, env, cwd):

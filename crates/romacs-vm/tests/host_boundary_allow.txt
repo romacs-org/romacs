@@ -30,14 +30,14 @@ crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds 
 crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
 crates/romacs-vm/src/display.rs:400 delayed-variable the window record's display variables, read through variable_value, which checks the fence
-crates/romacs-vm/src/display.rs:1262 delayed-variable reads through variable_value, which checks the fence
-crates/romacs-vm/src/forwarded.rs:722 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/forwarded.rs:1479 dynamic:saved reads the bound variable, owner or flag, not the saved value
-crates/romacs-vm/src/forwarded.rs:1676 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/gc.rs:225 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
-crates/romacs-vm/src/gc.rs:226 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:878 dynamic:saved collector: marks the saved values
-crates/romacs-vm/src/gc.rs:1305 dynamic:saved collector: forwards the saved values
+crates/romacs-vm/src/display.rs:1301 delayed-variable reads through variable_value, which checks the fence
+crates/romacs-vm/src/forwarded.rs:724 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/forwarded.rs:1482 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/forwarded.rs:1679 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/gc.rs:263 std::env::var the collector's test mode (ROMACS_GC_STRESS): collections are invisible to Lisp, so no world keys it, and a restored VM reads it again (Stress::rearm)
+crates/romacs-vm/src/gc.rs:264 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
+crates/romacs-vm/src/gc.rs:1004 dynamic:saved collector: marks the saved values
+crates/romacs-vm/src/gc.rs:1431 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/hash.rs:891 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:173 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
@@ -51,11 +51,11 @@ crates/romacs-vm/src/image.rs:383 std::fs the code-image store, reached only thr
 crates/romacs-vm/src/image.rs:386 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:392 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:397 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
-crates/romacs-vm/src/lib.rs:1959 slot:exec-path declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:1959 slot:initial-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:1959 slot:process-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2038 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/lib.rs:3492 dynamic:saved unbind: restores the saved value as the binding ends
+crates/romacs-vm/src/lib.rs:1979 slot:exec-path declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1979 slot:initial-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1979 slot:process-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:2058 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/lib.rs:3512 dynamic:saved unbind: restores the saved value as the binding ends
 crates/romacs-vm/src/prim.rs:1000 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:1010 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:1022 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
@@ -79,7 +79,7 @@ crates/romacs-vm/src/world/arena.rs:593 libc::file the world allocator checks an
 crates/romacs-vm/src/world/arena.rs:717 libc::file the world allocator maps its own executable read-only where an image expects it; no Lisp value depends on it
 crates/romacs-vm/src/world/arena.rs:1106 libc::file copies the builder arena's backing file into the image file the builder opened through host
 crates/romacs-vm/src/world/arena.rs:1119 libc::file copies the builder arena's backing file into the image file the builder opened through host
-crates/romacs-vm/src/world/image.rs:78 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
+crates/romacs-vm/src/world/image.rs:80 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
 crates/romacs-vm/src/world/mod.rs:124 slot:initial-environment fences the environment lists by name; reads no slot
 crates/romacs-vm/src/world/mod.rs:124 slot:process-environment fences the environment lists by name; reads no slot
 crates/romacs-vm/src/world/mod.rs:125 slot:exec-path fences the environment lists by name; reads no slot

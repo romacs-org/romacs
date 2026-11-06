@@ -272,7 +272,7 @@ replay those steps can diverge for reasons outside Romacs.
 
 # Standing benchmarks: fixed workloads against pinned GNU
 
-`perfbench/perfbench.py` runs one fixed set of workloads in pinned GNU and
+`perfbench/perfbench.py` runs one fixed set of workloads in GNU Emacs and
 in a given Romacs build and prints one table: per workload, each engine's
 `instructions:u` (the reliable metric) and wall time (median of `--runs`,
 default 3), the Romacs/GNU ratio of each, and the change of Romacs's
@@ -280,6 +280,14 @@ figures since the previous saved run.  Each run is saved as
 `results.json` and `table.md` under `OUT/<commit>/<UTC time>/` (default
 OUT `~/.cache/romacs/perf-bench`, or `$ROMACS_PERFBENCH_OUT`), so a rerun after every master
 shows the trend.
+
+The GNU engine is this machine's own installation, `/usr/bin/emacs`, run with
+`LD_LIBRARY_PATH` unset, or `--gnu BIN`.  Each run records its version,
+repository commit, package and whether it is natively compiled, in results.json
+and README's headers, since an upgrade moves it.  The parity harnesses keep the
+pinned oracle.  `$ROMACS_GNU_SOURCE` still supplies the pinned tree: fixture
+files and ERT test files, the same inputs for every engine, whatever commit the
+GNU engine is at.
 
 Romacs runs as an installation runs it.  Before anything is measured,
 perfbench stages the binary beside its Lisp trees and compiles them with
@@ -299,12 +307,22 @@ build reads source by design.  The init and apps rows load private copies
 of their packages, which read as source, and their notes say so.
 `--romacs-source` measures the old way, with no store or world.
 
+`--neomacs BIN` adds neomacs as a third engine with its own column: the same
+workloads in private homes, as it installs, its dump and its `.elc` files,
+with a workload's own file byte-compiled by its own compiler.
+`--neomacs-commit SHA` records the commit it was built from, which it does
+not report itself.  Its batch runs are limited to 8 GiB of address space,
+because one ERT file otherwise grows without bound.  A row it cannot run says why.  The `init` and `apps`
+rows are GNU's and Romacs's alone, and so is ERT.
+
 The workloads, and how each is counted, are in the script's docstring:
 
 * batch, `-Q --batch` on `perfbench/perfbench.el` in both engines:
   startup; font-lock-ensure on fileio.c, subr.el and ORG-NEWS; dired of
   5,000 files; project-find-regexp over the Emacs repository; vc-log of
-  2,000 commits; occur and how-many over xdisp.c.  Instructions are a run's
+  2,000 commits; occur and how-many over xdisp.c; find-file of xdisp.c;
+  describe-function of find-file; 20 shell-command-to-string and 20 eshell
+  commands.  Instructions are a run's
   less a run doing only the setup (perf/font-lock's method).  Each engine's
   result (match counts, line counts) is compared, and a difference is noted.
 * micro: named call, closure call, mapcar of 1 and 10, dolist + funcall,
@@ -317,12 +335,24 @@ The workloads, and how each is counted, are in the script's docstring:
   suite's own speed and safety, a third column; Romacs loads them from its
   store.
   A member an engine does not define, or whose run reported an error,
-  has no figure there and says why.  Pure Lisp compute rather than an
-  editor workload, so it has its own table and is not in `--quick`.
+  has no figure there and says why.  The geometric mean compares Romacs
+  with GNU `.elc` alone.  A median of the per-member ratios covers every
+  column: native compilation reduces some members to almost nothing, and one
+  such ratio would decide a mean.  Pure Lisp compute rather than an editor
+  workload, so it has its own table and is not in `--quick`.
 * ERT: 25 GNU ERT files with the same `-l ert ... -f
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
   not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
+* session, real commands and keys in a GUI session on headless labwc:
+  find-file, dired, occur, project-find-regexp, project-find-file, vc-log,
+  vc-diff, vc-dir, `M-x shell` and org-agenda on a key, and per-key kill,
+  yank, undo, isearch and Org editing.  Wall runs from the key to the result.
+  Block is the longest gap between ticks of a 5 ms timer, which cannot run
+  while the main VM is busy (`perfbench-session.el`).  Instructions are
+  reported, but these rows are read by wall and block: a worker VM's path does
+  more work in total to keep the main VM free, and its processes are not
+  counted.  Writing rows use a private clone of the pinned tree.
 * GUI, each engine on its own headless labwc as the parity harnesses run
   them: first-start world build (Romacs only), warm launch to first paint
   (Romacs only) and to idle, per-key self-insert, C-f and C-n, and C-x C-f
@@ -336,9 +366,9 @@ The workloads, and how each is counted, are in the script's docstring:
   paused while a phase is counted.  Wall per key runs from
   `pre-command-hook` to the next idle moment, after redisplay
   (`perfbench-gui.el`).
-* `init`, the real-init profile's init body (`--profile-config`), GNU against Romacs from
+* `init`, by name only (`--only init`): the real-init profile's init body (`--profile-config`), GNU against Romacs from
   source and from its init layer; wall only.
-* gnosis dashboard open and back (`gnosis_parity_live.py` on a database
+* `apps`, by name only (`--only apps`): gnosis dashboard open and back (`gnosis_parity_live.py` on a database
   copy given with `--gnosis-db` and `--gnosis-db-repo`, or the profile
   config's), and hermes
   dashboard open (`hermes_parity_live.py`, read-only, only when the
@@ -353,9 +383,9 @@ checked clean, and its fixture files are checked against SHA-256s.  The
 HOME/XDG/TMPDIR trees, and no workload writes a user's data.
 
 ```sh
-# in the project environment (pinned GNU oracle and source)
+# in the project environment (ROMACS_GNU_SOURCE for the pinned tree)
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
-  --romacs INSTALLED/romacs-vm-gui --profile-config PROFILE.json  # about an hour, most of it elb
+  --romacs INSTALLED/romacs-vm-gui  # about an hour, most of it elb
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
 ```
 
@@ -364,13 +394,16 @@ After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites th
 row: the editor workloads between `# perfbench-table-begin` and
 `# perfbench-table-end`, and the elisp-benchmarks members between
 `# perfbench-elb-begin` and `# perfbench-elb-end`.  A block the run did not
-measure is left as it was.
+measure is left as it was.  A whole run also rewrites the headlines between
+`# perfbench-headlines-begin` and `# perfbench-headlines-end`: every row where
+Romacs is 0.80x or better against a rival on every metric measured, with build
+and rerun command.  It names on standard error any headline the run lost.
 
 A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
 installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
-from `--commit`.  `--only` takes groups (`batch micro ert elb gui init apps`)
-or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `launch`,
+from `--commit`.  `--only` takes groups (`batch micro ert elb session gui init apps`)
+or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `session`, `launch`,
 `keys`, `init` or `apps`.
 
 ## Line numbers in programming buffers

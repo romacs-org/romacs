@@ -41,13 +41,13 @@ installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
 
 * Romacs and GNU Emacs compared
 
-Performance against pinned GNU Emacs, measured with the standing benchmark
+Performance against GNU Emacs as a user installs it, measured with the standing benchmark
 suite (=crates/romacs-vm-gui/harness/perfbench/=).  Romacs runs as an
 installation runs it, its Lisp compiled ahead of use.  The tables are regenerated
 from each new run, losses included.  To reproduce them:
 
 #+begin_src sh
-python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --gnu GNU-EMACS
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY
 python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json
 #+end_src
 
@@ -82,6 +82,24 @@ Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on 
 
 Not measured in this run: init, gnosis, apps.
 # perfbench-table-end
+
+** Interactive sessions
+
+# perfbench-session-begin
+# perfbench-session-end
+
+** Headlines
+
+# perfbench-headlines-begin
+Every row of this run where Romacs beats a rival by at least 20%: 0.80x or better on every metric the run measured.  Build ~0cfcb823~.  The tables keep every row, losses included.
+
+| Row | Against | Instructions | Time | Build | Rerun |
+|-
+| how-many xdisp.c | GNU | 0.14x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'how-many xdisp.c'= |
+| micro named call | GNU | 0.53x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'micro'= |
+| elb fibn | GNU | 0.49x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
+| elb fibn-named-let | GNU | 0.55x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
+# perfbench-headlines-end
 
 ** Lisp compute: GNU's elisp-benchmarks
 

@@ -22,4 +22,8 @@ impl Leaf<'_> {
         for function in functions.into_iter().rev().filter(|f| *f != Value::NIL) { list = self.cons(function, list); }
         list
     }
+    /// The usage log's read of the collections since its last.
+    pub(crate) fn take_collections(&mut self) -> Value {
+        self.vm.take_collections()
+    }
 }

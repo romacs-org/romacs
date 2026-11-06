@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Write a perfbench run's results into README.org's Romacs-vs-GNU tables.
+"""Write a perfbench run's results into README.org's Romacs comparison tables.
 
 Usage: readme.py RESULTS.json [README.org]
 
 Replaces the text between the `# perfbench-table-begin' and
 `# perfbench-table-end' lines of README.org with an Org table of the
-editor workloads built from RESULTS.json (perfbench's output), and the
-text between `# perfbench-elb-begin' and `# perfbench-elb-end' with one
-of GNU's elisp-benchmarks rows, each headed by the build, the GNU pin,
-the machine and the run's date.  Every row is kept, losses included.  A
-block whose rows the run did not measure is left as it was.
+editor workloads built from RESULTS.json (perfbench's output), the text
+between `# perfbench-session-begin' and `# perfbench-session-end' with one
+of the session rows, and the text between `# perfbench-elb-begin' and
+`# perfbench-elb-end' with one of GNU's elisp-benchmarks rows, each headed
+by the build, the GNU engine, the machine and the run's date.  Every row is kept, losses included.  A
+block whose rows the run did not measure is left as it was.  Between
+`# perfbench-headlines-begin' and `# perfbench-headlines-end' it lists the
+rows where Romacs clearly beats a rival, with build and rerun command, and
+names on standard error any headline this run no longer has.
 """
 import json
 import os
@@ -18,7 +22,14 @@ import sys
 from pathlib import Path
 
 BLOCKS = {'table': ('# perfbench-table-begin', '# perfbench-table-end'),
+          'session': ('# perfbench-session-begin', '# perfbench-session-end'),
+          'headlines': ('# perfbench-headlines-begin', '# perfbench-headlines-end'),
           'elb': ('# perfbench-elb-begin', '# perfbench-elb-end')}
+# A headline: this ratio or better on every metric the run measured.
+MARGIN = .80
+# (rival, its column, the prefix of its ratios)
+RIVALS = (('GNU', 'gnu', ''), ('GNU native', 'gnu_native', 'native_'), ('neomacs', 'neomacs', 'neomacs_'))
+SUMMARIES = ('elb geometric mean', 'elb median')
 
 
 def scaled(value, unit):
@@ -53,11 +64,22 @@ def machine():
     return f'{cpu}, {os.cpu_count()} threads, {round(mem / 1048576)} GB'
 
 
+def gnu_engine(meta):
+    """The GNU engine of this run, as a reader must know it: an upgrade moves it."""
+    build = meta.get('gnu_build')
+    if not build:
+        return f'pinned GNU Emacs ~{meta["fixtures"]["commit"][:8]}~'
+    commit = f', commit ~{build["commit"][:8]}~' if build.get('commit') else ''
+    package = f', package {build["package"]}' if build.get('package') else ''
+    native = 'natively compiled' if build.get('native') else 'without native compilation'
+    return (f'the installed GNU Emacs {build["version"]}{commit}{package}, {native}; '
+            f'the inputs are pinned at ~{meta["fixtures"]["commit"][:8]}~')
+
+
 def measured(meta, what):
     started = meta['started']
     date = f'{started[0:4]}-{started[4:6]}-{started[6:8]}'
-    return (f'Measured {date} on build ~{meta["commit"][:8]}~ against pinned GNU Emacs '
-            f'~{meta["fixtures"]["commit"][:8]}~, on {machine()}.  '
+    return (f'Measured {date} on build ~{meta["commit"][:8]}~ against {gnu_engine(meta)}, on {machine()}.  '
             f'Each {what} ran {meta["runs"]} times per engine in private home directories; '
             'wall time is the median, and wall times measured above load '
             f'{meta["max_load"]:g} are left out.')
@@ -76,31 +98,78 @@ def installation(meta):
             'counts the loads the store confirms and names any it does not.')
 
 
+def rival(meta):
+    """How this run's neomacs ran, for a table's header; empty without one."""
+    build = meta.get('neomacs')
+    if not build:
+        return ''
+    commit = f', commit ~{build["commit"][:8]}~' if build.get('commit') else ''
+    return (f'  {build["version"]}{commit} ran as it installs: its dump and its =.elc= files, a workload\'s own file '
+            'byte-compiled by its own compiler.  A row it cannot run says why.')
+
+
 def section(results):
+    neomacs = results['meta'].get('neomacs')
     lines = [
-        measured(results['meta'], 'workload') + '  ' + installation(results['meta'])
-        + '  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.',
+        measured(results['meta'], 'workload') + '  ' + installation(results['meta']) + rival(results['meta'])
+        + '  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.',
         '',
-        '| Workload | Per | GNU | Romacs | Romacs/GNU (time) | Romacs/GNU (instructions) | Notes |',
+        '| Workload | Per | GNU | Romacs | ' + ('neomacs | ' if neomacs else '')
+        + 'Romacs/GNU (time) | Romacs/GNU (instructions) | '
+        + ('Romacs/neomacs (time) | Romacs/neomacs (instructions) | ' if neomacs else '') + 'Notes |',
         '|-',
     ]
     for r in results['rows']:
-        if r['group'] == 'elb':
+        if r['group'] in ('elb', 'session'):
             continue
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
-        lines.append(f'| {r["row"]} | {r["unit"]} | {scaled(gnu.get("wall"), "s")} | '
-                     f'{scaled(romacs.get("wall"), "s")} | {ratio(r["wall_ratio"])} | '
-                     f'{ratio(r["instructions_ratio"])} | {public(r["note"])} |')
+        cells = [r['row'], r['unit'], scaled(gnu.get('wall'), 's'), scaled(romacs.get('wall'), 's')]
+        cells += [scaled((r.get('neomacs') or {}).get('wall'), 's')] if neomacs else []
+        cells += [ratio(r['wall_ratio']), ratio(r['instructions_ratio'])]
+        cells += [ratio(r.get('neomacs_wall_ratio')), ratio(r.get('neomacs_instructions_ratio'))] if neomacs else []
+        lines.append('| ' + ' | '.join(cells + [public(r['note'])]) + ' |')
     skipped = [line.split(':', 1)[0] for line in results['skipped'] if not line.startswith('elb')]
     if skipped:
         lines += ['', f'Not measured in this run: {", ".join(skipped)}.']
     return '\n'.join(lines)
 
 
+def session_section(results):
+    """The session rows: wall and block first, since a path on a worker VM does
+    more work in total to keep the main VM free."""
+    meta = results['meta']
+    neomacs = meta.get('neomacs')
+    lines = [
+        'Real commands and keys in a GUI session.  Wall runs from the key to the result.  Block is the longest gap '
+        "between ticks of a 5 ms timer, which cannot run while the main VM is busy: how long the session stopped "
+        'answering.  Read these rows by wall and block: work moved to a worker VM adds instructions and removes block.',
+        '',
+        measured(meta, 'row') + '  ' + installation(meta) + rival(meta)
+        + '  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.',
+        '',
+        '| Row | Per | GNU | Romacs | ' + ('neomacs | ' if neomacs else '') + 'GNU block | Romacs block | '
+        + ('neomacs block | ' if neomacs else '') + 'Romacs/GNU (time) | Romacs/GNU (block) | Romacs/GNU (instructions) | '
+        + ('Romacs/neomacs (time) | Romacs/neomacs (block) | ' if neomacs else '') + 'Notes |',
+        '|-',
+    ]
+    for r in results['rows']:
+        if r['group'] != 'session':
+            continue
+        gnu, romacs, third = r['gnu'] or {}, r['romacs'] or {}, r.get('neomacs') or {}
+        cells = [r['row'].removeprefix('session '), r['unit'], scaled(gnu.get('wall'), 's'), scaled(romacs.get('wall'), 's')]
+        cells += [scaled(third.get('wall'), 's')] if neomacs else []
+        cells += [scaled(gnu.get('block'), 's'), scaled(romacs.get('block'), 's')]
+        cells += [scaled(third.get('block'), 's')] if neomacs else []
+        cells += [ratio(r['wall_ratio']), ratio(r['block_ratio']), ratio(r['instructions_ratio'])]
+        cells += [ratio(r.get('neomacs_wall_ratio')), ratio(r.get('neomacs_block_ratio'))] if neomacs else []
+        lines.append('| ' + ' | '.join(cells + [public(r['note'])]) + ' |')
+    return '\n'.join(lines)
+
+
 def elb_section(results):
     """GNU's elisp-benchmarks, a member a row, and their geometric mean."""
     meta = results['meta']
-    native = meta.get('elb_native')
+    native, neomacs = meta.get('elb_native'), meta.get('neomacs')
     lines = [
         "This is GNU's own benchmark suite, GNU ELPA's elisp-benchmarks (the one GNU uses to evaluate "
         'native compilation), not ours, and it measures pure Lisp compute, not editor responsiveness.',
@@ -109,13 +178,16 @@ def elb_section(results):
         + ('and natively compiled at the suite\'s own speed and safety; its own Lisp libraries are '
            'natively compiled in both columns, as this GNU is built with native compilation.  '
            if native else 'and has no native-compilation column: this GNU is built without it.  ')
-        + installation(meta) + '  A member an engine does not define, or whose run reported an error, '
-        'has no figure there, and the geometric mean leaves it out.  The ratio is Romacs over GNU: '
-        'below 1.00x, Romacs is faster.',
+        + installation(meta) + rival(meta) + '  A member an engine does not define, or whose run reported an error, '
+        'has no figure there.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.  '
+        'The geometric mean compares Romacs with GNU =.elc= alone.  Every ratio also has a median over the members '
+        'that have it, and the median is the summary to read against native GNU: native compilation reduces some '
+        'members to almost nothing, and one such ratio would decide a mean.',
         '',
-        '| Member | GNU .elc | ' + ('GNU native | ' if native else '') + 'Romacs | Romacs/GNU .elc (time) | '
-        + ('Romacs/GNU native (time) | ' if native else '') + 'Romacs/GNU .elc (instructions) | '
-        + ('Romacs/GNU native (instructions) | ' if native else '') + 'Notes |',
+        '| Member | GNU .elc | ' + ('GNU native | ' if native else '') + 'Romacs | ' + ('neomacs | ' if neomacs else '')
+        + 'Romacs/GNU .elc (time) | ' + ('Romacs/GNU native (time) | ' if native else '')
+        + 'Romacs/GNU .elc (instructions) | ' + ('Romacs/GNU native (instructions) | ' if native else '')
+        + ('Romacs/neomacs (time) | Romacs/neomacs (instructions) | ' if neomacs else '') + 'Notes |',
         '|-',
     ]
     for r in results['rows']:
@@ -124,13 +196,65 @@ def elb_section(results):
         gnu, romacs = r['gnu'] or {}, r['romacs'] or {}
         cells = [r['row'].removeprefix('elb '), scaled(gnu.get('wall'), 's')]
         cells += [scaled((r.get('gnu_native') or {}).get('wall'), 's')] if native else []
-        cells += [scaled(romacs.get('wall'), 's'), ratio(r['wall_ratio'])]
+        cells += [scaled(romacs.get('wall'), 's')]
+        cells += [scaled((r.get('neomacs') or {}).get('wall'), 's')] if neomacs else []
+        cells += [ratio(r['wall_ratio'])]
         cells += [ratio(r.get('native_wall_ratio'))] if native else []
         cells += [ratio(r['instructions_ratio'])]
         cells += [ratio(r.get('native_instructions_ratio'))] if native else []
+        cells += [ratio(r.get('neomacs_wall_ratio')), ratio(r.get('neomacs_instructions_ratio'))] if neomacs else []
         cells += [public(r['note'])]
         lines.append('| ' + ' | '.join(cells) + ' |')
     return '\n'.join(lines)
+
+
+def selector(made):
+    """The --only that reruns the row MADE."""
+    if made['group'] == 'gui':
+        return 'launch' if 'launch' in made['row'] or 'world' in made['row'] else 'keys'
+    return {'micro': 'micro', 'elb': 'elb', 'ert': 'ERT 25 files', 'session': 'session', 'init': 'init',
+            'apps': 'apps'}.get(made['group'], made['row'])
+
+
+def wins(results):
+    """(row, rival, instructions ratio, time ratio, block ratio) of every row
+    where Romacs beats a rival by MARGIN on every metric measured, but a
+    session row on instructions: a worker VM's path raises them to free the
+    main VM, and its rows are read by wall and block.  A summary is no row.
+    A figure at or below zero on either side is a count lost in its setup or
+    idle floor, and two of them can make a fine ratio, so it wins nothing."""
+    for made in results['rows']:
+        if made['row'] in SUMMARIES:
+            continue
+        for name, column, prefix in RIVALS:
+            metrics = ('wall', 'block') if made['group'] == 'session' else ('instructions', 'wall')
+            figures = [(made.get(c) or {}).get(metric) for c in (column, 'romacs') for metric in metrics]
+            measured_ = [made[f'{prefix}{metric}_ratio'] for metric in metrics if made.get(f'{prefix}{metric}_ratio') is not None]
+            if measured_ and max(measured_) <= MARGIN and all(f is None or f > 0 for f in figures):
+                yield (made, name, made.get(f'{prefix}instructions_ratio'), made.get(f'{prefix}wall_ratio'),
+                       made.get(f'{prefix}block_ratio'))
+
+
+def headlines(results):
+    """The wins as a table: a row stays in the main tables whatever this says."""
+    meta = results['meta']
+    lines = [f'Every row of this run where Romacs beats a rival by at least {round((1 - MARGIN) * 100)}%: '
+             f'{MARGIN:.2f}x or better on every metric the run measured.  Build ~{meta["commit"][:8]}~.  '
+             'The tables keep every row, losses included.', '',
+             '| Row | Against | Instructions | Time | Block | Build | Rerun |', '|-']
+    for made, name, instructions, time, block in wins(results):
+        third = ' --neomacs NEOMACS' if name == 'neomacs' else ''
+        lines.append(f'| {made["row"]} | {name} | {ratio(instructions)} | {ratio(time)} | {ratio(block)} | ~{meta["commit"][:8]}~ | '
+                     f"=perfbench.py --romacs BINARY{third} --only '{selector(made)}'= |")
+    return '\n'.join(lines)
+
+
+def kept_wins(text):
+    """The (row, rival) pairs TEXT's headlines block lists now."""
+    begin, end = BLOCKS['headlines']
+    block = text[text.index(begin):text.index(end)] if begin in text else ''
+    return {tuple(cell.strip() for cell in line.split('|')[1:3]) for line in block.splitlines()
+            if line.startswith('| ') and not line.startswith('| Row ')}
 
 
 def replace(text, block, body):
@@ -148,9 +272,16 @@ def main(argv):
     readme = Path(argv[1] if len(argv) == 2 else 'README.org')
     text = readme.read_text()
     groups = {r['group'] for r in results['rows']}
-    for block, measured_here, body in (('table', bool(groups - {'elb'}), section),
-                                       ('elb', 'elb' in groups, elb_section)):
+    whole = bool(groups - {'elb', 'session'}) and 'elb' in groups
+    for block, measured_here, body in (('table', bool(groups - {'elb', 'session'}), section),
+                                       ('session', 'session' in groups, session_section),
+                                       ('elb', 'elb' in groups, elb_section),
+                                       ('headlines', whole, headlines)):
         if measured_here:
+            if block == 'headlines':
+                lost = kept_wins(text) - {(made['row'], name) for made, name, *_ in wins(results)}
+                for row_, name in sorted(lost):
+                    print(f'{readme}: no longer a headline: {row_} against {name}', file=sys.stderr)
             text = replace(text, block, body(results))
         else:
             print(f'{readme}: this run has no {block} rows; that block is unchanged', file=sys.stderr)

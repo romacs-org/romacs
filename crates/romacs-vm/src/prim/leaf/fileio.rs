@@ -269,7 +269,7 @@ impl Leaf<'_> {
         Ok(match &mut self.vm.objects[index] {
             data::Object::Buffer(t) => {
                 let internal;
-                let bytes = if multibyte { bytes } else {
+                let bytes = if multibyte || bytes.is_ascii() { bytes } else {
                     internal = crate::text::octets_to_multibyte(bytes);
                     &internal
                 };
