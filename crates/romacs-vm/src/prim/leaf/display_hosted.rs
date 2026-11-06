@@ -186,9 +186,9 @@ pub(super) struct Hosted<'l, 'a> {
     /// on, by index since the last reset.
     base: usize,
     glyphs: Vec<(i64, i64, i64, bool)>,
-    /// The elements the next measurement reaches at least: none past the
-    /// line after a reset, as motion back a line at a time walks one line,
-    /// then doubling up to CHUNK for a long walk.
+    /// The elements the next measurement reaches at least: CHUNK, for each
+    /// measurement has a fixed cost, but none past the line after motion
+    /// reseats, as it walks a line at a time, then doubling to CHUNK.
     reach: usize,
     /// The default face's row height, which every host row reaches, and
     /// its ascent.
@@ -198,12 +198,12 @@ pub(super) struct Hosted<'l, 'a> {
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, base: 0, glyphs: vec![], reach: 0, default_height: 0, default_ascent: 0 }
+        Hosted { source, base: 0, glyphs: vec![], reach: CHUNK, default_height: 0, default_ascent: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
-        (self.base, self.glyphs, self.reach) = (0, vec![], 0);
+        (self.base, self.glyphs, self.reach) = (0, vec![], CHUNK);
         self.source.reset(start)
     }
     /// The host's advance and own height for element INDEX.
@@ -283,7 +283,11 @@ impl Elements for Hosted<'_, '_> {
 }
 
 impl Lines for Hosted<'_, '_> {
-    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn reseat(&mut self, start: i64) -> R<()> {
+        self.reset(start)?;
+        self.reach = 0;
+        Ok(())
+    }
     fn delivered(&mut self, index: usize) -> R<Slot> { self.source.slot(index) }
     fn line_start_before(&mut self, pos: i64) -> R<i64> { self.source.visible_line_start(pos) }
     fn begv(&self) -> i64 { self.source.begv() }
