@@ -506,6 +506,21 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (should (equal (plist-get (car events) :text) words))
       (should-not (plist-get (car events) :images)))))
 
+(ert-deftest romacs-agent-the-size-bound-sees-through-a-symlink ()
+  (romacs-agent-attach-tests--with-chat session
+    (let ((target (expand-file-name "target.bin" dir)) (link (expand-file-name "link.png" dir))
+          (romacs-agent-image-max-bytes 4) (kept :none))
+      (write-region "123" nil target nil 'silent)
+      (make-symbolic-link target link)
+      (should (romacs-agent-image-file-p link))
+      ;; The target grows past the bound before dispatch: it is not sent.
+      (write-region "123456789" nil target nil 'silent)
+      (should-not (romacs-agent-image-file-p link))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ wire &optional journal) (setq kept (list wire journal)))))
+        (romacs-agent--input session "see" (list link)))
+      (should-not (cadr kept))
+      (should (stringp (gethash "content" (gethash "message" (car kept))))))))
+
 (ert-deftest romacs-agent-size-is-checked-again-at-send ()
   (romacs-agent-attach-tests--with-chat session
     (let ((image (expand-file-name "a.png" dir)) (sent nil))

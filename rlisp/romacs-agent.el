@@ -795,7 +795,8 @@ message, on the main VM, and a harness refuses what is far beyond this."
   "Whether FILE is a regular file with an image's name, of a size to send."
   (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
        (file-regular-p file) (file-readable-p file)
-       (<= (file-attribute-size (file-attributes file)) romacs-agent-image-max-bytes)))
+       ;; The file a read would get, past any symbolic link.
+       (<= (file-attribute-size (file-attributes (file-truename file))) romacs-agent-image-max-bytes)))
 
 (defun romacs-agent--sendable-images (images)
   "IMAGES that may still be sent: a queued message's file can change while

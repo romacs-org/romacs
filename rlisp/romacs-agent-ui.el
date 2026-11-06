@@ -1147,7 +1147,7 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
   ;; Codex's --image splits its value at commas.
   (when (string-match-p "," file)
     (user-error "An image's file name cannot hold a comma: %s" file))
-  (let ((size (file-attribute-size (file-attributes file))))
+  (let ((size (file-attribute-size (file-attributes (file-truename file)))))
     (when (and size (> size romacs-agent-image-max-bytes))
       (user-error "%s is %s, over `romacs-agent-image-max-bytes' (%s)" (file-name-nondirectory file)
                   (file-size-human-readable size) (file-size-human-readable romacs-agent-image-max-bytes))))
