@@ -27,6 +27,7 @@ DEFS = r'''(defvar ht-lines 12)
 (defun ht-motion () (with-current-buffer "pv" (save-excursion (goto-char (point-max)) (list (vertical-motion -19) (point)))))
 (defun ht-force (object) (force-window-update object) (list (window-end) (window-end nil t)))
 (defun ht-redisplay () (with-current-buffer "pv" (save-excursion (goto-char (point-min)) (insert "y"))) (redisplay t) (list (window-end) (window-end nil t) (window-start)))
+(defun ht-config () (let ((c (current-window-configuration))) (switch-to-buffer (get-buffer-create "ht-other")) (redisplay t) (set-window-configuration c) (list (window-end) (window-end nil t))))
 (defun ht-redisplay-end () (call-interactively #'end-of-buffer) (redisplay t) (list (window-start) (point) (window-end) (window-end nil t)))
 (defun ht-edit () (with-current-buffer "pv" (save-excursion (goto-char (point-min)) (insert "x")) (list (window-end) (window-end nil t))))
 '''
@@ -65,7 +66,7 @@ STEPS = ['nil', "'(end-of-buffer)", "'(end-of-buffer)", "'(previous-line)", "'(e
 # After `force-window-update' the end is stale; after a `redisplay' with no
 # paint between, it is fresh again.
 FRESHNESS = ['(pv-step nil)\n', '(ht-force nil)\n', '(pv-step nil)\n', '(ht-force (selected-window))\n',
-             "(pv-step '(beginning-of-buffer))\n", '(ht-redisplay)\n', '(ht-redisplay-end)\n', '(pv-step nil)\n']
+             "(pv-step '(beginning-of-buffer))\n", '(ht-redisplay)\n', '(ht-redisplay-end)\n', '(pv-step nil)\n', '(ht-config)\n', '(pv-step nil)\n']
 
 
 def main():

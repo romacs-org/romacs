@@ -420,6 +420,10 @@ struct ShownKey {
     overlays: u64,
     hosted: bool,
     buffer: Value,
+    /// `Window::shows' and the selected window's id: what stands for the
+    /// Values above across a collection, which moves them.
+    shows: u64,
+    selected_id: u64,
     selected: Value,
     modiff: u64,
     /// The accessible region (GNU's clip_changed): narrowing edits nothing.
@@ -459,13 +463,13 @@ impl ShownKey {
         self.geometry == other.geometry
     }
     fn same_display(&self, other: &Self) -> bool {
-        (self.buffer, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
-            == (other.buffer, other.modiff, other.accessible, other.start, other.overlays, other.geometry, other.min_hscroll, other.suspended)
+        (self.shows, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
+            == (other.shows, other.modiff, other.accessible, other.start, other.overlays, other.geometry, other.min_hscroll, other.suspended)
             && (self.chrome, self.root, self.metrics, self.faces) == (other.chrome, other.root, other.metrics, other.faces)
     }
 }
 
-romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, selected, modiff, accessible, start, mark, terminal, geometry, min_hscroll, suspended, chrome, root, metrics, faces, table, variables, header });
+romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, shows, selected_id, selected, modiff, accessible, start, mark, terminal, geometry, min_hscroll, suspended, chrome, root, metrics, faces, table, variables, header });
 
 struct Shown {
     key: ShownKey,
@@ -2086,12 +2090,15 @@ impl Vm {
         }).collect();
         self.slots[self.buffer_slot].value = saved;
         let header = crate::window::Windows::new(self).header_line_format(window).map_err(crate::forwarded::fault_text)?;
+        let selected = self.selected_window_value()?;
         Ok(ShownKey {
             collections: self.gc_stats.collections,
             overlays: self.display_state.overlays,
             hosted: self.display_state.hosted,
             buffer,
-            selected: self.selected_window_value()?,
+            shows: self.window(window)?.shows,
+            selected_id: self.window(selected).map_or(0, |w| w.id),
+            selected,
             modiff,
             accessible,
             start,
@@ -2227,7 +2234,7 @@ impl Vm {
                 Some(shown) if !shown.key.same_size(&key) => all = true,
                 Some(shown) if shown.key.same_display(&key) => {
                     // Selection flags the window it left and the one it reached.
-                    if shown.key.selected != key.selected && (shown.key.selected == window || key.selected == window) { picked.push(window); }
+                    if shown.key.selected_id != key.selected_id && [shown.key.selected_id, key.selected_id].contains(&id) { picked.push(window); }
                     else if point != Some(shown.point) { moved.push(window); }
                 }
                 Some(_) => buffers.push(key.buffer),
