@@ -458,6 +458,8 @@ default instance."
           (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
+    ;; An idle one has no end of a run to tell its views.
+    (romacs-agent--raise child (list :type 'status :text "cancelled"))
     (romacs-agent-stop child)
     (romacs-agent-tools--task child)))
 

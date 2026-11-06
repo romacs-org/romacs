@@ -170,7 +170,10 @@ not started, `outcome unknown' when it had)."
   ;; harness so far, every run's (request ids count on from them).
   driver-state startup-pending caught-up (inputs 0) models-request
   ;; Whether the last line was a compaction's boundary: its summary is next.
-  compacting)
+  compacting
+  ;; What runs under it, for its views: its harness's own subagents by tool
+  ;; id, then those and its delegated tasks as rows and as a line.
+  subagents children-rows children-summary)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -1704,8 +1707,18 @@ A server runs this at its start, so sessions survive it."
   "A delegating session's id and a client request id, to the session it
 started: a request repeated after a lost reply finds its session.")
 
+(defvar romacs-agent--children (make-hash-table :test #'equal)
+  "A session's id to the sessions delegated from it.")
+
+(defun romacs-agent-children (session)
+  "The sessions SESSION delegated."
+  (cl-remove-if-not (lambda (child) (eq (romacs-agent-get (romacs-agent-id child)) child))
+                    (gethash (romacs-agent-id session) romacs-agent--children)))
+
 (defun romacs-agent--index (session)
   (let ((options (romacs-agent-options session)))
+    (when-let* ((parent (plist-get options :parent)))
+      (push session (gethash parent romacs-agent--children)))
     (when (plist-get options :request)
       (puthash (cons (plist-get options :parent) (plist-get options :request))
                (romacs-agent-id session) romacs-agent--requests))))

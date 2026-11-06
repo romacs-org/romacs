@@ -53,6 +53,8 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  children   what runs under a session, in its header and C-c C-o menu,
+             by real keys.
   start_picker  a session started by real keys through the palette of
              instances and models, with an effort; the first session's
              models kept once.
@@ -2433,6 +2435,132 @@ def start_picker(args, base):
         a.close()
 
 
+def children(args, base):
+    """What runs under a session, by real keys: the header counts and the
+    `C-c C-o' menu's rows of a parent's delegated tasks (running, waiting,
+    failed) and of its harness's own subagent, following their state with
+    the menu open; a digit opens a child's chat or a subagent's card, and
+    RET one chosen from the list of them; opening a failure takes it out
+    of the count."""
+    a = Agents(args, base, 'ch')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.codex_instance()
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate(task, title, provider):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
+                {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
+            a.idle(parent, 60)
+            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
+            return record['taskId']
+
+        running = delegate('slow 300', 'long build', 'codex')
+        waiting = delegate('ask true', 'needs approval', 'claude')
+        failed = delegate('fail', 'broken task', 'codex')
+        until(lambda: a.state(failed) == 'idle', 20, 'failed child ended')
+        done = delegate('say fine', 'finished task', 'codex')
+        until(lambda: a.state(done) == 'idle', 20, 'done child ended')
+        a.idle(parent, 60)
+        until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
+
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def header():
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+                '(substring-no-properties (romacs-agent-ui--header-line)))'))
+
+        def menu():
+            return parity_live.read_sexp(a.eval(
+                '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
+                '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
+
+        def shot(name):
+            path = base / f'children-{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            return str(path)
+
+        def shown():
+            return parity_live.read_sexp(a.eval('(buffer-name (window-buffer (selected-window)))'))
+
+        def open_menu():
+            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
+            until(lambda: 'Agents' in menu(), 15, 'menu open')
+
+        until(lambda: '1 failed' in header(), 15, 'counts in the header')
+        result = {'header': header()}
+        result['shot_header'] = shot('header')
+        open_menu()
+        time.sleep(.5)
+        result['menu'] = menu()
+        result['shot_menu'] = shot('menu')
+
+        # With the menu open, the approval answered: its row and the title follow.
+        a.eval(f'(romacs-agent-respond {a.s(waiting)} (car (hash-table-keys (romacs-agent-approvals {a.s(waiting)}))) t)')
+        until(lambda: 'waiting' not in menu(), 15, 'menu follows the child')
+        result['menu_after'] = menu()
+        result['header_after'] = header()
+        result['shot_menu_after'] = shot('menu-after')
+
+        # A digit on the first row: the failure, first of what wants the user.
+        a.keys('1')
+        until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
+        result['opened'] = shown()
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
+        result['header_seen'] = header()
+
+        # The list of them, RET on the one typed for.
+        open_menu()
+        a.keys('o')
+        until(lambda: 'Subagent' in (parity_live.read_sexp(a.eval(
+            '(if (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+            '(substring-no-properties (minibuffer-prompt))) "")')) or ''), 15, 'palette open')
+        time.sleep(.5)
+        result['shot_palette'] = shot('palette')
+        a.keys('finished')
+        time.sleep(.5)
+        a.keys('-k', 'Return')
+        until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
+        result['chosen'] = shown()
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+
+        # The harness's own subagent: counted while it runs; its row goes to its card.
+        a.send(parent, 'agent 6 read the code')
+        until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
+        until(lambda: '2 running' in header() or '1 running' in header(), 15, 'subagent counted')
+        result['header_subagent'] = header()
+        open_menu()
+        time.sleep(.3)
+        result['menu_subagent'] = menu()
+        result['shot_subagent'] = shot('subagent')
+        lines = [line for line in result['menu_subagent'].splitlines() if 'read the code' in line]
+        key = lines[0].split('read the code')[0].split()[-1] if lines else '1'
+        a.keys(key)
+        until(lambda: not menu(), 15, 'menu closed')
+        result['card_line'] = parity_live.read_sexp(a.eval(
+            f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+            '(buffer-substring-no-properties (line-beginning-position) (line-end-position)))'))
+        a.idle(parent, 30)
+
+        running_stopped = a.eval(f'(romacs-agent-stop {a.s(running)})')
+        result['header_end'] = header()
+        result['ok'] = (all(w in result['header'] for w in ('⇢', '1 running', '1 waiting', '1 failed'))
+                        and all(w in result['menu'] for w in ('long build', 'needs approval', 'broken task', 'finished task'))
+                        and '1 running' in result['header_after'] and 'waiting' not in result['header_after']
+                        and 'waiting' not in result['menu_after']
+                        and 'finished task' in result['chosen']
+                        and 'broken task' in result['opened'] and 'failed' not in result['header_seen']
+                        and 'read the code' in result['menu_subagent'] and 'read the code' in result['card_line'])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -2490,7 +2618,7 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
