@@ -93,3 +93,23 @@ fn post_gc_hook_runs_as_pinned_gnu() {
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// With no pointer, as batch has none: frame.c's answers and checks,
+/// through `mouse-position-function'.
+#[test]
+fn mouse_position_with_no_pointer_is_pinned_gnu() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-mouse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let form = "(let ((seen (lambda (p) (list 'seen (eq (car p) (selected-frame)) (cdr p)))))
+      (list (eq (car (mouse-position)) (selected-frame)) (cdr (mouse-position)) (cdr (mouse-pixel-position))
+            (mouse-position-in-root-frame)
+            (condition-case e (set-mouse-position (selected-frame) 1 2) (error e))
+            (condition-case e (set-mouse-pixel-position (selected-frame) 1 2) (error e))
+            (condition-case e (set-mouse-position nil 1 2) (error e))
+            (condition-case e (set-mouse-pixel-position (selected-frame) 'a 2) (error e))
+            (let ((mouse-position-function seen)) (list (mouse-position) (mouse-pixel-position)))))";
+    assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
+    let _ = std::fs::remove_dir_all(&dir);
+}

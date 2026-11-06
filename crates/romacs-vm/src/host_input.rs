@@ -106,6 +106,12 @@ pub trait HostInput {
     fn native_window(&mut self, _action: NativeWindow) -> Option<bool> {
         None
     }
+
+    /// Where the pointer is over the host frame, in pixels: GNU's
+    /// `mouse_position_hook'.  None with no pointer there, or no display.
+    fn pointer(&mut self) -> Option<(i32, i32)> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.

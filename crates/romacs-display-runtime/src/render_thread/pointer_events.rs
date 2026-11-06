@@ -1475,6 +1475,7 @@ impl RenderApp {
             let lx = (position.x / scale) as f32;
             let ly = (position.y / scale) as f32;
             window_state.render.set_mouse_pos((lx, ly));
+            self.comms.pointer.set(Some((lx as i32, ly as i32)));
             let mut dirty = false;
             let pointer_owner = Self::pointer_owner(window_state, lx, ly);
             if !pointer_owner.owns_root_hover() {
@@ -1757,6 +1758,7 @@ impl RenderApp {
     }
 
     pub(super) fn handle_cursor_left(&mut self, window_id: WindowId) {
+        self.comms.pointer.set(None);
         // The pointer left the window: a wheel fraction left over a model
         // does not wait for its return.
         self.model_wheel.reset();

@@ -234,9 +234,6 @@ message-box	needed	lane A (editing, windows, frames, minibuffer readers, display
 message-or-box	absent	no shipped Lisp calls it and it is no command
 module-function-p	elsewhere	help, in the in-Romacs session
 module-load	absent	dynamic modules: Romacs loads no native modules
-mouse-pixel-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-mouse-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-mouse-position-in-root-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 move-point-visually	needed	lane A (editing, windows, frames, minibuffer readers, display)
 msdos-downcase-filename	absent	platform: MS-DOS build only
 msdos-long-file-names	absent	platform: MS-DOS build only
@@ -307,8 +304,6 @@ set-input-interrupt-mode	absent	terminal frames: Romacs has none (GUI and batch 
 set-input-mode	needed	lane A (editing, windows, frames, minibuffer readers, display)
 set-message-beep	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-minibuffer-window	needed	lane A (editing, windows, frames, minibuffer readers, display)
-set-mouse-pixel-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
-set-mouse-position	needed	lane A (editing, windows, frames, minibuffer readers, display)
 set-network-process-option	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-output-flow-control	absent	terminal frames: Romacs has none (GUI and batch only)
 set-process-datagram-address	absent	no shipped Lisp calls it and it is no command

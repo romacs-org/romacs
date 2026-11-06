@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d81eb4ac68e37eecd8781d0604f34bad0aba968bba8cba59064292e0208c261d",
+  "source_fingerprint": "55ab6b3f86910299fc0dad1c0990c5208495f97508f259ff087b39a4de13f09f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1370,
-  "parsed_vm2_only": 1370
+  "parsed_total": 1371,
+  "parsed_vm2_only": 1371
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4652,7 +4652,7 @@
   "romacs--native-window": {
    "name": "romacs--native-window",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/animate.rs:17"
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:19"
   },
   "romacs--nconc-list": {
    "name": "romacs--nconc-list",
@@ -4688,6 +4688,11 @@
    "name": "romacs--overlay-change-hooks",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insdel.rs:282"
+  },
+  "romacs--pointer": {
+   "name": "romacs--pointer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/animate.rs:17"
   },
   "romacs--prepare-change": {
    "name": "romacs--prepare-change",

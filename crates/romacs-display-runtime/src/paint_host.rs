@@ -477,6 +477,11 @@ impl PaintSender {
         result.map(|()| ready)
     }
 
+    /// Where the pointer is over the primary window, if it is.
+    pub fn pointer(&self) -> Option<(i32, i32)> {
+        self.comms.pointer.get()
+    }
+
     /// Title the primary window (xdisp.c gui_consider_frame_title).
     pub fn set_title(&self, title: String) -> Result<(), String> {
         let result = self

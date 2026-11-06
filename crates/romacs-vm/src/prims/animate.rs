@@ -14,5 +14,7 @@ fn display_animates(cx) { cx.display_animates() }}
 // and goes (rlisp/romacs-server.el): ACTION `show' makes it anew when it was
 // closed and asks for the focus, `hide' closes it and keeps the session,
 // `query' only asks. t when a window shows after the request.
+defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
+fn pointer(cx) { cx.pointer() }}
 defsubr! { name = "romacs--native-window", gnu = "romacs:display", effect = Global,
 fn native_window(cx, action: Value) { cx.native_window(action) }}

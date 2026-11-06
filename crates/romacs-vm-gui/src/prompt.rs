@@ -206,6 +206,10 @@ impl HostInput for GuiHost {
         display_animates(&self.sender)
     }
 
+    fn pointer(&mut self) -> Option<(i32, i32)> {
+        self.sender.pointer()
+    }
+
     fn native_window(&mut self, action: romacs_vm::NativeWindow) -> Option<bool> {
         let mut shared = self.shared.borrow_mut();
         let Some(server) = shared.server.as_mut() else {

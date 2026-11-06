@@ -803,7 +803,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Set per process by the batch startup, nil in a window session, as
     // frame.el leaves it (romacs-loadup-bootstrap.el, romacs-gui-loadup.el).
     CVariable { name: "terminal-frame", gnu: "frame.c:7477", kind: Kind::Lisp(Init::Nil) },
-    // `mouse-position' itself is not defined yet (DEFUN-CENSUS.tsv).
+    // `mouse-position' and `mouse-pixel-position' call it (prelude.el).
     CVariable { name: "mouse-position-function", gnu: "frame.c:7480", kind: Kind::Lisp(Init::Nil) },
     // The window host sends every wheel event (VM2-DEFVAR-INERT).
     CVariable { name: "mwheel-coalesce-scroll-events", gnu: "keyboard.c:14439", kind: Kind::Bool(true) },

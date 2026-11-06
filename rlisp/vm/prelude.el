@@ -1228,6 +1228,53 @@ commands find the item by COLUMN; its key sequence is [tab-bar TYPE]."
       (call-interactively command nil keys)
       (setq last-command command))))
 
+;;;; The mouse: frame.c, over what the host says of the pointer
+
+(defun romacs--mouse (x y)
+  "(FRAME X . Y) on the selected frame, through `mouse-position-function'."
+  (let ((position (cons (selected-frame) (cons x y))))
+    (if mouse-position-function (funcall mouse-position-function position) position)))
+
+(defun mouse-pixel-position ()
+  "Return a list (FRAME X . Y) giving the mouse frame and position in pixels.
+X and Y are nil when the mouse is not over the frame, or there is none."
+  (let ((at (romacs--pointer)))
+    (romacs--mouse (car at) (cdr at))))
+
+(defun mouse-position ()
+  "Return a list (FRAME X . Y) giving the mouse frame and position in characters.
+X and Y are nil when the mouse is not over the frame, or there is none."
+  (let ((at (romacs--pointer)))
+    (if at
+        (let ((border (frame-internal-border-width)))
+          (romacs--mouse (floor (- (car at) border) (frame-char-width))
+                         (floor (- (cdr at) border) (frame-char-height))))
+      (romacs--mouse nil nil))))
+
+(defun mouse-position-in-root-frame ()
+  "Return (X . Y), `mouse-position' on the root frame.
+Romacs's frames measure from the root frame's corner, as a Wayland
+frame's position is not known."
+  (let ((position (cdr (mouse-position))))
+    (cons (or (car position) 0) (or (cdr position) 0))))
+
+(defun romacs--check-mouse-target (frame x y)
+  "frame.c's checks of FRAME, X and Y, which nothing warps with.
+pgtkterm.c frame_set_mouse_pixel_position is empty: Wayland has no warp."
+  (unless (frame-live-p frame) (signal 'wrong-type-argument (list 'frame-live-p frame)))
+  (dolist (n (list x y))
+    (unless (integerp n) (signal 'wrong-type-argument (list 'integerp n)))))
+
+(defun set-mouse-position (frame x y)
+  "Ask to move the mouse pointer to character X, Y of FRAME.
+Wayland lets no client do it, so nothing moves, as pgtk's."
+  (romacs--check-mouse-target frame x y))
+
+(defun set-mouse-pixel-position (frame x y)
+  "Ask to move the mouse pointer to pixel X, Y of FRAME.
+Wayland lets no client do it, so nothing moves, as pgtk's."
+  (romacs--check-mouse-target frame x y))
+
 ;;;; The window title
 
 (defun romacs--title-format-static-p (format)
