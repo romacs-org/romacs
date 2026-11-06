@@ -87,6 +87,30 @@ fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, 
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
 
+/// A batch program's settings stay out of an init, as a session's do
+/// (rlisp/romacs-custom.el, in the chain): `disable-command' creates no
+/// ~/.emacs, and with an init named, both writers save beside it.
+#[test]
+fn batch_writers_leave_the_init_alone() {
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-init-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let init = dir.join("init.el");
+    std::fs::write(&init, INIT).unwrap();
+    let program = format!("(progn (disable-command 'forward-word)
+        (setq user-init-file {:?} user-emacs-directory {:?})
+        (customize-save-variable 'kill-ring-max 123)
+        (disable-command 'backward-word))", init.display().to_string(), format!("{}/", dir.display()));
+    let args = ["-Q", "--batch", "--eval", &program].map(str::to_owned);
+    let (status, stdout, stderr) = run(romacs, &dir, &args, false);
+    assert_eq!(status, Some(0), "{stdout}{stderr}");
+    assert!(!dir.join(".emacs").exists(), "a batch program made ~/.emacs");
+    assert_eq!(std::fs::read_to_string(&init).unwrap(), INIT);
+    let saved = std::fs::read_to_string(dir.join("custom.el")).unwrap();
+    assert!(saved.contains("kill-ring-max 123") && saved.contains("'backward-word 'disabled t"), "{saved}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn batch_command_line_matches_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");

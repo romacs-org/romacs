@@ -419,5 +419,8 @@ definitions (`romacs--world-reseed-all')."
 (require 'romacs-theme)
 (romacs-theme-start)
 
+;; Saved settings stay out of the user's init, in every launch of this chain.
+(require 'romacs-custom)
+
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

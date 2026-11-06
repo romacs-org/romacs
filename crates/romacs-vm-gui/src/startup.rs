@@ -661,10 +661,6 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
     if launch == Launch::Loadup && vm.eval_source("(require 'elec-pair nil t)")? != romacs_vm::Fixed::NIL {
         vm.eval_source(include_str!("../../../rlisp/romacs-defaults.el"))?;
     }
-    // Where saved settings go: never the user's init.
-    if launch == Launch::Loadup {
-        vm.eval_source(include_str!("../../../rlisp/romacs-custom.el"))?;
-    }
     mark_phase("session-definitions");
     Ok(())
 }
