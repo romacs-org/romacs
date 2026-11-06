@@ -3236,6 +3236,11 @@ pub fn inspect_enabled() -> bool {
 pub fn inspect_request() {
     INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
+/// Whether native loops poll for requests, as a listener makes them.
+#[cfg(test)]
+pub fn inspect_enable(on: bool) {
+    INSPECT_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
 /// The JSON of the newest answer.
 #[cfg(test)]
 pub fn inspect_answer() -> Option<String> {

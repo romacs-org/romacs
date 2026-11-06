@@ -1401,31 +1401,30 @@ impl Vm {
         };
         // A leaf's Lisp comes here, by pending variables, `safe_call' and
         // watchers: it sees the leaf's frame, whichever way it came.
+        self.with_site_leaf(|vm| {
+            vm.suspend_stack();
+            vm.propagated_escape = None;
+            vm.propagated_escape_hooked = false;
+            vm.propagated_eval_depth = None;
+            vm.propagate_next = true;
+            let result = execute_args(vm, trampoline, &registers);
+            vm.propagate_next = false;
+            vm.resume_stack();
+            vm.end_nested_execution();
+            result
+        })
+    }
+    /// BODY, with the activation recorded of any leaf a site is running with
+    /// none: what BODY runs or publishes sees that frame.
+    pub(crate) fn with_site_leaf<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
         let site = std::mem::replace(&mut self.site_leaf, (0, 0));
         let mark = self.record_site_leaf(site);
-        self.suspend_stack();
-        self.propagated_escape = None;
-        self.propagated_escape_hooked = false;
-        self.propagated_eval_depth = None;
-        self.propagate_next = true;
-        let result = execute_args(self, trampoline, &registers);
-        self.propagate_next = false;
-        self.resume_stack();
-        self.end_nested_execution();
+        let result = body(self);
         if let Some(mark) = mark {
             self.trace_leave(mark);
         }
         self.site_leaf = site;
         result
-    }
-    /// Answer an inspection from inside a native loop: a leaf a site runs
-    /// with no activation shows its frame for the snapshot.
-    pub(crate) fn inspect_in_leaf(&mut self) {
-        let mark = self.record_site_leaf(self.site_leaf);
-        self.inspect_capture();
-        if let Some(mark) = mark {
-            self.trace_leave(mark);
-        }
     }
     /// The activation `trace_call' would have made for the leaf at SITE.
     fn record_site_leaf(&mut self, site: (usize, usize)) -> Option<usize> {
