@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c1de5a004ba607f67427f4624b2b78f28b17f06b7960861976fab288fe7726a5",
+  "source_fingerprint": "b60ce325df9d49213eefd8652effca91e966ef4a3f34eae330f10ff49aabd8be",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1368,
-  "parsed_vm2_only": 1368
+  "parsed_total": 1370,
+  "parsed_vm2_only": 1370
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3303,7 +3303,7 @@
   "memory-info": {
    "name": "memory-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:98"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:113"
   },
   "memq": {
    "name": "memq",
@@ -4237,7 +4237,7 @@
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:92"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
@@ -4393,6 +4393,11 @@
    "name": "romacs--gnutls-verify",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/gnutls.rs:30"
+  },
+  "romacs--hold-collection": {
+   "name": "romacs--hold-collection",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:74"
   },
   "romacs--host-minibuffer": {
    "name": "romacs--host-minibuffer",
@@ -4984,6 +4989,11 @@
    "name": "romacs--take-doomed-finalizers",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:60"
+  },
+  "romacs--take-post-gc": {
+   "name": "romacs--take-post-gc",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:67"
   },
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",

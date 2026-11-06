@@ -425,6 +425,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "use-system-tooltips", gnu: "frame.c:7727", kind: Kind::Bool(true) },
     CVariable { name: "user-init-file", gnu: "lread.c:5684", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "values", gnu: "lread.c:5555", kind: Kind::Lisp(Init::Nil) },
+    // Run after a collection, at the next safe point (`romacs--run-finalizers').
+    CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
     // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
     // the command loop's run it (rlisp/vm/keyboard.el, echo.rs).
     CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
@@ -1118,6 +1120,7 @@ impl Vm {
     pub(super) fn count_collection(&mut self, elapsed_ns: u64) {
         let (done, elapsed) = self.forwarded.gc_done;
         self.forwarded.ints[done] = self.forwarded.ints[done].saturating_add(1);
+        self.post_gc_due = true;
         let value = self.forwarded.objects[elapsed];
         if value == Value::UNBOUND || matches!(self.object_if(value), Some(data::Object::Float(_))) {
             self.gc_stats.elapsed_ns += elapsed_ns;
