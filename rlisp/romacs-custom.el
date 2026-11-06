@@ -132,7 +132,6 @@ through a list must not run code nobody agreed to."
   :group 'customize)
 
 (defvar romacs-theme--stock)
-(defvar romacs-mode-line--pill-colors)
 
 (defvar romacs-theme-preview--base nil
   "The themes enabled when the preview began, highest priority first.")
@@ -247,10 +246,7 @@ however it ends."
           (romacs-theme-preview--candidate nil)
           (romacs-theme-preview--faces nil)
           (romacs-theme--stock (bound-and-true-p romacs-theme--stock))
-          (romacs-theme-preview--stock romacs-theme--stock)
-          ;; What the pill faces were last given: they come back with the
-          ;; other faces, so this does too.
-          (romacs-mode-line--pill-colors (bound-and-true-p romacs-mode-line--pill-colors)))
+          (romacs-theme-preview--stock romacs-theme--stock))
      (unwind-protect (progn ,@body)
        (when romacs-theme-preview--faces
          (let ((inhibit-quit t)) (romacs-theme-preview--revert))))))

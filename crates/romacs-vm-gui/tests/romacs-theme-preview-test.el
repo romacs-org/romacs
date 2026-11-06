@@ -89,10 +89,12 @@ enabled now back after it."
   ;; what the enable hooks derive must still come back.
   (romacs-preview-test--themes (directory)
     (mapc #'disable-theme custom-enabled-themes)
-    (let ((pills (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)))
+    (let* ((state (lambda () (list (face-background 'romacs-mode-line-pill)
+                                   (get 'romacs-mode-line-pill 'face-defface-spec)
+                                   (get 'romacs-mode-line-pill 'face-modified))))
+           (pills (funcall state)))
       (romacs-theme-preview--session (romacs-theme-preview--show 'catppuccin-latte))
-      (romacs-should (equal (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)
-                            pills)))))
+      (romacs-should (equal (funcall state) pills)))))
 
 (romacs-deftest romacs-theme-preview-ends-with-the-hooks-told ()
   ;; A hook that derives something from the faces has seen the last
