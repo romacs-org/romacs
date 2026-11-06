@@ -204,7 +204,8 @@ fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: 
     let bounds = Rect::new(0.0, 0.0, width, tab_bar.height as f32);
     frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, color(tab_bar.faces[face].background));
     frame.set_draw_context(DisplayWindowId::new(0), GlyphRowRole::TabBar, Some(bounds));
-    let mut x = 0.0;
+    let boxed = |index: usize| tab_bar.faces[index].decor.boxed.is_some();
+    let (mut x, mut box_open) = (0.0, false);
     for (byte, ch) in text.utf8.char_indices() {
         let index = face_at(text, byte, face);
         let id = FaceId::new(face_base + index as u32);
@@ -212,13 +213,24 @@ fn paint_tab_bar(frame: &mut FrameGlyphBuffer, tab_bar: &TabBarSnapshot, width: 
         let advance = advance(frame, id, ch, cell);
         let background = color(tab_bar.faces[index].background);
         if index != face { frame.add_background(x, 0.0, advance, bounds.height, background); }
-        match glyphless.get(index, ch) {
-            Some(shown) => { glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true, 0.0)?; }
+        let at = match glyphless.get(index, ch) {
+            Some(shown) => {
+                let cell = glyphless.paint(frame, index, shown, x, 0.0, (ascent, height), id, true, 0.0)?;
+                // Its blank character is there for a click, no cell of a run.
+                if boxed(index) { set_glyph_box_edges(frame, cell + 1, edges(false, false)); }
+                cell
+            }
             None => {
                 frame.add_char(ch, x, 0.0, advance, height, ascent, false);
                 *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing tab bar face")? = id;
+                frame.glyphs.len() - 1
             }
-        }
+        };
+        // Boxed characters side by side are one box run (IT_APPLY_FACE_BOX).
+        let next = byte + ch.len_utf8();
+        let ends = next >= text.utf8.len() || !boxed(face_at(text, next, face));
+        if boxed(index) { set_glyph_box_edges(frame, at, edges(!box_open, ends)); }
+        box_open = boxed(index) && !ends;
         x += advance;
     }
     Ok(())

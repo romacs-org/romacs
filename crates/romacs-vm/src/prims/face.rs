@@ -1,17 +1,18 @@
-//! GNU xfaces.c's live face registry. The Lisp lface vectors are
-//! authoritative; attribute changes on a frame are mirrored into the display
-//! theme, which realizes them.
+//! GNU xfaces.c's live face registry. The Lisp lface vectors are the one
+//! copy of a face: the display realizes from them when it shows a face, and
+//! a change on a displayed frame only drops what it had realized.
 use super::*;
 use crate::prim::leaf::Kind;
+use crate::prim::FaceKeys;
 use romacs_face::registry::{new_lface, LFACE_ATTRIBUTES, LFACE_VECTOR_SIZE};
 
-fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) -> Out {
+pub(super) fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) -> Out {
     if matches!(cx.kind(face), Kind::String | Kind::Bytes) {
         let table = cx.resolve_obarray(Value::NIL)?;
         face = cx.intern_in(table, face)?;
     }
     let original = face;
-    let property = cx.intern("face-alias");
+    let property = cx.face_keys().face_alias;
     // Faces seen along an alias chain, kept only once there is one.
     let mut seen = std::collections::HashSet::new();
     while face != Value::NIL && cx.kind(face) == Kind::Symbol {
@@ -28,8 +29,7 @@ fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) -> Out {
 
 /// Whether the display realizes faces from FRAME's: every frame but a child
 /// frame, which the display draws with its root frame's faces
-/// (DIVERGENCES.md VM2-CHILD-FRAME). A theme recomputes each face on every
-/// frame; mirroring only these keeps the display's work one frame's.
+/// (DIVERGENCES.md VM2-CHILD-FRAME).
 pub(super) fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
     Ok(!cx.windows().is_child_frame(frame)?)
 }
@@ -49,7 +49,7 @@ fn proper_list(cx: &Leaf<'_>, mut value: Value) -> bool {
     true
 }
 
-fn signal(cx: &mut Leaf<'_>, message: &str, value: Value) -> Fault {
+pub(super) fn signal(cx: &mut Leaf<'_>, message: &str, value: Value) -> Fault {
     let message = cx.string(message);
     let tail = if proper_list(cx, value) { value }
         else { cx.cons(value, Value::NIL) };
@@ -82,7 +82,7 @@ fn internal_lisp_face_p(cx, face: Value; optional frame: Value) {
 defsubr! { name = "internal-make-lisp-face", gnu = "xfaces.c:3029", effect = Global,
 fn internal_make_lisp_face(cx, face: Value; optional frame: Value) { make_lisp_face(cx, face, frame) }}
 
-fn make_lisp_face(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
+pub(super) fn make_lisp_face(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     if cx.kind(face) != Kind::Symbol { return Err(Fault::Wrong("symbolp", face)); }
     // GNU resolves before validating FRAME, including alias-cycle errors.
     let global = lookup(cx, face, Value::NIL)?;
@@ -133,31 +133,39 @@ fn internal_copy_lisp_face(cx, from: Value, to: Value, frame: Value, new_frame: 
         cx.vector_set(copy, index, value)?;
     }
     // A frame's realized faces follow its named faces (face_change).
-    let no_inherit = cx.intern("face-no-inherit");
-    if target != Value::NIL && displayed_faces(cx, target)? && cx.face_property(to, no_inherit)? == Value::NIL {
-        let name = cx.symbol_name(to)?;
-        for (index, keyword) in LFACE_ATTRIBUTES.iter().enumerate() {
-            let value = cx.vector_get(copy, Value::integer((index + 1) as i64).unwrap())?;
-            let mirrored = theme_value(cx, keyword, value, target)?;
-            cx.theme_face_attribute(&name, keyword, mirrored);
-        }
+    if target != Value::NIL && shows_changes(cx, to, target)? {
+        let height = cx.vector_get(copy, Value::integer(slot::HEIGHT as i64).unwrap())?;
+        note_height(cx, to, height, target)?;
+        cx.clear_face_cache();
     }
     Ok(to)
 }}
 
 defsubr! { name = "internal-merge-in-global-face", gnu = "xfaces.c:4316", effect = Global,
 fn internal_merge_in_global_face(cx, face: Value, frame: Value) {
+    let frame = cx.face_frame(frame, false)?;
+    merge_in_global(cx, face, frame)
+}}
+
+/// `internal-merge-in-global-face'.
+pub(super) fn merge_in_global(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     // Every attribute the face's new-frame defaults specify overrides
     // FRAME's, which face-set-after-frame-default has just computed from
     // the specs: "global before local", each slot copied as GNU copies it
     // (the frame's own values are not validated again, so a :font or
     // :fontset of `reset' arrives too).  A default of :ignore-defface
     // unspecifies FRAME's.  What changes is mirrored to the display.
-    let frame = cx.face_frame(frame, false)?;
     let resolved = resolve(cx, face, true)?;
     let global = cx.face_lookup(resolved, Value::NIL)?;
     if global == Value::NIL { return Err(signal(cx, "Invalid face", face)); }
-    let (unspecified, ignore) = (cx.intern("unspecified"), cx.intern(":ignore-defface"));
+    // A frame showing another's faces has this from the frame it shows:
+    // comparing here, ahead of that frame's own turn, would give it a copy
+    // for a difference about to vanish, on every theme switch.
+    if cx.frame_shares_faces(frame)? { return Ok(Value::NIL); }
+    let keys = cx.face_keys();
+    let (unspecified, ignore) = (keys.unspecified, keys.ignore_defface);
+    // Most faces have no defaults of their own for new frames.
+    if cx.vector_slots(global).is_some_and(|slots| slots[1..].iter().all(|&value| value == unspecified)) { return Ok(Value::NIL); }
     let mut wanted = Vec::new();
     for index in 1..LFACE_VECTOR_SIZE {
         let value = cx.vector_get(global, Value::integer(index as i64).unwrap())?;
@@ -166,30 +174,21 @@ fn internal_merge_in_global_face(cx, face: Value, frame: Value) {
     }
     let mut local = cx.face_lookup(resolved, frame)?;
     if local == Value::NIL { local = make_lisp_face(cx, resolved, frame)?; }
+    let local = local;
     let mut changes = Vec::new();
     for (index, value) in wanted {
         let old = cx.vector_get(local, Value::integer(index as i64).unwrap())?;
         if !cx.equal(old, value).map_err(|_| Fault::Circular(value))? { changes.push((index, value)); }
     }
     if changes.is_empty() { return Ok(Value::NIL); }
-    // A frame showing another's faces gets its own once this changes them.
-    if cx.frame_shares_faces(frame)? {
-        cx.face_own(frame)?;
-        local = cx.face_lookup(resolved, frame)?;
-    }
-    let no_inherit = cx.intern("face-no-inherit");
-    let mirror = displayed_faces(cx, frame)? && cx.face_property(resolved, no_inherit)? == Value::NIL;
-    let name = cx.symbol_name(resolved)?;
+    let shown = shows_changes(cx, resolved, frame)?;
     for (index, value) in changes {
         cx.vector_set(local, Value::integer(index as i64).unwrap(), value)?;
-        if mirror {
-            let keyword = LFACE_ATTRIBUTES[index - 1];
-            let mirrored = theme_value(cx, keyword, value, frame)?;
-            cx.theme_face_attribute(&name, keyword, mirrored);
-        }
+        if shown && index == slot::HEIGHT { note_height(cx, resolved, value, frame)?; }
     }
+    if shown { cx.clear_face_cache(); }
     Ok(Value::NIL)
-}}
+}
 
 defsubr! { name = "face-font", gnu = "xfaces.c:4423", effect = Reads,
 fn face_font(cx, face: Value; optional frame: Value, character: Value) {
@@ -228,7 +227,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
 }}
 
 /// Whether romacs-frame.el's display record, `romacs-display', is graphic.
-fn graphic_record(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+pub(super) fn graphic_record(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
     let record = cx.intern("romacs-display");
     let (graphic, mut tail) = (cx.intern(":graphic"), cx.variable_value(record)?.unwrap_or(Value::NIL));
     while let Some((key, rest)) = cx.pair(tail) {
@@ -361,8 +360,8 @@ fn bitmap_spec(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<bool, Fau
 /// GNU never lets a cycle form, so its recursion has no bound; ours does.
 fn inheritance_cycle(cx: &mut Leaf<'_>, frame: Value, face: Value, child: Value, depth: usize) -> std::result::Result<bool, Fault> {
     if depth > 256 { return Ok(false); }
-    let special = |cx: &mut Leaf<'_>, v: Value| v == Value::NIL || v == cx.intern("unspecified")
-        || v == cx.intern(":ignore-defface") || v == cx.intern("reset");
+    let keys = cx.face_keys();
+    let special = |_: &mut Leaf<'_>, v: Value| v == Value::NIL || is_special(&keys, v);
     let mut check = |cx: &mut Leaf<'_>, member: Value| -> std::result::Result<Option<bool>, Fault> {
         let resolved = resolve(cx, member, false)?;
         let lface = if cx.kind(resolved) == Kind::Symbol { cx.face_lookup(resolved, frame)? } else { Value::NIL };
@@ -401,17 +400,212 @@ fn function_height(cx: &mut Leaf<'_>, function: Value, under: i64) -> std::resul
     Ok(cx.safe_call(function, &[Value::integer(under).unwrap()]).integer_value())
 }
 
-/// The theme holds data only (romacs-face): a function :height is mirrored
-/// as its value over the default face's height (DIVERGENCES.md VM2-FACEFN1).
-fn theme_value(cx: &mut Leaf<'_>, keyword: &str, value: Value, frame: Value) -> std::result::Result<Value, Fault> {
-    if keyword != ":height" || value.integer_value().is_some() || cx.kind(value) == Kind::Float { return Ok(value); }
-    let default = cx.intern("default");
-    let lface = cx.face_lookup(default, frame)?;
-    let under = if lface == Value::NIL { None } else { cx.vector_get(lface, Value::integer(4).unwrap())?.integer_value() };
-    Ok(match under {
-        Some(under) => function_height(cx, value, under)?.map_or(value, |h| Value::integer(h).unwrap()),
-        None => value,
-    })
+/// Whether a change to FACE on FRAME reaches the display: every frame but
+/// a child frame, which it draws with its root's faces (VM2-CHILD-FRAME),
+/// and every face but one GNU marks as changing nothing a redisplay shows.
+pub(super) fn shows_changes(cx: &mut Leaf<'_>, face: Value, frame: Value) -> std::result::Result<bool, Fault> {
+    let keys = cx.face_keys();
+    Ok(displayed_faces(cx, frame)? && cx.face_property(face, keys.face_no_inherit)? == Value::NIL)
+}
+
+/// Realising a face runs no Lisp, so a function `:height' is noted here as
+/// its value over the default face's height on FRAME when it is set
+/// (DIVERGENCES.md VM2-FACEFN1).
+pub(super) fn note_height(cx: &mut Leaf<'_>, face: Value, value: Value, frame: Value) -> std::result::Result<(), Fault> {
+    let name = cx.symbol_name(face)?;
+    let keys = cx.face_keys();
+    let lface = cx.face_lookup(keys.default, frame)?;
+    let under = if lface == Value::NIL { None } else { cx.vector_get(lface, Value::integer(slot::HEIGHT as i64).unwrap())?.integer_value() };
+    let height = if value.integer_value().is_some() || cx.kind(value) == Kind::Float || is_special(&keys, value) { None }
+        else { match under { Some(under) => function_height(cx, value, under)?, None => None } };
+    cx.note_face_height(name, height);
+    Ok(())
+}
+
+/// The lface slots, as LFACE_ATTRIBUTES orders them.
+pub(super) mod slot {
+    pub const FAMILY: usize = 1;
+    pub const FOUNDRY: usize = 2;
+    pub const WIDTH: usize = 3;
+    pub const HEIGHT: usize = 4;
+    pub const WEIGHT: usize = 5;
+    pub const SLANT: usize = 6;
+    pub const UNDERLINE: usize = 7;
+    pub const INVERSE: usize = 8;
+    pub const FOREGROUND: usize = 9;
+    pub const BACKGROUND: usize = 10;
+    pub const STIPPLE: usize = 11;
+    pub const OVERLINE: usize = 12;
+    pub const STRIKE: usize = 13;
+    pub const BOX: usize = 14;
+    pub const FONT: usize = 15;
+    pub const INHERIT: usize = 16;
+    pub const FONTSET: usize = 17;
+    pub const DISTANT: usize = 18;
+    pub const EXTEND: usize = 19;
+}
+
+fn is_special(keys: &FaceKeys, value: Value) -> bool {
+    value == keys.unspecified || value == keys.ignore_defface || value == keys.reset
+}
+
+/// `internal-set-lisp-face-attribute''s checks of VALUE for ATTR on FACE,
+/// reading the faces of TABLE (nil for the new-frame defaults): the slot
+/// to write and the value to write there, or None for a value the slot
+/// ignores. Each arm is one attribute of GNU's chain.
+pub(super) fn validate(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, attr: Value, mut value: Value, table: Value, global: bool)
+    -> std::result::Result<Option<(usize, Value)>, Fault> {
+    use slot::*;
+    let special = is_special(keys, value);
+    let nil_is_unspecified = |v: Value| if v == Value::NIL { keys.unspecified } else { v };
+    if attr == keys.bold_key || attr == keys.italic_key {
+        let on = if attr == keys.bold_key { keys.bold } else { keys.italic };
+        if value != keys.reset { value = if value == Value::NIL { keys.normal } else { on }; }
+        return Ok(Some((if attr == keys.bold_key { WEIGHT } else { SLANT }, value)));
+    }
+    let Some(index) = keys.slot_of(attr) else { return Err(signal(cx, "Invalid face attribute name", attr)); };
+    match index {
+        FAMILY | FOUNDRY => if !special {
+            if !matches!(cx.kind(value), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", value)); }
+            if !string_nonempty(cx, value) {
+                return Err(signal(cx, if index == FAMILY { "Invalid face family" } else { "Invalid face foundry" }, value));
+            }
+        },
+        HEIGHT => if !special {
+            if face == keys.default {
+                if !value.integer_value().is_some_and(|n| n > 0) {
+                    return Err(signal(cx, "Default face height not absolute and positive", value));
+                }
+            } else if !test_height(cx, value)?.is_some_and(|n| n > 0) {
+                return Err(signal(cx, "Face height does not produce a positive integer", value));
+            }
+        },
+        WEIGHT => if !special { style_name(cx, value, super::font::WEIGHT, "Invalid face weight")?; },
+        SLANT => if !special { style_name(cx, value, super::font::SLANT, "Invalid face slant")?; },
+        WIDTH => if !special { style_name(cx, value, super::font::WIDTH, "Invalid face width")?; },
+        UNDERLINE => if !special && !valid_underline(cx, value) { return Err(signal(cx, "Invalid face underline", value)); },
+        OVERLINE | STRIKE => {
+            let bad = (cx.kind(value) == Kind::Symbol && value != Value::TRUE && value != Value::NIL)
+                || (matches!(cx.kind(value), Kind::String | Kind::Bytes) && !string_nonempty(cx, value));
+            if !special && bad {
+                return Err(signal(cx, if index == OVERLINE { "Invalid face overline" } else { "Invalid face strike-through" }, value));
+            }
+        }
+        BOX => {
+            if value == Value::TRUE { value = Value::integer(1).unwrap(); }
+            if !special && !valid_box(cx, value) { return Err(signal(cx, "Invalid face box", value)); }
+        }
+        INVERSE | EXTEND => if !special {
+            if cx.kind(value) != Kind::Symbol { return Err(Fault::Wrong("symbolp", value)); }
+            if value != Value::TRUE && value != Value::NIL {
+                return Err(signal(cx, if index == EXTEND { "Invalid extend face attribute value" }
+                    else { "Invalid inverse-video face attribute value" }, value));
+            }
+        },
+        FOREGROUND | DISTANT | BACKGROUND => {
+            value = nil_is_unspecified(value);
+            if !is_special(keys, value) {
+                if !matches!(cx.kind(value), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", value)); }
+                if !string_nonempty(cx, value) {
+                    let message = match index {
+                        FOREGROUND => "Empty foreground color value",
+                        BACKGROUND => "Empty background color value",
+                        _ => "Empty distant-foreground color value",
+                    };
+                    return Err(signal(cx, message, value));
+                }
+            }
+        }
+        STIPPLE => if !special && value != Value::NIL && !bitmap_spec(cx, value)? {
+            return Err(signal(cx, "Invalid stipple attribute", value));
+        },
+        // A frame without a window system ignores fonts; the default for new
+        // frames keeps only the special values (xfaces.c:3627-3680).
+        FONT => {
+            if !global { return Ok(None); }
+            if !special { return Err(super::fileio::refuse("internal-set-lisp-face-attribute :font for new frames")); }
+        }
+        // query-fontset validates every value but `reset'.
+        FONTSET => {
+            if !global { return Ok(None); }
+            if value != keys.reset { return Err(super::fileio::refuse("internal-set-lisp-face-attribute :fontset for new frames")); }
+        }
+        INHERIT => {
+            let mut tail = if cx.kind(value) == Kind::Symbol { Value::NIL } else { value };
+            let mut seen = std::collections::HashSet::new();
+            while let Some((car, cdr)) = cx.pair(tail) {
+                if cx.kind(car) != Kind::Symbol || !seen.insert(tail.0) { break; }
+                tail = cdr;
+            }
+            if value == face || inheritance_cycle(cx, table, value, face, 0)? {
+                return Err(signal(cx, "Face inheritance results in inheritance cycle", value));
+            }
+            if tail != Value::NIL { return Err(signal(cx, "Invalid face inheritance", value)); }
+        }
+        _ => unreachable!("every lface slot has an arm"),
+    }
+    Ok(Some((index, value)))
+}
+
+/// The frame parameter a named face's attribute mirrors into, if any:
+/// five faces carry one, so a write elsewhere pays one comparison each.
+fn mirrored_parameter(keys: &FaceKeys, face: Value, index: usize) -> Option<&'static str> {
+    use slot::*;
+    if face == keys.default {
+        match index { FOREGROUND => Some("foreground-color"), BACKGROUND => Some("background-color"), _ => None }
+    } else if face == keys.scroll_bar {
+        match index { FOREGROUND => Some("scroll-bar-foreground"), BACKGROUND => Some("scroll-bar-background"), _ => None }
+    } else if index != BACKGROUND {
+        None
+    } else if face == keys.border {
+        Some("border-color")
+    } else if face == keys.cursor {
+        Some("cursor-color")
+    } else if face == keys.mouse {
+        Some("mouse-color")
+    } else {
+        None
+    }
+}
+
+/// Whether a write to FACE can have an effect beyond its vector.
+pub(super) fn carries_effects(keys: &FaceKeys, face: Value) -> bool {
+    face == keys.default || face == keys.scroll_bar || face == keys.border || face == keys.cursor || face == keys.mouse
+}
+
+/// What a changed, non-special value of FACE's slot INDEX does beyond the
+/// vector: colours of a few named faces are mirrored into frame parameters.
+pub(super) fn slot_effects(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, index: usize, value: Value, frame: Value, global: bool)
+    -> std::result::Result<(), Fault> {
+    let Some(parameter) = mirrored_parameter(keys, face, index) else { return Ok(()) };
+    let key = cx.intern(parameter);
+    if global {
+        // store_in_alist (&Vdefault_frame_alist, PARAM, VALUE).
+        let alist_name = cx.intern("default-frame-alist");
+        let alist = cx.variable_value(alist_name)?.unwrap_or(Value::NIL);
+        let mut tail = alist;
+        let mut stored = false;
+        while let Some((entry, rest)) = cx.pair(tail) {
+            if cx.pair(entry).is_some_and(|(k, _)| k == key) { cx.setcdr(entry, value)?; stored = true; break; }
+            tail = rest;
+        }
+        if !stored {
+            let entry = cx.cons(key, value);
+            let alist = cx.cons(entry, alist);
+            cx.variable_set(alist_name, alist)?;
+        }
+    } else {
+        cx.windows().store_frame_parameter(frame, key, value)?;
+        // update_face_from_frame_parameter (xfaces.c:3896): a new
+        // background may change the frame's background mode, and with
+        // it which defface specs apply. GNU's call1: what exits the
+        // rescan, a quit among them, exits this write too.
+        if parameter == "background-color" && cx.windows().window_system(frame)? != Value::NIL && !cx.frame_shares_faces(frame)? {
+            let function = cx.intern("frame-set-background-mode");
+            if cx.fboundp(function) { cx.call_propagating(function, &[frame])?; }
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut value: Value, frame: Value) -> Out {
@@ -429,14 +623,12 @@ pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Valu
         }
         return Ok(face);
     }
-    let unspecified = cx.intern("unspecified");
-    let ignore = cx.intern(":ignore-defface");
-    let reset = cx.intern("reset");
+    let keys = cx.face_keys();
     let global = frame == Value::TRUE;
     let (frame, lface) = if global {
         let lface = cx.face_lookup(face, Value::NIL)?;
         if lface == Value::NIL { return Err(signal(cx, "Invalid face", face)); }
-        if value == unspecified { value = ignore; }
+        if value == keys.unspecified { value = keys.ignore_defface; }
         (Value::TRUE, lface)
     } else {
         let frame = cx.face_frame(frame, true)?;
@@ -444,183 +636,26 @@ pub(super) fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Valu
         if lface == Value::NIL { lface = make_lisp_face(cx, face, frame)?; }
         (frame, lface)
     };
-    let special = |v: Value| v == unspecified || v == ignore || v == reset;
-    let name = cx.symbol_name(attr)?;
-    let index = |keyword: &str| Value::integer((LFACE_ATTRIBUTES.iter().position(|k| *k == keyword).unwrap() + 1) as i64).unwrap();
-    let nil_is_unspecified = |v: Value| if v == Value::NIL { unspecified } else { v };
-    // Each arm validates VALUE and names the lface slot it replaces.
-    let slot = match name.as_str() {
-        ":family" | ":foundry" => {
-            if !special(value) {
-                if !matches!(cx.kind(value), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", value)); }
-                if !string_nonempty(cx, value) {
-                    return Err(signal(cx, if name == ":family" { "Invalid face family" } else { "Invalid face foundry" }, value));
-                }
-            }
-            Some(name.as_str())
-        }
-        ":height" => {
-            if !special(value) {
-                if face == cx.intern("default") {
-                    if !value.integer_value().is_some_and(|n| n > 0) {
-                        return Err(signal(cx, "Default face height not absolute and positive", value));
-                    }
-                } else if !test_height(cx, value)?.is_some_and(|n| n > 0) {
-                    return Err(signal(cx, "Face height does not produce a positive integer", value));
-                }
-            }
-            Some(":height")
-        }
-        ":weight" => { if !special(value) { style_name(cx, value, super::font::WEIGHT, "Invalid face weight")?; } Some(":weight") }
-        ":slant" => { if !special(value) { style_name(cx, value, super::font::SLANT, "Invalid face slant")?; } Some(":slant") }
-        ":width" => { if !special(value) { style_name(cx, value, super::font::WIDTH, "Invalid face width")?; } Some(":width") }
-        ":underline" => {
-            if !special(value) && !valid_underline(cx, value) { return Err(signal(cx, "Invalid face underline", value)); }
-            Some(":underline")
-        }
-        ":overline" | ":strike-through" => {
-            let bad = (cx.kind(value) == Kind::Symbol && value != Value::TRUE && value != Value::NIL)
-                || (matches!(cx.kind(value), Kind::String | Kind::Bytes) && !string_nonempty(cx, value));
-            if !special(value) && bad {
-                return Err(signal(cx, if name == ":overline" { "Invalid face overline" } else { "Invalid face strike-through" }, value));
-            }
-            Some(name.as_str())
-        }
-        ":box" => {
-            if value == Value::TRUE { value = Value::integer(1).unwrap(); }
-            if !special(value) && !valid_box(cx, value) { return Err(signal(cx, "Invalid face box", value)); }
-            Some(":box")
-        }
-        ":inverse-video" | ":extend" => {
-            if !special(value) {
-                if cx.kind(value) != Kind::Symbol { return Err(Fault::Wrong("symbolp", value)); }
-                if value != Value::TRUE && value != Value::NIL {
-                    return Err(signal(cx, if name == ":extend" { "Invalid extend face attribute value" }
-                        else { "Invalid inverse-video face attribute value" }, value));
-                }
-            }
-            Some(name.as_str())
-        }
-        ":foreground" | ":distant-foreground" | ":background" => {
-            value = nil_is_unspecified(value);
-            if !special(value) {
-                if !matches!(cx.kind(value), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", value)); }
-                if !string_nonempty(cx, value) {
-                    let message = match name.as_str() {
-                        ":foreground" => "Empty foreground color value",
-                        ":background" => "Empty background color value",
-                        _ => "Empty distant-foreground color value",
-                    };
-                    return Err(signal(cx, message, value));
-                }
-            }
-            Some(name.as_str())
-        }
-        ":stipple" => {
-            if !special(value) && value != Value::NIL && !bitmap_spec(cx, value)? {
-                return Err(signal(cx, "Invalid stipple attribute", value));
-            }
-            Some(":stipple")
-        }
-        // A frame without a window system ignores fonts; the default for new
-        // frames keeps only the special values (xfaces.c:3627-3680).
-        ":font" => {
-            if !global { None }
-            else if special(value) { Some(":font") }
-            else { return Err(super::fileio::refuse("internal-set-lisp-face-attribute :font for new frames")); }
-        }
-        // query-fontset validates every value but `reset'.
-        ":fontset" => {
-            if !global { None }
-            else if value == reset { Some(":fontset") }
-            else { return Err(super::fileio::refuse("internal-set-lisp-face-attribute :fontset for new frames")); }
-        }
-        ":inherit" => {
-            let mut tail = if cx.kind(value) == Kind::Symbol { Value::NIL } else { value };
-            let mut seen = std::collections::HashSet::new();
-            while let Some((car, cdr)) = cx.pair(tail) {
-                if cx.kind(car) != Kind::Symbol || !seen.insert(tail.0) { break; }
-                tail = cdr;
-            }
-            let table = if global { Value::NIL } else { frame };
-            if value == face || inheritance_cycle(cx, table, value, face, 0)? {
-                return Err(signal(cx, "Face inheritance results in inheritance cycle", value));
-            }
-            if tail != Value::NIL { return Err(signal(cx, "Invalid face inheritance", value)); }
-            Some(":inherit")
-        }
-        ":bold" => {
-            if value != reset { value = if value == Value::NIL { cx.intern("normal") } else { cx.intern("bold") }; }
-            Some(":weight")
-        }
-        ":italic" => {
-            if value != reset { value = if value == Value::NIL { cx.intern("normal") } else { cx.intern("italic") }; }
-            Some(":slant")
-        }
-        _ => return Err(signal(cx, "Invalid face attribute name", attr)),
-    };
-    let Some(keyword) = slot else { return Ok(face); };
+    let table = if global { Value::NIL } else { frame };
+    let Some((index, value)) = validate(cx, &keys, face, attr, value, table, global)? else { return Ok(face); };
+    let at = Value::integer(index as i64).unwrap();
     // A frame showing another's faces gets its own only when VALUE changes
     // what it shows.
     let mut lface = lface;
     if !global && cx.frame_shares_faces(frame)? {
-        let shown = cx.vector_get(lface, index(keyword))?;
+        let shown = cx.vector_get(lface, at)?;
         if cx.equal(shown, value).map_err(|_| Fault::Circular(value))? { return Ok(face); }
         cx.face_own(frame)?;
         lface = cx.face_lookup(face, frame)?;
     }
-    let old = cx.vector_get(lface, index(keyword))?;
-    cx.vector_set(lface, index(keyword), value)?;
+    let old = cx.vector_get(lface, at)?;
+    cx.vector_set(lface, at, value)?;
     let changed = !cx.equal(old, value).map_err(|_| Fault::Circular(value))?;
-    if !global && changed && displayed_faces(cx, frame)? {
-        let no_inherit = cx.intern("face-no-inherit");
-        if cx.face_property(face, no_inherit)? == Value::NIL {
-            let face_name = cx.symbol_name(face)?;
-            let mirrored = theme_value(cx, keyword, value, frame)?;
-            cx.theme_face_attribute(&face_name, keyword, mirrored);
-        }
+    if !global && changed && shows_changes(cx, face, frame)? {
+        if index == slot::HEIGHT { note_height(cx, face, value, frame)?; }
+        cx.clear_face_cache();
     }
-    if special(value) || !changed { return Ok(face); }
-    // Colors of a few named faces are mirrored into frame parameters.
-    let face_name = cx.symbol_name(face)?;
-    let parameter = match (face_name.as_str(), keyword) {
-        ("default", ":foreground") => Some("foreground-color"),
-        ("default", ":background") => Some("background-color"),
-        ("scroll-bar", ":foreground") => Some("scroll-bar-foreground"),
-        ("scroll-bar", ":background") => Some("scroll-bar-background"),
-        ("border", ":background") => Some("border-color"),
-        ("cursor", ":background") => Some("cursor-color"),
-        ("mouse", ":background") => Some("mouse-color"),
-        _ => None,
-    };
-    if let Some(parameter) = parameter {
-        let key = cx.intern(parameter);
-        if global {
-            // store_in_alist (&Vdefault_frame_alist, PARAM, VALUE).
-            let alist_name = cx.intern("default-frame-alist");
-            let alist = cx.variable_value(alist_name)?.unwrap_or(Value::NIL);
-            let mut tail = alist;
-            let mut stored = false;
-            while let Some((entry, rest)) = cx.pair(tail) {
-                if cx.pair(entry).is_some_and(|(k, _)| k == key) { cx.setcdr(entry, value)?; stored = true; break; }
-                tail = rest;
-            }
-            if !stored {
-                let entry = cx.cons(key, value);
-                let alist = cx.cons(entry, alist);
-                cx.variable_set(alist_name, alist)?;
-            }
-        } else {
-            cx.windows().store_frame_parameter(frame, key, value)?;
-            // update_face_from_frame_parameter (xfaces.c:3896): a new
-            // background may change the frame's background mode, and with
-            // it which defface specs apply.
-            if parameter == "background-color" && cx.windows().window_system(frame)? != Value::NIL && displayed_faces(cx, frame)? {
-                let function = cx.intern("frame-set-background-mode");
-                if cx.fboundp(function) { cx.safe_call(function, &[frame]); }
-            }
-        }
-    }
+    if changed && !is_special(&keys, value) { slot_effects(cx, &keys, face, index, value, frame, global)?; }
     Ok(face)
 }
 
@@ -631,6 +666,11 @@ fn internal_set_lisp_face_attribute(cx, face: Value, attr: Value, value: Value; 
 
 defsubr! { name = "display-supports-face-attributes-p", gnu = "xfaces.c:5764", effect = Reads,
 fn display_supports_face_attributes_p(cx, attributes: Value; optional display: Value) {
+    display_supports(cx, attributes, display)
+}}
+
+/// `display-supports-face-attributes-p'.
+pub(super) fn display_supports(cx: &mut Leaf<'_>, attributes: Value, display: Value) -> Out {
     // GNU gives up in batch before examining either argument; without a
     // graphic display record a frame is an initial-terminal frame
     // (VM2-WIN5), which supports no attribute.
@@ -646,7 +686,7 @@ fn display_supports_face_attributes_p(cx, attributes: Value; optional display: V
     let default = cx.intern("default");
     let default = cx.face_lookup(default, frame)?;
     Ok(if gui_supports(cx, &attrs, default)? { Value::TRUE } else { Value::NIL })
-}}
+}
 
 /// The lface slot of the attribute named NAME.
 fn lface_slot(name: &str) -> usize {
@@ -766,9 +806,8 @@ fn closest_font(cx: &mut Leaf<'_>, family: Option<&str>, lface: &[Value]) -> Opt
         name.and_then(|n| style_value(cx, slot, &n, false)).map_or(normal, |v| v >> 8)
     };
     let (width, weight, slant) = (style(":width", WIDTH, 100), style(":weight", WEIGHT, 80), style(":slant", SLANT, 100));
-    let query = crate::display_host::FontQuery { family: family.map(str::to_owned), ..Default::default() };
-    let fonts = cx.font_host()?.list_fonts(&query);
-    fonts.into_iter().min_by_key(|f| ((f.width - width).abs(), (f.weight - weight).abs(), (f.slant - slant).abs()))
+    let fonts = cx.font_host()?.family_fonts(family);
+    fonts.iter().min_by_key(|f| ((f.width - width).abs(), (f.weight - weight).abs(), (f.slant - slant).abs())).cloned()
 }
 
 defsubr! { name = "frame--face-hash-table", gnu = "xfaces.c:4619", effect = Global,

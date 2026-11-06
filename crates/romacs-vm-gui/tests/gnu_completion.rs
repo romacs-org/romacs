@@ -609,6 +609,20 @@ fn romacs_theme_rum_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-rum-test.el");
 }
 
+/// The native `backquote-process' and the compiler's use of it, against
+/// GNU's backquote.el (tests/romacs-backquote-test.el).
+#[test]
+fn romacs_backquote_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-backquote-test.el");
+}
+
+/// `load-theme''s preview (tests/romacs-theme-preview-test.el): what it
+/// shows, what it refuses to read, and that it leaves the session as it was.
+#[test]
+fn romacs_theme_preview_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-preview-test.el");
+}
+
 /// `def-romacs-theme' and the role table (tests/romacs-theme-author-test.el),
 /// and the blocks of doc/themes.org.
 #[test]

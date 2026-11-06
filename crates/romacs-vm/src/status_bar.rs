@@ -96,22 +96,23 @@ impl Vm {
         let band = self.status_bar_band(owner, columns)?;
         // Kept for a click, which reads it as a string (`status_bar_target').
         self.status_bar_line = band.clone().map(|band| Box::new(band) as Box<dyn std::any::Any>);
-        let base = table.handle("mode-line-active").or_else(|| table.handle("mode-line")).ok_or("mode-line face required")?;
+        let base_name = if self.named(&table, "mode-line-active").is_some() { "mode-line-active" } else { "mode-line" };
+        let base = self.named(&table, base_name).ok_or("mode-line face required")?;
         let (text, runs, props, segments) = band.map_or_else(Default::default, |band| (band.text, band.runs, band.props, band.segments));
         // The owner's line leads the bar, where it has one; its pills read
         // whether its buffer is modified (`romacs-pill-modified').
         let owner_chars = self.display_state.bar_parts.first().filter(|(_, id)| *id == window).map_or(0, |(chars, _)| chars.end);
         let owner_chars = self.display_state.bar_kept.as_ref().map_or(owner_chars, |kept| kept.partition_point(|&i| i < owner_chars));
         let owner_end = text.char_indices().nth(owner_chars).map_or(text.len(), |(at, _)| at);
-        let marks = self.band_marks(&text, &props, &segments, &table, if modified { owner_end } else { 0 })?;
+        let marks = self.band_marks(&text, &props, &segments, &table, base_name, if modified { owner_end } else { 0 })?;
         // The bar's faces: its base face first, then those its runs use.
-        let mut faces = vec![table.faces[base.0 as usize].clone()];
+        let mut faces = vec![table.face(base)];
         let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
         let mut face_runs = vec![];
         for (bytes, name) in runs {
-            let Some(handle) = table.handle(&name) else { continue };
+            let Some(handle) = self.band_face(&table, &name, base_name) else { continue };
             let face = *local.entry(handle.0).or_insert_with(|| {
-                faces.push(table.faces[handle.0 as usize].clone());
+                faces.push(table.face(handle));
                 FaceHandle(faces.len() as u32 - 1)
             });
             face_runs.push(FaceRun { bytes, face });
@@ -167,9 +168,9 @@ impl Vm {
     /// `romacs-pill-modified' face where it names one: the bar's own
     /// line, whose buffer is modified.
     pub(super) fn band_marks(&mut self, text: &str, props: &[(std::ops::Range<usize>, mode_line::Projected)],
-                  segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable, modified: usize) -> Result<BandMarks> {
+                  segments: &[(std::ops::Range<usize>, mode_line::Projected)], table: &super::FaceTable, base: &str, modified: usize) -> Result<BandMarks> {
         let mut marks = BandMarks::default();
-        let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table, bytes.start < modified)).collect();
+        let structural: Vec<Segment> = segments.iter().filter_map(|(bytes, projected)| self.segment_of(bytes, projected, table, base, bytes.start < modified)).collect();
         // A string's segment inside a construct of the same name is that
         // construct's: each name's ranges, ordered, searched per run.
         let mut by_name: std::collections::HashMap<&str, Vec<std::ops::Range<usize>>> = std::collections::HashMap::new();
@@ -181,7 +182,7 @@ impl Vm {
         });
         let mut icons: Option<std::collections::HashMap<u64, char>> = None;
         for (bytes, projected) in props {
-            if let Some(segment) = self.segment_of(bytes, projected, table, bytes.start < modified) && !contained(&segment.name, bytes) {
+            if let Some(segment) = self.segment_of(bytes, projected, table, base, bytes.start < modified) && !contained(&segment.name, bytes) {
                 match marks.segments.last_mut() {
                     // One segment's pieces are adjacent runs of its name.
                     Some(last) if last.name == segment.name && last.bytes.end == segment.bytes.start && last.pill == segment.pill => {
@@ -265,9 +266,9 @@ impl Vm {
     }
     /// The segment PROJECTED names over BYTES, if it names one; its pill's
     /// text in its `romacs-pill-modified' face when MODIFIED.
-    fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable, modified: bool) -> Option<Segment> {
+    fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable, base: &str, modified: bool) -> Option<Segment> {
         let value = |name: &str| projected.iter().find(|(n, _)| *n == name).and_then(|(_, form)| self.ml_form_name(form));
-        let face = |name: &str| value(name).and_then(|face| table.handle(&face)).map(|h| &table.faces[h.0 as usize]);
+        let face = |name: &str| value(name).and_then(|face| self.band_face(table, &face, base)).map(|h| table.face(h));
         let name = value("romacs-segment")?;
         let pill = face("romacs-pill").map(|f| Pill { background: f.background, radius: PILL_RADIUS,
                                                       foreground: modified.then(|| face("romacs-pill-modified")).flatten()

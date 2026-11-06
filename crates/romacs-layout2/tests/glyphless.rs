@@ -162,3 +162,24 @@ fn a_glyphless_character_ending_a_box_run_closes_it() {
     // Its digits are inside the run, in a face of their own without a box.
     assert!(chars(&frame).iter().any(|c| c.0 == '7'));
 }
+
+/// A character no font has stays inside a boxed tab bar's run: its cell
+/// has no edges of its own, and its blank character, there for a click,
+/// no box.
+#[test]
+fn a_glyphless_character_stays_inside_a_boxed_tab_bar_run() {
+    use romacs_display_protocol::{BoxVerticalEdges::{Left, Neither, Right}, FrameGlyph, frame_glyphs::GlyphRowRole};
+    use romacs_layout_input::{BoxLine, Decor};
+    let text = format!("a{NONE}b");
+    let boxed = Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some([200, 10, 10]), style: 1 }), ..Default::default() },
+                       ..face("Liberation Mono") };
+    let mut snapshot = frame("x", NoFont::ThinSpace);
+    snapshot.tab_bar = Some(TabBarSnapshot { height: 20, text: slice(&text), face: FaceHandle(0), faces: vec![boxed] });
+    let painted = LayoutEngine::new().unwrap().layout_frame(&snapshot, 1, None).unwrap().0;
+    let cells: Vec<_> = painted.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. }
+        | FrameGlyph::Stretch { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. } => Some(*box_vertical_edges),
+        _ => None,
+    }).collect();
+    assert_eq!(cells, [Left, Neither, Neither, Right]);
+}

@@ -18,6 +18,11 @@
 (load "emacs-lisp/debug-early.el" nil t t)
 (load "emacs-lisp/byte-run.el" nil t t)
 (load "emacs-lisp/backquote.el" nil t t)
+;; Every load expands its templates, so the walk is native, and while
+;; these two stay as they are here the compiler takes its answer without
+;; calling the macro (DIVERGENCES.md VM2-BACKQUOTE).
+(defalias 'backquote-process (symbol-function 'romacs--backquote-process))
+(put 'backquote 'romacs--standard-macro (cdr (symbol-function 'backquote)))
 ;; subr.el's defvars own these maps in GNU; the native bare-VM skeleton
 ;; binds them on first keymap use, so yield them before subr.el runs.  The
 ;; C-level keymaps (function-key-map and friends) stay native.
@@ -125,6 +130,8 @@
 (load "term/tty-colors.el" nil t t)
 ;; Romacs owns the display layer of frame.el and faces.el (VM2-DISPLAY1).
 (load "romacs-frame.el" nil t t)
+;; ... and `enable-theme' and `disable-theme' loop over faces natively.
+(load "romacs-custom.el" nil t t)
 ;; GNU computes the active keymaps in C; Romacs in Lisp.
 (load "romacs-keymap.el" nil t t)
 ;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.

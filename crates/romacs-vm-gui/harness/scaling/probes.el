@@ -172,13 +172,332 @@ thousandth a stack mark."
                (setq parent name))))
   :body (romacs-theme-roles-floors it '((bg . "#101418"))))
 
+;; A theme switch over N faces the theme sets: `enable-theme' walks them
+;; once and recalculates each on the root frame.
+(scaling-probe faces-theme-switch :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-themed" n))))
+           (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
+           (deftheme scaling-switch "N faces.")
+           (apply #'custom-theme-set-faces 'scaling-switch
+                  (mapcar (lambda (face) `(,face ((t :foreground "#a0b0c0" :weight bold)))) faces))
+           (switch-to-buffer (get-buffer-create "scaling-switch")))
+  ;; None of the faces shows, so the step paints by typing.
+  :body (progn (enable-theme 'scaling-switch) (disable-theme 'scaling-switch)
+               (with-current-buffer it (insert "x"))))
+
+;; A theme switch over N package faces no theme mentions, each with a
+;; spec that depends on the background mode.
+(scaling-probe faces-theme-unused :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-unused" n))))
+           (dolist (face faces)
+             (custom-declare-face face '((((background dark)) :foreground "#aabbcc") (t :foreground "#112233"))
+                                  "A package face." :group 'scaling))
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           faces)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; Nothing in a theme switch visits a buffer: text names faces.
+(scaling-probe faces-theme-buffers :gui t :n 100 :steps 1 :budget 0.3
+  :setup (progn
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           (dotimes (i n)
+             (with-current-buffer (get-buffer-create (format "scaling-text-%d" i))
+               (insert (propertize "some fontified text\n" 'face 'font-lock-keyword-face))))
+           n)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; A theme switch with N child frames open: they show the root's faces,
+;; so what the switch adds per frame is a check that it shares.
+(scaling-probe faces-theme-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (deftheme scaling-small "One face.")
+           (custom-theme-set-faces 'scaling-small '(default ((t :background "#101010" :foreground "#e0e0e0"))))
+           (unless (fboundp 'pgtk-register-dnd-targets) (defalias 'pgtk-register-dnd-targets #'ignore))
+           (dotimes (_ n) (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil))))
+           n)
+  :body (progn (enable-theme 'scaling-small) (disable-theme 'scaling-small)))
+
+;; A face edit after N faces were realised: what the table held is dropped,
+;; and only the one face still shown is realised again.
+(scaling-probe faces-display-warm :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-warm" n))))
+           (dolist (face faces) (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (let ((buffer (get-buffer-create "scaling-warm")))
+             (with-current-buffer buffer
+               (dolist (face faces) (insert (propertize "x" 'face face))))
+             (switch-to-buffer buffer)
+             (redisplay t)
+             (with-current-buffer buffer
+               (erase-buffer)
+               (insert (propertize "x" 'face (car faces))))
+             (redisplay t)
+             (cons buffer faces)))
+  :body (progn (set-face-attribute (cadr it) nil :foreground "#102030")
+               (with-current-buffer (car it) (insert "x"))))
+
+;; One shown face at the end of an inheritance chain of N: realising it walks
+;; the chain once, as GNU's merge_named_face does.
+(scaling-probe faces-inherit-chain :gui t :n 50 :steps 1
+  :setup (let* ((faces (mapcar #'intern (scaling--names "scaling-chain" n)))
+                (parent nil))
+           (dolist (face faces)
+             (custom-declare-face face `((t :inherit ,parent)) "A scaling face." :group 'scaling)
+             (setq parent face))
+           (let ((buffer (switch-to-buffer (get-buffer-create "scaling-chain"))))
+             (insert (propertize "x" 'face parent))
+             (cons buffer faces)))
+  :body (progn (set-face-attribute (cadr it) nil :foreground "#102030")
+               (with-current-buffer (car it) (insert "x"))))
+
+;; N shown faces inheriting one face, which an edit changes: each is
+;; realised again, once.
+(scaling-probe faces-shared-ancestor :gui t :n 50 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-shared" n))))
+           (custom-declare-face 'scaling-shared-parent '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling)
+           (dolist (face faces)
+             (custom-declare-face face '((t :inherit scaling-shared-parent)) "A scaling face." :group 'scaling))
+           (let ((buffer (switch-to-buffer (get-buffer-create "scaling-shared"))))
+             (dolist (face faces) (insert (propertize "x" 'face face)))
+             buffer))
+  :body (progn (set-face-attribute 'scaling-shared-parent nil :foreground "#102030")
+               (with-current-buffer it (insert "x"))))
+
+;; Recalculating N faces whose memos exist: a first pass records them, then
+;; the counted pass hits. Fresh faces each size insert into a populated
+;; table, and a frame coming and going leaves nothing behind.
+(scaling-probe faces-memo-churn :gui t :n 200 :steps 1
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-memo" n)))
+               (frame (selected-frame)))
+           (dolist (face faces)
+             (custom-declare-face face '((((background dark)) :foreground "#aabbcc") (t :foreground "#112233")) "A scaling face." :group 'scaling))
+           (dolist (face faces) (face-spec-recalc face frame))
+           (cons (switch-to-buffer (get-buffer-create "scaling-memo")) faces))
+  :body (let ((frame (selected-frame)) (churn (intern (format "scaling-memo-new-%s" (float-time)))))
+          (custom-declare-face churn '((t :foreground "#102030")) "A scaling face." :group 'scaling)
+          (dolist (face (cdr it)) (face-spec-recalc face frame))
+          (with-current-buffer (car it) (insert "x"))))
+
+;; N faces memoised on an owned frame beside others, with frames going and
+;; a collection between passes: a stale table must not be scanned per face.
+(scaling-probe faces-memo-frames :gui t :n 100 :steps 1
+  :setup (let* ((faces (mapcar #'intern (scaling--names "scaling-memo-frames" n)))
+                (frames (progn
+                          (unless (fboundp 'pgtk-register-dnd-targets) (defalias 'pgtk-register-dnd-targets #'ignore))
+                          (mapcar (lambda (_) (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil))))
+                                  (number-sequence 1 8)))))
+           (dolist (face faces)
+             (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (dolist (frame frames)
+             (set-face-attribute (car faces) frame :weight 'bold)
+             (dolist (face faces) (face-spec-recalc face frame)))
+           (list (switch-to-buffer (get-buffer-create "scaling-memo-frames")) frames faces))
+  :body (let ((extra (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil)))))
+          (set-face-attribute (car (nth 2 it)) extra :weight 'bold)
+          (delete-frame extra)
+          (garbage-collect)
+          (dolist (frame (nth 1 it))
+            (dolist (face (nth 2 it)) (face-spec-recalc face frame)))
+          (with-current-buffer (car it) (insert "x"))))
+
+;; `load-theme''s prompt with N themes offered: a command that leaves the
+;; selection alone, and one that moves it to no theme.
+(scaling-probe theme-preview-names :n 2000
+  :setup (let ((names (mapcar #'symbol-name (mapcar #'intern (scaling--names "scaling-offered" n)))))
+           (list (romacs-theme-preview--table names) (car (last names))))
+  :body (romacs-theme-preview--session
+          (let ((romacs-theme-preview--names (car it))
+                (romacs-theme-preview--selected "")
+                (name (cadr it)))
+            (with-temp-buffer
+              (dotimes (_ 200)
+                (romacs-theme-preview--follow)
+                (erase-buffer)
+                (insert name)
+                (romacs-theme-preview--follow)
+                (erase-buffer))))))
+
+;; Candidates over N enabled themes: the stack under them is left alone.
+(scaling-probe theme-preview-stack :gui t :n 16 :steps 1
+  :setup (let ((themes (mapcar #'intern (scaling--names "scaling-under" n))))
+           (dolist (theme themes)
+             (custom-declare-theme theme nil)
+             (custom-theme-set-faces theme '(region ((t :underline t))))
+             (enable-theme theme))
+           (deftheme scaling-candidate-a "One face.")
+           (custom-theme-set-faces 'scaling-candidate-a '(highlight ((t :foreground "#102030"))))
+           (deftheme scaling-candidate-b "One face.")
+           (custom-theme-set-faces 'scaling-candidate-b '(highlight ((t :foreground "#203040"))))
+           (switch-to-buffer (get-buffer-create "scaling-under")))
+  :body (progn
+          (romacs-theme-preview--session
+            (dotimes (_ 8)
+              (romacs-theme-preview--show 'scaling-candidate-a)
+              (romacs-theme-preview--show 'scaling-candidate-b)))
+          (with-current-buffer it (insert "x"))))
+
+;; A preview's save and restore: what it copies grows with the faces, and
+;; with the frames that have faces of their own, and not with those that
+;; show another's.
+(defun scaling--preview-theme ()
+  (deftheme scaling-candidate "One face.")
+  (custom-theme-set-faces 'scaling-candidate '(highlight ((t :foreground "#102030")))))
+
+(defun scaling--frames (n owned)
+  "N child frames, OWNED ones with faces of their own."
+  (unless (fboundp 'pgtk-register-dnd-targets) (defalias 'pgtk-register-dnd-targets #'ignore))
+  (dotimes (_ n)
+    (let ((frame (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil)))))
+      (when owned (set-face-attribute 'highlight frame :weight 'bold)))))
+
+(defun scaling--preview-once (buffer)
+  (romacs-theme-preview--session
+    (romacs-theme-preview--show 'scaling-candidate))
+  (with-current-buffer buffer (insert "x")))
+
+(scaling-probe theme-preview-faces :gui t :n 200 :steps 1
+  :setup (progn
+           (dolist (face (mapcar #'intern (scaling--names "scaling-saved" n)))
+             (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (scaling--preview-theme)
+           (switch-to-buffer (get-buffer-create "scaling-saved")))
+  :body (scaling--preview-once it))
+
+(scaling-probe theme-preview-shared-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (scaling--preview-theme)
+           (scaling--frames n nil)
+           (switch-to-buffer (get-buffer-create "scaling-shared")))
+  :body (scaling--preview-once it))
+
+(scaling-probe theme-preview-owned-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (scaling--preview-theme)
+           (scaling--frames n t)
+           (switch-to-buffer (get-buffer-create "scaling-owned")))
+  :body (scaling--preview-once it))
+
+;; N is the registry, faces times frames with their own: what is saved is
+;; that much, on both sides of the product at once.
+(scaling-probe theme-preview-registry :gui t :n 400 :steps 1
+  :setup (let ((side (floor (sqrt n))))
+           (dolist (face (mapcar #'intern (scaling--names "scaling-registry" side)))
+             (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (scaling--preview-theme)
+           (scaling--frames side t)
+           (switch-to-buffer (get-buffer-create "scaling-registry")))
+  :body (scaling--preview-once it))
+
+;; N terminals open, each with a table of its own, which what is shown
+;; must not walk: an ordinary buffer finds none, the last terminal opened
+;; finds its own, and a face change makes it again.  Constant in N.
+(defun scaling--terminals (n)
+  "N terminals, each shown once; the last."
+  (require 'romacs-term)
+  (dotimes (_ n) (romacs-term "/bin/cat") (redisplay t))
+  (current-buffer))
+
+(scaling-probe terminal-face-tables-none :gui t :n 4 :steps 4 :budget 0.25
+  :setup (progn (scaling--terminals n) (switch-to-buffer (get-buffer-create "scaling-typing")))
+  :body (with-current-buffer it (insert "x")))
+
+(scaling-probe terminal-face-tables-own :gui t :n 4 :steps 4 :budget 0.25
+  :setup (scaling--terminals n)
+  :body (with-current-buffer it
+          (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
+
+(scaling-probe terminal-face-tables-made :gui t :n 4 :steps 4 :budget 0.25
+  :setup (scaling--terminals n)
+  :body (with-current-buffer it
+          (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
+          (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
+
+;; A tab bar of N characters, each in a face of its own colour, so N rows
+;; (each_distinct_face_in_the_tab_bar_is_published_once): found on each step, and made
+;; again on each step after a face change.
+(defun scaling--tab-bar (n)
+  "A tab bar of N distinct faces, and a buffer to type in."
+  (let* ((faces (mapcar #'intern (scaling--names "scaling-tab" n)))
+         (row (let ((i 0))
+                (mapconcat
+                 (lambda (face)
+                   (setq i (1+ i))
+                   (custom-declare-face face `((t :foreground ,(format "#%06x" (* 7 i)))) "A scaling face." :group 'scaling)
+                   (propertize "x" 'face face))
+                 faces ""))))
+    (defalias 'romacs--tab-bar-string (lambda () row))
+    (modify-frame-parameters nil '((tab-bar-lines . 1)))
+    (switch-to-buffer (get-buffer-create "scaling-tab"))))
+
+(scaling-probe tab-bar-faces :gui t :n 100 :steps 4
+  :setup (scaling--tab-bar n)
+  :body (with-current-buffer it (insert "x")))
+
+(scaling-probe tab-bar-faces-made :gui t :n 100 :steps 4
+  :setup (scaling--tab-bar n)
+  :body (with-current-buffer it
+          (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
+          (insert "x")))
+
+;; N faces differing only in an underline's colour, merged for text.
+(scaling-probe faces-merged-decor :gui t :n 200 :steps 1
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
+           (dotimes (i n)
+             (insert (propertize "x" 'face (list :underline (list :color (format "#%06x" (* 7 (1+ i))))))))
+           buffer)
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; Typing in one window after N faces were shown in another: what a table
+;; remembers must not make every key pay for it.
+(scaling-probe faces-publish-history :gui t :n 200 :steps 4
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-history" n)))
+               (buffer (get-buffer-create "scaling-history")))
+           (dolist (face faces) (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (with-current-buffer buffer (dolist (face faces) (insert (propertize "x" 'face face))))
+           (switch-to-buffer buffer)
+           (redisplay t)
+           (let ((typing (get-buffer-create "scaling-typing")))
+             (select-window (split-window))
+             (switch-to-buffer typing)
+             (with-current-buffer buffer (erase-buffer) (insert "x"))
+             typing))
+  :body (with-current-buffer it (insert "x")))
+
+;; Distinct anonymous faces in a buffer with a remapping, past the size a
+;; table is kept to.
+(scaling-probe faces-remapped-churn :gui t :n 1500 :steps 1
+  :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-remapped"))))
+           (setq-local face-remapping-alist '((default :height 1.5)))
+           (dotimes (i n)
+             (insert (propertize "x" 'face (list :foreground (format "#%06x" (* 3 (1+ i)))))))
+           buffer)
+  :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
+
+;; `supports' over N distinct font queries: a query's fonts are listed once.
+(scaling-probe faces-supports-queries :gui t :n 50 :steps 1
+  :setup (cons (switch-to-buffer (get-buffer-create "scaling-supports"))
+               (mapcar (lambda (name) (list :family name :weight 'bold)) (scaling--names "Scaling Family" n)))
+  :body (progn (dotimes (_ 2) (dolist (query (cdr it)) (display-supports-face-attributes-p query)))
+               (with-current-buffer (car it) (insert "x"))))
+
+;; `face-spec-recalc' over N faces on one frame.
+(scaling-probe faces-recalc-defface :n 500
+  :setup (let ((faces (mapcar #'intern (scaling--names "scaling-recalc" n))))
+           (dolist (face faces)
+             (custom-declare-face face '((((background dark)) :foreground "#aabbcc") (t :inherit bold)) "A scaling face." :group 'scaling))
+           faces)
+  :body (dolist (face it) (face-spec-recalc face (selected-frame))))
+
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))
-           faces)
-  :body (dolist (face it)
-          (set-face-attribute face nil :foreground "red")
-          (face-attribute face :foreground)))
+           (cons (switch-to-buffer (get-buffer-create "scaling-edit")) faces))
+  ;; None of the faces shows, so the step paints by typing.
+  :body (progn (dolist (face (cdr it))
+                 (set-face-attribute face nil :foreground "red")
+                 (face-attribute face :foreground))
+               (with-current-buffer (car it) (insert "x"))))
 
 ;;;; Buffers, markers, overlays, text properties, undo
 

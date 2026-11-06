@@ -83,6 +83,12 @@ pub trait DisplayHost {
     fn display_name(&self) -> String;
     /// Installed faces matching QUERY, in the platform's order.
     fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity>;
+    /// FAMILY's fonts (any family's for None) for repeated matching: a host
+    /// may keep them, since asking its font database is the slow part of
+    /// `display-supports-face-attributes-p'. `list_fonts' stays live.
+    fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>> {
+        std::rc::Rc::new(self.list_fonts(&FontQuery { family: family.map(str::to_owned), ..Default::default() }))
+    }
     /// Installed family names.
     fn font_families(&mut self) -> Vec<String>;
     /// ENTITY opened at PIXEL_SIZE, if it opens.

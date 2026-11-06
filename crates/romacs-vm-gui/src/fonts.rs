@@ -37,6 +37,9 @@ pub struct Display {
     /// frame's font each time.
     opened: HashMap<(String, u32, i64), Option<OpenedFont>>,
     chars: HashMap<((String, u32, u16, bool, u16), char), Option<(OpenedFont, u32)>>,
+    /// Each family's fonts as `family_fonts' listed them, kept as long as
+    /// `opened' and `chars': bounded by the families faces name.
+    families: HashMap<Option<String>, std::rc::Rc<Vec<FontEntity>>>,
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
@@ -113,7 +116,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?, policy: FontsetPolicy::new(),
-                  opened: HashMap::new(), chars: HashMap::new(), alpha_hook: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
     }
@@ -259,6 +262,13 @@ impl romacs_vm::DisplayHost for Display {
     }
     fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity> {
         entity::list(query.family.as_deref()).into_iter().map(font_entity).filter(|entity| matches(query, entity)).collect()
+    }
+    fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>> {
+        let key = family.map(str::to_owned);
+        if let Some(found) = self.families.get(&key) { return found.clone(); }
+        let fonts = std::rc::Rc::new(entity::list(family).into_iter().map(font_entity).collect::<Vec<_>>());
+        self.families.insert(key, fonts.clone());
+        fonts
     }
     fn font_families(&mut self) -> Vec<String> {
         entity::families()

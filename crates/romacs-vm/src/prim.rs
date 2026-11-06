@@ -220,8 +220,12 @@ mod leaf {
         pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
             self.vm.safe_call(function, args)
         }
-        pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
-            self.vm.theme_face_attribute(face, keyword, value);
+        /// What a function `:height' of the face NAME came to, None for none.
+        pub(crate) fn note_face_height(&mut self, name: String, height: Option<i64>) {
+            match height {
+                Some(height) => { self.vm.display_state.face_heights.insert(name, height); }
+                None => { self.vm.display_state.face_heights.remove(&name); }
+            }
         }
         /// The bytes of a DOC file, read once per path and modification time.
         pub(crate) fn doc_file_bytes(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
@@ -1415,6 +1419,14 @@ mod leaf {
             self.vm.permanent_symbol_names.insert(symbol.0, value);
             Ok(value)
         }
+        /// VALUE as the compiler reads a macro's expansion.
+        pub fn expansion_datum(&self, value: Value) -> std::result::Result<Form, Fault> {
+            self.vm.expansion_form(value, 0).map_err(Fault::Error)
+        }
+        /// FORM as a Lisp object.
+        pub fn form_value(&mut self, form: &Form) -> std::result::Result<Value, Fault> {
+            self.vm.literal(form).map_err(Fault::Error)
+        }
         pub fn intern(&mut self, name: &str) -> Value {
             self.vm.intern(name)
         }
@@ -1759,6 +1771,7 @@ mod leaf {
     mod syntax_scan;
     pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
+    pub(crate) use face::{FaceKeys, FaceProps};
     mod font;
     mod value_order;
     mod completion;
@@ -1791,7 +1804,7 @@ mod leaf {
     mod world;
     mod finalizer;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, Shown, ShownKind, LineLabels};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, FaceKeys, FaceProps, Shown, ShownKind, LineLabels};
 
 /// Redisplay's window start over the host's layout (Leaf::hosted_window_start).
 pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point: i64, minimal: bool, back: i64) -> std::result::Result<Option<i64>, String> {

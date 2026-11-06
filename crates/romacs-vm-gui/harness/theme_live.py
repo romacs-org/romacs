@@ -16,8 +16,8 @@ subtracted: what is reported is the switch, not the M-: around it.
 The switches run in rounds: the session's own faces, then after each
 --extra step that many more faces (`custom-declare-face', a background-
 dependent spec each) are declared.  Every round switches through all of
---themes with `load-theme' (reported as `load'), then again with
-`enable-theme' alone, one M-: per switch (reported per theme), then
+--themes twice with `load-theme' from a key (reported as `first' and
+`repeat'), then with `enable-theme' alone, one M-: per switch (reported per theme), then
 --rounds passes of `enable-theme' through them all in one M-:: applying a
 loaded theme, per switch, what the budget and the growth check judge.
 One M-: costs more than a switch and varies by more, so only the cycled
@@ -26,19 +26,23 @@ measure, which divides it among all its switches, is judged.
 The run fails when
   * a switch signals, or a theme is not the one enabled after it;
   * a cycled switch of the first round costs more than --budget
-    instructions: 1.2 times pinned GNU's, 43.2 M.  GNU switching the same
-    shape (its Rum on modus-themes 5.3.0, modus-vivendi, tango-dark; four
-    cycled rounds and a redisplay in one command, net of a command that
-    switches nothing, its whole process counted, 205 faces) costs 36.0 M
-    per switch.  Romacs, with its stock theme as large as Modus's, costs
-    about 22 times that: red until incremental face recalculation
-    (romacs#6);
+    instructions.  Pinned GNU, cycling the same shape (its Rum on
+    modus-themes 5.3.0, modus-vivendi, tango-dark; four cycled rounds and a
+    redisplay in one command, net of a command that switches nothing, its
+    whole process counted, 203 faces), costs 46.0 M per switch, and 78.0 M
+    when the no-theme state between themes flips the background mode as
+    it does here.  The budget, 43.2 M, stayed from a run in which
+    modus-vivendi was never loaded (36.0 M), and is held to;
   * a round's cycled switch grows faster than its face count: its ratio
     to the first round's exceeds --slack times the ratio of the face
-    counts (cost linear in the faces passes; quadratic does not).
+    counts (cost linear in the faces passes; quadratic does not);
+  * `load-theme' of a theme in LOAD_BUDGETS, first visit or repeat, costs
+    more than its budget, net of the key that runs it visiting nothing.
+    The stock theme has no counterpart in GNU and is reported only;
+  * `C-g' during a long cycle takes more than --quit-limit to end it.
 
 usage: theme_live.py --binary PATH --output DIR [--themes default,catppuccin-latte,tokyonight-night]
-                     [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 4]
+                     [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 40]
                      [--tools DIR:DIR]
 """
 import argparse
@@ -51,6 +55,13 @@ import tempfile
 import time
 
 import perkey_live as perkey
+
+# 1.2 x pinned GNU's `load-theme' of modus-vivendi with a redisplay, whole
+# process, from a key in a -Q session: 788 M on a first visit, which reads
+# its library, and 311 M to 380 M on a repeat.  It is the nearest GNU has to
+# a port: a table of every package's faces.  The ports are judged by it.
+LOAD_BUDGETS = {'first': {'catppuccin-latte': 946e6, 'tokyonight-night': 946e6},
+                'repeat': {'catppuccin-latte': 373e6, 'tokyonight-night': 373e6}}
 
 SETUP = r'''(progn
   (setq auto-save-timeout nil)
@@ -66,6 +77,16 @@ SETUP = r'''(progn
           (mapc #'disable-theme custom-enabled-themes)
           (enable-theme theme)))
       (list (- (float-time) started) custom-enabled-themes (length (face-list)))))
+  (defvar theme-live-queue nil)
+  (defvar theme-live-visited nil)
+  (defun theme-live-visit ()
+    (interactive)
+    (let ((theme (pop theme-live-queue)))
+      (when theme
+        (mapc #'disable-theme custom-enabled-themes)
+        (load-theme theme t))
+      (write-region (format "%S\n" (car custom-enabled-themes)) nil theme-live-visited t 'silent)))
+  (global-set-key (kbd "<f9>") #'theme-live-visit)
   (defun theme-live-noop ()
     (list 0.0 custom-enabled-themes (length (face-list))))
   (defun theme-live-faces (n)
@@ -128,6 +149,50 @@ def switch(session, theme, load):
             'problems': [str(p) for p in problems]}
 
 
+def visits(session, themes):
+    """`load-theme' of each of THEMES from a key, net of the same key
+    visiting nothing: an M-: varies by more than a load costs."""
+    out = session.root / f'visits-{time.monotonic_ns()}.txt'
+    session.eval_form(f"(setq theme-live-queue '({' '.join(themes)} nil nil nil) theme-live-visited \"{out}\")")
+    lines = lambda: out.read_text().splitlines() if out.exists() else []
+    def press():
+        before = len(lines())
+        def key():
+            session.type(['-k', 'F9'])
+            session.wait(lambda: len(lines()) > before, session.args.timeout, 'a visit')
+            session.quiesce()
+            return []
+        return session.counted(key)[0]
+    measured = [press() for _ in themes]
+    noop = statistics.median(press() for _ in range(3))
+    return [{'theme': theme, 'net_instructions': count - noop,
+             'problems': [] if shown == theme else [f'enabled {shown}']}
+            for theme, count, shown in zip(themes, measured, lines())]
+
+
+def quit_seconds(session, themes):
+    """Seconds from `C-g' to the end of a cycle far longer than the test:
+    the switch's own loops must take the quit, not its end."""
+    names = ' '.join(themes)
+    before = len(perkey.records(session.stdout))
+    session.type(['-M', 'alt', ':', '-m', 'alt'])
+    time.sleep(.2)
+    session.type([f"(theme-live-cycle '({names}) 1000000)"])
+    session.type(['-k', 'Return'])
+    time.sleep(1)
+    done = lambda: [r for r in perkey.records(session.stdout)[before:] if r.get('native_command') == 'eval-expression']
+    if done():
+        raise perkey.Invalid(f'the cycle ended before C-g: {done()}')
+    pressed = time.monotonic()
+    session.type(['-M', 'ctrl', 'g', '-m', 'ctrl'])
+    session.wait(done, session.args.timeout, 'the cycle to quit')
+    seconds = time.monotonic() - pressed
+    if not any('quit' in str(r.get('signal')) for r in done()):
+        raise perkey.Invalid(f'the cycle ended without a quit: {done()}')
+    session.quiesce()
+    return seconds
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
@@ -136,14 +201,15 @@ def main():
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
     ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)
-    ap.add_argument('--rounds', type=int, default=4, help='passes through --themes in the cycled measure')
+    ap.add_argument('--rounds', type=int, default=40, help='passes through --themes in the cycled measure: one M-: costs ten switches and varies by more')
+    ap.add_argument('--quit-limit', type=float, default=.25, help='seconds from C-g to the end of a long cycle, key delivery included')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)
     ap.add_argument('--mode', default='1600x1000')
     ap.add_argument('--tools', help='directories with labwc, wlr-randr and wtype, PATH-style')
     args = ap.parse_args()
     args.binary, args.output = args.binary.resolve(), args.output.resolve()
-    args.regime, args.lines, args.classic, args.state, args.gap, args.populate = 'loadup', 20, False, False, .25, False
+    args.regime, args.lines, args.classic, args.state, args.gap, args.populate, args.split = 'loadup', 20, False, False, .25, False, 1
     args.output.mkdir(parents=True, exist_ok=True)
     themes = [t for t in args.themes.split(',') if t]
     report = {'binary': str(args.binary), 'themes': themes, 'budget': args.budget, 'slack': args.slack, 'rounds': []}
@@ -158,20 +224,25 @@ def main():
             session.eval_form(SETUP)
             for extra in [0] + [int(n) for n in args.extra.split(',') if n]:
                 faces = int(session.value(f'(theme-live-faces {extra})'))
-                passes = [[switch(session, theme, load) for theme in themes] for load in (True, False)]
+                loads = [visits(session, themes) for _ in range(2)]
+                kept = [switch(session, theme, False) for theme in themes]
                 noop = statistics.median(switch(session, None, False)['instructions'] for _ in range(3))
-                kept = passes[1]
                 for s in kept:
                     s['net_instructions'] = s['instructions'] - noop
                 cycled = cycle(session, themes, args.rounds, noop)
                 median = cycled['instructions']
                 report['rounds'].append({'faces': faces, 'median_instructions': median, 'noop_instructions': noop,
-                                         'cycle': cycled, 'load': passes[0], 'switches': kept})
+                                         'cycle': cycled, 'first': loads[0], 'repeat': loads[1], 'switches': kept})
                 failures += [f"cycle: {p}" for p in cycled['problems']]
                 print(json.dumps({'faces': faces, 'per_switch': median, 'lisp_seconds': cycled['lisp_seconds'], 'noop': noop,
-                                  'load': [(s['theme'], s['instructions'], s['lisp_seconds']) for s in passes[0]],
+                                  'first': [(s['theme'], s['net_instructions']) for s in loads[0]],
+                                  'repeat': [(s['theme'], s['net_instructions']) for s in loads[1]],
                                   'apply': [(s['theme'], s['net_instructions'], s['lisp_seconds']) for s in kept]}), flush=True)
-                failures += [f"{s['theme']}: {s['problems']}" for p in passes for s in p if s['problems']]
+                failures += [f"{s['theme']}: {s['problems']}" for p in loads + [kept] for s in p if s['problems']]
+            report['quit_seconds'] = quit_seconds(session, themes)
+            print(json.dumps({'quit_seconds': report['quit_seconds']}), flush=True)
+            if report['quit_seconds'] > args.quit_limit:
+                failures.append(f"C-g took {report['quit_seconds']:.3f} s to end a cycle, more than {args.quit_limit}")
         except (perkey.Invalid, AssertionError, OSError) as error:
             failures.append(repr(error))
         finally:
@@ -184,6 +255,9 @@ def main():
         first = rounds[0]
         if first['median_instructions'] > args.budget:
             failures.append(f"{first['median_instructions']:.3g} instructions per switch > budget {args.budget:.3g}")
+        for name, budgets in LOAD_BUDGETS.items():
+            failures += [f"{name} `load-theme' of {s['theme']}: {s['net_instructions']:.3g} > budget {budgets[s['theme']]:.3g}"
+                         for s in first[name] if s['net_instructions'] > budgets.get(s['theme'], float('inf'))]
         for r in rounds[1:]:
             growth, allowed = r['median_instructions'] / first['median_instructions'], args.slack * r['faces'] / first['faces']
             r['growth'], r['allowed_growth'] = growth, allowed
