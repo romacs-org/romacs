@@ -126,7 +126,7 @@ impl Leaf<'_> {
         };
         let mut process = Process::new(0, readmax.clamp(1, i64::from(i32::MAX)) as usize);
         let mark = self.vm.allocate_object(data::Object::Marker(Box::new(Marker {
-            buffer: Value::NIL, anchor: None, bias: Bias::Left,
+            buffer: Value::NIL, anchor: None, bias: Bias::Left, last_position: 0
         })));
         process.set(Slot::Name, unique);
         process.set(Slot::Status, self.sym("run"));

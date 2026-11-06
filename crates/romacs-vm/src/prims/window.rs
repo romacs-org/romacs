@@ -381,14 +381,23 @@ fn lower_frame(cx; optional frame: Value) {
 // after the command (VM2-REDISPLAY1), but settles each window's start now,
 // so what Lisp asks of the display after it is credible.
 defsubr! { name = "redisplay", gnu = "dispnew.c:7020", effect = Global,
-fn redisplay(cx; optional _force: Value) {
+fn redisplay(cx; optional _force: Value) -> Step {
     let macro_ = cx.intern("executing-kbd-macro");
-    if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { return Ok(Value::NIL); }
+    if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { return Ok(Step::Done(Value::NIL)); }
     // Under `inhibit-redisplay' GNU's redisplay does nothing.
     let inhibit = cx.intern("inhibit-redisplay");
-    if cx.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) { cx.redisplay_point_visibility_now()?; }
-    Ok(Value::TRUE)
+    if cx.variable_value(inhibit)?.is_some_and(|v| v != Value::NIL) { return Ok(Step::Done(Value::TRUE)); }
+    // Lisp runs through the evaluator here, not nested in this primitive.
+    if let Some(windows) = cx.pre_redisplay_call()? {
+        let f = cx.intern("romacs--pre-redisplay");
+        return Ok(Step::Call { f, args: vec![windows], then: redisplay_settled, saved: vec![] });
+    }
+    redisplay_settled(cx, Value::NIL, &[])
 }}
+fn redisplay_settled(cx: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
+    cx.redisplay_point_visibility_now()?;
+    Ok(Step::Done(Value::TRUE))
+}
 
 defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
 fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {

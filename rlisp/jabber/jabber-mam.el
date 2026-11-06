@@ -744,8 +744,10 @@ EFFECTS is `jabber-mam--effects' as the result left it."
 (defvar jabber-mam-batch-size 100
   "Most results a batch holds before it commits.")
 
-(defvar jabber-mam-batch-age 0.05
-  "Seconds a batch stays open at most before its next result commits it.")
+(defvar jabber-mam-batch-age 0.01
+  "Seconds a batch stays open at most before its next result commits it.
+An open batch holds the write lock the live session may need on the main
+VM, and a loaded host stretches this time: a COMMIT costs far less.")
 
 (defun jabber-mam-make-batch ()
   "A closed batch for `jabber-mam--batch'."
@@ -785,6 +787,16 @@ EFFECTS is `jabber-mam--effects' as the result left it."
       (when-let* ((file (jabber-db--intent-file)))
         (jabber-db--intent-fresh-p file))))
 
+(defvar jabber-mam--longest-hold nil
+  "The longest write lock hold of a batch, as (SECONDS COMMIT-SECONDS).")
+
+(defun jabber-mam--note-hold (opened committing)
+  "Note the batch OPENED whose COMMIT started at COMMITTING, just ended."
+  (when opened
+    (let ((held (- (float-time) opened)))
+      (when (> held (or (car jabber-mam--longest-hold) 0))
+        (setq jabber-mam--longest-hold (list held (- (float-time) committing)))))))
+
 (defun jabber-mam-batch-commit ()
   "Commit the open batch, then run its results' effects in order.
 Should the COMMIT fail, the batch rolls back, its results' in-memory
@@ -793,14 +805,18 @@ changes are undone, and its queries fail: their cursors moved inside it."
               (db (plist-get batch :open)))
     (let ((effects (reverse (plist-get batch :effects)))
           (undos (plist-get batch :undos))
-          (queries (plist-get batch :queries)))
+          (queries (plist-get batch :queries))
+          (opened (plist-get batch :opened))
+          (committing (float-time)))
       (setq gc-cons-threshold (or (plist-get batch :gc) gc-cons-threshold))
       (dolist (key '(:open :effects :undos :queries :opened :gc))
         (plist-put batch key nil))
       (plist-put batch :count 0)
       (setq jabber-db--in-transaction nil)
       (if (condition-case err
-              (progn (sqlite-execute db "COMMIT") t)
+              (progn (sqlite-execute db "COMMIT")
+                     (jabber-mam--note-hold opened committing)
+                     t)
             (error
              (ignore-error sqlite-error (sqlite-execute db "ROLLBACK"))
              (dolist (undo undos)

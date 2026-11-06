@@ -18,6 +18,11 @@
 (load "emacs-lisp/debug-early.el" nil t t)
 (load "emacs-lisp/byte-run.el" nil t t)
 (load "emacs-lisp/backquote.el" nil t t)
+;; Every load expands its templates, so the walk is native, and while
+;; these two stay as they are here the compiler takes its answer without
+;; calling the macro (DIVERGENCES.md VM2-BACKQUOTE).
+(defalias 'backquote-process (symbol-function 'romacs--backquote-process))
+(put 'backquote 'romacs--standard-macro (cdr (symbol-function 'backquote)))
 ;; subr.el's defvars own these maps in GNU; the native bare-VM skeleton
 ;; binds them on first keymap use, so yield them before subr.el runs.  The
 ;; C-level keymaps (function-key-map and friends) stay native.
@@ -31,6 +36,8 @@
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
 (load "international/mule-conf.el" nil t t)
+;; loadup.el:143.
+(setq load-source-file-function #'load-with-code-conversion)
 (load "env.el" nil t t)
 (load "format.el" nil t t)
 (load "bindings.el" nil t t)
@@ -95,7 +102,11 @@
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
 ;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
+;; SCRAM's key derivation natively (VM2-SCRAM1).
+(with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 (load "simple.el" nil t t)
+;; The region is drawn natively (`snapshot_region'): no overlay for it.
+(setq redisplay-highlight-region-function #'romacs--native-region)
 (require 'romacs-function-documentation)
 (load "emacs-lisp/seq.el" nil t t)
 (load "emacs-lisp/nadvice.el" nil t t)
@@ -108,6 +119,8 @@
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
 ;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
+;; SCRAM's key derivation natively (VM2-SCRAM1).
+(with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of
@@ -119,6 +132,8 @@
 (load "term/tty-colors.el" nil t t)
 ;; Romacs owns the display layer of frame.el and faces.el (VM2-DISPLAY1).
 (load "romacs-frame.el" nil t t)
+;; ... and `enable-theme' and `disable-theme' loop over faces natively.
+(load "romacs-custom.el" nil t t)
 ;; GNU computes the active keymaps in C; Romacs in Lisp.
 (load "romacs-keymap.el" nil t t)
 ;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.
@@ -216,6 +231,16 @@ Custom delayed, gets its record's position as `variable-documentation'."
 ;; loadup.el:569: with the preloaded files in, `debug-early' gives way to
 ;; the full debugger.
 (setq debugger #'debug)
+;; loadup.el:391.
+(setq internal-make-interpreted-closure-function #'cconv-make-interpreted-closure)
+;; lread.c Fload keeps the name of each file the dump loads, newest first:
+;; GNU's Lisp in this chain, relative to its directory.
+(setq preloaded-file-list
+      (let ((root (file-name-directory (locate-file "simple" load-path '(".el")))))
+        (delq nil (mapcar (lambda (entry)
+                            (and (stringp (car entry)) (string-prefix-p root (car entry))
+                                 (file-name-sans-extension (substring (car entry) (length root)))))
+                          load-history))))
 
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
@@ -294,6 +319,8 @@ chain left (`romacs--locale-defaults'); `command-line' \(startup.el:1300)
 then begins initialization, in the directory the process started in."
   (setq eol-mnemonic-dos "(DOS)"
         eol-mnemonic-mac "(Mac)")
+  ;; startup.el command-line (startup.el:1343): where this process's Lisp is.
+  (setq lisp-directory (file-name-directory (locate-file "simple" load-path '(".el"))))
   ;; The replay is startup's, before the user's init only.
   (if romacs--locale-defaults
       (romacs--restore-locale-state romacs--locale-defaults)
@@ -325,6 +352,9 @@ and `after-init-time' its clock."
                   startup--xdg-config-default)))
         (setq user-emacs-directory
               (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+        ;; The frame init_display made; a window session has none
+        ;; (rlisp/romacs-gui-loadup.el).
+        (setq terminal-frame (selected-frame))
         (romacs--startup-environment)
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
@@ -418,6 +448,11 @@ definitions (`romacs--world-reseed-all')."
 ;; scheme enabled over it replaces it (romacs-theme.el).
 (require 'romacs-theme)
 (romacs-theme-start)
+
+;; The default fontsets are data for the window system's initialization
+;; (`romacs--setup-fontsets'), made once here so no launch pays for them.
+(romacs--make-default-fontsets)
+(romacs--stage-fontsets)
 
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

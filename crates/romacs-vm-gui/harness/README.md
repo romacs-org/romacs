@@ -272,7 +272,7 @@ replay those steps can diverge for reasons outside Romacs.
 
 # Standing benchmarks: fixed workloads against pinned GNU
 
-`perfbench/perfbench.py` runs one fixed set of workloads in pinned GNU and
+`perfbench/perfbench.py` runs one fixed set of workloads in GNU Emacs and
 in a given Romacs build and prints one table: per workload, each engine's
 `instructions:u` (the reliable metric) and wall time (median of `--runs`,
 default 3), the Romacs/GNU ratio of each, and the change of Romacs's
@@ -280,6 +280,14 @@ figures since the previous saved run.  Each run is saved as
 `results.json` and `table.md` under `OUT/<commit>/<UTC time>/` (default
 OUT `~/.cache/romacs/perf-bench`, or `$ROMACS_PERFBENCH_OUT`), so a rerun after every master
 shows the trend.
+
+The GNU engine is this machine's own installation, `/usr/bin/emacs`, run with
+`LD_LIBRARY_PATH` unset, or `--gnu BIN`.  Each run records its version,
+repository commit, package and whether it is natively compiled, in results.json
+and README's headers, since an upgrade moves it.  The parity harnesses keep the
+pinned oracle.  `$ROMACS_GNU_SOURCE` still supplies the pinned tree: fixture
+files and ERT test files, the same inputs for every engine, whatever commit the
+GNU engine is at.
 
 Romacs runs as an installation runs it.  Before anything is measured,
 perfbench stages the binary beside its Lisp trees and compiles them with
@@ -305,7 +313,7 @@ with a workload's own file byte-compiled by its own compiler.
 `--neomacs-commit SHA` records the commit it was built from, which it does
 not report itself.  Its batch runs are limited to 8 GiB of address space,
 because one ERT file otherwise grows without bound.  A row it cannot run says why.  The `init` and `apps`
-rows are GNU's and Romacs's alone.
+rows are GNU's and Romacs's alone, and so is ERT.
 
 The workloads, and how each is counted, are in the script's docstring:
 
@@ -336,6 +344,22 @@ The workloads, and how each is counted, are in the script's docstring:
   ert-run-tests-batch-and-exit` command in both engines.  These totals are
   not comparable with `gnu-tests/run.py`'s, which run romacs-gnu-ert
   through the romacs-batch adapter.
+* session, real commands and keys in a GUI session on headless labwc:
+  dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,
+  vc-dir, `M-x shell` and org-agenda on a key, and per-key kill, yank, undo,
+  isearch and Org editing.  Then, in a session with Romacs's shipped defaults
+  on, the rows README's lead quotes: find-file of `xdisp.c` and of a generated
+  15 MB header to the window's final faces (every visible character
+  `fontified`), `vc-print-root-log` over upstream master's whole history with
+  `vc-log-show-limit` 0 (commits, complete, first screen, median key while it
+  streams, the buffer's hash compared across engines), and a theme switch,
+  cycled and on first visit, among each engine's own shipped themes, since
+  Romacs ships none of GNU's.  Wall runs from the key to the result.
+  Block is the longest gap between ticks of a 5 ms timer, which cannot run
+  while the main VM is busy (`perfbench-session.el`).  Instructions are
+  reported, but these rows are read by wall and block: a worker VM's path does
+  more work in total to keep the main VM free, and its processes are not
+  counted.  Writing rows use a private clone of the pinned tree.
 * GUI, each engine on its own headless labwc as the parity harnesses run
   them: first-start world build (Romacs only), warm launch to first paint
   (Romacs only) and to idle, per-key self-insert, C-f and C-n, and C-x C-f
@@ -366,27 +390,31 @@ checked clean, and its fixture files are checked against SHA-256s.  The
 HOME/XDG/TMPDIR trees, and no workload writes a user's data.
 
 ```sh
-# in the project environment (pinned GNU oracle and source)
+# in the project environment (ROMACS_GNU_SOURCE for the pinned tree)
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
-  --romacs INSTALLED/romacs-vm-gui --profile-config PROFILE.json  # about an hour, most of it elb
+  --romacs INSTALLED/romacs-vm-gui  # about an hour, most of it elb
 python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
 ```
 
 After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
-"Romacs and GNU Emacs compared" tables in README.org from that run, keeping every
-row: the editor workloads between `# perfbench-table-begin` and
-`# perfbench-table-end`, and the elisp-benchmarks members between
-`# perfbench-elb-begin` and `# perfbench-elb-end`.  A block the run did not
-measure is left as it was.  A whole run also rewrites the headlines between
-`# perfbench-headlines-begin` and `# perfbench-headlines-end`: every row where
+"Romacs and GNU Emacs compared" tables in the top-level README.md from that run, keeping every
+row: the editor workloads between `<!-- perfbench-table-begin -->` and
+`<!-- perfbench-table-end -->`, and the elisp-benchmarks members between
+`<!-- perfbench-elb-begin -->` and `<!-- perfbench-elb-end -->`.  A block the run did not
+measure is left as it was.  `perfbench/lead.md` is README's lead: each `{{name}}`
+in it is filled from the run and written between `<!-- perfbench-lead-begin -->` and
+`<!-- perfbench-lead-end -->`.  A name with no value fails the run and stops `readme.py`
+with that README untouched, and a wall time refused for load counts as none, so
+the lead takes a quiet run.  A whole run also rewrites the headlines between
+`<!-- perfbench-headlines-begin -->` and `<!-- perfbench-headlines-end -->`: every row where
 Romacs is 0.80x or better against a rival on every metric measured, with build
 and rerun command.  It names on standard error any headline the run lost.
 
 A binary installed beside its runtime (`gnu-lisp/`, `rlisp/`, as an
 installed build has them) runs that runtime; otherwise give
 `--runtime`.  The commit comes from the `build.json` beside the binary, or
-from `--commit`.  `--only` takes groups (`batch micro ert elb gui init apps`)
-or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `launch`,
+from `--commit`.  `--only` takes groups (`batch micro ert elb session gui init apps`)
+or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `session`, `launch`,
 `keys`, `init` or `apps`.
 
 ## Line numbers in programming buffers

@@ -45,6 +45,8 @@ pub struct Shared {
     /// The window was shown or hidden since the loop last looked: what it
     /// had in flight is gone with the old window.
     pub window_changed: bool,
+    /// The window's title, and what it was last worked out on (title.rs).
+    pub title: crate::title::Title,
 }
 
 /// A server's window: whether one shows, and the size the next is made at.
@@ -202,6 +204,10 @@ impl HostInput for GuiHost {
 
     fn display_animates(&mut self) -> Option<bool> {
         display_animates(&self.sender)
+    }
+
+    fn pointer(&mut self) -> Option<(i32, i32)> {
+        self.sender.pointer()
     }
 
     fn native_window(&mut self, action: romacs_vm::NativeWindow) -> Option<bool> {

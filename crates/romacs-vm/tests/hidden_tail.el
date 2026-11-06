@@ -20,6 +20,7 @@
 (defun ht-motion () (with-current-buffer "pv" (save-excursion (goto-char (point-max)) (list (vertical-motion -19) (point)))))
 (defun ht-force (object) (force-window-update object) (list (window-end) (window-end nil t)))
 (defun ht-redisplay () (with-current-buffer "pv" (save-excursion (goto-char (point-min)) (insert "y"))) (redisplay t) (list (window-end) (window-end nil t) (window-start)))
+(defun ht-config () (let ((c (current-window-configuration))) (switch-to-buffer (get-buffer-create "ht-other")) (redisplay t) (set-window-configuration c) (list (window-end) (window-end nil t))))
 (defun ht-redisplay-end () (call-interactively #'end-of-buffer) (redisplay t) (list (window-start) (point) (window-end) (window-end nil t)))
 (defun ht-edit () (with-current-buffer "pv" (save-excursion (goto-char (point-min)) (insert "x")) (list (window-end) (window-end nil t))))
 ;; plain-0
@@ -42,6 +43,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; plain-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 't) (pv-step nil))
@@ -62,6 +65,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; plain-newline-0
@@ -84,6 +89,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; plain-newline-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (goto-char (point-max)) (insert "\n"))) (pv-step nil))
@@ -104,6 +111,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-property-0
@@ -126,6 +135,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-property-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(ht-hide 'property (ht-bol 8) (point-max))) (pv-step nil))
@@ -146,6 +157,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-property-newline-0
@@ -168,6 +181,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-property-newline-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-bol 8) (point-max)))) (pv-step nil))
@@ -188,6 +203,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-overlay-0
@@ -210,6 +227,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-overlay-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'overlay (ht-bol 8) (point-max)))) (pv-step nil))
@@ -230,6 +249,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-spec-0
@@ -252,6 +273,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-spec-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'spec (ht-bol 8) (point-max)))) (pv-step nil))
@@ -272,6 +295,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-ellipsis-0
@@ -294,6 +319,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-ellipsis-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'ellipsis (ht-bol 8) (point-max)))) (pv-step nil))
@@ -314,6 +341,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; row-overlay-ellipsis-0
@@ -336,6 +365,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; row-overlay-ellipsis-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'overlay-ellipsis (ht-bol 8) (point-max)))) (pv-step nil))
@@ -356,6 +387,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; mid-line-0
@@ -378,6 +411,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; mid-line-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (+ (ht-bol 8) 3) (point-max)))) (pv-step nil))
@@ -398,6 +433,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; mid-line-ellipsis-0
@@ -420,6 +457,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; mid-line-ellipsis-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'ellipsis (+ (ht-bol 8) 3) (point-max)))) (pv-step nil))
@@ -440,6 +479,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; line-end-0
@@ -462,6 +503,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; line-end-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-eol 8) (point-max)))) (pv-step nil))
@@ -482,6 +525,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; line-end-ellipsis-0
@@ -504,6 +549,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; line-end-ellipsis-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'ellipsis (ht-eol 8) (point-max)))) (pv-step nil))
@@ -524,6 +571,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; continuation-0
@@ -546,6 +595,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; continuation-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (goto-char (ht-eol 8)) (insert (make-string 250 ?c)) (ht-hide 'property (+ (ht-bol 8) 99) (point-max)))) (pv-step nil))
@@ -566,6 +617,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; after-string-0
@@ -588,6 +641,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; after-string-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-bol 8) (point-max)) (overlay-put (make-overlay (ht-bol 8) (ht-bol 8)) 'after-string "shown"))) (pv-step nil))
@@ -608,6 +663,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; narrowed-0
@@ -630,6 +687,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; narrowed-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 30 '(progn (ht-hide 'property (ht-bol 8) (ht-bol 14)) (narrow-to-region 1 (ht-bol 14)))) (pv-step nil))
@@ -650,6 +709,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; narrowed-text-after-0
@@ -672,6 +733,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; narrowed-text-after-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 30 '(progn (ht-hide 'property (ht-bol 8) (ht-bol 10)) (narrow-to-region 1 (ht-bol 14)))) (pv-step nil))
@@ -692,6 +755,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; all-hidden-0
@@ -714,6 +779,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; all-hidden-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(ht-hide 'property (point-min) (point-max))) (pv-step nil))
@@ -734,6 +801,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; block-then-text-0
@@ -756,6 +825,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; block-then-text-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 12 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-bol 5) (ht-bol 9)))) (pv-step nil))
@@ -776,6 +847,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; below-window-0
@@ -798,6 +871,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; below-window-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 80 '(ht-hide 'property (ht-bol 50) (point-max))) (pv-step nil))
@@ -818,6 +893,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; at-window-end-0
@@ -840,6 +917,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; at-window-end-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 60 '(ht-hide 'property (ht-bol 23) (point-max))) (pv-step nil))
@@ -860,6 +939,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; two-blocks-0
@@ -882,6 +963,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; two-blocks-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 80 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-bol 20) (ht-bol 40)) (ht-hide 'property (ht-bol 70) (point-max)))) (pv-step nil))
@@ -902,6 +985,8 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)
 ;; long-block-above-0
@@ -924,6 +1009,8 @@
 (ht-redisplay)
 (ht-redisplay-end)
 (pv-step nil)
+(ht-config)
+(pv-step nil)
 (ht-edit)
 ;; long-block-above-101
 (progn (ht-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil)) 120 '(progn (progn (goto-char (point-max)) (insert "\n")) (ht-hide 'property (ht-bol 30) (ht-bol 100)) (ht-hide 'property (ht-bol 115) (point-max)))) (pv-step nil))
@@ -944,5 +1031,7 @@
 (pv-step '(beginning-of-buffer))
 (ht-redisplay)
 (ht-redisplay-end)
+(pv-step nil)
+(ht-config)
 (pv-step nil)
 (ht-edit)

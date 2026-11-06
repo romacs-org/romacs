@@ -21,6 +21,7 @@ impl Vm {
         let table = CharTable {
             default: fields[0], parent: fields[1], purpose: fields[2],
             ascii: self.literal_table_slot(fields[3]), root, extras: fields[68..].to_vec(),
+            edits: 0,
         };
         Ok(self.allocate_object(data::Object::CharTable(Box::new(table))))
     }

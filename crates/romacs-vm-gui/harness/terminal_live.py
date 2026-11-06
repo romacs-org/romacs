@@ -38,6 +38,28 @@ def process_running(pid):
         return False
 
 
+def exercise_history_buffers(keys, control, extended, shell, visible, check, trace, report):
+    """Real bash: M-p recalls and re-runs its last line; C-2 M-x romacs-term
+    makes *romacs-term*<2>, and each name switches back to its own terminal."""
+    shell('n=0')
+    shell('echo HISTORY_$((++n))')
+    visible('HISTORY_1')
+    keys('-M', 'alt', 'p', '-m', 'alt')
+    keys('-k', 'Return')
+    visible('HISTORY_2')
+    control('2')
+    extended('romacs-term')
+    check('TERMINAL_C_2_OPENS_ANOTHER', lambda: not any('HISTORY_' in row for row in ff.current_rows(trace())))
+    shell('echo SECOND_TERMINAL')
+    visible('SECOND_TERMINAL')
+    extended('romacs-term')
+    visible('HISTORY_2')
+    control('2')
+    extended('romacs-term')
+    visible('SECOND_TERMINAL')
+    report['checks'].append('TERMINAL_HISTORY_AND_NUMBERED_BUFFERS')
+
+
 def exercise_exit_resize(process, keys, control, extended, shell, visible, capture,
                          trace, original, env, args, report):
     control('x')
@@ -331,6 +353,8 @@ def main():
                         help='C-c C-j leaves the cursor for the scrollback; typing returns')
     parser.add_argument('--prompt-grow', action='store_true',
                         help='under --loadup (fido-vertical), a growing minibuffer must not resize the pty')
+    parser.add_argument('--history-buffers', action='store_true',
+                        help='M-p recalls the shell history; numeric prefixes choose the terminal')
     parser.add_argument('--labwc', default=live.LABWC)
     parser.add_argument('--wlr-randr', default=live.RANDR)
     args = parser.parse_args()
@@ -400,7 +424,7 @@ def main():
                 time.sleep(.3)
                 # The leave journey needs GNU's Lisp (isearch, M-w), as a
                 # daily session has it.
-                flags = ['--loadup'] if args.prompt_grow or args.leave else []
+                flags = ['--loadup'] if args.prompt_grow or args.leave or args.history_buffers else []
                 if args.prompt_grow:
                     # The minibuffer must grow over the terminal: fido-vertical's
                     # display, not the default layer (VM2-COMPLETE-DEFAULT).
@@ -452,6 +476,9 @@ def main():
                 keys('1')
                 extended('romacs-term')
                 check('TERMINAL_OPEN_NATIVE', lambda: 'romacs-term' in trace() and process.poll() is None)
+                if args.history_buffers:
+                    exercise_history_buffers(keys, control, extended, shell, visible, check, trace, report)
+                    return 0
                 if args.prompt_grow:
                     check_prompt_grow(process, keys, control, extended, shell, visible, capture, trace, work, report, args.timeout)
                     return 0

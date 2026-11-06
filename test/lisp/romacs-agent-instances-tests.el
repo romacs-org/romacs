@@ -174,5 +174,18 @@ file) and `romacs-agent-providers' PROVIDERS."
       (should (cl-some (lambda (r) (string-match-p "no Romacs harness for T3 driver zz" r))
                        (romacs-agent-instances-test--reasons))))))
 
+(ert-deftest romacs-agent-default-provider-reads-only-as-far-as-it-needs ()
+  (let ((romacs-agent-default-provider nil)
+        (romacs-agent-providers '(("claude" :enabled nil) ("claude") ("codex") ("codex-2") ("claude-2")))
+        (read nil)
+        (provider (symbol-function 'romacs-agent--provider)))
+    (cl-letf (((symbol-function 'romacs-agent--provider)
+               (lambda (entry) (push (car entry) read) (funcall provider entry))))
+      ;; The first entry of a name wins, disabled or not.
+      (should (equal (romacs-agent--default-provider) "codex"))
+      (should (equal (reverse read) '("claude" "codex"))))
+    (let ((romacs-agent-providers '(("claude" :enabled nil))))
+      (should-error (romacs-agent--default-provider) :type 'user-error))))
+
 (provide 'romacs-agent-instances-tests)
 ;;; romacs-agent-instances-tests.el ends here

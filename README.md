@@ -1,19 +1,14 @@
-#+title: Romacs
+<!-- perfbench-lead-begin -->
+# Romacs
+
+<!-- hero-clip -->
 
 Romacs is a Lisp machine emulator written in Rust, with Emacs Lisp as its
 runtime.  People and agents program the whole machine in Lisp; editing is one
 application running on it.
+<!-- perfbench-lead-end -->
 
-#+BEGIN_QUOTE
-All original content in this project has been written with AI Agents
-except for this paragraph.  I’m not a programmer, and have no
-background in CS or tech, just a hobbyist with strong opinions.
-
-The goal of this project is for me to have a malleable system that is
-100% maintained by my agents, tailored to my needs.
-#+END_QUOTE
-
-* Direction
+## Direction
 
 Keep Emacs's malleability without preserving every historical constraint.
 Rust handles the machinery; Elisp keeps commands, keybindings and policy
@@ -22,40 +17,39 @@ not a replica of GNU Emacs's internals.
 
 Rust emulates the machine: object memory and collection, the evaluator,
 loading, processes, and the display and input host.  Elisp is the runtime:
-GNU's Lisp corpus (=gnu-lisp/=) and Romacs's own Lisp (=rlisp/=) run on it
+GNU's Lisp corpus (`gnu-lisp/`) and Romacs's own Lisp (`rlisp/`) run on it
 as programs, and compatibility is judged by what those programs do.
 
 A user should be limited only by his imagination by what he can do
 with romacs.
 
 Minibuffer completion matches the way fzf does by default: fuzzy terms in
-any order, =^prefix=, =suffix$=, ='exact=, =!not= and =a | b=, best match
-first.  =(setopt completion-styles '(basic partial-completion emacs22)
-completion-category-overrides nil)= restores GNU's (DIVERGENCES.md VM2-FZF-DEFAULT).
+any order, `^prefix`, `suffix$`, `'exact`, `!not` and `a | b`, best match
+first.  `(setopt completion-styles '(basic partial-completion emacs22) completion-category-overrides nil)` restores GNU's (DIVERGENCES.md VM2-FZF-DEFAULT).
 
 Mail is the real notmuch package, loaded from the user's init, on GNU's
 message.el and smtpmail over Romacs's native TLS; Romacs ships no mail
 interface of its own (DIVERGENCES.md VM2-MAIL1).  A distribution's notmuch
-installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
-=load-path= (VM2-SITELISP1).
+installs its Lisp in `/usr/share/emacs/site-lisp`, which the init adds to
+`load-path` (VM2-SITELISP1).
 
-* Romacs and GNU Emacs compared
+## Romacs and GNU Emacs compared
 
-Performance against pinned GNU Emacs, measured with the standing benchmark
-suite (=crates/romacs-vm-gui/harness/perfbench/=).  Romacs runs as an
+Performance against GNU Emacs as a user installs it, measured with the standing benchmark
+suite (`crates/romacs-vm-gui/harness/perfbench/`).  Romacs runs as an
 installation runs it, its Lisp compiled ahead of use.  The tables are regenerated
 from each new run, losses included.  To reproduce them:
 
-#+begin_src sh
-python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --gnu GNU-EMACS
+```sh
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY
 python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json
-#+end_src
+```
 
-# perfbench-table-begin
-Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each workload ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  Romacs ran as an installation does: 1920 of the 1970 files of its Lisp compiled ahead of use into its store by =--compile-lisp-tree=, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
+<!-- perfbench-table-begin -->
+Measured 2026-11-06 on build `0cfcb823` against pinned GNU Emacs `45b0f769`, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each workload ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  Romacs ran as an installation does: 1920 of the 1970 files of its Lisp compiled ahead of use into its store by `--compile-lisp-tree`, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
 
 | Workload | Per | GNU | Romacs | Romacs/GNU (time) | Romacs/GNU (instructions) | Notes |
-|-
+| --- | --- | --- | --- | --- | --- | --- |
 | startup -Q --batch | run | - | - | - | 1.57x | wall refused: load 10.2 > 8.0; process to exit; Romacs: compiled store, 0 of 0 loads compiled |
 | font-lock-ensure fileio.c | run | - | - | - | 3.31x | wall refused: load 10.2 > 8.0; less its setup; Romacs: compiled store, 10 of 10 loads compiled |
 | font-lock-ensure subr.el | run | - | - | - | 3.38x | wall refused: load 10.3 > 8.0; less its setup; Romacs: compiled store, 0 of 0 loads compiled |
@@ -81,30 +75,35 @@ Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on 
 | C-x C-f 5,000 files, per key, romacs-complete | key | - | - | - | - | wall refused: load 36.3 > 8.0; Romacs only: its default completion (the layer, fzf), keys of file-1; candidates 2084, minibuffer 'file-1'; Romacs: compiled store, 1 of 1 loads compiled |
 
 Not measured in this run: init, gnosis, apps.
-# perfbench-table-end
+<!-- perfbench-table-end -->
 
-** Headlines
+### Interactive sessions
 
-# perfbench-headlines-begin
-Every row of this run where Romacs beats a rival by at least 20%: 0.80x or better on every metric the run measured.  Build ~0cfcb823~.  The tables keep every row, losses included.
+<!-- perfbench-session-begin -->
+<!-- perfbench-session-end -->
+
+### Headlines
+
+<!-- perfbench-headlines-begin -->
+Every row of this run where Romacs beats a rival by at least 20%: 0.80x or better on every metric the run measured.  Build `0cfcb823`.  The tables keep every row, losses included.
 
 | Row | Against | Instructions | Time | Build | Rerun |
-|-
-| how-many xdisp.c | GNU | 0.14x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'how-many xdisp.c'= |
-| micro named call | GNU | 0.53x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'micro'= |
-| elb fibn | GNU | 0.49x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
-| elb fibn-named-let | GNU | 0.55x | - | ~0cfcb823~ | =perfbench.py --romacs BINARY --only 'elb'= |
-# perfbench-headlines-end
+| --- | --- | --- | --- | --- | --- |
+| how-many xdisp.c | GNU | 0.14x | - | `0cfcb823` | `perfbench.py --romacs BINARY --only 'how-many xdisp.c'` |
+| micro named call | GNU | 0.53x | - | `0cfcb823` | `perfbench.py --romacs BINARY --only 'micro'` |
+| elb fibn | GNU | 0.49x | - | `0cfcb823` | `perfbench.py --romacs BINARY --only 'elb'` |
+| elb fibn-named-let | GNU | 0.55x | - | `0cfcb823` | `perfbench.py --romacs BINARY --only 'elb'` |
+<!-- perfbench-headlines-end -->
 
-** Lisp compute: GNU's elisp-benchmarks
+### Lisp compute: GNU's elisp-benchmarks
 
-# perfbench-elb-begin
+<!-- perfbench-elb-begin -->
 This is GNU's own benchmark suite, GNU ELPA's elisp-benchmarks (the one GNU uses to evaluate native compilation), not ours, and it measures pure Lisp compute, not editor responsiveness.
 
-Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each member ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  GNU loads the member files byte-compiled, with JIT native compilation off, and natively compiled at the suite's own speed and safety; its own Lisp libraries are natively compiled in both columns, as this GNU is built with native compilation.  Romacs ran as an installation does: 1920 of the 1970 files of its Lisp compiled ahead of use into its store by =--compile-lisp-tree=, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  A member an engine does not define, or whose run reported an error, has no figure there, and the geometric mean leaves it out.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
+Measured 2026-11-06 on build `0cfcb823` against pinned GNU Emacs `45b0f769`, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each member ran 3 times per engine in private home directories; wall time is the median, and wall times measured above load 8 are left out.  GNU loads the member files byte-compiled, with JIT native compilation off, and natively compiled at the suite's own speed and safety; its own Lisp libraries are natively compiled in both columns, as this GNU is built with native compilation.  Romacs ran as an installation does: 1920 of the 1970 files of its Lisp compiled ahead of use into its store by `--compile-lisp-tree`, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  A member an engine does not define, or whose run reported an error, has no figure there, and the geometric mean leaves it out.  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.
 
 | Member | GNU .elc | GNU native | Romacs | Romacs/GNU .elc (time) | Romacs/GNU native (time) | Romacs/GNU .elc (instructions) | Romacs/GNU native (instructions) | Notes |
-|-
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | bubble | - | - | - | - | - | 1.32x | 5.75x | wall refused: load 34.6 > 8.0; Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
 | bubble-no-cons | - | - | - | - | - | 4.24x | 28.52x | wall refused: load 35.5 > 8.0; Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
 | bytecomp | - | - | - | - | - | - | - | wall refused: load 24.8 > 8.0; Romacs: reported "Error: Symbol’s function definition is void: read-positioning-symbols"; Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
@@ -128,58 +127,41 @@ Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on 
 | scroll | - | - | - | - | - | - | - | wall refused: load 34.1 > 8.0; Romacs: no elb-scroll-entry after loading the suite |
 | smie | - | - | - | - | - | 3.90x | 3.92x | wall refused: load 45.2 > 8.0; Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
 | geometric mean | - | - | - | - | - | 2.42x | 31.98x | wall refused: load 45.2 > 8.0; over the 19 of 22 members every engine ran; left out: bytecomp, pidigits, scroll |
-# perfbench-elb-end
+<!-- perfbench-elb-end -->
 
-* Source layout
+## Source layout
 
-=rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
-=rlisp/deps/= temporary third-party dependencies and their replacement plan.
+`rlisp/` holds Romacs Lisp, `gnu-lisp/` the pinned GNU sources, and
+`rlisp/deps/` temporary third-party dependencies and their replacement plan.
 
-* Install a release
+## Install
 
-Every push to =master= replaces the assets of the =nightly= prerelease;
-each =v*= tag is a stable release.  Both ship =romacs-x86_64-linux.tar.gz=
-and its =SHA256SUMS=.  The tarball runs wherever it is unpacked, on x86_64
-Linux with glibc 2.39 or newer, in a Wayland session with a Vulkan driver,
-fontconfig and FreeType.
+```sh
+curl -fsSL https://thanosapollo.org/romacs/install.sh | bash
+```
 
-Download the nightly with the GitHub CLI (for the latest stable release,
-omit =nightly=):
+Romacs runs on x86_64 Linux with glibc 2.39 or newer, such as Ubuntu 24.04,
+Debian 13 and Arch, in a Wayland session with a Vulkan driver.  The installer
+checks the download against its `SHA256SUMS`, installs under `~/.local`, and
+asks before using `sudo`, only to add missing system libraries.
 
-#+begin_src sh
-gh release download nightly -R romacs-org/romacs
-#+end_src
+Options go after `bash -s --`.  `--nightly` installs the rolling build of
+`master`, and `--uninstall` removes Romacs and leaves your init and data:
 
-or with curl (for the latest stable release, replace =download/nightly=
-with =latest/download=):
+```sh
+curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly
+curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
+```
 
-#+begin_src sh
-curl -fLO https://github.com/romacs-org/romacs/releases/download/nightly/romacs-x86_64-linux.tar.gz
-curl -fLO https://github.com/romacs-org/romacs/releases/download/nightly/SHA256SUMS
-#+end_src
-
-Then check and install it:
-
-#+begin_src sh
-sha256sum -c SHA256SUMS
-mkdir -p ~/.local/opt ~/.local/bin ~/.local/share
-tar -xzf romacs-x86_64-linux.tar.gz -C ~/.local/opt
-ln -sf ~/.local/opt/romacs-x86_64-linux/bin/romacs ~/.local/bin/romacs
-cp -r ~/.local/opt/romacs-x86_64-linux/share/applications ~/.local/opt/romacs-x86_64-linux/share/icons ~/.local/share/
-#+end_src
-
-To upgrade, remove =~/.local/opt/romacs-x86_64-linux= first, so no file
-of the old release remains.
-
-* Build and run
+## Build and run
 
 On Linux with a Wayland session, install the Rust toolchain specified in
-=rust-toolchain.toml= and the native dependencies in =nix/dependencies.nix=.
-Alternatively, enter the development environment with =nix develop=.
+`rust-toolchain.toml` and the native dependencies in `nix/dependencies.nix`.
+Alternatively, enter the development environment with `nix develop`.
 
 From the repository root:
 
-#+begin_src sh
+```sh
 cargo build --release --locked -p romacs-vm-gui
 scripts/romacs
-#+end_src
+```

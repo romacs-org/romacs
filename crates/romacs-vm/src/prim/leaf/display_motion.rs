@@ -31,7 +31,7 @@ pub(super) enum Shape {
     /// A character the host lays out as one glyph WIDTH pixels wide in a
     /// row at least HEIGHT pixels tall, ASCENT of them above the baseline;
     /// a newline is zero wide.
-    Pixel { c: u32, width: i64, height: i64, ascent: i64 },
+    Pixel { c: u32, width: i64, height: i64, ascent: i64, fallback: bool },
     Tab,
     /// A TAB the host lays out as a stretch to the next tab stop in its
     /// pixels, SPACE being its face's space width, in a row at least
@@ -254,7 +254,7 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
     let mut rise = Rise::of(1, 1);
     let (width, glyphs) = match e.shape {
         Shape::Glyph { c: 10, .. } => (0, 0),
-        Shape::Pixel { c, width, height, ascent } => { rise = Rise::of(height, ascent); if c == 10 { (0, 0) } else { (width, 1) } }
+        Shape::Pixel { c, width, height, ascent, fallback } => { rise = Rise { settled: fallback, ..Rise::of(height, ascent) }; if c == 10 { (0, 0) } else { (width, 1) } }
         Shape::Glyph { width, .. } | Shape::Glyphless { width, .. } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
         Shape::PixelTab { space, height, ascent } => { rise = Rise::of(height, ascent); (pixel_tab(cx, it, space), 1) }

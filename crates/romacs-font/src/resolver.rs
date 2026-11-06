@@ -6,11 +6,14 @@ mod selection_order_tests;
 #[cfg(test)]
 #[path = "resolver/tests/alternative_state_test.rs"]
 mod alternative_state_tests;
+#[cfg(test)]
+#[path = "resolver/tests/fontset_test.rs"]
+mod fontset_tests;
 
-use crate::fontset::{FontsetEntry, FontsetPolicy};
 use crate::instance::{FontInstanceInterner, FontInstanceProperties};
 use crate::style::{FontRequest, RequestKey, style_score};
-use romacs_layout_input::{FontAlternativeState, FontSelectionAttribute, FontSelectionState};
+use romacs_layout_input::{Alternatives, FontAlternativeState, FontDef, FontSelectionAttribute, FontSelectionState, FontsetState, OpenedDefFont};
+use std::sync::Arc;
 
 #[cfg(test)]
 const DEFAULT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
@@ -60,7 +63,7 @@ pub struct CharResolution {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use crate::fontconfig_catalog::{self as catalog, ListedFace};
+pub(crate) use crate::fontconfig_catalog::{self as catalog, FaceList, ListSpec, ListedFace};
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) mod catalog {
@@ -97,9 +100,25 @@ pub(crate) mod catalog {
     pub(crate) fn list_families() -> Vec<String> {
         Vec::new()
     }
+    #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+    pub(crate) struct ListSpec {
+        pub family: Option<String>,
+        pub foundry: Option<String>,
+        pub chars: Vec<u32>,
+        pub langs: Vec<String>,
+    }
+    pub(crate) struct FaceList;
+    impl FaceList {
+        pub fn covering(&self, _: char) -> Vec<ListedFace> {
+            Vec::new()
+        }
+    }
+    pub(crate) fn list_constrained(_: &ListSpec) -> Option<FaceList> {
+        None
+    }
 }
 #[cfg(not(target_os = "linux"))]
-use catalog::ListedFace;
+use catalog::{FaceList, ListSpec, ListedFace};
 
 /// Generic family names Fontconfig resolves through alias rules rather than
 /// listing (GNU `ftfont_resolve_generic_family`).
@@ -156,6 +175,25 @@ impl OpenedFace {
                 let units = f32::from(face.glyph_hor_advance(glyph)?);
                 let advance = (units * pixel_size / f32::from(face.units_per_em())).round();
                 Some((ResolvedGlyphId::from(glyph.0), advance))
+            }
+        }
+    }
+
+    /// CH's left and right bearings, in whole pixels.
+    fn bearings(&self, ch: char) -> Option<(f32, f32)> {
+        let (_, advance) = self.glyph(ch)?;
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::FreeType(face) => {
+                let metrics = face.glyph().metrics();
+                let left = metrics.horiBearingX as f32 / 64.0;
+                Some((left.floor(), (left + metrics.width as f32 / 64.0).ceil()))
+            }
+            Self::Sfnt { data, index, pixel_size } => {
+                let face = ttf_parser::Face::parse(data, *index).ok()?;
+                let scale = pixel_size / f32::from(face.units_per_em());
+                let bounds = face.glyph_index(ch).and_then(|glyph| face.glyph_bounding_box(glyph));
+                Some(bounds.map_or((0.0, advance), |b| ((f32::from(b.x_min) * scale).floor(), (f32::from(b.x_max) * scale).ceil())))
             }
         }
     }
@@ -226,11 +264,21 @@ pub struct FontResolver {
     interner: FontInstanceInterner,
     selection_order: FontSelectionState,
     alternatives: FontAlternativeState,
-    primary: HashMap<(RequestKey, u64), Result<ResolvedFont, FontResolveError>>,
-    chars: HashMap<(RequestKey, u64, char), Result<CharResolution, FontResolveError>>,
-    /// Characters only one font has (Romacs's icons), by character and the
-    /// request's style and size, whatever its family (`resolve_sole').
-    sole: HashMap<(char, u16, romacs_display_protocol::font::FontSlantKind, u16, u32), Result<CharResolution, FontResolveError>>,
+    fontsets: Arc<FontsetState>,
+    primary: HashMap<RequestKey, Result<ResolvedFont, FontResolveError>>,
+    chars: HashMap<(RequestKey, char), Result<CharResolution, FontResolveError>>,
+    /// Romacs's icons: by the request's family, so a lookup allocates no
+    /// key, then character, style and size (`resolve_sole').
+    sole: HashMap<String, HashMap<(char, u16, romacs_display_protocol::font::FontSlantKind, u16, u32), Result<CharResolution, FontResolveError>>>,
+    /// Fontconfig's listings for each spec, kept across rule changes: they
+    /// depend on the installed fonts alone.
+    lists: HashMap<ListSpec, Option<Arc<FaceList>>>,
+    /// The fonts opened for each request and def so far, tried first
+    /// (fontset_find_font's "font already opened").
+    realized: HashMap<(RequestKey, usize), Vec<ResolvedFont>>,
+    /// Each group in search order, by group and request: reordered once a
+    /// revision, as GNU's realized font-group is.
+    orders: HashMap<((usize, usize), RequestKey), Arc<Vec<romacs_layout_input::Alternative>>>,
     opened: HashMap<(String, u32, u32), Option<OpenedFace>>,
     files: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
 }
@@ -254,9 +302,13 @@ impl FontResolver {
             interner: FontInstanceInterner::default(),
             selection_order: FontSelectionState::default(),
             alternatives: FontAlternativeState::default(),
+            fontsets: Arc::default(),
             primary: HashMap::default(),
             chars: HashMap::default(),
             sole: HashMap::default(),
+            lists: HashMap::default(),
+            realized: HashMap::default(),
+            orders: HashMap::default(),
             opened: HashMap::default(),
             files: HashMap::default(),
         })
@@ -283,10 +335,25 @@ impl FontResolver {
     pub fn set_selection_state(&mut self, state: FontSelectionState) {
         if self.selection_order != state {
             self.selection_order = state;
-            self.primary.clear();
-            self.chars.clear();
-            self.sole.clear();
+            self.retire_answers();
         }
+    }
+
+    /// Forget every answer that depends on rules or selection state.
+    fn retire_answers(&mut self) {
+        self.primary.clear();
+        self.chars.clear();
+        self.sole.clear();
+        self.realized.clear();
+        self.orders.clear();
+    }
+
+    /// Adopt the producer's fontsets: a new revision retires every answer.
+    pub fn set_fontsets(&mut self, state: Arc<FontsetState>) {
+        if *self.fontsets != *state {
+            self.retire_answers();
+        }
+        self.fontsets = state;
     }
 
     pub fn alternative_state(&self) -> &FontAlternativeState { &self.alternatives }
@@ -295,9 +362,7 @@ impl FontResolver {
     pub fn set_alternative_state(&mut self, state: FontAlternativeState) {
         if self.alternatives != state {
             self.alternatives = state;
-            self.primary.clear();
-            self.chars.clear();
-            self.sole.clear();
+            self.retire_answers();
         }
     }
 
@@ -309,28 +374,33 @@ impl FontResolver {
         self.set_selection_state(state);
     }
 
+    /// FAMILY, then its `face-font-family-alternatives' row.
+    fn families_for(&self, family: &str) -> Vec<String> {
+        let mut out = vec![family.to_owned()];
+        if let Some(row) = self.alternatives.family_alist().iter().find(|row| row.first().is_some_and(|name| name.eq_ignore_ascii_case(family))) {
+            for alternative in &row[1..] {
+                if !out.iter().any(|seen| seen.eq_ignore_ascii_case(alternative)) {
+                    out.push(alternative.clone());
+                }
+            }
+        }
+        out
+    }
+
     /// The face's own font: the best-scoring scalable face of the request's
     /// family, then of each `face-font-family-alternatives` entry.
-    pub fn resolve_primary(
-        &mut self,
-        request: &FontRequest,
-        policy: &FontsetPolicy,
-    ) -> Result<ResolvedFont, FontResolveError> {
-        let key = (request.cache_key(), policy.generation());
+    pub fn resolve_primary(&mut self, request: &FontRequest) -> Result<ResolvedFont, FontResolveError> {
+        let key = request.cache_key();
         if let Some(cached) = self.primary.get(&key) {
             return cached.clone();
         }
-        let resolved = self.resolve_primary_uncached(request, policy);
+        let resolved = self.resolve_primary_uncached(request);
         self.primary.insert(key, resolved.clone());
         resolved
     }
 
-    fn resolve_primary_uncached(
-        &mut self,
-        request: &FontRequest,
-        policy: &FontsetPolicy,
-    ) -> Result<ResolvedFont, FontResolveError> {
-        for family in policy.families_for(&request.family) {
+    fn resolve_primary_uncached(&mut self, request: &FontRequest) -> Result<ResolvedFont, FontResolveError> {
+        for family in self.families_for(&request.family) {
             let faces = list_family(&family, None);
             if let Some(best) = best_face(&faces, request, self.selection_order, |_| 0) {
                 return self.instance(best, request.pixel_size);
@@ -353,77 +423,73 @@ impl FontResolver {
         })
     }
 
-    /// The font for one non-ASCII character drawn in REQUEST's face.
-    ///
-    /// Order: the fontset's entries for CH (range-specific, then fallback);
-    /// then the face's own font when it has the glyph; then any installed
-    /// font with the glyph. An explicit nil entry stops the search.
-    pub fn resolve_char(
-        &mut self,
-        request: &FontRequest,
-        ch: char,
-        policy: &FontsetPolicy,
-    ) -> Result<CharResolution, FontResolveError> {
-        let key = (request.cache_key(), policy.generation(), ch);
+    /// The font for one non-ASCII character drawn in REQUEST's face, in
+    /// fontset_font's order: the frame fontset's group for CH, the default
+    /// fontset's, then their fallback groups, each skipped when the group
+    /// before it in the same fontset stopped. Without any rule at all (no
+    /// Lisp runtime), the face's font, then any installed font with the glyph.
+    pub fn resolve_char(&mut self, request: &FontRequest, ch: char) -> Result<CharResolution, FontResolveError> {
+        let key = (request.cache_key(), ch);
         if let Some(cached) = self.chars.get(&key) {
             return cached.clone();
         }
-        let resolved = self.resolve_char_uncached(request, ch, policy);
+        let resolved = self.resolve_char_uncached(request, ch);
         self.chars.insert(key, resolved.clone());
         resolved
     }
 
-    /// CH's font and glyph for a character that only one font has, as
-    /// Romacs's icons (U+FE000-U+FE0FF, its own font) are: resolved once per
-    /// style and size through `resolve_char', then by character alone, so
-    /// no family is hashed or font cloned for it again.
-    pub fn resolve_sole(&mut self, request: &FontRequest, ch: char, policy: &FontsetPolicy) -> Result<&CharResolution, FontResolveError> {
+    /// CH's font and glyph for a character of Romacs's icon font
+    /// (U+FE000-U+FE0FF): resolved once per family, style and size through
+    /// `resolve_char', then by a lookup that clones no font or family.
+    pub fn resolve_sole(&mut self, request: &FontRequest, ch: char) -> Result<&CharResolution, FontResolveError> {
         let key = (ch, request.weight, request.slant, request.width, request.pixel_size.to_bits());
-        if !self.sole.contains_key(&key) {
-            let resolved = self.resolve_char(request, ch, policy);
-            self.sole.insert(key, resolved);
+        if !self.sole.get(&request.family).is_some_and(|family| family.contains_key(&key)) {
+            let resolved = self.resolve_char(request, ch);
+            self.sole.entry(request.family.clone()).or_default().insert(key, resolved);
         }
-        self.sole[&key].as_ref().map_err(Clone::clone)
+        self.sole[&request.family][&key].as_ref().map_err(Clone::clone)
     }
 
-    fn resolve_char_uncached(
-        &mut self,
-        request: &FontRequest,
-        ch: char,
-        policy: &FontsetPolicy,
-    ) -> Result<CharResolution, FontResolveError> {
-        let code = u32::from(ch);
-        let entries: Vec<FontsetEntry> = policy.entries_for(ch).cloned().collect();
-        for (index, entry) in entries.iter().enumerate() {
-            let spec = match entry {
-                // GNU `(set-fontset-font FONTSET TARGET nil)` leaves the
-                // range without a font of its own; display still finds one
-                // through the fallback, the face font and the platform
-                // (measured: Ж stays on Iosevka). Not a stop.
-                FontsetEntry::ExplicitNone => continue,
-                FontsetEntry::Font(spec) => spec,
-            };
-            let styled = FontRequest {
-                weight: spec.weight.unwrap_or(request.weight),
-                slant: spec.slant.unwrap_or(request.slant),
-                ..request.clone()
-            };
-            let families = match &spec.family {
-                Some(family) => vec![family.clone()],
-                None => policy.families_for(&request.family),
-            };
-            for family in families {
-                let faces = list_family(&family, Some(ch));
-                if let Some(found) = self.first_with_glyph(&faces, &styled, ch, |_| 0)? {
-                    return Ok(CharResolution {
-                        source: CharResolutionSource::Fontset(index),
-                        ..found
-                    });
-                }
-            }
+    fn resolve_char_uncached(&mut self, request: &FontRequest, ch: char) -> Result<CharResolution, FontResolveError> {
+        let state = Arc::clone(&self.fontsets);
+        // face_for_char: ASCII is the face's own font.
+        if state.is_empty() || ch.is_ascii() {
+            return self.resolve_without_rules(request, ch);
         }
+        let code = u32::from(ch);
+        let ascii = self.resolve_primary(request).ok();
+        // face_for_char: `use-default-font-for-symbols'.
+        if state.default_font_first(code)
+            && let Some(font) = &ascii
+            && let Some((glyph_id, advance_px)) = self.glyph_in(font, ch) {
+            return Ok(CharResolution {
+                glyph: ResolvedCharGlyph { resolved_font_id: font.id, glyph_id, advance_px },
+                font: font.clone(),
+                source: CharResolutionSource::Primary,
+            });
+        }
+        let own = self.search_group(state.frame.get(code), request, ch, ascii.as_ref(), &state)?;
+        if let Group::Found(found) = own {
+            return Ok(*found);
+        }
+        let separate = !Arc::ptr_eq(&state.frame, &state.default);
+        let shared = if separate { self.search_group(state.default.get(code), request, ch, ascii.as_ref(), &state)? } else { Group::Missed };
+        if let Group::Found(found) = shared {
+            return Ok(*found);
+        }
+        if !matches!(own, Group::Stopped)
+            && let Group::Found(found) = self.search_group(state.frame.fallback(), request, ch, ascii.as_ref(), &state)? {
+            return Ok(*found);
+        }
+        if separate && !matches!(shared, Group::Stopped)
+            && let Group::Found(found) = self.search_group(state.default.fallback(), request, ch, ascii.as_ref(), &state)? {
+            return Ok(*found);
+        }
+        Err(FontResolveError::NoCoveringFont { code })
+    }
 
-        let primary = self.resolve_primary(request, policy)?;
+    fn resolve_without_rules(&mut self, request: &FontRequest, ch: char) -> Result<CharResolution, FontResolveError> {
+        let primary = self.resolve_primary(request)?;
         if let Some((glyph_id, advance_px)) = self.glyph_in(&primary, ch) {
             return Ok(CharResolution {
                 glyph: ResolvedCharGlyph {
@@ -460,7 +526,96 @@ impl FontResolver {
                 });
             }
         }
-        Err(FontResolveError::NoCoveringFont { code })
+        Err(FontResolveError::NoCoveringFont { code: u32::from(ch) })
+    }
+
+    /// fontset_find_font: the alternatives of a group in reorder_font_vector's
+    /// order, until a font has CH or a nil stops the search.
+    fn search_group(&mut self, group: Option<&Alternatives>, request: &FontRequest, ch: char, ascii: Option<&ResolvedFont>, state: &Arc<FontsetState>) -> Result<Group, FontResolveError> {
+        let Some(group) = group else { return Ok(Group::Missed) };
+        let key = (group.identity(), request.cache_key());
+        let order = match self.orders.get(&key) {
+            Some(order) => Arc::clone(order),
+            None => {
+                let order = Arc::new(reordered(group.to_vec(), ascii, state, |font, chars| self.has_all(font, chars)));
+                self.orders.insert(key, Arc::clone(&order));
+                order
+            }
+        };
+        for (index, alternative) in order.iter().enumerate() {
+            let Some(def) = alternative else { return Ok(Group::Stopped) };
+            if let Some(found) = self.search_def(def, request, ch, state)? {
+                return Ok(Group::Found(Box::new(CharResolution { source: CharResolutionSource::Fontset(index), ..found })));
+            }
+        }
+        Ok(Group::Missed)
+    }
+
+    fn has_all(&mut self, font: &ResolvedFont, chars: &[u32]) -> bool {
+        chars.iter().all(|&code| char::from_u32(code).is_some_and(|ch| self.glyph_in(font, ch).is_some()))
+    }
+
+    /// A font for DEF having CH, as font_find_for_lface looks: the def's
+    /// family, else the face's, its alternatives and any family, under the
+    /// pattern ftfont_spec_pattern builds. A font already opened for this
+    /// face and def is tried first.
+    fn search_def(&mut self, def: &Arc<FontDef>, request: &FontRequest, ch: char, state: &FontsetState) -> Result<Option<CharResolution>, FontResolveError> {
+        let key = (request.cache_key(), romacs_layout_input::fontset::def_key(def));
+        for font in self.realized.get(&key).cloned().unwrap_or_default() {
+            if let Some((glyph_id, advance_px)) = self.glyph_in(&font, ch) {
+                return Ok(Some(CharResolution {
+                    glyph: ResolvedCharGlyph { resolved_font_id: font.id, glyph_id, advance_px },
+                    font,
+                    source: CharResolutionSource::Fallback,
+                }));
+            }
+        }
+        let Some((chars, registry_lang)) = registry_constraints(def) else { return Ok(None) };
+        let mut langs = def.lang.clone();
+        langs.extend(registry_lang.map(str::to_owned));
+        let styled = FontRequest {
+            family: request.family.clone(),
+            weight: def.weight.unwrap_or(request.weight),
+            slant: def.slant.map_or(request.slant, slant_kind),
+            width: def.width.unwrap_or(request.width),
+            pixel_size: def.pixel_size.map_or(request.pixel_size, |size| size as f32),
+        };
+        let families: Vec<Option<String>> = match &def.family {
+            Some(family) => vec![Some(family.clone())],
+            None => self.families_for(&request.family).into_iter().map(Some).chain([None]).collect(),
+        };
+        for family in families {
+            let spec = ListSpec { family, foundry: def.foundry.clone(), chars: chars.clone(), langs: langs.clone() };
+            let Some(list) = self.listing(spec) else { continue };
+            let mut faces = list.covering(ch);
+            if let Some(otf) = &def.otf {
+                faces.retain(|face| otf_matches(otf, face));
+            }
+            if let Some(found) = self.first_with_glyph(&faces, &styled, ch, |_| 0)? {
+                state.note_opened(def, OpenedDefFont {
+                    family: found.font.family.clone(),
+                    file: found.font.identity.file_path.clone().unwrap_or_default(),
+                    selector: found.font.identity.freetype_selector().unwrap_or(0),
+                    pixel_size: found.font.pixel_size.round() as u32,
+                });
+                self.realized.entry(key).or_default().push(found.font.clone());
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The listing for SPEC, resolving a generic family through Fontconfig's
+    /// aliases when it lists nothing itself, once per spec.
+    fn listing(&mut self, spec: ListSpec) -> Option<Arc<FaceList>> {
+        if let Some(cached) = self.lists.get(&spec) {
+            return cached.clone();
+        }
+        let generic = spec.family.as_deref().filter(|family| is_generic_family(family)).and_then(catalog::match_family);
+        let concrete = ListSpec { family: generic.or_else(|| spec.family.clone()), ..spec.clone() };
+        let list = catalog::list_constrained(&concrete).map(Arc::new);
+        self.lists.insert(spec, list.clone());
+        list
     }
 
     /// Candidates in score order; the first that opens and has CH wins.
@@ -516,6 +671,23 @@ impl FontResolver {
     /// cannot be opened.
     pub fn glyph_in_font(&mut self, font: &ResolvedFont, ch: char) -> Option<(ResolvedGlyphId, f32)> {
         self.glyph_in(font, ch)
+    }
+
+    /// CH in the face FILE and SELECTOR name at PIXEL_SIZE: its glyph and,
+    /// as text_extents gives them, advance, left and right bearings, ascent
+    /// and descent; None when the face lacks it.
+    pub fn glyph_extents(&mut self, file: &str, selector: u32, pixel_size: f32, ch: char) -> Option<(ResolvedGlyphId, [f32; 5])> {
+        let face = self.opened_face(file, selector, pixel_size)?;
+        let (glyph, _) = face.glyph(ch)?;
+        let (advance, ascent, descent) = face.ink(ch)?;
+        let (left, right) = face.bearings(ch)?;
+        Some((glyph, [advance, left, right, ascent, descent]))
+    }
+
+    /// Forget the faces opened and every answer from them.
+    pub fn clear_fonts(&mut self) {
+        self.retire_answers();
+        self.opened.clear();
     }
 
     /// TEXT's extents in FONT (font->driver->text_extents), or None when
@@ -627,6 +799,140 @@ impl FontResolver {
                 underline: metrics.underline,
             }))
     }
+}
+
+/// What a group's search came to.
+enum Group {
+    Found(Box<CharResolution>),
+    /// A nil alternative: no other font for this character in this fontset.
+    Stopped,
+    Missed,
+}
+
+fn slant_kind(slant: u8) -> romacs_display_protocol::font::FontSlantKind {
+    use romacs_display_protocol::font::FontSlantKind;
+    match slant {
+        1 => FontSlantKind::Italic,
+        2 => FontSlantKind::Oblique,
+        _ => FontSlantKind::Normal,
+    }
+}
+
+/// ftfont.c's fc_charset_table: a registry's uniquifying characters and
+/// language.
+const REGISTRY_CHARSETS: &[(&str, &[u32], Option<&str>)] = &[
+    ("iso8859-1", &[0x00A0, 0x00A1, 0x00B4, 0x00BC, 0x00D0], None),
+    ("iso8859-2", &[0x00A0, 0x010E], None),
+    ("iso8859-3", &[0x00A0, 0x0108], None),
+    ("iso8859-4", &[0x00A0, 0x00AF, 0x0128, 0x0156, 0x02C7], None),
+    ("iso8859-5", &[0x00A0, 0x0401], None),
+    ("iso8859-6", &[0x00A0, 0x060C], None),
+    ("iso8859-7", &[0x00A0, 0x0384], None),
+    ("iso8859-8", &[0x00A0, 0x05D0], None),
+    ("iso8859-9", &[0x00A0, 0x00A1, 0x00BC, 0x011E], None),
+    ("iso8859-10", &[0x00A0, 0x00D0, 0x0128, 0x2015], None),
+    ("iso8859-11", &[0x00A0, 0x0E01], None),
+    ("iso8859-13", &[0x00A0, 0x201C], None),
+    ("iso8859-14", &[0x00A0, 0x0174], None),
+    ("iso8859-15", &[0x00A0, 0x00A1, 0x00D0, 0x0152], None),
+    ("iso8859-16", &[0x00A0, 0x0218], None),
+    ("gb2312.1980-0", &[0x4E13], Some("zh-cn")),
+    ("big5-0", &[0x9C21], Some("zh-tw")),
+    ("jisx0208.1983-0", &[0x4E55], Some("ja")),
+    ("ksc5601.1985-0", &[0xAC00], Some("ko")),
+    ("cns11643.1992-1", &[0xFE32], Some("zh-tw")),
+    ("cns11643.1992-2", &[0x4E33, 0x7934], None),
+    ("cns11643.1992-3", &[0x201A9], None),
+    ("cns11643.1992-4", &[0x20057], None),
+    ("cns11643.1992-5", &[0x20000], None),
+    ("cns11643.1992-6", &[0x20003], None),
+    ("cns11643.1992-7", &[0x20055], None),
+    ("gbk-0", &[0x4E06], Some("zh-cn")),
+    ("jisx0212.1990-0", &[0x4E44], None),
+    ("jisx0213.2000-1", &[0xFA10], Some("ja")),
+    ("jisx0213.2000-2", &[0xFA49], None),
+    ("jisx0213.2004-1", &[0x20B9F], None),
+    ("viscii1.1-1", &[0x1EA0, 0x1EAE, 0x1ED2], Some("vi")),
+    ("tis620.2529-1", &[0x0E01], Some("th")),
+    ("microsoft-cp1251", &[0x0401, 0x0490], Some("ru")),
+    ("koi8-r", &[0x0401, 0x2219], Some("ru")),
+    ("mulelao-1", &[0x0E81], Some("lo")),
+    ("unicode-sip", &[0x20000], None),
+];
+
+/// Whether PATTERN, with `*' any run and `?' any one character, occurs in
+/// TEXT, ignoring case: ftfont_get_charset's regexp.
+fn registry_matches(pattern: &[u8], text: &[u8]) -> bool {
+    fn at(pattern: &[u8], text: &[u8]) -> bool {
+        match pattern.split_first() {
+            None => true,
+            Some((b'*', rest)) => (0..=text.len()).any(|skip| at(rest, &text[skip..])),
+            Some((&p, rest)) => text.split_first().is_some_and(|(&t, tail)| (p == b'?' || p.eq_ignore_ascii_case(&t)) && at(rest, tail)),
+        }
+    }
+    (0..=text.len()).any(|start| at(pattern, &text[start..]))
+}
+
+/// The characters and language DEF requires of a font, as
+/// ftfont_spec_pattern finds them; None for a registry no font can have.
+fn registry_constraints(def: &FontDef) -> Option<(Vec<u32>, Option<&'static str>)> {
+    match def.registry.as_deref() {
+        None | Some("ascii-0" | "iso10646-1" | "unicode-bmp") => Some((def.script_chars.clone(), None)),
+        Some(registry) => REGISTRY_CHARSETS.iter().find(|(name, ..)| registry_matches(registry.as_bytes(), name.as_bytes()))
+            .map(|&(_, chars, lang)| (chars.to_vec(), lang)),
+    }
+}
+
+/// ftfont_check_otf: FACE's tables have OTF's script and language system,
+/// with each wanted feature and no unwanted one.
+fn otf_matches(otf: &romacs_layout_input::OtfSpec, face: &ListedFace) -> bool {
+    let Some(capability) = crate::probe::otf_capability(&face.file, face.selector & 0xffff) else { return false };
+    let table_has = |table: &[crate::probe::OtfScript], wanted: &[(String, bool)]| {
+        let Some(script) = table.iter().find(|script| script.tag == otf.script) else { return wanted.is_empty() };
+        let features = |lang: &crate::probe::OtfLangSys| wanted.iter().all(|(tag, present)| lang.features.contains(tag) == *present);
+        script.lang_syses.iter().filter(|lang| otf.langsys.is_none() || lang.tag == otf.langsys).any(features)
+    };
+    let scripted = capability.gsub.iter().chain(&capability.gpos).any(|script| script.tag == otf.script);
+    scripted && table_has(&capability.gsub, &otf.gsub) && table_has(&capability.gpos, &otf.gpos)
+}
+
+/// reorder_font_vector: ALTERNATIVES in listing order, those matching the
+/// face's ASCII font or naming `:otf' first and the rest by where their
+/// encoding stands in the charset order. A nil at the end stays there; nil
+/// elsewhere sorts first once anything moved, as fontset_compare_rfontdef.
+fn reordered(alternatives: Vec<romacs_layout_input::Alternative>, ascii: Option<&ResolvedFont>, state: &FontsetState, mut has_all: impl FnMut(&ResolvedFont, &[u32]) -> bool) -> Vec<romacs_layout_input::Alternative> {
+    if alternatives.len() < 2 {
+        return alternatives;
+    }
+    let trailing = alternatives.last().is_some_and(Option::is_none);
+    let scored = alternatives.len() - usize::from(trailing);
+    let rank = |def: &FontDef| state.charset_order.get(&def.encoding).copied().unwrap_or(state.preferred_charsets);
+    let mut keyed: Vec<(i64, romacs_layout_input::Alternative)> = alternatives.into_iter().enumerate().map(|(index, alternative)| {
+        let score = match &alternative {
+            _ if index >= scored => i64::MAX,
+            None => i64::MIN,
+            Some(def) if def.otf.is_some() || ascii.is_some_and(|font| def_matches(def, font, &mut has_all)) => index as i64,
+            Some(def) => index as i64 + 0x100 * i64::from(rank(def)),
+        };
+        (score, alternative)
+    }).collect();
+    if keyed.iter().any(|(score, _)| (0x100..i64::MAX).contains(score)) {
+        keyed.sort_by_key(|(score, _)| *score);
+    }
+    keyed.into_iter().map(|(_, alternative)| alternative).collect()
+}
+
+/// font_match_p of DEF against the face's ASCII font: every property the
+/// def names is the font's. Listed fonts are all Unicode-encoded.
+fn def_matches(def: &FontDef, font: &ResolvedFont, has_all: &mut impl FnMut(&ResolvedFont, &[u32]) -> bool) -> bool {
+    def.family.as_ref().is_none_or(|family| family.eq_ignore_ascii_case(&font.family))
+        && def.registry.as_ref().is_none_or(|registry| registry.eq_ignore_ascii_case("iso10646-1"))
+        && def.weight.is_none_or(|weight| weight == font.weight)
+        && def.slant.is_none_or(|slant| slant_kind(slant) == font.slant)
+        && def.width.is_none_or(|width| width == font.width)
+        && def.pixel_size.is_none_or(|size| size as f32 == font.pixel_size.round())
+        && def.lang.is_empty()
+        && has_all(font, &def.script_chars)
 }
 
 /// Faces of FAMILY covering CH (any coverage when `None`), resolving a

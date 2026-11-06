@@ -218,6 +218,7 @@ impl Vm {
             if !self.live_buffer_value(buffer) {
                 self.terminal_host.as_mut().ok_or("No terminal host attached")?.close(session)?;
                 self.terminal_bindings.remove(index);
+                self.terminal_ended(session, buffer);
                 changed |= self.buffer_is_displayed(buffer)?;
                 continue;
             }

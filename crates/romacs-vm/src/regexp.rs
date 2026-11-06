@@ -747,7 +747,7 @@ impl Vm {
                     if aa < t.restriction.start.0 || bb > t.restriction.end.0 || aa > bb {
                         return Err(fail());
                     }
-                    Object::Bytes(t.bytes[aa..bb].to_vec())
+                    data::unibyte_object(t.bytes[aa..bb].to_vec())
                 }
                 _ => unreachable!("buffer_index validates"),
             }
@@ -790,7 +790,7 @@ impl Vm {
                             self.allocate_object(Object::Marker(Box::new(annotations::Marker {
                                 buffer: Value::NIL,
                                 anchor: None,
-                                bias: anchors::Bias::Left,
+                                bias: anchors::Bias::Left, last_position: 0
                             })));
                         self.set_marker_object(
                             m,

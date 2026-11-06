@@ -5,7 +5,7 @@
 //! fonts the renderer replays. This crate does that from plain data:
 //!
 //! - [`FontRequest`] is a face's font attributes, already realized;
-//! - [`FontsetPolicy`] is a fontset as Rust data (sorted character ranges to
+//! - [`FontsetState`] (romacs-layout-input) is a fontset as Rust data (character ranges to
 //!   ordered font specs, plus a fallback list), the shape `set-fontset-font`
 //!   edits;
 //! - [`FontResolver`] answers both through the platform catalog and publishes
@@ -21,8 +21,6 @@ pub mod entity;
 pub mod font_match;
 #[cfg(target_os = "linux")]
 mod fontconfig_catalog;
-mod fontset;
-mod fontset_default;
 mod frame;
 pub mod instance;
 pub mod probe;
@@ -31,8 +29,7 @@ mod style;
 pub mod subpixel;
 pub mod system;
 
-pub use fontset::{FontsetEntry, FontsetFontSpec, FontsetMode, FontsetPolicy, FontsetTarget};
-pub use fontset_default::fontset_default;
+pub use romacs_layout_input::{Alternatives, FontDef, Fontset, FontsetMode, FontsetState, FontsetTarget, OpenedDefFont, OtfSpec};
 pub use frame::{PublishedFace, publish_face_text};
 pub use resolver::{CharResolution, CharResolutionSource, FontResolveError, FontResolver, InkExtents};
 pub use style::{FontRequest, StyleScore, style_score};

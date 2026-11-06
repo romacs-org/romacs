@@ -99,6 +99,13 @@ fn format_mode_line_of_another_buffer_as_pinned_gnu() {
     replay(include_str!("format_mode_line.el"), include_str!("format_mode_line.gnu"), 0);
 }
 
+/// pre_redisplay.el: `pre-redisplay-function' and its hook run with the
+/// windows GNU's prepare_menu_bars passes, under `inhibit-redisplay'.
+#[test]
+fn pre_redisplay_function_runs_as_pinned_gnu() {
+    replay(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30);
+}
+
 /// unibyte_window.el: a window shows a unibyte buffer, visited literally
 /// or made unibyte while shown, its raw bytes as escapes: motion,
 /// scrolling, edits and narrowing keep every position as GNU's.
@@ -116,11 +123,23 @@ fn window_end_and_recentring_over_a_hidden_tail_as_pinned_gnu() {
     replay(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500);
 }
 
+/// A collection moves every object but changes no answer: what a window
+/// recorded about its display must survive one.
+#[test]
+fn a_collection_changes_no_recorded_display() {
+    replay_stressed(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500, 100);
+    replay_stressed(include_str!("pre_redisplay.el"), include_str!("pre_redisplay.gnu"), 30, 100);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
-fn replay(probe: &str, answers: &str, least: usize) {
+fn replay(probe: &str, answers: &str, least: usize) { replay_stressed(probe, answers, least, 0) }
+
+/// `replay' collecting at every STRESSth Lisp entry.
+fn replay_stressed(probe: &str, answers: &str, least: usize, stress: u32) {
     assert_eq!(forms(probe).count(), forms(answers).count(), "the .gnu answers are stale: rerun child_frames_oracle.py --probe");
     let mut s = session();
+    if stress != 0 { s.vm.set_gc_stress(stress); }
     let (mut sequence, mut mismatches, mut invariant, mut steps) = ("", vec![], vec![], 0);
     let mut gnu = forms(answers);
     for line in probe.lines().filter(|line| !line.is_empty()) {
