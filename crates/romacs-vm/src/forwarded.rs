@@ -594,6 +594,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // jka-cmpr-hook.el, which VM2 has not loaded.
     CVariable { name: "load-suffixes", gnu: "lread.c:5580", kind: Kind::Lisp(Init::List(&[Init::Str(".so"), Init::Str(".elc"), Init::Str(".el")])) },
     CVariable { name: "load-file-rep-suffixes", gnu: "lread.c:5616", kind: Kind::Lisp(Init::List(&[Init::Str("")])) },
+    // Romacs loads no native modules, so nil, as GNU built without them.
+    CVariable { name: "module-file-suffix", gnu: "lread.c:5595", kind: Kind::Lisp(Init::Nil) },
     // Census (warm): pcase.el form 12 (line 173) reads after-load-alist and
     // form 52 (line 1190) binds current-load-list. Both are nil in C. GNU's
     // C maintains them while it runs (load specbinds current-load-list,

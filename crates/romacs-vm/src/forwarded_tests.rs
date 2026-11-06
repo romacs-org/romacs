@@ -197,3 +197,12 @@ fn list_initial_values_use_gnus_immediates() {
     let v = vm.eval_source_raw("(prin1-to-string (list (eq (cdr (car window-persistent-parameters)) t) window-persistent-parameters emacs-version (multibyte-string-p emacs-version) help-char standard-display-table load-suffixes load-file-rep-suffixes (multibyte-string-p (car load-file-rep-suffixes))))").unwrap();
     assert_eq!(vm.display(v).unwrap(), "\"(t ((clone-of . t)) \\\"32.0.50\\\" nil 8 nil (\\\".so\\\" \\\".elc\\\" \\\".el\\\") (\\\"\\\") nil)\"");
 }
+
+/// `load-file''s interactive form reads module-file-suffix (files.el), nil
+/// in a build without modules.
+#[test]
+fn module_file_suffix_is_bound_and_nil_without_modules() {
+    let mut vm = Vm::new();
+    let v = vm.eval_source_raw("(list (boundp 'module-file-suffix) module-file-suffix)").unwrap();
+    assert_eq!(vm.display(v).unwrap(), "(t nil)");
+}
