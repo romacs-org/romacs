@@ -1937,6 +1937,34 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+;; Code retirement (request_code.rs, Program::retire_code): N functions
+;; compiled, lowered by a call and dropped in each step; the host's idle
+;; pass between steps collects at the top level, the only place request
+;; code retires, and the next step takes their sites and cache slots back.
+;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
+;; and shows a startup message, so the probe supplies the one and clears
+;; the other.  A step with no collection after the last ends the session,
+;; which fails the measure.  Retirement that scanned its free lists, or
+;; rebuilt tables per function, would grow faster than N.
+(defvar scaling--retire-collections 0
+  "`gcs-done' when the last `gc-retired-code' step ended.")
+
+(scaling-probe gc-retired-code :gui t :n 1000 :steps 4 :gap 1.0
+  :setup (progn
+           (defalias 'romacs--idle-collect (lambda (&optional _in-lisp) t))
+           (setq scaling--retire-collections gcs-done)
+           (switch-to-buffer (get-buffer-create "*scaling-retire*")))
+  :body (progn
+          (when (and (> i 0) (<= gcs-done scaling--retire-collections))
+            (kill-emacs 3))
+          (dotimes (k n)
+            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k)) t)))
+          (with-current-buffer (window-buffer (selected-window))
+            (goto-char (point-max))
+            (insert (format "step %d\n" i)))
+          (message nil)
+          (setq scaling--retire-collections gcs-done)))
+
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a
 ;; dynamic binding per frame.  One walk (`backtrace--frames-and-locals');
@@ -1945,6 +1973,22 @@ closures over a mutable variable (each a closure and a cell)."
 (defun scaling--bt-frames (n)
   (let ((scaling--bt-depth n))
     (if (> n 0) (scaling--bt-frames (1- n)) (length (backtrace-get-frames)))))
+;; A snapshot of the stack (`romacs--inspect-frames') walks within a work
+;; budget: the time is flat in the size of an argument, and in the depth of
+;; the stack past the frames it keeps.
+(defun scaling--inspect-value (_value) (romacs--inspect-frames))
+(defun scaling--inspect-deep (n)
+  (if (> n 0) (list (scaling--inspect-deep (1- n))) (romacs--inspect-frames)))
+(scaling-probe inspect-value :n 20000 :k 8
+  :setup (make-list n 'x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-string :n 100000 :k 8
+  :setup (make-string n ?x)
+  :body (dotimes (_ 200) (scaling--inspect-value it)))
+(scaling-probe inspect-stack :n 1000 :k 4
+  :setup (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n)))
+  :body (dotimes (_ 100) (scaling--inspect-deep n)))
+
 (scaling-probe backtrace-frames :n 200 :k 4
   :setup (progn (require 'backtrace) (require 'romacs-backtrace)
                 (setq max-lisp-eval-depth (max max-lisp-eval-depth (* 20 n))))

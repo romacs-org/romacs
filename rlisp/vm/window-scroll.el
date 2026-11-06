@@ -171,7 +171,8 @@ nil or a list) of the selected window, clear of `scroll-margin'."
            (ht (romacs--window-internal-height window))
            (line (cond (center (/ ht 2)) ((< iarg 0) (+ iarg ht)) (t iarg)))
            (line (max margin (min line (- ht margin 1))))
-           (start (save-excursion (vertical-motion (- line) window) (point))))
+           ;; Short of lines, the iterator ends at BEGV, shown or not.
+           (start (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point)))))
       ;; optional_new_start: redisplay keeps it while point shows.
       (set-window-start window start t)
       ;; Zero in lines or pixels alike; VM2 keeps it in pixels.

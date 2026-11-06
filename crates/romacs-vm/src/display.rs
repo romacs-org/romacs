@@ -9,7 +9,7 @@ mod mode_line;
 mod status_bar;
 #[path = "mini_window.rs"]
 mod mini_window;
-pub(crate) use mini_window::buffer_of;
+pub(crate) use mini_window::{buffer_of, shown_end};
 use romacs_face::{
     Attribute, AttrsBuilder, Background, Base, BoundedDatum, Deffaces, LispGraph, NodeView,
     Slot as FaceSlot, Theme, Value as FaceValue,
@@ -319,12 +319,13 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
-    /// Window END.id's last publication was painted as END reports.
-    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd) {
+    /// Window END.id's last publication was painted as END reports, ending
+    /// at buffer byte BYTE.
+    pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
         let base = self.base(end.id);
         let segments = self.segments.get(&end.id).cloned();
         if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, base, shown.len, shown.at_zv, segments.as_deref())));
+            shown.laid = Some((shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -473,8 +474,11 @@ struct Shown {
     /// The window laid out from its start under a key: by its last paint
     /// under KEY, or by redisplay since under the key then (`window_layout`).
     laid: Option<(ShownKey, Laid)>,
+    /// The key the recorded end was laid out under when redisplay recorded
+    /// it since the last paint (`record_end_laid'), else KEY's.
+    ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, laid, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -650,7 +654,7 @@ impl Vm {
         let (buffer, marker) = (w.buffer, w.start);
         let window_rows = w.height / self.window_state.line.max(1);
         let window_start = self.marker_position_value(marker)?.integer_value().unwrap_or(1);
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("buffer required".into()) };
         let byte = |pos: i64| -> Result<usize> {
             let pos = (pos.max(1) as usize - 1).min(b.len_chars());
             Ok(b.byte_of_char(coordinates::CharOffset(pos))?.0)
@@ -956,6 +960,22 @@ impl Vm {
         else if let Some(text) = self.str_view(method).and_then(|view| view.as_str().map(str::to_owned)) { NoFont::Acronym(text) }
         else { NoFont::EmptyBox }
     }
+    /// BUFFER's text as display reads it, a unibyte buffer's through its
+    /// mirror (`mirror_shown' brings that up to date).
+    pub(crate) fn shown_text(&self, buffer: Value) -> Result<&crate::annotations::AnnotatedBuffer> {
+        match self.object(buffer)? {
+            Object::Buffer(b) => Ok(b),
+            Object::ByteBuffer(b) => b.shown().ok_or_else(|| "unibyte buffer not mirrored".into()),
+            _ => Err("buffer required".into()),
+        }
+    }
+    /// What must run before display reads BUFFER's text.
+    pub(crate) fn mirror_shown(&mut self, buffer: Value) -> Result<()> {
+        match self.object_mut(buffer)? {
+            Object::ByteBuffer(b) => b.mirror_now(),
+            _ => Ok(()),
+        }
+    }
     pub(crate) fn display_symbol(&mut self, name: &str) -> Value {
         Value::reference(self.slot(name) + 1, 7)
     }
@@ -967,10 +987,10 @@ impl Vm {
         } else {
             v
         };
-        if matches!(self.object_if(v), Some(Object::Buffer(b)) if b.state.live) {
-            Ok(v)
-        } else {
-            Err("live Unicode buffer required".into())
+        match self.object_if(v) {
+            Some(Object::Buffer(b)) if b.state.live => Ok(v),
+            Some(Object::ByteBuffer(b)) if b.state.live => Ok(v),
+            _ => Err("live buffer required".into()),
         }
     }
     pub(super) fn display_primitive(
@@ -1248,7 +1268,7 @@ impl Vm {
         let Some(Object::Marker(mark)) = self.object_if(marker) else { return Ok(None); };
         if mark.buffer != buffer { return Ok(None); }
         let Some(mark) = self.marker_position_value(marker)?.integer_value() else { return Ok(None); };
-        let Object::Buffer(b) = self.object(buffer)? else { return Ok(None); };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(None); };
         let accessible = b.accessible();
         let mark = b.byte_of_char(crate::coordinates::CharOffset((mark - 1).max(0) as usize))?.0
             .clamp(accessible.start.0, accessible.end.0);
@@ -1371,7 +1391,7 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, laid: None, ended: None });
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1419,9 +1439,33 @@ impl Vm {
         let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
         if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
-        let laid = laid(&end, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        let byte = shown.base + end.end;
+        let b = self.shown_text(self.window(window)?.buffer)?;
+        let byte = shown.segments.as_ref().map_or(byte, |segments| shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)));
+        let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
         if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
         Ok(Some(laid))
+    }
+    /// Whether the end recorded for WINDOW still holds (GNU's Fwindow_end
+    /// asks `window_end_valid', `clip_changed' and `window_outdated'):
+    /// nothing it showed has changed since, and no `force-window-update'
+    /// waits. Point may have moved.
+    pub(crate) fn window_end_current(&mut self, window: Value) -> Result<bool> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        Ok(w.end_valid && self.display_state.previous.contains_key(&w.id)
+            && self.display_state.shown.get(&w.id).is_some_and(|shown| shown.ended.as_ref().unwrap_or(&shown.key).same_display(&key)))
+    }
+    /// Redisplay recorded WINDOW's end from `window_layout' before any
+    /// paint: it holds for what the window shows now.
+    pub(crate) fn record_end_laid(&mut self, window: Value) -> Result<()> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.ended = Some(key); }
+        self.window_mut(window)?.end_valid = true;
+        Ok(())
     }
     /// WINDOW laid out from its start as `window_layout' lays it out, every
     /// row, and the text it showed; not recorded.
@@ -1538,7 +1582,7 @@ impl Vm {
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
         let margin = self.scroll_margin_px(window, end.body_height)?;
         if margin == 0.0 { return Ok(None); }
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let begv = b.accessible().start.0;
         let at_bob = shown.buffer_byte(shown.start_byte) <= begv;
         let body = end.body_height;
@@ -1558,7 +1602,7 @@ impl Vm {
     /// pixels puts it.
     pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32, usize)>>> {
         let Some((end, shown)) = self.lay_out_lines(window, from, to, true)? else { return Ok(None) };
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let (text, shown_text) = (b.as_str().as_bytes(), shown.text.utf8.as_bytes());
         let start = |at: usize| match at.checked_sub(1).filter(|&i| shown_text.get(i) == Some(&b'\n')).map(|i| shown.buffer_byte(i)) {
             Some(newline) if text.get(newline) == Some(&b'\n') => newline + 1,
@@ -1570,7 +1614,7 @@ impl Vm {
     /// it out (GNU's cursor on its row, which hscroll_window_tree reads).
     /// None without a layout host.
     pub(crate) fn point_place(&mut self, window: Value, point_byte: usize) -> Result<Option<romacs_layout_input::PointPlace>> {
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let begv = b.accessible().start.0;
         let line = b.as_str()[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
         // A window's first redisplay places point too.
@@ -1589,7 +1633,7 @@ impl Vm {
         let (width, _) = self.window_body_size(window)?;
         let buffer = self.window(window)?.buffer;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let zv = b.accessible().end.0;
         let to = b.as_str().as_bytes()[to.min(zv)..zv].iter().position(|&c| c == b'\n').map_or(zv, |i| to + i + 1);
         let shown = self.window_text(window, 0, Some(from..to))?;
@@ -1638,7 +1682,7 @@ impl Vm {
     /// the accessible end when AT_ZV: the boundary indicators' marks.
     fn text_chrome(&mut self, window: Value, table: &FaceTable, base: usize, at_zv: bool) -> Result<romacs_layout_input::WindowChrome> {
         let mut chrome = self.window_chrome(window, table, true)?;
-        let begv = match self.object(self.window(window)?.buffer)? { Object::Buffer(b) => b.accessible().start.0, _ => 0 };
+        let begv = match self.shown_text(self.window(window)?.buffer) { Ok(b) => b.accessible().start.0, _ => 0 };
         (chrome.indicators.bob, chrome.indicators.eob) = (base <= begv, at_zv);
         Ok(chrome)
     }
@@ -1667,13 +1711,14 @@ impl Vm {
             .marker_position_value(start)?
             .integer_value()
             .unwrap_or(1);
+        self.mirror_shown(buffer)?;
         let point = self.window_point_value(window)?.as_integer()?;
         let region = self.snapshot_region(window, buffer, point)?;
         let region_face = self.intern("region");
         let table = self.display_faces_for(window, buffer)?;
         let floor = self.row_floor_of(&table);
         let (shown, start_byte, start, point_byte, at_zv, rows) = {
-            let Object::Buffer(b) = self.object(buffer)? else {
+            let Ok(b) = self.shown_text(buffer) else {
                 return Err("Unicode display buffer required".into());
             };
             let point_byte = b
@@ -1702,7 +1747,7 @@ impl Vm {
         let elements = if mini || !self.shows_elements(window, buffer, shown.clone())? { None } else {
             let mut lines = rows.unwrap_or(0);
             loop {
-                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
                 let pos = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 as i64 + 1);
                 let (from, to) = (pos(shown.start)?, pos(shown.end)?);
                 let Ok((elements, element_images)) = crate::prim::window_shown_elements(self, window, from, to) else { break None };
@@ -1710,7 +1755,7 @@ impl Vm {
                 // until as many show as the window has rows.
                 let Some(rows) = rows.filter(|&rows| !at_zv && elements.iter().filter(|e| e.c == '\n').count() < rows) else { break Some((elements, element_images)) };
                 lines *= 2;
-                let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+                let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
                 let accessible = b.accessible();
                 shown = crate::window::shown_bytes(b.as_str(), accessible.start.0..accessible.end.0, start_byte, rows + lines);
                 at_zv = shown.end >= accessible.end.0;
@@ -1733,7 +1778,7 @@ impl Vm {
         let region_background = table.handle("region").map(|i| faces[i.0 as usize].background);
         // A control character other than TAB and newline shows as an escape.
         let escape = table.handle("escape-glyph");
-        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+        let Ok(b) = self.shown_text(buffer) else { return Err("Unicode display buffer required".into()) };
         let mut style_index = styles.partition_point(|run| run.bytes.end <= shown.start);
         // The face the buffer's character CH at byte AT shows in, and for a
         // newline the face its row paints past the text in (`extend_face').
@@ -1912,7 +1957,7 @@ impl Vm {
     fn shows_elements(&mut self, window: Value, buffer: Value, shown: std::ops::Range<usize>) -> Result<bool> {
         let display = [self.display_symbol("display"), self.display_symbol("invisible")];
         let keys = ["display", "invisible", "before-string", "after-string"].map(|n| self.display_symbol(n));
-        let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(false) };
         let (at, end) = (ByteOffset(shown.start), ByteOffset(shown.end));
         // An overlay ending at the start shows its after-string there, one
         // starting at the end its before-string: the characters around.
@@ -1943,7 +1988,7 @@ impl Vm {
         if !found {
             // Printable ASCII, newlines and TABs show as themselves: only
             // other bytes, or a display table, need the iterator's look.
-            let Object::Buffer(b) = self.object(buffer)? else { return Ok(false) };
+            let Ok(b) = self.shown_text(buffer) else { return Ok(false) };
             let plain = b.as_str().as_bytes()[shown.start..shown.end].iter().all(|&c| (0x20..0x7f).contains(&c) || c == b'\n' || c == b'\t');
             let tables = ["buffer-display-table", "standard-display-table"].into_iter()
                 .map(|name| { let slot = self.slot(name); self.value_in_buffer(slot, buffer) })
@@ -1987,6 +2032,7 @@ impl Vm {
         let modiff = self.buffer_state(buffer)?.modiff;
         let accessible = match self.object(buffer)? {
             Object::Buffer(b) => { let region = b.accessible(); (region.start.0, region.end.0) }
+            Object::ByteBuffer(b) => (b.restriction.start.0, b.restriction.end.0),
             _ => (0, 0),
         };
         let mark = match self.buffer_mark_value(buffer) {
@@ -2067,7 +2113,7 @@ impl Vm {
             }
             // Point's row must be one the last paint showed whole, and its
             // cursor in the text area: the point-visibility step's checks.
-            let Object::Buffer(b) = self.object(key.buffer)? else { return Ok(None) };
+            let Ok(b) = self.shown_text(key.buffer) else { return Ok(None) };
             let point_byte = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0;
             let base = self.display_state.base(id);
             let offset = point_byte.wrapping_sub(base);
@@ -2220,7 +2266,8 @@ impl Vm {
         // (21626-21645). Do this after visibility has finalized window-point:
         // that pass can move the window marker for a forced window-start.
         let buffer = self.slots[buffer_slot].value;
-        let Object::Buffer(b) = self.object(buffer)? else {
+        self.mirror_shown(buffer)?;
+        let Ok(b) = self.shown_text(buffer) else {
             return Err("Unicode display buffer required".into());
         };
         let saved_point = b.char_of_byte(b.point)?;
@@ -2250,6 +2297,10 @@ impl Vm {
         // by character position if Lisp changed its text. As in GNU's restore,
         // a saved point beyond the new ZV falls back to the buffer's true end.
         let buffer = self.slots[buffer_slot].value;
+        if let Object::ByteBuffer(b) = self.object_mut(buffer)? {
+            b.point = ByteOffset(saved_point.0.clamp(b.restriction.start.0, b.restriction.end.0));
+            return outcome;
+        }
         let Object::Buffer(b) = self.object_mut(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
@@ -2559,6 +2610,7 @@ impl Vm {
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
+        self.mirror_shown(buffer)?;
         // `buffer-name', not a search of every symbol for its registry slot.
         let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
@@ -2567,6 +2619,7 @@ impl Vm {
         // stands at its own point.
         let point = match self.object(buffer)? {
             Object::Buffer(b) if self.window(window)?.buffer != buffer => b.char_of_byte(b.point)?.0 + 1,
+            Object::ByteBuffer(b) if self.window(window)?.buffer != buffer => b.point.0 + 1,
             _ => self.window_point_value(window)?.as_integer()? as usize,
         };
         let rule = self.width_rule()?;
@@ -2576,7 +2629,7 @@ impl Vm {
         let command_loop_level = self.names.get("romacs--command-loop-level")
             .and_then(|&slot| self.slots[slot].value.integer_value())
             .map_or(0, |level| level.max(0) as usize);
-        let Object::Buffer(b) = self.object(buffer)? else {
+        let Ok(b) = self.shown_text(buffer) else {
             return Err("Unicode display buffer required".into());
         };
         let text = b.as_str();
@@ -2727,8 +2780,8 @@ impl Vm {
     pub(crate) fn host_measure_elements(&mut self, window: Value, shown: &[(char, crate::prim::FaceKey)]) -> Result<romacs_layout_input::Measured> {
         let table = self.current_faces(Some(window))?;
         let buffer = self.slots[self.buffer_slot].value;
-        let span = match self.object(buffer)? {
-            Object::Buffer(b) => {
+        let span = match self.shown_text(buffer) {
+            Ok(b) => {
                 let byte = |pos: i64| b.byte_of_char(crate::coordinates::CharOffset((pos - 1).max(0) as usize)).map(|b| b.0);
                 let charpos = |key: &crate::prim::FaceKey| match *key { crate::prim::FaceKey::Buffer(p) | crate::prim::FaceKey::String { charpos: p, .. } | crate::prim::FaceKey::Glyph { charpos: p, .. } => p };
                 let (low, high) = shown.iter().map(|(_, key)| charpos(key)).fold((i64::MAX, 0), |(l, h), p| (l.min(p), h.max(p)));
@@ -2775,8 +2828,8 @@ impl Vm {
         };
         let at = match at {
             Some(at) => at,
-            None => match self.object(sources.buffer)? {
-                Object::Buffer(b) => {
+            None => match self.shown_text(sources.buffer) {
+                Ok(b) => {
                     // Elements come in order: step from the last one's byte.
                     let (pos, byte) = sources.cursor;
                     let at = if pos > 0 && (pos..pos + 64).contains(&charpos) {
@@ -2796,12 +2849,12 @@ impl Vm {
             let mut layers: Vec<Value> = crate::overlay_order::sort_overlays(covering, |o| o.0).into_iter().rev().map(|(.., face)| face).filter(|&face| face != Value::NIL).collect();
             // The text's own face last, nil past the text; the mini-window
             // shows text outside a narrowing too.
-            let text_face = match self.object(sources.buffer)? {
-                Object::Buffer(_) if at >= sources.end => Value::NIL,
+            let text_face = match self.shown_text(sources.buffer) {
+                Ok(_) if at >= sources.end => Value::NIL,
                 // The property itself, where nothing could stand in for it.
-                Object::Buffer(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
+                Ok(b) if sources.plain && b.properties.get_property(ByteOffset(at), "category").is_none() =>
                     b.properties.get_property(ByteOffset(at), "face").unwrap_or(Value::NIL),
-                Object::Buffer(b) => {
+                Ok(b) => {
                     let raw: Vec<(String, Value)> = b.properties.properties_at(ByteOffset(at)).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
                     self.annotation_resolve(&raw, sources.face)?
                 }
@@ -3125,8 +3178,8 @@ fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
     buffer_of(segments, display, end)
 }
 
-fn laid(end: &romacs_layout_input::WindowEnd, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
+fn laid(end: &romacs_layout_input::WindowEnd, byte_end: usize, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
     let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
     let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
-    Laid { end: byte(end.end), visible_end, body_height: end.body_height }
+    Laid { end: byte_end, visible_end, body_height: end.body_height }
 }

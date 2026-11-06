@@ -24,4 +24,5 @@
 (let ((b (fm-other 20 12 3))) (with-current-buffer b (narrow-to-region (save-excursion (forward-line -4) (point)) (point-max))) (fm-text b))
 (with-current-buffer (fm-other 10 6 4) (substring-no-properties (format-mode-line "%l %c")))
 (progn (with-current-buffer "pv" (goto-char (point-max))) (redisplay t) (fm-text (fm-other 10 6 4)))
+(let* ((b (fm-other 10 6 4)) (text (progn (with-current-buffer b (set-buffer-multibyte nil)) (fm-text b)))) (with-current-buffer b (set-buffer-multibyte t)) text)
 (fm-text)

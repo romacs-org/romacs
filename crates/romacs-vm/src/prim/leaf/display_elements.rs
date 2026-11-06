@@ -207,7 +207,7 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     fn text(&self) -> &crate::annotations::AnnotatedBuffer {
-        match self.leaf.vm.object_if(self.view.buffer) { Some(Object::Buffer(b)) => b, _ => unreachable!("checked text buffer") }
+        match self.leaf.vm.shown_text(self.view.buffer) { Ok(b) => b, _ => unreachable!("checked text buffer") }
     }
     fn char_at(&self, byte: usize) -> u32 {
         // The flat text's scalar, then the raw-byte listing (empty for
@@ -1032,7 +1032,7 @@ impl Leaf<'_> {
             return Ok(true);
         }
         let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras.is_empty() => Some(look.glyphless), _ => None };
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
         let text = &b.as_str()[from.min(b.as_str().len())..to.min(b.as_str().len())];
         let mut special = vec![];
         for (at, ch) in text.char_indices() {
@@ -1089,7 +1089,7 @@ impl Syms {
 impl Leaf<'_> {
     /// The byte of character position POS (1-based) in text buffer BUFFER.
     pub(super) fn buffer_byte(&self, buffer: Value, pos: i64) -> R<usize> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(fault("text buffer required")) };
+        let Ok(b) = self.vm.shown_text(buffer) else { return Err(fault("text buffer required")) };
         Ok(b.byte_of_char(CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0)
     }
     pub(crate) fn number_value(&self, v: Value) -> Option<f64> {
