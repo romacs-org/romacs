@@ -477,6 +477,17 @@ impl PaintSender {
         result.map(|()| ready)
     }
 
+    /// Title the primary window (xdisp.c gui_consider_frame_title).
+    pub fn set_title(&self, title: String) -> Result<(), String> {
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::SetWindowTitle { title }))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
     /// Close a server's primary window; the render loop and the GPU stay.
     pub fn hide_primary(&self) -> Result<(), String> {
         let result = self

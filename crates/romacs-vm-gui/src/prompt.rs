@@ -45,6 +45,8 @@ pub struct Shared {
     /// The window was shown or hidden since the loop last looked: what it
     /// had in flight is gone with the old window.
     pub window_changed: bool,
+    /// What the window's title was last worked out on (`title::consider').
+    pub title_key: Option<u64>,
 }
 
 /// A server's window: whether one shows, and the size the next is made at.

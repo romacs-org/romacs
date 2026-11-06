@@ -24,6 +24,7 @@ mod eval_last_sexp;
 mod presentation;
 mod latency;
 mod echo;
+mod title;
 mod prompt;
 mod terminal_service;
 mod terminal_wait;
@@ -1339,6 +1340,7 @@ fn evaluate(
         paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
+    title::consider(&mut vm, sender, &host);
     let mut live_presentation = presentation::Presentation::new();
     if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
         // Not drawn (hidden as it starts): the loop waits for it, stalled.
@@ -1488,6 +1490,7 @@ fn evaluate(
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+                    title::consider(&mut vm, sender, &host);
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -1578,6 +1581,7 @@ fn evaluate(
                 };
                 let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::No, &mut paint_timings)?;
+                title::consider(&mut vm, sender, &host);
                 // The evaluator's part: the frame's snapshot, layout and
                 // submission; the render thread draws it meanwhile.
                 vm.redisplay_done(snapshot_start.elapsed());
@@ -1670,6 +1674,7 @@ fn evaluate(
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {
             let presentation = next_presentation(&host)?;
             previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
+            title::consider(&mut vm, sender, &host);
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,

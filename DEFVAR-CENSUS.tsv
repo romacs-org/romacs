@@ -74,7 +74,6 @@ face-filters-always-match	absent	xfaces.c; no shipped Lisp reads or sets it
 face-font-lax-matched-attributes	absent	xfaces.c; no shipped Lisp reads or sets it
 face-near-same-color-threshold	absent	xfaces.c; no shipped Lisp reads or sets it
 floats-consed	absent	alloc.c; no shipped Lisp reads or sets it
-frame-title-format	needed	xdisp.c; read by gnu-lisp/ansi-osc.el and 10 more
 global-disable-point-adjustment	absent	keyboard.c; no shipped Lisp reads or sets it
 gtk-version-string	needed	pgtkfns.c, xfns.c; read by gnu-lisp/erc/erc.el and 1 more
 haiku-allowed-ui-colors	absent	platform: Haiku build only
@@ -89,7 +88,6 @@ haiku-pass-control-tab-to-system	absent	platform: Haiku build only
 haiku-shift-keysym	absent	platform: Haiku build only
 haiku-signal-invalid-refs	needed	haikuselect.c; read by gnu-lisp/term/haiku-win.el
 haiku-super-keysym	absent	platform: Haiku build only
-icon-title-format	needed	xdisp.c; read by gnu-lisp/files.el and 3 more
 imagemagick-render-type	needed	image.c; read by gnu-lisp/cus-start.el
 inhibit-bidi-mirroring	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-eval-during-redisplay	absent	xdisp.c; no shipped Lisp reads or sets it
@@ -114,7 +112,6 @@ make-window-start-visible	absent	xdisp.c; no shipped Lisp reads or sets it
 max-redisplay-ticks	absent	xdisp.c; no shipped Lisp reads or sets it
 menu-prompt-more-char	absent	keyboard.c; no shipped Lisp reads or sets it
 motif-version-string	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
-multiple-frames	absent	xdisp.c; no shipped Lisp reads or sets it
 native-comp-eln-load-path	absent	native compilation: Romacs compiles Lisp its own way
 native-comp-enable-subr-trampolines	absent	native compilation: Romacs compiles Lisp its own way
 nobreak-char-ascii-display	absent	xdisp.c; no shipped Lisp reads or sets it

@@ -812,10 +812,22 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "tool-bar-max-label-size", gnu: "xdisp.c:39005", kind: Kind::Int(14) },
     // tty-colors.el fills it.
     CVariable { name: "tty-defined-color-alist", gnu: "xfaces.c:7687", kind: Kind::Lisp(Init::Nil) },
+    // The window title's format (romacs-vm-gui title.rs).  Romacs shows one
+    // top-level window, so `multiple-frames' stays nil; Wayland does not say
+    // when a window is minimised, so the icon format is never the one used.
+    CVariable { name: "multiple-frames", gnu: "xdisp.c:38825", kind: Kind::Bool(false) },
+    CVariable { name: "frame-title-format", gnu: "xdisp.c:38831", kind: Kind::Lisp(Init::List(TITLE_FORMAT)) },
+    CVariable { name: "icon-title-format", gnu: "xdisp.c:38839", kind: Kind::Lisp(Init::List(TITLE_FORMAT)) },
     // `forward-word' reads it (prims/word_motion.rs); subword-mode sets it.
     CVariable { name: "find-word-boundary-function-table", gnu: "syntax.c:3798", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     // No shipped Lisp sets it (VM2-DEFVAR-INERT).
     CVariable { name: "buffer-access-fontify-functions", gnu: "editfns.c:4834", kind: Kind::Lisp(Init::Nil) },
+];
+
+/// xdisp.c:38853: (multiple-frames "%b" ("" "%b - GNU Emacs at " system-name)).
+static TITLE_FORMAT: &[Init] = &[
+    Init::Symbol("multiple-frames"), Init::Str("%b"),
+    Init::List(&[Init::Str(""), Init::Str("%b - GNU Emacs at "), Init::Symbol("system-name")]),
 ];
 
 const fn font_entry(entry: &'static [Init]) -> Init { Init::Vector(entry) }

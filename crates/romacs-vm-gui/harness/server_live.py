@@ -35,6 +35,8 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
              GNU's, and `ding' with no frame, with one and in a worker
              isolate writes no BEL to the server's output; with its window
              shown, `server-stop-automatically' `empty' keeps the server.
+  title      `frame-title-format' reaches the window, again when the buffer's
+             name and the format change.
 
 usage: server_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
@@ -580,12 +582,38 @@ def daemon(args, base):
     finally:
         s.close()
 
+def title(args, base):
+    """`frame-title-format' reaches the window: what a Romacs server tells
+    its host after a client's frame shows and the buffer changes, against
+    GNU's `format-mode-line' of the same format in the same buffer names."""
+    s = Server(args, base, 'tt', {'ROMACS_DIAGNOSTICS': '1'})
+    try:
+        a = s.file('a.txt')
+        s.client('-n', str(a))
+        s.pid = int(s.eval('(emacs-pid)'))
+        titles = lambda: [json.loads(line)['window_title'] for line in s.log().splitlines() if line.startswith('{"window_title"')]
+        host = s.eval('(system-name)').strip('"')
+        wanted = f'a.txt - GNU Emacs at {host}'
+        until(lambda: wanted in titles(), 30, f'the title {wanted}')
+        s.eval('(with-current-buffer "a.txt" (rename-buffer "renamed.txt"))')
+        renamed = f'renamed.txt - GNU Emacs at {host}'
+        s.eval('(force-mode-line-update t)')
+        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: renamed in titles(), 30, f'the title {renamed}')
+        s.eval("(setq frame-title-format \"custom %b\")")
+        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: 'custom renamed.txt' in titles(), 30, 'the custom title')
+        return {'titles': titles(), 'ok': True}
+    finally:
+        s.close()
+
+
 def lisp_read(text):
     return parity_live.read_sexp(text) if text.startswith('"') else text
 
 
 WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
-             'probe': probe, 'daemon': daemon}
+             'probe': probe, 'daemon': daemon, 'title': title}
 
 
 def main():

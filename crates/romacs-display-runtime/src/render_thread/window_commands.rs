@@ -164,12 +164,8 @@ impl RenderApp {
                 }
             }
             WindowCommand::SetWindowTitle { title } => {
-                self.frame_windows
-                    .primary_window_mut()
-                    .expect("primary window state")
-                    .chrome_mut()
-                    .title = title.clone();
                 if let Some(primary_state) = self.frame_windows.primary_window_mut() {
+                    primary_state.chrome_mut().title = title.clone();
                     primary_state.set_title(title);
                     if !primary_state.chrome().decorations_enabled {
                         primary_state.render.mark_dirty();
