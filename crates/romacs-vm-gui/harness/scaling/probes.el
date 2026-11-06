@@ -2082,7 +2082,8 @@ closures over a mutable variable (each a closure and a cell)."
           (scaling--churn n)))
 
 ;; Code retirement (request_code.rs, Program::retire_code): N functions
-;; compiled, lowered by a call and dropped in each step; the host's idle
+;; compiled, lowered by a call and dropped in each step, each with a site
+;; on a primitive and one on a leaf; the host's idle
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
 ;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
@@ -2102,7 +2103,7 @@ closures over a mutable variable (each a closure and a cell)."
           (when (and (> i 0) (<= gcs-done scaling--retire-collections))
             (kill-emacs 3))
           (dotimes (k n)
-            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k)) t)))
+            (funcall (eval (list 'lambda nil (list 'list (list '+ k i) k '(symbol-name 'scaling))) t)))
           (with-current-buffer (window-buffer (selected-window))
             (goto-char (point-max))
             (insert (format "step %d\n" i)))

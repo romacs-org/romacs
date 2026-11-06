@@ -159,6 +159,7 @@ mod control_tests {
             escape: None,
             escape_hooked: false,
             failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
             propagate: false,
             controls: vec![],
@@ -275,6 +276,7 @@ mod control_tests {
             escape: None,
             escape_hooked: false,
             failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
             propagate: false,
             controls: vec![Control {
@@ -1240,6 +1242,8 @@ pub(super) struct Engine<'a> {
     pub(super) escape: Option<Escape>,
     escape_hooked: bool,
     failed_eval_depth: Option<usize>,
+    /// A site leaf's fault, on its way to `leaf_failed'.
+    leaf_fault: Option<prim::Fault>,
     /// Lowest native stack address at which an activation may start (R193).
     native_floor: usize,
     /// This engine runs an `eval` form: an escape reaching its outermost frame
@@ -1344,6 +1348,7 @@ pub(super) fn assert_opaque_rest_compaction() {
         escape: None,
         escape_hooked: false,
         failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: 0,
         propagate: false,
         controls: vec![],
@@ -1549,6 +1554,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         escape: None,
         escape_hooked: false,
         failed_eval_depth: None,
+            leaf_fault: None,
         native_floor: eval_depth::native_stack_floor(),
         propagate: vm_propagate,
         controls: Vec::new(),
@@ -2600,8 +2606,13 @@ unsafe fn invoke(
     unsafe {
         if target.tag() != 4 {
             let entry = *e.entries.get_unchecked((*pc).site);
-            if entry.target == target && entry.primitive.is_some() {
-                return cached_primitive(e, r, pc, target, start, argc);
+            if entry.target == target {
+                if entry.primitive.is_some() {
+                    return cached_primitive(e, r, pc, target, start, argc);
+                }
+                if entry.simple_arity == LEAF_ENTRY + argc {
+                    return leaf_call(e, r, pc, target, start, argc);
+                }
             }
             return resolve_entry(e, r, pc, target, start, argc);
         }
@@ -2757,8 +2768,20 @@ unsafe fn resolve_entry(
             };
             return invoke(e, r, pc, target, start, argc);
         }
-        if prim::generated(target).is_some() {
-            return enter_generated(e, r, pc, target, start, argc);
+        if let Some(d) = prim::generated(target) {
+            let Some(leaf) = prim::site_leaf(d, argc) else {
+                return enter_generated(e, r, pc, target, start, argc);
+            };
+            e.inline_bodies[(*pc).site] = None;
+            *e.entries.get_unchecked_mut((*pc).site) = EntryCache {
+                world_version: 0,
+                target,
+                function: leaf as usize,
+                entry: std::ptr::null(),
+                simple_arity: LEAF_ENTRY + argc,
+                primitive: None,
+            };
+            return leaf_call(e, r, pc, target, start, argc);
         }
         if target.tag() == 6 {
             let Some(p) = prim::legacy(target) else {
@@ -3691,6 +3714,70 @@ fn primitive_value(
             e.error = Some(error);
             None
         }
+    }
+}
+/// `EntryCache::simple_arity' of a leaf site, plus its argument count; the
+/// leaf's body is in `function' (`prim::site_leaf').
+const LEAF_ENTRY: usize = usize::MAX / 2;
+/// A leaf through its site: no activation unless it fails, as nothing can see
+/// one while it runs. Whatever watches calls keeps the full path. Six
+/// register arguments, for the reason `cached_primitive' gives.
+unsafe fn leaf_call(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Value {
+    unsafe {
+        if e.native_mark.is_some() || e.apply_mark.is_some() || e.vm.profiler.active
+            || e.vm.backtrace.observing() || e.vm.fence.is_some()
+        {
+            return enter_generated(e, r, pc, target, start, argc);
+        }
+        let leaf: prim::LeafBody = std::mem::transmute(e.entries.get_unchecked((*pc).site).function);
+        let value = e.vm.leaf_value(leaf, r.add(start), argc, &mut e.leaf_fault);
+        if value == Value::UNBOUND && e.leaf_fault.is_some() {
+            return leaf_failed(e, r, pc, target, start, argc);
+        }
+        if e.vm.region_collect || (e.vm.collect_poll && e.vm.may_collect(1)) {
+            e.budget = 0;
+        }
+        *r.add((*pc).a) = value;
+        advance(e, r, pc)
+    }
+}
+/// The call a failed leaf made, recorded now: its arguments are where they
+/// were, and the fault is reported once, as if the activation had been there.
+#[cold]
+#[inline(never)]
+unsafe fn leaf_failed_step(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Continue {
+    unsafe {
+        enter_native(e, r, pc, target, start, argc);
+        let fault = e.leaf_fault.take().expect("a failed leaf's fault");
+        let step = e.vm.leaf_step(fault);
+        take_step(e, r, pc, step)
+    }
+}
+unsafe fn leaf_failed(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    target: Value,
+    start: usize,
+    argc: usize,
+) -> Value {
+    unsafe {
+        let to = leaf_failed_step(e, r, pc, target, start, argc);
+        continue_at(e, to)
     }
 }
 /// A primitive through the site's entry cache, which holds its call. Six

@@ -126,9 +126,13 @@ pub(crate) type Next = std::result::Result<Step, Fault>;
 /// The two declarable tiers. Control primitives stay hand-written in the engine.
 #[derive(Clone, Copy)]
 pub(crate) enum Body {
-    Leaf(fn(&mut Leaf<'_>, &[Value]) -> Out),
+    Leaf(LeafBody),
     Call(fn(&mut Leaf<'_>, &[Value]) -> Next),
+    /// A leaf that runs Lisp while it reads: its caller publishes the
+    /// engine's roots first (`generated_step').
+    Reader(LeafBody),
 }
+pub(crate) type LeafBody = fn(&mut Leaf<'_>, &[Value]) -> Out;
 
 pub(crate) struct PrimDesc {
     pub name: &'static str,
@@ -1896,6 +1900,10 @@ macro_rules! defsubr {
         $crate::prim::defsubr!(@emit $name, $gnu, $eff, Call, Next, $id, ($($params)*), $body);
     };
     (name = $name:literal, gnu = $gnu:literal, effect = $eff:ident,
+     fn $id:ident ($($params:tt)*) -> Reader $body:block) => {
+        $crate::prim::defsubr!(@emit $name, $gnu, $eff, Reader, Out, $id, ($($params)*), $body);
+    };
+    (name = $name:literal, gnu = $gnu:literal, effect = $eff:ident,
      fn $id:ident ($($params:tt)*) $body:block) => {
         $crate::prim::defsubr!(@emit $name, $gnu, $eff, Leaf, Out, $id, ($($params)*), $body);
     };
@@ -2043,6 +2051,21 @@ pub(crate) fn generated(v: Value) -> Option<&'static PrimDesc> {
     }
 }
 
+/// The most arguments a leaf takes on the site path.
+pub(crate) const LEAF_ARGUMENTS: usize = 8;
+
+/// Whether a call site may run D with ARGC arguments and no activation:
+/// nothing can see the missing frame. A leaf with no effect beyond reading
+/// runs no Lisp and leaves the stack alone; stack readers are `Step'
+/// primitives (`stack_readers_keep_their_frame'). A leaf that writes can
+/// run a variable watcher, which would see the frame gone.
+pub(crate) fn site_leaf(d: &PrimDesc, argc: usize) -> Option<LeafBody> {
+    let Body::Leaf(f) = d.body else { return None };
+    (matches!(d.effect, Effect::Pure | Effect::Reads)
+        && argc >= d.min && d.max.is_none_or(|max| argc <= max) && argc <= LEAF_ARGUMENTS)
+        .then_some(f)
+}
+
 /// Run `run` with the VM and assert, in debug builds, that it did not collect.
 /// Every leaf body and T2 continuation goes through here: Values held in Rust
 /// locals during the call are valid only because nothing in it can collect.
@@ -2174,18 +2197,41 @@ impl Vm {
         let run = |vm: &mut Vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
-                Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
+                Body::Leaf(f) | Body::Reader(f) => f(&mut cx, args).map(Step::Done),
                 Body::Call(f) => f(&mut cx, args),
             }
         };
         // The reader owns explicit roots and the engine publishes its suspended
         // values before entering it. Unlike ordinary leaves it can call Lisp.
-        let step = if matches!(d.name, "read" | "read-from-string") {
+        let step = if matches!(d.body, Body::Reader(_)) {
             run(self)
         } else {
             no_collection(self, run)
         };
         step.map_err(|fault| self.step_fault(fault))
+    }
+    /// F on the ARGC values at ARGS, with no activation or `Step': the value,
+    /// or UNBOUND with FAULT set. Copied off the register stack as
+    /// `call_generated' copies, the caller having checked ARGC against
+    /// LEAF_ARGUMENTS.
+    ///
+    /// # Safety
+    /// ARGS must point at ARGC live values.
+    #[inline(never)]
+    pub(crate) unsafe fn leaf_value(&mut self, f: LeafBody, args: *const Value, argc: usize, fault: &mut Option<Fault>) -> Value {
+        let mut small = [Value::NIL; LEAF_ARGUMENTS];
+        unsafe { std::ptr::copy_nonoverlapping(args, small.as_mut_ptr(), argc) };
+        match no_collection(self, |vm| f(&mut Leaf::new(vm), &small[..argc])) {
+            Ok(value) => value,
+            Err(failed) => {
+                *fault = Some(failed);
+                Value::UNBOUND
+            }
+        }
+    }
+    /// A leaf's fault, as `call_generated' reports one.
+    pub(crate) fn leaf_step(&mut self, fault: Fault) -> std::result::Result<Step, Option<(Value, Value)>> {
+        Err(self.step_fault(fault))
     }
     /// Run a T2 continuation with the callback's value and the saved registers.
     pub(crate) fn resume_generated(
@@ -2402,7 +2448,7 @@ mod tests {
     ) -> std::result::Result<Value, Fault> {
         let mut cx = Leaf::new(vm);
         match d.body {
-            Body::Leaf(f) => f(&mut cx, args),
+            Body::Leaf(f) | Body::Reader(f) => f(&mut cx, args),
             Body::Call(f) => match f(&mut cx, args)? {
                 Step::Done(v) => Ok(v),
                 Step::Call { .. } | Step::Handle { .. } | Step::Collect | Step::CollectIdle => panic!("expected immediate test result"),
@@ -2682,6 +2728,28 @@ mod line_scan_tests {
                     assert_eq!(line_beginning(body, low, high, point, count), line_beginning(long.as_bytes(), low, high, point, count));
                     assert_eq!(line_end_after(body, low, high, point, count), line_end_after(long.as_bytes(), low, high, point, count));
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod site_leaf_tests {
+    /// `site_leaf' runs Pure and Reads leaves with no activation, so none of
+    /// them may read the stack: such a primitive is a `Step' one.
+    #[test]
+    fn stack_readers_keep_their_frame() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/prims");
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            for form in text.split("defsubr! {").skip(1) {
+                let header = form.split('{').next().unwrap();
+                let quiet = header.contains("effect = Pure") || header.contains("effect = Reads");
+                let reads_stack = form.split("defsubr!").next().unwrap().split("\n}}").next().unwrap()
+                    .contains("cx.backtrace") || form.split("\n}}").next().unwrap().contains("cx.inspect_frames");
+                assert!(!(quiet && reads_stack && !header.contains("-> Step")),
+                    "{}: a stack reader must be a Step primitive: {}", path.display(), header.trim());
             }
         }
     }
