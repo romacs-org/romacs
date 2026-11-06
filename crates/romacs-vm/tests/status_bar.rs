@@ -178,6 +178,24 @@ fn a_face_that_sets_nothing_leaves_the_bars_colours() {
     assert_eq!(shown.faces[run.face.0 as usize].foreground, [0, 0, 255]);
 }
 
+/// A face over the bar takes what it leaves unset from the bar, not from
+/// `default' (xdisp.c face_at_string_position's base face): bold text on a
+/// light bar over a dark frame stays dark.
+#[test]
+fn a_face_over_the_bar_takes_what_it_leaves_from_the_bar() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (set-face-attribute 'default nil :foreground "#eeeeee" :background "#111111")
+                             (set-face-attribute 'mode-line nil :foreground "#222222" :background "#dddddd")
+                             (set-face-attribute 'mode-line-active nil :foreground "#222222" :background "#dddddd")
+                             (defface weight-face '((t :weight bold)) "w")
+                             (setq mode-line-format (list (propertize "x" 'face 'weight-face))))"##);
+    let shown = bar(&mut vm);
+    let at = shown.text.utf8.find('x').unwrap_or_else(|| panic!("x in {:?}", shown.text.utf8));
+    let run = shown.text.face_runs.iter().find(|run| run.bytes.contains(&at)).expect("a run for the bold text");
+    let face = &shown.faces[run.face.0 as usize];
+    assert_eq!((face.foreground, face.background), ([0x22, 0x22, 0x22], [0xdd, 0xdd, 0xdd]));
+}
+
 #[test]
 fn no_window_draws_a_band_of_its_own() {
     let mut vm = session();

@@ -498,6 +498,16 @@ impl LiveView {
         render_named(self, &self.resolved, name, &self.default_realized)
     }
 
+    /// The face as text in it shows over the face BASE: what it leaves
+    /// unset is BASE's (xdisp.c face_at_string_position's base face).
+    pub fn realize_over(&self, face: &str, base: &str) -> Attrs {
+        let name = self.canonical(face);
+        if name == "default" {
+            return self.default_realized.clone();
+        }
+        render_named(self, &self.resolved, name, &self.realize(base))
+    }
+
     /// Whether the face sets nothing, itself or through what it inherits:
     /// text in it shows the face it is over.
     pub fn blank(&self, face: &str) -> bool {

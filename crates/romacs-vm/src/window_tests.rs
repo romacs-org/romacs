@@ -842,6 +842,24 @@ fn a_remapping_added_after_a_paint_makes_a_band_new() {
     assert_eq!(changed.faces[0].foreground, [0, 255, 0], "the window shows the new table");
 }
 
+/// A face in a window's band takes what it leaves unset from the band's
+/// face, not from `default' (xdisp.c face_at_string_position).
+#[test]
+fn a_face_in_a_band_takes_what_it_leaves_from_the_band() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface band-weight '((t :weight bold)) "w")
+                           (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'band-weight))))"##);
+    let shown = vm.frame_snapshot(800, 600).unwrap().windows[0].snapshot.clone();
+    let band = shown.mode_line.as_ref().expect("the band is shown");
+    let face = &shown.faces[band.face_runs[0].face.0 as usize];
+    assert_eq!(face.background, shown.faces[shown.mode_line_face.0 as usize].background, "the band's");
+    assert_ne!(face.background, shown.faces[0].background, "not the default's");
+}
+
 /// A face that sets nothing merges nothing (xfaces.c merge_named_face): in
 /// a band its text keeps the band's face, not `default''s, and in a window
 /// it stays on the window's own default row.

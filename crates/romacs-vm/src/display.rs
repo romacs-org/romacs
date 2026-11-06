@@ -501,11 +501,11 @@ struct Bands {
 
 /// A mode-line band as a text slice whose faces index TABLE, and the
 /// stretches its runs of SPACES make (`Vm::band_spaces').
-fn band_slice(vm: &Vm, table: &FaceTable, band: mode_line::Band, spaces: &[(std::ops::Range<usize>, StretchWidth)]) -> (TextSlice, Vec<Stretch>) {
+fn band_slice(vm: &Vm, table: &FaceTable, band: mode_line::Band, base: &str, spaces: &[(std::ops::Range<usize>, StretchWidth)]) -> (TextSlice, Vec<Stretch>) {
     let (utf8, runs, stretches) = shown_band(&band.text, band.runs, spaces);
     (TextSlice { extends: vec![],
         face_runs: runs.into_iter()
-            .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: vm.band_face(table, &face)? }))
+            .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: vm.band_face(table, &face, base)? }))
             .collect(),
         utf8,
         raw: vec![],
@@ -1381,7 +1381,7 @@ impl Vm {
         } else {
             (utf8, face_runs, raw, extends, start_byte, point_byte)
         };
-        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands, &band_face, &header_face)?;
         // Before FACES is published: what it asks for is realised as it asks.
         let chrome = self.text_chrome(window, &table, base, at_zv)?;
         let snapshot = WindowSnapshot {
@@ -2162,7 +2162,7 @@ impl Vm {
         // A remapping changes the table with no change of face: the
         // reused text's handles index the table it was published with.
         if self.display_state.shown.get(&id).map(|shown| shown.table) != Some(table.id) { return Ok(None); }
-        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands)?;
+        let (mode_line, header_line, band_stretches) = self.band_slices(root, &table, bands, &face, &header_face)?;
         (snapshot.mode_line, snapshot.header_line, snapshot.band_stretches) = (mode_line, header_line, band_stretches);
         snapshot.mode_line_face = self.named(&table, &face).ok_or("mode-line face required")?;
         snapshot.header_line_face = self.named(&table, &header_face).ok_or("header-line face required")?;
@@ -2577,15 +2577,15 @@ impl Vm {
     /// BANDS as the window paints them (`band_slice'), each band's text
     /// with the stretches its `(space ...)' displays make, resolved with
     /// the window ROOT holds.
-    fn band_slices(&mut self, root: usize, table: &FaceTable, bands: Bands) -> Result<(Option<TextSlice>, Option<TextSlice>, BandStretches)> {
-        let slice = |vm: &mut Vm, band: Option<mode_line::Band>| -> Result<(Option<TextSlice>, Vec<Stretch>)> {
+    fn band_slices(&mut self, root: usize, table: &FaceTable, bands: Bands, mode_face: &str, header_face: &str) -> Result<(Option<TextSlice>, Option<TextSlice>, BandStretches)> {
+        let slice = |vm: &mut Vm, band: Option<mode_line::Band>, base: &str| -> Result<(Option<TextSlice>, Vec<Stretch>)> {
             let Some(band) = band else { return Ok((None, vec![])) };
             let spaces = vm.band_spaces(root, &band)?;
-            let (text, stretches) = band_slice(vm, table, band, &spaces);
+            let (text, stretches) = band_slice(vm, table, band, base, &spaces);
             Ok((Some(text), stretches))
         };
-        let (mode_line, mode) = slice(self, bands.mode_line)?;
-        let (header_line, header) = slice(self, bands.header_line)?;
+        let (mode_line, mode) = slice(self, bands.mode_line, mode_face)?;
+        let (header_line, header) = slice(self, bands.header_line, header_face)?;
         Ok((mode_line, header_line, BandStretches { header_line: header, mode_line: mode }))
     }
     /// The runs of BAND a `display' property shows as a stretch, each run
@@ -2923,10 +2923,21 @@ impl Vm {
         table.index.borrow_mut().insert(name.to_owned(), handle);
         handle.map(FaceHandle)
     }
-    /// The handle of the face NAME for a band's text, None where the
-    /// band's own face shows: no such face, or one that sets nothing.
-    pub(crate) fn band_face(&self, table: &FaceTable, name: &str) -> Option<FaceHandle> {
-        self.named(table, name).filter(|handle| handle.0 != 0 || name == "default")
+    /// The handle of the face NAME for text in a band of the face BASE,
+    /// which gives what NAME leaves unset; None where BASE shows as it is:
+    /// no such face, or one that sets nothing.
+    pub(crate) fn band_face(&self, table: &FaceTable, name: &str, base: &str) -> Option<FaceHandle> {
+        self.named(table, name).filter(|handle| handle.0 != 0 || name == "default")?;
+        let key = format!("{name}\0{base}");
+        if let Some(known) = table.index.borrow().get(&key) { return known.map(FaceHandle); }
+        let face = {
+            let mut view = table.view.borrow_mut();
+            self.define_faces(&mut view, vec![base.into()]);
+            face_of_attrs(&view.realize_over(name, base), name).ok()
+        };
+        let handle = face.map(|face| table.add(face).0);
+        table.index.borrow_mut().insert(key, handle);
+        handle.map(FaceHandle)
     }
     /// FACE_REF's face in TABLE, its faces read first.
     fn realized_ref(&self, table: &FaceTable, face_ref: &romacs_face::FaceRef) -> romacs_face::Attrs {
