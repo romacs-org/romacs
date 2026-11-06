@@ -1,5 +1,8 @@
 ;;; romacs-sasl-scram.el --- SCRAM's key derivation, natively  -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
 
 ;; GNU's `sasl-scram--client-final-message' (lisp/net/sasl-scram-rfc.el)
 ;; computes Hi() as one Lisp HMAC per iteration, thousands of them, on the
