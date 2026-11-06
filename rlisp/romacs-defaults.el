@@ -8,8 +8,9 @@
 ;; and no package for them: paired delimiters, minibuffer history, recent
 ;; files and places kept across sessions, key hints, buffers that follow their files, relative line numbers in
 ;; programming buffers, tree-sitter modes for the languages whose
-;; grammars Romacs ships, and backups and auto-saves kept out of the
-;; directories being edited.  `romacs-defaults-settings' lists
+;; grammars Romacs ships, backups and auto-saves kept out of the
+;; directories being edited, and VC logs of the whole history, which
+;; C-g stops while they arrive.  `romacs-defaults-settings' lists
 ;; them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
 ;;
 ;; One switch, `romacs-defaults-mode', turns them all on or off.  An
@@ -44,6 +45,13 @@
 (require 'use-package-core)
 (require 'display-line-numbers)
 (require 'treesit)
+
+;; vc.el stays out of the world: from source it loads dired, which runs tar
+;; as it loads.  Its option is declared here, with GNU's standard value, for
+;; the settings to find; vc.el's defcustom keeps whatever value it then has.
+(defvar vc-log-show-limit 500)
+(put 'vc-log-show-limit 'standard-value '(500))
+(put 'vc-log-show-limit 'custom-type 'natnum)
 (require 'romacs-omarchy)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
@@ -98,7 +106,9 @@
     (imenu-auto-rescan t)
     (imenu-flatten 'prefix)
     ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".
-    (use-package-enable-imenu-support t))
+    (use-package-enable-imenu-support t)
+    ;; Logs show the whole history: it streams in behind the first screen.
+    (vc-log-show-limit 0))
   "Romacs's defaults, each (OPTION FORM [idle]): FORM is OPTION's standard value.
 They are set in this order while `romacs-defaults-mode' is on.  An `idle'
 setting, a mode the first frame does not need, is set at the session's
@@ -217,6 +227,26 @@ on before the user's init, unless started with -Q."
              (romacs-defaults--ensure-directories))
     (romacs-defaults--line-numbers-off)
     (romacs-defaults--restore romacs-defaults-settings)))
+
+(defun romacs-defaults-log-stop ()
+  "Stop the log still arriving in this buffer: kill its process, keep its text."
+  (interactive)
+  (let ((process (get-buffer-process (current-buffer))))
+    (when (process-live-p process)
+      (kill-process process)
+      (message "Log stopped"))))
+
+(defun romacs-defaults--log-arriving (command)
+  "COMMAND, while this buffer's log arrives and `romacs-defaults-mode' is on."
+  (and romacs-defaults-mode (process-live-p (get-buffer-process (current-buffer))) command))
+
+(with-eval-after-load 'log-view
+  (define-key log-view-mode-map [remap keyboard-quit]
+    '(menu-item "" romacs-defaults-log-stop :filter romacs-defaults--log-arriving)))
+
+(with-eval-after-load 'vc
+  ;; Its defcustom gave the option GNU's standard value again.
+  (when romacs-defaults-mode (put 'vc-log-show-limit 'standard-value '(0))))
 
 (defun romacs-defaults-start (quick)
   "Start this session's defaults; the GUI calls this before the user's init.

@@ -214,7 +214,7 @@ disabled.
 
 ;;; Generated autoloads from romacs-defaults.el
 
-(register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
+(register-definition-prefixes "romacs-defaults" '("romacs-defaults-" "vc-log-show-limit"))
 
 
 ;;; Generated autoloads from romacs-dired.el
