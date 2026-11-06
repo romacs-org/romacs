@@ -68,7 +68,7 @@ romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
 # this out of the shipped graph. Without it such a test can only live outside
 # the repository, where it rots unrun.
 romacs-layout2 = { path = "../romacs-layout2" }
-# Compile-fail proofs that the heap boundary is a type property (tests/heap_boundary.rs).
+# Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
 
 [profile.release]
