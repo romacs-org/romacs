@@ -313,14 +313,8 @@ command's binds it.")
 
 (defun romacs--clear-echo ()
   "read_char's wipe of the echo area, `echo-area-clear-hook' first."
-  (when (current-message)
-    (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
-    (message nil)))
-
-(defun romacs--input-method-char-p (c)
-  "Whether read_char hands the event C to an input method: printable and
-one byte wide."
-  (and (integerp c) (>= c 32) (< c 256) (/= c 127)))
+  (when (boundp 'echo-area-clear-hook) (romacs--safe-run-hooks 'echo-area-clear-hook))
+  (message nil))
 
 (defun romacs--record-char (c)
   "keyboard.c record_char: `recent-keys' and the macro being defined leave
@@ -339,7 +333,7 @@ command's keys are kept from them.  Unless KEYMAP-READ, the read is not one
 of a key sequence and the method must not use the echo area."
   (let ((keys romacs--command-keys) (start romacs--single-command-key-start))
     (setq romacs--command-keys [] romacs--single-command-key-start 0)
-    (romacs--clear-echo)
+    (when (current-message) (romacs--clear-echo))
     (prog1 (let ((input-method-use-echo-area (or input-method-use-echo-area (not keymap-read))))
              (funcall input-method-function c))
       ;; A C-g the method read was the method's key.
@@ -418,14 +412,15 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
           (romacs--record-char c)
           (setq recorded t))
         ;; What the echo area held, for an input method to refer to.
-        (when (and input-method-function (romacs--input-method-char-p c))
+        (when (and input-method-function (integerp c) (>= c 32) (< c 256) (/= c 127))
           (setq previous (current-message)
                 input-method-previous-message previous))
         ;; read_char wipes the echo area for each event from the keyboard,
         ;; other than help, frame and window selection events
         ;; (keyboard.c:3231): a prompt `read-event' showed goes once its
         ;; event comes.
-        (unless (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))
+        (when (and (current-message)
+                   (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
           (romacs--clear-echo))))
      ;; Without a host keyboard a user signal is still an event
      ;; (kbd_buffer_get_event); a special one runs its binding and the read
@@ -448,11 +443,11 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
      ((> (recursion-depth) 0)
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
      (t (signal 'end-of-file '("Error reading from stdin"))))
-    ;; reread_for_input_method.
+    ;; reread_for_input_method, for a printable one-byte character.
     (when (and input-method-function (not post) (null prev-event)
-               (romacs--input-method-char-p c))
+               (integerp c) (>= c 32) (< c 256) (/= c 127))
       (if (eq input-method-function 'list)
-          (romacs--clear-echo)
+          (when (current-message) (romacs--clear-echo))
         (let ((events (romacs--call-input-method c keymap-read)))
           (if (consp events)
               (setq c (car events)

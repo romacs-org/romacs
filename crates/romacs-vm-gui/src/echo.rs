@@ -87,6 +87,11 @@ pub fn sync_current_message(vm: &mut Vm) -> Result<(), String> {
 /// Clear a message left by the previous command.
 pub fn clear(vm: &mut Vm) -> Result<(), String> {
     vm.set_echo_area_message(None);
+    hide(vm)
+}
+
+/// Take the message off the display, leaving it current.
+pub fn hide(vm: &mut Vm) -> Result<(), String> {
     display(vm, "(romacs--echo-display nil)")
 }
 

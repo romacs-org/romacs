@@ -134,6 +134,11 @@ and its comparison policy in its docstring:
   session per theme, PNGs plus one sheet per scene stacking the themes;
   `--gnu` puts pinned GNU under the reference Rum configuration first.
   For judging a theme by eye, not a gate.
+* `input_method_live.py`: input methods by real keys against pinned GNU:
+  greek-polytonic's dead keys and C-\\, a pending sequence's overlay, C-g and
+  DEL, bulgarian-phonetic, TeX, chinese-py's candidates and completions,
+  korean-hangul, `describe-input-method`, INHERIT-INPUT-METHOD, C-q,
+  `read-passwd`, isearch and keyboard macros.
 * `command_errors_live.py`: the command loop and the session's end on a
   plain init: command errors' echo area, *Messages* and bells, the
   debugger's *Backtrace* from M-: and from a `debug-on-error` command,

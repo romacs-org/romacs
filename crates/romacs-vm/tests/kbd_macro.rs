@@ -34,7 +34,23 @@ const PRELUDE: &str = "(defmacro kt-case (&rest body)
      (use-global-map kt-map)
      (unwind-protect (progn ,@body)
        (use-global-map global-map)
-       (with-current-buffer \"*scratch*\" (erase-buffer)))))";
+       (with-current-buffer \"*scratch*\" (erase-buffer)))))
+(defvar kt-log nil)
+(defun kt-method (key)
+  (push (list key input-method-previous-message input-method-use-echo-area input-method-exit-on-first-char
+              (this-command-keys-vector))
+        kt-log)
+  (list key))
+(defun kt-log-of (form)
+  (setq kt-log nil)
+  (let ((value (eval form t))) (list value (reverse kt-log))))
+(defun kt-typed (method keys)
+  (with-current-buffer \"*scratch*\"
+    (activate-input-method method)
+    (unwind-protect
+        (list current-input-method-title (condition-case e (execute-kbd-macro keys) (t e))
+              (buffer-string) (this-command-keys-vector))
+      (deactivate-input-method))))";
 
 const CASES: &[&str] = &[
     // The command loop runs in the selected window's buffer and leaves it current.
@@ -229,6 +245,76 @@ const CASES: &[&str] = &[
   last-kbd-macro
   (let ((last-kbd-macro "ab")) (start-kbd-macro t t) (store-kbd-macro-event ?c) (end-kbd-macro) last-kbd-macro)
   (with-temp-buffer (let ((last-kbd-macro "q") (last-command 'previous)) (call-last-kbd-macro 3) (list (buffer-string) this-command))))"#,
+    // read_char's input method: `read-event' and its kin only with
+    // INHERIT-INPUT-METHOD, and a key sequence's first event only.
+    r#"(kt-log-of '(let ((input-method-function #'kt-method) (unread-command-events (list ?a ?b ?c ?d ?e ?f)))
+  (list (read-event) (read-event nil t) (read-char) (read-char nil t) (read-char-exclusive) (read-char-exclusive nil t))))"#,
+    r#"(kt-log-of '(let ((input-method-function #'kt-method) (unread-command-events (list ?\C-x ?\C-f ?a ?b)))
+  (list (read-key-sequence nil) (read-key-sequence nil) (read-key-sequence nil nil nil nil t))))"#,
+    // Queues: a method sees `unread-command-events', `unread-input-method-events'
+    // and (t . EVENT), never `unread-post-input-method-events'.
+    r#"(kt-log-of '(let ((input-method-function #'kt-method) (unread-post-input-method-events (list ?a))
+                     (unread-command-events (list ?b '(t . ?d) '(no-record . ?e))) (unread-input-method-events (list ?c)))
+  (list (read-key-sequence nil) (read-key-sequence nil) (read-key-sequence nil) (read-key-sequence nil) (read-key-sequence nil)
+        (let ((keys (append (recent-keys) nil))) (nthcdr (- (length keys) 3) keys)))))"#,
+    // Printable and one byte wide, so not DEL, control, meta or a symbol.
+    r#"(kt-log-of '(let ((input-method-function #'kt-method)
+                     (unread-command-events (list 31 32 126 127 128 255 256 ?α ?\M-a ?\C-a 'f20 'return)))
+  (mapcar (lambda (_) (read-key-sequence-vector nil)) (make-list 12 nil))))"#,
+    // What it returns: the first event now and the rest post-input-method;
+    // nothing, or a non-list, reads on.
+    r#"(let ((input-method-function (lambda (k) (push k kt-log) (list ?x ?y ?z))) (unread-command-events (list ?a)))
+  (kt-log-of '(list (read-event nil t) unread-post-input-method-events (read-event nil t) (read-event nil t) unread-command-events)))"#,
+    r#"(let ((input-method-function (lambda (k) (push k kt-log) nil)) (unread-command-events (list ?a ?b)))
+  (kt-log-of '(list (read-event nil t 0) unread-command-events)))"#,
+    r#"(let ((input-method-function (lambda (k) (push k kt-log) (if (= k ?a) 'junk (list k)))) (unread-command-events (list ?a ?b)))
+  (kt-log-of '(list (read-event nil t) unread-command-events)))"#,
+    // The default `list' and nil change nothing.
+    r#"(list (let ((input-method-function 'list) (unread-command-events (list ?a))) (read-event nil t))
+      (let ((input-method-function nil) (unread-command-events (list ?a))) (read-event nil t)))"#,
+    // A method's own reads leave the command's keys alone.
+    r#"(let ((input-method-function
+       (lambda (k) (push (list 'in k (this-command-keys-vector)) kt-log)
+         (let ((input-method-function nil) (x nil))
+           (setq x (read-key-sequence nil))
+           (push (list 'read x (this-command-keys-vector)) kt-log)
+           (list k (aref x 0)))))
+      (unread-command-events (list ?\C-x ?\C-f ?a ?b ?c ?d ?e ?f)))
+  (kt-log-of '(list (read-key-sequence nil nil nil nil t) (this-command-keys-vector)
+                    (read-key-sequence nil nil nil nil t) (this-command-keys-vector)
+                    (read-key-sequence nil nil nil nil t) (this-command-keys-vector) unread-post-input-method-events)))"#,
+    // A macro's events reach the method, as the label `from_macro' says, and
+    // a macro lasts until the method's events have run.
+    r#"(let ((input-method-function #'kt-method)) (kt-log-of '(execute-kbd-macro "ab")))"#,
+    r#"(let ((input-method-function (lambda (k) (push k kt-log) (list (upcase k)))))
+  (kt-log-of '(list (condition-case e (execute-kbd-macro "ab\C-fc") (error e)) (with-current-buffer "*scratch*" (buffer-string)))))"#,
+    r#"(let ((input-method-function (lambda (k) (push (list k last-input-event) kt-log) (list ?x ?y))) (got nil))
+  (dolist (key '("x" "y"))
+    (global-set-key key (lambda () (interactive)
+      (push (list last-command-event last-input-event (this-command-keys-vector) (this-single-command-keys)
+                  (this-single-command-raw-keys))
+            got))))
+  (execute-kbd-macro "a")
+  got)"#,
+    // INHERIT-INPUT-METHOD turns the caller's method on in the minibuffer.
+    r#"(with-current-buffer "*scratch*"
+  (activate-input-method "greek-polytonic")
+  (unwind-protect
+      (list (let ((executing-kbd-macro t) (unread-command-events (append "abg\r" nil))) (read-string "P: " nil nil nil t))
+            (let ((executing-kbd-macro t) (unread-command-events (append "abg\r" nil))) (read-string "P: "))
+            (let ((executing-kbd-macro t) (unread-command-events (append "abg\r" nil)))
+              (read-from-minibuffer "P: " nil nil nil nil nil t))
+            (let ((executing-kbd-macro t) (unread-command-events (append "abg\r" nil)))
+              (completing-read "P: " '("αβγ" "δ") nil nil nil nil nil t))
+            current-input-method)
+    (deactivate-input-method)))"#,
+    // Quail, by its keys: plain, dead keys, sequences resolved late,
+    // methods with candidates.
+    r#"(mapcar (lambda (case) (apply #'kt-typed case))
+  '(("greek-polytonic" "abg") ("greek-polytonic" "s'as") ("greek-polytonic" "'a`a\"a~a") ("greek-polytonic" "A'A")
+    ("greek-polytonic" "a'e[") ("greek-polytonic" ":a;w") ("bulgarian-phonetic" "abvgd shch")
+    ("TeX" "\\alpha x^2 \\to \\sum") ("latin-1-prefix" "'a\"o~n") ("latin-postfix" "a'o\"n~")
+    ("chinese-py" "ni hao ") ("chinese-py" "ni1hao2") ("german-postfix" "ae ue oe") ("rfc1345" "&a:")))"#,
 ];
 
 fn gnu_results(root: &Path) -> Vec<String> {

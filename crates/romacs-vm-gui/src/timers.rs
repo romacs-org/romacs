@@ -151,6 +151,16 @@ mod tests {
             (run-with-idle-timer 0.03 nil (lambda () (push (list 'idle (and (current-idle-time) t)) probe)))");
         assert_eq!(printed(&mut vm, "(list (read-string \"P: \") (reverse probe) (current-idle-time))"),
                    "(\"a\" (ordinary (idle t)) nil)");
+        // A keyboard key is recorded as typed before the input method runs,
+        // and a method that returns no event brings the message back.
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a'), Step::Key('b')].into()))));
+        printed(&mut vm, "(setq probe nil input-method-function
+                  (lambda (k) (push (list k input-method-previous-message (current-message)) probe) (and (= k ?b) (list ?x))))
+            (message \"before\")");
+        assert_eq!(printed(&mut vm, "(prog1 (list (read-event nil t) (reverse probe) (current-message)
+                                                  (let ((keys (append (recent-keys) nil))) (nthcdr (- (length keys) 2) keys)))
+                                       (setq input-method-function 'list))"),
+                   "(120 ((97 \"before\" nil) (98 \"before\" nil)) nil (97 98))");
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
         printed(&mut vm, "(setq probe nil)
             (run-with-timer 0.01 nil (lambda () (push 'ordinary probe)))
