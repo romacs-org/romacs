@@ -1889,7 +1889,14 @@ def composer(args, base, real=False):
         a.keys(*ctrl('g'))
         until(lambda: not popup(), 10, 'the menu closed')
         a.keys('w')
-        steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+
+        def copied():
+            steps['copied'] = parity_live.read_sexp(a.eval('(current-kill 0)'))[:40]
+            return steps['copied'].startswith('> say hello from Romacs')
+        try:
+            until(copied, 10, 'the turn copied')
+        except RuntimeError:
+            pass
         good.append(steps['menu_from_transcript'] and (steps['copied'] or '').startswith('> say hello from Romacs'))
         a.keys('-M', 'alt', '>', '-m', 'alt')
         # The queue is the session's: sent though the chat buffer is gone, and
@@ -1986,6 +1993,7 @@ def composer(args, base, real=False):
         good.append(typed('home_after_turn', 'more'))
         said = messages()
         result = {'steps': steps, 'messages': said[-1500:], 'title': look()[4]}
+        result['failed'] = [i for i, check in enumerate(good) if not check]
         result['ok'] = all(good) and not any(word in said for word in ('unsupported', 'read-only', 'error', 'Error'))
         return result
     finally:

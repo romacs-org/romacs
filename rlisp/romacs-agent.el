@@ -1139,6 +1139,10 @@ byte FROM (a record's start) when given."
       (when (eq (romacs-agent-connection session) process)
         (setf (romacs-agent-connection session) nil)
         (romacs-agent--drop-relays session)
+        ;; A run so short its supervisor left before answering the
+        ;; attachment: its journal has what was not sent.
+        (when (and (romacs-agent--per-turn-p session) (not (eq (romacs-agent-state session) 'idle)))
+          (romacs-agent--caught-up-p session))
         (if (and (romacs-agent--per-turn-p session) (eq (romacs-agent-state session) 'idle))
             (romacs-agent--run-ended session)
           (unless (eq (romacs-agent-state session) 'ended)
