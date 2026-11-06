@@ -40,7 +40,7 @@
     (romacs-agent-send-later session "second")
     (setf (romacs-agent-state session) 'idle)
     (cl-letf (((symbol-function 'romacs-agent--turn)
-               (lambda (s text)
+               (lambda (s text &rest _)
                  (push text turns)
                  ;; The run ends at once: the run's end asks for the next.
                  (romacs-agent--send-next s))))

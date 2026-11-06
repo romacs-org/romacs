@@ -308,11 +308,8 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (romacs-agent-attach-tests--with-chat session
     (romacs-agent-chat-attach "/a.png")
     (let ((saved (plist-get (romacs-agent-ui--desktop-save nil) :draft)))
-      (should (equal saved "[image: /a.png]"))
-      (romacs-agent-ui--set-draft "")
-      (should-not romacs-agent-ui--draft-images)
-      (romacs-agent-ui--set-draft saved)
-      (should (equal romacs-agent-ui--draft-images '("/a.png"))))))
+      (should (equal saved ""))
+      (should (equal (plist-get (romacs-agent-ui--desktop-save nil) :images) '("/a.png"))))))
 
 (ert-deftest romacs-agent-tray-follows-the-selected-chat ()
   ;; It reads the selected window, whatever buffer a hook runs in, and an
@@ -423,7 +420,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (romacs-agent-attach-tests--with-chat session
     (let ((image (expand-file-name "a,b.png" dir)))
       (write-region "x" nil image nil 'silent)
-      (should-not (romacs-agent-image-files (format "[image: %s]" image))))))
+      (should-not (string-match-p romacs-agent-image-token (format "[image: %s]" image))))))
 
 (ert-deftest romacs-agent-attach-leaves-no-file-when-capture-fails ()
   (romacs-agent-attach-tests--with-chat session
@@ -445,26 +442,77 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (should (string-match-p "> next" (buffer-string)))
       (should-not (next-single-property-change (point-min) 'display)))))
 
-(ert-deftest romacs-agent-codex-gets-a-prompt-s-images-on-its-command-line ()
+(defun romacs-agent-attach-tests--turn-argv (session send)
+  "The command line SEND makes SESSION's per-turn harness run."
+  (let ((argv nil))
+    (cl-letf (((symbol-function 'romacs-agent--instance) (lambda (&rest _) (list :program "codex")))
+              ((symbol-function 'romacs-agent--environment-words) #'ignore)
+              ((symbol-function 'romacs-agent--codex-mcp-words) #'ignore)
+              ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+              ((symbol-function 'romacs-agent--attach) #'ignore)
+              ((symbol-function 'romacs-agent--launch) (lambda (_ words &rest _) (setq argv words))))
+      (funcall send))
+    argv))
+
+(ert-deftest romacs-agent-only-attached-images-reach-codex ()
   (romacs-agent-attach-tests--with-chat session
-    (let ((image (expand-file-name "a.png" dir)))
+    (let ((image (expand-file-name "secret.png" dir))
+          (codex (romacs-agent--make :id "22222222-2222-4333-8444-666666666666" :harness 'codex :state 'idle
+                                     :title "codex" :dir dir :harness-session "thread")))
       (write-region "x" nil image nil 'silent)
-      (write-region (format "see [image: %s] and [image: /gone/b.png] and [image: /tmp/]" image)
-                    nil (expand-file-name "input" dir) nil 'silent)
-      (cl-letf (((symbol-function 'romacs-agent--instance) (lambda (&rest _) (list :program "codex")))
-                ((symbol-function 'romacs-agent--environment-words) #'ignore)
-                ((symbol-function 'romacs-agent--codex-mcp-words) #'ignore))
-        (setf (romacs-agent-harness-session session) "thread")
-        (let ((argv (romacs-agent--codex-argv session t)))
-          (should (equal (seq-take argv 6) (list "codex" "exec" "resume" "thread" "--image" image)))
-          ;; The prompt stays the last word: --image takes no more than its file.
-          (should (equal (nth 6 argv) "--json"))
-          (should (equal (car (last argv)) "-"))))
-      (delete-file (expand-file-name "input" dir))
-      (cl-letf (((symbol-function 'romacs-agent--instance) (lambda (&rest _) (list :program "codex")))
-                ((symbol-function 'romacs-agent--environment-words) #'ignore)
-                ((symbol-function 'romacs-agent--codex-mcp-words) #'ignore))
-        (should-not (member "--image" (romacs-agent--codex-argv session t)))))))
+      ;; A child's result quoting a file uploads nothing.
+      (let ((argv (romacs-agent-attach-tests--turn-argv
+                   codex (lambda () (romacs-agent-send codex (format "Delegated result: [image: %s]" image))))))
+        (should argv)
+        (should-not (member "--image" argv)))
+      (setf (romacs-agent-state codex) 'idle)
+      ;; Attached, it goes; before --json, so the prompt stays the last word.
+      (let ((argv (romacs-agent-attach-tests--turn-argv
+                   codex (lambda () (romacs-agent-send codex "see" nil nil (list image))))))
+        (should (equal (seq-take argv 6) (list "codex" "exec" "resume" "thread" "--image" image)))
+        (should (equal (nth 6 argv) "--json"))
+        (should (equal (car (last argv)) "-")))
+      ;; Queued, it waits with its message.
+      (setf (romacs-agent-state codex) 'running)
+      (romacs-agent-send-later codex "later" nil (list image))
+      (setf (romacs-agent-state codex) 'idle)
+      (let ((argv (romacs-agent-attach-tests--turn-argv codex (lambda () (romacs-agent--send-next codex)))))
+        (should (member image argv))))))
+
+(ert-deftest romacs-agent-attach-loads-the-tray ()
+  ;; The clipboard's way in reads no file: attaching alone must bring it.
+  (romacs-agent-attach-tests--with-chat session
+    (let ((required nil))
+      (cl-letf (((symbol-function 'require) (lambda (feature &rest _) (push feature required) t))
+                ((symbol-function 'romacs-agent-ui--tray) #'ignore))
+        (romacs-agent-chat-attach "/tmp/a.png"))
+      (should (memq 'romacs-agent-images required)))))
+
+(ert-deftest romacs-agent-m-n-keeps-the-draft-as-written ()
+  (romacs-agent-attach-tests--with-chat session
+    (setq romacs-agent-ui--history '("sent"))
+    (goto-char (point-max))
+    (insert "   indented draft\n\n")
+    (romacs-agent-chat-attach "/c.png")
+    (romacs-agent-chat-history-previous)
+    (romacs-agent-chat-history-next)
+    (should (equal (buffer-substring-no-properties romacs-agent-ui--end (point-max)) "   indented draft\n\n"))
+    (should (equal romacs-agent-ui--draft-images '("/c.png")))))
+
+(ert-deftest romacs-agent-png-size-is-read-from-the-header ()
+  (let ((file (make-temp-file "romacs-png" nil ".png")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (set-buffer-multibyte nil)
+            (insert (unibyte-string 137 ?P ?N ?G 13 10 26 10 0 0 0 13 ?I ?H ?D ?R 0 0 9 228 0 0 5 67)))
+          (should (equal (romacs-agent-ui--png-size file) '(2532 . 1347)))
+          (write-region "not an image at all, and long enough" nil file nil 'silent)
+          (should-not (romacs-agent-ui--png-size file)))
+      (delete-file file)))
+  (should (equal (romacs-agent-ui--fitted-size '(2532 . 1347) 480 270) '(480 . 256)))
+  (should (equal (romacs-agent-ui--fitted-size '(100 . 50) 480 270) '(100 . 50)))
+  (should (equal (romacs-agent-ui--fitted-size '(1725 . 70) 480 270) '(480 . 20))))
 
 (ert-deftest romacs-agent-transcript-shows-images-as-rows-below-the-prompt ()
   (romacs-agent-attach-tests--with-chat session
@@ -472,7 +520,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (write-region "x" nil image nil 'silent)
       (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
                 ((symbol-function 'create-image) (lambda (file &rest _) (list 'image :file file)))
-                ((symbol-function 'image-size) (lambda (&rest _) '(100 . 50)))
+                ((symbol-function 'romacs-agent-ui--png-size) (lambda (_) '(100 . 50)))
                 ((symbol-function 'default-line-height) (lambda () 20)))
         (romacs-agent-ui--draw session (list :type 'input :seq 1 :text (format "see [image: %s] and [image: /gone/b.png]" image))
                                (current-buffer)))

@@ -238,7 +238,8 @@ frame too small for the cards browses, at once or when it shrinks."
 (defun romacs-agent-images--tray-text (names columns)
   "The tray's hint line for NAMES within COLUMNS."
   (truncate-string-to-width
-   (format "%d image%s · C-c C-w removes the last, N C-c C-w the Nth"
+   (format (substitute-command-keys
+            "%d image%s · \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-remove-image] removes the last, N \\[romacs-agent-chat-remove-image] the Nth")
            (length names) (if (cdr names) "s" ""))
    columns nil nil "…"))
 
@@ -281,8 +282,11 @@ by its bottom when the composer is out of view; nil when it does not fit."
          (edges (window-edges window t nil t))
          (padding (* 2 (plist-get (alist-get 'card romacs-popup-look) :padding)))
          (height (+ padding (* lines (frame-char-height root))))
+         ;; Past the window's end is out of view: no position to measure,
+         ;; so a composer far below costs a key nothing.
+         (last-shown (window-end window))
          (y-of (lambda (position)
-                 (let ((seen (pos-visible-in-window-p position window t)))
+                 (let ((seen (and (<= position last-shown) (pos-visible-in-window-p position window t))))
                    (and seen (+ (nth 1 edges) (cadr seen))))))
          (extent (romacs-agent-images--tray-extent (nth 1 edges) (nth 3 edges)
                                                    (funcall y-of romacs-agent-ui--end)

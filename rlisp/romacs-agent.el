@@ -791,16 +791,6 @@ so: it resumes with `romacs-agent-resume'."
   (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
        (file-regular-p file) (file-readable-p file)))
 
-(defun romacs-agent-image-files (text)
-  "The image files TEXT's tokens name, in order.  A token whose file is no
-image stays plain words."
-  (let ((files nil) (start 0))
-    (while (string-match romacs-agent-image-token text start)
-      (setq start (match-end 0))
-      (when (romacs-agent-image-file-p (match-string 1 text))
-        (push (match-string 1 text) files)))
-    (nreverse files)))
-
 (defun romacs-agent--value (value)
   "VALUE, with JSON null and false as nil."
   (unless (memq value '(:null :false)) value))
@@ -853,10 +843,15 @@ a digest of its identity, UUID-shaped."
                               key)))
                 (hash-table-values romacs-agent--sessions))))
 
-(defun romacs-agent--turn (session text)
-  "Run one turn of SESSION's per-turn harness on prompt TEXT.  The
-supervisor journals TEXT and gives it to the harness itself, so the turn
-goes on whatever becomes of this server."
+(defvar romacs-agent--turn-images nil
+  "The images the user attached to the turn whose command line is built.
+Only what was attached: a message's text, which a child's result or a quote
+can fill, never names a file to send.")
+
+(defun romacs-agent--turn (session text &optional images)
+  "Run one turn of SESSION's per-turn harness on prompt TEXT with the
+attached IMAGES.  The supervisor journals TEXT and gives it to the harness
+itself, so the turn goes on whatever becomes of this server."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (let ((input (expand-file-name "input" (romacs-agent-dir session))))
     (let ((coding-system-for-write 'utf-8-unix))
@@ -864,7 +859,7 @@ goes on whatever becomes of this server."
     (set-file-modes input #o600)
     (setf (romacs-agent-journal-start session)
           (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-    (romacs-agent--launch session (romacs-agent--argv session t) input))
+    (romacs-agent--launch session (let ((romacs-agent--turn-images images)) (romacs-agent--argv session t)) input))
   (setf (romacs-agent-state session) 'starting)
   (romacs-agent--attach session 50))
 
@@ -1174,7 +1169,7 @@ for the next, sent once this one is off the queue."
                     ;; harness gone meanwhile) keeps it for the next turn end
                     ;; or resume.
                     (if (romacs-agent--per-turn-p session)
-                        (romacs-agent--turn session (car next))
+                        (romacs-agent--turn session (car next) (nth 3 next))
                       (romacs-agent--input session (car next)))
                     (drop)
                     (when (nth 1 next) (funcall (nth 1 next)))
@@ -1182,15 +1177,16 @@ for the next, sent once this one is off the queue."
                     (setf (romacs-agent-dispatch session) 'busy)))))))
       (setf (romacs-agent-dispatch session) nil))))
 
-(defun romacs-agent-send-later (session text &optional first)
-  "Send TEXT to SESSION once its running turn ends, now when none runs;
-FIRST puts it ahead of the messages already waiting."
+(defun romacs-agent-send-later (session text &optional first images)
+  "Send TEXT to SESSION, with the attached IMAGES, once its running turn
+ends, now when none runs; FIRST puts it ahead of the messages already
+waiting."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
-      (romacs-agent-send session text)
+      (romacs-agent-send session text nil nil images)
     (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil nil) (romacs-agent-queue session))
+        (progn (push (list text nil nil images) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
-      (romacs-agent--enqueue session (list text nil nil)))))
+      (romacs-agent--enqueue session (list text nil nil images)))))
 
 ;;; Lifecycle
 
@@ -1439,21 +1435,22 @@ resumed; a per-turn harness goes on with its next message."
     (when (> (or tries 100) 0)
       (run-at-time 0.1 nil #'romacs-agent--when-attached session function (1- (or tries 100))))))
 
-(defun romacs-agent-send (session text &optional delivered valid)
+(defun romacs-agent-send (session text &optional delivered valid images)
   "Send TEXT to SESSION's harness as the user's next message, then call
 DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
-given, then says it is no longer wanted."
+given, then says it is no longer wanted.  IMAGES are the files the user
+attached to it."
   (cond ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
          (romacs-agent--input session text)
          (when delivered (funcall delivered)))
         ;; Starting up: it goes once the harness is ready.
         ((not (romacs-agent--per-turn-p session))
-         (romacs-agent--enqueue session (list text delivered valid)))
+         (romacs-agent--enqueue session (list text delivered valid images)))
         ((or (process-live-p (romacs-agent-connection session))
              (memq (romacs-agent-state session) '(starting running)))
-         (romacs-agent--enqueue session (list text delivered valid)))
-        (t (romacs-agent--turn session text)
+         (romacs-agent--enqueue session (list text delivered valid images)))
+        (t (romacs-agent--turn session text images)
            (when delivered (funcall delivered)))))
 
 (defun romacs-agent--enqueue (session item)

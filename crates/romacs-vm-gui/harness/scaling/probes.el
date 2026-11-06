@@ -994,6 +994,36 @@ thousandth a stack mark."
           (dolist (session it) (romacs-agent-requested "scaling-parent" (romacs-agent-id session)))))
 
 ;; A walk through N images: each key reads the matches filtered once.
+;; 200 keys with the tray's real anchor and a composer past a transcript
+;; of N lines: what it measures must not grow with what is out of view.
+(scaling-probe agent-tray-far :n 20000
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-images)
+                (let ((buffer (get-buffer-create " *scaling-tray-far*")))
+                  (with-current-buffer buffer
+                    (erase-buffer)
+                    (dotimes (_ n) (insert "a line of the transcript\n"))
+                    (setq-local romacs-agent-ui--end (point-max-marker)))
+                  (set-window-buffer (selected-window) buffer)
+                  (set-window-start (selected-window) 1)
+                  buffer))
+  :body (with-current-buffer it
+          (goto-char (point-min))
+          (dotimes (_ 200) (romacs-agent-images--tray-anchor (selected-window) 3))))
+
+;; Replaying N images of a transcript lays them out from their headers.
+(scaling-probe agent-image-replay :n 400
+  :setup (progn (scaling--agent)
+                (require 'romacs-agent-ui)
+                (let ((file (make-temp-file "scaling-image" nil ".png")))
+                  (with-temp-file file
+                    (set-buffer-multibyte nil)
+                    (insert (unibyte-string 137 ?P ?N ?G 13 10 26 10 0 0 0 13 ?I ?H ?D ?R 0 0 3 192 0 0 2 28)))
+                  (cons file n)))
+  :body (cl-letf (((symbol-function 'image-size) (lambda (&rest _) (error "Replay decodes nothing"))))
+          (dotimes (_ (cdr it))
+            (or (romacs-agent-ui--image-strips (car it)) (error "No strips")))))
+
 ;; N keys in a chat whose draft carries N images: the tray is drawn once.
 (scaling-probe agent-tray-keys :n 2000
   :setup (progn (scaling--agent)

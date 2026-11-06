@@ -290,6 +290,14 @@ cursor, or scrolled back, becomes a plain Emacs buffer."
       (progn (romacs--term-track) (romacs-term--motion-hint))
     (error nil)))
 
+(defun romacs-term--history-keys ()
+  "The keys that recall the shell's history, as a hint names them; their
+defaults where the bootstrap Lisp has no help.el."
+  (if (fboundp 'substitute-command-keys)
+      (substitute-command-keys
+       "\\<romacs-term-history-map>\\[romacs-term-previous-input]/\\[romacs-term-next-input]")
+    "M-p/M-n"))
+
 (defun romacs-term--motion-hint ()
   "The first time a command leaves a terminal's cursor, say once how keys
 work there: motion moves, typing or C-c C-j returns, and M-p and M-n at
@@ -301,7 +309,7 @@ the cursor recall the shell's history.  A command's own message (M-<'s
       (when (and (plist-get state :running) (not (plist-get state :alternate))
                  (not (plist-get state :following)) (not (current-message)))
         (setq romacs-term--motion-hinted t)
-        (message "C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history")))))
+        (message "C-p/C-n move; type or C-c C-j to return; there %s recall history" (romacs-term--history-keys))))))
 
 ;;;; Commands
 
@@ -328,7 +336,8 @@ puts the window back on the cursor, as GNU term's line mode key does."
           ((not (plist-get state :following)) (romacs-term--snap))
           (t (romacs--term-follow session nil)
              (setq romacs-term--motion-hinted t)
-             (message "Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history")))))
+             (message "Terminal left at its cursor: C-p/C-n move; type or C-c C-j to return; there %s recall history"
+                      (romacs-term--history-keys))))))
 
 (defun romacs-term-send-key ()
   "Send the key that ran this command to the terminal, as the terminal's
@@ -352,12 +361,12 @@ makes it a meta key.  The selected window follows the cursor again."
 
 (defun romacs-term-previous-input ()
   "Recall the previous line of the shell's history, on the shell's prompt."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (romacs-term--recall 'up))
 
 (defun romacs-term-next-input ()
   "Recall the next line of the shell's history, on the shell's prompt."
-  (interactive)
+  (interactive nil romacs-term-mode)
   (romacs-term--recall 'down))
 
 (defun romacs-term--paste (text)

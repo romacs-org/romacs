@@ -12,13 +12,12 @@
 (require 'romacs-agent)
 
 (defun romacs-agent--codex-image-words (session)
-  "Codex's arguments for the images of SESSION's prompt: it is given a
-turn's images on its command line, and does not open a file a prompt names."
-  (let ((input (expand-file-name "input" (romacs-agent-dir session))))
-    (when (file-readable-p input)
-      (mapcan (lambda (file) (list "--image" file))
-              (romacs-agent-image-files
-               (with-temp-buffer (insert-file-contents input) (buffer-string)))))))
+  "Codex's arguments for the images attached to this turn: it is given them
+on its command line, and does not open a file a prompt names.  Attached,
+never read from the prompt: `--image' uploads the file."
+  (ignore session)
+  (mapcan (lambda (file) (list "--image" file))
+          (seq-filter #'romacs-agent-image-file-p romacs-agent--turn-images)))
 
 (defun romacs-agent--codex-argv (session resume)
   "`codex exec''s command line for one turn of SESSION, its prompt on
