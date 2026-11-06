@@ -48,7 +48,30 @@ fn float_int(f: f64, i: num_bigint::BigInt) -> u8 {
     )
 }
 
+fn order_bits(order: Option<std::cmp::Ordering>) -> u8 {
+    match order {
+        Some(std::cmp::Ordering::Less) => LT,
+        Some(std::cmp::Ordering::Greater) => GT,
+        Some(std::cmp::Ordering::Equal) => EQ,
+        None => 0,
+    }
+}
+
+/// GNU coerce_marker's failure; data.c arithcompare meets it for either
+/// operand before it type-checks the first.
+fn unset_marker(cx: &Leaf<'_>, v: Value) -> std::result::Result<(), Fault> {
+    match cx.marker_position(v) {
+        Some(None) => Err(Fault::Error("Marker does not point anywhere".into())),
+        _ => Ok(()),
+    }
+}
+
 fn arithcompare(cx: &Leaf<'_>, a: Value, b: Value) -> std::result::Result<u8, Fault> {
+    if let Some(order) = cx.quick_compare(a, b) {
+        return Ok(order_bits(order));
+    }
+    unset_marker(cx, a)?;
+    unset_marker(cx, b)?;
     let x = number(cx, a)?;
     let y = number(cx, b)?;
     Ok(match (x, y) {
@@ -63,11 +86,13 @@ fn arithcompare(cx: &Leaf<'_>, a: Value, b: Value) -> std::result::Result<u8, Fa
     })
 }
 
-fn driver(cx: &Leaf<'_>, args: &[Value], mask: u8) -> Out {
-    for pair in args.windows(2) {
-        if arithcompare(cx, pair[0], pair[1])? & mask == 0 {
+fn driver(cx: &Leaf<'_>, first: Value, rest: &[Value], mask: u8) -> Out {
+    let mut previous = first;
+    for &next in rest {
+        if arithcompare(cx, previous, next)? & mask == 0 {
             return Ok(Value::NIL);
         }
+        previous = next;
     }
     Ok(Value::TRUE)
 }
@@ -117,26 +142,19 @@ fn modulo(cx, x: Value, y: Value) {
     }
 }}
 
-fn with_first(first: Value, rest: &[Value]) -> Vec<Value> {
-    let mut all = Vec::with_capacity(rest.len() + 1);
-    all.push(first);
-    all.extend_from_slice(rest);
-    all
-}
-
 defsubr! { name = "<=", gnu = "data.c:2894", effect = Pure,
 fn leq(cx, first: Value; rest rest) {
-    driver(cx, &with_first(first, rest), LT | EQ)
+    driver(cx, first, rest, LT | EQ)
 }}
 
 defsubr! { name = ">", gnu = "data.c:2883", effect = Pure,
 fn gtr(cx, first: Value; rest rest) {
-    driver(cx, &with_first(first, rest), GT)
+    driver(cx, first, rest, GT)
 }}
 
 defsubr! { name = ">=", gnu = "data.c:2905", effect = Pure,
 fn geq(cx, first: Value; rest rest) {
-    driver(cx, &with_first(first, rest), GT | EQ)
+    driver(cx, first, rest, GT | EQ)
 }}
 
 // Named `/=`, which primh cannot use as a file name; recorded through

@@ -745,12 +745,7 @@ impl Vm {
             return Err("wrong primitive arity".into());
         }
         if p == Remainder {
-            return Value::integer(
-                args[0]
-                    .as_integer()?
-                    .checked_rem(args[1].as_integer()?)
-                    .ok_or("arithmetic error")?,
-            );
+            return self.remainder(args[0], args[1]);
         }
         if p == SetBuffer {
             let mut v = args[0];

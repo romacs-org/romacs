@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "52ecf23991fd623dc4d6019804ae9b421bd3724a0b2901781452e888be207673",
+  "source_fingerprint": "5fbbe175e8ab4677e404cb17efb1f2c673670acff49ff92f7c639510f261286f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -191,7 +191,7 @@
   "/=": {
    "name": "/=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:144"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:162"
   },
   "1+": {
    "name": "1+",
@@ -214,7 +214,7 @@
   "<=": {
    "name": "<=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:127"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:145"
   },
   "=": {
    "name": "=",
@@ -225,12 +225,12 @@
   ">": {
    "name": ">",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:132"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:150"
   },
   ">=": {
    "name": ">=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:137"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:155"
   },
   "abort-recursive-edit": {
    "name": "abort-recursive-edit",
@@ -695,7 +695,7 @@
   "car-less-than-car": {
    "name": "car-less-than-car",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:75"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:100"
   },
   "car-safe": {
    "name": "car-safe",
@@ -742,7 +742,7 @@
   "cdr-safe": {
    "name": "cdr-safe",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns.rs:87"
+   "registered_at": "crates/romacs-vm/src/prims/fns.rs:90"
   },
   "ceiling": {
    "name": "ceiling",
@@ -3382,7 +3382,7 @@
   "mod": {
    "name": "mod",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:92"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:117"
   },
   "modify-category-entry": {
    "name": "modify-category-entry",
@@ -3965,7 +3965,7 @@
   "proper-list-p": {
    "name": "proper-list-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns.rs:69"
+   "registered_at": "crates/romacs-vm/src/prims/fns.rs:72"
   },
   "propertize": {
    "name": "propertize",
@@ -5178,7 +5178,7 @@
   "safe-length": {
    "name": "safe-length",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns.rs:80"
+   "registered_at": "crates/romacs-vm/src/prims/fns.rs:83"
   },
   "save-current-buffer": {
    "name": "save-current-buffer",
@@ -6084,7 +6084,7 @@
   "take": {
    "name": "take",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fns.rs:92"
+   "registered_at": "crates/romacs-vm/src/prims/fns.rs:95"
   },
   "tan": {
    "name": "tan",

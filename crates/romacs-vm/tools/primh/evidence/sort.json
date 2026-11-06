@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "sort",
- "spec_sha256": "3e0c232f13be29f773e9455ee2d3ef41c74a470e8a27aff334188f025808ceaa",
+ "spec_sha256": "39cb52e5cf87d923b90580bee095cd6984b405773caaf10893663511fae95a79",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
  "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",

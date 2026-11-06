@@ -968,6 +968,10 @@ mod leaf {
         pub fn eql(&self, a: Value, b: Value) -> bool {
             self.vm.eql(a, b)
         }
+        /// `Vm::quick_cmp'.
+        pub fn quick_compare(&self, a: Value, b: Value) -> Option<Option<std::cmp::Ordering>> {
+            self.vm.quick_cmp(a, b)
+        }
         /// Reuses GNU-compatible cycle/depth handling, preserving its typed errors.
         pub fn equal(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal(a, b)

@@ -14,7 +14,7 @@
     "many"
   ],
   "gnu_def": "fns.c:2447",
-  "rust": "src/prims/leaf_sequences.rs:102",
+  "rust": "src/prims/leaf_sequences.rs:13",
   "probes": [
     "(sort '(3 1 2) #'<)",
     "(sort nil 'invalid)",

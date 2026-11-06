@@ -1,48 +1,6 @@
 //! Ordinary primitives first exercised by the unmodified bundled loadup.
 use super::*;
 impl Vm {
-    fn equal_bootstrap(&self, a: Value, b: Value, depth: usize) -> Result<bool> {
-        if a == b {
-            return Ok(true);
-        }
-        if depth > 100 {
-            return Err("equal nesting limit exceeded".into());
-        }
-        // Conses first: a cons is never a string, and `member' and `assoc'
-        // over lists compare conses most, so they skip two string views.
-        match (a.tag() == 3, b.tag() == 3) {
-            (true, true) => {
-                let (ac, ad) = self.cons_pair(a)?;
-                let (bc, bd) = self.cons_pair(b)?;
-                return Ok(self.equal_bootstrap(ac, bc, depth + 1)?
-                    && self.equal_bootstrap(ad, bd, depth + 1)?);
-            }
-            (true, false) | (false, true) => return Ok(false),
-            (false, false) => {}
-        }
-        if let (Some(x), Some(y)) = (self.str_view(a), self.str_view(b)) {
-            return Ok(x.len() == y.len() && x.bytes() == y.bytes());
-        }
-        Ok(match (self.object_if(a), self.object_if(b)) {
-            (Some(data::Object::Float(a)), Some(data::Object::Float(b))) => a == b,
-            (Some(data::Object::Bignum(a)), Some(data::Object::Bignum(b))) => a == b,
-            (Some(data::Object::Bytes(a)), Some(data::Object::Bytes(b))) => a == b,
-            (Some(data::Object::BoolVector(a)), Some(data::Object::BoolVector(b))) => a == b,
-            (Some(data::Object::Vector(a)), Some(data::Object::Vector(b)))
-            | (Some(data::Object::Record(a)), Some(data::Object::Record(b))) => {
-                if a.len() != b.len() {
-                    false
-                } else {
-                    let mut equal = true;
-                    for (&a, &b) in a.iter().zip(b) {
-                        equal &= self.equal_bootstrap(a, b, depth + 1)?;
-                    }
-                    equal
-                }
-            }
-            _ => false,
-        })
-    }
     /// data.c:1021: a non-nil DOCSTRING becomes SYMBOL's
     /// `function-documentation'.
     fn defalias_documentation(&mut self, args: &[Value]) -> Result<()> {
@@ -173,7 +131,7 @@ impl Vm {
                 let mut steps = 0;
                 while tail != Value::NIL {
                     let (car, cdr) = self.cons_pair(tail)?;
-                    if self.equal_bootstrap(a[0], car, 0)? {
+                    if self.equal_text(a[0], car)? {
                         return Ok(tail);
                     }
                     tail = cdr;

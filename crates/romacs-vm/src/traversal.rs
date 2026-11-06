@@ -111,6 +111,67 @@ impl Vm {
     }
 }
 
+impl Vm {
+    /// The length of the proper list LIST, else UNBOUND: a dotted or
+    /// circular list is the primitive's to report.
+    #[inline(never)]
+    pub(super) fn list_length_kernel(&self, list: Value) -> Value {
+        let (mut tail, mut length, limit) = (list, 0usize, self.list_limit());
+        while let Some((_, next)) = pair(self, tail) {
+            tail = next;
+            length += 1;
+            if length > limit {
+                return Value::UNBOUND;
+            }
+        }
+        if tail == Value::NIL { Value::integer(length as i64).unwrap_or(Value::UNBOUND) } else { Value::UNBOUND }
+    }
+    /// `nthcdr' of a count below GNU's SMALL_LIST_LEN_MAX on a plain walk,
+    /// else UNBOUND.
+    #[inline(never)]
+    pub(super) fn nthcdr_kernel(&self, count: Value, list: Value) -> Value {
+        let Some(count) = count.integer_value().filter(|&n| n <= 127) else { return Value::UNBOUND };
+        let mut tail = list;
+        for _ in 0..count.max(0) {
+            match pair(self, tail) {
+                Some((_, next)) => tail = next,
+                None if tail == Value::NIL => return Value::NIL,
+                None => return Value::UNBOUND,
+            }
+        }
+        tail
+    }
+    /// `member' over a proper list, else UNBOUND.
+    #[inline(never)]
+    pub(super) fn member_kernel(&self, element: Value, list: Value) -> Value {
+        let (mut tail, mut steps, limit) = (list, 0usize, self.list_limit());
+        while let Some((item, next)) = pair(self, tail) {
+            match self.equal_kernel(element, item) {
+                Value::TRUE => return tail,
+                Value::UNBOUND => return Value::UNBOUND,
+                _ => {}
+            }
+            tail = next;
+            steps += 1;
+            if steps > limit {
+                return Value::UNBOUND;
+            }
+        }
+        if tail == Value::NIL { Value::NIL } else { Value::UNBOUND }
+    }
+    /// `get' of an ordinary property, else UNBOUND: a fence observes the
+    /// read, and the condition properties live in the registry.
+    #[inline(never)]
+    pub(super) fn get_kernel(&self, symbol: Value, property: Value) -> Value {
+        let registry = property.index_if(7).and_then(|i| i.checked_sub(1)).and_then(|slot| self.symbol_names.get(slot))
+            .is_some_and(|name| name == "error-conditions" || name == "error-message");
+        if registry || self.fence.is_some() {
+            return Value::UNBOUND;
+        }
+        self.symbol_property(symbol, property).unwrap_or(Value::UNBOUND)
+    }
+}
+
 // Keep error formatting and image-authentication stack addresses out of the
 // tail-threaded handler. Even a cold address escape can inhibit LLVM tail calls.
 #[inline(never)]

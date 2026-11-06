@@ -556,6 +556,24 @@ impl Vm {
     pub(super) fn equal(&self, a: Value, b: Value) -> Hashed<bool> {
         self.equal_at(a, b, 0, &mut HashMap::default(), false)
     }
+    /// `equal' for a primitive whose faults travel as text
+    /// (`primitive_condition').
+    pub(super) fn equal_text(&self, a: Value, b: Value) -> Result<bool> {
+        self.equal(a, b).map_err(|fault| match fault {
+            HashFault::Error(message, _) => message.to_owned(),
+            HashFault::Internal(text) => text,
+            _ => "equal failed".to_owned(),
+        })
+    }
+    /// `equal' for a kernel: UNBOUND on a fault, which the primitive raises.
+    #[inline(never)]
+    pub(super) fn equal_kernel(&self, a: Value, b: Value) -> Value {
+        match self.equal(a, b) {
+            Ok(true) => Value::TRUE,
+            Ok(false) => Value::NIL,
+            Err(_) => Value::UNBOUND,
+        }
+    }
     /// internal_equal with EQUAL_INCLUDING_PROPERTIES: strings must also
     /// carry equal text properties at every position.
     pub(crate) fn equal_including_properties(&self, a: Value, b: Value) -> Hashed<bool> {

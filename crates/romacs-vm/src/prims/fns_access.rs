@@ -7,12 +7,7 @@ use crate::prim::leaf::Kind;
 defsubr! { name = "elt", gnu = "fns.c:1853", effect = Pure,
 fn elt(cx, sequence: Value, index: Value) {
     if sequence == Value::NIL || cx.pair(sequence).is_some() {
-        let tail = if let Some(n) = index.integer_value() {
-            super::fns::nthcdr(cx, Integer(n), sequence)?
-        } else {
-            let n = cx.bigint_value(index).ok_or(Fault::Wrong("integerp", index))?;
-            bignum_nthcdr(cx, n, sequence)?
-        };
+        let tail = super::fns::nthcdr(cx, index, sequence)?;
         return match cx.pair(tail) {
             Some((car, _)) => Ok(car),
             None if tail == Value::NIL => Ok(Value::NIL),
@@ -46,7 +41,7 @@ fn elt(cx, sequence: Value, index: Value) {
 // Fnthcdr's bignum correction (fns.c:1813): reduce the original integer
 // modulo the real cycle, never truncate it to a machine word. Values remain
 // leaf-local and allocation cannot collect while the visited map is live.
-fn bignum_nthcdr(cx: &Leaf<'_>, mut n: num_bigint::BigInt, list: Value) -> Out {
+pub(super) fn bignum_nthcdr(cx: &Leaf<'_>, mut n: num_bigint::BigInt, list: Value) -> Out {
     if n.sign() == num_bigint::Sign::Minus { return Ok(list); }
     let mut tail = list;
     let mut seen = std::collections::HashMap::new();

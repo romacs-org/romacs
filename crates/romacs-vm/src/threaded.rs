@@ -48,6 +48,32 @@ mod control_tests {
         }
     }
 
+    /// Rows left to the primitive, on purpose: each does its work in the
+    /// buffer, in text or by allocating, so a kernel saves little of a call.
+    /// A new row needs a kernel or a place here.
+    const GENERIC_BYTE_OPS: &[&str] = &[
+        "current-column", "current-buffer", "widen", "end-of-line", "forward-char", "forward-line",
+        "following-char", "preceding-char", "eolp", "eobp", "bolp", "bobp", "symbol-value", "set-buffer",
+        "forward-word", "char-syntax", "nreverse", "skip-chars-forward", "skip-chars-backward", "set",
+        "fset", "substring", "move-marker", "set-marker", "match-beginning", "match-end", "upcase",
+        "downcase", "string=", "string<", "string-equal", "string-lessp", "elt", "rplaca", "rplacd",
+        "buffer-substring", "delete-region", "narrow-to-region", "concat", "indent-to-column",
+        "indent-to", "cdr-safe", "not",
+    ];
+
+    #[test]
+    fn every_sealed_row_has_a_kernel_or_is_named_generic() {
+        for (name, min, max) in crate::sealed::rows() {
+            if GENERIC_BYTE_OPS.contains(&name) {
+                continue;
+            }
+            let covered = (min..=max.min(3)).any(|argc| {
+                kernel(crate::sealed::target(name, argc).expect("a row's own count"), argc).is_some()
+            });
+            assert!(covered, "{name} has no kernel and is not named generic");
+        }
+    }
+
     #[test]
     fn inline_side_table_tracks_release_and_compaction() {
         let vm = Vm::new();
@@ -1797,6 +1823,10 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
             ("nconc", 2) => Some(nconc2),
             ("plist-get", 2) => Some(traversal::plist_get),
             ("symbol-function", 1) => Some(symbol_function),
+            (">", 2) => Some(greater),
+            ("<=", 2) => Some(less_equal),
+            (">=", 2) => Some(greater_equal),
+            ("nthcdr", 2) => Some(nthcdr),
             _ => None,
         };
     }
@@ -1819,12 +1849,21 @@ fn kernel(target: Value, argc: usize) -> Option<Handler> {
         (Primitive::Equal, 2) => equal,
         (Primitive::Cons, 2) => cons,
         (Primitive::Remainder, 2) => remainder,
+        (Primitive::Div, 2) => divide,
+        (Primitive::Max, 2) => max,
+        (Primitive::Min, 2) => min,
+        (Primitive::Aset, 3) => aset,
+        (Primitive::DeepEqual, 2) => deep_equal,
+        (Primitive::Member, 2) => member,
+        (Primitive::Get, 2) => get,
+        (Primitive::List, _) => list,
         (Primitive::Consp, 1) => consp,
         (Primitive::Symbolp, 1) => symbolp,
         (Primitive::Stringp, 1) => stringp,
         (Primitive::Integerp, 1) => integerp,
         (Primitive::CarSafe, 1) => car_safe,
-        (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
+        (Primitive::Aref, 2) => sequence_read,
+        (Primitive::Length, 1) => length,
         (Primitive::CharAfter, 0 | 1)
         | (Primitive::Point | Primitive::PointMin | Primitive::PointMax | Primitive::BufferSize, 0)
         | (Primitive::GotoChar, 1) => buffer_read,
@@ -4066,16 +4105,33 @@ unsafe fn reentrant_step(
     }
 }
 
+/// A kernel's case with an operand that is no fixnum: `Vm::float_kernel',
+/// else the primitive. A handler of its own, so a kernel's fixnum path needs
+/// no stack frame.
+#[inline(never)]
+unsafe fn not_fixnums<const KERNEL: u8>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let x = *r.add(i.d);
+        let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
+        let value = e.vm.float_kernel(KERNEL, x, y);
+        if value == Value::UNBOUND {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
 macro_rules! numeric {
-    ($name:ident,$body:expr) => {
+    ($name:ident,$kernel:expr,$body:expr) => {
         #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), unsafe(link_section = concat!(".text.vm2.", stringify!($name))))]
         unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
                 let y = if i.e == 2 { *r.add(i.d + 1) } else { Value(5) };
-                if x.tag() != 1 || y.tag() != 1 {
-                    return sealed_call(e, r, pc);
+                if x.0 & 3 != 1 || y.0 & 3 != 1 {
+                    return not_fixnums::<{ $kernel }>(e, r, pc);
                 }
                 let result: Option<Value> = ($body)(x, y);
                 match result {
@@ -4089,33 +4145,95 @@ macro_rules! numeric {
         }
     };
 }
-numeric!(mul, |x: Value, y: Value| ((x.0 as i64) >> 2)
+numeric!(mul, numbers::op::MUL, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_mul((y.0 as i64) >> 2)
     .and_then(|n| Value::fixnum(n)));
-numeric!(add, |x: Value, y: Value| (x.0 as i64)
+numeric!(add, numbers::op::ADD, |x: Value, y: Value| (x.0 as i64)
     .checked_add((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
-numeric!(sub, |x: Value, y: Value| (x.0 as i64)
+numeric!(sub, numbers::op::SUB, |x: Value, y: Value| (x.0 as i64)
     .checked_sub((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
-numeric!(inc, |x: Value, _y: Value| (x.0 as i64)
+numeric!(inc, numbers::op::ADD, |x: Value, _y: Value| (x.0 as i64)
     .checked_add(4)
     .map(|n| Value(n as u64)));
-numeric!(dec, |x: Value, _y: Value| (x.0 as i64)
+numeric!(dec, numbers::op::SUB, |x: Value, _y: Value| (x.0 as i64)
     .checked_sub(4)
     .map(|n| Value(n as u64)));
-numeric!(less, |x: Value, y: Value| Some(
-    if (x.0 as i64) < (y.0 as i64) {
-        Value::TRUE
-    } else {
-        Value::NIL
+fn boolean(holds: bool) -> Option<Value> {
+    Some(if holds { Value::TRUE } else { Value::NIL })
+}
+numeric!(less, numbers::op::LESS, |x: Value, y: Value| boolean((x.0 as i64) < (y.0 as i64)));
+numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| boolean((x.0 as i64) > (y.0 as i64)));
+numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) <= (y.0 as i64)));
+numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) >= (y.0 as i64)));
+numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| boolean(x == y));
+// A zero divisor and the one quotient past the fixnums are the primitive's.
+numeric!(divide, numbers::op::DIV, |x: Value, y: Value| ((x.0 as i64) >> 2)
+    .checked_div((y.0 as i64) >> 2)
+    .and_then(Value::fixnum));
+/// A kernel whose work is one `Vm' call of its operands, UNBOUND leaving the
+/// call to the primitive.
+macro_rules! through {
+    ($name:ident, |$vm:ident, $x:ident, $y:ident| $body:expr) => {
+        unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let ($x, $y) = (*r.add(i.d), *r.add(i.d + 1));
+                let $vm = &mut *e.vm;
+                let value = $body;
+                if value == Value::UNBOUND {
+                    return sealed_call(e, r, pc);
+                }
+                *r.add(i.a) = value;
+                advance(e, r, pc)
+            }
+        }
+    };
+}
+through!(deep_equal, |vm, x, y| vm.equal_kernel(x, y));
+through!(member, |vm, x, y| vm.member_kernel(x, y));
+through!(get, |vm, x, y| vm.get_kernel(x, y));
+through!(nthcdr, |vm, x, y| vm.nthcdr_kernel(x, y));
+through!(max, |_vm, x, y| if x.0 & 3 != 1 || y.0 & 3 != 1 { Value::UNBOUND } else if (y.0 as i64) > (x.0 as i64) { y } else { x });
+through!(min, |_vm, x, y| if x.0 & 3 != 1 || y.0 & 3 != 1 { Value::UNBOUND } else if (y.0 as i64) < (x.0 as i64) { y } else { x });
+unsafe fn aset(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let value = *r.add(i.d + 2);
+        if !e.vm.aset_kernel(*r.add(i.d), *r.add(i.d + 1), value) {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
     }
-));
-numeric!(equal, |x: Value, y: Value| Some(if x == y {
-    Value::TRUE
-} else {
-    Value::NIL
-}));
+}
+unsafe fn length(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let x = *r.add(i.d);
+        if x != Value::NIL && x.0 & 7 != 3 {
+            return sequence_read(e, r, pc);
+        }
+        let value = e.vm.list_length_kernel(x);
+        if value == Value::UNBOUND {
+            return sealed_call(e, r, pc);
+        }
+        *r.add(i.a) = value;
+        advance(e, r, pc)
+    }
+}
+unsafe fn list(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let i = &*pc;
+        let mut tail = Value::NIL;
+        for at in (0..i.e).rev() {
+            tail = e.vm.alloc_cons(*r.add(i.d + at), tail);
+        }
+        *r.add(i.a) = tail;
+        advance(e, r, pc)
+    }
+}
 unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;

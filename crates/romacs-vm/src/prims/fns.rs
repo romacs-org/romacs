@@ -23,8 +23,11 @@ fn for_each_tail_safe(cx: &Leaf<'_>, mut tail: Value, mut body: impl FnMut(Value
 }
 
 defsubr! { name = "nthcdr", gnu = "fns.c:1749", effect = Pure,
-fn nthcdr(cx, n: Integer, list: Value) {
-    let Integer(n) = n;
+fn nthcdr(cx, n: Value, list: Value) {
+    let Some(n) = n.integer_value() else {
+        let n = cx.bigint_value(n).ok_or(Fault::Wrong("integerp", n))?;
+        return super::fns_access::bignum_nthcdr(cx, n, list);
+    };
     let mut tail = list;
     if n <= 127 {
         // GNU's SMALL_LIST_LEN_MAX path: no cycle check.
