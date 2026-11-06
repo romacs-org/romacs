@@ -146,7 +146,7 @@ fn the_bar_expands_the_mode_line_at_its_own_columns() {
     assert_eq!(eval(&mut vm, "(let ((noninteractive nil)) (format-mode-line mode-line-format))"), "\"*scratch* --\"");
     // A longer format is clipped at them.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
-    assert_eq!(shows(&mut vm), "x".repeat(121));
+    assert_eq!(shows(&mut vm), "x".repeat(119));
     // A window's `mode-line-format' parameter is its effective format.
     eval(&mut vm, "(set-window-parameter nil 'mode-line-format \"param %l\")");
     assert_eq!(bar(&mut vm).text.utf8, "param 1");
@@ -245,6 +245,30 @@ fn a_context_marker_does_not_align_the_bar() {
     assert_eq!(shown.marks.right_align(), None);
 }
 
+/// A pill reads `romacs-pill-modified' only on the bar's own line, and
+/// from the owner's buffer as it was before the line's Lisp ran, which may
+/// collect: a modified owner with no line of its own leaves a context's
+/// pill in its own colour; a collecting line still recolours the owner's.
+#[test]
+fn only_the_owners_pill_reads_its_modified_state() {
+    let mut vm = session();
+    vm.set_gc_stress(1);
+    eval(&mut vm, "(set-face-attribute 'error nil :foreground \"#ff0000\")");
+    let pill = "(:propertize \"ID\" romacs-segment id romacs-pill mode-line-highlight romacs-pill-modified error)";
+    eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below))");
+    eval(&mut vm, &format!("(with-current-buffer (get-buffer-create \"pop\") (setq-local mode-line-format '({pill})))"));
+    eval(&mut vm, "(set-window-buffer w2 \"pop\")");
+    eval(&mut vm, "(progn (setq-local mode-line-format nil) (insert \"x\"))");
+    let shown = bar(&mut vm);
+    let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the context's pill");
+    assert_eq!(id.pill.and_then(|p| p.foreground), None, "a context keeps its own colour: {:?}", shown.text.utf8);
+    // The owner's own line collects as it expands: its pill still recolours.
+    eval(&mut vm, &format!("(setq-local mode-line-format '((:eval (progn (garbage-collect) \"\")) {pill}))"));
+    let shown = bar(&mut vm);
+    let id = shown.marks.segments.iter().find(|s| s.name == "id").expect("the owner's pill");
+    assert_eq!(id.pill.and_then(|p| p.foreground), Some([0xff, 0, 0]));
+}
+
 /// A `romacs-icon' alist's first entry for a character decides, as
 /// `assq' and the painter do: `none' drops it only when it comes first.
 #[test]
@@ -275,6 +299,7 @@ fn projected_values_are_the_formats_data() {
 #[test]
 fn a_collecting_line_keeps_its_windows() {
     let mut vm = session();
+    vm.set_gc_stress(1);
     eval(&mut vm, "(put 'gc-probe 'risky-local-variable t)");
     eval(&mut vm, "(setq-default mode-line-format '(:eval (progn (garbage-collect) \"MAIN\")))");
     eval(&mut vm, "(setq w1 (selected-window) w2 (split-window-below) w3 (split-window-right))");
@@ -317,11 +342,14 @@ fn a_click_after_dashes_reaches_the_shown_element() {
 #[test]
 fn a_full_bar_drops_segments_by_priority() {
     let mut vm = romacs_lines();
+    // A name the bar does not cut in its middle.
+    eval(&mut vm, "(setq romacs-mode-line-buffer-name-width 200)");
     eval(&mut vm, &format!("(rename-buffer \"{}\")", "n".repeat(100)));
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"buffer") && !names.contains(&"major-mode"), "{names:?}");
-    assert!(shown.text.utf8.chars().count() <= 121, "{:?}", shown.text.utf8);
+    // The mode name has no priority: the position goes, it stays.
+    assert!(names.contains(&"buffer") && names.contains(&"major-mode") && !names.contains(&"position"), "{names:?}");
+    assert!(shown.text.utf8.chars().count() <= 119, "{:?}", shown.text.utf8);
     // A click reads the bar's text as it shows, segments dropped.
     let length = shown.text.utf8.chars().count();
     assert_eq!(eval(&mut vm, &format!("(length (nth 1 (romacs--status-bar-target {})))", length - 1)), length.to_string());
@@ -445,10 +473,11 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 }
 
 /// The bar's marks under Romacs's mode line (VM2-STATUS-BAR): its
-/// segments, the `right-align' marker, the buffer's pill on
-/// `romacs-mode-line-pill''s background, `%*' drawn as an icon while
-/// Romacs Icons is there; `romacs-status-bar-string' is what the bar
-/// shows, the right side flush with its right edge.
+/// segments, the `centre-align' and `right-align' markers, the buffer's
+/// pill on `romacs-mode-line-pill''s background, its text in
+/// `romacs-mode-line-modified' while the buffer is modified, `%*' drawn
+/// as an icon while Romacs Icons is there; `romacs-status-bar-string' is
+/// what the bar shows, the right side flush with its right edge.
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
@@ -460,26 +489,30 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\")");
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
-    for name in ["front", "buffer", "position", "right-align", "major-mode"] {
+    for name in ["buffer", "position", "centre-align", "right-align", "major-mode"] {
         assert!(names.contains(&name), "{name} in {names:?}");
     }
     // The default coding says nothing.
     assert!(!names.contains(&"encoding"), "{names:?}");
-    // The buffer has no pill, as doom-modeline's has none.
+    // The buffer's identity on its pill, in its own faces while unmodified.
+    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-modified nil :foreground \"#e0a030\")");
     let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
-    assert_eq!(buffer.pill, None);
+    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], None)));
     assert!(shown.text.utf8[buffer.bytes.clone()].contains("*scratch*"));
     // `%*' of the unmodified *scratch*: nothing, its `-' dropped.
     assert!(shown.marks.icons.is_empty(), "{:?}", shown.marks.icons);
     assert!(!shown.text.utf8[buffer.bytes.clone()].contains('-'), "{:?}", shown.text.utf8);
     eval(&mut vm, "(insert \"x\")");
     let shown = bar(&mut vm);
+    let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
+    assert_eq!(buffer.pill.and_then(|p| p.foreground), Some([0xe0, 0xa0, 0x30]), "modified");
     let (byte, icon) = shown.marks.icons[0];
     assert_eq!((&shown.text.utf8[byte..byte + 1], icon), ("*", '\u{FE001}'));
-    // The drawn text: the bar's 121 columns, the right side at the end.
+    // The drawn text: the bar's 119 columns, each marker's room in whole
+    // cells, the right side at the end.
     let drawn = eval(&mut vm, "(romacs-status-bar-string)");
     let drawn = drawn.trim_matches('"');
-    assert_eq!(drawn.chars().count(), 121, "{drawn}");
+    assert_eq!(drawn.chars().count(), 118, "{drawn}");
     let marker = shown.marks.right_align().unwrap();
     let right = shown.text.utf8[marker.end..].to_owned();
     assert!(drawn.ends_with(&right), "{drawn:?} ends with {right:?}");
@@ -555,8 +588,9 @@ fn a_strings_own_marks_reach_the_bar() {
 }
 
 /// `romacs-status-bar-string' is what the painter places: the host's
-/// advances right of the accent block, a long text clipped where the bar
-/// ends, a right side wider than the bar from its start.
+/// advances inside the bar's padding, a long text clipped where the bar
+/// ends, a right side wider than the bar from its start; a centred zone
+/// on the bar's middle, after the left zone where the room is short.
 #[test]
 fn the_bar_string_follows_the_painter() {
     let mut vm = session();
@@ -567,15 +601,66 @@ fn the_bar_string_follows_the_painter() {
     let shows = |vm: &mut Vm| { vm.frame_snapshot(120, 876).unwrap(); eval(vm, "(romacs-status-bar-string)") };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/romacs-chrome.el");
     vm.load_file(&root).unwrap();
-    // 120 pixels less the 3-pixel accent: 11 cells of 10.
+    // 120 pixels less 12 of padding at either end: 9 cells of 10.
     eval(&mut vm, "(setq mode-line-format (make-string 300 ?x))");
-    assert_eq!(shows(&mut vm), format!("{:?}", "x".repeat(11)));
+    assert_eq!(shows(&mut vm), format!("{:?}", "x".repeat(9)));
     eval(&mut vm, "(setq mode-line-format (list \"L\" '(:propertize \" \" romacs-segment right-align) (make-string 30 ?R)))");
-    assert_eq!(shows(&mut vm), format!("{:?}", "R".repeat(11)));
+    assert_eq!(shows(&mut vm), format!("{:?}", "R".repeat(9)));
     eval(&mut vm, "(setq mode-line-format (list \"LL\" '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
-    assert_eq!(shows(&mut vm), format!("{:?}", format!("LL{}RRR", " ".repeat(6))));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("LL{}RRR", " ".repeat(4))));
     // A left side longer than the expansion keeps of it leaves the right
     // side whole.
     eval(&mut vm, "(setq mode-line-format (list (make-string 60 ?L) '(:propertize \" \" romacs-segment right-align) \"RRR\"))");
-    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}RRR", "L".repeat(8))));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}RRR", "L".repeat(6))));
+    // The centre on the bar's middle; with no room for the gaps either
+    // side of it, after the left.
+    let zoned = |l: &str, c: &str, r: &str| format!("(setq mode-line-format (list {l:?} '(:propertize \" \" romacs-segment centre-align) {c:?} '(:propertize \" \" romacs-segment right-align) {r:?}))");
+    eval(&mut vm, &zoned("L", "C", "R"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "L   C   R"));
+    eval(&mut vm, &zoned("LLL", "CC", "RRR"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "LLLCC RRR"));
+    // An empty centre: its room is counted once.
+    eval(&mut vm, &zoned("LL", "", "RR"));
+    assert_eq!(shows(&mut vm), format!("{:?}", "LL     RR"));
+    // A left side clipped: the centre shows nothing, no room past the bar.
+    eval(&mut vm, &zoned(&"L".repeat(60), "C", "R"));
+    assert_eq!(shows(&mut vm), format!("{:?}", format!("{}R", "L".repeat(8))));
+}
+
+/// A buffer's `face-remapping-alist' remaps its bands' faces: the bar's
+/// base face while the bar shows that buffer's line (its last expansion
+/// is not reused), and its window's header line.
+#[test]
+fn a_buffers_face_remapping_reaches_its_bands() {
+    let mut vm = session();
+    let base = |b: &romacs_layout_input::StatusBarSnapshot| b.faces[b.face.0 as usize].background;
+    let plain = base(&bar(&mut vm));
+    eval(&mut vm, "(progn (setq header-line-format \"head\")
+                     (setq-local face-remapping-alist
+                       (list '(mode-line-active (:background \"#123456\"))
+                             (list (if (facep 'header-line-active) 'header-line-active 'header-line) '(:background \"#654321\")))))");
+    let remapped = base(&bar(&mut vm));
+    assert_ne!(plain, [0x12, 0x34, 0x56]);
+    assert_eq!(remapped, [0x12, 0x34, 0x56], "the bar's face follows the buffer's remapping");
+    let id = window_id(&mut vm, "(selected-window)");
+    let frame = snapshot(&mut vm);
+    let w = &frame.windows.iter().find(|w| w.snapshot.id == id).unwrap().snapshot;
+    assert_eq!(w.header_line.as_ref().map(|h| h.utf8.as_str()), Some("head"));
+    assert_eq!(w.faces[w.header_line_face.0 as usize].background, [0x65, 0x43, 0x21], "the header line's face follows it too");
+    // Undone, the bar's face is the theme's again.
+    eval(&mut vm, "(kill-local-variable 'face-remapping-alist)");
+    assert_eq!(base(&bar(&mut vm)), plain);
+    // A remapping of the parent faces alone reaches the faces that inherit
+    // them, as pinned GNU's (merge_named_face reads the remapping: there,
+    // `mode-line' and `header-line' at :height 2.0 grow both bands from 20
+    // to 38 pixels, as their `-active' faces would). The default theme's
+    // `-active' faces only inherit, so a package's remapping of `mode-line'
+    // (`face-remap-add-relative') reaches the bar.
+    eval(&mut vm, "(progn (face-remap-add-relative 'mode-line :background \"#123456\")
+                     (face-remap-add-relative 'header-line :background \"#654321\"))");
+    let faces = eval(&mut vm, "(list (face-attribute 'mode-line-active :inherit) (face-attribute 'mode-line-active :background))");
+    assert_eq!(base(&bar(&mut vm)), [0x12, 0x34, 0x56], "`mode-line' reaches `mode-line-active' {faces}");
+    let frame = snapshot(&mut vm);
+    let w = &frame.windows.iter().find(|w| w.snapshot.id == id).unwrap().snapshot;
+    assert_eq!(w.faces[w.header_line_face.0 as usize].background, [0x65, 0x43, 0x21], "`header-line' reaches `header-line-active'");
 }

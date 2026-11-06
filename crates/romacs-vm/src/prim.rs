@@ -183,6 +183,7 @@ mod leaf {
         Sqlite,
         Process,
         Finalizer,
+        Thread,
         TreesitParser,
         TreesitNode,
         TreesitQuery,
@@ -436,10 +437,23 @@ mod leaf {
         pub(crate) fn kill_buffer(&mut self, buffer: Value) -> std::result::Result<(), Fault> {
             self.vm.kill_buffer_model(buffer).map_err(Fault::Error)
         }
+        /// `save-excursion` begins: its marker, recorded where it is made
+        /// for `backtrace-eval`'s unrewind (`Backtrace::excursions`).
         pub(crate) fn save_excursion_data(&mut self) -> std::result::Result<Value, Fault> {
-            self.vm.save_excursion_data().map_err(Fault::Error)
+            let marker = self.vm.save_excursion_data().map_err(Fault::Error)?;
+            // The excursion is its caller's: not this primitive's own
+            // activation, when the call recorded one.
+            let frames = &self.vm.backtrace.frames;
+            let own = frames.last().is_some_and(|frame| crate::prim::name(frame.function) == Some("romacs--save-excursion"));
+            let frames = frames.len() - usize::from(own);
+            let dynamic = self.vm.dynamic.len();
+            // Only `backtrace-eval` reads it: a frame without windows records none.
+            let window = self.vm.excursion_window().unwrap_or(Value::NIL);
+            self.vm.backtrace.excursion_begin(marker, window, frames, dynamic);
+            Ok(marker)
         }
         pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
+            self.vm.backtrace.excursion_end(data);
             self.vm.restore_excursion_data(data).map_err(Fault::Error)
         }
         pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
@@ -1170,6 +1184,7 @@ mod leaf {
             } else {
                 let slot = self.symbol_slot(symbol)?;
                 self.vm.slots[slot].declared_special = true;
+                self.vm.special_changes += 1;
                 if self.vm.names.get(&name) == Some(&slot) {
                     self.vm.specials.insert(name);
                 }
@@ -1179,6 +1194,7 @@ mod leaf {
         /// Clear the symbol's declaration without following a variable alias.
         pub fn make_variable_non_special(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
             let name = self.symbol_name(symbol)?;
+            self.vm.special_changes += 1;
             if symbol == Value::NIL || symbol == Value::TRUE {
                 self.vm.specials.remove(&name);
             } else {
@@ -1506,6 +1522,7 @@ mod leaf {
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     Some(data::Object::Process(_)) => Kind::Process,
                     Some(data::Object::Finalizer(_)) => Kind::Finalizer,
+                    Some(data::Object::Thread) => Kind::Thread,
                     Some(data::Object::Treesit(t)) => match &**t {
                         crate::treesit::Object::Parser(_) => Kind::TreesitParser,
                         crate::treesit::Object::Node(_) => Kind::TreesitNode,
@@ -1784,6 +1801,12 @@ pub(crate) fn hosted_window_start(vm: &mut Vm, window: Value, start: i64, point:
     })
 }
 
+/// The stretches SPECS, a list, make in WINDOW's header or mode line
+/// (Leaf::band_stretches).
+pub(crate) fn band_stretches(vm: &mut Vm, window: Value, specs: Value) -> std::result::Result<Vec<Option<romacs_layout_input::StretchWidth>>, Fault> {
+    Leaf::new(vm).band_stretches(window, specs)
+}
+
 /// The display elements WINDOW shows of its buffer from FROM, a line
 /// start, to TO, as a host paints them (Leaf::window_shown_elements).
 pub(crate) fn window_shown_elements(vm: &mut Vm, window: Value, from: i64, to: i64) -> std::result::Result<(Vec<Shown>, Vec<romacs_layout_input::InlineImage>), Fault> {
@@ -1913,6 +1936,7 @@ pub(crate) use defsubr;
 pub(crate) mod prims;
 
 include!(concat!(env!("OUT_DIR"), "/generated_prims.rs"));
+include!(concat!(env!("OUT_DIR"), "/variable_sites.rs"));
 
 /// The single ordinal lookup boundary for legacy and generated subrs.
 #[derive(Clone, Copy)]

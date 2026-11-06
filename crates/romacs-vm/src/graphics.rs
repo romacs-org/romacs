@@ -52,6 +52,9 @@ pub struct ImageFacts {
     /// GNU's `img->mask': the image has a clipping mask.
     pub mask: bool,
     pub metadata: ImageEmbeddedMetadata,
+    /// Sized from its header, its decode still running: WIDTH and HEIGHT
+    /// are final, MASK and METADATA not yet known.
+    pub pending: bool,
     /// GNU's IMAGE_BACKGROUND (its four corners' guess, 0xRRGGBB) when
     /// that is not transparent: a relief's colors start from it.
     pub background: Option<u32>,
@@ -95,6 +98,8 @@ pub(crate) struct ImageKey {
     pub frame: u64,
     /// The resolved `:scale', as bits.
     pub scale: u64,
+    /// The device scale its pixels were decoded at, as bits.
+    pub device: u32,
     pub foreground: u32,
     pub background: u32,
     pub font_size: u32,
@@ -127,8 +132,10 @@ pub(crate) enum Dependency {
 #[derive(Default)]
 pub(crate) struct ImageCache {
     entries: HashMap<ImageKey, ImageEntry>,
+    /// The key of each pending entry, by its host id.
+    pending: HashMap<u64, ImageKey>,
     /// The last lookup environment, under what it was computed from.
-    env: Option<([u64; 7], crate::prim::ImageEnv)>,
+    env: Option<([u64; 8], crate::prim::ImageEnv)>,
     /// The next id for `lookup-image' (GNU's cache slot index).
     ids: HashMap<ImageKey, u64>,
     next_id: u64,
@@ -138,10 +145,10 @@ impl ImageCache {
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub(crate) fn env(&self, stamp: &[u64; 7]) -> Option<crate::prim::ImageEnv> {
+    pub(crate) fn env(&self, stamp: &[u64; 8]) -> Option<crate::prim::ImageEnv> {
         self.env.as_ref().filter(|(s, _)| s == stamp).map(|(_, env)| env.clone())
     }
-    pub(crate) fn keep_env(&mut self, stamp: [u64; 7], env: crate::prim::ImageEnv) {
+    pub(crate) fn keep_env(&mut self, stamp: [u64; 8], env: crate::prim::ImageEnv) {
         self.env = Some((stamp, env));
     }
     pub(crate) fn get(&self, key: &ImageKey) -> Option<&ImageEntry> {
@@ -153,8 +160,13 @@ impl ImageCache {
             self.next_id += 1;
             self.next_id
         });
+        if entry.facts.pending { self.pending.insert(entry.facts.id, key.clone()); }
         self.entries.insert(key, entry);
         id
+    }
+    /// The key of the pending entry whose host id is ID; it is no longer pending.
+    pub(crate) fn settle(&mut self, id: u64) -> Option<ImageKey> {
+        self.pending.remove(&id)
     }
     pub(crate) fn id(&self, key: &ImageKey) -> Option<u64> {
         self.ids.get(key).copied()
@@ -169,6 +181,7 @@ impl ImageCache {
         });
         let entries = &self.entries;
         self.ids.retain(|key, _| entries.contains_key(key));
+        self.pending.retain(|_, key| entries.contains_key(key));
         released
     }
     /// GNU's `image-cache-size': the bytes the cached images' pixels take.

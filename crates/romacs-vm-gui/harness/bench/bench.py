@@ -536,7 +536,9 @@ class Bench:
         extra = {'maxRows': rows} if rows else {}
         if self.cursors[engine.name][cursor] is not None:
             extra['messagesFrom'] = self.cursors[engine.name][cursor]
-        obs = engine.tool('romacs_observe', 60, faces=faces, **extra)
+        # Every buffer by name, conversations' too: each engine is an
+        # isolated session, and its whole inventory is what is compared.
+        obs = engine.tool('romacs_observe', 60, faces=faces, buffers=True, private=True, **extra)
         self.cursors[engine.name][cursor] = obs['messages']['next']
         return engine.normalise(obs)
 

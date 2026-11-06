@@ -74,10 +74,12 @@ mod control_tests {
         }
         program.code.push(instructions[..2].to_vec());
         program.code.push(instructions[2..].to_vec());
-        program.release_entry(0);
+        program.retire_code(&[false, true]);
         assert!(program.inline_bodies[..2].iter().all(Option::is_none));
         assert_eq!(program.free_entries, [0, 1]);
-        program.retire_code(&[false, true]);
+        assert_eq!(program.entries.len(), 3, "retiring keeps the sites where they are");
+        assert_eq!(program.code[1][0].site, 2);
+        program.close_sites();
         assert_eq!(program.entries.len(), 1);
         assert_eq!(program.inline_bodies.len(), 1);
         assert_eq!(program.code[1][0].site, 0);
@@ -87,6 +89,17 @@ mod control_tests {
             unsafe { program.inline_bodies[0].unwrap().evaluate(std::ptr::null()) },
             Some(Value::integer(12).unwrap())
         );
+        // Past half free, retiring closes the tables and keeps no free list.
+        let dead = 3 * SPARE_SITES;
+        program.code.insert(0, vec![instructions[0]; dead]);
+        for (site, inst) in program.code[0].iter_mut().enumerate() {
+            inst.site = site + 1;
+        }
+        program.entries.resize(dead + 1, entry);
+        program.inline_bodies.resize(dead + 1, None);
+        program.retire_code(&[false, true, true]);
+        assert_eq!(program.entries.len(), 1);
+        assert_eq!(program.free_entries.capacity(), 0);
     }
 
     #[test]
@@ -584,7 +597,7 @@ impl Program {
     }
     #[cfg(test)]
     pub(super) fn code_is_empty(&self) -> bool {
-        self.code.iter().all(Vec::is_empty) && self.entries.is_empty()
+        self.code.iter().all(Vec::is_empty) && self.entries.len() == self.free_entries.len()
     }
     /// Drop the lowered code an idle program caches; it is lowered again on
     /// first use. The per-site tables keep room for SPARE_SITES at most, so a
@@ -603,6 +616,10 @@ impl Program {
     }
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()
+    }
+    #[cfg(test)]
+    pub(super) fn sites(&self) -> usize {
+        self.entries.len()
     }
     pub(super) fn trace_function(
         &self,
@@ -635,25 +652,31 @@ impl Program {
             }
         }
     }
+    /// Drop the code of every function MARKS leaves out, its sites free for
+    /// reuse: the work follows what died, not what lives. Past half free
+    /// the site tables close up, so a peak is not kept and the cost of
+    /// closing them amortises over the sites freed.
     pub(super) fn retire_code(&mut self, marks: &[bool]) {
-        // Nothing to drop or compact: keep the entry table as it is.
-        if self.free_entries.is_empty() && self.code.iter().enumerate().all(|(id, code)| code.is_empty() || marks[id]) {
-            return;
+        for id in 0..self.code.len() {
+            // Writing an empty slot would dirty a forked worker's pages.
+            if !marks[id] && !self.code[id].is_empty() {
+                self.release_entry(id);
+            }
         }
+        if self.free_entries.len() > (self.entries.len() - self.free_entries.len()).max(SPARE_SITES) {
+            self.close_sites();
+        }
+    }
+    /// Renumber the live sites densely, leaving none free.
+    fn close_sites(&mut self) {
         let old = std::mem::take(&mut self.entries);
         let old_inline = std::mem::take(&mut self.inline_bodies);
-        self.free_entries.clear();
-        for (id, code) in self.code.iter_mut().enumerate() {
-            if !marks[id] {
-                *code = Vec::new();
-            } else {
-                for inst in code {
-                    let entry = old[inst.site];
-                    self.inline_bodies.push(old_inline[inst.site]);
-                    inst.site = self.entries.len();
-                    self.entries.push(entry);
-                }
-            }
+        self.free_entries = Vec::new();
+        for inst in self.code.iter_mut().flatten() {
+            let entry = old[inst.site];
+            self.inline_bodies.push(old_inline[inst.site]);
+            inst.site = self.entries.len();
+            self.entries.push(entry);
         }
     }
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
@@ -842,8 +865,17 @@ pub(super) fn call_debugger(e: &mut Engine<'_>, conditions: Value, object: Value
     let call = Form::List(vec![sym("funcall"), sym("debugger"), Form::List(vec![sym("quote"), sym("error")]), quoted(e.vm, object)]);
     let bindings = Form::List(vec![bind("debugger-may-continue", "t"), bind("inhibit-redisplay", "nil"),
                                    bind("inhibit-debugger", "t"), bind("inhibit-changing-match-data", "nil")]);
-    let form = Form::List(vec![sym("if"), test, Form::List(vec![sym("let"), bindings, call])]);
-    call_in_signal(e, form, 200, failed_depth)
+    // GNU tests eligibility in C: the helper's calls are no stops for a
+    // `debug-on-next-call' (debug-on-event's). The debugger runs after the
+    // hold, so it may arm the variable again (`d').
+    e.vm.profiler.held += 1;
+    let wanted = run_in_signal(e, test, 200, failed_depth);
+    e.vm.profiler.held -= 1;
+    match wanted {
+        Err(escape) => Some(escape),
+        Ok(Value::NIL) => None,
+        Ok(_) => call_in_signal(e, Form::List(vec![sym("let"), bindings, call]), 200, failed_depth),
+    }
 }
 
 /// VALUE as a quoted, rooted form object.
@@ -857,6 +889,11 @@ fn quoted(vm: &Vm, value: Value) -> Form {
 /// collecting safepoint: FORM's objects are rooted, and are also the
 /// pending escape's, which the suspended engine traces.
 fn call_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Option<usize>) -> Option<Escape> {
+    run_in_signal(e, form, room, failed_depth).err()
+}
+/// `call_in_signal', keeping FORM's value: it is read at once, before
+/// anything can collect.
+fn run_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Option<usize>) -> std::result::Result<Value, Escape> {
     let r = e.regs;
     let saved_depth = e.vm.eval_depth;
     // A refused activation has already incremented GNU's depth, even though
@@ -884,13 +921,13 @@ fn call_in_signal(e: &mut Engine<'_>, form: Form, room: i64, failed_depth: Optio
         e.error = Some("register storage exhausted".into());
     }
     match (result, replacement) {
-        (_, Some(escape)) => Some(escape),
+        (_, Some(escape)) => Err(escape),
         (Err(error), None) => {
             let message = e.vm.make_lisp_string(error.into_bytes(), true);
             let data = e.vm.list_value(&[message]);
-            Some(Escape::Signal(e.vm.intern("error"), data))
+            Err(Escape::Signal(e.vm.intern("error"), data))
         }
-        (Ok(_), None) => None,
+        (Ok(value), None) => Ok(value),
     }
 }
 /// Regions belong to register activations. Unwinding consumes those same frames;
@@ -1680,6 +1717,32 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.a = a;
             i.b = b;
         }
+        Op::BindLate(a, b) => {
+            i.handler = bind_late;
+            i.a = a;
+            i.b = b;
+        }
+        Op::UnbindLate(a) => {
+            i.handler = unbind_late;
+            i.a = a;
+        }
+        Op::ReadLate(a, b, c) => {
+            i.handler = read_late;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
+        Op::LateForwarded(a, b) => {
+            i.handler = late_forwarded;
+            i.a = a;
+            i.b = b;
+        }
+        Op::WriteLate(a, b, c) => {
+            i.handler = write_late;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
         Op::Jump(a) => {
             i.handler = jump;
             i.a = a;
@@ -1906,6 +1969,12 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
+    // Before the debugger and collection: an inspection changes nothing and
+    // answers from any engine, nested or not.
+    if crate::host::inspect_pending() { e.vm.inspect_capture(); }
+    if e.vm.profiler.debug_call {
+        return unsafe { debug_on_call(e, r, pc) };
+    }
     if e.vm.collection_due() {
         // Due but held (a nested engine): the request stays for the engine
         // that may collect.
@@ -1986,6 +2055,41 @@ unsafe fn global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         advance(e, r, pc)
     }
 }
+// Late bindings (Op::BindLate): the common case, a binding made lexically,
+// stays on the hot path; a dynamic one goes cold.
+unsafe fn bind_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if e.vm.slot_is_special_now((*pc).a) { return cold(e, r, pc); }
+        advance(e, r, pc)
+    }
+}
+unsafe fn unbind_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if late_get(e, r, (*pc).a) == Value::UNBOUND { return cold(e, r, pc); }
+        advance(e, r, pc)
+    }
+}
+unsafe fn read_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let v = late_get(e, r, (*pc).b);
+        if v == Value::UNBOUND { return cold(e, r, pc); }
+        *r.add((*pc).a) = v;
+        advance(e, r, pc)
+    }
+}
+unsafe fn late_forwarded(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        *r.add((*pc).a) = if late_get(e, r, (*pc).b) == Value::UNBOUND { Value::TRUE } else { Value::NIL };
+        advance(e, r, pc)
+    }
+}
+unsafe fn write_late(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        if late_get(e, r, (*pc).a) == Value::UNBOUND { return cold(e, r, pc); }
+        late_set(e, r, (*pc).a, *r.add((*pc).b));
+        advance(e, r, pc)
+    }
+}
 unsafe fn constant(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         *r.add((*pc).a) = (*pc).value;
@@ -2060,8 +2164,18 @@ unsafe fn ret(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         if e.controls.len() != e.controls_base {
             return fail(e, "invalid image return through control region");
         }
+        // The return's one hook test, in place of `trace_leave''s.
+        if e.vm.profiler.active
+            && let Some(frame) = e.frames.last()
+            && frame.mark != NO_MARK
+        {
+            if e.vm.profiler.exit_flags && e.vm.backtrace.exit_flagged_from(frame.mark) {
+                return debug_on_exit(e, r, pc, frame.mark);
+            }
+            e.vm.hooked_leave(frame.mark);
+        }
         if let Some(frame) = e.frames.pop() {
-            leave_call(e, frame.mark);
+            leave_return(e, frame.mark);
             e.rest.leave(e.frames.len() + 1);
             *frame.regs.add(frame.dest as usize) = value;
             e.function = frame.function as usize;
@@ -2164,8 +2278,13 @@ fn leave_native(e: &mut Engine<'_>) {
 fn leave_call(e: &mut Engine<'_>, mark: usize) {
     if mark != NO_MARK { e.vm.trace_leave(mark); }
 }
+/// A normal return's leave: `ret' has run the hooks.
 #[inline(never)]
-unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
+fn leave_return(e: &mut Engine<'_>, mark: usize) {
+    if mark != NO_MARK { e.vm.backtrace.leave(mark); }
+}
+#[inline(never)]
+unsafe fn trace_call<const LISP: bool>(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
     target: Value, start: usize, argc: usize) -> usize {
     unsafe {
         let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
@@ -2193,7 +2312,102 @@ unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
                 count: argc,
             }
         };
-        e.vm.trace_enter(function, resolved, args, e.vm.dynamic.len())
+        // One test for every call boundary hook; the hooked path is cold.
+        if e.vm.profiler.active {
+            return hooked_call::<LISP>(e, function, resolved, args);
+        }
+        e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len())
+    }
+}
+/// A call's backtrace entry while a hook is armed: the profilers sample the
+/// stack it is entered from, and a Lisp call may stop for
+/// `debug-on-next-call'.
+#[cold]
+#[inline(never)]
+fn hooked_call<const LISP: bool>(e: &mut Engine<'_>, function: Value, resolved: Value, args: backtrace::Arguments) -> usize {
+    e.vm.profile_boundary();
+    let mark = e.vm.backtrace.enter(function, resolved, args, e.vm.dynamic.len());
+    if LISP { arm_debug_on_call(e, mark); }
+    mark
+}
+/// GNU do_debug_on_call for the Lisp call MARK enters, when
+/// `debug-on-next-call' is set: clear it, flag the call debug-on-exit, and
+/// stop at the call's first poll, its frame in place (`debug_on_call').
+/// Primitives are no stops (DIVERGENCES DBG-NEXT-CALL); the variable stays
+/// set through them.
+#[cold]
+#[inline(never)]
+fn arm_debug_on_call(e: &mut Engine<'_>, mark: usize) {
+    if !e.vm.profiler.next_call || e.vm.profiler.held != 0 { return; }
+    e.vm.forwarded.clear_debug_on_next_call();
+    let token = e.vm.backtrace.frames[mark].token;
+    e.vm.backtrace.set_debug_on_exit(token, true);
+    e.vm.debug_hooks_changed();
+    e.vm.profiler.debug_call = true;
+    e.budget = 0;
+}
+/// GNU call_debugger's form: `debugger' on ARGS under its bindings. Run as
+/// the engine's own code, it adds no frame under the debugger's.
+fn debugger_form(vm: &Vm, args: &[Value]) -> Form {
+    let sym = |name: &str| Form::Sym(name.into());
+    let bind = |name: &str, value: &str| Form::List(vec![sym(name), sym(value)]);
+    let mut call = vec![sym("funcall"), sym("debugger")];
+    call.extend(args.iter().map(|&arg| quoted(vm, arg)));
+    let bindings = Form::List(vec![bind("debugger-may-continue", "t"), bind("inhibit-redisplay", "nil"),
+                                   bind("inhibit-debugger", "t"), bind("inhibit-changing-match-data", "nil")]);
+    let note = Form::List(vec![sym("setq"), sym("debug-on-next-call"), sym("nil"),
+                               sym("internal-when-entered-debugger"), sym("num-nonmacro-input-events")]);
+    Form::List(vec![sym("progn"), note, Form::List(vec![sym("let"), bindings, Form::List(call)])])
+}
+/// Run the debugger on ARGS with the activation at R suspended, borrowing
+/// two hundred levels. Its value, or None with its escape pending.
+unsafe fn hook_debugger(e: &mut Engine<'_>, r: *mut Value, args: &[Value]) -> Option<(*mut Value, Value)> {
+    let form = debugger_form(e.vm, args);
+    // The reserve is borrowed at the engine's depth, which `eval_depth'
+    // learns only at a nested boundary.
+    let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+    let token = e.vm.max_ensure_room(200);
+    e.vm.eval_depth = saved_depth;
+    let out = unsafe {
+        nested_then(e, r, |vm| {
+            let function = vm.compile(&form)?;
+            vm.propagate_next = true;
+            let result = vm.execute_raw(function);
+            vm.propagate_next = false;
+            result
+        })
+    };
+    if let Some(old) = token { e.vm.restore_stack_limits(old); }
+    out
+}
+/// `debug-on-next-call''s stop, at the first poll of the call it armed.
+#[cold]
+#[inline(never)]
+unsafe fn debug_on_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    e.vm.profiler.debug_call = false;
+    let code = e.vm.intern("lambda");
+    match unsafe { hook_debugger(e, r, &[code]) } {
+        Some((r, _)) => unsafe { poll_resume(e, r, pc) },
+        None => Value::UNBOUND,
+    }
+}
+/// GNU funcall's debug-on-exit: the debugger gets `(exit VALUE)' as a
+/// flagged activation returns normally, and its value is returned instead.
+#[cold]
+#[inline(never)]
+unsafe fn debug_on_exit(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, mark: usize) -> Value {
+    unsafe {
+        e.vm.backtrace.drop_exit_flags_from(mark);
+        e.vm.debug_hooks_changed();
+        let exit = e.vm.intern("exit");
+        let value = *r.add((*pc).a);
+        match hook_debugger(e, r, &[exit, value]) {
+            Some((r, value)) => {
+                *r.add((*pc).a) = value;
+                ret(e, r, pc)
+            }
+            None => Value::UNBOUND,
+        }
     }
 }
 #[inline(never)]
@@ -2203,7 +2417,7 @@ unsafe fn enter_native(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
         e.vm.backtrace.resolve_pending(target);
         mark
     } else {
-        unsafe { trace_call(e, r, pc, target, start, argc) }
+        unsafe { trace_call::<false>(e, r, pc, target, start, argc) }
     };
     e.native_mark = Some(e.apply_mark.take().unwrap_or(mark));
 }
@@ -2214,7 +2428,7 @@ unsafe fn enter_apply(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, start:
         e.vm.backtrace.resolve_pending(target);
         mark
     } else {
-        unsafe { trace_call(e, r, pc, target, start, argc) }
+        unsafe { trace_call::<false>(e, r, pc, target, start, argc) }
     };
     // A callee's physical activation owns its whole native apply chain. This
     // keeps genuine apply operations visible until the final callee leaves.
@@ -2429,6 +2643,7 @@ unsafe fn resolve_entry(
                 && !e.vm.functions[function].rest
                 && e.vm.slots[(*pc).b].function == target
                 && !e.vm.macros.contains(&(*pc).b)
+                && !e.vm.profiler.next_call
             {
                 e.vm.world_version
             } else {
@@ -2657,10 +2872,13 @@ unsafe fn enter_frame(
 unsafe fn call_mark(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, target: Value, start: usize, argc: usize) -> usize {
     unsafe {
         if let Some(mark) = e.native_mark.take() {
+            // The activation a primitive (`funcall') entered becomes this
+            // Lisp call's: it is the call `debug-on-next-call' stops.
             e.vm.backtrace.resolve_pending(target);
+            if e.vm.profiler.active { arm_debug_on_call(e, mark); }
             mark
         } else {
-            trace_call(e, r, pc, target, start, argc)
+            trace_call::<true>(e, r, pc, target, start, argc)
         }
     }
 }
@@ -2861,6 +3079,7 @@ unsafe fn take_step(
             Ok(prim::Step::Collect) => {
                 leave_native(e);
                 if e.vm.may_collect(1) {
+                    e.vm.collection_log.explicit = true;
                     poll_collect(e);
                     let statistics = e.vm.garbage_collect_statistics();
                     // garbage_collect's run_finalizers, before it returns.
@@ -3564,7 +3783,12 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
 #[cold]
 #[inline(never)]
 unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Option<(*mut Value, Value)> {
-    unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) }
+    // Compiling the list is Romacs's own work, which GNU's interpreter does
+    // not do: `debug-on-next-call' waits for the lambda's activation.
+    e.vm.profiler.held += 1;
+    let out = unsafe { nested_then(e, r, |vm| vm.lambda_list_closure(list)) };
+    e.vm.profiler.held -= 1;
+    out
 }
 /// specbind of SLOT to VALUE from compiled code or a call site: a protected
 /// variable (most-positive-fixnum, enable-multibyte-characters, ...) is
@@ -3572,6 +3796,69 @@ unsafe fn lambda_list_then(e: &mut Engine<'_>, r: *mut Value, list: Value) -> Op
 /// signal or a forwarded store fault is left pending. A trapped variable's
 /// watchers may collect (`watched_write`), so VALUE is rooted across them
 /// for the fault's data.
+/// The value of SLOT's variable, void signalling as GNU's eval_sub does.
+fn global_value(e: &mut Engine<'_>, slot: usize) -> Result<Value> {
+    let v = if slot == e.vm.multibyte_slot {
+        if e.vm.buffer_text_p() { Value::TRUE } else { Value::NIL }
+    } else {
+        e.vm.variable_value(slot)?
+    };
+    if v == Value::UNBOUND {
+        raise(e, "void-variable", &[Value::reference(slot + 1, 7)]);
+        return Err("unbound variable".into());
+    }
+    Ok(v)
+}
+
+/// Set SLOT's variable to register REG of R, read again after a write whose
+/// watchers may have collected.
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+unsafe fn set_global(e: &mut Engine<'_>, slot: usize, r: *mut Value, reg: usize) -> Result<()> {
+    unsafe {
+        if e.vm.protected_variable_slot(slot) {
+            raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
+            return Err("setting constant".into());
+        }
+        let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+        if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
+            // A variable watcher's own signal, else a forwarded store fault.
+            if let Some(escape) = e.vm.propagated_escape.take() {
+                e.escape = Some(escape);
+            } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
+                e.escape = Some(Escape::Signal(condition, data));
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+/// A late binding's value: its cell's, or its register's where the
+/// binding was unboxed (no closure shares it).
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+#[inline(always)]
+unsafe fn late_get(e: &Engine<'_>, r: *mut Value, reg: usize) -> Value {
+    unsafe {
+        let v = *r.add(reg);
+        if v.tag() == 5 { e.vm.read_capture_cell(v.payload() as usize) } else { v }
+    }
+}
+/// Set a late binding's cell, or its register where it was unboxed.
+///
+/// # Safety
+/// R must point at a live frame holding REG.
+#[inline(always)]
+unsafe fn late_set(e: &mut Engine<'_>, r: *mut Value, reg: usize, value: Value) {
+    unsafe {
+        let v = *r.add(reg);
+        if v.tag() == 5 { e.vm.write_capture_cell(v.payload() as usize, value) } else { *r.add(reg) = value }
+    }
+}
+
 fn bind_special(e: &mut Engine<'_>, slot: usize, value: Value) -> Result<()> {
     if e.vm.protected_variable_slot(slot) {
         raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
@@ -4144,43 +4431,39 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     let index = e.vm.alloc_cell(*r.add(reg));
                     *r.add(reg) = Value::reference(index, 5);
                 }
-                Op::Global(reg, slot) => {
-                    let v = if slot == e.vm.multibyte_slot {
-                        if e.vm.buffer_text_p() {
-                            Value::TRUE
-                        } else {
-                            Value::NIL
-                        }
-                    } else {
-                        e.vm.variable_value(slot)?
-                    };
-                    if v == Value::UNBOUND {
-                        raise(e, "void-variable", &[Value::reference(slot + 1, 7)]);
-                        return Err("unbound variable".into());
-                    }
-                    *r.add(reg) = v;
-                }
-                Op::SetGlobal(slot, _)
-                    if e.vm.protected_variable_slot(slot) =>
-                {
-                    raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
-                    return Err("setting constant".into());
-                }
-                // The value is read again from its register after a write
-                // whose watchers may have collected.
-                Op::SetGlobal(slot, reg) => {
-                    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
-                    if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
-                        // A variable watcher's own signal, else a forwarded store fault.
-                        if let Some(escape) = e.vm.propagated_escape.take() {
-                            e.escape = Some(escape);
-                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
-                            e.escape = Some(Escape::Signal(condition, data));
-                        }
-                        return Err(error);
-                    }
-                }
+                Op::Global(reg, slot) => *r.add(reg) = global_value(e, slot)?,
+                Op::SetGlobal(slot, reg) => set_global(e, slot, r, reg)?,
                 Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
+                // A late binding (Op::BindLate): dynamic when its symbol is
+                // special now, its cell then forwarding to the dynamic value.
+                Op::BindLate(slot, cell) => {
+                    if e.vm.slot_is_special_now(slot) {
+                        bind_special(e, slot, late_get(e, r, cell))?;
+                        late_set(e, r, cell, Value::UNBOUND);
+                    }
+                }
+                Op::UnbindLate(cell) => {
+                    if late_get(e, r, cell) == Value::UNBOUND {
+                        if e.vm.dynamic.len() <= e.dynamic {
+                            return Err("invalid late dynamic binding depth".into());
+                        }
+                        if let Some(signal) = checked_unbind(e, 1) {
+                            e.escape = Some(signal);
+                            return Ok(());
+                        }
+                    }
+                }
+                Op::ReadLate(reg, cell, slot) => {
+                    let v = late_get(e, r, cell);
+                    *r.add(reg) = if v == Value::UNBOUND { global_value(e, slot)? } else { v };
+                }
+                Op::WriteLate(cell, reg, slot) => {
+                    if late_get(e, r, cell) == Value::UNBOUND {
+                        set_global(e, slot, r, reg)?;
+                    } else {
+                        late_set(e, r, cell, *r.add(reg));
+                    }
+                }
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
                         return Err("invalid image dynamic binding depth".into());
@@ -4287,6 +4570,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 | Op::Move(..)
                 | Op::ReadCell(..)
                 | Op::WriteCell(..)
+                | Op::LateForwarded(..)
                 | Op::Jump(..)
                 | Op::Unless(..)
                 | Op::Return(..)

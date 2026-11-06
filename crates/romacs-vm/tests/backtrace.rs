@@ -508,3 +508,142 @@ fn arguments_are_shown_as_passed_from_the_callers_registers() {
   (list (bt-setq 1) (bt-cell 1) (bt-outer 5) (bt-deep 300) (apply 'bt-a '(1 2)) (bt-rest 1 2 3) (funcall 'bt-rest 1)))"#,
     );
 }
+
+// `backtrace-debug' sets a frame's debug-on-exit flag, which `mapbacktrace'
+// passes as FLAGS (`(:debug-on-exit t)'); the flag is cleared before the
+// frame returns, so GNU calls no debugger. A frame beyond the stack is no
+// error, as get_backtrace_frame's nil.
+#[test]
+fn backtrace_debug_flags_match_gnu() {
+    compare(
+        "debug-flags",
+        r#"(progn
+  (defun bt-flags (name) (let (out) (mapbacktrace (lambda (_e f _a flags) (if (eq f name) (setq out (cons flags out)))) name) out))
+  (fset 'bt-flagged (bt-compile (lambda ()
+    (list (backtrace-debug 0 t 'bt-flagged) (bt-flags 'bt-flagged)
+          (backtrace-debug 0 nil 'bt-flagged) (bt-flags 'bt-flagged)
+          (backtrace-debug 999 t 'bt-flagged)
+          (condition-case e (backtrace-debug -1 t) (error (car e)))))))
+  (bt-flagged))"#,
+    );
+}
+
+// `backtrace-eval' sees the dynamic environment at the frame's entry (its
+// own bindings undone, eval.c backtrace_eval_unrewind), lands a `setq' in
+// the binding that frame saw, and swaps everything back however EXP exits.
+#[test]
+fn backtrace_eval_bindings_match_gnu() {
+    compare(
+        "eval-bindings",
+        r#"(progn
+  (defvar bt-dyn 'outer)
+  (fset 'bt-inner (bt-compile (lambda ()
+    (list (backtrace-eval 'bt-dyn 0 'bt-inner) (backtrace-eval 'bt-dyn 1 'bt-inner) (backtrace-eval 'bt-dyn 2 'bt-inner)
+          (catch 'bt-out (backtrace-eval '(throw 'bt-out bt-dyn) 2 'bt-inner))
+          (condition-case e (backtrace-eval '(car bt-dyn) 1 'bt-inner) (error (car e)))
+          (condition-case e (backtrace-eval 'bt-dyn 99 'bt-inner) (error e))
+          (backtrace-eval '(setq bt-dyn 'changed) 1 'bt-inner)
+          bt-dyn))))
+  (fset 'bt-mid (bt-compile (lambda () (let ((bt-dyn 'mid)) (bt-inner)))))
+  (fset 'bt-top (bt-compile (lambda () (let ((bt-dyn 'top)) (list (bt-mid) bt-dyn)))))
+  (list (bt-top) bt-dyn))"#,
+    );
+}
+
+// The current buffer and `save-excursion' are part of the unrewind: an
+// excursion begun in a caller before the call stays for the callee's entry
+// (the inner frame sees B at 5), one begun inside the frame is undone (the
+// outer frame sees A at 1), and B's point is 5 again afterwards.
+#[test]
+fn backtrace_eval_buffers_and_excursions_match_gnu() {
+    compare(
+        "eval-excursions",
+        r#"(let ((a (get-buffer-create " bt-a")) (b (get-buffer-create " bt-b")))
+  (with-current-buffer a (erase-buffer) (insert "aaaaaaaaaa") (goto-char 1))
+  (with-current-buffer b (erase-buffer) (insert "bbbbbbbbbb") (goto-char 1))
+  (fset 'bt-ex-inner (bt-compile (lambda ()
+    (let ((here '(list (buffer-name) (point))))
+      (list (backtrace-eval here 0 'bt-ex-inner) (backtrace-eval here 1 'bt-ex-inner)
+            (backtrace-eval '(progn (goto-char 3) (buffer-name)) 1 'bt-ex-inner)
+            (eval here t))))))
+  (fset 'bt-ex-outer (bt-compile (lambda () (save-excursion (set-buffer b) (goto-char 5) (bt-ex-inner)))))
+  (fset 'bt-cb-inner (bt-compile (lambda () (list (backtrace-eval '(buffer-name) 1 'bt-cb-inner) (buffer-name)))))
+  (fset 'bt-cb-outer (bt-compile (lambda () (with-current-buffer b (bt-cb-inner)))))
+  (with-current-buffer a
+    (list (bt-ex-outer) (buffer-name) (point) (with-current-buffer b (point)) (bt-cb-outer))))"#,
+    );
+}
+
+// `backtrace--frames-and-locals' is `mapbacktrace' plus `backtrace--locals'
+// for every frame but the first, from one walk; `backtrace-get-frames'
+// (rlisp/romacs-backtrace.el) is built on it.
+#[test]
+fn frames_and_locals_equal_the_per_frame_primitives() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let source = r#"(progn
+  (defvar bt-v1 nil) (defvar bt-v2 nil)
+  (fset 'bt-leaf (lambda ()
+    (let ((bulk (backtrace--frames-and-locals 'bt-leaf)) (each nil) (i 0))
+      (mapbacktrace (lambda (e f a flags)
+                      (setq each (cons (list e f a flags (if (= i 0) nil (backtrace--locals i 'bt-leaf))) each)
+                            i (1+ i)))
+                    'bt-leaf)
+      (list (equal bulk (nreverse each)) (nth 4 (nth 1 bulk)) (length bulk)))))
+  (fset 'bt-binder (lambda (n) (let ((bt-v1 n) (bt-v2 (* n 2))) (if (> n 0) (bt-binder (1- n)) (bt-leaf)))))
+  (bt-binder 3))"#;
+    let value = vm.eval_source(source).and_then(|v| v.display());
+    let value = value.unwrap();
+    assert!(value.starts_with("(t ((bt-v1 . 0) (bt-v2 . 0)) "), "{value}");
+}
+
+// A buffer's local binding is swapped while the buffer has one, even one
+// made again after the `let' (GNU `local-variable-p'); a binding whose local
+// is gone becomes GNU's SPECPDL_NOP, so a local made during the evaluation
+// stays, and the `let''s end leaves it too. Ordinary and forwarded
+// (`fill-column') locals.
+#[test]
+fn backtrace_eval_buffer_locals_match_gnu() {
+    compare(
+        "eval-locals",
+        r#"(progn
+  (defvar bt-loc 'global)
+  (fset 'bt-re-inner (bt-compile (lambda ()
+    (kill-local-variable 'bt-loc) (set (make-local-variable 'bt-loc) 'recreated)
+    (list (backtrace-eval 'bt-loc 1 'bt-re-inner) bt-loc))))
+  (fset 'bt-re-outer (bt-compile (lambda () (let ((bt-loc 'entry)) (bt-re-inner)))))
+  (fset 'bt-gone-inner (bt-compile (lambda (var value)
+    (kill-local-variable var)
+    (backtrace-eval (list 'set (list 'make-local-variable (list 'quote var)) value) 1 'bt-gone-inner)
+    (list (symbol-value var) (local-variable-p var)))))
+  (fset 'bt-gone-outer (bt-compile (lambda (var value) (eval (list 'let (list (list var 82)) (list 'bt-gone-inner (list 'quote var) value)) t))))
+  (list (with-temp-buffer (set (make-local-variable 'bt-loc) 'before) (list (bt-re-outer) bt-loc))
+        (with-temp-buffer (set (make-local-variable 'bt-loc) 71) (list (bt-gone-outer 'bt-loc 93) bt-loc (local-variable-p 'bt-loc)))
+        (with-temp-buffer (set (make-local-variable 'fill-column) 71) (list (bt-gone-outer 'fill-column 93) fill-column (local-variable-p 'fill-column)))))"#,
+    );
+}
+
+// An excursion's swap restores the saved window's point when another
+// window (here the minibuffer's) is selected and it still shows the buffer
+// (GNU save_excursion_restore), from the point as restored: clipped to a
+// narrowing made inside the excursion.
+#[test]
+fn backtrace_eval_excursion_window_point_matches_gnu() {
+    compare(
+        "eval-window-point",
+        r#"(progn
+  (defvar bt-w1 nil) (defvar bt-buf nil)
+  (setq bt-buf (get-buffer-create " bt-w") bt-w1 (selected-window))
+  (with-current-buffer bt-buf (erase-buffer) (insert "0123456789"))
+  (set-window-buffer bt-w1 bt-buf)
+  (set-buffer bt-buf) (goto-char 2)
+  (let ((w2 (minibuffer-window)))
+    (fset 'bt-w-inner (bt-compile (lambda ()
+      (list (backtrace-eval '(list (buffer-name) (point) (window-point bt-w1)) 1 'bt-w-inner)
+            (buffer-name) (window-point bt-w1)))))
+    (fset 'bt-w-outer (bt-compile (lambda (w2) (save-excursion (goto-char 5) (select-window w2) (bt-w-inner)))))
+    (fset 'bt-n-outer (bt-compile (lambda (w2) (save-excursion (narrow-to-region 4 9) (select-window w2) (bt-w-inner)))))
+    (list (prog1 (bt-w-outer w2) (select-window bt-w1))
+          (prog1 (bt-n-outer w2) (select-window bt-w1) (with-current-buffer bt-buf (widen))))))"#,
+    );
+}

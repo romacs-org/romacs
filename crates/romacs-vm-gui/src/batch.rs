@@ -138,6 +138,22 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
+    configure_store(store, compiles, interactive);
+}
+
+/// Load compiled Lisp in a worker isolate from STORE, the store its
+/// spawner, an interactive session, loads from (`isolate-compiled-store`),
+/// without ever compiling into it. A miss reads source; the spawner's
+/// background compiles reach every file of the installation's trees in
+/// time.
+pub fn configure_worker_compiled_lisp(store: PathBuf) {
+    if !romacs_vm::compiled_lisp::requested(true) || romacs_vm::world::store::disabled() { return; }
+    configure_store(store, false, true);
+}
+
+/// Load compiled Lisp from STORE; COMPILES when this process may compile
+/// into it; DEFER_MISSES when no load may wait for a compile.
+fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
@@ -156,7 +172,7 @@ pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
         compiler,
         environment,
         inherited: &COMPILE_INHERITS,
-        defer_misses: interactive,
+        defer_misses,
         store,
         // The world is made once (its key hashes the executable and
         // libraries); only whether its build was published is asked again.
@@ -179,14 +195,45 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
     configure_compiled_lisp(store.as_deref(), false);
     super::spawn_evaluator(move || -> Result<(), String> {
         let mut vm = boot(store, true)?;
-        if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH) {
+        // A tree's compile (none given) keeps the chain's own.
+        if let Ok(path) = std::env::var(romacs_vm::compiled_lisp::LOAD_PATH)
+            && !path.is_empty()
+        {
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
-        let artifact = vm.compile_lisp_file(&file)?;
+        let (artifact, held) = vm.compile_lisp_file(&file)?;
+        if held { println!("romacs-compile-held"); }
         println!("romacs-compiled: {}", artifact.display());
         vm.shutdown_background_processes()
     })?.join().map_err(|_| "compile process panicked".to_owned())?
+}
+
+/// `--compile-lisp-tree [--jobs N]`: compile the installation's Lisp
+/// trees into its store ahead of use (`compiled_lisp::compile_tree`), N
+/// compile processes at a time, as an interactive session of this
+/// installation would compile them, and print the summary as JSON. Fails
+/// when compiled Lisp is off, the store is unusable, a file's compile
+/// process failed or its artifact did not survive the store's maintenance,
+/// or the tree's artifacts exceed the store's budget. A run whose only
+/// faults are files that failed to compile (their artifacts say so, and
+/// they load as source) exits with status 2, for the installer to judge.
+pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
+    configure_compiled_lisp(None, true);
+    let summary = romacs_vm::compiled_lisp::compile_tree(jobs)?;
+    println!("{summary}");
+    let empty = |field: &str| summary[field].as_array().is_none_or(Vec::is_empty);
+    if !empty("failed") || !empty("lost") {
+        return Err("some files of the tree have no usable artifact (see the summary)".into());
+    }
+    if summary["over_budget"] == true {
+        return Err("the tree's artifacts exceed the compiled-Lisp store's budget (see the summary)".into());
+    }
+    if !empty("errors") {
+        eprintln!("romacs-compile: some files of the tree failed to compile and load as source (see the summary)");
+        std::process::exit(2);
+    }
+    Ok(())
 }
 
 /// The batch session's VM up to the chain's end: its world restored, then

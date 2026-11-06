@@ -168,6 +168,8 @@ impl Vm {
         buffer: Value,
         position: ByteOffset,
     ) -> Result<ByteOffset> {
+        // A unibyte buffer has no overlays.
+        if matches!(self.object_if(buffer), Some(Object::ByteBuffer(_))) { return Ok(ByteOffset(usize::MAX)); }
         let b = self.annotated(buffer)?;
         b.char_of_byte(position)?;
         Ok(ByteOffset(
@@ -189,10 +191,8 @@ impl Vm {
             .map_or(Value::NIL, |(_, v)| *v))
     }
     fn annotated(&self, buffer: Value) -> Result<&annotations::AnnotatedBuffer> {
-        match self.object(buffer)? {
-            Object::Buffer(b) => Ok(b),
-            _ => Err("text buffer required".into()),
-        }
+        // A shown unibyte buffer has no overlays, as its mirror has none.
+        self.shown_text(buffer).map_err(|_| "text buffer required".into())
     }
     pub(super) fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
@@ -1282,10 +1282,7 @@ impl Vm {
         let integer = |n: i64| Value::integer(n).map_err(Fault::Error);
         let object = self.slots[self.buffer_slot].value;
         let position = self.text_property_position(position)?;
-        let Object::Buffer(b) = self.object(object).map_err(Fault::Error)? else {
-            return Err(Fault::Error("property-change queries in unibyte buffers are not implemented".into()));
-        };
-        let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
+        let begv = self.property_text_start(object)?.1;
         let limit = if limit == Value::NIL { begv } else { self.text_property_position(limit)? };
         if position <= limit {
             return integer(limit.max(begv));
@@ -1328,6 +1325,14 @@ impl Vm {
     /// text property run or an overlay starts or ends, nearest first.
     fn char_property_boundaries_before(&self, object: Value, position: i64, low: i64) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
         use crate::prim::Fault;
+        if let Some(Object::ByteBuffer(b)) = self.object_if(object) {
+            let (low, mut at, mut positions) = (ByteOffset((low - 1).max(0) as usize), ByteOffset((position - 1).max(0) as usize), vec![]);
+            while at > low {
+                at = b.previous_property_change(at, low);
+                if at > low { positions.push(at.0 as i64 + 1); }
+            }
+            return Ok(positions);
+        }
         let b = self.annotated(object).map_err(Fault::Error)?;
         let range = b.accessible();
         let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize)).map_err(Fault::Error);
@@ -1569,9 +1574,14 @@ impl Vm {
                     .map_err(Fault::Error)?;
                 Ok((number, byte..range.end, max))
             }
-            Object::ByteBuffer(_) => Err(Fault::Error(
-                "property-change queries in unibyte buffers are not implemented".into(),
-            )),
+            Object::ByteBuffer(buffer) => {
+                let range = buffer.restriction.clone();
+                let (min, max) = (range.start.0 as i64 + 1, range.end.0 as i64 + 1);
+                if number < min || number > max {
+                    return Err(error());
+                }
+                Ok((number, ByteOffset(number as usize - 1)..range.end, max))
+            }
             _ => unreachable!(),
         }
     }
@@ -1590,6 +1600,7 @@ impl Vm {
                 let r = b.accessible();
                 Ok((r.start, b.char_of_byte(r.start).map_err(crate::prim::Fault::Error)?.0 as i64 + 1))
             }
+            Some(Object::ByteBuffer(b)) => Ok((b.restriction.start, b.restriction.start.0 as i64 + 1)),
             _ => Ok((ByteOffset(0), 0)),
         }
     }
@@ -1599,6 +1610,7 @@ impl Vm {
         match self.object_if(object) {
             Some(Object::String(s) | Object::RawString(s)) => s.properties.previous_change(at, start),
             Some(Object::Buffer(buffer)) => buffer.properties.previous_change(at, start),
+            Some(Object::ByteBuffer(buffer)) => buffer.previous_property_change(at, start),
             _ => start,
         }
     }
@@ -1611,6 +1623,7 @@ impl Vm {
         match self.object_if(object) {
             Some(Object::String(s) | Object::RawString(s)) => s.properties.next_change(at, end),
             Some(Object::Buffer(buffer)) => buffer.properties.next_change(at, end),
+            Some(Object::ByteBuffer(buffer)) => buffer.next_property_change(at, end),
             _ => end,
         }
     }
@@ -1639,9 +1652,10 @@ impl Vm {
             }
             return Ok(count);
         }
-        let Object::Buffer(buffer) = self.object(object).map_err(Fault::Error)? else {
-            unreachable!()
-        };
-        Ok(buffer.char_of_byte(byte).map_err(Fault::Error)?.0 as i64 + 1)
+        match self.object(object).map_err(Fault::Error)? {
+            Object::Buffer(buffer) => Ok(buffer.char_of_byte(byte).map_err(Fault::Error)?.0 as i64 + 1),
+            Object::ByteBuffer(_) => Ok(byte.0 as i64 + 1),
+            _ => unreachable!(),
+        }
     }
 }

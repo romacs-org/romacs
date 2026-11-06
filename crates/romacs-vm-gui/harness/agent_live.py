@@ -34,6 +34,11 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              answered `outcome unknown' (romacs_call_outcome: done, it ran
              once); a call queued behind a busy editor is withdrawn,
              answered `not executed', and never runs.
+  mcp_tour   every Romacs MCP tool called once through romacs_mcp_client, as
+             an agent's client calls them: the server's instructions name
+             the entry points, romacs_help lists the groups, observe gives a
+             buffer summary by default and names conversations only when
+             asked.
   instances  T3 Code's provider instances as a source (`t3' in the providers
              list): capabilities list them with their sources, a T3 account
              overlay is disabled with why, a T3 id starts its instance.
@@ -48,6 +53,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
   home_keys  RET on the home page's other lines, real keys: a project
              opens its newest, "more" shows every transcript, the help
              line says how to reach a row.
+  start_picker  a session started by real keys through the palette of
+             instances and models, with an effort; the first session's
+             models kept once.
   environment  a harness sees none of the editor's own launch variables.
   unicode    non-ASCII (’, é, CJK, emoji, a combining mark, a raw byte)
              through prompts, replies, the journal, titles, tools, Codex
@@ -649,6 +657,7 @@ def tour(work, delegate_target):
     return [
         ('romacs_identity', {}, lambda t: '"instance"' in t),
         ('romacs_eval', {'code': '(+ 1 2)'}, lambda t: t.strip() == '3'),
+        ('romacs_help', {}, lambda t: t.startswith('core:') and 'romacs_delegate_task' in t),
         ('romacs_buffer_list', {'offset': 0, 'limit': 32}, lambda t: '"notes"' in t),
         ('romacs_buffer_read', {'name': 'notes', 'start': 1, 'maxChars': 100}, lambda t: 'alpha beta' in t),
         ('romacs_buffer_edit', {'name': 'notes', 'edits': [{'start': 1, 'end': 6, 'text': 'ALPHA'}]}, lambda t: '"tick"' in t),
@@ -1358,6 +1367,103 @@ def environment(args, base):
         a.close()
 
 
+def mcp_tour(args, base):
+    """Every tool the endpoint offers, called once through the MCP client a
+    harness uses (romacs_mcp_client, the romacs-mcp relay), each answering
+    with a result or a tool error, never a protocol error or silence; the
+    server's initialize instructions name romacs_identity, romacs_observe,
+    romacs_eval and romacs_help; observe's buffers are counts by kind, and
+    names (a private chat's only with private) when asked.  Gnosis's tools,
+    with no session or database here, answer their refusals."""
+    a = Agents(args, base, 'to')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        with RomacsMcp.for_server(a, agent_tools=True) as mcp:
+            instructions = mcp.server.get('instructions', '')
+            names = mcp.tools()
+            mcp.call('romacs_eval', code='(progn (with-current-buffer (get-buffer-create "*tour*") (erase-buffer) (insert "abc")) '
+                                         '(get-buffer-create "*-jabber-chat-friend@example.org*") t)')
+            tick = json.loads(mcp.tool('romacs_buffer_read', {'instance': mcp.identity(), 'name': '*tour*', 'start': 1,
+                                                              'maxChars': 10})[1]).get('tick')
+            note = a.work / 'note.txt'
+            note.write_text('one\n')
+            plan = {
+                'romacs_identity': {}, 'romacs_help': {}, 'romacs_observe': {},
+                'romacs_eval': {'code': '(+ 1 2)'},
+                'romacs_buffer_list': {'offset': 0, 'limit': 8}, 'romacs_buffer_read': {'name': '*tour*', 'start': 1, 'maxChars': 10},
+                'romacs_buffer_edit': {'name': '*tour*', 'expectedTick': tick, 'edits': [{'start': 1, 'end': 2, 'text': 'X'}]},
+                'romacs_visit': {'path': str(note)},
+                'romacs_file_write': {'path': str(note), 'text': 'two\n', 'save': True},
+                'romacs_send_keys': {'keys': 'C-a'}, 'romacs_wait_idle': {'timeout': 5},
+                'romacs_call_outcome': {'id': 'no-such-call'},
+                'romacs_orchestrator_capabilities': {},
+                'romacs_delegate_task': {'task': 'say toured', 'cwd': str(a.work)},
+            }
+            answered, errors, protocol, silent = {}, {}, {}, []
+
+            def given(name):
+                """PLAN's arguments for NAME, else schema-valid ones: each
+                required field a value of its type."""
+                schema = mcp.schemas().get(name, {})
+                arguments = dict(plan.get(name, {}))
+                for field in schema.get('required', []):
+                    if field not in arguments:
+                        kind = schema.get('properties', {}).get(field, {}).get('type')
+                        arguments[field] = {'string': 'tour', 'integer': 1, 'number': 1, 'boolean': False,
+                                            'array': [], 'object': {}}.get(kind, 'tour')
+                if 'instance' in schema.get('properties', {}):
+                    arguments['instance'] = mcp.identity()
+                return arguments
+
+            def call(name, arguments):
+                """Its answer: a result, a tool error, a protocol error or none."""
+                _, reply = mcp.request('tools/call', {'name': name, 'arguments': arguments}, 60)
+                if 'error' in reply:
+                    (protocol.__setitem__(name, reply['error']) if 'code' in reply['error'] else silent.append(name))
+                    return None
+                text = ''.join(c.get('text', '') for c in reply['result'].get('content', []))
+                answered[name] = text
+                if reply['result'].get('isError'):
+                    errors[name] = text[:200]
+                return text
+
+            for name in [n for n in names if n not in ('romacs_task_status', 'romacs_task_cancel', 'romacs_restart_request')]:
+                call(name, given(name))
+            task = (json.loads(answered['romacs_delegate_task']).get('taskId')
+                    if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
+            for name in ('romacs_task_status', 'romacs_task_cancel'):
+                if name in names:
+                    call(name, {'instance': mcp.identity(), 'taskId': task or 'none'})
+            observed = mcp.call('romacs_observe')
+            listed = mcp.call('romacs_observe', buffers=True)
+            private = mcp.call('romacs_observe', buffers=True, private=True)
+            helped = answered.get('romacs_help', '')
+            # Last: it restarts the editor once this caller's turn ends.
+            if 'romacs_restart_request' in names:
+                call('romacs_restart_request', {'instance': mcp.identity(), 'delay': 3600})
+        friend = '*-jabber-chat-friend@example.org*'
+        result = {'tools': names, 'errors': errors, 'protocol_errors': protocol, 'no_reply': silent,
+                  'instructions': instructions, 'help': helped[:600],
+                  'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
+                  'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+        result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
+                        and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
+                        and helped.startswith('core:') and 'agents:' in helped
+                        and isinstance(observed.get('buffers'), dict) and 'byKind' in observed['buffers']
+                        and friend not in json.dumps(observed['buffers'])
+                        and '*tour*' in listed['buffers'] and friend not in listed['buffers']
+                        and friend in private['buffers']
+                        # Gnosis's refuse without a session or database (none here).
+                        and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request')
+                                for n in errors)
+                        and task is not None)
+        return result
+    finally:
+        a.close()
+
+
 def instances(args, base):
     """T3 Code's instances through the `t3' entry, as an init recommends:
 `(t3 ("claude" . "~/.claude") ("claude2" . DIR) ("codex" . "~/.codex"))'.
@@ -1607,15 +1713,28 @@ def logging(args, base):
         result = {'directory': directory.name, 'errors': errors, 'slow': slow, 'painted': painted,
                   'started': {k: started.get(k) for k in ('pid', 'server', 'start', 'end')},
                   'ended': {k: ended.get(k) for k in ('end', 'seconds', 'status')}}
-        result['ok'] = (len(errors) == 2 and isinstance(errors[0].get('backtrace'), list)
-                        and 'logging-live-fail' in errors[0]['backtrace'] and 'backtrace' not in errors[1]
-                        and slow and slow[0]['max'] >= 150 and slow[0]['ms'] >= 150
-                        and painted and painted[0]['ms'] < 50 and painted[0]['redisplay_ms'] >= 80
-                        and painted[0]['max'] >= 80
-                        and started.get('server') == a.name and 'end' not in started
-                        and isinstance(own_end.get('end'), (int, float)) and 'status' not in own_end
-                        and ended.get('end') == own_end['end'] and ended.get('status') == 0
-                        and ended.get('service', {}).get('result') == 'success')
+        # Named, so a failure says which.
+        checks = {
+            'two errors': len(errors) == 2,
+            'first has a backtrace': bool(errors) and isinstance(errors[0].get('backtrace'), list)
+                                     and 'logging-live-fail' in errors[0]['backtrace'],
+            'second has none': len(errors) > 1 and 'backtrace' not in errors[1],
+            'slow loop': bool(slow) and slow[0]['max'] >= 150 and slow[0]['ms'] >= 150,
+            'slow redisplay': bool(painted) and painted[0]['ms'] < 50 and painted[0]['redisplay_ms'] >= 80
+                              and painted[0]['max'] >= 80,
+            'started record': started.get('server') == a.name and 'end' not in started,
+            'own end written': isinstance(own_end.get('end'), (int, float)) and 'status' not in own_end,
+            # The server's own end kept (serde_json reads a float to within
+            # an ulp, not exactly, and writes it back so).
+            'unit end filled': isinstance(ended.get('end'), (int, float)) and isinstance(own_end.get('end'), (int, float))
+                               and abs(ended['end'] - own_end['end']) < 1e-3 and ended.get('status') == 0
+                               and ended.get('service', {}).get('result') == 'success',
+        }
+        result['failed'] = [name for name, ok in checks.items() if not ok]
+        if result['failed']:
+            result['own_end_record'], result['ended_record'] = own_end, ended
+        result['load'] = os.getloadavg()[0]
+        result['ok'] = not result['failed']
         return result
     finally:
         a.close()
@@ -2200,6 +2319,120 @@ def home_keys(args, base):
         a.close()
 
 
+def start_picker(args, base):
+    """Starting a session by real keys through the palette: C-u c on the
+    home page, the directory of the project at point, a row found by typing
+    (its instance's group, the harness's reported model among the catalogue's),
+    the effort, the prompt.  The fake harnesses record what they were given.
+    The first session of an instance asks its models once and keeps only
+    their rows; with one enabled instance no palette is asked."""
+    a = Agents(args, base, 'pk')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        # A repository's subdirectory: `c' there offers it, not the root.
+        (a.root / 'repository/.git').mkdir(parents=True)
+        other = a.root / 'repository/other'
+        other.mkdir()
+        a.codex_instance()
+        kept = a.home / '.local/state/romacs/agents/models/claude.json'
+
+        first = a.start('say one')
+        until(lambda: kept.exists(), 30, 'models kept')
+        a.idle(first)
+        second = a.eval(f'(romacs-agent-id (romacs-agent-start {lisp(other)} "say two"))').strip('"')
+        a.idle(second)
+        result = {'asked': sum(1 for e in a.logged() if e.get('control') == 'initialize'),
+                  'kept': kept.read_text()}
+        kept_ok = 'claude-fake-1' in result['kept'] and 'someone@example.org' not in result['kept']
+
+        a.eval('(progn (delete-other-windows) (romacs-agents) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def prompt():
+            return parity_live.read_sexp(a.eval(
+                '(when (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
+                '(substring-no-properties (minibuffer-prompt))))')) or ''
+
+        def contents():
+            return parity_live.read_sexp(a.eval(
+                '(with-current-buffer (window-buffer (active-minibuffer-window)) (minibuffer-contents-no-properties))'))
+
+        def asked(text):
+            until(lambda: text in prompt(), 15, f'{text} asked')
+
+        def on_project(path):
+            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+                   f'(re-search-forward {lisp_text("^" + path.name + "  ")}) (beginning-of-line) t)')
+
+        def pick(project, typed, effort, text):
+            """C-u c at PROJECT's section; the row TYPED finds, at EFFORT."""
+            on_project(project)
+            a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
+            a.keys('c')
+            asked('Project directory')
+            directory = contents()
+            a.keys('-k', 'Return')
+            asked('Agent')
+            a.keys(typed)
+            time.sleep(.5)
+            a.keys('-k', 'Return')
+            asked('Effort')
+            a.keys(effort)
+            time.sleep(.5)
+            a.keys('-k', 'Return')
+            asked('Prompt')
+            a.keys(text)
+            a.keys('-k', 'Return')
+            return directory
+
+        # The palette, as drawn.
+        on_project(other)
+        a.keys('c')
+        asked('Project directory')
+        a.keys('-k', 'Return')
+        asked('Agent')
+        time.sleep(1)
+        rows = parity_live.read_sexp(a.eval(
+            '(mapcar (function car) (romacs-agent--picker-rows))'))
+        shot = base / 'start-picker.png'
+        subprocess.run([f'{args.tools}/grim', str(shot)], env=a.env, check=True, timeout=30)
+        result['screenshot'] = str(shot)
+        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(lambda: not prompt(), 15, 'palette closed')
+
+        result['directory'] = pick(other, 'son', 'high', 'say sonnet')
+        until(lambda: any(e.get('argv') and '--model' in e['argv'] for e in a.logged()), 30, 'claude started')
+        claude_argv = next(e['argv'] for e in a.logged() if e.get('argv') and '--model' in e['argv'])
+        pick(other, 'cod luna', 'low', 'say luna')
+        until(lambda: any('gpt-6-luna' in r['argv'] for r in a.codex_runs()), 30, 'codex ran')
+        codex_argv = next(r['argv'] for r in a.codex_runs() if 'gpt-6-luna' in r['argv'])
+        result.update(claude_argv=claude_argv, codex_argv=codex_argv, rows=rows)
+
+        # One enabled instance: from the directory straight to the prompt.
+        a.eval('(progn (setq romacs-agent-providers (list (cons "claude" "~/.claude"))) t)')
+        on_project(other)
+        a.keys('c')
+        asked('Project directory')
+        a.keys('-k', 'Return')
+        asked('Prompt')
+        result['single'] = prompt()
+        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+
+        after = lambda argv, flag: argv[argv.index(flag) + 1] if flag in argv else None
+        result['ok'] = (result['asked'] == 1 and kept_ok
+                        and Path(result['directory'].rstrip('/')).name == other.name
+                        and after(claude_argv, '--model') == 'claude-sonnet-5-5'
+                        and after(claude_argv, '--effort') == 'high'
+                        and after(codex_argv, '-m') == 'gpt-6-luna'
+                        and 'model_reasoning_effort="low"' in codex_argv
+                        and rows[0] == 'Claude · default' and 'Claude · Fake 1' in rows
+                        and 'Codex · GPT-6.1 Sol' in rows and 'Prompt' in result['single'])
+        return result
+    finally:
+        a.close()
+
+
 def history_real(args, base):
     """A real Claude Code conversation (--claude-model) and a real Codex one
     (--codex-model), each made outside Romacs in the real configuration
@@ -2257,8 +2490,8 @@ WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'sessio
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'rpc': rpc,
-             'instances': instances}
+             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'rpc': rpc,
+             'instances': instances, 'mcp_tour': mcp_tour}
 
 
 def main():
@@ -2280,7 +2513,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'survive',
+    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)

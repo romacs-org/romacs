@@ -66,6 +66,17 @@ Set to nil to disable message storage entirely."
   :type '(choice (file :tag "Database file")
                  (const :tag "Disabled" nil)))
 
+(defcustom jabber-db-busy-timeout 250
+  "Milliseconds a database statement waits for another connection's lock.
+The background archive sync (`jabber-mam-background') writes the same
+database from a worker VM, one archived message per transaction.  A
+write that meets such a transaction waits for it, up to this long,
+instead of failing; the bound keeps a stuck writer from holding the
+editor.  A live message whose write still fails is in the server's
+archive, which the next catch-up reads.  The worker itself waits up to
+30 seconds for the session's transactions."
+  :type 'natnum)
+
 (defcustom jabber-backlog-days nil
   "Age limit on messages in chat buffer backlog, in days."
   :type '(choice (number :tag "Number of days")
@@ -353,22 +364,49 @@ Delete it and start fresh? "
 delete %s manually to continue"
                     version jabber-db--schema-version jabber-db-path)))))
 
+(defvar jabber-db--in-transaction nil
+  "The connection whose transaction, opened by this package, code runs in.")
+
+(defun jabber-db--begin (db)
+  "Open a transaction on DB holding the write lock; return `begin'.
+Return `savepoint' instead, having opened a savepoint, when DB is
+already inside a transaction: this package's own, or one its caller
+opened with a plain BEGIN, which SQLite reports by refusing the BEGIN."
+  (if (eq jabber-db--in-transaction db)
+      (progn (sqlite-execute db "SAVEPOINT jabber_schema") 'savepoint)
+    (condition-case err
+        (progn (sqlite-execute db "BEGIN IMMEDIATE") 'begin)
+      (sqlite-error
+       (unless (string-match-p "within a transaction" (error-message-string err))
+         (signal (car err) (cdr err)))
+       (sqlite-execute db "SAVEPOINT jabber_schema")
+       'savepoint))))
+
 (defmacro jabber-db--with-savepoint (db &rest body)
   "Execute BODY atomically on DB, including on nonlocal exits.
-Savepoints permit migration inside a caller-owned transaction."
+Outside a transaction, open one that holds the write lock from the
+start (BEGIN IMMEDIATE): a deferred transaction that reads first cannot
+write once another connection has committed (SQLITE_BUSY_SNAPSHOT,
+which the busy timeout does not retry), and the background sync's
+worker VM writes this database too.  Inside a transaction, use a
+savepoint, which permits migration inside a caller-owned transaction."
   (declare (indent 1) (debug t))
   (let ((connection (make-symbol "connection"))
+        (mode (make-symbol "mode"))
         (complete (make-symbol "complete")))
-    `(let ((,connection ,db)
-           (,complete nil))
-       (sqlite-execute ,connection "SAVEPOINT jabber_schema")
+    `(let* ((,connection ,db)
+            (,mode (jabber-db--begin ,connection))
+            (,complete nil))
        (unwind-protect
-           (prog1 (progn ,@body)
-             (sqlite-execute ,connection "RELEASE jabber_schema")
+           (prog1 (let ((jabber-db--in-transaction ,connection)) ,@body)
+             (sqlite-execute ,connection
+                             (if (eq ,mode 'begin) "COMMIT" "RELEASE jabber_schema"))
              (setq ,complete t))
          (unless ,complete
-           (sqlite-execute ,connection "ROLLBACK TO jabber_schema")
-           (sqlite-execute ,connection "RELEASE jabber_schema"))))))
+           (if (eq ,mode 'begin)
+               (sqlite-execute ,connection "ROLLBACK")
+             (sqlite-execute ,connection "ROLLBACK TO jabber_schema")
+             (sqlite-execute ,connection "RELEASE jabber_schema")))))))
 
 (defun jabber-db--migrate-v1-to-v2 (db)
   "Migrate DB from schema version 1 to version 2."
@@ -862,6 +900,8 @@ Return the database connection, or nil if storage is disabled."
               (setq db (sqlite-open jabber-db-path))
               (when (jabber-db--handle-unknown-schema db)
                 (setq db (sqlite-open jabber-db-path)))
+              (sqlite-select db (format "PRAGMA busy_timeout=%d"
+                                        jabber-db-busy-timeout))
               (sqlite-execute db "PRAGMA journal_mode=WAL")
               (sqlite-execute db "PRAGMA synchronous=NORMAL")
               (sqlite-execute db "PRAGMA foreign_keys=ON"))
@@ -869,6 +909,7 @@ Return the database connection, or nil if storage is disabled."
                       (< (caar (sqlite-select db "PRAGMA user_version"))
                          jabber-db--schema-version))
               (jabber-db--migrate db))
+            (unless live (jabber-db--apply-checkpointing db))
             (setq jabber-db--connection db
                   complete t)
             db)
@@ -884,18 +925,100 @@ Return the database connection, or nil if storage is disabled."
     (sqlite-close jabber-db--connection)
     (setq jabber-db--connection nil)))
 
+;;; Two writers: the live session and the background sync's worker
+
+;; While a worker VM catches up archives it commits one archived message
+;; per transaction, back to back.  SQLite's busy handler retries a waiting
+;; writer at growing intervals (1, 2, 5 ms...), and the worker can take
+;; the lock again between two of them, so a live write could wait behind
+;; a run of the worker's transactions.  The live session therefore marks
+;; each lock acquisition with a file next to the database, and the worker
+;; takes no new lock while a fresh mark exists: the session waits for at
+;; most the transaction the worker is in.
+
+(defvar jabber-db-intent-patience 0.5
+  "Seconds the worker defers to the live session's announced write.
+A mark older than this is stale (its writer is gone) and is ignored.")
+
+(defun jabber-db--intent-file ()
+  "The file that marks a live write's lock acquisition, or nil."
+  (and jabber-db-path (concat jabber-db-path "-write-intent")))
+
+(defun jabber-db--acquires-lock-p (db sql)
+  "Non-nil when executing SQL on DB may take the write lock.
+Statements inside this package's transaction on DB hold it already, and
+ending or naming a transaction takes none."
+  (and (eq db jabber-db--connection)
+       (not (eq jabber-db--in-transaction db))
+       (stringp sql)
+       (not (string-match-p "\\`[ \t\n]*\\(?:COMMIT\\|RELEASE\\|ROLLBACK\\|SAVEPOINT\\|END\\)" sql))))
+
+(defun jabber-db--announce-write (execute db sql &rest args)
+  "Execute SQL on DB with a mark the worker sees, when it takes the lock.
+`:around' advice on `sqlite-execute' in the live session while a
+background sync writes the database."
+  (if (not (jabber-db--acquires-lock-p db sql))
+      (apply execute db sql args)
+    (let ((file (jabber-db--intent-file)))
+      (ignore-errors (write-region "" nil file nil 'silent))
+      (unwind-protect (apply execute db sql args)
+        (ignore-errors (delete-file file))))))
+
+(defun jabber-db--intent-fresh-p (file)
+  "Non-nil when FILE marks a live write younger than the patience."
+  (when-let* ((attributes (file-attributes file)))
+    (< (float-time (time-since (file-attribute-modification-time attributes)))
+       jabber-db-intent-patience)))
+
+(defun jabber-db--defer-to-session (execute db sql &rest args)
+  "Execute SQL on DB once no live write is announced, when it takes the lock.
+`:around' advice on `sqlite-execute' in the background sync's worker.
+The wait spins: the session's write lasts one of this worker's
+transactions, and sleeping would run this worker's timers and filters
+inside the statement."
+  (when (jabber-db--acquires-lock-p db sql)
+    (let ((file (jabber-db--intent-file))
+          (end (+ (float-time) jabber-db-intent-patience)))
+      (while (and (< (float-time) end) (jabber-db--intent-fresh-p file)))))
+  (apply execute db sql args))
+
+(defvar jabber-db--sharing nil
+  "This VM's role in `jabber-db-share-writes', which outlives a connection.")
+
+(defun jabber-db--apply-checkpointing (db)
+  "Have DB checkpoint as this VM's role says: the session leaves it to the
+worker while a sync writes, since a checkpoint's fsync would run in
+whichever COMMIT crosses the threshold, on the main VM."
+  (when db
+    (ignore-errors
+      (sqlite-select db (format "PRAGMA wal_autocheckpoint=%d"
+                                (if (eq jabber-db--sharing 'announce) 0 1000))))))
+
+(defun jabber-db-share-writes (role)
+  "Arrange this VM's writes for another writer of the database.
+ROLE `announce': the live session, while a background sync writes;
+`defer': the worker that writes; nil: alone again."
+  (advice-remove 'sqlite-execute #'jabber-db--announce-write)
+  (advice-remove 'sqlite-execute #'jabber-db--defer-to-session)
+  (setq jabber-db--sharing role)
+  (jabber-db--apply-checkpointing jabber-db--connection)
+  (pcase role
+    ('announce (advice-add 'sqlite-execute :around #'jabber-db--announce-write))
+    ('defer (advice-add 'sqlite-execute :around #'jabber-db--defer-to-session))))
+
 ;;; Transactions
 
 (defmacro jabber-db-with-transaction (&rest body)
   "Execute BODY inside a SQLite transaction.
-Opens a BEGIN/COMMIT pair around BODY.  If BODY signals an error,
-the transaction is still committed (partial data is better than
+Opens a BEGIN IMMEDIATE/COMMIT pair around BODY (see
+`jabber-db--with-savepoint' for why immediate).  If BODY signals an
+error, the transaction is still committed (partial data is better than
 a stuck open transaction in single-threaded Emacs)."
   (declare (indent 0) (debug t))
   `(when-let* ((db (jabber-db-ensure-open)))
-     (sqlite-execute db "BEGIN")
+     (sqlite-execute db "BEGIN IMMEDIATE")
      (unwind-protect
-         (progn ,@body)
+         (let ((jabber-db--in-transaction db)) ,@body)
        (sqlite-execute db "COMMIT"))))
 
 ;;; Chat settings
@@ -1210,9 +1333,12 @@ WHERE account = ? AND peer = ? AND type = ? AND thread_id = ?"
     (list account peer type thread-id))))
 
 (defun jabber-db--ensure-message-thread
-    (account peer type timestamp stanza-id server-id thread)
+    (account peer type timestamp stanza-id server-id thread &optional message-id)
   "Register THREAD after storing a message for ACCOUNT, PEER, and TYPE.
-TIMESTAMP, STANZA-ID, and SERVER-ID identify its first observed root."
+TIMESTAMP, STANZA-ID, and SERVER-ID identify its first observed root.
+A thread's root is its oldest message: archives are read out of order
+\(newest pages first, time slices side by side), so a message older than
+the stored root, MESSAGE-ID's row, becomes the root."
   (when-let* ((thread-id (plist-get thread :thread-id))
               (db (jabber-db-ensure-open)))
     (let* ((new-p (not (jabber-db--message-thread-stored-p
@@ -1231,7 +1357,15 @@ ORDER BY id DESC LIMIT 1"
       (jabber-db--register-message-thread
        account peer type thread-id parent-id stanza-id server-id timestamp
        root-message-id
-       (or (equal type "groupchat") parent-id)))))
+       (or (equal type "groupchat") parent-id))
+      (when (and (not new-p) message-id)
+        (sqlite-execute
+         db
+         "UPDATE message_thread SET root_message_id = ?, root_stanza_id = ?, \
+root_server_id = ?, created_at = ? \
+WHERE account = ? AND peer = ? AND type = ? AND thread_id = ? AND created_at > ?"
+         (list message-id stanza-id server-id timestamp
+               account peer type thread-id timestamp))))))
 
 (defun jabber-db-mam-progress (account archive with)
   "Return durable (UID START) for ACCOUNT, exact ARCHIVE and WITH filter.
@@ -1258,6 +1392,20 @@ ON CONFLICT(account, archive, scope) DO UPDATE SET uid = excluded.uid
 WHERE mam_progress.uid IS NULL"
      (list account archive (or with "") uid start)))
   (= 1 (caar (sqlite-select db "SELECT changes()"))))
+
+(defun jabber-db-seed-mam-progress (account archive with uid start)
+  "Start ACCOUNT's cursor for ARCHIVE and WITH at UID, coverage at START.
+Only where no cursor is recorded (no row, or a row whose UID is NULL):
+a cursor recorded meanwhile is newer and stays.  Return non-nil when
+seeded."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db
+     "INSERT INTO mam_progress (account, archive, scope, uid, start)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(account, archive, scope) DO UPDATE SET uid = excluded.uid,
+start = excluded.start WHERE mam_progress.uid IS NULL"
+     (list account archive (or with "") uid start))
+    (= 1 (caar (sqlite-select db "SELECT changes()")))))
 
 (defun jabber-db--message-identity (xml &optional archive uid)
   "Return operation-specific evidence in XML, plus ARCHIVE and UID.
@@ -1340,11 +1488,25 @@ AND (room_id IS NOT NULL OR (server_id IS NULL AND stanza_id = ?))"
                      (jabber-db--identity-compatible-p
                       db id stanza-id server-id origin room resource occupant-id))
                    candidates)))
+    ;; The archive occurrence is the result's own row, when compatible.  A
+    ;; row of the same message (sender and IDs but its server ID) held under
+    ;; another UID of the same archive is another copy the archive kept,
+    ;; not a conflict; any other row is.
     (when (and occurrence
-               (not (and (equal matches (list occurrence))
-                         (equal candidates (list occurrence)))))
+               (not (and (memq occurrence matches)
+                         (seq-every-p
+                          (lambda (id)
+                            (or (eql id occurrence)
+                                (and (sqlite-select db "SELECT 1 FROM message_archive
+WHERE account = ? AND archive = ? AND message_id = ? AND uid != ?"
+                                                    (list account archive id uid))
+                                     (jabber-db--identity-compatible-p
+                                      db id stanza-id nil origin room resource occupant-id))))
+                          candidates))))
       (error "Conflicting archive occurrence"))
-    (and (= (length candidates) 1) (= (length matches) 1) (car matches))))
+    (if occurrence
+        occurrence
+      (and (= (length candidates) 1) (= (length matches) 1) (car matches)))))
 
 (defun jabber-db--enrich-message-identity (db id account identity)
   "Append compatible IDENTITY to exact ID in DB for ACCOUNT.
@@ -1414,7 +1576,7 @@ Return the canonical message row ID."
         (jabber-db--enrich-message-identity db message-id account identity))
       (jabber-db--backfill-thread-fields db message-id thread)
       (jabber-db--ensure-message-thread
-       account peer type stored-timestamp stanza-id server-id thread)
+       account peer type stored-timestamp stanza-id server-id thread message-id)
       (when-let* ((thread-id (plist-get thread :thread-id)))
         (run-hook-with-args
          'jabber-db-message-thread-stored-functions
@@ -1739,30 +1901,33 @@ stored reactions for the target.  Non-nil UPDATED-AT is source ordered and
 older or equal values are ignored.  Nil UPDATED-AT is a local replacement
 and is always accepted with the current timestamp.  The actor timestamp
 and snapshot change together: an error or quit leaves both unchanged."
-  (when-let* ((db (jabber-db-ensure-open))
-              (message-id (jabber-db--message-id-for-reaction-target
-                           db account peer type target-id)))
-    (unless (and updated-at
-                 (jabber-db--source-reaction-stale-p
-                  db message-id sender updated-at))
-      (let ((deduplicated (delete-dups (cl-remove-if-not #'stringp reactions)))
-            (replacement-updated-at (or updated-at (floor (float-time)))))
-        ;; The actor watermark and its snapshot are one replacement.
-        (jabber-db--with-savepoint db
-          (sqlite-execute db "INSERT INTO message_reaction_actor \
+  (when-let* ((db (jabber-db-ensure-open)))
+    ;; The target, the watermark check and the replacement are one
+    ;; transaction: another connection (the background sync's worker) may
+    ;; store a newer reaction between a check and a write made apart.
+    (jabber-db--with-savepoint db
+      (when-let* ((message-id (jabber-db--message-id-for-reaction-target
+                               db account peer type target-id)))
+        (unless (and updated-at
+                     (jabber-db--source-reaction-stale-p
+                      db message-id sender updated-at))
+          (let ((deduplicated (delete-dups (cl-remove-if-not #'stringp reactions)))
+                (replacement-updated-at (or updated-at (floor (float-time)))))
+            ;; The actor watermark and its snapshot are one replacement.
+            (sqlite-execute db "INSERT INTO message_reaction_actor \
 (message_id, sender, updated_at) VALUES (?, ?, ?) \
 ON CONFLICT(message_id, sender) DO UPDATE SET updated_at = excluded.updated_at"
-                          (list message-id sender replacement-updated-at))
-          (sqlite-execute db "DELETE FROM message_reaction \
+                            (list message-id sender replacement-updated-at))
+            (sqlite-execute db "DELETE FROM message_reaction \
 WHERE message_id = ? AND sender = ?"
-                          (list message-id sender))
-          (dolist (reaction deduplicated)
-            (unless (string-empty-p reaction)
-              (sqlite-execute db "INSERT INTO message_reaction \
+                            (list message-id sender))
+            (dolist (reaction deduplicated)
+              (unless (string-empty-p reaction)
+                (sqlite-execute db "INSERT INTO message_reaction \
 (message_id, sender, reaction, updated_at) VALUES (?, ?, ?, ?)"
-                              (list message-id sender reaction
-                                    replacement-updated-at))))
-          t)))))
+                                (list message-id sender reaction
+                                      replacement-updated-at))))
+            t))))))
 
 (defun jabber-db-reactions-for-message-ids (message-ids)
   "Return reaction state for MESSAGE-IDS keyed by message DB id.

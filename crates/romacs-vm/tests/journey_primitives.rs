@@ -33,6 +33,14 @@ fn romacs() -> Vm {
 /// Each EXPRESSION's printed value (or signal) in pinned GNU and in a
 /// Romacs on the loadup bootstrap, after SETUP in both; the mismatches.
 fn mismatches(setup: &str, expressions: &[&str]) -> Vec<String> {
+    mismatches_where(setup, expressions, &[])
+}
+
+/// As [`mismatches`], GNU's answers read with each (EXPRESSION, GNU TEXT,
+/// ROMACS FORM) of BUILT_INS: in that expression's answer, GNU's TEXT naming
+/// where C defines a built-in stands for what Romacs's FORM evaluates to,
+/// its Rust file (DIVERGENCES.md VM2-HELP-SOURCE).
+fn mismatches_where(setup: &str, expressions: &[&str], built_ins: &[(&str, &str, &str)]) -> Vec<String> {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let probe = |expression: &str| format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");
     let gnu = format!("(progn {setup} (dolist (s (list {})) (princ s) (princ \"\\0\")))",
@@ -49,7 +57,12 @@ fn mismatches(setup: &str, expressions: &[&str]) -> Vec<String> {
     let mut vm = romacs();
     vm.eval_source(&format!("(progn {setup} nil)")).unwrap();
     let mut failures = Vec::new();
-    for (expression, expected) in expressions.iter().zip(expected) {
+    for (expression, mut expected) in expressions.iter().zip(expected) {
+        for &(_, text, form) in built_ins.iter().filter(|b| b.0 == *expression) {
+            let file = vm.eval_source(form).and_then(|v| v.display()).unwrap();
+            let file = file.trim_matches('"').to_owned();
+            expected = expected.replace(text, &if text == "C-source" { format!("{file:?}") } else { format!("\u{2018}{file}\u{2019}") });
+        }
         let actual = vm.eval_source(&probe(expression)).and_then(|v| v.display()).map(|printed| {
             serde_json::from_str::<String>(&printed).unwrap_or(printed)
         }).unwrap_or_else(|e| format!("ERR {e}"));
@@ -214,13 +227,15 @@ fn help_describes_a_function_a_variable_and_a_mode() {
         "(progn (let ((inhibit-message t)) (save-window-excursion {body}))
                 (with-current-buffer (help-buffer)
                   (buffer-substring-no-properties (point-min) (progn (goto-char (point-min)) {end}))))");
-    assert_matches(r#"(require 'help-fns) (defvar jp-documented '(1 "two") "A documented variable.")"#, &[
-        &help("(describe-function 'buffer-size)", "(point-max)"),
+    let buffer_size = help("(describe-function 'buffer-size)", "(point-max)");
+    let failures = mismatches_where(r#"(require 'help-fns) (defvar jp-documented '(1 "two") "A documented variable.")"#, &[
+        &buffer_size,
         &help("(describe-variable 'jp-documented)", "(point-max)"),
         &help("(with-temp-buffer (emacs-lisp-mode) (describe-mode))", r#"(search-forward "In addition") (match-beginning 0)"#),
         "(buffer-size (get-buffer-create \" jp-sized\"))",
         "(buffer-size 'jp-not-a-buffer)",
-    ]);
+    ], &[(&buffer_size, "‘C source code’", "(car (romacs--rust-definition (symbol-function 'buffer-size) nil))")]);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// loadup's Snarf-documentation gives the C variables their DOC
@@ -231,13 +246,16 @@ fn c_variables_carry_their_doc_strings() {
     let help = |body: &str| format!(
         "(progn (let ((inhibit-message t)) (save-window-excursion {body}))
                 (with-current-buffer (help-buffer) (buffer-substring-no-properties (point-min) (point-max))))");
-    assert_matches("(require 'help-fns)", &[
+    let describe = help("(describe-variable 'fill-column)");
+    let file = "(car (romacs--rust-definition 'fill-column 'defvar))";
+    let failures = mismatches_where("(require 'help-fns)", &[
         "(documentation-property 'fill-column 'variable-documentation t)",
         "(documentation-property 'case-fold-search 'variable-documentation)",
         "(integerp (get 'gc-cons-threshold 'variable-documentation))",
         "(find-lisp-object-file-name 'fill-column 'defvar)",
-        &help("(describe-variable 'fill-column)"),
-    ]);
+        &describe,
+    ], &[("(find-lisp-object-file-name 'fill-column 'defvar)", "C-source", file), (&describe, "‘C source code’", file)]);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// icomplete's file-name completion of a `~USER' prefix lists

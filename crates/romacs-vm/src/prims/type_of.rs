@@ -40,6 +40,7 @@ fn classify(cx: &mut Leaf<'_>, object: Value, precise: bool) -> Out {
         Kind::Sqlite => "sqlite",
         Kind::Process => "process",
         Kind::Finalizer => "finalizer",
+        Kind::Thread => "thread",
         Kind::TreesitParser => "treesit-parser",
         Kind::TreesitNode => "treesit-node",
         Kind::TreesitQuery => "treesit-compiled-query",

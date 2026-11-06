@@ -41,6 +41,20 @@ fn current_time(cx) {
     lisp_time(cx, nanos)
 }}
 
+// GNU sysdep.c:4527: the user and system time the process has used, as
+// make_lisp_s_us makes it, in `current-time-list''s form.
+defsubr! { name = "get-internal-run-time", gnu = "sysdep.c:4527", effect = Global,
+fn get_internal_run_time(cx) {
+    let used = crate::host::run_time().map_err(|_| Fault::Error("getrusage failed".into()))?;
+    let micros = used.as_micros() as i128;
+    let format = cx.intern("current-time-list");
+    // As (TICKS . HZ), make_lisp_s_us counts microseconds.
+    if cx.variable_value(format)?.unwrap_or(Value::NIL) == Value::NIL {
+        return Ok(cx.cons(ticks_value(micros)?, Value::integer(1_000_000).unwrap()));
+    }
+    lisp_time(cx, micros * 1000)
+}}
+
 /// GNU make_lisp_time of NANOS nanoseconds, in `current-time-list''s form.
 pub(super) fn lisp_time(cx: &mut Leaf<'_>, nanos: i128) -> Out {
     let format = cx.intern("current-time-list");

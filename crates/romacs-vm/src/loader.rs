@@ -7,7 +7,7 @@ pub(super) struct Loader {
     pub(super) propagate: usize,
     active: Vec<PathBuf>,
     /// Every file a step was recorded in, once, in first-step order.
-    files: Vec<PathBuf>,
+    pub(super) files: Vec<PathBuf>,
     steps: Vec<Step>,
     completed_files: usize,
     completed_forms: usize,
@@ -481,12 +481,17 @@ impl Vm {
     }
 
     pub(crate) fn load_file_raw(&mut self, path: &Path) -> Result<Value> {
-        self.load_file_kind(path, false)
+        self.load_file_as(path, false, false)
     }
-    /// Load PATH; COMPILED when its name was found by adding `.el`, so the
-    /// load is compiled when the file has a compiled form
-    /// (`compiled_lisp`).
+    /// Lisp's `load' of PATH; COMPILED when its name was found by adding
+    /// `.el`, so the load is compiled when the file has a compiled form
+    /// (`compiled_lisp`), else the `.el` was named.
     pub(crate) fn load_file_kind(&mut self, path: &Path, compiled: bool) -> Result<Value> {
+        self.load_file_as(path, compiled, !compiled)
+    }
+    /// Load PATH, COMPILED as `load_file_kind' says; EXPLICIT when a Lisp
+    /// `load' named its `.el` (`Vm::gnu_interprets').
+    fn load_file_as(&mut self, path: &Path, compiled: bool, explicit: bool) -> Result<Value> {
         if path.extension().is_some_and(|s| s == "elc") {
             return Err("compiled .elc input is not supported".into());
         }
@@ -571,6 +576,10 @@ impl Vm {
         let lazy = matches!(self.slots[expander].function, f if f == Value::UNBOUND || f == Value::NIL);
         let saved_regime = std::mem::replace(&mut self.lazy_regime, lazy);
         let saved_defer = std::mem::replace(&mut self.defer_expansion_errors, lazy);
+        // GNU's readevalloop interprets a file it reads as source: its
+        // `let's decide as they bind (VM2-LATE-SPECIAL1).
+        let interpreting = self.gnu_interprets(&path, explicit);
+        let saved_interpreting = std::mem::replace(&mut self.interpreting_source, interpreting);
         // readevalloop binds `internal-interpreter-environment' once for the
         // file, so a top-level `(defvar NAME)' reaches every LATER form of
         // this file and no other file (VM2-FILESPECIAL1 in DIVERGENCES.md).
@@ -664,6 +673,7 @@ impl Vm {
         let result = result.map(|()| value);
         self.lazy_regime = saved_regime;
         self.defer_expansion_errors = saved_defer;
+        self.interpreting_source = saved_interpreting;
         self.file_specials = saved_file_specials;
         self.expanded_macros = saved_expanded_macros;
         self.expanded_symbols = saved_expanded_symbols;

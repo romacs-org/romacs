@@ -280,6 +280,57 @@ def command_points(stderr_text, text):
     return out
 
 
+def reply_lines(log):
+    """A function: the text of LOG's reply lines so far, all that
+    `command_points' and `command_signals' read.  Each call reads only what
+    LOG has gained: its scenes run to hundreds of kilobytes a line, so
+    reading it whole at each poll costs more than the commands, and the last
+    ones outlast any wait."""
+    kept, rest, offset = [], b'', 0
+
+    def read():
+        nonlocal rest, offset
+        with log.open('rb') as stream:
+            stream.seek(offset)
+            data = stream.read()
+        offset += len(data)
+        lines = (rest + data).split(b'\n')
+        rest = lines.pop()
+        kept.extend(line.decode(errors='replace') for line in lines
+                    if b'"native_command"' in line or b'"cursor-publication"' in line)
+        return '\n'.join(kept)
+    return read
+
+
+def cpu_seconds(pid):
+    """The CPU time PID's threads have used."""
+    fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
+
+
+def wait_for_reply(pred, log, process, what, stall):
+    """Until PRED holds, read again only when LOG has grown.  A loaded host
+    slows a command without limit, so no fixed time decides: the binary has
+    stalled when, for STALL seconds, LOG does not grow and it uses under a
+    second of CPU (a lost key: it idles).  A command still busy after five
+    times that is a hang, not load."""
+    size, spent, moved = -1, 0.0, time.monotonic()
+    limit = moved + 5 * stall
+    while True:
+        if process.poll() is not None:
+            raise AssertionError(f'{what}: process exited {process.returncode}')
+        grown, used, now = log.stat().st_size, cpu_seconds(process.pid), time.monotonic()
+        if grown != size or used - spent >= 1:
+            if grown != size and pred():
+                return
+            size, spent, moved = grown, used, now
+        elif now - moved > stall:
+            raise AssertionError(f'{what}: no progress for {stall} seconds')
+        if now > limit:
+            raise AssertionError(f'{what}: busy for {5 * stall} seconds')
+        time.sleep(.05)
+
+
 def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion'):
     output = args.output / name
     output.mkdir(parents=True, exist_ok=True)
@@ -296,19 +347,22 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
         columns = glyphs + 1
         time.sleep(.5)
         fio.shot(args.output / f'{name}-before.png', env, report)
+        replies = reply_lines(log)
         for index, (key, _) in enumerate(keys):
-            subprocess.run(['wtype', '-M', 'ctrl', key, '-m', 'ctrl'], env=env, check=True, timeout=20)
+            subprocess.run(['wtype', '-M', 'ctrl', key, '-m', 'ctrl'], env=env, check=True, timeout=args.timeout)
             try:
-                fio.wait(lambda: len(command_points(log.read_text(errors='replace'), text)) > index, 10, f'command {index + 1} ({key})', process)
-            except AssertionError:
+                wait_for_reply(lambda: len(command_points(replies(), text)) > index,
+                               log, process, f'command {index + 1} ({key})', args.timeout)
+            except AssertionError as stalled:
+                report[f'{name}_stalled'] = str(stalled)
                 break
             if index in (6 + 3, 6 + 60):
                 time.sleep(.5)
                 fio.shot(args.output / f'{name}-{index + 1}.png', env, report)
         time.sleep(.5)
         fio.shot(args.output / f'{name}-after.png', env, report)
-        romacs = command_points(log.read_text(errors='replace'), text)
-        signals = command_signals(log.read_text(errors='replace'))
+        romacs = command_points(replies(), text)
+        signals = command_signals(replies())
         report[f'{name}_echo'] = fio.rows((output / 'binary.stderr').read_text(errors='replace'))[-2:]
     gnu = gnu_points(args.gnu, file, columns, 40, keys)
     report[name] = {'columns': columns, 'gnu_geometry': gnu[:1], 'gnu': gnu[1:], 'romacs': romacs}

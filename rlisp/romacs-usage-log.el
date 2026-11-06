@@ -16,7 +16,9 @@
 ;;       input itself counts the wait);
 ;;   {"kind":"error","command":C,"mode":M,"error":"(SYMBOL . MESSAGE)"}
 ;;       an error the command loop reported, through `command-error-function',
-;;       M the current buffer's major mode;
+;;       M the current buffer's major mode; "user":true besides when it is
+;;       the user's own (`romacs-usage-log-user-error-p': a C-g, the
+;;       buffer's end, a refusing command);
 ;;   {"kind":"refusal","class":MESSAGE,"mode":M,"n":N}
 ;;       how often a displayed window's layout question in major mode M
 ;;       was answered by approximation where the host's measurement refused
@@ -32,6 +34,15 @@
 ;;       loops' total, their redisplays' total and the longest of the two
 ;;       together, written with the counts.  A redisplay is charged to its
 ;;       command at the next command's start, or at a write after it ran.
+;;   {"kind":"collection","collection":K,"pause_ms":MS,"met":M,"command":C}
+;;       a garbage collection MS long, K `idle' (the idle pass's or a
+;;       prompt's), `explicit' (`garbage-collect') or `automatic', written
+;;       with the counts.  M, when there is one, says who waited at most
+;;       MS: "command", C being the command it ran in or at the end of;
+;;       "key", a key press queued as it ended; or "redisplay", in a
+;;       prompt's redisplay, where no key can be seen and any pressed waits.
+;;       {"kind":"collection","dropped":N} counts those beyond what a
+;;       session keeps between writes.
 ;; An error record of a kind (its command and its error symbol) not yet
 ;; seen this session also has "backtrace": the names of the functions
 ;; its signal went through, innermost first (no arguments, no text).
@@ -51,6 +62,21 @@
 ;; A message can still hold text an error was given, such as a search's.
 
 ;;; Code:
+
+(defconst romacs-usage-log-user-conditions
+  '(beginning-of-buffer end-of-buffer quit minibuffer-quit user-error text-read-only buffer-read-only
+    mark-inactive)
+  "Error conditions an ordinary action of the user's raises (moving past
+the buffer's end, a C-g, a command refusing, typing into read-only text):
+no fault of the editor's.  Reports set them apart.")
+
+(defun romacs-usage-log-user-error-p (data)
+  "Whether error DATA, (SYMBOL . DATA), is one of `romacs-usage-log-user-conditions'."
+  (and (symbolp (car-safe data))
+       (let ((conditions (get (car data) 'error-conditions)))
+         (while (and conditions (not (memq (car conditions) romacs-usage-log-user-conditions)))
+           (setq conditions (cdr conditions)))
+         (and conditions t))))
 
 (defvar romacs-usage-log-file nil
   "The file this session logs its commands to, or nil when it does not.")
@@ -222,14 +248,15 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                           (equal (aref capture 0) kind) (eq (aref capture 1) (cdr-safe data))
                           (aref capture 2))))
         (setq romacs-usage-log--capture nil)
-        (if (not frames)
-            (romacs-usage-log--push :kind "error" :command command :mode (romacs-usage-log--name major-mode)
-                                    :error (romacs-usage-log--error-text data))
-          (puthash kind t romacs-usage-log--traced)
-          (remhash kind romacs-usage-log--captured)
-          (romacs-usage-log--push :kind "error" :command command :mode (romacs-usage-log--name major-mode)
-                                  :error (romacs-usage-log--error-text data)
-                                  :backtrace (vconcat frames))))
+        (let ((record (list :kind "error" :command command :mode (romacs-usage-log--name major-mode)
+                            :error (romacs-usage-log--error-text data))))
+          ;; The user's own, apart: `romacs-usage-log-user-error-p'.
+          (when (romacs-usage-log-user-error-p data) (setq record (append record (list :user t))))
+          (when frames
+            (puthash kind t romacs-usage-log--traced)
+            (remhash kind romacs-usage-log--captured)
+            (setq record (append record (list :backtrace (vconcat frames)))))
+          (apply #'romacs-usage-log--push record)))
     (error nil)))
 
 (defun romacs-usage-log--seconds ()
@@ -239,6 +266,19 @@ The first of its kind carries the backtrace its signal left, if one was taken."
 
 (defun romacs-usage-log--event (event)
   (romacs-usage-log--push :kind "session" :event event :seconds (romacs-usage-log--seconds)))
+
+(defun romacs-usage-log--collections ()
+  "The lines of the collections since the last call, oldest first."
+  (when (fboundp 'romacs--take-collections)
+    (let ((taken (romacs--take-collections)))
+      (nconc
+       (mapcar (lambda (record)
+                 (let ((met (nth 2 record)) (command (nth 3 record)))
+                   (json-serialize (append (list :kind "collection" :collection (symbol-name (nth 0 record)) :pause_ms (nth 1 record))
+                                           (and met (list :met (symbol-name met)))
+                                           (and command (list :command command))))))
+               (cdr taken))
+       (and (> (car taken) 0) (list (json-serialize (list :kind "collection" :dropped (car taken)))))))))
 
 (defun romacs-usage-log-flush ()
   "Append the queued lines and the counts since the last write to the log."
@@ -267,7 +307,7 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                          counts)))
                romacs-usage-log--slow)
       (clrhash romacs-usage-log--slow)
-      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts))))
+      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts) (romacs-usage-log--collections))))
         (setq romacs-usage-log--pending nil)
         (when lines (romacs-usage-log--append lines))))))
 

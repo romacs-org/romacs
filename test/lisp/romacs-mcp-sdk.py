@@ -27,7 +27,7 @@ async def exercise(relay, socket, env, pid, rows, output):
                 initialized = await session.initialize()
                 rows.append({"name": "sdk-legacy-initialize", "pass": initialized.protocolVersion == "2025-11-25", "observed": initialized.model_dump(mode="json", by_alias=True)})
                 listed = await session.list_tools()
-                rows.append({"name": "sdk-discovery", "pass": len(listed.tools) == 8, "observed": listed.model_dump(mode="json", by_alias=True)})
+                rows.append({"name": "sdk-discovery", "pass": len(listed.tools) == 9, "observed": listed.model_dump(mode="json", by_alias=True)})
 
                 async def tool(name, args, data=False):
                     result = await session.call_tool(name, args)

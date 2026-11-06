@@ -257,6 +257,19 @@ fn set_process_plist(cx, process: Value, plist: Value) {
     cx.set_process_slot(process, Slot::Plist, plist)
 }}
 
+defsubr! { name = "set-process-thread", gnu = "process.c:1508", effect = Global,
+fn set_process_thread(cx, process: Value, thread: Value) {
+    check_process(cx, process)?;
+    if thread != Value::NIL && cx.kind(thread) != Kind::Thread { return Err(Fault::Wrong("threadp", thread)); }
+    cx.set_process_slot(process, Slot::Thread, thread)
+}}
+
+defsubr! { name = "process-thread", gnu = "process.c:1533", effect = Reads,
+fn process_thread(cx, process: Value) {
+    check_process(cx, process)?;
+    cx.process_slot(process, Slot::Thread)
+}}
+
 defsubr! { name = "process-type", gnu = "process.c:1704", effect = Reads,
 fn process_type(cx, process: Value) {
     let process = get_process(cx, process)?;
@@ -533,3 +546,85 @@ fn signal_names(cx) {
     Ok((0..=crate::subprocess::signal_bound()).filter_map(crate::subprocess::signal_name)
         .fold(Value::NIL, |list, name| { let name = cx.string(&name); cx.cons(name, list) }))
 }}
+
+/// An IP ADDRESS as `make-network-process' takes one: [A B C D PORT] for
+/// IPv4, [X1 ... X8 PORT] for IPv6 (conv_sockaddr_to_lisp), PORT 0.
+fn address_vector(cx: &mut Leaf<'_>, address: std::net::IpAddr) -> Value {
+    let int = |n: u16| Value::fixnum(i64::from(n)).expect("a 16-bit value is a fixnum");
+    let mut items: Vec<Value> = match address {
+        std::net::IpAddr::V4(v4) => v4.octets().iter().map(|&o| int(u16::from(o))).collect(),
+        std::net::IpAddr::V6(v6) => v6.segments().iter().map(|&s| int(s)).collect(),
+    };
+    items.push(int(0));
+    cx.vector(&items)
+}
+
+// Fnetwork_lookup_address_info: NAME's addresses, as `make-network-process'
+// takes them, from the resolver (host::lookup_addresses).  FAMILY nil, ipv4
+// or ipv6; HINT nil or numeric (no DNS).  A failed lookup says why in the
+// echo area, as GNU's does, and gives nil.
+defsubr! { name = "network-lookup-address-info", gnu = "process.c:4767", effect = Global,
+fn network_lookup_address_info(cx, name: Value; optional family: Value, hint: Value) -> Step {
+    if !matches!(cx.kind(name), Kind::String | Kind::Bytes) {
+        return Err(Fault::Wrong("stringp", name));
+    }
+    let text = cx.string_text(name)?;
+    if !text.is_ascii() {
+        return Err(Fault::Error(format!("Non-ASCII hostname {text} detected, please use `puny-encode-domain'")));
+    }
+    let family = if family == Value::NIL { libc::AF_UNSPEC }
+        else if family == cx.intern("ipv4") { libc::AF_INET }
+        else if family == cx.intern("ipv6") { libc::AF_INET6 }
+        else { return Err(Fault::Error("Unsupported family".into())) };
+    let numeric = if hint == Value::NIL { false }
+        else if hint == cx.intern("numeric") { true }
+        else { return Err(Fault::Error("Unsupported hints value".into())) };
+    match crate::host::lookup_addresses(&text, family, numeric) {
+        Ok(addresses) => {
+            let items: Vec<Value> = addresses.into_iter().map(|a| address_vector(cx, a)).collect();
+            Ok(Step::Done(cx.coding_list(&items)))
+        }
+        Err(reason) => {
+            let format = cx.string("%s");
+            let report = cx.string(&format!("{text}/0 {reason}"));
+            Ok(Step::Call { f: cx.intern("message"), args: vec![format, report], then: lookup_nil, saved: vec![] })
+        }
+    }
+}}
+
+fn lookup_nil(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
+
+#[cfg(test)]
+mod tests {
+    use crate::Vm;
+
+    fn printed(vm: &mut Vm, source: &str) -> String {
+        match vm.eval_source_raw(source) {
+            Ok(value) => vm.display(value).unwrap(),
+            Err(error) => format!("ERR {error:?}"),
+        }
+    }
+
+    /// A numeric address needs no DNS: IPv4 and IPv6 come back as
+    /// `make-network-process' addresses, a family filters them, and a name
+    /// that is no number under `numeric' gives nil.
+    #[test]
+    fn numeric_lookups_give_address_vectors() {
+        let mut vm = Vm::new();
+        assert_eq!(printed(&mut vm, r#"(network-lookup-address-info "127.0.0.1" nil 'numeric)"#), "([127 0 0 1 0])");
+        assert_eq!(printed(&mut vm, r#"(network-lookup-address-info "::1" 'ipv6 'numeric)"#), "([0 0 0 0 0 0 0 1 0])");
+        assert_eq!(printed(&mut vm, r#"(network-lookup-address-info "::1" 'ipv4 'numeric)"#), "nil");
+        assert_eq!(printed(&mut vm, r#"(network-lookup-address-info "example.org" nil 'numeric)"#), "nil");
+    }
+
+    /// GNU's argument errors.
+    #[test]
+    fn bad_arguments_signal_as_gnu() {
+        let mut vm = Vm::new();
+        let caught = |vm: &mut Vm, form: &str| printed(vm, &format!("(condition-case e {form} (error (car (cdr e))))"));
+        assert_eq!(caught(&mut vm, r#"(network-lookup-address-info "a" 'ipx)"#), "\"Unsupported family\"");
+        assert_eq!(caught(&mut vm, r#"(network-lookup-address-info "a" nil 'fast)"#), "\"Unsupported hints value\"");
+        assert!(caught(&mut vm, r#"(network-lookup-address-info "café.example")"#).starts_with("\"Non-ASCII hostname"));
+        assert_eq!(printed(&mut vm, "(condition-case e (network-lookup-address-info 1) (wrong-type-argument (car e)))"), "wrong-type-argument");
+    }
+}

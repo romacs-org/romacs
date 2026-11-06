@@ -40,56 +40,107 @@ use crate::{Vm, host};
 use serde_json::{Value as Json, json};
 use std::path::{Path, PathBuf};
 
-pub const FORMAT: &str = "romacs-init-plan 1";
+pub const FORMAT: &str = "romacs-init-plan 2";
 /// Where a store keeps plans: `STORE/plans/<sha256 of the init's path>.json`.
 const PLANS: &str = "plans";
 /// The refusal kind a layer build lists for an entry it will not hold.
 pub const REFUSAL: &str = "init-layer";
 
-/// How the init asked for a load.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The functions that read a secret: a declared library whose load or
+/// configuration calls one is refused, so the layer never holds what one
+/// returns, and the library keeps its first-use load, where the call
+/// happens in the session. The build's confinement already denies the
+/// files and processes behind them; this names the reason.
+const SECRET_READERS: [&str; 17] = [
+    "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
+    "auth-source-user-and-password", "auth-source-pass-get", "auth-source-pass-parse-entry",
+    "auth-source-pass--read-entry", "auth-source-pass-entries", "epg-decrypt-file", "epg-decrypt-string",
+    "epg-start-decrypt", "epa-decrypt-file", "epa-decrypt-region", "epa-file-insert-file-contents",
+    "plstore-open", "secrets-get-secret", "read-passwd",
+];
+
+/// How the init asked for a load, or declared a library it loads later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     /// `(require NAME FILE NOERROR)`.
     Require,
-    /// An autoload's load of FILE, as `autoload-do-load` issues it.
+    /// An autoload's load of FILE, as `autoload-do-load` issues it; when
+    /// declared, an `autoload` the init defined for FILE.
     Autoload,
+    /// `eval-after-load` of a feature (or, with `file`, of a file) not
+    /// loaded yet: a library the init configures for its first use, as
+    /// `use-package`'s :config, :bind, :hook and :defer and
+    /// `with-eval-after-load` do. Always declared.
+    After,
 }
-romacs_snapshot::snapshot_enum!(Kind { Kind::Require => (), Kind::Autoload => () });
+romacs_snapshot::snapshot_enum!(Kind { Kind::Require => (), Kind::Autoload => (), Kind::After => () });
 
-/// One load the init issued at its own depth.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One load the init issued at its own depth, or one library it declared.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Entry {
     pub kind: Kind,
     /// The feature's name, or the autoload's file as given.
     pub name: String,
-    /// `require`'s FILENAME argument, when given.
+    /// `require`'s FILENAME argument, when given; for `After`, the file
+    /// `eval-after-load` named, as given, when it named one.
     pub file: Option<String>,
     pub noerror: bool,
     /// The `load-path` of the moment: an index into the plan's list.
     pub load_path: usize,
+    /// The init only declared the library (an `autoload`, an
+    /// `eval-after-load`), which GNU loads at its first use.
+    pub declared: bool,
+    /// `After`'s forms, each as printed, in the order the init gave them.
+    pub forms: Vec<String>,
 }
-romacs_snapshot::snapshot_struct!(Entry { kind, name, file, noerror, load_path });
+romacs_snapshot::snapshot_struct!(Entry { kind, name, file, noerror, load_path, declared, forms });
 
 impl Entry {
     fn json(&self) -> Json {
-        let kind = match self.kind { Kind::Require => "require", Kind::Autoload => "autoload" };
-        json!({"kind": kind, "name": self.name, "file": self.file, "noerror": self.noerror, "load_path": self.load_path})
+        let kind = match self.kind { Kind::Require => "require", Kind::Autoload => "autoload", Kind::After => "after" };
+        json!({"kind": kind, "name": self.name, "file": self.file, "noerror": self.noerror, "load_path": self.load_path,
+               "declared": self.declared, "forms": self.forms})
     }
 
     fn from_json(json: &Json) -> Option<Entry> {
-        let kind = match json["kind"].as_str()? { "require" => Kind::Require, "autoload" => Kind::Autoload, _ => return None };
+        let kind = match json["kind"].as_str()? { "require" => Kind::Require, "autoload" => Kind::Autoload, "after" => Kind::After, _ => return None };
+        let forms = json["forms"].as_array()?.iter().map(|f| f.as_str().map(str::to_owned)).collect::<Option<_>>()?;
         Some(Entry { kind, name: json["name"].as_str()?.to_owned(), file: json["file"].as_str().map(str::to_owned),
-                     noerror: json["noerror"].as_bool()?, load_path: json["load_path"].as_u64()? as usize })
+                     noerror: json["noerror"].as_bool()?, load_path: json["load_path"].as_u64()? as usize,
+                     declared: json["declared"].as_bool()?, forms })
     }
 
-    /// The call, as the init made it.
+    /// The call, as the init made it; for a declared library, its load as
+    /// its first use would make it. A declared file loads once, however
+    /// many of its commands the init declared; an `After` entry's forms
+    /// are registered first, so they run where GNU runs them, at the
+    /// library's `provide` or the end of its file, and the library must be
+    /// there: the layer holds what the init configured, or refuses it.
     fn form(&self) -> String {
         let noerror = if self.noerror { "t" } else { "nil" };
+        let name = lisp_string(&self.name);
         match (self.kind, &self.file) {
-            (Kind::Require, Some(file)) => format!("(require (intern {}) {} {noerror})", lisp_string(&self.name), lisp_string(file)),
-            (Kind::Require, None) => format!("(require (intern {}) nil {noerror})", lisp_string(&self.name)),
-            (Kind::Autoload, _) => format!("(load {} {noerror} t)", lisp_string(&self.name)),
+            (Kind::Require, Some(file)) => format!("(require (intern {name}) {} {noerror})", lisp_string(file)),
+            (Kind::Require, None) => format!("(require (intern {name}) nil {noerror})"),
+            (Kind::Autoload, _) if self.declared => format!("(romacs--layer-load-declared {name})"),
+            (Kind::Autoload, _) => format!("(load {name} {noerror} t)"),
+            (Kind::After, file) => {
+                let library = match file { Some(file) => lisp_string(file), None => format!("(intern {name})") };
+                let forms: Vec<String> = self.forms.iter().map(|f| lisp_string(f)).collect();
+                format!("(romacs--layer-load-configured {library} '({}))", forms.join(" "))
+            }
         }
+    }
+
+    /// Whether this entry is the same declaration or load as OTHER. Two
+    /// `After` entries of one library with as many forms are: a layer is
+    /// used only while the init has the content its plan was recorded
+    /// from, so the forms are the same code, though their printed text may
+    /// name other generated symbols (`cl-gentemp' skips the names a layer
+    /// interned).
+    fn same(&self, other: &Entry) -> bool {
+        let key = |e: &Entry| Entry { load_path: 0, forms: if e.kind == Kind::After { vec![String::new(); e.forms.len()] } else { e.forms.clone() }, ..e.clone() };
+        key(self) == key(other)
     }
 }
 
@@ -112,8 +163,27 @@ pub(crate) struct Recording {
     depth: usize,
     entries: Vec<Entry>,
     load_paths: Vec<Vec<String>>,
+    /// Holds on noting (`romacs--init-recording-hold`): an after-load
+    /// form the init runs at once, whose loads are its library's.
+    hold: usize,
+    /// Each declaration's entry (`Recording::key`).
+    index: std::collections::BTreeMap<String, usize>,
+    /// The recording observes the calls of `SECRET_READERS`: once one ran,
+    /// a form the init gives may hold what it returned.
+    secrets: bool,
 }
-romacs_snapshot::snapshot_struct!(Recording { depth, entries, load_paths });
+romacs_snapshot::snapshot_struct!(Recording { depth, entries, load_paths, hold, index, secrets });
+
+impl Recording {
+    /// The index key of a declaration of NAME (FILE) of KIND.
+    fn key(kind: Kind, name: &str, file: Option<&str>) -> String {
+        format!("{kind:?}\0{name}\0{}", file.unwrap_or("\0"))
+    }
+}
+
+/// The printed form noted for a form the init gave after a secret reader
+/// ran: never its text, which may hold the secret, and never replayed.
+const AFTER_SECRET: &str = "#<after a secret reader>";
 
 /// An init's plan: the loads it issued, in order, each under the
 /// `load-path` of its moment, bound to the init's path and content.
@@ -223,31 +293,81 @@ impl Plan {
         Some(Plan { init: PathBuf::from(json["init"].as_str()?), init_digest: json["init_digest"].as_str()?.to_owned(), entries, load_paths, siblings })
     }
 
+    /// Where STORE keeps INIT's plan, or with LAST the plan of the last
+    /// layer a launch could restore for it.
+    fn path(store: &Path, init: &Path, last: bool) -> PathBuf {
+        use std::os::unix::ffi::OsStrExt;
+        let suffix = if last { ".last.json" } else { ".json" };
+        store.join(PLANS).join(format!("{}{suffix}", sha256(init.as_os_str().as_bytes())))
+    }
+
     /// Where STORE keeps INIT's plan.
     pub fn file(store: &Path, init: &Path) -> PathBuf {
-        use std::os::unix::ffi::OsStrExt;
-        store.join(PLANS).join(format!("{}.json", sha256(init.as_os_str().as_bytes())))
+        Self::path(store, init, false)
     }
 
     /// INIT's plan in STORE, when one is there and is INIT's.
     pub fn read(store: &Path, init: &Path) -> Option<Plan> {
-        let text = host::read_store_file(Self::file(store, init)).ok()?;
+        Self::read_path(&Self::file(store, init), init)
+    }
+
+    /// The plan of the last layer usable for INIT in STORE (`write_last`),
+    /// with the digest of the plan it was resolved from.
+    pub fn read_last(store: &Path, init: &Path) -> Option<(Plan, String)> {
+        let text = host::read_store_file(Self::path(store, init, true)).ok()?;
+        let json: Json = serde_json::from_str(&text).ok()?;
+        let from = json["resolved_from"].as_str()?.to_owned();
+        Some((Plan::from_json(&json).filter(|plan| plan.init == init)?, from))
+    }
+
+    fn read_path(file: &Path, init: &Path) -> Option<Plan> {
+        let text = host::read_store_file(file).ok()?;
         Plan::from_json(&serde_json::from_str(&text).ok()?).filter(|plan| plan.init == init)
     }
 
     /// Keep this plan in STORE as its init's, replacing the one there whole.
     pub fn write(&self, store: &Path) -> std::io::Result<()> {
+        self.write_path(&Self::file(store, &self.init), store)
+    }
+
+    /// Keep this plan in STORE as its init's last usable layer's, resolved
+    /// from the plan of digest FROM: a launch restores it at once while
+    /// that plan is the init's, and while a newer plan's layer builds
+    /// (romacs-vm-gui world.rs).
+    pub fn write_last(&self, store: &Path, from: &str) -> std::io::Result<()> {
+        let mut json = self.json();
+        json["resolved_from"] = json!(from);
+        Self::write_json(&json, &Self::path(store, &self.init, true), store)
+    }
+
+    fn write_path(&self, file: &Path, store: &Path) -> std::io::Result<()> {
+        Self::write_json(&self.json(), file, store)
+    }
+
+    fn write_json(json: &Json, file: &Path, store: &Path) -> std::io::Result<()> {
         use std::io::Write;
-        let file = Self::file(store, &self.init);
+        let file = file.to_owned();
         super::store::store_subdir(&store.join(PLANS))?;
         let (temporary, mut out) = host::temp_file(&file.with_extension("json.XXXXXX"))?;
-        out.write_all(self.json().to_string().as_bytes())?;
+        out.write_all(json.to_string().as_bytes())?;
         host::rename(&temporary, &file)
     }
 
-    /// Whether PLAN replays as this one: the same entries over the same paths.
+    /// Whether every load and declaration of this plan is one of OTHER's,
+    /// under the same `load-path`: a layer of this plan holds nothing
+    /// OTHER does not ask for.
+    pub fn within(&self, other: &Plan) -> bool {
+        let keyed = |plan: &Plan, entry: &Entry| (Entry { load_path: 0, forms: vec![String::new(); entry.forms.len()], ..entry.clone() },
+                                                  plan.load_paths[entry.load_path].clone());
+        let theirs: std::collections::HashSet<(Entry, Vec<String>)> = other.entries.iter().map(|e| keyed(other, e)).collect();
+        self.entries.iter().all(|e| theirs.contains(&keyed(self, e)))
+    }
+
+    /// Whether PLAN replays as this one: the same entries (`Entry::same`)
+    /// over the same paths.
     pub fn same_loads(&self, other: &Plan) -> bool {
-        self.entries == other.entries && self.load_paths == other.load_paths
+        self.entries.len() == other.entries.len()
+            && self.entries.iter().zip(&other.entries).all(|(a, b)| a.same(b) && self.load_paths[a.load_path] == other.load_paths[b.load_path])
     }
 
     /// Whether this plan, recorded now, must replace KEPT in the store: it
@@ -264,7 +384,7 @@ impl Plan {
     /// init's digest is RECORDED's.
     pub fn merged(&self, recorded: &Plan) -> Plan {
         let path = |plan: &Plan, entry: &Entry| plan.load_paths[entry.load_path].clone();
-        let same = |a: &Entry, pa: &[String], b: &Entry, pb: &[String]| a.kind == b.kind && a.name == b.name && a.file == b.file && a.noerror == b.noerror && pa == pb;
+        let same = |a: &Entry, pa: &[String], b: &Entry, pb: &[String]| a.same(b) && pa == pb;
         let mut merged: Vec<(Entry, Vec<String>)> = Vec::new();
         let mut cursor = 0;
         for entry in &recorded.entries {
@@ -287,9 +407,76 @@ impl Plan {
     }
 }
 
-/// Whether NAME is a plan file's: a hex digest and `.json`.
+/// The libraries whose configuration is refused, by what loading them
+/// leaves: features, and files named as `eval-after-load` names them
+/// (`load-history-regexp`): without the Lisp suffixes, an absolute name by
+/// its true name, a relative one as the tail of the loaded file's.
+struct Deferred {
+    features: std::collections::HashMap<String, String>,
+    files: std::collections::HashMap<String, String>,
+}
+
+impl Deferred {
+    /// The libraries ENTRIES, each a name and the file `eval-after-load`
+    /// named, if it named one.
+    fn new<'a>(entries: impl Iterator<Item = (&'a str, Option<&'a str>)>) -> Deferred {
+        let mut deferred = Deferred { features: Default::default(), files: Default::default() };
+        for (name, file) in entries {
+            match file {
+                None => { deferred.features.insert(name.to_owned(), name.to_owned()); }
+                Some(file) => {
+                    let file = if file.starts_with('/') { true_name(file) } else { file.to_owned() };
+                    deferred.files.insert(bare(&file), name.to_owned());
+                }
+            }
+        }
+        deferred
+    }
+
+    /// The deferred library FEATURES or FILES (true names) hold, if any:
+    /// each feature looked up, each file's name and each of its tails.
+    fn loaded_by(&self, features: &[String], files: &[String]) -> Option<&str> {
+        if let Some(name) = features.iter().find_map(|f| self.features.get(f)) { return Some(name); }
+        if self.files.is_empty() { return None; }
+        files.iter().find_map(|file| {
+            let file = bare(file);
+            let tails = file.match_indices('/').map(|(at, _)| &file[at + 1..]);
+            std::iter::once(file.as_str()).chain(tails).find_map(|tail| self.files.get(tail))
+        }).map(String::as_str)
+    }
+}
+
+/// The builder's question of each entry's loads LOADED (the features it
+/// provided, the files it loaded): the library of DEFERRED (names, and the
+/// files `eval-after-load` named) it loaded, if any.
+pub fn deferred_by(deferred: &[(String, Option<String>)], loaded: &[(Vec<String>, Vec<String>)]) -> Vec<Option<String>> {
+    let deferred = Deferred::new(deferred.iter().map(|(name, file)| (name.as_str(), file.as_deref())));
+    loaded.iter().map(|(features, files)| deferred.loaded_by(features, files).map(str::to_owned)).collect()
+}
+
+/// FILE's true name, as `file-truename` gives it: its directories'
+/// symbolic links resolved even when FILE itself does not exist, as a
+/// name without its Lisp suffix does not.
+fn true_name(file: &str) -> String {
+    let path = Path::new(file);
+    host::canonicalize(path)
+        .or_else(|_| match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => host::canonicalize(parent).map(|dir| dir.join(name)),
+            _ => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        })
+        .map_or_else(|_| file.to_owned(), |p| p.display().to_string())
+}
+
+/// NAME without the Lisp suffixes `load-history-regexp` allows.
+fn bare(name: &str) -> String {
+    let name = name.strip_suffix(".gz").unwrap_or(name);
+    name.strip_suffix(".elc").or_else(|| name.strip_suffix(".el")).unwrap_or(name).to_owned()
+}
+
+/// Whether NAME is a plan file's: a hex digest and `.json`, or `.last.json`.
 pub(super) fn plan_file(name: &str) -> bool {
-    name.strip_suffix(".json").is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
+    let key = name.strip_suffix(".last.json").or_else(|| name.strip_suffix(".json"));
+    key.is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// The loader's variables, which every entry reads and writes: no library's own.
@@ -297,7 +484,12 @@ impl Vm {
     /// Record the loads the init issues from here, at the depth the next
     /// load (the init's own) runs at, until `take_init_loads`.
     pub fn record_init_loads(&mut self) {
-        self.loader.recording = Some(Recording { depth: self.loader.active_depth() + 1, ..Default::default() });
+        let secrets = !self.backtrace.observing();
+        if secrets {
+            let readers = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
+            self.backtrace.observe_only(readers);
+        }
+        self.loader.recording = Some(Recording { depth: self.loader.active_depth() + 1, secrets, ..Default::default() });
     }
 
     /// The loads recorded since `record_init_loads`, as INIT's plan, and
@@ -306,26 +498,99 @@ impl Vm {
     /// read.
     pub fn take_init_loads(&mut self, init: &Path) -> Option<Plan> {
         let recording = self.loader.recording.take()?;
-        Plan::new(init, recording.entries, recording.load_paths)
+        if recording.secrets && self.backtrace.observing() { self.backtrace.observed(); }
+        let excluded = self.init_layer_exclusions();
+        let entries = recording.entries.into_iter()
+            .filter(|e| !excluded.iter().any(|x| *x == e.name || e.file.as_ref() == Some(x)))
+            .collect();
+        Plan::new(init, entries, recording.load_paths)
+    }
+
+    /// The names `romacs-init-layer-exclude` lists, as the init left it:
+    /// features as their names, files as given.
+    fn init_layer_exclusions(&mut self) -> Vec<String> {
+        let slot = self.slot("romacs-init-layer-exclude");
+        let Ok(list) = self.variable_value(slot) else { return Vec::new() };
+        if list == crate::Value::UNBOUND { return Vec::new(); }
+        self.list_values(list).unwrap_or_default().into_iter()
+            .filter_map(|v| self.symbol_name_of(v).or_else(|| self.source_string_if(v).map(str::to_owned)))
+            .collect()
+    }
+
+    /// Where the init stands, when a recording is on and the caller runs at
+    /// the init's own depth: the index of the `load-path` of the moment.
+    fn init_recording_point(&mut self) -> Option<usize> {
+        let recording = self.loader.recording.as_ref()?;
+        if recording.hold > 0 || self.loader.active_depth() != recording.depth {
+            return None;
+        }
+        let Ok(load_path) = self.load_path_strings() else {
+            self.loader.recording = None;
+            return None;
+        };
+        let recording = self.loader.recording.as_mut().expect("the recording");
+        Some(match recording.load_paths.last() {
+            Some(last) if *last == load_path => recording.load_paths.len() - 1,
+            _ => { recording.load_paths.push(load_path); recording.load_paths.len() - 1 }
+        })
+    }
+
+    /// Hold noting (ON), or release one hold: while the init runs an
+    /// after-load form at once, for a library loaded already, what the form
+    /// loads is the library's configuration's, as when the form runs inside
+    /// the library's load; so a launch notes the same whether its layer
+    /// loaded the library or not.
+    pub(crate) fn hold_init_recording(&mut self, on: bool) {
+        if let Some(recording) = self.loader.recording.as_mut() {
+            recording.hold = if on { recording.hold + 1 } else { recording.hold.saturating_sub(1) };
+        }
     }
 
     /// A `require` or an autoload's load begins: noted when the init issues
     /// it at its own depth and a recording is on.
     pub(crate) fn note_init_load(&mut self, kind: Kind, name: String, file: Option<String>, noerror: bool) {
-        let Some(recording) = &self.loader.recording else { return };
-        if self.loader.active_depth() != recording.depth {
-            return;
-        }
-        let Ok(load_path) = self.load_path_strings() else {
-            self.loader.recording = None;
-            return;
-        };
+        let Some(at) = self.init_recording_point() else { return };
         let recording = self.loader.recording.as_mut().expect("the recording");
-        let at = match recording.load_paths.last() {
-            Some(last) if *last == load_path => recording.load_paths.len() - 1,
-            _ => { recording.load_paths.push(load_path); recording.load_paths.len() - 1 }
-        };
-        recording.entries.push(Entry { kind, name, file, noerror, load_path: at });
+        recording.entries.push(Entry { kind, name, file, noerror, load_path: at, declared: false, forms: Vec::new() });
+    }
+
+    /// The init defined an autoload from FILE: a library it declared, noted
+    /// once per file.
+    pub(crate) fn note_init_declared(&mut self, file: String) {
+        let Some(at) = self.init_recording_point() else { return };
+        let recording = self.loader.recording.as_mut().expect("the recording");
+        let key = Recording::key(Kind::Autoload, &file, None);
+        if !recording.index.contains_key(&key) {
+            recording.index.insert(key, recording.entries.len());
+            recording.entries.push(Entry { kind: Kind::Autoload, name: file, file: None, noerror: true, load_path: at, declared: true, forms: Vec::new() });
+        }
+    }
+
+    /// The position the init's next `eval-after-load` form for NAME (FILE
+    /// as `note_init_after_load`) takes among that library's, when the
+    /// init itself makes the call and a recording is on.
+    pub(crate) fn init_after_load_ordinal(&mut self, name: &str, file: Option<&str>) -> Option<usize> {
+        self.init_recording_point()?;
+        let recording = self.loader.recording.as_ref()?;
+        Some(recording.index.get(&Recording::key(Kind::After, name, file)).map_or(0, |&at| recording.entries[at].forms.len()))
+    }
+
+    /// The init gave `eval-after-load` FORM, as printed, for NAME (a
+    /// feature's name, or with FILE the file it named) not loaded yet:
+    /// noted with that library's entry, made at its first such call.
+    pub(crate) fn note_init_after_load(&mut self, name: String, file: Option<String>, form: String) {
+        let Some(at) = self.init_recording_point() else { return };
+        let secret = self.loader.recording.as_ref().is_some_and(|r| r.secrets) && self.backtrace.observed_any();
+        let form = if secret { AFTER_SECRET.to_owned() } else { form };
+        let recording = self.loader.recording.as_mut().expect("the recording");
+        let key = Recording::key(Kind::After, &name, file.as_deref());
+        match recording.index.get(&key) {
+            Some(&entry) => recording.entries[entry].forms.push(form),
+            None => {
+                recording.index.insert(key, recording.entries.len());
+                recording.entries.push(Entry { kind: Kind::After, name, file, noerror: true, load_path: at, declared: true, forms: vec![form] });
+            }
+        }
     }
 
     /// SYMBOL's name as interned, or None for a non-symbol.
@@ -343,6 +608,44 @@ impl Vm {
             .collect()
     }
 
+    /// The first function that reads a secret (`SECRET_READERS`) called
+    /// since `observe`, which ends here.
+    fn secret_call(&mut self) -> Option<String> {
+        // Startup's own observation, begun and ended inside the entry, took
+        // it over: its reads are the fence's to judge.
+        if !self.backtrace.observing() { return None; }
+        let mut calls = self.backtrace.observed();
+        calls.sort_unstable();
+        calls.dedup();
+        calls.into_iter().map(|slot| self.symbol_names[slot].as_str()).find(|name| SECRET_READERS.contains(name)).map(str::to_owned)
+    }
+
+    /// `features` as it is, rooted, and how many files the loader has
+    /// loaded: `features` grows at its front and the loader's files at
+    /// their end, so what an entry loads is what is new past these marks
+    /// after it (`loads_since`).
+    fn load_heads(&mut self) -> (crate::gc::RootFrame, usize) {
+        let slot = self.slot("features");
+        let features = self.variable_value(slot).unwrap_or(crate::Value::NIL);
+        (self.root_frame(&[features]), self.loader.files.len())
+    }
+
+    /// The features provided and the files loaded since HEADS, walking only
+    /// what is new.
+    fn loads_since(&mut self, (heads, files): (crate::gc::RootFrame, usize)) -> (Vec<String>, Vec<String>) {
+        let old = self.rooted(&heads, 0);
+        let slot = self.slot("features");
+        let mut list = self.variable_value(slot).unwrap_or(crate::Value::NIL);
+        let mut features = Vec::new();
+        while list != old && let Ok((feature, rest)) = self.cons_pair(list) {
+            features.extend(self.symbol_name_of(feature));
+            list = rest;
+        }
+        self.drop_frame(heads);
+        let files = self.loader.files.get(files..).unwrap_or_default().iter().map(|f| f.display().to_string()).collect();
+        (features, files)
+    }
+
     fn timer_count(&mut self) -> i64 {
         self.eval_source_raw("(+ (if (boundp 'timer-list) (length timer-list) 0) (if (boundp 'timer-idle-list) (length timer-idle-list) 0))")
             .ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
@@ -357,10 +660,12 @@ impl Vm {
     /// build names every such entry. A definition form that reads a
     /// per-process fact is kept for restore instead (`world_form_done`).
     /// The refused entries.
-    pub fn world_layer_load(&mut self, plan: &Plan) -> Vec<(usize, String)> {
+    pub fn world_layer_load(&mut self, plan: &Plan, deferred: &[Entry]) -> Vec<(usize, String)> {
         let kept = self.load_path_strings().unwrap_or_default();
         let mut added: Vec<String> = Vec::new();
         let mut refused = Vec::new();
+        // What each entry loaded: the features it provided and the files.
+        let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
         host::layer_begin();
         // As the init's libraries find the live session: interactive
         // (rlisp/romacs-gui-loadup.el), with the init named before it loads
@@ -371,22 +676,47 @@ impl Vm {
         for (at, entry) in plan.entries.iter().enumerate() {
             let paths: Vec<PathBuf> = plan.load_paths[entry.load_path].iter().map(PathBuf::from).collect();
             let (refusals, timers) = (host::refusals(), self.timer_count());
+            let heads = self.load_heads();
+            host::layer_declared(entry.declared);
+            let observed = entry.declared && !self.backtrace.observing();
+            if observed { self.backtrace.observe(); }
             let result = self.set_load_path(&paths).and_then(|()| self.eval_source_raw(&entry.form()));
+            let secret = if observed { self.secret_call() } else { None };
             for path in self.load_path_strings().unwrap_or_default() {
                 if !plan.load_paths[entry.load_path].contains(&path) && !added.contains(&path) { added.push(path); }
             }
             let within = self.innermost_function();
             let why = match result {
+                _ if secret.is_some() => secret.map(|f| format!("secret: {f}")),
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
                 Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
                 Ok(_) if self.timer_count() > timers && !host::layer_timers_allowed() => Some("timer".to_owned()),
                 Ok(_) => None,
             };
+            loaded.push(self.loads_since(heads));
             if let Some(why) = why {
                 host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
                 refused.push((at, why));
             }
         }
+        // A library whose configuration is refused, in this build or an
+        // earlier one of the plan (DEFERRED), stays deferred whole: a
+        // declared entry that loaded it anyway (an `autoload' of one of its
+        // commands, a library requiring it) is refused too, or the init
+        // would run that configuration at every start.
+        let refused_after: Vec<&Entry> = refused.iter().map(|(at, _)| &plan.entries[*at]).filter(|e| e.kind == Kind::After).collect();
+        let deferred = Deferred::new(deferred.iter().chain(refused_after).map(|e| (e.name.as_str(), e.file.as_deref())));
+        let mut held: std::collections::HashSet<usize> = refused.iter().map(|(at, _)| *at).collect();
+        for (at, entry) in plan.entries.iter().enumerate() {
+            if !entry.declared || held.contains(&at) { continue; }
+            let (features, files) = &loaded[at];
+            let Some(library) = deferred.loaded_by(features, files) else { continue };
+            let why = format!("loads {library}, whose configuration is refused");
+            host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
+            held.insert(at);
+            refused.push((at, why));
+        }
+        host::layer_declared(false);
         let restored: Vec<PathBuf> = added.iter().chain(kept.iter().filter(|p| !added.contains(p))).map(PathBuf::from).collect();
         let _ = self.set_load_path(&restored);
         // The startup function runs again after the libraries, as a
@@ -416,12 +746,12 @@ mod tests {
     }
 
     fn require(name: &str) -> Entry {
-        Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0 }
+        Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() }
     }
 
     #[test]
     fn a_plan_survives_its_json_and_its_digest_ignores_the_init_content() {
-        let one = plan(vec![require("org"), Entry { kind: Kind::Autoload, name: "which-key".into(), file: None, noerror: true, load_path: 0 }]);
+        let one = plan(vec![require("org"), Entry { kind: Kind::Autoload, name: "which-key".into(), file: None, noerror: true, load_path: 0, declared: false, forms: Vec::new() }]);
         assert_eq!(Plan::from_json(&one.json()), Some(one.clone()));
         let edited = Plan { init_digest: "e".repeat(64), ..one.clone() };
         assert_eq!(edited.digest(), one.digest());
@@ -436,7 +766,7 @@ mod tests {
 
     #[test]
     fn a_recorded_plan_merges_into_the_layers_keeping_what_the_layer_satisfied() {
-        let auto = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: false, load_path: 0 };
+        let auto = |name: &str| Entry { kind: Kind::Autoload, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
         let layer = plan(vec![auto("display-line-numbers"), require("savehist"), auto("which-key"), require("org"), require("eat")]);
         // Restored from the layer: no autoloads, and one new require between org and eat.
         let mut recorded = plan(vec![require("savehist"), require("org"), require("new"), require("eat")]);
@@ -452,6 +782,9 @@ mod tests {
         assert!(plan(vec![require("eat")]).supersedes(Some(&kept)));
         assert!(Plan { init_digest: "e".repeat(64), ..kept.clone() }.supersedes(Some(&kept)));
         assert!(Plan { siblings: vec![("/".into(), vec!["x".into()])], ..kept.clone() }.supersedes(Some(&kept)));
+        // A layer of a plan within another holds nothing the other does not ask for.
+        assert!(kept.within(&layer) && kept.within(&kept) && !layer.within(&kept));
+        assert!(!plan(vec![Entry { declared: true, ..require("org") }]).within(&layer));
         // Another load path makes another entry.
         let mut elsewhere = plan(vec![require("org")]);
         elsewhere.load_paths = vec![vec!["/z".into()]];
@@ -463,10 +796,18 @@ mod tests {
     #[test]
     fn an_entry_replays_as_the_call_the_init_made() {
         assert_eq!(require("org").form(), r#"(require (intern "org") nil nil)"#);
-        let named = Entry { kind: Kind::Require, name: "x".into(), file: Some("a \"q\"".into()), noerror: true, load_path: 0 };
+        let named = Entry { kind: Kind::Require, name: "x".into(), file: Some("a \"q\"".into()), noerror: true, load_path: 0, declared: false, forms: Vec::new() };
         assert_eq!(named.form(), r#"(require (intern "x") "a \"q\"" t)"#);
-        let auto = Entry { kind: Kind::Autoload, name: "/l/w.el".into(), file: None, noerror: false, load_path: 0 };
+        let auto = Entry { kind: Kind::Autoload, name: "/l/w.el".into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
         assert_eq!(auto.form(), r#"(load "/l/w.el" nil t)"#);
+        let declared = Entry { declared: true, noerror: true, ..auto.clone() };
+        assert_eq!(declared.form(), r#"(romacs--layer-load-declared "/l/w.el")"#);
+        let after = Entry { kind: Kind::After, name: "notmuch".into(), file: None, noerror: true, load_path: 0, declared: true,
+                            forms: vec!["(t progn (f \"x\"))".into(), "(nil . 1)".into()] };
+        assert_eq!(after.form(), r#"(romacs--layer-load-configured (intern "notmuch") '("(t progn (f \"x\"))" "(nil . 1)"))"#);
+        let file = Entry { file: Some("dired-x".into()), name: "dired-x".into(), ..after.clone() };
+        assert!(file.form().starts_with(r#"(romacs--layer-load-configured "dired-x" '("#), "{}", file.form());
+        assert!(!after.same(&Entry { forms: vec![], ..after.clone() }) && after.same(&Entry { load_path: 3, ..after.clone() }));
         assert!(plan_file(&format!("{}.json", "0".repeat(64))) && !plan_file("x.json") && !plan_file(&"0".repeat(64)));
     }
 

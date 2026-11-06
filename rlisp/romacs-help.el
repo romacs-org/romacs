@@ -340,5 +340,104 @@ The optional argument MENUS, if non-nil, says to mention menu bindings.
                    ",\n\t  is a prefix character for `backward-prefix-chars'")))))))
   syntax)
 
+;;;; Where Rust defines a primitive or a variable
+
+;; GNU's help and xref find a DEFUN or DEFVAR through the DOC file
+;; (`help-C-file-name') and search its C file (`find-function-C-source').
+;; Romacs's primitives and the variables its Rust declares answer from the
+;; primitive registry instead (`romacs--rust-definition'): their file,
+;; relative to the Romacs source tree `source-directory' names, and the line
+;; of their registration.  What Lisp defines still goes where GNU's goes.
+
+(defun romacs-help--primitive (definition)
+  "The primitive DEFINITION is, under any advice, else nil."
+  (when (advice--p definition) (setq definition (advice--cd*r definition)))
+  (and (subrp definition) definition))
+
+(defun romacs-help--rust-definition (object kind)
+  "Where Rust defines OBJECT: (FILE LINE TEXT), or nil.
+KIND `defvar' means OBJECT is a variable; else OBJECT is a function, or
+a symbol naming one, which is a primitive when Rust defines it."
+  (if (eq kind 'defvar)
+      (and (symbolp object) (romacs--rust-definition object 'defvar))
+    (let ((primitive (romacs-help--primitive (if (symbolp object) (indirect-function object) object))))
+      (and primitive (romacs--rust-definition primitive nil)))))
+
+(defun romacs-help--rust-file (object type &optional _also-c-source)
+  "The Rust file defining OBJECT where no Lisp file does, else nil.
+As `find-lisp-object-file-name' takes OBJECT and TYPE: a variable for
+TYPE `defvar'; else a function, TYPE its definition or `defun' for
+OBJECT's own, when that is a primitive, advised or not."
+  (cond ((eq type 'defvar)
+         (and (symbolp object) (not (symbol-file object 'defvar))
+              (car (romacs-help--rust-definition object 'defvar))))
+        ((and (symbolp object) (symbol-file object 'defun)) nil)
+        (t (let* ((definition (cond ((not (symbolp type)) type)
+                                    ((and (eq type 'defun) (symbolp object)) (indirect-function object))))
+                  (primitive (and definition (romacs-help--primitive definition))))
+             (and primitive (car (romacs--rust-definition primitive nil)))))))
+
+(defun romacs-help--C-file-name (subr-or-var kind)
+  "`help-C-file-name' of a primitive or a variable Rust defines: its file."
+  (car (romacs-help--rust-definition subr-or-var (if (eq kind 'var) 'defvar 'defun))))
+
+(defun romacs-help--rust-source (symbol type file)
+  "Where Rust defines SYMBOL in FILE, as `find-function-C-source' finds
+a DEFUN: (BUFFER . POSITION).  TYPE `defvar' means a variable.  FILE is
+relative to the Romacs source tree `source-directory' names; without
+it, a `user-error' names the file."
+  (let ((site (romacs-help--rust-definition symbol (if (eq type 'defvar) 'defvar 'defun)))
+        (path (and (stringp source-directory) (expand-file-name file source-directory))))
+    (unless (and path (file-readable-p path))
+      (user-error "The Rust source file %s is not available%s" file
+                  (if (stringp source-directory) (format " under %s" source-directory)
+                    ": no Romacs source tree (`source-directory' is nil)")))
+    (with-current-buffer (find-file-noselect path)
+      (without-restriction
+        (goto-char (point-min))
+        (let ((line (nth 1 site)) (text (nth 2 site)))
+          ;; The registered line, while it still holds the registration;
+          ;; else the registration wherever the file now has it.
+          (cond ((and line text (zerop (forward-line (1- line)))
+                      (search-forward text (line-end-position) t))
+                 (cons (current-buffer) (line-beginning-position)))
+                ((and text (progn (goto-char (point-min)) (search-forward text nil t)))
+                 (cons (current-buffer) (line-beginning-position)))
+                (t (error "Can't find source for %s" symbol))))))))
+
+(defun romacs-help--search-rust (symbol type library)
+  "`find-function-search-for-symbol' for a LIBRARY in Romacs's Rust."
+  (and (stringp library) (string-match-p "\\`crates/.*\\.rs\\'" library)
+       (romacs-help--rust-source symbol type library)))
+
+;;;; A build without its source tree
+
+;; `source-directory' is nil when no Romacs source tree is there, where
+;; GNU's is always the build's source directory, present or not.
+
+(defun romacs-help--repository-git (function dir)
+  "FUNCTION (version.el's git query) on DIR; nil, its answer for sources
+not under version control, when there is no DIR."
+  (and dir (funcall function dir)))
+
+(defun romacs-help--info-default-dirs (dirs)
+  "`Info-default-dirs' DIRS without the source tree's info/ when there is
+no source tree: it would be the working directory's."
+  (if (or (stringp source-directory) (not (equal (car dirs) (expand-file-name "info/" nil))))
+      dirs
+    (cdr dirs)))
+
+(with-eval-after-load "version"
+  (advice-add 'emacs-repository-version-git :around #'romacs-help--repository-git)
+  (advice-add 'emacs-repository-branch-git :around #'romacs-help--repository-git))
+(with-eval-after-load 'info
+  (advice-add 'Info-default-dirs :filter-return #'romacs-help--info-default-dirs))
+
+(with-eval-after-load 'help-fns
+  (advice-add 'find-lisp-object-file-name :before-until #'romacs-help--rust-file)
+  (advice-add 'help-C-file-name :before-until #'romacs-help--C-file-name))
+(with-eval-after-load 'find-func
+  (advice-add 'find-function-search-for-symbol :before-until #'romacs-help--search-rust))
+
 (provide 'romacs-help)
 ;;; romacs-help.el ends here

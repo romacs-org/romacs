@@ -388,7 +388,7 @@ mod frame_tests {
             text: romacs_layout_input::TextSlice { extends: vec![], utf8: "ab".into(), face_runs: vec![], raw: vec![] },
             face: Default::default(), faces: vec![], window: 1, focused: true, marks: Default::default() });
         let shown = super::Shown { frame: painted, ends: vec![], presentation: 1, tab_bar: vec![],
-                                   status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], Some(2)) };
+                                   status_bar: (vec![Some((6.0, 10.0)), Some((16.0, 10.0)), Some((26.0, 100.0)), Some((126.0, 10.0)), None], vec![2]) };
         let click = |x, y, button, pressed| super::status_bar_click(&shown, &InputEvent::PositionedPointer(PositionedPointerInput {
             position: PointerPosition { x, y, target_frame_id: 1 }, target: PointerTarget::Unpresented,
             action: PointerAction::Button { button, pressed, modifiers: 0 } }));
@@ -400,6 +400,45 @@ mod frame_tests {
         assert_eq!(click(17.0, 759.0, 1, false), None, "above the band");
     }
 
+    /// The stock theme's own faces reach a launch without Custom, the bare
+    /// workspace, as they reach one with it.
+    #[test]
+    fn the_workspace_has_the_stock_theme_s_own_faces() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let attribute = |vm: &mut romacs_vm::Vm, face: &str, key: &str| {
+            vm.eval_source(&format!("(internal-get-lisp-face-attribute '{face} {key})")).unwrap().display().unwrap()
+        };
+        assert_eq!(attribute(&mut vm, "mode-line-active", ":overline"), "\"#2e2922\"");
+        assert_eq!(attribute(&mut vm, "romacs-mode-line-pill", ":background"), "\"#50269a\"");
+        assert_eq!(attribute(&mut vm, "font-lock-variable-use-face", ":foreground"), "\"#d4c5a0\"");
+    }
+
+    /// A frame differing only in one chrome value paints differently, for
+    /// the paint and the prompt host alike: its cursor's colour, a pane's
+    /// corners or dimming, or a token of its style.
+    #[test]
+    fn a_chrome_value_alone_repaints() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        assert!(super::frames_alike(&painted.snapshot, &painted.snapshot.clone()));
+        let changes: [fn(&mut romacs_layout_input::FrameChrome); 5] = [
+            |c| c.cursor = Some([1, 2, 3]),
+            |c| c.radius += 1,
+            |c| c.dim += 0.01,
+            |c| c.style.band_radius += 1.0,
+            |c| c.style.layer_radius += 1.0,
+        ];
+        for change in changes {
+            let mut other = painted.snapshot.clone();
+            change(&mut other.chrome);
+            assert!(!super::frames_alike(&painted.snapshot, &other));
+        }
+    }
+
     /// Selecting the buffer a window already shows resets its end, though its
     /// frame stays equal; keeping the paint must keep `window-end' too.
     #[test]
@@ -409,7 +448,7 @@ mod frame_tests {
         crate::startup::initialize(&mut vm).unwrap();
         vm.eval_source("(erase-buffer) (let ((i 0)) (while (< i 300) (insert \"a long line of text\\n\") (setq i (1+ i)))) (goto-char 1)").unwrap();
         let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
-        let cursor = painted.selected.map(|id| (id, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+        let cursor = painted.selected.map(|id| (id, super::cursor_colour(&painted.snapshot)));
         let (_, ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&painted.snapshot, 1, cursor).unwrap();
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
@@ -449,10 +488,11 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
     a.font_selection == b.font_selection
         && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
+        && a.chrome == b.chrome
         && windows_alike(&a.windows, &b.windows)
         && a.children.len() == b.children.len()
-        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha)
-            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha)
+        && a.children.iter().zip(&b.children).all(|(a, b)| (a.id, a.x, a.y, a.width, a.height, a.border, a.border_color, a.background, a.background_alpha, a.radius)
+            == (b.id, b.x, b.y, b.width, b.height, b.border, b.border_color, b.background, b.background_alpha, b.radius)
             && (a.animation, a.edge, a.selection) == (b.animation, b.edge, b.selection) && windows_alike(&a.windows, &b.windows))
 }
 
@@ -469,8 +509,8 @@ struct Shown {
     /// The painted tab bar's characters: each one's left edge and width.
     tab_bar: Vec<(f32, f32)>,
     /// The painted status bar's characters, each one's left edge and width
-    /// or None where clipped, and its `right-align' marker's index.
-    status_bar: (Vec<Option<(f32, f32)>>, Option<usize>),
+    /// or None where clipped, and its markers' indices.
+    status_bar: (Vec<Option<(f32, f32)>>, Vec<usize>),
 }
 
 /// The frame to paint after a batch, or None when the paint on screen still
@@ -535,6 +575,8 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         once one is prepared in an existing store
   --compile-lisp FILE   compile FILE into the compiled-Lisp store (what a
                         compiled load runs on a miss)
+  --compile-lisp-tree [--jobs N]  compile the installation's Lisp into its
+                        compiled-Lisp store ahead of use, N at a time (default 4)
   ROMACS_WORLD=off      boot from source, without a world
   ROMACS_COMPILED_LISP=on|off  load GNU-compiled-kind files through compiled
                         artifacts (default: on in a live session, off in --batch)
@@ -593,7 +635,12 @@ fn run() -> Result<Option<exit::Exit>, String> {
         match arg.as_str() {
             "--world-build" => world_build = true,
             // The server a client started (client.rs): no window until a client asks.
-            "--serve" => serve = Some(client::server_name(&args.next().ok_or("--serve needs a NAME")?)?),
+            // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
+            "--serve" => {
+                let name = client::server_name(&args.next().ok_or("--serve needs a NAME")?)?;
+                romacs_vm::host::set_daemon(&name);
+                serve = Some(name);
+            }
             // The client that starts a server and asks for its window: the
             // window comes up while the world restores, as a session's does.
             "--serve-frame" => serve_frame = true,
@@ -632,6 +679,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
             "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--compile-lisp-tree" => {
+                let jobs = match (args.next().as_deref(), args.next()) {
+                    (None, _) => 4,
+                    (Some("--jobs"), Some(n)) => n.parse::<usize>().map_err(|e| format!("--jobs: {e}"))?,
+                    _ => return Err("usage: --compile-lisp-tree [--jobs N]".into()),
+                };
+                return batch::compile_lisp_tree(jobs).map(|()| None);
+            }
             "--compile-lisp" => {
                 let file = args.next().ok_or("--compile-lisp needs a FILE")?;
                 return batch::compile_lisp(file.into(), world_store).map(|()| None);
@@ -911,7 +966,7 @@ fn paint(
     }
     let layout_start = Instant::now();
     let (snapshot, selected) = (&shown.snapshot, shown.selected);
-    let cursor = selected.map(|selected| (selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+    let cursor = selected.map(|selected| (selected, cursor_colour(snapshot)));
     let (mut frame, mut ends) = engine.layout_frame(snapshot, presentation, cursor)?;
     let (mut children, child_ends) = engine.layout_children(snapshot, presentation, cursor)?;
     ends.extend(child_ends);
@@ -1019,7 +1074,7 @@ fn tab_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
 /// A mouse button event over the root frame's status bar as the Lisp that
 /// runs the binding of the mode line it shows (`romacs--status-bar-click'):
 /// the index of the painted character under the pointer. Between or past
-/// the characters, and on the `right-align' marker's room, it is no click.
+/// the characters, and on a marker's room, it is no click.
 fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let InputEvent::PositionedPointer(romacs_display_runtime::thread_comm::PositionedPointerInput {
         position, action: romacs_display_runtime::thread_comm::PointerAction::Button { button, pressed, .. }, ..
@@ -1027,9 +1082,9 @@ fn status_bar_click(shown: &Shown, event: &InputEvent) -> Option<String> {
     let bar = shown.frame.snapshot.status_bar.as_ref()?;
     let (top, bottom) = (bar.y as f32, (bar.y + bar.height) as f32);
     if position.target_frame_id != 1 || position.y < top || position.y >= bottom || !(1..=3).contains(button) { return None; }
-    let (extents, marker) = &shown.status_bar;
+    let (extents, markers) = &shown.status_bar;
     let column = extents.iter().position(|e| e.is_some_and(|(x, width)| position.x >= x && position.x < x + width))?;
-    if Some(column) == *marker { return None; }
+    if markers.contains(&column) { return None; }
     // A press is the bar's and runs nothing: its release is the click, so
     // `[mode-line down-mouse-1] mouse-drag-mode-line' never starts a drag of
     // an edge the bar does not have (VM2-STATUS-BAR).
@@ -1055,6 +1110,12 @@ fn steady_cursors(frame: &mut romacs_display_protocol::FrameGlyphBuffer, childre
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
 /// evaluator is suspended in Lisp and redisplay already ran in its own engine.
+/// The cursor's colour: the frame's `cursor-color', which SNAPSHOT carries.
+fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_display_protocol::Color {
+    let [r, g, b] = snapshot.chrome.cursor.unwrap_or_default();
+    romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]))
+}
+
 fn paint_prompt(
     engine: &mut romacs_layout2::LayoutEngine,
     sender: &PaintSender,
@@ -1062,7 +1123,7 @@ fn paint_prompt(
     presentation: u64,
     frame: &romacs_vm::HostFrame,
 ) -> Result<(usize, Vec<romacs_vm::WindowEnd>), String> {
-    let cursor = Some((frame.selected, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+    let cursor = Some((frame.selected, cursor_colour(&frame.frame)));
     let (mut glyphs, mut ends) = engine.layout_frame(&frame.frame, presentation, cursor)?;
     let (mut children, child_ends) = engine.layout_children(&frame.frame, presentation, cursor)?;
     ends.extend(child_ends);
@@ -1121,7 +1182,10 @@ fn evaluate(
     // How this VM booted, which its worker isolates repeat (rlisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
-            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}))", startup::lisp_string(&store.display().to_string()), key))?;
+            let compiled = romacs_vm::compiled_lisp::store_dir()
+                .map_or("nil".to_owned(), |dir| startup::lisp_string(&dir.display().to_string()));
+            vm.eval_source(&format!("(setq isolate-boot 'world isolate-world (cons {} {:?}) isolate-compiled-store {compiled})",
+                                    startup::lisp_string(&store.display().to_string()), key))?;
         }
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
@@ -1135,12 +1199,14 @@ fn evaluate(
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
     let images = residency::Shared::default();
-    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_alpha_hook(move |frame, alpha, limit| {
-        // Only a closed window refuses, and then nothing shows it.
-        let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
-    }))));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // An image decoded off the VM wakes the same wait as a terminal.
+    vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
+        .with_alpha_hook(move |frame, alpha, limit| {
+            // Only a closed window refuses, and then nothing shows it.
+            let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        }))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1188,11 +1254,17 @@ fn evaluate(
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // What the init loads is its layer's plan (world.rs).
-                if worlds.is_some() { vm.record_init_loads(); }
+                // Its `eval-after-load' calls declare the libraries it
+                // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
+                if worlds.is_some() {
+                    vm.record_init_loads();
+                    if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
+                }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
                 }
+                if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
                 if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
             }
@@ -1335,7 +1407,9 @@ fn evaluate(
                 if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
                 let event = command::unwrap_event(event);
                 command_start = Instant::now();
-                if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
+                if live && let InputEvent::WindowResize { width: w, height: h, scale_factor, .. } = event {
+                    // A HiDPI output: images decode at its device pixels.
+                    if vm.set_device_scale(scale_factor as f32) { live_presentation.changed(); }
                     if w > 0 && h > 0 && (width, height) != (w, h) {
                         width = w; height = h;
                         if let Some(server) = host.borrow_mut().server.as_mut() { server.size = (w, h); }
@@ -1486,6 +1560,9 @@ fn evaluate(
                 && let Some(trace) = &mut key_trace {
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
+            // Pixels landed, a parse a window waits on did, or a publication
+            // left images to send: paint again.
+            if vm.land_images()? || vm.land_treesit() || images.borrow().behind() { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }
@@ -1586,6 +1663,7 @@ fn evaluate(
                 }
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
+        vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());

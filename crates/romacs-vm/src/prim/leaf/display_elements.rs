@@ -61,9 +61,6 @@ pub(super) struct Source<'l, 'a> {
     /// An `:align-to' being computed has counted the line number
     /// (calc_pixel_width_or_height's LNUM_ONCE).
     lnum_added: bool,
-    /// A byte and the lines of the accessible text before it, from which
-    /// `line_at' counts on.
-    lines: (usize, i64),
     /// How many columns a character takes (width_rule.rs), read once.
     rule: crate::width_rule::WidthRule,
     /// The images the elements show (Shape::Image's AT), with their specs.
@@ -103,7 +100,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let byte = leaf.buffer_byte(view.buffer, start)?;
         let rule = leaf.vm.width_rule().map_err(Fault::Error)?;
         Ok(Source { leaf, view, look, syms, slots: vec![], next: start, byte, run_end: start, stop_due: true,
-            pre: None, ended: false, prefixes: vec![], lnum_added: false, lines: (0, -1), rule, images: vec![] })
+            pre: None, ended: false, prefixes: vec![], lnum_added: false, rule, images: vec![] })
     }
 
     pub(super) fn begv(&self) -> i64 { self.view.begv }
@@ -207,7 +204,7 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     fn text(&self) -> &crate::annotations::AnnotatedBuffer {
-        match self.leaf.vm.object_if(self.view.buffer) { Some(Object::Buffer(b)) => b, _ => unreachable!("checked text buffer") }
+        match self.leaf.vm.shown_text(self.view.buffer) { Ok(b) => b, _ => unreachable!("checked text buffer") }
     }
     fn char_at(&self, byte: usize) -> u32 {
         // The flat text's scalar, then the raw-byte listing (empty for
@@ -425,9 +422,7 @@ impl<'l, 'a> Source<'l, 'a> {
             composition_refusal(self.leaf.vm.property_textget(string, i as i64, self.syms.composition)?)?;
             let spec = self.leaf.vm.property_textget(string, i as i64, self.syms.display)?;
             if spec != Value::NIL && let Some(replacement) = self.display_spec(spec, true, origin.from_display)? {
-                let (at, display) = (Value::integer(i as i64).map_err(Fault::Error)?, self.syms.display);
-                let end = self.leaf.vm.next_single_property_change_values(at, display, string, Value::NIL)?
-                    .integer_value().map_or(chars.len(), |n| n as usize);
+                let end = self.string_run_end(string, i, self.syms.display, spec, &chars, end_byte)?;
                 let under = here.whitespace_under || matches!(chars[i].1, 0x20 | 0x09);
                 self.replacement(replacement, Origin { from_display: true, whitespace_under: under, ..here })?;
                 i = end.max(i + 1);
@@ -437,7 +432,7 @@ impl<'l, 'a> Source<'l, 'a> {
             let invisible = self.leaf.invisible_kind(property)?;
             let boundary = self.leaf.vm.next_property_boundary(string, ByteOffset(chars[i].0), ByteOffset(end_byte))
                 .map_err(Fault::Error)?.0;
-            let run = chars.iter().position(|&(b, _)| b >= boundary).unwrap_or(chars.len()).max(i + 1);
+            let run = char_at_byte(&chars, boundary).max(i + 1);
             if invisible != 0 {
                 let (end, ellipsis) = self.skip_invisible_string(string, run, &chars, invisible == 2)?;
                 if ellipsis { self.ellipsis(Origin { strpos: Some(end.min(chars.len().saturating_sub(1))), ..origin }, false)?; }
@@ -452,6 +447,21 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(())
     }
 
+    /// Where STRING's run of PROP, whose value at character AT is VALUE,
+    /// ends (GNU's next-single-property-change): its property boundaries
+    /// walked by byte, each mapped through CHARS, (byte, char) in order,
+    /// without decoding the string again.
+    fn string_run_end(&mut self, string: Value, at: usize, prop: Value, value: Value, chars: &[(usize, u32)], end_byte: usize) -> R<usize> {
+        let mut byte = chars[at].0;
+        loop {
+            let next = self.leaf.vm.next_property_boundary(string, ByteOffset(byte), ByteOffset(end_byte)).map_err(Fault::Error)?.0;
+            if next >= end_byte { return Ok(chars.len()) }
+            let k = char_at_byte(chars, next);
+            if self.leaf.vm.property_textget(string, k as i64, prop)? != value { return Ok(k) }
+            byte = next;
+        }
+    }
+
     fn skip_invisible_string(&mut self, string: Value, mut at: usize, chars: &[(usize, u32)], mut ellipsis: bool) -> R<(usize, bool)> {
         let end_byte = self.leaf.vm.str_view(string).map_or(0, |v| v.bytes().len());
         while at < chars.len() {
@@ -463,7 +473,7 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             let boundary = self.leaf.vm.next_property_boundary(string, ByteOffset(chars[at].0), ByteOffset(end_byte))
                 .map_err(Fault::Error)?.0;
-            at = chars.iter().position(|&(b, _)| b >= boundary).unwrap_or(chars.len()).max(at + 1);
+            at = char_at_byte(&chars, boundary).max(at + 1);
         }
         Ok((at, ellipsis))
     }
@@ -738,7 +748,9 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             Replacement::Image(spec, text_area, slice) => {
                 let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
-                let Some(image) = self.leaf.image_glyph(&parsed, slice)? else { return Ok(()) };
+                let window = self.view.window;
+                let face = self.leaf.vm.remapped_default_face(window).map_err(Fault::Error)?;
+                let Some(image) = self.leaf.image_glyph(&parsed, slice, face.as_ref())? else { return Ok(()) };
                 let at = self.images.len() as u32;
                 self.images.push((image, spec));
                 let shape = Shape::Image { width: image.width, ascent: image.ascent, descent: image.descent, at };
@@ -759,6 +771,30 @@ impl<'l, 'a> Source<'l, 'a> {
                 Ok(())
             }
         }
+    }
+
+    /// SPEC's stretch in a header or mode line (`Leaf::band_stretches'): a
+    /// `(space ...)' as the text's stretch is, but that it reads no buffer
+    /// character: a `:relative-width' counts a column, the band's space;
+    /// None for another display.
+    pub(super) fn band_stretch(&mut self, spec: Value) -> R<Option<romacs_layout_input::StretchWidth>> {
+        use romacs_layout_input::StretchWidth;
+        let s = self.syms;
+        if self.leaf.pair(spec).is_none_or(|(car, _)| car != s.space) { return Ok(None); }
+        let plist = self.leaf.pair(spec).map_or(Value::NIL, |(_, p)| p);
+        let column = self.view.column;
+        if self.plist_get(plist, s.width) == Value::NIL
+            && let Some(factor) = self.leaf.number_value(self.plist_get(plist, s.relative_width)).filter(|&f| f > 0.0) {
+            return Ok(Some(StretchWidth::Width { width: (factor * column as f64) as i64, zero_ok: false }));
+        }
+        let origin = Origin { charpos: self.view.begv, string: Value::NIL, strpos: None, from_display: true, text_area: true, whitespace_under: false };
+        Ok(Some(match self.stretch_shape(spec, origin) {
+            Ok(Shape::Stretch { width, zero_ok }) => StretchWidth::Width { width, zero_ok },
+            Ok(Shape::Align { target }) => StretchWidth::AlignTo(target),
+            // What the text's stretches refuse (a height of its own, physical
+            // units) shows as one column, as GNU's default width is.
+            Ok(_) | Err(_) => StretchWidth::Width { width: column, zero_ok: false },
+        }))
     }
 
     /// produce_stretch_glyph's width, before it depends on the x position.
@@ -859,7 +895,7 @@ impl<'l, 'a> Source<'l, 'a> {
         // An image spec: its own width, margins aside (img->width).
         if car == s.image && self.view.pixels && self.leaf.vm.window_system_open() && let Some(spec) = self.leaf.image_spec(prop)? {
             let env = self.leaf.image_env(Value::NIL)?;
-            let (_, entry, _) = self.leaf.image_lookup(&spec, &env)?;
+            let (_, entry, _) = self.leaf.image_lookup_display(&spec, &env)?;
             return Ok(Some(f64::from(entry.facts.width)));
         }
         if self.leaf.kind(car) == super::Kind::Symbol {
@@ -905,6 +941,12 @@ impl<'l, 'a> Source<'l, 'a> {
 
 /// A unibyte string's byte as get_next_display_element shows it: a
 /// non-ASCII byte is a raw-byte character (BYTE8_TO_CHAR).
+/// The index in CHARS, (byte, char) in byte order, of the first character
+/// at or after BYTE; CHARS' length past its end.
+fn char_at_byte(chars: &[(usize, u32)], byte: usize) -> usize {
+    chars.partition_point(|&(b, _)| b < byte)
+}
+
 fn unibyte_char(b: u8) -> u32 {
     if b.is_ascii() { u32::from(b) } else { 0x3fff00 + u32::from(b) }
 }
@@ -925,10 +967,8 @@ impl Source<'_, '_> {
     pub(super) fn line_of(&mut self, pos: i64) -> R<i64> {
         let begv = self.leaf.buffer_byte(self.view.buffer, self.view.begv)?;
         let at = self.leaf.buffer_byte(self.view.buffer, pos.clamp(self.view.begv, self.view.zv))?;
-        let (from, line) = if self.lines.1 >= 0 && self.lines.0 <= at { self.lines } else { (begv, 0) };
-        let line = line + self.text().as_str().as_bytes()[from..at].iter().filter(|&&c| c == b'\n').count() as i64;
-        self.lines = (at, line);
-        Ok(line)
+        let line = |byte| self.text().line_of_byte(crate::coordinates::ByteOffset(byte)).map_err(Fault::Error);
+        Ok((line(at)? - line(begv)?) as i64)
     }
 }
 
@@ -987,7 +1027,7 @@ impl Leaf<'_> {
             return Ok(true);
         }
         let glyphless = match self.vm.object_if(look.glyphless) { Some(Object::CharTable(t)) if !t.extras.is_empty() => Some(look.glyphless), _ => None };
-        let Some(Object::Buffer(b)) = self.vm.object_if(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
+        let Ok(b) = self.vm.shown_text(self.vm.slots[self.vm.buffer_slot].value) else { return Ok(false) };
         let text = &b.as_str()[from.min(b.as_str().len())..to.min(b.as_str().len())];
         let mut special = vec![];
         for (at, ch) in text.char_indices() {
@@ -1044,7 +1084,7 @@ impl Syms {
 impl Leaf<'_> {
     /// The byte of character position POS (1-based) in text buffer BUFFER.
     pub(super) fn buffer_byte(&self, buffer: Value, pos: i64) -> R<usize> {
-        let Some(Object::Buffer(b)) = self.vm.object_if(buffer) else { return Err(fault("text buffer required")) };
+        let Ok(b) = self.vm.shown_text(buffer) else { return Err(fault("text buffer required")) };
         Ok(b.byte_of_char(CharOffset((pos - 1).max(0) as usize)).map_err(Fault::Error)?.0)
     }
     pub(crate) fn number_value(&self, v: Value) -> Option<f64> {

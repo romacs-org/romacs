@@ -146,12 +146,14 @@ refuses a call meant for a Romacs that has since restarted."
 
 (defun romacs-mcp-register-tool (name description schema handler &optional annotations)
   "Register a named tool with a JSON schema and handler.
-NAME identifies the tool; DESCRIPTION documents it; SCHEMA describes inputs.
+NAME identifies the tool; DESCRIPTION documents it (a string, or a function
+of no arguments giving it as things are when the tools are listed); SCHEMA
+describes inputs.
 HANDLER receives a JSON object and returns a JSON value.  Optional ANNOTATIONS
 are descriptive hints, not permissions.  Replace the same name
  deterministically."
   (unless (and (stringp name) (string-match-p "\\`[A-Za-z0-9_.-]+\\'" name)
-               (<= (length name) 128) (stringp description)
+               (<= (length name) 128) (or (stringp description) (functionp description))
                (hash-table-p schema) (equal (gethash "type" schema) "object")
                (functionp handler))
     (error "Invalid MCP tool registration"))
@@ -215,6 +217,53 @@ The printed value is bounded; effects are not rolled back on failure."
           (error "Eval result exceeds output limit; effects may have occurred")
         text))))
 
+(defconst romacs-mcp-instructions
+  "Romacs, a running Emacs-compatible editor. Start with romacs_identity \
+(the instance a fenced call names), romacs_observe (what the frame shows) and \
+romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
+(romacs_buffer_list/read/edit, romacs_file_write, romacs_visit); input \
+(romacs_send_keys, romacs_wait_idle); agents (romacs_delegate_task, \
+romacs_task_status/cancel, romacs_orchestrator_capabilities); restart \
+(romacs_restart_request, romacs_call_outcome); gnosis_* (spaced-repetition \
+practice and review). romacs_help lists them all, one line each."
+  "What an MCP client is told at initialization: the entry points and the
+tools' groups, short, since every session pays for it.")
+
+(defconst romacs-mcp--tool-groups
+  '(("core" "romacs_identity" "romacs_observe" "romacs_eval" "romacs_help")
+    ("buffers and files" "romacs_buffer_list" "romacs_buffer_read" "romacs_buffer_edit" "romacs_file_write"
+     "romacs_visit")
+    ("input" "romacs_send_keys" "romacs_wait_idle")
+    ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_cancel"
+     "romacs_orchestrator_capabilities")
+    ("restart" "romacs_restart_request" "romacs_call_outcome")
+    ("gnosis" . "gnosis_"))
+  "The tools' groups for `romacs_help': names, or a prefix; the rest are other.")
+
+(defun romacs-mcp--description (tool)
+  "TOOL's description: a string, or a function giving it as things are now."
+  (let ((description (plist-get tool :description)))
+    (if (functionp description) (funcall description) description)))
+
+(defun romacs-mcp--help (_arguments)
+  "The tools offered, by group, each with its description's first sentence."
+  (let ((groups (mapcar (lambda (g) (cons (car g) nil)) romacs-mcp--tool-groups))
+        (other nil))
+    (dolist (entry (romacs-mcp--available-tools))
+      (let* ((name (car entry))
+             (line (car (split-string (romacs-mcp--description (cdr entry)) "\\.\\( \\|$\\)\\|\n")))
+             (group (car (cl-find-if (lambda (g) (if (stringp (cdr g)) (string-prefix-p (cdr g) name)
+                                                    (member name (cdr g))))
+                                     romacs-mcp--tool-groups))))
+        (if group (push (cons name line) (alist-get group groups nil nil #'equal))
+          (push (cons name line) other))))
+    (mapconcat (lambda (g)
+                 (concat (car g) ":\n"
+                         (mapconcat (lambda (tool) (format "  %s  %s" (car tool) (cdr tool)))
+                                    (sort (cdr g) (lambda (a b) (string< (car a) (car b)))) "\n")))
+               (cl-remove-if-not #'cdr (append groups (and other (list (cons "other" other)))))
+               "\n")))
+
 (defun romacs-mcp--available-tools ()
   "Return the registered tools that clients may currently list and call."
   (if romacs-mcp-full-access
@@ -228,7 +277,7 @@ The printed value is bounded; effects are not rolled back on failure."
    (mapcar (lambda (entry)
              (let* ((tool (cdr entry))
                     (object (romacs-mcp--object
-                             "name" (car entry) "description" (plist-get tool :description)
+                             "name" (car entry) "description" (romacs-mcp--description tool)
                              "inputSchema" (plist-get tool :schema))))
                (when (plist-get tool :annotations)
                  (puthash "annotations" (plist-get tool :annotations) object))
@@ -384,7 +433,8 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
           "protocolVersion" (if (member version romacs-mcp--legacy-versions)
                                 version romacs-mcp--legacy)
           "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object))
-          "serverInfo" (romacs-mcp--object "name" "Romacs" "version" "1"))))
+          "serverInfo" (romacs-mcp--object "name" "Romacs" "version" "1")
+          "instructions" romacs-mcp-instructions)))
       ("notifications/initialized"
        (unless (eq (process-get peer 'legacy) 'initializing)
          (romacs-mcp--fail -32600 "Unexpected initialized notification"))
@@ -403,6 +453,7 @@ A handler's `romacs-mcp-defer' value is returned with MODERN appended."
            "capabilities" (romacs-mcp--object "tools" (romacs-mcp--object))
            "_meta" (romacs-mcp--object "io.modelcontextprotocol/serverInfo"
                                        (romacs-mcp--object "name" "Romacs" "version" "1"))
+           "instructions" romacs-mcp-instructions
            "ttlMs" 0 "cacheScope" "private"))
          ("tools/list"
           (when (gethash "cursor" params) (romacs-mcp--fail -32602 "No pagination cursor is supported"))
@@ -781,6 +832,17 @@ probe, so the caller can check that the node it deletes is the one probed."
                    (string-match-p "refused" reason)
                    identity)))))))
 
+(defun romacs-mcp--inspect-start (socket)
+  "Serve inspect requests beside SOCKET, off the evaluator's thread.
+This endpoint is what answers while the evaluator is too busy for MCP
+\(`romacs-mcp --inspect'); failing to start it costs nothing else."
+  (when (fboundp 'romacs--inspect-listen)
+    (condition-case failure
+        (romacs--inspect-listen
+         (file-name-directory socket)
+         (expand-file-name "romacs/debug" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+      (error (message "Inspect endpoint not started: %s" (error-message-string failure))))))
+
 ;;;###autoload
 (defun romacs-mcp-start (socket)
   "Start an owner-controlled MCP listener at explicit absolute SOCKET.
@@ -817,6 +879,7 @@ Loading the library alone never starts a listener."
     (setq romacs-mcp--listener listener romacs-mcp--socket socket
           romacs-mcp--socket-identity (romacs-mcp--socket-id socket))
     (add-hook 'kill-emacs-hook #'romacs-mcp-stop)
+    (romacs-mcp--inspect-start socket)
     (romacs-mcp-identity)))
 
 (defun romacs-mcp-start-loopback (token file)
@@ -860,6 +923,7 @@ Keep boot identity and companion receipts until the editor process exits."
   (clrhash romacs-mcp--queued)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
   (when (process-live-p romacs-mcp--listener) (delete-process romacs-mcp--listener))
+  (when (fboundp 'romacs--inspect-stop) (romacs--inspect-stop))
   (when (and romacs-mcp--socket
              (equal (romacs-mcp--socket-id romacs-mcp--socket) romacs-mcp--socket-identity)
              (file-exists-p romacs-mcp--socket))
@@ -871,6 +935,10 @@ Keep boot identity and companion receipts until the editor process exits."
 (romacs-mcp-register-tool
  "romacs_identity" "Read the stable editor incarnation before fenced calls."
  (romacs-mcp--schema nil nil) (lambda (_) (romacs-mcp-identity))
+ (romacs-mcp--object "readOnlyHint" t))
+(romacs-mcp-register-tool
+ "romacs_help" "Every tool, by group, with one line each."
+ (romacs-mcp--schema nil nil) #'romacs-mcp--help
  (romacs-mcp--object "readOnlyHint" t))
 (romacs-mcp-register-tool
  "romacs_eval" "Evaluate unrestricted owner Lisp. No rollback or CPU preemption."

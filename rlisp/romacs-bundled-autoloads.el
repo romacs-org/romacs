@@ -26,9 +26,9 @@
 ;;; Generated autoloads from romacs-agent.el
 
 (autoload 'romacs-agent-start "romacs-agent"
-"Start a session in CWD under instance PROVIDER (a name in
-`romacs-agent-providers', by default `romacs-agent-default-provider'),
-sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
+"Start a session working in the project directory CWD under instance
+PROVIDER (a name in `romacs-agent-providers', by default
+`romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 (its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
@@ -91,6 +91,49 @@ with the session before its harness starts.  Return the session.
 ;;; Generated autoloads from romacs-animate.el
 
 (register-definition-prefixes "romacs-animate" '("romacs-animat"))
+
+
+;;; Generated autoloads from romacs-attach.el
+
+(autoload 'romacs-attach-define-consumer "romacs-attach"
+"Declare the consumer NAME, shown as DISPLAY.  STYLE `tray' keeps items
+for the host's send; `inline' inserts each at attach with INSERT, called
+with the item and the context.  RULES are ((MIME-REGEXP KIND . LIMITS)
+...), the first match winning, or a function of the context returning
+them; KIND is one of `image', `document', `text', `path', `upload' and
+`file'; LIMITS hold `:max-bytes', `:max-edge', `:formats', `:still' and
+`:strip'.  MAX-COUNT and MAX-TOTAL bound a message's items and bytes.
+
+(fn NAME &key DISPLAY (STYLE \\='tray) RULES MAX-COUNT MAX-TOTAL PASTE-TEXT-LIMIT INSERT)")
+(autoload 'romacs-attach-tray-setup "romacs-attach"
+"Make the current buffer a tray host for CONSUMER (a symbol, or a
+function returning (SYMBOL . CONTEXT)).  With REDISPLAY, a function, the
+host draws `romacs-attach-tray-string' itself and REDISPLAY runs when it
+changes; else the tray shows before ANCHOR, a marker.  Nothing is
+installed until the first item arrives.
+
+(fn &key CONSUMER ANCHOR REDISPLAY)")
+(autoload 'romacs-attach-file "romacs-attach"
+"Attach FILE to the current buffer's tray, or insert it in an inline
+consumer's buffer (mail, org) at point.
+
+(fn FILE)" t)
+(autoload 'romacs-attach-edit "romacs-attach"
+"Edit the current tray's chips, from chip ID (the last by default).
+Keys in `romacs-attach-edit-map' keep the mode; any other leaves it and
+runs as usual.  Removed owned files are deleted when it ends.
+
+(fn &optional ID)" t)
+(autoload 'romacs-attach-view "romacs-attach"
+"Show THING (an item or a local file) full size in the viewer, with
+`n'/`p' over SIBLINGS.  CONTEXT is the tray host it came from, if any.
+The viewer never takes focus; its keys are a transient map kept while
+they are typed: any other key closes it and runs as usual.
+
+(fn THING &key SIBLINGS CONTEXT)")
+(autoload 'romacs-attach-test-host "romacs-attach"
+"Show a composer-shaped buffer that takes attachments." t)
+(register-definition-prefixes "romacs-attach" '("romacs-attach-"))
 
 
 ;;; Generated autoloads from romacs-buffer-switch.el
@@ -406,6 +449,11 @@ MESHES and PLIST are as for `romacs-model-create', plus :name
 (register-definition-prefixes "romacs-oclosure" '("oclosure-type"))
 
 
+;;; Generated autoloads from romacs-omarchy.el
+
+(register-definition-prefixes "romacs-omarchy" '("omarchy-"))
+
+
 ;;; Generated autoloads from romacs-orderless.el
 
 (autoload 'orderless-all-completions "romacs-orderless"
@@ -453,6 +501,11 @@ a value in `ivy-re-builders-alist'.
 ;;; Generated autoloads from romacs-project.el
 
 (register-definition-prefixes "romacs-project" '("romacs-project-"))
+
+
+;;; Generated autoloads from romacs-sasl-scram.el
+
+(register-definition-prefixes "romacs-sasl-scram" '("sasl-scram-"))
 
 
 ;;; Generated autoloads from romacs-server.el
@@ -522,12 +575,22 @@ recompiling; signals an error if no frame shader is installed
 
 ;;; Generated autoloads from romacs-theme.el
 
-(register-definition-prefixes "romacs-theme" '("romacs-"))
+(register-definition-prefixes "romacs-theme" '("def-romacs-theme" "romacs-"))
 
 
 ;;; Generated autoloads from romacs-theme-modus.el
 
 (register-definition-prefixes "romacs-theme-modus" '("romacs-theme-"))
+
+
+;;; Generated autoloads from romacs-theme-roles.el
+
+(register-definition-prefixes "romacs-theme-roles" '("romacs-theme-"))
+
+
+;;; Generated autoloads from romacs-treesit.el
+
+(register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
 
 
 ;;; Generated autoloads from romacs-unidata.el
@@ -589,6 +652,11 @@ however many times `romacs-video' is loaded.")
 ;;; Generated autoloads from romacs-workspace-completion.el
 
 (register-definition-prefixes "romacs-workspace-completion" '("buffer-name-history" "execute-extended-command" "extended-command-history" "read-" "romacs-"))
+
+
+;;; Generated autoloads from romacs-world-layer.el
+
+(register-definition-prefixes "romacs-world-layer" '("romacs-"))
 
 
 ;;; Generated autoloads from warm-restart.el
@@ -2571,6 +2639,11 @@ accounts.
 ;;; Generated autoloads from jabber-mam.el
 
 (register-definition-prefixes "jabber-mam" '("jabber-mam-"))
+
+
+;;; Generated autoloads from jabber-mam-sync.el
+
+(register-definition-prefixes "jabber-mam-sync" '("jabber-mam-"))
 
 
 ;;; Generated autoloads from jabber-message-correct.el

@@ -270,6 +270,7 @@ impl Vm {
             vm.slots.push(Slot { value: v, function: f, ..Slot::new() });
             if s[3].as_bool().ok_or("invalid special flag")? {
                 vm.slots[i].declared_special = true;
+                vm.special_changes += 1;
                 if !generated { vm.specials.insert(name.into()); }
             }
         }
@@ -584,6 +585,10 @@ impl Vm {
                     reg(d)
                 }
                 Op::Move(d, s) | Op::ReadCell(d, s) | Op::WriteCell(d, s) => reg(d) && reg(s),
+                Op::ReadLate(d, c, s) | Op::WriteLate(d, c, s) => reg(d) && reg(c) && slot(s),
+                Op::BindLate(s, r) => slot(s) && reg(r),
+                Op::UnbindLate(r) => reg(r),
+                Op::LateForwarded(d, c) => reg(d) && reg(c),
                 Op::Cell(r) | Op::Return(r) => reg(r),
                 Op::Global(d, s) => reg(d) && slot(s),
                 Op::Sealed(d, s, a, n) => reg(d) && slot(s) && args(a, n),
@@ -638,6 +643,11 @@ pub(crate) fn encode_op(op: Op) -> Json {
         SetGlobal(a, b) => json!([6, a, b]),
         Bind(a, b) => json!([7, a, b]),
         Unbind(a) => json!([8, a]),
+        BindLate(a, b) => json!([30, a, b]),
+        UnbindLate(a) => json!([31, a]),
+        ReadLate(a, b, c) => json!([32, a, b, c]),
+        WriteLate(a, b, c) => json!([33, a, b, c]),
+        LateForwarded(a, b) => json!([34, a, b]),
         Jump(a) => json!([9, a]),
         Unless(a, b) => json!([10, a, b]),
         Closure(a, b, c) => json!([11, a, b, c]),
@@ -685,6 +695,11 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
         [22, a] => LeaveProtect(*a),
         [23] => ResumeExit,
         [26, a, b, c, d] => Sealed(*a, *b, *c, *d),
+        [30, a, b] => BindLate(*a, *b),
+        [31, a] => UnbindLate(*a),
+        [32, a, b, c] => ReadLate(*a, *b, *c),
+        [33, a, b, c] => WriteLate(*a, *b, *c),
+        [34, a, b] => LateForwarded(*a, *b),
         _ => return Err("invalid image opcode".into()),
     })
 }

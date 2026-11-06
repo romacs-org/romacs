@@ -40,6 +40,21 @@ LOG = os.environ.get('FAKE_HARNESS_LOG')
 WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_')
 
 
+# What `initialize' answers, in claude 2.1.316's shape.
+INITIALIZED = {
+    'models': [
+        {'value': 'default', 'resolvedModel': 'claude-opus-5-5', 'displayName': 'Default (recommended)',
+         'description': 'Opus 5.5', 'supportsEffort': True, 'supportedEffortLevels': ['low', 'high']},
+        {'value': 'sonnet', 'resolvedModel': 'claude-sonnet-5-5', 'displayName': 'Sonnet 5.5',
+         'description': 'Efficient', 'supportsEffort': True,
+         'supportedEffortLevels': ['low', 'medium', 'high', 'xhigh', 'max']},
+        {'value': 'claude-fake-1', 'resolvedModel': 'claude-fake-1', 'displayName': 'Fake 1',
+         'description': 'Only the harness knows it'},
+    ],
+    'account': {'email': 'someone@example.org'}, 'commands': [], 'pid': 0,
+}
+
+
 def emit(obj):
     with OUT:
         sys.stdout.write(json.dumps(obj) + '\n')
@@ -213,9 +228,12 @@ class Harness:
         for line in sys.stdin:
             message = json.loads(line)
             if message.get('type') == 'control_request':
+                subtype = message['request'].get('subtype')
+                log(control=subtype)
+                answer = INITIALIZED if subtype == 'initialize' else {'still_queued': []}
                 emit({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': message['request_id'],
-                                                               'response': {'still_queued': []}}})
-                if message['request'].get('subtype') == 'interrupt':
+                                                               'response': answer}})
+                if subtype == 'interrupt':
                     self.interrupted.set()
             elif message.get('type') == 'control_response':
                 response = message['response']

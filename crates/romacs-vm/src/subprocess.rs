@@ -25,8 +25,9 @@ pub(crate) enum Slot {
     Encode,
     Stderrproc,
     TtyName,
+    Thread,
 }
-pub(crate) const SLOTS: usize = Slot::TtyName as usize + 1;
+pub(crate) const SLOTS: usize = Slot::Thread as usize + 1;
 
 /// A process object. Its descriptors live in [`Table`] under `serial`, so a
 /// moved or copied object never owns an OS resource.
@@ -359,6 +360,19 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     use std::os::unix::process::CommandExt;
     // A process creation retries a reaper that failed to start.
     REAPER.adopt(Vec::new(), spawn_reaper);
+    // A program named by a path and no controlling terminal: posix_spawn,
+    // which a fork's page-table copy would make cost what the heap weighs.
+    if !spec.controlling_tty && spec.argv.first().is_some_and(|p| p.contains(&b'/')) {
+        let above = |fd: RawFd| -> io::Result<OwnedFd> {
+            let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+            if duplicate < 0 { Err(last_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(duplicate) }) }
+        };
+        let fds = [above(spec.stdin)?, above(spec.stdout)?, above(spec.stderr)?];
+        let env: Vec<Vec<u8>> = spec.env.iter().filter(|e| e.contains(&b'=')).cloned().collect();
+        let pid = crate::host::spawn_child(spec.argv, &env, spec.dir, fds.each_ref().map(|fd| fd.as_raw_fd()))?;
+        crate::isolate::child_spawned(pid);
+        return Ok(pid);
+    }
     let os = |b: &[u8]| std::ffi::OsStr::from_bytes(b).to_os_string();
     let mut command = crate::host::command(os(&spec.argv[0]))?;
     command.args(spec.argv[1..].iter().map(|a| os(a)));

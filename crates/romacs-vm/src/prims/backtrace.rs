@@ -33,16 +33,46 @@ fn backtrace_locals(cx, level: Value; optional base: Value) {
 }}
 defsubr! { name = "backtrace-frame--internal", gnu = "eval.c:4079", effect = Global,
 fn backtrace_frame_internal(cx, function: Value, nframes: Value, base: Value) -> Step {
-    let count = nframes.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", nframes))?;
-    let mut token = cx.backtrace_first(base)?;
-    for _ in 0..count {
-        let Some(at) = token else { break; };
-        token = cx.backtrace_entry(at)?.map(|(_, next)| next);
-    }
     // backtrace_frame_apply: nil when no such frame exists.
-    let Some((args, _)) = token.map(|at| cx.backtrace_entry(at)).transpose()?.flatten() else {
+    let Some(args) = cx.backtrace_frame_at(nframes, base)? else {
         return Ok(Step::Done(Value::NIL));
     };
     Ok(Step::Call { f: function, args, then: frame_result, saved: vec![] })
 }}
 fn frame_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+defsubr! { name = "romacs--inspect-frames", gnu = "romacs:inspect", effect = Reads,
+fn romacs_inspect_frames(cx) {
+    Ok(cx.inspect_frames())
+}}
+defsubr! { name = "romacs--inspect-listen", gnu = "romacs:inspect", effect = Global,
+fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
+    let directory = cx.string_text(directory)?;
+    let store = if store == Value::NIL { None } else { Some(cx.string_text(store)?) };
+    crate::host::inspect_listen(&directory, store.as_deref()).map_err(|error| Fault::Error(format!("inspect listener: {error}")))?;
+    Ok(Value::NIL)
+}}
+defsubr! { name = "romacs--inspect-stop", gnu = "romacs:inspect", effect = Global,
+fn romacs_inspect_stop(_cx) {
+    crate::host::inspect_stop();
+    Ok(Value::NIL)
+}}
+defsubr! { name = "backtrace-debug", gnu = "eval.c:4035", effect = Global,
+fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) {
+    cx.backtrace_debug(level, flag, base)
+}}
+// Every frame with its locals in one walk, for `backtrace-get-frames`
+// (rlisp/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
+defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
+fn backtrace_frames_and_locals(cx; optional base: Value) {
+    cx.backtrace_frames_and_locals(base)
+}}
+// The two halves of `backtrace-eval' (rlisp/vm/prelude.el): GNU's
+// specpdl_unrewind to a frame's entry, and back.
+defsubr! { name = "romacs--backtrace-unrewind", gnu = "eval.c:4236", effect = Global,
+fn backtrace_unrewind(cx, nframes: Value; optional base: Value) {
+    cx.backtrace_unrewind(nframes, base)
+}}
+defsubr! { name = "romacs--backtrace-rewind", gnu = "eval.c:4236", effect = Global,
+fn backtrace_rewind(cx, span: Value) {
+    cx.backtrace_rewind(span)
+}}

@@ -60,6 +60,10 @@ const CASES: &str = r###"
 (with-temp-buffer (set-buffer-multibyte nil) (insert "ABgarbageCD") (goto-char 4) (set (make-local-variable 'before-change-functions) (list (lambda (&rest _) (goto-char 6)))) (list (zlib-decompress-region 3 10) (point)))
 (with-temp-buffer (set-buffer-multibyte nil) (insert "ABgarbageCD") (goto-char 4) (set (make-local-variable 'before-change-functions) (list (lambda (&rest _) (goto-char 6) (error "early")))) (list (condition-case e (zlib-decompress-region 3 10) (error e)) (point)))
 (list (with-temp-buffer (insert "x") (condition-case e (zlib-decompress-region 1 2) (error e))) (with-temp-buffer (set-buffer-multibyte nil) (insert "x") (condition-case e (zlib-decompress-region 1 5) (error e))))
+(let ((p (make-pipe-process :name "t1"))) (unwind-protect (let ((th (process-thread p))) (list (type-of th) (cl-type-of th) (recordp th) (atom th) (null th) (substring (prin1-to-string th) 0 11) (substring (format "%s" th) 0 11) (equal th th) (eq th (process-thread p)))) (delete-process p)))
+(let ((p (make-pipe-process :name "t2")) (q (make-pipe-process :name "t3"))) (unwind-protect (let ((th (process-thread p))) (list (eq th (process-thread q)) (set-process-thread p nil) (process-thread p) (eq th (set-process-thread p th)) (eq th (process-thread p)))) (delete-process p) (delete-process q)))
+(let ((p (make-pipe-process :name "t4"))) (unwind-protect (list (condition-case e (set-process-thread p 3) (error e)) (condition-case e (set-process-thread p 'a) (error e)) (condition-case e (set-process-thread 3 nil) (error e)) (condition-case e (process-thread 3) (error e)) (condition-case e (process-thread "t4") (error e)) (condition-case e (set-process-thread "t4" nil) (error e))) (delete-process p)))
+(let ((p (make-pipe-process :name "t8"))) (unwind-protect (let ((th (process-thread p))) (garbage-collect) (let ((q (make-pipe-process :name "t9"))) (prog1 (list (eq th (process-thread p)) (eq th (process-thread q))) (delete-process q)))) (delete-process p)))
 "###;
 
 #[test]

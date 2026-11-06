@@ -338,6 +338,53 @@ Each page settles independently of other pending pages."
                        (sqlite-select (jabber-db-ensure-open)
                         "SELECT body,stanza_id,origin_id,resource FROM message")))))))
 
+(ert-deftest jabber-test-archive-replayed-copy-resolves-to-its-occurrence ()
+  "An archive that kept two copies of one message (one origin, two UIDs)
+stores both; each copy brought again is its own row, not a conflict."
+  (jabber-test-archive--with-file
+    (let ((inner '(message ((from . "room@conference.example.com/nick") (to . "me@example.com")
+                           (type . "chat") (id . "transport"))
+                          (body () "hi")
+                          (origin-id ((xmlns . "urn:xmpp:sid:0") (id . "origin"))))))
+      (let ((query (jabber-mam--query jc)))
+        (jabber-mam--process-message jc (jabber-test-archive--result query "uid-1" inner))
+        (jabber-test-archive--fin jc query "uid-1"))
+      ;; The second copy as such an archive leaves it: its own row and UID.
+      (let ((db (jabber-db-ensure-open)))
+        (sqlite-execute db "INSERT INTO message (account, peer, resource, direction, type, body, \
+timestamp, stanza_id, server_id, origin_id) SELECT account, peer, resource, direction, type, body, \
+timestamp, stanza_id, 'uid-2', origin_id FROM message")
+        (sqlite-execute db "INSERT INTO message_archive VALUES (?, ?, 'uid-2', \
+(SELECT max(id) FROM message))" (list "me@example.com" "me@example.com")))
+      (dolist (uid '("uid-1" "uid-2"))
+        (let ((query (jabber-mam--query jc nil nil nil nil nil t 10)))
+          (jabber-mam--process-message jc (jabber-test-archive--result query uid inner))
+          (should-not (plist-get query :failed))
+          (jabber-test-archive--fin jc query uid)))
+      (should (= 2 (caar (sqlite-select (jabber-db-ensure-open) "SELECT count(*) FROM message")))))))
+
+(ert-deftest jabber-test-archive-archived-other-sender-still-conflicts ()
+  "A row from another sender with the same origin is a conflict, even held
+under another UID of the same archive."
+  (jabber-test-archive--with-file
+    (let ((inner '(message ((from . "friend@example.com/phone") (to . "me@example.com")
+                           (type . "chat") (id . "transport"))
+                          (body () "hi")
+                          (origin-id ((xmlns . "urn:xmpp:sid:0") (id . "origin"))))))
+      (let ((query (jabber-mam--query jc)))
+        (jabber-mam--process-message jc (jabber-test-archive--result query "uid-1" inner))
+        (jabber-test-archive--fin jc query "uid-1"))
+      (let ((db (jabber-db-ensure-open)))
+        (sqlite-execute db "INSERT INTO message (account, peer, resource, direction, type, body, \
+timestamp, stanza_id, server_id, origin_id) SELECT account, peer, 'other', direction, type, body, \
+timestamp, stanza_id, 'uid-2', origin_id FROM message")
+        (sqlite-execute db "INSERT INTO message_archive VALUES (?, ?, 'uid-2', \
+(SELECT max(id) FROM message))" (list "me@example.com" "me@example.com")))
+      (let ((query (jabber-mam--query jc nil nil nil nil nil t 10)))
+        (should-error (jabber-mam--process-message
+                       jc (jabber-test-archive--result query "uid-1" inner)))
+        (jabber-test-archive--fin jc query "uid-1")))))
+
 (ert-deftest jabber-test-archive-conflicting-origin-does-not-merge ()
   "A reused transport ID cannot replace another origin ID."
   (jabber-test-archive--with-file

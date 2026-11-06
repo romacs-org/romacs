@@ -262,6 +262,8 @@ fn g3a_resize_axis_and_nested_tree() {
 #[test]
 fn g3a_collections_and_three_size_retention() {
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_collection_floor(1_000_000);
     run(&mut vm, "(selected-window)");
     let mut retained = vec![];
@@ -326,6 +328,8 @@ fn g3a_surviving_parent_does_not_retain_peak_child_storage() {
         (set-window-new-pixel a (+ (window-pixel-height a) 64)) \
         (delete-window-internal (car ws)) (setq ws (cdr ws)))";
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_frame_geometry(800, 2048 + 24, 24, 12).unwrap();
     vm.set_collection_floor(1_000_000);
     run(&mut vm, "(setq a (selected-window) ws nil)");
@@ -576,10 +580,10 @@ fn g3a_geometry_and_layout_end_journal() {
     let snapshot = vm.display_snapshot(800, 576).unwrap();
     vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], point: None }]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
-    // A laid-out window lays itself out again for UPDATE, which needs the
-    // host's layout attached.
+    // UPDATE answers a current end as recorded; a stale one lays the window
+    // out again, which needs the host's layout attached.
+    yes(&mut vm, "(= (window-end nil t) 4)");
     let refused = r#"(equal (condition-case e (window-end nil t) (error (car (cdr e)))) "VM2 window-end in a displayed window is unsupported")"#;
-    yes(&mut vm, refused);
     run(&mut vm, "(insert \"z\")");
     yes(&mut vm, refused);
     yes(&mut vm, "(= (window-end nil) 5)");
@@ -759,6 +763,10 @@ fn unchanged_windows_redisplay_only_their_cursor_and_mode_line() {
 #[test]
 fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
     let mut vm = Vm::new();
+    // Compaction, not stress: a collection before this redisplay would
+    // drop the reuse it is here to reach.
+    vm.set_gc_stress(0);
+    vm.set_gc_moving(true);
     vm.set_frame_geometry(800, 600, 24, 12).unwrap();
     // Garbage below the window the redisplay reuses, so a collection moves it.
     run(&mut vm, r#"(progn (setq junk (list (make-string 9 ?j) (make-vector 9 0) (make-string 9 ?k)))
@@ -776,9 +784,12 @@ fn a_collection_in_a_reused_windows_mode_line_moves_nothing_it_reads() {
     vm.frame_snapshot(800, 576).unwrap();
     // Dead only now: the reused redisplay's collection moves the window down.
     run(&mut vm, "(setq junk nil collect t)");
-    let before = vm.heap_stats().collections;
+    let (before, evals, window) = (vm.heap_stats().collections, vm.mode_line_evals(), vm.selected_window_value().unwrap());
     let again = vm.frame_snapshot(800, 576).expect("a redisplay that collected");
     assert!(vm.heap_stats().collections > before, "the mode line collected");
+    assert_ne!(vm.selected_window_value().unwrap(), window, "the collection moved the window");
+    // Reuse ran the band, saw the collection and went on to a full redisplay.
+    assert_eq!(vm.mode_line_evals() - evals, 2, "the reused redisplay ran the band");
     assert!(again.windows.iter().any(|w| w.snapshot.text.utf8 == "a\nb\nc\n"));
 }
 

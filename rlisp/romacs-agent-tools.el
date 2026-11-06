@@ -426,18 +426,23 @@ the call (and retire this wait) and drop its answer."
 
 (defun romacs-agent-tools--delegate (arguments)
   "Start a child session on ARGUMENTS' task, or find the one this caller
-started with the same clientRequestId."
+started with the same clientRequestId.  The child runs on the instance
+its target names, else on its delegating session's own (claude to
+claude, codex to codex); a caller that is no agent session gets the
+default instance."
   (romacs-mcp--instance arguments)
   (let* ((parent (romacs-agent-tools--caller))
          (request (gethash "clientRequestId" arguments))
          (target (gethash "target" arguments (romacs-mcp--object)))
          (options (gethash "options" target (romacs-mcp--object)))
+         (provider (or (gethash "provider" target)
+                       (and parent (romacs-agent-get parent) (romacs-agent-provider (romacs-agent-get parent)))))
          (child (or (and request (romacs-agent-requested parent request))
                     (romacs-agent-start
                      (or (gethash "cwd" arguments)
                          (and parent (romacs-agent-get parent) (romacs-agent-cwd (romacs-agent-get parent)))
                          default-directory)
-                     (gethash "task" arguments) (gethash "title" arguments) (gethash "provider" target)
+                     (gethash "task" arguments) (gethash "title" arguments) provider
                      (list :model (gethash "model" target)
                            :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
                            :role (gethash "role" arguments) :parent parent :request request)))))
@@ -456,10 +461,25 @@ started with the same clientRequestId."
     (romacs-agent-stop child)
     (romacs-agent-tools--task child)))
 
+(defun romacs-agent-tools--effort-option (instance)
+  "The name INSTANCE's harness's effort goes by in a target's options."
+  (if (eq (plist-get instance :harness) 'codex) "reasoningEffort" "effort"))
+
+(defun romacs-agent-tools--model (instance row)
+  "ROW of `romacs-agent--models' as T3 Code lists a model."
+  (let ((efforts (plist-get (cdr row) :efforts)))
+    (romacs-mcp--object
+     "id" (car row) "label" (or (plist-get (cdr row) :label) (car row))
+     "options" (if efforts
+                   (vector (romacs-mcp--object "id" (romacs-agent-tools--effort-option instance)
+                                               "values" (vconcat efforts)
+                                               "default" (or (plist-get (cdr row) :default-effort) :null)))
+                 []))))
+
 (defun romacs-agent-tools--capabilities (arguments)
   "Each provider instance (`romacs-agent-instances'): its harness,
-directory, program, whether it is enabled and where it comes from; and
-each one Romacs cannot run, with why."
+directory, program, models, whether it is enabled and where it comes
+from; and each one Romacs cannot run, with why."
   (romacs-mcp--instance arguments)
   (pcase-let ((`(,instances . ,constraints) (romacs-agent-instances t)))
     (romacs-mcp--object
@@ -478,7 +498,9 @@ each one Romacs cannot run, with why."
                    "configDir" (expand-file-name dir) "configDirExists" (if (file-directory-p dir) t :false)
                    "program" (plist-get instance :program)
                    "programFound" (if (executable-find (plist-get instance :program)) t :false)
-                   "options" (if (eq (plist-get instance :harness) 'codex) ["reasoningEffort"] ["effort"]))))
+                   "options" (vector (romacs-agent-tools--effort-option instance))
+                   "models" (vconcat (mapcar (lambda (row) (romacs-agent-tools--model instance row))
+                                             (romacs-agent--models instance))))))
               instances))
      "constraints"
      (vconcat (mapcar (lambda (c) (romacs-mcp--object "source" (symbol-name (plist-get c :source))
@@ -591,20 +613,39 @@ with its result."
  #'romacs-agent-tools--outcome
  (romacs-mcp--object "readOnlyHint" t))
 
+(defun romacs-agent-tools--delegate-description ()
+  "romacs_delegate_task's description, naming the instances it accepts now."
+  (concat
+   "Start a child agent session on TASK, as T3 Code's delegate_task: target {provider, model, options \
+{reasoningEffort|effort}}, role, cwd (default the caller's), title. provider defaults to your own session's instance \
+(claude to claude, codex to codex); name another to run there: "
+   (or (ignore-errors
+         (mapconcat #'identity (cl-loop for i in (romacs-agent-instances) when (plist-get i :enabled)
+                                        collect (plist-get i :name))
+                    ", "))
+       "see romacs_orchestrator_capabilities")
+   " (romacs_orchestrator_capabilities has their models and options). mode async (default) answers at once with \
+the taskId and wakes you with the child's result when its turn ends; mode wait answers when it ends, asks for an \
+approval, or timeoutMs (default 600000) passes, and the child goes on. The same clientRequestId returns the task it \
+started before."))
+
 (romacs-mcp-register-tool
  "romacs_delegate_task"
- "Start a child agent session on TASK, as T3 Code's delegate_task: target {provider (a providerInstanceId from \
-romacs_orchestrator_capabilities), model, options {reasoningEffort|effort}}, role, cwd (default the caller's), title. \
-mode async (default) answers at once with the taskId and wakes you with the child's result when its turn ends; mode \
-wait answers when it ends, asks for an approval, or timeoutMs (default 600000) passes, and the child goes on. The \
-same clientRequestId returns the task it started before."
+ #'romacs-agent-tools--delegate-description
  (romacs-mcp--object
   "type" "object"
   "properties" (romacs-mcp--object
                 "instance" (romacs-mcp--object "type" "string")
                 "task" (romacs-mcp--object "type" "string") "role" (romacs-mcp--object "type" "string")
                 "mode" (romacs-mcp--object "type" "string" "enum" ["async" "wait"])
-                "target" (romacs-mcp--object "type" "object")
+                "target" (romacs-mcp--object
+                          "type" "object"
+                          "properties" (romacs-mcp--object
+                                        "provider" (romacs-mcp--object
+                                                    "type" "string"
+                                                    "description" "An instance (providerInstanceId, or a T3 instance id); default your own session's.")
+                                        "model" (romacs-mcp--object "type" "string")
+                                        "options" (romacs-mcp--object "type" "object")))
                 "cwd" (romacs-mcp--object "type" "string") "title" (romacs-mcp--object "type" "string")
                 "timeoutMs" (romacs-mcp--object "type" "integer")
                 "clientRequestId" (romacs-mcp--object "type" "string"))

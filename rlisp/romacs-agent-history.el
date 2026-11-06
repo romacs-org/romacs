@@ -80,12 +80,13 @@ BEG or END cuts is left out."
   (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t) (match-string 1)))
 
 (defun romacs-agent-history--title (text)
-  "TEXT's first line, as a title; nil for none, or for a harness's own
-injected context (a <tag>, AGENTS.md's instructions)."
+  "TEXT's first line, as a title (`romacs-agent--task-line'); nil for
+none, or for a harness's own injected context (a <tag>, AGENTS.md's
+instructions)."
   (let ((text (and (stringp text) (string-trim text))))
     (unless (or (null text) (string-empty-p text) (string-prefix-p "<" text)
                 (string-prefix-p "# AGENTS.md instructions" text))
-      (truncate-string-to-width (car (split-string text "\n")) 60 nil nil "…"))))
+      (truncate-string-to-width (romacs-agent--task-line text) 60 nil nil "…"))))
 
 (defun romacs-agent-history--prompt (content)
   "The user's typed text in a Claude Code message CONTENT, or nil (a tool
@@ -333,18 +334,41 @@ first instance of that harness, run with the default directory)."
         (puthash path (cons size (cons mtime description)) romacs-agent-history--descriptions)
         description))))
 
+(declare-function romacs-agent-t3-thread-titles "romacs-agent-t3" (store))
+(declare-function romacs-agent-t3-title-key "romacs-agent-t3" (instance native))
+
 (defun romacs-agent-history-list ()
   "List the harnesses' transcripts anew: the newest of each directory,
-described (from their heads, once per size and time)."
+described (from their heads, once per size and time).  A transcript of
+an instance T3 Code configures takes the title T3 gave its thread, when
+T3 ran it: its first prompt is then T3's preamble."
   (setq romacs-agent-history--listing
-        (cl-loop for (dir harness provider config-dir) in (romacs-agent-history--places)
+        (cl-loop with from-t3 = (let ((table (make-hash-table :test #'equal)))
+                                  ;; Each T3 instance's id and thread store, by name.
+                                  (dolist (i (romacs-agent-instances) table)
+                                    (when (plist-get i :t3-store)
+                                      (puthash (plist-get i :name) (cons (plist-get i :t3-id) (plist-get i :t3-store)) table))))
+                 with stores = (make-hash-table :test #'equal)
+                 for (dir harness provider config-dir) in (romacs-agent-history--places)
+                 for t3 = (gethash provider from-t3)
+                 ;; One read of each store a refresh, failed or not.
+                 for titles = (and t3 (let ((kept (gethash (cdr t3) stores 'unread)))
+                                        (if (not (eq kept 'unread)) kept
+                                          (require 'romacs-agent-t3)
+                                          (puthash (cdr t3) (romacs-agent-t3-thread-titles (cdr t3)) stores))))
                  append
                  (let ((files (sort (funcall (romacs-agent-history--get harness :files) dir romacs-agent-history-limit)
                                     (lambda (a b) (> (nth 2 a) (nth 2 b))))))
                    (cl-loop for (path size mtime) in (seq-take files romacs-agent-history-limit)
                             for description = (romacs-agent-history--describe path size mtime harness)
                             when description
-                            collect (append (list :path path :size size :mtime mtime
+                            collect (append (let ((title (and titles
+                                                              (gethash (romacs-agent-t3-title-key (car t3) (plist-get description :id))
+                                                                       titles))))
+                                              ;; T3's title as T3 shows it, cut to fit.
+                                              (and title (not (string-empty-p (string-trim title)))
+                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil "…"))))
+                                            (list :path path :size size :mtime mtime
                                                   :provider provider :config-dir config-dir)
                                             description))))))
 

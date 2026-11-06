@@ -176,6 +176,14 @@ class Engine:
         self.probe_dir = root / 'probe'
 
     def start(self, tools):
+        """Start the compositor and the editor; a failure leaves neither running."""
+        try:
+            return self.launch(tools)
+        except Exception:
+            self.stop()
+            raise
+
+    def launch(self, tools):
         self.tools = tools
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
@@ -199,7 +207,11 @@ class Engine:
         return self
 
     def randr(self, width, height):
-        subprocess.run([f'{self.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', f'{width}x{height}'],
+        # PARITY_OUTPUT_SCALE: a HiDPI output (2 is a scale-2 display) for
+        # both engines, its mode in physical pixels.
+        scale = os.environ.get('PARITY_OUTPUT_SCALE')
+        mode = f'{width}x{height}' if not scale else f'{round(width * float(scale))}x{round(height * float(scale))}'
+        subprocess.run([f'{self.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', mode, *(['--scale', scale] if scale else [])],
                        env=self.env, check=True, timeout=15, capture_output=True)
 
     def ask(self, form, timeout=None):
@@ -248,7 +260,8 @@ class Engine:
     def output_size(self):
         mode = subprocess.run([f'{self.tools}/wlr-randr'], env=self.env, capture_output=True, text=True).stdout
         current = re.search(r'(\d+)x(\d+) px.*current', mode)
-        return (int(current[1]), int(current[2])) if current else (1280, 900)
+        scale = float(os.environ.get('PARITY_OUTPUT_SCALE') or 1)
+        return (round(int(current[1]) / scale), round(int(current[2]) / scale)) if current else (1280, 900)
 
     def perf(self):
         return subprocess.Popen(['perf', 'stat', '-x', ',', '-e', 'instructions:u', '-p', str(self.process.pid)],
@@ -352,6 +365,13 @@ def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
     return (cls or Engine)('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
 
 
+def neomacs_engine(neomacs, root, home, env, init, lisp, timeout, tools, cls=None):
+    """NEOMACS as it installs, on INIT, as `-l' after `-Q'."""
+    (root / 'init.el').write_text(init)
+    return (cls or Engine)('neomacs', [neomacs, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'init.el')],
+                           root, lisp, env, timeout).start(tools)
+
+
 def prepare_world(romacs, env, cwd):
     """The world `ROMACS --loadup' boots from in ENV, made usable with no
     window (`--world-build'), as an installer prepares it before a user's
@@ -372,7 +392,7 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_COMPILED_LISP'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')

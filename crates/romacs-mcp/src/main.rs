@@ -8,6 +8,9 @@ fn main() {
     #[cfg(unix)]
     {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.iter().any(|arg| arg == "--inspect") {
+            std::process::exit(inspect(&args));
+        }
         if args.iter().any(|arg| arg == "--reconnect") {
             match reconnecting(&args) {
                 Some(config) => reconnect::main(config),
@@ -24,6 +27,49 @@ fn main() {
         eprintln!("romacs-mcp: Unix sockets are unsupported on this platform");
         std::process::exit(1);
     }
+}
+
+/// `--inspect (--socket PATH | --server NAME)`: ask a session for a snapshot
+/// of its call stack and print the answer. The endpoint beside the session's
+/// socket is served off its evaluator, so this answers while MCP cannot.
+#[cfg(unix)]
+fn inspect(args: &[String]) -> i32 {
+    use std::io::Write;
+    let mut socket = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--socket" => socket = args.next().map(std::path::PathBuf::from),
+            "--server" => socket = args.next().and_then(|name| server_socket(name)),
+            _ => {}
+        }
+    }
+    let Some(socket) = socket else {
+        eprintln!("usage: romacs-mcp --inspect (--socket ABSOLUTE-PATH | --server NAME)");
+        return 2;
+    };
+    let answer = inspect_answer(&socket);
+    match answer {
+        Ok(answer) if !answer.is_empty() => { let _ = std::io::stdout().write_all(&answer); 0 }
+        Ok(_) => { eprintln!("romacs-mcp: the session gave no answer"); 1 }
+        Err(error) => { eprintln!("romacs-mcp: {error}"); 1 }
+    }
+}
+
+/// What the session beside SOCKET says about its call stack. Bounded by
+/// the session's own deadlines, and past them by these.
+#[cfg(unix)]
+pub(crate) fn inspect_answer(socket: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Write};
+    // Beside the socket itself: SOCKET may be a route, retargeted at any time.
+    let socket = std::fs::canonicalize(socket)?;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket.with_file_name("inspect.sock"))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(8)))?;
+    stream.write_all(b"inspect\n")?;
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer)?;
+    Ok(answer)
 }
 
 /// The native socket of the Romacs server NAME (rlisp/romacs-server.el):

@@ -613,6 +613,19 @@ the current buffer's major mode."
         (funcall function)))
     nil))
 
+(defun romacs--pre-redisplay (windows)
+  "xdisp.c prepare_menu_bars's call of `pre-redisplay-function' on WINDOWS,
+as safe_call makes it."
+  (let ((inhibit-redisplay t)
+        (inhibit-quit t))
+    (condition-case err
+        (funcall pre-redisplay-function windows)
+      (error (message "Error during redisplay: %S" err)))))
+
+(defun romacs--native-region (_start _end _window _overlay)
+  "`redisplay-highlight-region-function' while Romacs draws the region itself."
+  nil)
+
 (defun insert-buffer-substring (buffer &optional start end)
   "Insert before point a substring of the contents of BUFFER.
 BUFFER may be a buffer or a buffer name.
@@ -876,6 +889,18 @@ Redisplay calls this in the buffer of a window showing START to END."
               (setq globals (cdr globals)))))
         (setq functions (cdr functions))))))
 
+
+;;; Evaluating in a frame
+
+(defun backtrace-eval (exp nframes &optional base)
+  "Evaluate EXP in the context of some activation frame.
+NFRAMES and BASE specify the activation frame to use, as in `backtrace-frame'.
+eval.c Fbacktrace_eval: the dynamic bindings, the current buffer and the
+excursions made since that frame's entry are swapped back while EXP runs,
+and forward again however it exits."
+  (let ((swapped (romacs--backtrace-unrewind nframes (or base 'backtrace-eval))))
+    (unwind-protect (eval exp t)
+      (romacs--backtrace-rewind swapped))))
 
 ;;; The debugger on the signal path
 

@@ -156,7 +156,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // `debugger' to `debug' once the full debugger can load.
     CVariable { name: "debug-ignored-errors", gnu: "eval.c:4497", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
-    CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-quit", gnu: "eval.c:4510", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-signal", gnu: "eval.c:4552", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debugger", gnu: "eval.c:4534", kind: Kind::Lisp(Init::Symbol("debug-early")) },
@@ -595,6 +594,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // jka-cmpr-hook.el, which VM2 has not loaded.
     CVariable { name: "load-suffixes", gnu: "lread.c:5580", kind: Kind::Lisp(Init::List(&[Init::Str(".so"), Init::Str(".elc"), Init::Str(".el")])) },
     CVariable { name: "load-file-rep-suffixes", gnu: "lread.c:5616", kind: Kind::Lisp(Init::List(&[Init::Str("")])) },
+    // Romacs loads no native modules, so nil, as GNU built without them.
+    CVariable { name: "module-file-suffix", gnu: "lread.c:5595", kind: Kind::Lisp(Init::Nil) },
     // Census (warm): pcase.el form 12 (line 173) reads after-load-alist and
     // form 52 (line 1190) binds current-load-list. Both are nil in C. GNU's
     // C maintains them while it runs (load specbinds current-load-list,
@@ -633,6 +634,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "minibuffer-setup-hook", gnu: "minibuf.c:2564", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-error", gnu: "eval.c:4485", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debugger-stack-frame-as-list", gnu: "eval.c:4529", kind: Kind::Bool(false) },
+    // Its writes arm the call boundary's next-call hook (`Vm::debug_hooks_changed`).
+    CVariable { name: "debug-on-next-call", gnu: "eval.c:4515", kind: Kind::Bool(false) },
     CVariable { name: "signal-hook-function", gnu: "eval.c:4487", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_INT that subr.el reads.
     CVariable { name: "undo-limit", gnu: "undo.c:437", kind: Kind::Int(160_000) },
@@ -738,6 +741,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "invocation-directory", gnu: "emacs.c:3560", kind: Kind::Lisp(Init::Invocation(false)) },
     CVariable { name: "doc-directory", gnu: "callproc.c:2123", kind: Kind::Lisp(Init::RuntimeFile("etc", true)) },
     CVariable { name: "internal-doc-file-name", gnu: "doc.c:691", kind: Kind::Lisp(Init::Str("DOC")) },
+    // The C files the DOC file lists, by which help-fns.el's
+    // `help-C-file-name' knows a DEFUN's file: Romacs builds none.
+    CVariable { name: "build-files", gnu: "doc.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "eol-mnemonic-undecided", gnu: "coding.c:12106", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "eol-mnemonic-unix", gnu: "coding.c:12091", kind: Kind::Lisp(Init::Str(":")) },
     CVariable { name: "overlay-arrow-string", gnu: "xdisp.c:38711", kind: Kind::Lisp(Init::Str("=>")) },
@@ -834,9 +840,19 @@ impl Default for Forwarded {
     }
 }
 
+/// `debug-on-next-call''s index among the boolean variables.
+static NEXT_CALL: std::sync::LazyLock<u16> = std::sync::LazyLock::new(|| {
+    let at = C_VARIABLES.iter().position(|var| var.name == "debug-on-next-call").expect("debug-on-next-call is forwarded");
+    C_VARIABLES[..at].iter().filter(|var| matches!(var.kind, Kind::Bool(_))).count() as u16
+});
+
 impl Forwarded {
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
+    pub(super) fn debug_on_next_call(&self) -> bool { self.bools[*NEXT_CALL as usize] }
+    /// GNU do_debug_on_call's `debug_on_next_call = 0', no watchers; the
+    /// caller rearms the hooks.
+    pub(super) fn clear_debug_on_next_call(&mut self) { self.bools[*NEXT_CALL as usize] = false; }
     pub(super) fn gc_cons_threshold(&self) -> i64 { self.ints[self.gc_cons.0] }
     /// `gc-cons-percentage': its value, or its initial float before Lisp
     /// first reads it (initial values are materialized lazily).
@@ -1000,6 +1016,7 @@ impl Vm {
     /// GNU `init_alloc', at each process's start: no collection done yet.
     pub(crate) fn reset_collection_counters(&mut self) {
         self.gc_stats.elapsed_ns = 0;
+        self.collection_log = Default::default();
         let (done, elapsed) = self.forwarded.gc_done;
         self.forwarded.ints[done] = 0;
         self.forwarded.objects[elapsed] = Value::UNBOUND;
@@ -1123,15 +1140,10 @@ impl Vm {
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
-            Init::SourceDirectory => {
-                // CARGO_MANIFEST_DIR is captured while building this crate.
-                // Like GNU's expansion, this is lexical: do not canonicalize
-                // or require that the build tree still exists at runtime.
-                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .parent().unwrap().parent().unwrap();
-                let text = format!("{}/", root.to_str().expect("build source path is UTF-8"));
-                self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
-            }
+            Init::SourceDirectory => match crate::host::source_directory().and_then(|dir| dir.to_str().map(|d| format!("{}/", d.trim_end_matches('/')))) {
+                Some(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
+                None => Value::NIL,
+            },
             Init::List(items) => {
                 let values: Vec<Value> = items.iter().map(|&i| self.materialize(i)).collect();
                 self.list_value(&values)
@@ -1424,7 +1436,10 @@ impl Vm {
     fn store_forwarded(&mut self, fwd: Fwd, value: Value, buffer: usize) -> std::result::Result<(), Fault> {
         match fwd {
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = value,
-            Fwd::Bool(i) => self.forwarded.bools[i as usize] = value != Value::NIL,
+            Fwd::Bool(i) => {
+                self.forwarded.bools[i as usize] = value != Value::NIL;
+                if i == *NEXT_CALL { self.debug_hooks_changed(); }
+            }
             Fwd::Int(i) => {
                 // CHECK_INTEGER; VM2 has no bignums, so every integer fits
                 // and GNU's overflow-error arm is unreachable.
@@ -1564,7 +1579,10 @@ impl Vm {
         match fwd {
             Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
-            Fwd::Bool(i) => self.forwarded.bools[i as usize] = old != Value::NIL,
+            Fwd::Bool(i) => {
+                self.forwarded.bools[i as usize] = old != Value::NIL;
+                if i == *NEXT_CALL { self.debug_hooks_changed(); }
+            }
             Fwd::Int(i) => {
                 let Some(n) = old.integer_value() else {
                     let predicate = self.intern("integerp");

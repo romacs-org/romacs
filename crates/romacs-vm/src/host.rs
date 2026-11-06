@@ -219,11 +219,15 @@ struct LayerState {
     /// A re-seed form that starts a timer ran (`reseed_reads`).
     timers: bool,
     rerun: bool,
+    /// The entry loading is a library the init only declared
+    /// (`layer::Entry::declared`): its re-seed forms may wait for their
+    /// variable's first read (`romacs--world-pend`).
+    declared: bool,
 }
 
 /// The definition forms a layer re-seeds: the head's kind and the name it
 /// defines, for `(KIND NAME ...`.
-const DEFINITIONS: [&str; 4] = ["defcustom", "defvar", "defconst", "defvar-local"];
+const DEFINITIONS: [&str; 5] = ["defcustom", "defvar", "defconst", "defvar-local", "defimage"];
 
 fn definition(head: &str) -> Option<(&'static str, String)> {
     let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
@@ -251,8 +255,12 @@ fn layer_form(head: &str) {
 }
 
 /// An effect inside a layer's definition form: not done, and the form
-/// is deferred whole to restore, where it is. True when so taken.
+/// is deferred whole to restore, where it is. True when so taken. A
+/// network connection is never deferred: it refuses the entry.
 fn layer_cut(what: &str) -> bool {
+    if ["connect ", "listen ", "resolve "].iter().any(|network| what.starts_with(network)) {
+        return false;
+    }
     LAYER.with(|l| match l.borrow_mut().as_mut() {
         Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
         _ => false,
@@ -292,6 +300,17 @@ pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
         let cut = std::mem::take(&mut layer.cut);
         layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
     })
+}
+
+/// The layer's next entries are libraries the init only declared (ON),
+/// or ones it loaded.
+pub(crate) fn layer_declared(on: bool) {
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.declared = on; });
+}
+
+/// Whether the entry loading is a declared library's.
+pub(crate) fn layer_in_declared() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.declared))
 }
 
 /// Whether the startup function may run again now: after a layer's
@@ -662,6 +681,21 @@ pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
+/// The Romacs source tree this build came from, `source-directory':
+/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
+/// build's own root while it is a git checkout of one, else none.  A gate's
+/// build slot mirrors a checkout without `.git`, so a build made there
+/// names no tree it would not find again.
+pub fn source_directory() -> Option<PathBuf> {
+    let tree = |dir: &Path| metadata(dir.join("crates/romacs-vm/src/prims")).is_ok_and(|m| m.is_dir());
+    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
+        // Absolute, so a buffer's own directory never resolves it.
+        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
+    }
+    let root = build_root();
+    (tree(&root) && symlink_metadata(root.join(".git")).is_ok()).then_some(root)
+}
+
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -853,7 +887,10 @@ impl Input {
             return captured.take(usize::try_from(limit).unwrap_or(usize::MAX)).map(<[u8]>::to_vec);
         }
         self.0.seek(SeekFrom::Start(offset))?;
-        let mut bytes = Vec::new();
+        // Sized for the file: growing by doubling copies it and faults its
+        // pages in again.
+        let size = self.0.metadata().map_or(0, |m| m.len()).saturating_sub(offset).min(limit);
+        let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
         (&mut self.0).take(limit).read_to_end(&mut bytes)?;
         Ok(bytes)
     }
@@ -1343,15 +1380,42 @@ pub fn die_with_parent(parent: u32) {
     }
 }
 
-/// Lower this process to the background: the weakest CPU niceness and the
-/// idle I/O class, which its children inherit. Best effort.
-pub fn lower_priority() {
+/// How far a background process steps back from the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    /// Work nobody waits for, such as a background compile: the weakest
+    /// CPU niceness and the idle I/O class.
+    Idle,
+    /// A worker isolate: work the session waits for, never ahead of it:
+    /// niceness 10 and the lowest best-effort I/O level, so the session's
+    /// evaluator and render threads always run first.
+    Worker,
+}
+
+/// Lower the calling thread to PRIORITY; the threads and processes it
+/// starts afterwards inherit it, so a process calls it at the start of
+/// main. Best effort.
+pub fn lower_priority(priority: Priority) {
     const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+    const IOPRIO_CLASS_BE: libc::c_long = 2;
     const IOPRIO_CLASS_IDLE: libc::c_long = 3;
+    let (nice, io) = match priority {
+        Priority::Idle => (19, IOPRIO_CLASS_IDLE << 13),
+        Priority::Worker => (10, (IOPRIO_CLASS_BE << 13) | 7),
+    };
     unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, IOPRIO_CLASS_IDLE << 13);
+        libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0 as libc::c_long, io);
     }
+}
+
+/// Name the calling thread NAME (the kernel keeps 15 bytes). On a
+/// process's main thread that is the process's own name, the one `ps` and
+/// `pgrep` show.
+pub fn set_thread_name(name: &str) -> io::Result<()> {
+    effect(|| "thread-name".into())?;
+    let name = std::ffi::CString::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    status(unsafe { libc::prctl(libc::PR_SET_NAME, name.as_ptr()) })
 }
 
 pub fn euid() -> u32 {
@@ -1537,10 +1601,15 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    thread_local! {
-        static COUNTER: std::cell::OnceCell<Option<std::os::fd::OwnedFd>> = const { std::cell::OnceCell::new() };
-    }
-    COUNTER.with(|counter| counter.get_or_init(open_instruction_counter).as_ref().and_then(read_counter))
+    INSTRUCTION_COUNTER.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
+    })
+}
+
+thread_local! {
+    /// The calling thread's counter, once opened (None inside: refused).
+    static INSTRUCTION_COUNTER: std::cell::RefCell<Option<Option<std::os::fd::OwnedFd>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(target_os = "linux")]
@@ -1625,6 +1694,25 @@ pub fn clock() -> SystemTime {
         return with_build(|b| b.pinned.clock).unwrap_or(SystemTime::UNIX_EPOCH);
     }
     SystemTime::now()
+}
+
+/// The processor time this process has used, user and system, as
+/// `getrusage (RUSAGE_SELF)` sums them (GNU sysdep.c
+/// `get-internal-run-time'); in build mode none, a per-process fact.
+pub fn run_time() -> io::Result<std::time::Duration> {
+    if refusing() {
+        p_read(Fact::Monotonic, "run time".into());
+        return Ok(std::time::Duration::ZERO);
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage writes the whole struct it is given.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: initialized by the successful call above.
+    let usage = unsafe { usage.assume_init() };
+    let part = |t: libc::timeval| std::time::Duration::new(t.tv_sec.max(0) as u64, (t.tv_usec.clamp(0, 999_999) as u32) * 1000);
+    Ok(part(usage.ru_utime) + part(usage.ru_stime))
 }
 
 /// The monotonic clock, for deadlines and measurement.
@@ -1789,6 +1877,60 @@ pub fn command(program: impl AsRef<OsStr>) -> io::Result<Command> {
     Ok(Command::new(program))
 }
 
+/// A child process, as GNU's emacs_spawn starts one (callproc.c): ARGV[0],
+/// a file name with a slash, run with ARGV and ENV (each `NAME=VALUE') in
+/// DIR, FDS as its standard input, output and error, in a session of its
+/// own, with SIGINT, SIGQUIT, SIGPROF and SIGPIPE at their defaults and no
+/// signal blocked. posix_spawn: the child shares this process's memory
+/// until it execs, where a fork would copy page tables whose size grows
+/// with the heap. Each of FDS must be above 2, so no descriptor is
+/// replaced before it is copied.
+pub fn spawn_child(argv: &[Vec<u8>], env: &[Vec<u8>], dir: &[u8], fds: [std::os::fd::RawFd; 3]) -> io::Result<i32> {
+    use std::ffi::CString;
+    effect(|| format!("run {}", String::from_utf8_lossy(argv.first().map_or(&[][..], Vec::as_slice))))?;
+    let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
+    let strings = |list: &[Vec<u8>]| list.iter().map(|b| CString::new(b.as_slice())).collect::<Result<Vec<_>, _>>().map_err(|_| invalid());
+    let (argv, env, dir) = (strings(argv)?, strings(env)?, CString::new(dir).map_err(|_| invalid())?);
+    let program = argv.first().ok_or_else(invalid)?;
+    let pointers = |list: &[CString]| list.iter().map(|c| c.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect::<Vec<_>>();
+    let (argp, envp) = (pointers(&argv), pointers(&env));
+    let ok = |r: libc::c_int| if r == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(r)) };
+    // SAFETY: the actions and attributes are initialized before use and
+    // destroyed after; every pointer passed outlives the call.
+    unsafe {
+        let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+        ok(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
+        let mut attr = std::mem::MaybeUninit::<libc::posix_spawnattr_t>::uninit();
+        if let Err(error) = ok(libc::posix_spawnattr_init(attr.as_mut_ptr())) {
+            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
+            return Err(error);
+        }
+        let (actions, attr) = (actions.as_mut_ptr(), attr.as_mut_ptr());
+        let prepared = (|| -> io::Result<()> {
+            for (target, fd) in fds.into_iter().enumerate() {
+                ok(libc::posix_spawn_file_actions_adddup2(actions, fd, target as libc::c_int))?;
+            }
+            ok(libc::posix_spawn_file_actions_addchdir_np(actions, dir.as_ptr()))?;
+            let mut defaults: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut defaults);
+            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPROF, libc::SIGPIPE] {
+                libc::sigaddset(&mut defaults, signal);
+            }
+            ok(libc::posix_spawnattr_setsigdefault(attr, &defaults))?;
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            ok(libc::posix_spawnattr_setsigmask(attr, &mask))?;
+            let flags = libc::POSIX_SPAWN_SETSID as libc::c_int | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+            ok(libc::posix_spawnattr_setflags(attr, flags as libc::c_short))
+        })();
+        let mut pid: libc::pid_t = 0;
+        let spawned = prepared.and_then(|()| ok(libc::posix_spawn(&mut pid, program.as_ptr(), actions, attr, argp.as_ptr(), envp.as_ptr())));
+        libc::posix_spawnattr_destroy(attr);
+        libc::posix_spawn_file_actions_destroy(actions);
+        spawned.map(|()| pid)
+    }
+}
+
 /// A file of a world store, opened for reading: the store's own, never a
 /// fact of a build.
 pub fn open_world_file(path: impl AsRef<Path>) -> io::Result<File> {
@@ -1805,6 +1947,9 @@ pub enum StoreOpen {
     Write { create: bool, truncate: bool },
     /// To make it where none is (O_CREAT|O_EXCL), and write it.
     New,
+    /// To append to it (O_APPEND), made if missing: concurrent writers'
+    /// lines never overwrite each other.
+    Append,
 }
 
 /// A world store's file at PATH, opened as HOW: never through a symlink,
@@ -1819,6 +1964,7 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
         StoreOpen::Read => { options.read(true); }
         StoreOpen::Write { create, .. } => { options.write(true).create(create); }
         StoreOpen::New => { options.write(true).create_new(true); }
+        StoreOpen::Append => { options.append(true).create(true); }
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
@@ -1934,6 +2080,7 @@ pub fn open_store_file_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Sto
         StoreOpen::Write { create: true, .. } => libc::O_WRONLY | libc::O_CREAT,
         StoreOpen::Write { create: false, .. } => libc::O_WRONLY,
         StoreOpen::New => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        StoreOpen::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
     };
     let cname = std::ffi::CString::new(name).map_err(io::Error::other)?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), flags, 0o600 as libc::c_uint) };
@@ -2289,6 +2436,10 @@ extern "C" fn note_user_signal(signal: libc::c_int) {
     let index = usize::from(signal == libc::SIGUSR1);
     USER_SIGNALS[index].fetch_add(1, Ordering::SeqCst);
     USER_SIGNAL_ARRIVED.store(true, Ordering::SeqCst);
+    // SIGUSR2 also asks for a snapshot, which `debug-on-event' leaves alone.
+    if signal == libc::SIGUSR2 && INSPECT_ENABLED.load(Ordering::SeqCst) {
+        INSPECT_REQUESTED.fetch_add(1, Ordering::SeqCst);
+    }
     // A waiting session wakes to read it, as GNU's select returns on a
     // signal; write(2) is async-signal-safe, and the end is non-blocking.
     let fd = TERMINATION_PIPE.load(Ordering::SeqCst);
@@ -2346,13 +2497,100 @@ pub fn take_terminate_quit() -> bool {
 }
 
 /// A worker process: PROGRAM with ARGS after `--isolate 0`, SOCKET as its
-/// standard input, this process's stderr. Its pid; the caller reaps.
+/// standard input, this process's stderr. Its standard output is null: a
+/// worker's Lisp is batch, but the output it would write (`ding''s BEL,
+/// `princ' to t) is no one's, and this process's may be a session's log.
+/// Its pid; the caller reaps.
 /// Spawned, never forked, as a world builder is (`World::start_builder`):
 /// no pre_exec, so no driver's atfork handler runs.
 pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::Result<i32> {
     let mut command = command(program)?;
-    command.arg("--isolate").arg("0").args(args).stdin(socket);
+    command.arg("--isolate").arg("0").args(args).stdin(socket).stdout(std::process::Stdio::null());
     Ok(command.spawn()?.id() as i32)
+}
+
+/// This process was forked from a zygote (`fork_isolate`).
+static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The threads of this process other than its main thread and the
+/// caller (/proc/self/task): those a fork from the caller would lose.
+pub fn other_threads() -> io::Result<Vec<i32>> {
+    let (main, caller) = (unsafe { libc::getpid() }, unsafe { libc::gettid() });
+    let mut others = Vec::new();
+    for entry in std::fs::read_dir("/proc/self/task")? {
+        let tid = entry?.file_name().to_string_lossy().parse::<i32>().map_err(io::Error::other)?;
+        if tid != main && tid != caller { others.push(tid); }
+    }
+    Ok(others)
+}
+
+/// fork(2) from a zygote isolate, which checked that no thread but the
+/// caller and its parked main thread exists (`other_threads`): 0 in the child, whose one
+/// thread is the caller, else the child's pid. The child resets what is
+/// its own with `forked_child_reset`.
+pub fn fork_isolate() -> io::Result<i32> {
+    effect(|| "fork".into())?;
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
+    Ok(pid)
+}
+
+/// Whether this process is a child forked from a zygote: it ends with
+/// `exit`, since no main thread is left to return to.
+pub fn forked_child() -> bool {
+    FORKED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// In a child just forked from ZYGOTE: its process name, no signal noted
+/// yet, a wake pipe of its own (the zygote's would wake both), SIGTERM
+/// once the zygote is gone (fork clears it), and its own instruction
+/// counter (the inherited one counts the zygote's thread).
+pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
+    set_process_name("romacs-worker")?;
+    INTERRUPT.store(false, Ordering::SeqCst);
+    TERMINATE.store(false, Ordering::SeqCst);
+    TERMINATE_QUIT.store(false, Ordering::SeqCst);
+    for end in [WAKE_READ.swap(-1, Ordering::SeqCst), WAKE_WRITE.swap(-1, Ordering::SeqCst)] {
+        if end >= 0 { unsafe { libc::close(end) }; }
+    }
+    catch_isolate_signals()?;
+    INSTRUCTION_COUNTER.with(|counter| counter.replace(None));
+    set_parent_death_signal(libc::SIGTERM)?;
+    if parent_pid() != zygote {
+        return Err(io::Error::other(format!("zygote {zygote} is gone")));
+    }
+    Ok(())
+}
+
+/// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
+/// write end closes unwritten (false); a termination ends the wait too.
+pub fn await_gate(gate: OwnedFd) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut byte = 0u8;
+    loop {
+        match unsafe { libc::read(gate.as_raw_fd(), (&raw mut byte).cast(), 1) } {
+            1 => return true,
+            0 => return false,
+            _ if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted && !terminate_pending() => {}
+            _ => return false,
+        }
+    }
+}
+
+/// Open GATE, the write end `await_gate` waits on: one byte, then closed.
+pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    effect(|| "gate".into())?;
+    status((unsafe { libc::write(gate.as_raw_fd(), [1u8].as_ptr().cast(), 1) } as libc::c_int).min(0))
+}
+
+/// Name this process NAME (the kernel keeps 15 bytes): its thread-group
+/// leader's name, the one `ps` and `pgrep` show, from any of its threads.
+pub fn set_process_name(name: &str) -> io::Result<()> {
+    effect(|| "process-name".into())?;
+    std::fs::write("/proc/self/comm", name)
 }
 
 /// emacs_pipe: a close-on-exec pipe (read end, write end).
@@ -2408,26 +2646,47 @@ pub fn catch_termination_signals(wake: std::sync::Arc<dyn Fn() + Send + Sync>) -
 /// profiler.c's SIGPROF timer, as a thread that only counts: every
 /// INTERVAL nanoseconds it looks at the calling thread, and when that
 /// thread is running, adds one to TICKS. A late wake samples once: the
-/// thread's state over the intervals it missed is unknown. The evaluator takes them at its next
-/// call boundary, a moment later, under the stack that was running. A
-/// sample is never counted for a thread that waits, so like GNU's
-/// CLOCK_THREAD_CPUTIME_ID timer the samples measure the thread's CPU time,
-/// and no wait is charged with work done before it. (A thread CPU-time
-/// timer itself is not used: under a zero RLIMIT_RTTIME hard limit
-/// Linux kills a thread whose CPU timer fires.) Dropping the sender ends
-/// the thread.
+/// thread's state over the intervals it missed is unknown. The evaluator
+/// takes them at its next call boundary, a moment later, under the stack
+/// that was running. A sample is never counted for a thread that waits,
+/// so like GNU's CLOCK_THREAD_CPUTIME_ID timer the samples measure the
+/// thread's CPU time, and no wait is charged with work done before it.
+/// Running means on a CPU: the thread's CPU clock advances between two
+/// reads. Its scheduler state would not do, since `R' also holds while a
+/// woken thread waits for a CPU, and on a loaded host that wait follows
+/// every sleep. (A thread CPU-time timer itself
+/// is not used: under a zero RLIMIT_RTTIME hard limit Linux kills a
+/// thread whose CPU timer fires.) Dropping the sender ends the thread.
 pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::AtomicU64>) -> io::Result<std::sync::mpsc::Sender<()>> {
-    use std::os::unix::fs::FileExt;
     effect(|| "cpu profiler sampler".into())?;
+    let mut clock: libc::clockid_t = 0;
+    match unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) } {
+        0 => {}
+        error => return Err(io::Error::from_raw_os_error(error)),
+    }
+    let cpu_time = move || {
+        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+        (unsafe { libc::clock_gettime(clock, &mut time) } == 0).then_some((time.tv_sec, time.tv_nsec))
+    };
+    // A thread allowed only one CPU shares it with the sampler, which
+    // never sees it there: for it, runnable has to stand for running.
+    // Read once: an affinity changed later takes a profiler restart.
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    status(unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) })?;
+    let alone = unsafe { libc::CPU_COUNT(&cpus) } == 1;
     let stat = File::open("/proc/thread-self/stat")?;
     // stat's third field, after the parenthesized command name.
-    let running = move || {
+    let runnable = move || {
+        use std::os::unix::fs::FileExt;
         let mut text = [0u8; 512];
         let n = stat.read_at(&mut text, 0).ok()?;
         let close = text[..n].iter().rposition(|&b| b == b')')?;
         Some(text.get(close + 2) == Some(&b'R'))
     };
-    running().ok_or_else(|| io::Error::other("unreadable thread state"))?;
+    // A clock read is a system call, so a thread on a CPU has run between
+    // two of them; a waiting one has not.
+    let running = move || Some(cpu_time()? < cpu_time()? || alone && runnable()?);
+    running().ok_or_else(|| io::Error::other("unreadable thread CPU clock"))?;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let period = std::time::Duration::from_nanos(interval.max(100_000));
     std::thread::Builder::new().name("romacs-profiler".into()).stack_size(64 * 1024).spawn(move || {
@@ -2438,7 +2697,7 @@ pub fn cpu_sampler(interval: u64, ticks: std::sync::Arc<std::sync::atomic::Atomi
                 _ => break,
             }
             due = next_sample(due, Instant::now(), period);
-            // The profiled thread is gone: its state no longer reads.
+            // The profiled thread is gone: its clock no longer reads.
             let Some(running) = running() else { break };
             if running {
                 ticks.fetch_add((period.as_nanos() as u64 / interval).max(1), std::sync::atomic::Ordering::Relaxed);
@@ -2475,6 +2734,20 @@ pub fn set_messages_to_stderr(on: bool) {
 
 pub fn messages_to_stderr() -> bool {
     MESSAGES_TO_STDERR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The server this process is, as GNU's `--fg-daemon=NAME' is a daemon
+/// (emacs.c daemon_type, `IS_DAEMON'): set once, at the command line,
+/// for the whole process.
+static DAEMON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_daemon(name: &str) {
+    let _ = DAEMON.set(name.to_owned());
+}
+
+/// The name `daemonp' answers, while this process is a server.
+pub fn daemon() -> Option<&'static str> {
+    DAEMON.get().map(String::as_str)
 }
 
 /// A close-on-exec, nonblocking eventfd: a wakeup counter no file names.
@@ -2524,6 +2797,53 @@ pub fn resolve(host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
     effect(|| format!("resolve {host}:{port}"))?;
     use std::net::ToSocketAddrs;
     (host, port).to_socket_addrs().map(Iterator::collect)
+}
+
+/// NAME's IP addresses as the C library's resolver gives them, one for each
+/// datagram socket address (GNU's `network-lookup-address-info'): FAMILY
+/// is `AF_UNSPEC', `AF_INET' or `AF_INET6'; NUMERIC treats NAME as a
+/// numeric address (`AI_NUMERICHOST'), with no DNS.  Err is the
+/// resolver's reason (`gai_strerror'), or the refusal in build mode.
+pub fn lookup_addresses(name: &str, family: i32, numeric: bool) -> Result<Vec<std::net::IpAddr>, String> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    effect(|| format!("resolve {name}")).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|_| "Name contains a NUL".to_string())?;
+    // SAFETY: an all-zero addrinfo is the documented "no hints" value.
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_family = family;
+    hints.ai_socktype = libc::SOCK_DGRAM;
+    if numeric {
+        hints.ai_flags = libc::AI_NUMERICHOST;
+    }
+    let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+    // SAFETY: c_name and hints outlive the call; res is freed below.
+    let ret = unsafe { libc::getaddrinfo(c_name.as_ptr(), std::ptr::null(), &hints, &mut res) };
+    if ret != 0 {
+        // SAFETY: gai_strerror returns a static string for any code.
+        return Err(unsafe { std::ffi::CStr::from_ptr(libc::gai_strerror(ret)) }.to_string_lossy().into_owned());
+    }
+    let mut addresses = Vec::new();
+    let mut entry = res;
+    while !entry.is_null() {
+        // SAFETY: entry is a node of the list getaddrinfo returned; its
+        // address is a sockaddr of its family.
+        let ai = unsafe { &*entry };
+        match ai.ai_family {
+            libc::AF_INET => {
+                let sin = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in) };
+                addresses.push(IpAddr::V4(Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
+            }
+            libc::AF_INET6 => {
+                let sin6 = unsafe { &*(ai.ai_addr as *const libc::sockaddr_in6) };
+                addresses.push(IpAddr::V6(Ipv6Addr::from(sin6.sin6_addr.s6_addr)));
+            }
+            _ => {}
+        }
+        entry = ai.ai_next;
+    }
+    // SAFETY: res came from a successful getaddrinfo and is freed once.
+    unsafe { libc::freeaddrinfo(res) };
+    Ok(addresses)
 }
 
 pub fn listen(addr: SocketAddr) -> io::Result<TcpListener> {
@@ -2766,4 +3086,259 @@ pub mod call_deadline {
         let current = CURRENT.load(Ordering::Acquire);
         current != 0 && EXPIRED.load(Ordering::Acquire) == current
     }
+}
+
+// Inspecting a busy evaluator (inspect.rs). A request is a generation: the
+// listener and SIGUSR2 raise REQUESTED, the evaluator's next poll answers
+// with a snapshot and raises SERVED. The bytes are in the slot before any
+// disk work, so a stalled store never delays a reply. Each process has one
+// evaluator, and only a session's own process starts a listener.
+static INSPECT_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static INSPECT_REQUESTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INSPECT_SERVED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INSPECT_SLOT: std::sync::Mutex<Option<InspectSnapshot>> = std::sync::Mutex::new(None);
+static INSPECT_LISTENER: std::sync::Mutex<Option<InspectListener>> = std::sync::Mutex::new(None);
+/// How long a client waits for the evaluator's next safe point.
+const INSPECT_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a client has to send its line, and to take the reply. Absolute,
+/// as one client at a time is served.
+const INSPECT_IO: std::time::Duration = std::time::Duration::from_millis(500);
+/// Snapshots waiting for the store; past it the oldest goes.
+const INSPECT_PENDING: usize = 4;
+/// The snapshot files kept.
+const INSPECT_KEEP: usize = 8;
+
+#[derive(Clone)]
+struct InspectSnapshot {
+    generation: u64,
+    at: Instant,
+    json: std::sync::Arc<str>,
+}
+
+/// One listener's store queue, so a stopped writer never takes a later
+/// listener's snapshots.
+#[derive(Default)]
+struct InspectStore {
+    queue: std::sync::Mutex<InspectQueue>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct InspectQueue {
+    pending: std::collections::VecDeque<InspectSnapshot>,
+    stopped: bool,
+}
+
+impl InspectStore {
+    fn lock(&self) -> std::sync::MutexGuard<'_, InspectQueue> {
+        self.queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+    fn push(&self, snapshot: InspectSnapshot) {
+        let mut queue = self.lock();
+        if queue.pending.len() >= INSPECT_PENDING { queue.pending.pop_front(); }
+        queue.pending.push_back(snapshot);
+        self.changed.notify_one();
+    }
+    fn stop(&self) {
+        self.lock().stopped = true;
+        self.changed.notify_all();
+    }
+    /// The next snapshot to save, or None once stopped.
+    fn next(&self) -> Option<InspectSnapshot> {
+        let mut queue = self.lock();
+        loop {
+            if queue.stopped { return None; }
+            if let Some(snapshot) = queue.pending.pop_front() { return Some(snapshot); }
+            queue = self.changed.wait(queue).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+}
+
+struct InspectListener {
+    path: PathBuf,
+    /// The socket's device and inode: a path another process has since
+    /// taken is not unlinked.
+    identity: (u64, u64),
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    store: Option<std::sync::Arc<InspectStore>>,
+}
+
+fn inspect_lock<T>(mutex: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard<'static, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A request the evaluator has not answered. Two relaxed loads per poll.
+#[inline(always)]
+pub fn inspect_pending() -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
+}
+/// The newest request, which a snapshot taken now answers.
+pub fn inspect_generation() -> u64 {
+    INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// Publish JSON as the answer to GENERATION, then queue it for the store.
+pub fn inspect_publish(generation: u64, json: String) {
+    let snapshot = InspectSnapshot { generation, at: Instant::now(), json: json.into() };
+    *inspect_lock(&INSPECT_SLOT) = Some(snapshot.clone());
+    INSPECT_SERVED.store(generation, std::sync::atomic::Ordering::SeqCst);
+    if let Some(store) = inspect_lock(&INSPECT_LISTENER).as_ref().and_then(|listener| listener.store.as_ref()) {
+        store.push(snapshot);
+    }
+}
+
+fn inspect_reply(answered: bool) -> String {
+    let status = if answered { r#""status":"ok""# } else { r#""status":"busy","detail":"no safe point""# };
+    match &*inspect_lock(&INSPECT_SLOT) {
+        Some(s) => format!(r#"{{"v":1,{status},"generation":{},"age_ms":{},"snapshot":{}}}"#, s.generation, s.at.elapsed().as_millis(), s.json),
+        None => format!(r#"{{"v":1,{status},"snapshot":null}}"#),
+    }
+}
+
+/// The peer's uid, from the kernel's record of who connected.
+fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let got = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut credentials).cast(), &mut size)
+    };
+    (got == 0).then_some(credentials.uid)
+}
+
+/// The client's line, within DEADLINE however slowly it comes.
+fn inspect_line(stream: &mut std::os::unix::net::UnixStream, deadline: Instant) -> Option<([u8; 16], usize)> {
+    use std::io::Read;
+    let mut line = [0u8; 16];
+    let mut length = 0;
+    while length < line.len() && !line[..length].contains(&b'\n') {
+        let left = deadline.checked_duration_since(Instant::now()).filter(|left| !left.is_zero())?;
+        stream.set_read_timeout(Some(left)).ok()?;
+        match stream.read(&mut line[length..]) {
+            Ok(n) if n > 0 => length += n,
+            _ => return None,
+        }
+    }
+    Some((line, length))
+}
+
+/// BYTES to the client, within DEADLINE however slowly it reads.
+fn inspect_write(stream: &mut std::os::unix::net::UnixStream, mut bytes: &[u8], deadline: Instant) {
+    use std::io::Write;
+    while !bytes.is_empty() {
+        let Some(left) = deadline.checked_duration_since(Instant::now()).filter(|left| !left.is_zero()) else { return };
+        if stream.set_write_timeout(Some(left)).is_err() { return; }
+        match stream.write(bytes) {
+            Ok(n) if n > 0 => bytes = &bytes[n..],
+            _ => return,
+        }
+    }
+}
+
+/// One client: the line `inspect', answered once. STOP ends the wait.
+fn inspect_serve(mut stream: std::os::unix::net::UnixStream, stop: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) { return; }
+    let Some((line, length)) = inspect_line(&mut stream, Instant::now() + INSPECT_IO) else { return };
+    if &line[..length] != b"inspect\n" { return; }
+    let generation = INSPECT_REQUESTED.fetch_add(1, SeqCst) + 1;
+    let deadline = Instant::now() + INSPECT_WAIT;
+    while INSPECT_SERVED.load(SeqCst) < generation && Instant::now() < deadline && !stop.load(SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let mut reply = inspect_reply(INSPECT_SERVED.load(SeqCst) >= generation);
+    reply.push('\n');
+    inspect_write(&mut stream, reply.as_bytes(), Instant::now() + INSPECT_IO);
+}
+
+/// A store directory is used only if it is a real directory of ours that
+/// no one else may read.
+fn inspect_store_ready(store: &Path) -> bool {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    if std::fs::DirBuilder::new().recursive(true).mode(0o700).create(store).is_err() { return false; }
+    std::fs::symlink_metadata(store).is_ok_and(|meta| {
+        meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0
+    })
+}
+
+fn inspect_save(store: &Path, snapshot: &InspectSnapshot) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let pid = std::process::id();
+    let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let name = format!("inspect-{pid}-{}.json", snapshot.generation);
+    let temporary = store.join(format!(".{name}.tmp"));
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+    write!(file, r#"{{"v":1,"pid":{pid},"time":{time},"generation":{},"snapshot":{}}}"#, snapshot.generation, snapshot.json)?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, store.join(name))?;
+    let mut saved: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(store)?.filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("inspect-"))
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    saved.sort();
+    let surplus = saved.len().saturating_sub(INSPECT_KEEP);
+    for (_, path) in &saved[..surplus] { let _ = std::fs::remove_file(path); }
+    Ok(())
+}
+
+fn inspect_store_thread(directory: PathBuf, store: std::sync::Arc<InspectStore>) {
+    if !inspect_store_ready(&directory) { return; }
+    while let Some(snapshot) = store.next() {
+        let _ = inspect_save(&directory, &snapshot);
+    }
+}
+
+/// Listen for inspect requests at DIRECTORY/inspect.sock, and keep snapshots
+/// in STORE when given. DIRECTORY is private to this user (`romacs-mcp-start'
+/// checks it). A socket no one answers on is a dead session's and is replaced.
+pub fn inspect_listen(directory: &str, store: Option<&str>) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::sync::atomic::Ordering::SeqCst;
+    effect(|| "inspect listener".into())?;
+    inspect_stop();
+    let path = Path::new(directory).join("inspect.sock");
+    match UnixStream::connect(&path) {
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AddrInUse)),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => std::fs::remove_file(&path)?,
+        Err(_) => {}
+    }
+    let listener = UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let meta = std::fs::symlink_metadata(&path)?;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let accepting = stop.clone();
+    std::thread::Builder::new().name("romacs-inspect".into()).spawn(move || {
+        for stream in listener.incoming() {
+            if accepting.load(SeqCst) { return; }
+            if let Ok(stream) = stream { inspect_serve(stream, &accepting); }
+        }
+    })?;
+    let store = match store.map(PathBuf::from) {
+        Some(directory) => {
+            let store = std::sync::Arc::<InspectStore>::default();
+            let storing = store.clone();
+            std::thread::Builder::new().name("romacs-inspect-store".into()).spawn(move || inspect_store_thread(directory, storing))?;
+            Some(store)
+        }
+        None => None,
+    };
+    *inspect_lock(&INSPECT_LISTENER) = Some(InspectListener { path, identity: (meta.dev(), meta.ino()), stop, store });
+    INSPECT_ENABLED.store(true, SeqCst);
+    Ok(())
+}
+
+/// Stop listening: the threads end and the socket goes, if it is still ours.
+pub fn inspect_stop() {
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::atomic::Ordering::SeqCst;
+    let Some(listener) = inspect_lock(&INSPECT_LISTENER).take() else { return };
+    INSPECT_ENABLED.store(false, SeqCst);
+    listener.stop.store(true, SeqCst);
+    if let Some(store) = &listener.store { store.stop(); }
+    // The accept loop looks at its flag once a connection wakes it.
+    let _ = std::os::unix::net::UnixStream::connect(&listener.path);
+    let ours = std::fs::symlink_metadata(&listener.path).is_ok_and(|meta| (meta.dev(), meta.ino()) == listener.identity);
+    if ours { let _ = std::fs::remove_file(&listener.path); }
 }
