@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "aa0c19e071cb5cbc8f29e952ee9ac79f676f2de8ab32897b2db985476cfc43fe",
+  "source_fingerprint": "d6ea9612114aa4e96ee219677f12aabb707faf56a5172f567d7028cccbb9cbab",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -4262,7 +4262,7 @@
   "romacs--backquote-process": {
    "name": "romacs--backquote-process",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/backquote.rs:19"
+   "registered_at": "crates/romacs-vm/src/prims/backquote.rs:39"
   },
   "romacs--backtrace-rewind": {
    "name": "romacs--backtrace-rewind",

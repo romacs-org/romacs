@@ -106,6 +106,49 @@
           (romacs-should (eq (eval '(\` walked-template) t) 'replaced)))
       (defalias 'backquote-process native))))
 
+(romacs-deftest backquote-by-either-name-reads-the-same-template ()
+  ;; An `eval' datum carries a quotation whole, outside a template; the
+  ;; named macro's must still reach its comma.
+  (dolist (head '(backquote \`))
+    (romacs-should (equal (eval (list head '(quote (\, x))) '((x . 42))) ''42))
+    (romacs-should (equal (eval (list head '(a (quote (\, x)) (\,@ y))) '((x . 1) (y . (2))))
+                          '(a '1 2)))))
+
+(romacs-deftest backquote-takes-the-advertised-symbols ()
+  (let ((variables '((x . 1) (y . (2 3)))))
+    (dolist (case '((backquote-unquote-symbol unquote (a (unquote x) b))
+                    (backquote-splice-symbol splice (a (splice y) b))
+                    (backquote-backquote-symbol quasi (a (quasi (b (\, (\, x))))))))
+      (let ((template (nth 2 case)))
+        (cl-progv (list (car case)) (list (nth 1 case))
+          (romacs-should (equal (backquote-process template) (backquote-test--process template)))
+          (romacs-should (equal (macroexpand-1 (list '\` template))
+                                (cdr (backquote-test--process template))))
+          (romacs-should (equal (eval (list '\` template) variables)
+                                (eval (cdr (backquote-test--process template)) variables))))))))
+
+(romacs-deftest backquote-list*-is-a-name-anyone-may-define ()
+  (let ((standard (symbol-function 'backquote-list*)))
+    (unwind-protect
+        (progn
+          (fset 'backquote-list* (lambda (&rest _) 'replaced))
+          (romacs-should (eq (eval '(backquote-list* 1 2) t) 'replaced)))
+      (fset 'backquote-list* standard))))
+
+(romacs-deftest backquote-evaluates-a-constant-as-gnu-does ()
+  ;; `backquote-listify' evaluates what it folds, so a malformed quotation
+  ;; signals, with GNU's condition, where it is folded and only there.
+  (dolist (template '((a (\, (quote b c))) (a (\, (quote))) ((\, (quote b c)) . d)
+                      (a \, (quote b c)) (a (\, (quote x . y))) (\, (quote b c)) (\, (quote))))
+    (let ((ours (condition-case failure (backquote-process template) (error failure)))
+          (theirs (condition-case failure (backquote-test--process template) (error failure))))
+      (romacs-should (equal ours theirs))
+      ;; Where the walk stands, the code it gives signals when evaluated.
+      (romacs-should (equal (condition-case failure (eval (list '\` template) t) (error failure))
+                            (if (integerp (car theirs))
+                                (condition-case failure (eval (cdr theirs) t) (error failure))
+                              theirs))))))
+
 (romacs-deftest backquote-refuses-what-gnu-refuses ()
   (dolist (template '((\, a b) (\,@ a b) (x (\, a b c))))
     (romacs-should (equal (condition-case failure (eval (list '\` template) t) (error failure))
