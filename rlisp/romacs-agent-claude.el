@@ -191,6 +191,9 @@ start: its answer comes with the other control responses."
     (romacs-agent--line session (romacs-mcp--object "type" "control_request" "request_id" id
                                                     "request" (romacs-mcp--object "subtype" "initialize")))))
 
+;; A record's image files are trusted as what the user attached: the journal
+;; is this user's private state, whoever can rewrite it can read those files
+;; anyway, and a recalled image shows in the tray before anything is sent.
 (defun romacs-agent--claude-input-events (session line)
   "The events of LINE, written to SESSION's harness: a user's prompt, or
 an approval answered."

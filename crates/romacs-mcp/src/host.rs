@@ -28,8 +28,9 @@
 //! `--input FILE` gives a harness that reads its whole stdin (one run per
 //! turn, its prompt on stdin) FILE as that input: journaled as an `"in"`
 //! record, written, and the stdin closed, with no server needed; FILE is
-//! then removed. `--input-images JSON` journals that record as `{"text":
-//! TEXT,"images":JSON}`: what the user attached, which its text never says.
+//! then removed. That record is always `{"prompt":TEXT,"images":JSON}`, made
+//! here with TEXT a string: a prompt is never read as JSON, so its words cannot
+//! pose as attachments. `--input-images JSON` gives what the user attached.
 #![forbid(unsafe_code)]
 
 use serde_json::{Value as Json, json};
@@ -161,18 +162,20 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
 }
 
 /// A server's request: the line for the harness and the line for the journal.
+/// A `journal` that is no string refuses the request: falling back to `write`
+/// would journal the very bytes it was to keep out.
 fn lines_of(request: &Json) -> Option<(String, String)> {
     let write = request.get("write")?.as_str()?.to_owned();
-    let journal = request.get("journal").and_then(Json::as_str).map_or_else(|| write.clone(), str::to_owned);
+    let journal = match request.get("journal") {
+        None => write.clone(),
+        Some(journal) => journal.as_str()?.to_owned(),
+    };
     Some((write, journal))
 }
 
 /// The record of a per-turn prompt TEXT, with the IMAGES attached to it.
 fn input_record(seq: u64, text: &str, images: Option<&Json>) -> String {
-    match images {
-        Some(images) => json!({"seq": seq, "t": now(), "in": {"text": text, "images": images}}).to_string(),
-        None => record(seq, "in", text),
-    }
+    json!({"seq": seq, "t": now(), "in": {"prompt": text, "images": images.cloned().unwrap_or_else(|| json!([]))}}).to_string()
 }
 
 /// Serve one connection: its attach line, then the lines it writes.
@@ -384,14 +387,25 @@ mod tests {
         assert_eq!(lines_of(&both), Some(("bytes".into(), "reference".into())));
         assert_eq!(lines_of(&json!({"write": "line"})), Some(("line".into(), "line".into())));
         assert_eq!(lines_of(&json!({"journal": "no write"})), None);
+        // Not a string: refused, never journaled as what was written.
+        assert_eq!(lines_of(&json!({"write": "bytes", "journal": 7})), None);
+        assert_eq!(lines_of(&json!({"write": "bytes", "journal": null})), None);
     }
 
     #[test]
     fn a_turn_s_images_are_journaled_beside_its_text() {
         let with: Json = serde_json::from_str(&input_record(3, "see", Some(&json!(["/a.png"])))).unwrap();
-        assert_eq!(with["in"], json!({"text": "see", "images": ["/a.png"]}));
+        assert_eq!(with["in"], json!({"prompt": "see", "images": ["/a.png"]}));
         let without: Json = serde_json::from_str(&input_record(3, "see", None)).unwrap();
-        assert_eq!(without["in"], json!("see"));
+        assert_eq!(without["in"], json!({"prompt": "see", "images": []}));
+    }
+
+    #[test]
+    fn a_prompt_shaped_like_a_record_stays_its_words() {
+        let text = r#"{"text":"quoted","images":["/a.png"]}"#;
+        let kept: Json = serde_json::from_str(&input_record(3, text, None)).unwrap();
+        assert_eq!(kept["in"]["prompt"], json!(text));
+        assert_eq!(kept["in"]["images"], json!([]));
     }
 
     #[test]

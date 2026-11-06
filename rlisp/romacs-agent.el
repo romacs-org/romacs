@@ -786,10 +786,24 @@ runs is attached first; one whose supervisor ended says so: it resumes with
   (if (stringp content) content
     (mapconcat (lambda (block) (or (and (hash-table-p block) (gethash "text" block)) "")) content "")))
 
+(defcustom romacs-agent-image-max-bytes (* 20 1024 1024)
+  "The largest image that may be attached or sent: one goes whole into a
+message, on the main VM, and a harness refuses what is far beyond this."
+  :type 'natnum :group 'romacs-agent)
+
 (defun romacs-agent-image-file-p (file)
-  "Whether FILE is a regular file with an image's name."
+  "Whether FILE is a regular file with an image's name, of a size to send."
   (and (string-match-p "\\.\\(?:png\\|jpe?g\\|webp\\|gif\\)\\'" file)
-       (file-regular-p file) (file-readable-p file)))
+       (file-regular-p file) (file-readable-p file)
+       (<= (file-attribute-size (file-attributes file)) romacs-agent-image-max-bytes)))
+
+(defun romacs-agent--sendable-images (images)
+  "IMAGES that may still be sent: a queued message's file can change while
+it waits.  A file left out is said, as its message goes on without it."
+  (seq-filter (lambda (file)
+                (or (romacs-agent-image-file-p file)
+                    (progn (message "Not sending %s: gone, or over `romacs-agent-image-max-bytes'" file) nil)))
+              images))
 
 (defun romacs-agent--value (value)
   "VALUE, with JSON null and false as nil."
@@ -813,7 +827,8 @@ message's text, which a child's result or a quote can fill.")
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES.  The journal keeps the message as it would be without
 them, and their files: a replay reads every record, and no image's bytes."
-  (let ((input (romacs-agent--harness-get session :input)))
+  (let ((input (romacs-agent--harness-get session :input))
+        (images (romacs-agent--sendable-images images)))
     (if (not images)
         (romacs-agent--line session (funcall input session text))
       (let ((record (funcall input session text)))
@@ -862,7 +877,8 @@ a digest of its identity, UUID-shaped."
 attached IMAGES.  The supervisor journals TEXT and gives it to the harness
 itself, so the turn goes on whatever becomes of this server."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
-  (let ((input (expand-file-name "input" (romacs-agent-dir session))))
+  (let ((input (expand-file-name "input" (romacs-agent-dir session)))
+        (images (romacs-agent--sendable-images images)))
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
@@ -1004,6 +1020,10 @@ other; empty for none."
               (setf (romacs-agent-startup-pending session) nil))))
         (let ((events (cond ((hash-table-p out) (funcall (romacs-agent--harness-get session :events) session out))
                             ((stringp out) (list (list :type 'unknown :raw out)))
+                            ;; A per-turn prompt: the supervisor's own record.
+                            ((and (hash-table-p in) (stringp (gethash "prompt" in)))
+                             (list (list :type 'input :text (gethash "prompt" in)
+                                         :images (append (gethash "images" in) nil))))
                             ((hash-table-p in)
                              (funcall (or (romacs-agent--harness-get session :input-events) #'ignore) session in))
                             ;; A per-turn harness's prompt, written as text.

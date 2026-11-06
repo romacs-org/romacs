@@ -975,10 +975,18 @@ PROPERTY: the previous one is the run point is in, past its start."
 (defun romacs-agent-ui--running-p ()
   (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
 
+(defun romacs-agent-ui--draft-images-checked ()
+  "The draft's images, or a `user-error' naming one that may not be sent:
+the draft stays, for the tray to take it off."
+  (dolist (file romacs-agent-ui--draft-images romacs-agent-ui--draft-images)
+    (unless (romacs-agent-image-file-p file)
+      (user-error "%s is gone or too large: %s removes it" (file-name-nondirectory file)
+                  (substitute-command-keys "\\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-remove-image]")))))
+
 (defun romacs-agent-ui--deliver (send)
   "Call SEND with the composer's text and attached images, then empty it into its
 history; when SEND fails, the draft stays.  Nothing when it is empty."
-  (let* ((images romacs-agent-ui--draft-images)
+  (let* ((images (romacs-agent-ui--draft-images-checked))
          (written (romacs-agent-ui--composer-text))
          ;; A harness wants words: an image alone gets these.
          (text (if (and images (string-empty-p written)) "See the attached image." written)))
@@ -1089,11 +1097,6 @@ A buffer of this mode no session shows has no turns."
          (end (or (next-single-property-change start 'romacs-agent-turn nil romacs-agent-ui--end) romacs-agent-ui--end))
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
     (romacs-agent-ui--set-draft-parts prompt images)))
-
-(defcustom romacs-agent-image-max-bytes (* 20 1024 1024)
-  "The largest image `romacs-agent-chat-attach' takes: one goes whole into a
-message, and a harness refuses what is far beyond this."
-  :type 'natnum :group 'romacs-agent)
 
 (defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
   "Where `romacs-agent-chat-attach' offers images from."
