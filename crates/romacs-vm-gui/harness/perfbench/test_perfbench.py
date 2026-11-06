@@ -4,7 +4,9 @@
 Run: python3 -B -m unittest discover -s crates/romacs-vm-gui/harness/perfbench -p 'test_perfbench*.py'
 """
 import json
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -104,6 +106,85 @@ class Members(unittest.TestCase):
         self.assertEqual((made['wall_ratio'], made['native_wall_ratio']), (2.0, 4.0))
 
 
+class Table(unittest.TestCase):
+    def test_the_saved_table_keeps_the_members_apart_and_says_how_romacs_ran(self):
+        rows = [pb.row('startup -Q --batch', 'batch', 'run', {'wall': .05}, {'wall': .1}, 3),
+                member_row('fibn', {'wall': 2.0}, {'wall': 1.0}, {'wall': 1.0})]
+        made = results(rows)
+        made['meta'].update(romacs='r', romacs_sha256='0' * 64, runtime='t', gnu='g', quick=False, load_start=1.0,
+                            load_end=1.0, previous=None, romacs_lisp='compiled store')
+        text = pb.table(made)
+        self.assertLess(text.index('startup -Q'), text.index('GNU ELPA elisp-benchmarks'))
+        self.assertLess(text.index('GNU ELPA elisp-benchmarks'), text.index('| elb fibn'))
+        self.assertIn('Romacs compiled store.', text)
+
+
+class Store(unittest.TestCase):
+    def test_a_load_no_artifact_ran_is_named(self):
+        samples = [{'loaded': ['/r/gnu-lisp/org.el', '/r/gnu-lisp/ox.el'], 'compiled': {'/r/gnu-lisp/org.el'}, 'published': 0},
+                   {'loaded': ['/r/gnu-lisp/org.el', '/r/gnu-lisp/ox.el'],
+                    'compiled': {'/r/gnu-lisp/org.el', '/r/gnu-lisp/ox.el'}, 'published': 0}]
+        self.assertEqual(pb.store_note(samples), 'Romacs: compiled store, 1 of 2 loads compiled, read as source: ox.el')
+
+    def test_every_load_compiled_and_no_load_at_all_say_so(self):
+        self.assertEqual(pb.store_note([{'loaded': ['/r/a.el'], 'compiled': {'/r/a.el'}, 'published': 0}]),
+                         'Romacs: compiled store, 1 of 1 loads compiled')
+        self.assertEqual(pb.store_note([{'loaded': None, 'compiled': set(), 'published': 0}]),
+                         'Romacs: compiled store, 0 of 0 loads compiled')
+
+    def test_a_compile_during_a_row_is_said(self):
+        note = pb.store_note([{'loaded': ['/r/a.el'], 'compiled': {'/r/a.el'}, 'published': 2}])
+        self.assertIn('2 artifacts compiled during this row', note)
+
+    def test_a_long_list_of_source_reads_is_cut_with_its_count(self):
+        note = pb.store_note([{'loaded': [f'/r/{n}.el' for n in range(9)], 'compiled': set(), 'published': 0}])
+        self.assertIn('and 3 more', note)
+
+    def test_the_loaded_line_is_read_from_ert_output(self):
+        self.assertEqual(pb.loaded_line('Ran 3 tests\nPERFBENCH-LOADED ("/r/a.el")\n'), ['/r/a.el'])
+        self.assertEqual(pb.loaded_line('PERFBENCH-LOADED nil\n'), [])
+        self.assertIsNone(pb.loaded_line('Ran 3 tests\n'))
+
+    def test_the_harness_own_lisp_is_no_load(self):
+        loaded = [str(pb.HARNESS / 'parity-probe.el'), '/h/.config/romacs/init.el', '/r/a.el']
+        self.assertEqual(pb.compiled_loads([{'loaded': loaded, 'compiled': {'/r/a.el'}, 'published': 0}]),
+                         ({'/r/a.el'}, set()))
+
+    def test_the_use_log_counts_from_its_mark(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory)
+            (store / 'gen').mkdir()
+            log = store / 'gen/use.log'
+            log.write_text('a/1\t/r/old.el\n')
+            marks = pb.store_marks(store)
+            with log.open('a') as out:
+                out.write('a/2\t/r/new.el\n')
+            (store / 'gen/key').mkdir()
+            (store / 'gen/key/x.rlc').write_text('')
+            self.assertEqual(pb.store_since(store, marks), {'compiled': {'/r/new.el'}, 'published': 1})
+            log.write_text('a/3\t/r/x.el\n')  # compacted, shorter than its mark: no proof, and a compile ran
+            self.assertEqual(pb.store_since(store, {'logs': {log: 10 ** 6}, 'at': time.time_ns() + 10 ** 12}),
+                             {'compiled': set(), 'published': 1})
+
+    def test_a_compile_the_store_then_pruned_still_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory)
+            (store / 'gen/old').mkdir(parents=True)
+            (store / 'gen/old/a.rlc').write_text('')
+            os.utime(store / 'gen/old/a.rlc', ns=(1, 1))
+            (store / 'gen/use.log').write_text('')
+            marks = pb.store_marks(store)
+            (store / 'gen/old/a.rlc').unlink()  # one removed
+            (store / 'gen/new').mkdir()
+            (store / 'gen/new/b.rlc').write_text('')  # one published: no net growth
+            self.assertEqual(pb.store_since(store, marks)['published'], 1)
+
+    def test_a_run_with_no_load_report_is_said_not_counted_as_none(self):
+        note = pb.store_note([{'loaded': [], 'compiled': set(), 'published': 0, 'unreported': True},
+                              {'loaded': ['/r/a.el'], 'compiled': {'/r/a.el'}, 'published': 0}])
+        self.assertIn('loads not checked in 1 of 2 runs', note)
+
+
 class Readme(unittest.TestCase):
     ROWS = staticmethod(lambda: [pb.row('startup -Q --batch', 'batch', 'run', {'wall': .05}, {'wall': .1}, 3),
                                  member_row('fibn', {'wall': 2.0}, {'wall': 1.0}, {'wall': 1.0})])
@@ -115,6 +196,16 @@ class Readme(unittest.TestCase):
         self.assertNotIn('startup', elb)
         self.assertIn("GNU's own benchmark suite", elb)
         self.assertIn('| fibn | 2 s | 1 s | 1 s | 0.50x | 1.00x |', elb)
+
+    def test_the_header_says_how_romacs_ran(self):
+        made = results(self.ROWS())
+        self.assertIn('from source', readme.section(made))
+        self.assertIn('not how an installation runs', readme.elb_section(made))
+        made['meta']['install'] = {'files': 100, 'not_compiled': 3}
+        for text in (readme.section(made), readme.elb_section(made)):
+            self.assertIn('97 of the 100 files', text)
+            self.assertIn('--compile-lisp-tree', text)
+            self.assertNotIn('not how an installation runs', text)
 
     def test_without_native_compilation_the_column_is_absent_and_said_so(self):
         elb = readme.elb_section(results(self.ROWS(), native=False))

@@ -63,9 +63,23 @@ def measured(meta, what):
             f'{meta["max_load"]:g} are left out.')
 
 
+def installation(meta):
+    """How this run's Romacs ran, for a table's header."""
+    install = meta.get('install')
+    if not install:
+        return ('Romacs read its Lisp from source, with no compiled store or batch world: '
+                'not how an installation runs.')
+    return (f'Romacs ran as an installation does: {install["files"] - install["not_compiled"]} of the '
+            f'{install["files"]} files of its Lisp compiled ahead of use into its store by '
+            '=--compile-lisp-tree=, before anything was timed; batch rows booted from a batch world prepared first, '
+            "which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note "
+            'counts the loads the store confirms and names any it does not.')
+
+
 def section(results):
     lines = [
-        measured(results['meta'], 'workload') + '  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.',
+        measured(results['meta'], 'workload') + '  ' + installation(results['meta'])
+        + '  The ratio is Romacs over GNU: below 1.00x, Romacs is faster.',
         '',
         '| Workload | Per | GNU | Romacs | Romacs/GNU (time) | Romacs/GNU (instructions) | Notes |',
         '|-',
@@ -95,7 +109,7 @@ def elb_section(results):
         + ('and natively compiled at the suite\'s own speed and safety; its own Lisp libraries are '
            'natively compiled in both columns, as this GNU is built with native compilation.  '
            if native else 'and has no native-compilation column: this GNU is built without it.  ')
-        + 'Romacs loads their source.  A member an engine does not define, or whose run reported an error, '
+        + installation(meta) + '  A member an engine does not define, or whose run reported an error, '
         'has no figure there, and the geometric mean leaves it out.  The ratio is Romacs over GNU: '
         'below 1.00x, Romacs is faster.',
         '',

@@ -11,8 +11,12 @@
 ;; (GNU) or source (Romacs) PERFBENCH_MICRO file instead: see `micro'.
 ;; `elb-prepare' compiles GNU ELPA's elisp-benchmarks and reports its
 ;; entry names; `elb' runs one of them: see `perfbench--elb-load'.
+;; Every result carries :loaded, the files the run loaded, which
+;; perfbench.py checks against the compiled store's use log.
 
 ;;; Code:
+
+(load (expand-file-name "perfbench-loaded.el" (file-name-directory load-file-name)) nil t t)
 
 (defun perfbench--fixture (name)
   (expand-file-name name (getenv "PERFBENCH_FIXTURES")))
@@ -57,8 +61,10 @@
 PERFBENCH_ELB_MODE says how: `source' loads each member file's source,
 `elc' its byte-compiled file, `eln' its native-compiled file (in
 PERFBENCH_ELN), compiled at the suite's own `elb-speed' and
-`elb-safety' as its driver does.  With COMPILE, compile them first.  JIT
-native compilation is off, so `elc' stays bytecode."
+`elb-safety' as its driver does, and `store' each by its name alone,
+which Romacs satisfies from its compiled store given the `.elc' beside
+the file.  With COMPILE, compile them first.  JIT native compilation is
+off, so `elc' stays bytecode."
   (add-to-list 'load-path (getenv "PERFBENCH_ELB_DIR"))
   (require 'elisp-benchmarks)
   (let ((mode (getenv "PERFBENCH_ELB_MODE"))
@@ -68,6 +74,8 @@ native compilation is off, so `elc' stays bytecode."
     (when (equal mode "eln")
       (push (getenv "PERFBENCH_ELN") native-comp-eln-load-path))
     (when compile
+      (when (equal mode "elc")
+        (byte-compile-file (expand-file-name "elisp-benchmarks.el" (getenv "PERFBENCH_ELB_DIR"))))
       (dolist (file files)
         (pcase mode
           ("elc" (unless (byte-compile-file file) (error "byte-compile-file %s failed" file)))
@@ -76,10 +84,11 @@ native compilation is off, so `elc' stays bytecode."
     (dolist (file files)
       (load (pcase mode
               ("source" file)
+              ("store" (file-name-sans-extension file))
               ("elc" (concat file "c"))
               ("eln" (comp-el-to-eln-filename file))
-              (_ (error "PERFBENCH_ELB_MODE %S is not source, elc or eln" mode)))
-            nil t t))
+              (_ (error "PERFBENCH_ELB_MODE %S is not source, store, elc or eln" mode)))
+            nil t (not (equal mode "store"))))
     (mapatoms (lambda (symbol)
                 (when (and (fboundp symbol)
                            (string-match "\\`elb-\\(.*\\)-entry\\'" (symbol-name symbol)))
@@ -133,10 +142,12 @@ native compilation is off, so `elc' stays bytecode."
 (let* ((name (intern (getenv "PERFBENCH_WORKLOAD")))
        (body (funcall (alist-get name perfbench-workloads))))
   (if (getenv "PERFBENCH_SKIP")
-      (princ (format "PERFBENCH %S\n" (list :workload name :skipped t)))
+      ;; `:loaded' here too: what perfbench.py subtracts includes reporting it.
+      (princ (format "PERFBENCH %S\n" (list :workload name :skipped t :loaded (perfbench-loaded))))
     (let* ((start (float-time))
            (check (funcall body))
            (seconds (- (float-time) start)))
-      (princ (format "PERFBENCH %S\n" (list :workload name :seconds seconds :check check))))))
+      (princ (format "PERFBENCH %S\n" (list :workload name :seconds seconds :check check
+                                             :loaded (perfbench-loaded)))))))
 
 ;;; perfbench.el ends here
