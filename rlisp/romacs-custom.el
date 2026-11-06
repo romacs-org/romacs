@@ -231,11 +231,12 @@ loads over those themes, which it may read."
 (defun romacs-theme-preview--revert ()
   "Put back what the preview began with: the themes, then every face,
 then the enable hooks told of those faces, which `disable-theme' alone
-would not do.  Enabling `user' to tell them recalculates what it sets, so
-the faces come back once more."
+would not do.  They are told as enabling `user' tells them, without
+recalculating what it sets, and what they write goes back too."
   (romacs-theme-preview--settle)
   (romacs-theme-preview--restore-faces)
-  (with-demoted-errors "Theme preview: %S" (enable-theme 'user))
+  (with-demoted-errors "Theme preview: %S"
+    (run-hook-with-args 'enable-theme-functions 'user))
   (romacs-theme-preview--restore-faces))
 
 (defmacro romacs-theme-preview--session (&rest body)

@@ -101,7 +101,9 @@ enabled now back after it."
     (mapc #'disable-theme custom-enabled-themes)
     (let* ((seen nil)
            (hook (lambda (&rest _) (setq seen (face-background 'default))))
-           (background (face-background 'default)))
+           (background (face-background 'default))
+           (settings (get 'user 'theme-settings))
+           (stack (get 'default 'theme-face)))
       (add-hook 'enable-theme-functions hook)
       (unwind-protect
           (progn
@@ -114,8 +116,18 @@ enabled now back after it."
             (romacs-theme-preview--session
               (romacs-theme-preview--show 'tango-dark))
             (romacs-should (equal seen "#123456"))
+            (romacs-should (equal (face-background 'default) "#123456"))
+            ;; So is a local edit over a face `user' sets.
+            (custom-theme-set-faces 'user '(default ((t :background "#334455"))))
+            (set-face-attribute 'default (selected-frame) :background "#123456")
+            (romacs-theme-preview--session
+              (romacs-theme-preview--show 'tango-dark))
+            (romacs-should (equal seen "#123456"))
             (romacs-should (equal (face-background 'default) "#123456")))
         (remove-hook 'enable-theme-functions hook)
+        (put 'user 'theme-settings settings)
+        (put 'default 'theme-face stack)
+        (face-spec-recalc 'default (selected-frame))
         (set-face-attribute 'default (selected-frame) :background background)))))
 
 (romacs-deftest romacs-theme-preview-never-reads-a-theme-load-theme-would-ask-about ()
