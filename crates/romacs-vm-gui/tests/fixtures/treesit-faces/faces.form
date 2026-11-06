@@ -1,0 +1,13 @@
+(progn
+  (let ((grammars (getenv "TREESIT_FACES_GRAMMARS")))
+    (when grammars (setq treesit-extra-load-path (list grammars))))
+  (require 'treesit)
+  (customize-set-variable 'treesit-enabled-modes t)
+  (with-current-buffer (find-file-noselect (getenv "TREESIT_FACES_FILE"))
+    (font-lock-ensure)
+    (princ (format "mode=%s level=%s\n" major-mode treesit-font-lock-level))
+    (let ((pos (point-min)))
+      (while (< pos (point-max))
+        (let ((next (next-single-property-change pos 'face nil (point-max))))
+          (princ (format "%d %d %S\n" pos next (get-text-property pos 'face)))
+          (setq pos next))))))

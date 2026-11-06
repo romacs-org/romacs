@@ -1560,8 +1560,9 @@ fn evaluate(
                 && let Some(trace) = &mut key_trace {
                 for sample in trace.completed(presentation, observed) { eprintln!("{sample}"); }
             }
-            // Pixels landed, or a publication left images to send: paint again.
-            if vm.land_images()? || images.borrow().behind() { live_presentation.changed(); }
+            // Pixels landed, a parse a window waits on did, or a publication
+            // left images to send: paint again.
+            if vm.land_images()? || vm.land_treesit() || images.borrow().behind() { live_presentation.changed(); }
             if let Some(result) = live_presentation.after_batch(|| -> Result<_, String> {
                 // A server with no window paints nothing until one shows.
                 if !host.borrow().window_shown() { return Ok(None); }

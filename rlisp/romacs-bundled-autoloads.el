@@ -578,6 +578,11 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-theme-roles" '("romacs-theme-"))
 
 
+;;; Generated autoloads from romacs-treesit.el
+
+(register-definition-prefixes "romacs-treesit" '("romacs-treesit--"))
+
+
 ;;; Generated autoloads from romacs-unidata.el
 
 (register-definition-prefixes "romacs-unidata" '("romacs-unidata-"))
