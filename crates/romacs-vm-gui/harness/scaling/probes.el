@@ -1850,9 +1850,9 @@ closures over a mutable variable (each a closure and a cell)."
 ;; compiled, lowered by a call and dropped in each step; the host's idle
 ;; pass between steps collects at the top level, the only place request
 ;; code retires, and the next step takes their sites and cache slots back.
-;; A --loadup session has no `romacs--idle-collect' (rlisp/vm/keyboard.el)
-;; and shows a startup message, so the probe supplies the one and clears
-;; the other.  A step with no collection after the last ends the session,
+;; A session no key has reached has no `romacs--idle-collect' (the lazy
+;; rlisp/vm/keyboard.el) and shows a startup message, so the probe supplies
+;; the one and clears the other.  A step with no collection after the last ends the session,
 ;; which fails the measure.  Retirement that scanned its free lists, or
 ;; rebuilt tables per function, would grow faster than N.
 (defvar scaling--retire-collections 0
@@ -1873,6 +1873,14 @@ closures over a mutable variable (each a closure and a cell)."
             (insert (format "step %d\n" i)))
           (message nil)
           (setq scaling--retire-collections gcs-done)))
+
+;; The collections a usage log reads (gc.rs `Vm::note_collection'): N
+;; collections, past what the log keeps at 4N, then its read.  A record
+;; costs the same however many were kept, and past the limit only a count.
+(scaling-probe gc-collection-log :n 100
+  :setup (romacs--take-collections)
+  :body (progn (dotimes (_ n) (garbage-collect))
+               (romacs--take-collections)))
 
 ;; The debugger's frame model: `backtrace-get-frames' (every frame with
 ;; its locals, as a *Backtrace* buffer is built) over a stack N deep with a

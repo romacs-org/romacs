@@ -404,6 +404,23 @@ mod tests {
         assert!((5_000..40_000).contains(&first), "{got}");
     }
 
+    /// A collection in a prompt's redisplay runs with the host taken for the
+    /// read, so no key can be seen: its record says so rather than nothing.
+    #[test]
+    fn a_collection_in_a_prompts_redisplay_is_recorded_as_met() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120], vec![0]))));
+        vm.eval_source("(setq mode-line-format '(:eval (progn (garbage-collect) \"m\")))").unwrap();
+        vm.take_collections();
+        vm.idle_since = Some(crate::host::monotonic());
+        vm.eval_source("(romacs--read-host-event)").unwrap();
+        let taken = vm.take_collections();
+        let got = vm.display(taken).unwrap();
+        assert!(got.contains(" redisplay "), "{got}");
+    }
+
     /// The T2 continuation path (`t2_dispatch`) also routes the read to engine
     /// control: a T2 primitive's callback `apply`s it with no arguments.
     #[test]

@@ -1448,6 +1448,8 @@ pub struct Vm {
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
+    /// The collections since the usage log last read them.
+    collection_log: gc::CollectionLog,
     gc_retained: usize,
     /// Payload bytes (string text, vector slots) allocated since the last
     /// collection, which GNU charges to `consing_until_gc' with the objects
@@ -1658,6 +1660,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
+    collection_log,
     gc_retained,
     gc_payload_bytes,
     collect_poll,
@@ -1867,6 +1870,7 @@ impl Vm {
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
+            collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
             collect_poll: false,
