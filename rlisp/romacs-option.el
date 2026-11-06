@@ -43,6 +43,7 @@ inside one MCP reply (`romacs-mcp--output-limit').")
 
 (add-hook 'custom-define-hook #'romacs-option--stale)
 (advice-add 'custom-add-to-group :after #'romacs-option--stale)
+(advice-add 'defvaralias :after #'romacs-option--stale)
 
 (defun romacs-option--rebuild ()
   "Walk the symbols once: the declared options, and who lists them."

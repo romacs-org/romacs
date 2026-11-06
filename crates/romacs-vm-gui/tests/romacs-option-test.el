@@ -158,9 +158,11 @@ types, choices and hooks.")
 (romacs-deftest romacs-option-search-finds-aliases-and-ignores-case ()
   (romacs-option-test--with-option option 'integer
     (let ((alias (intern (format "%s-alias" option))) (upper (intern (format "%s-UPPER" option))))
+      ;; With the cache warm, and nothing else declared after the alias.
+      (romacs-should (assq option (romacs-option-search (symbol-name option))))
       (defvaralias alias option)
-      (custom-declare-variable upper 1 "Mixed case." :type 'integer :group 'romacs-option-test)
       (romacs-should (assq alias (romacs-option-search (symbol-name alias))))
+      (custom-declare-variable upper 1 "Mixed case." :type 'integer :group 'romacs-option-test)
       (romacs-should (assq upper (romacs-option-search (symbol-name upper)))))))
 
 (romacs-deftest romacs-option-a-group-search-keeps-kinds-and-order ()
