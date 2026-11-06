@@ -600,9 +600,16 @@ def title(args, base):
         s.eval('(force-mode-line-update t)')
         s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
         until(lambda: renamed in titles(), 30, f'the title {renamed}')
+        # With nothing to paint: a client's form, then a timer's.
         s.eval("(setq frame-title-format \"custom %b\")")
-        s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
         until(lambda: 'custom renamed.txt' in titles(), 30, 'the custom title')
+        s.eval("(run-at-time 0.1 nil (lambda () (setq frame-title-format \"timer %b\")))")
+        until(lambda: 'timer renamed.txt' in titles(), 30, 'the timer title')
+        # A construct the key does not cover: the size follows each edit.
+        s.eval('(with-current-buffer "renamed.txt" (setq frame-title-format "%b (%i)") (set-buffer-modified-p t) (erase-buffer) (insert "a"))')
+        until(lambda: 'renamed.txt (1)' in titles(), 30, 'the size in the title')
+        s.eval('(with-current-buffer "renamed.txt" (insert "b"))')
+        until(lambda: 'renamed.txt (2)' in titles(), 30, 'the next size in the title')
         return {'titles': titles(), 'ok': True}
     finally:
         s.close()
