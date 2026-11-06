@@ -207,7 +207,6 @@ make-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 malloc-info	absent	glibc malloc diagnostics: Romacs's heap is its own arena
 malloc-trim	absent	glibc malloc diagnostics: Romacs's heap is its own arena
 markers-in	absent	no shipped Lisp calls it and it is no command
-memory-use-counts	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 menu-bar-menu-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
 menu-or-popup-active-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 message-box	needed	lane A (editing, windows, frames, minibuffer readers, display)

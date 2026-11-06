@@ -106,3 +106,11 @@ fn memory_info(cx) -> Step {
     });
     Ok(Step::Done(list))
 }}
+
+// Each counter wraps past the largest fixnum, as GNU's doc says, and
+// collection never lowers one.
+defsubr! { name = "memory-use-counts", gnu = "alloc.c:7212", effect = Reads,
+fn memory_use_counts(cx) {
+    let counters = cx.consed().map(|n| Value::fixnum((n & Value::MAX_FIXNUM as u64) as i64).unwrap());
+    Ok(counters.iter().rev().fold(Value::NIL, |list, &n| cx.cons(n, list)))
+}}

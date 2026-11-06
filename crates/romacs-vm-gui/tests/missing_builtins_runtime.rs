@@ -45,6 +45,11 @@ const FORMS: &str = r###"
 (let ((b (expt 2 80)) (c (- (expt 3 60)))) (list (% b 7) (% c 7) (% b c) (% 7 b) (% 7 3) (% -7 3) (oddp b) (evenp b) (with-temp-buffer (insert "abcde") (list (% (copy-marker 5) 3) (% 7 (copy-marker 4))))))
 (list (condition-case e (% (expt 2 80) 0) (error e)) (condition-case e (% 7 0) (error e)) (condition-case e (% 1.5 2) (error e)) (condition-case e (% 'a 2) (error e)) (condition-case e (% 7 2.5) (error e)) (condition-case e (funcall '% 7 2.5) (error e)) (condition-case e (funcall '% 7 0) (error e)) (condition-case e (% 7 (make-marker)) (error e)))
 
+(let* ((b (expt 2 80)) (n (- b)) (c (list 1 2 3 4 5))) (setcdr (nthcdr 4 c) (nthcdr 2 c)) (list (nth b '(1)) (nthcdr b '(1)) (nth n '(1 2)) (nthcdr n '(1 2)) (nth b nil) (nthcdr b nil) (car (nthcdr b c)) (nth b c) (nth (1+ b) c) (nth (+ b 2) c) (car (nthcdr (+ b 2) c)) (funcall 'nth b c) (condition-case e (nth b '(1 . 2)) (error e)) (condition-case e (nthcdr b '(1 . 2)) (error e)) (condition-case e (nth 1.5 '(1)) (error e)) (condition-case e (nthcdr 1.5 '(1)) (error e)) (let ((r (list 1))) (setcdr r r) (nth b r))))
+(let* ((_ (require 'cl-lib)) (keep nil) (d (lambda (f) (let ((a (memory-use-counts))) (setq keep (funcall f)) (mapcar (lambda (x) (> x 0)) (cl-mapcar #'- (memory-use-counts) a)))))) (list (length (memory-use-counts)) (seq-every-p #'natnump (memory-use-counts)) (nth 0 (funcall d (lambda () (cons 1 2)))) (nth 1 (funcall d (lambda () (* 1.5 (float (random 9)))))) (nth 2 (funcall d (lambda () (make-vector 10 0)))) (nth 3 (funcall d (lambda () (make-symbol "x")))) (nth 4 (funcall d (lambda () (make-string 5 ?a)))) (nth 6 (funcall d (lambda () (make-string 5 ?a)))) (let ((a (memory-use-counts))) (garbage-collect) (seq-every-p #'identity (cl-mapcar #'<= a (memory-use-counts))))))
+(progn (require 'window-tool-bar) (stringp (window-tool-bar-string)))
+(let* ((a (nth 2 (memory-use-counts))) (keep (lambda () 42))) (list (functionp keep) (> (- (nth 2 (memory-use-counts)) a) 0)))
+(with-temp-buffer (defvar memcount-probe 1) (let ((a (nth 3 (memory-use-counts)))) (make-local-variable 'memcount-probe) (- (nth 3 (memory-use-counts)) a)))
 "###;
 
 #[test]

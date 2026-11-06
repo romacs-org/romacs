@@ -202,6 +202,12 @@ mod leaf {
         pub(crate) fn collection_budget(&self) -> (f64, f64) {
             self.vm.collection_budget()
         }
+        /// `memory-use-counts': (CONSES FLOATS VECTOR-CELLS SYMBOLS STRING-CHARS INTERVALS STRINGS).
+        pub(crate) fn consed(&self) -> [u64; 7] {
+            let c = &self.vm.free.consed;
+            let symbols = (self.vm.slots.len() - self.vm.local_binding_slots.len()) as u64 + c.reused_symbols;
+            [c.conses, c.floats, c.vector_cells, symbols, c.string_chars, 0, c.strings]
+        }
         /// `Vm::collection_share'.
         pub(crate) fn collection_share(&self) -> f64 {
             self.vm.collection_share()

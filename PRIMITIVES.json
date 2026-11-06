@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "67b501e01f2855369d2ef9036d8e40c8a789e6cd0c15c61b54485824c07434bb",
+  "source_fingerprint": "b0cac6daf737e49ec793de6fc421a194cc7ca9499381c0ffdfe43ac7fec074c6",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1395,
-  "parsed_vm2_only": 1395
+  "parsed_total": 1396,
+  "parsed_vm2_only": 1396
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3373,6 +3373,11 @@
    "name": "memory-info",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:98"
+  },
+  "memory-use-counts": {
+   "name": "memory-use-counts",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:112"
   },
   "memq": {
    "name": "memq",
