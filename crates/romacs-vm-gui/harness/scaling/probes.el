@@ -172,6 +172,26 @@ thousandth a stack mark."
                (setq parent name))))
   :body (romacs-theme-roles-floors it '((bg . "#101418"))))
 
+;; N distinct floor questions, past the memo's bound: an answer is kept or the
+;; memo cleared, never the whole of it walked per question.
+(scaling-probe theme-floor-memo :n 6000 :k 6
+  :setup (progn
+           (require 'romacs-theme)
+           (clrhash romacs-color--memo)
+           (mapcar (lambda (i) (format "#%06x" (* i 397))) (number-sequence 1 n)))
+  :body (dolist (color it) (romacs-color-floor-on color '("#101418") 4.5)))
+
+;; The pill's colours under N theme entries on each of its faces: the entries
+;; are walked once, by the face's recalculation.
+(scaling-probe theme-pill-stack :n 2000 :k 4
+  :setup (progn
+           (require 'romacs-mode-line)
+           (let ((entries (mapcar (lambda (name) (list (intern name) '((t :weight bold))))
+                                  (scaling--names "scaling-pill" n))))
+             (dolist (face '(romacs-mode-line-pill romacs-mode-line-state romacs-mode-line-state-pill))
+               (put face 'theme-face entries))))
+  :body (romacs-mode-line-pill-faces))
+
 (scaling-probe faces-edit-read :gui t :n 100 :steps 1
   :setup (let ((faces (mapcar #'intern (scaling--names "scaling-face" n))))
            (dolist (face faces) (custom-declare-face face '((t)) "A scaling face." :group 'scaling))

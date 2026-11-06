@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "2c53271338100eaa22ec59bd281d47ea37a8e4a84fa810896415d1e572654f61",
+    "input_hash": "e3e5f82aaa97a61dac7e288847344f9f8b2b8b634945ac2234c7926092f79165",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8359
+    "vm2_universe": 8366
   },
   "schema": 2,
   "vm2": {
-    "count": 1383,
+    "count": 1388,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -1009,6 +1009,11 @@
       "romacs--write-auto-save-list",
       "romacs--write-region-body",
       "romacs--xml-read-element",
+      "romacs-color--in-gamut",
+      "romacs-color--oklch",
+      "romacs-color-from-oklab",
+      "romacs-color-luminance",
+      "romacs-color-oklab",
       "romacs-find-buffer-visiting",
       "romacs-image-header-size",
       "romacs-instructions",
