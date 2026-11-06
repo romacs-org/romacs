@@ -34,6 +34,8 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; from the command line, and only batch keeps it.
         (setq noninteractive nil)
         (romacs-gui--startup-ellipsis)
+        ;; frame.el frame-initialize: a window session has no terminal frame.
+        (setq terminal-frame nil)
         ;; emacs.c main (emacs.c:2213) logs an empty message, so every session
         ;; starts with *Messages*, which `kill-buffer' and `other-buffer' may
         ;; fall back on; normal-top-level (startup.el:736) puts it in

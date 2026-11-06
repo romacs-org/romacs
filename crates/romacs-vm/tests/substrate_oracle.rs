@@ -115,3 +115,14 @@ fn buffer_swap_text_matches_pinned_gnu() {
 (list (condition-case e (buffer-swap-text 'x) (error e)) (let ((b (generate-new-buffer "swap-dead"))) (kill-buffer b) (condition-case e (buffer-swap-text b) (error e))) (with-temp-buffer (insert "same") (buffer-swap-text (current-buffer)) (buffer-string)))
 "###);
 }
+
+#[test]
+fn string_literal_multibyteness_matches_pinned_gnu() {
+    // GNU's --eval reads from a string; Romacs's eval_source reads the
+    // host source, as `load' does.
+    matches_pinned_gnu(r###"
+(list (multibyte-string-p "ab") (multibyte-string-p "") (multibyte-string-p "\0\0") (multibyte-string-p "a\nb\t") (multibyte-string-p "é") (multibyte-string-p "\351") (multibyte-string-p "\x80") (multibyte-string-p "é") (multibyte-string-p "\351é"))
+(list (string-bytes "\351") (string-bytes "\351é") (append "\351" nil) (append "\x80a" nil) (equal "ab" (string-to-multibyte "ab")) (eq (aref "a\0" 1) 0))
+(with-temp-buffer (setq mode-name "Text" buffer-file-name "/tmp/name") (list (format-mode-line "%m|%f") (format-mode-line '("x" "y")) (multibyte-string-p (format-mode-line "%m"))))
+"###);
+}

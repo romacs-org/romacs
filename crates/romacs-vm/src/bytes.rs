@@ -177,7 +177,7 @@ impl ByteBuffer {
         let properties: BTreeMap<ByteOffset, BTreeMap<String, Value>> = self.properties.range(r.clone())
             .filter(|(_, values)| !values.is_empty())
             .map(|(&at, values)| (ByteOffset(at.0 - r.start.0), values.clone())).collect();
-        if properties.is_empty() { return crate::data::Object::Bytes(bytes); }
+        if properties.is_empty() { return crate::data::unibyte_object(bytes); }
         let mut string = crate::data::LispString::from_bytes(bytes, false);
         string.properties = crate::properties::Properties::from_map(&properties);
         crate::data::string_object(string)

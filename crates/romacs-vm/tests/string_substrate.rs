@@ -48,3 +48,14 @@ fn p1a_to_unibyte_error() { assert_eq!(printed("(condition-case e (string-to-uni
 // GNU: "\273\273"
 #[test]
 fn p1a_fill() { assert_eq!(printed("(fillarray (unibyte-string 97 98) 955)"), "\"\\273\\273\""); }
+
+/// bindat-pack's pattern: a byte above 127 stored in a unibyte string reaches
+/// the host as bytes, through each way it reads a result.
+#[test]
+fn a_binary_string_reaches_the_host_as_bytes() {
+    let form = "(let ((s (make-string 2 0))) (aset s 0 255) s)";
+    let mut vm = Vm::new();
+    assert_eq!(vm.eval_source(form).unwrap().bytes().unwrap(), [255, 0]);
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "#u8(255 0)");
+    assert_eq!(vm.eval_source(form).unwrap().typed_value().unwrap(), serde_json::json!({"type": "bytes", "value": [255, 0]}));
+}

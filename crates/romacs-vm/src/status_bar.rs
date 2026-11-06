@@ -122,6 +122,26 @@ impl Vm {
         self.display_state.bar_cache = Some((key, bar.clone()));
         Ok(Some(place(bar)))
     }
+    /// The window title's format, and what a format of `%b' depends on
+    /// (`romacs--title-format-static-p'): the selected window's buffer, its
+    /// name, and what moves mode lines.  Not point, so a key that only
+    /// moves it pays nothing.
+    pub fn frame_title_key(&mut self) -> Result<(u64, u64)> {
+        use std::hash::{Hash, Hasher};
+        let window = self.selected_window_value()?;
+        let buffer = self.window(window)?.buffer;
+        let state = match self.object(buffer)? {
+            Object::Buffer(b) => &b.state,
+            Object::ByteBuffer(b) => &b.state,
+            _ => return Err("buffer required".into()),
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (buffer.0, &state.name).hash(&mut hasher);
+        let format = self.slot("frame-title-format");
+        let format = self.variable_value(format)?.0;
+        (format, self.display_state.mode_line_epoch, self.gc_stats.collections).hash(&mut hasher);
+        Ok((format, hasher.finish()))
+    }
     /// What the bar's line shows depends on, as GNU's redisplay decides when
     /// to update a mode line (`update_mode_lines', a window's buffer, its
     /// point, start and size, the buffer's tick and modified state), for

@@ -289,7 +289,7 @@ fn file_symlink_contract() {
     std::fs::write(fixture.0.join("a"), b"original").unwrap();
     std::os::unix::fs::symlink("missing-target", fixture.0.join("link")).unwrap();
     let mut vm = Vm::new();
-    for (name, expected) in [("a", "nil"), ("missing", "nil"), ("link", "#u8(109 105 115 115 105 110 103 45 116 97 114 103 101 116)")] {
+    for (name, expected) in [("a", "nil"), ("missing", "nil"), ("link", "\"missing-target\"")] {
         assert_eq!(eval(&mut vm, &format!("(file-symlink-p {})", serde_json::to_string(&fixture.0.join(name)).unwrap())), expected, "SYMLINK_TARGET {name}");
     }
     eval(&mut vm, "(setq default-directory \"/tmp/\")");
@@ -339,7 +339,7 @@ fn directory_component_and_handler_contract() {
 fn key_description_native_sequence() {
     let mut vm = Vm::new();
     assert_eq!(eval(&mut vm, "(list (fboundp 'key-description) (equal (funcall 'key-description [8]) \"C-h\"))"), "(t t)");
-    assert_eq!(eval(&mut vm, "(list (key-description [8]) (key-description [24 12] [27 120]) (key-description [27 9]) (key-description [27 27]) (key-description [C-M-left f1]) (key-description nil) (condition-case e (key-description 2) (error e)))"), "(\"C-h\" \"M-x C-x C-l\" \"C-M-i\" \"ESC ESC\" \"C-M-<left> <f1>\" #u8() (wrong-type-argument sequencep 2))", "KEY_DESCRIPTION_GNU");
+    assert_eq!(eval(&mut vm, "(list (key-description [8]) (key-description [24 12] [27 120]) (key-description [27 9]) (key-description [27 27]) (key-description [C-M-left f1]) (key-description nil) (condition-case e (key-description 2) (error e)))"), "(\"C-h\" \"M-x C-x C-l\" \"C-M-i\" \"ESC ESC\" \"C-M-<left> <f1>\" \"\" (wrong-type-argument sequencep 2))", "KEY_DESCRIPTION_GNU");
 }
 #[test]
 fn truename_intrinsic_local_lifecycle() {

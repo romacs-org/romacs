@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "d94c93945d4cbaee3c2189ab96fba25fc0eae4312781f223b3ccb0dc07829141",
+    "input_hash": "6bc1fb054885718ec5cf7fc30847f47dc07bd00f7967b43363292c0b7817cc92",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8523
+    "vm2_universe": 8601
   },
   "schema": 2,
   "vm2": {
-    "count": 1429,
+    "count": 1432,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -895,6 +895,7 @@
       "romacs--fzf-sort",
       "romacs--get-process",
       "romacs--gnutls-verify",
+      "romacs--hold-collection",
       "romacs--host-minibuffer",
       "romacs--indirect-buffers",
       "romacs--init-after-load-ordinal",
@@ -959,6 +960,7 @@
       "romacs--orderless-filter",
       "romacs--orderless-highlight",
       "romacs--overlay-change-hooks",
+      "romacs--pointer",
       "romacs--prepare-change",
       "romacs--proc-accept",
       "romacs--proc-activity",
@@ -1026,6 +1028,7 @@
       "romacs--status-bar-text",
       "romacs--take-collections",
       "romacs--take-doomed-finalizers",
+      "romacs--take-post-gc",
       "romacs--take-user-signal",
       "romacs--term-close",
       "romacs--term-create",

@@ -2332,6 +2332,7 @@ impl Vm {
     /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
+        self.eval_source_raw(prims::HOOKS_LISP)?;
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
         self.eval_source_raw(prims::INOTIFY_PRELUDE)?;

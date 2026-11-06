@@ -815,15 +815,22 @@ impl Vm {
     fn decode_mode_spec(&mut self, state: &SpecState, c: char, field: i64, target: Target) -> Result<String> {
         let width = field.min(4 * state.frame_cols as i64);
         let read_only = self.ml_symbol_value("buffer-read-only")?.is_some_and(|v| !is_nil(&v));
-        let string_of = |value: Option<Form>| match value {
+        // Unibyte characters are bytes, not UTF-8 sequences. Preserve ASCII
+        // and paint high bytes as GNU's default octal glyphs.
+        let unibyte = |bytes: &[u8]| -> String { bytes.iter().map(|&b| {
+            if b.is_ascii() { char::from(b).to_string() } else { format!("\\{b:03o}") }
+        }).collect() };
+        // A unibyte string value reaches here as an object.
+        let string_of = |vm: &Self, value: Option<Form>| -> Result<String> { Ok(match value {
             Some(Form::String(s)) => s,
-            // Unibyte characters are bytes, not UTF-8 sequences. Preserve
-            // ASCII and paint high bytes as GNU's default octal glyphs.
-            Some(Form::Bytes(bytes)) => bytes.into_iter().map(|b| {
-                if b.is_ascii() { char::from(b).to_string() } else { format!("\\{b:03o}") }
-            }).collect(),
+            Some(Form::Bytes(bytes)) => unibyte(&bytes),
+            Some(Form::Object(object)) => match vm.str_view(object.value(vm)?) {
+                Some(view) if view.is_multibyte() => String::from_utf8_lossy(view.bytes()).into_owned(),
+                Some(view) => unibyte(view.bytes()),
+                None => String::new(),
+            },
             _ => String::new(),
-        };
+        }) };
         let (top, bottom, begv, zv) = (state.start, state.end, state.begv, state.zv);
         Ok(match c {
             '*' if read_only => "%".into(),
@@ -845,11 +852,11 @@ impl Vm {
             'e' => String::new(),
             // No frame title or explicit name on a window frame.
             'F' => "Emacs".into(),
-            'f' => string_of(self.ml_symbol_value("buffer-file-name")?),
+            'f' => { let name = self.ml_symbol_value("buffer-file-name")?; string_of(self, name)? }
             'i' => pint2str(width, (zv - begv) as i64),
             'I' => pint2hrstr(width, (zv - begv) as i64),
             'l' => pint2str(width, state.line as i64),
-            'm' => string_of(self.ml_symbol_value("mode-name")?),
+            'm' => { let name = self.ml_symbol_value("mode-name")?; string_of(self, name)? }
             'n' => if begv > 1 || zv < state.z { " Narrow" } else { "" }.into(),
             'o' => if zv <= bottom {
                 if top <= begv { "All" } else { "Bottom" }.into()
@@ -895,7 +902,7 @@ impl Vm {
                 ]);
                 self.display_state.mode_line_evals += 1;
                 match self.eval_datum_raw(&form) {
-                    Ok(value) => string_of(Some(self.mode_line_form(value))),
+                    Ok(value) => { let form = self.mode_line_form(value); string_of(self, Some(form))? }
                     Err(_) => "no process".into(),
                 }
             }
@@ -922,8 +929,8 @@ impl Vm {
             'z' => "-".into(),
             'Z' => {
                 let mnemonic = self.ml_symbol_value("eol-mnemonic-undecided")?;
-                format!("-{}", if matches!(mnemonic, Some(Form::String(_) | Form::Bytes(_))) {
-                    string_of(mnemonic)
+                format!("-{}", if matches!(mnemonic, Some(Form::String(_) | Form::Bytes(_) | Form::Object(_))) {
+                    string_of(self, mnemonic)?
                 } else {
                     ":".into()
                 })
