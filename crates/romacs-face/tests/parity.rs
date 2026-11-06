@@ -137,7 +137,7 @@ fn every_bundled_theme_matches_gnu_attribute_by_attribute() {
     assert_eq!(
         names.len(),
         25,
-        "expected all 25 etc/themes/*-theme.el dumps: {names:?}"
+        "expected the 25 oracle theme dumps in tests/gnu/fixtures: {names:?}"
     );
     let mut all = Vec::new();
     let (mut own, mut realized, mut specs, mut frame) = (0, 0, 0, 0);

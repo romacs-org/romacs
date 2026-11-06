@@ -176,6 +176,14 @@ class Engine:
         self.probe_dir = root / 'probe'
 
     def start(self, tools):
+        """Start the compositor and the editor; a failure leaves neither running."""
+        try:
+            return self.launch(tools)
+        except Exception:
+            self.stop()
+            raise
+
+    def launch(self, tools):
         self.tools = tools
         (self.root / 'labwc').mkdir()
         (self.root / 'labwc/rc.xml').write_text(RC_XML)
@@ -357,6 +365,13 @@ def gnu_engine(root, home, env, init, lisp, timeout, tools, cls=None):
     return (cls or Engine)('gnu', [GNU, '--font', 'Iosevka-14'], root, lisp, env, timeout).start(tools)
 
 
+def neomacs_engine(neomacs, root, home, env, init, lisp, timeout, tools, cls=None):
+    """NEOMACS as it installs, on INIT, as `-l' after `-Q'."""
+    (root / 'init.el').write_text(init)
+    return (cls or Engine)('neomacs', [neomacs, '-Q', '--font', 'Iosevka-14', '-l', str(root / 'init.el')],
+                           root, lisp, env, timeout).start(tools)
+
+
 def prepare_world(romacs, env, cwd):
     """The world `ROMACS --loadup' boots from in ENV, made usable with no
     window (`--world-build'), as an installer prepares it before a user's
@@ -377,7 +392,7 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
     env.update(ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
-    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR'):
+    for key in ('ROMACS_GNU_SOURCE', 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_COMPILED_LISP'):
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')

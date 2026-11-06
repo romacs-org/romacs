@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "b9546fd622ea10e823dc62346327f455491170784710f69c0233e148ba8740c9",
+    "input_hash": "45fa374ea5fec338b1775e89ebbda6ac95a9252962faeef3978a99b565683d97",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8304
+    "vm2_universe": 8338
   },
   "schema": 2,
   "vm2": {
-    "count": 1376,
+    "count": 1381,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -874,6 +874,9 @@
       "romacs--insert-file-contents-format",
       "romacs--insert-file-contents-undecide",
       "romacs--insert-printed",
+      "romacs--inspect-frames",
+      "romacs--inspect-listen",
+      "romacs--inspect-stop",
       "romacs--isolate-affinity",
       "romacs--isolate-children",
       "romacs--isolate-close",
@@ -996,6 +999,8 @@
       "romacs--timer-next",
       "romacs--timer-time",
       "romacs--treesit-detach",
+      "romacs--treesit-parse-early",
+      "romacs--treesit-parsing-p",
       "romacs--validate-region",
       "romacs--wait-status",
       "romacs--world-layer-deferred-by",

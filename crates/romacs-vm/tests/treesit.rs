@@ -53,6 +53,12 @@ const SYSTEM_CASES: &str = r###"
 (let ((node (treesit-parse-string "int a;" 'c))) (list (treesit-node-string node) (treesit-parser-list (treesit-parser-buffer (treesit-node-parser node)))))
 (with-temp-buffer (insert "int a;") (let ((p (treesit-parser-create 'c))) (treesit-parser-root-node p) (goto-char 1) (delete-char 1) (insert "i") (list (treesit-parser-changed-regions p) (treesit-parser-changed-regions p) (treesit-query-capture p "(identifier) @i" nil nil t))))
 (with-temp-buffer (insert "int a;\nint b;\nint c;\n") (let* ((treesit-languages-require-line-column-tracking '(c)) (p (treesit-parser-create 'c))) (treesit-parser-root-node p) (subst-char-in-region 1 (point-max) ?\n ?\s) (goto-char (point-max)) (list (treesit--linecol-at (point-max)) (treesit--linecol-cache) (treesit-parser-tracking-line-column-p p) (treesit-node-string (treesit-parser-root-node p)) (progn (translate-region 1 4 (make-string 256 ?x)) (treesit--linecol-at (point-max))))))
+(with-temp-buffer (insert "int a; int b;") (let* ((p (treesit-parser-create 'c)) (q (treesit-parser-create 'c nil nil 'twin)) (log nil) (rp (treesit-parser-root-node p))) (defalias 'treesit-test-notify (lambda (ranges parser) (push (list ranges (eq parser q)) log))) (treesit-parser-add-notifier q 'treesit-test-notify) (let ((rq (treesit-parser-root-node q))) (list (equal (treesit-node-string rp) (treesit-node-string rq)) (treesit-node-eq rp rq) (equal rp rq) (treesit-node-check rq 'live) (treesit-parser-changed-regions q) (reverse log) (progn (setq log nil) (goto-char 5) (insert "xx") (list (treesit-parser-changed-regions p) (treesit-parser-changed-regions q) (treesit-node-string (treesit-parser-root-node p)) (treesit-node-string (treesit-parser-root-node q)) (treesit-node-check rq 'outdated) (reverse log))) (progn (goto-char (point-max)) (insert " int c;") (treesit-parser-delete p) (treesit-node-string (treesit-parser-root-node q)))))))
+(with-temp-buffer (insert "int a; int bb; int ccc;") (let ((p (treesit-parser-create 'c)) (q (treesit-parser-create 'c nil nil 'twin)) (r (treesit-parser-create 'c nil nil 'whole)) (s (treesit-parser-create 'c nil nil 'same))) (treesit-parser-set-included-ranges p '((8 . 15))) (treesit-parser-set-included-ranges s '((8 . 15))) (let ((rp (treesit-node-string (treesit-parser-root-node p)))) (treesit-parser-set-included-ranges r (list (cons (point-min) (point-max)))) (list rp (treesit-node-string (treesit-parser-root-node q)) (treesit-node-string (treesit-parser-root-node r)) (treesit-node-string (treesit-parser-root-node s)) (progn (goto-char 8) (insert "long ") (list (treesit-parser-included-ranges s) (treesit-node-string (treesit-parser-root-node s)) (treesit-parser-changed-regions r) (treesit-node-string (treesit-parser-root-node r))))))))
+(with-temp-buffer (insert "int a; int b;") (let ((p (treesit-parser-create 'c)) (q (treesit-parser-create 'c nil nil 'narrowed)) (r (treesit-parser-create 'c nil nil 'stale))) (treesit-parser-root-node p) (list (save-restriction (narrow-to-region 8 14) (list (treesit-node-string (treesit-parser-root-node q)) (treesit-node-start (treesit-parser-root-node q)))) (progn (goto-char (point-max)) (insert " int c;") (treesit-node-string (treesit-parser-root-node r))) (treesit-node-string (treesit-parser-root-node p)) (treesit-node-string (treesit-parser-root-node q)))))
+(with-temp-buffer (insert ";t f(i/1x)(") (let ((p (treesit-parser-create 'c)) (q (treesit-parser-create 'c nil nil 'twin))) (treesit-parser-root-node p) (goto-char 2) (insert "=") (list (treesit-node-string (treesit-parser-root-node p)) (treesit-node-string (treesit-parser-root-node q)))))
+(with-temp-buffer (insert "int a; int b;") (let ((p (treesit-parser-create 'c)) (q (treesit-parser-create 'c nil nil 'twin))) (treesit-parser-root-node p) (let ((n (treesit-node-child (treesit-parser-root-node q) 0))) (goto-char 5) (insert "x") (treesit-parser-root-node p) (garbage-collect) (list (treesit-node-type n) (treesit-node-start n) (treesit-node-check n 'outdated) (treesit-node-type (treesit-node-child n 1 t)) (progn (treesit-parser-root-node q) (treesit-node-check n 'outdated))))))
+(with-temp-buffer (insert "int a;\nint b;\n") (let* ((p (treesit-parser-create 'c)) (treesit-languages-require-line-column-tracking '(c)) (q (treesit-parser-create 'c nil nil 'tracking))) (treesit-parser-root-node p) (goto-char 1) (insert "\n") (treesit-parser-root-node p) (list (treesit-parser-tracking-line-column-p p) (treesit-parser-tracking-line-column-p q) (treesit-node-string (treesit-parser-root-node q)) (treesit-node-start (treesit-node-child (treesit-parser-root-node q) 1)))))
 (with-temp-buffer (insert "int foo_bar;") (let ((root (treesit-parser-root-node (treesit-parser-create 'c)))) (list (treesit-query-capture root "((identifier) @i (#match? \"\\\\bbar\" @i))" nil nil t) (with-temp-buffer (set-syntax-table (make-syntax-table)) (modify-syntax-entry ?_ "w") (treesit-query-capture root "((identifier) @i (#match? \"\\\\bbar\" @i))" nil nil t)) (progn (set-syntax-table (make-syntax-table)) (modify-syntax-entry ?_ "w") (treesit-query-capture root "((identifier) @i (#match? \"\\\\bbar\" @i))" nil nil t)))))
 (with-temp-buffer (insert "int foo_bar;") (let ((root (treesit-parser-root-node (treesit-parser-create 'c))) (q "((identifier) @i (#match? \"\\\\bbar\" @i))")) (put-text-property 8 9 'syntax-table '(2)) (list (treesit-query-capture root q nil nil t) (progn (setq-local parse-sexp-lookup-properties t) (treesit-query-capture root q nil nil t)) (let ((buffer (current-buffer))) (with-temp-buffer (treesit-query-capture root q nil nil t))) (with-temp-buffer (setq-local parse-sexp-lookup-properties nil) (treesit-query-capture root q nil nil t)))))
 "###;
@@ -118,6 +124,29 @@ fn treesit_matches_pinned_gnu() {
         failures.extend(differences(&mut vm, &format!("(setq treesit-extra-load-path '({grammars:?}))"), CASES));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// An early parse gives the first parser of a buffer what a parse would,
+/// through the buffer's changes since, unless it is narrowed or the parser
+/// asks otherwise.
+#[test]
+fn an_early_parse_is_used_only_for_the_text_it_read() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} \
+        (let* ((text \"int a; int b;\") \
+               (string (lambda () (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c))))) \
+               (fresh (lambda (text) (with-temp-buffer (insert text) (funcall string))))) \
+          (list (with-temp-buffer (insert text) (list (romacs--treesit-parse-early 'c) (romacs--treesit-parse-early 'c) (equal (funcall string) (funcall fresh text)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (goto-char 1) (insert \"int z; \") (equal (funcall string) (funcall fresh (buffer-string)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (subst-char-in-region 1 14 ?i ?=) (equal (funcall string) (funcall fresh (buffer-string)))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (narrow-to-region 8 14) (equal (funcall string) (funcall fresh \"int b;\"))) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (romacs--treesit-parse-early nil) (equal (funcall string) (funcall fresh text))) \
+                (with-temp-buffer (insert text) (funcall string) (romacs--treesit-parse-early 'c)) \
+                (with-temp-buffer (insert text) (romacs--treesit-parse-early 'c) (let ((p (treesit-parser-create 'c))) (treesit-parser-set-included-ranges p '((1 . 7))) (equal (treesit-node-string (treesit-parser-root-node p)) (funcall fresh \"int a;\")))))))");
+    let value = vm.eval_source(&source).and_then(|v| v.display());
+    assert_eq!(value.as_deref(), Ok("((t nil t) t t t t nil t)"));
 }
 
 /// VM2-TREESIT-HASH: `equal' nodes hash alike, so an `equal' table finds

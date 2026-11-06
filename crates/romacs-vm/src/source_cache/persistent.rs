@@ -128,7 +128,10 @@ impl Vm {
                 _ => unreachable!(),
             }
         }
-        let (ids, cache_ids) = self.reserve_request_artifact(a.functions.clone(), a.caches);
+        // Reserved empty: the code names the artifact's cache ordinals until
+        // the loop below rewrites it, and a dead function frees what it names.
+        let placeholders = a.functions.iter().map(|f| Function { code: Vec::new(), ..f.clone() });
+        let (ids, cache_ids) = self.reserve_request_artifact(placeholders, a.caches);
         for f in &mut a.functions {
             for op in &mut f.code {
                 match op {
