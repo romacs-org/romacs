@@ -1569,6 +1569,8 @@ pub struct Vm {
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
     doomed_finalizers: Vec<Value>,
+    /// A collection ended since `post-gc-hook' last ran (`Vm::post_gc_runs').
+    post_gc_due: bool,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1709,6 +1711,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     external_roots,
     finalizers,
     doomed_finalizers,
+    post_gc_due,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1925,6 +1928,7 @@ impl Vm {
             external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: vec![],
+            post_gc_due: false,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),

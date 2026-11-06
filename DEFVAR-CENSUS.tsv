@@ -125,7 +125,6 @@ pgtk-selection-timeout	absent	pgtkselect.c; no shipped Lisp reads or sets it
 pgtk-sent-selection-functions	absent	pgtkselect.c; no shipped Lisp reads or sets it
 pgtk-sent-selection-hooks	absent	pgtkselect.c; no shipped Lisp reads or sets it
 pgtk-wait-for-event-timeout	absent	pgtkterm.c; no shipped Lisp reads or sets it
-post-gc-hook	absent	alloc.c; no shipped Lisp reads or sets it
 print--unreadable-callback-buffer	absent	print.c; no shipped Lisp reads or sets it
 query-all-font-backends	absent	font.c; no shipped Lisp reads or sets it
 redisplay--all-windows-cause	absent	xdisp.c; no shipped Lisp reads or sets it

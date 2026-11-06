@@ -8,7 +8,7 @@ const SAME: &[&str] = &[
     "face-ignored-fonts", "font-log", "frame-title-format", "icon-title-format", "multiple-frames", "font-slant-table", "font-weight-table", "font-width-table", "fontset-alias-alist",
     "inhibit-compacting-font-caches", "inhibit-load-charset-map", "internal-make-interpreted-closure-function",
     "load-force-doc-strings", "load-source-file-function", "mouse-position-function", "mwheel-coalesce-scroll-events",
-    "operating-system-release", "redisplay--inhibit-bidi", "tool-bar-button-margin", "tool-bar-max-label-size",
+    "operating-system-release", "post-gc-hook", "redisplay--inhibit-bidi", "tool-bar-button-margin", "tool-bar-max-label-size",
 ];
 
 fn batch(binary: &str, dir: &std::path::Path, form: &str, romacs: bool) -> String {
@@ -65,6 +65,28 @@ fn subword_mode_moves_as_pinned_gnu() {
         (subword-mode 1) (goto-char 1) (put-text-property 5 9 'field 'f)
         (push (list (forward-word 2) (point)) r)
         (nreverse r)))";
+    assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `post-gc-hook' after a collection, against pinned GNU: once per
+/// collection, after the finalizers, with collection inhibited (`garbage-collect'
+/// in it answers nil), and a function that signals leaves the hook.
+#[test]
+fn post_gc_hook_runs_as_pinned_gnu() {
+    let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let dir = std::env::temp_dir().join(format!("romacs-post-gc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let form = "(progn
+      (setq post-gc-log nil)
+      (add-hook 'post-gc-hook (lambda () (push (list 'hook (garbage-collect)) post-gc-log)))
+      (eval '(progn (make-finalizer (lambda () (push 'finalizer post-gc-log))) nil) t)
+      (garbage-collect)
+      (garbage-collect)
+      (add-hook 'post-gc-hook (lambda () (error \"boom\")))
+      (garbage-collect)
+      (list (reverse post-gc-log) (length post-gc-hook)))";
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -11,6 +11,16 @@ impl Leaf<'_> {
     }
     /// run_finalizers' first half: the functions of the doomed finalizers,
     /// oldest first, each finalizer emptied so that it never runs again.
+    /// Whether `post-gc-hook' is due; it is not after this.
+    pub(crate) fn take_post_gc(&mut self) -> bool {
+        let due = self.vm.post_gc_runs();
+        self.vm.post_gc_due = false;
+        due
+    }
+    /// alloc.c inhibit_garbage_collection, and its unwinding when not ON.
+    pub(crate) fn hold_collection(&mut self, on: bool) {
+        if on { self.vm.gc_holds += 1; } else { self.vm.gc_holds -= 1; }
+    }
     pub(crate) fn take_doomed_finalizers(&mut self) -> Value {
         let mut functions = vec![];
         for finalizer in std::mem::take(&mut self.vm.doomed_finalizers) {

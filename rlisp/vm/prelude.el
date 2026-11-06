@@ -929,10 +929,36 @@ CONDITIONS or has a regexp matching ERROR's message."
 
 ;;; Finalizers
 
+(defun romacs--safe-run-hooks (hook)
+  "keyboard.c safe_run_hooks: run HOOK, each function under a handler that
+reports an error and removes that function from HOOK."
+  (when (and (boundp hook) (symbol-value hook))
+    (let ((inhibit-quit t))
+      (run-hook-wrapped hook #'romacs--safe-run-hook-function hook))))
+
+(defun romacs--safe-run-hook-function (function hook)
+  "keyboard.c safe_run_hook_funcall and safe_run_hooks_error."
+  (condition-case err
+      (funcall function)
+    (t (message "Error in %s (%S): %S" hook function err)
+       (let ((without (lambda (list)
+                        (let ((kept nil))
+                          (while (consp list)
+                            (unless (eq (car list) function) (push (car list) kept))
+                            (setq list (cdr list)))
+                          (nreverse kept)))))
+         (cond ((and (consp (symbol-value hook)) (memq function (symbol-value hook)))
+                (set hook (funcall without (symbol-value hook))))
+               ((and (default-boundp hook) (consp (default-value hook))
+                     (memq function (default-value hook)))
+                (set-default hook (funcall without (default-value hook))))))))
+  nil)
+
 (defun romacs--run-finalizers (&optional value)
   "alloc.c run_finalizers: call the function of each finalizer the
 collections since the last run found unreachable, once each, with quits
-inhibited; a signal is logged to *Messages*, as `add_to_log' does.
+inhibited; a signal is logged to *Messages*, as `add_to_log' does.  Then
+`post-gc-hook', if a collection ended since it last ran.
 Return VALUE, the statistics of the collection that ran it."
   (dolist (function (romacs--take-doomed-finalizers))
     (let ((inhibit-quit t))
@@ -940,6 +966,11 @@ Return VALUE, the statistics of the collection that ran it."
           (funcall function)
         (t (let ((inhibit-message t))
              (message "finalizer failed: %S" err))))))
+  ;; garbage_collect's end, with collection inhibited.
+  (when (romacs--take-post-gc)
+    (romacs--hold-collection t)
+    (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
+      (romacs--hold-collection nil)))
   value)
 
 ;;; Evaluating buffer text: lread.c readevalloop
