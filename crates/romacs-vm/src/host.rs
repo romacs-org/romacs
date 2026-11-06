@@ -2572,6 +2572,33 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
     Ok(())
 }
 
+/// The calling thread's id.
+pub fn thread_id() -> i32 {
+    unsafe { libc::gettid() }
+}
+
+/// The processors thread TID may run on: how many, and a digest of which;
+/// None once it is gone.
+pub fn thread_affinity(tid: i32) -> Option<(u32, u64)> {
+    use std::hash::{Hash, Hasher};
+    let mut cpus: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sched_getaffinity(tid, std::mem::size_of::<libc::cpu_set_t>(), &mut cpus) } != 0 { return None; }
+    let (mut count, mut digest) = (0, std::collections::hash_map::DefaultHasher::new());
+    for cpu in 0..libc::CPU_SETSIZE as usize {
+        let set = unsafe { libc::CPU_ISSET(cpu, &cpus) };
+        count += u32::from(set);
+        set.hash(&mut digest);
+    }
+    Some((count, digest.finish()))
+}
+
+/// PID's proportional set size, in kilobytes (/proc/PID/smaps_rollup);
+/// None once it is gone.
+pub fn process_pss(pid: i32) -> Option<u64> {
+    let rollup = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
+    rollup.lines().find_map(|line| line.strip_prefix("Pss:")?.split_whitespace().next()?.parse().ok())
+}
+
 /// Wait at GATE, a pipe's read end, until one byte arrives (true) or the
 /// write end closes unwritten (false); a termination ends the wait too.
 pub fn await_gate(gate: OwnedFd) -> bool {

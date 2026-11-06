@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5307e4c3d938885901cf191ced19e30528d97a79bbb46ae5fcc8f83f96c9e077",
+  "source_fingerprint": "1189874460ee0071544d0b8d5f07a71bc17b185b3892d0880e14b76db0307940",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1364,
-  "parsed_vm2_only": 1364
+  "parsed_total": 1368,
+  "parsed_vm2_only": 1368
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4449,6 +4449,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insdel.rs:141"
   },
+  "romacs--isolate-affinity": {
+   "name": "romacs--isolate-affinity",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:217"
+  },
   "romacs--isolate-children": {
    "name": "romacs--isolate-children",
    "implementation": "vm2",
@@ -4534,10 +4539,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/isolate.rs:75"
   },
+  "romacs--isolate-pool-memory": {
+   "name": "romacs--isolate-pool-memory",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:232"
+  },
   "romacs--isolate-post": {
    "name": "romacs--isolate-post",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/isolate.rs:20"
+  },
+  "romacs--isolate-pss": {
+   "name": "romacs--isolate-pss",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:224"
   },
   "romacs--isolate-reap": {
    "name": "romacs--isolate-reap",
@@ -4588,6 +4603,11 @@
    "name": "romacs--isolate-terminated-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/isolate.rs:114"
+  },
+  "romacs--isolate-thread-id": {
+   "name": "romacs--isolate-thread-id",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/isolate.rs:210"
   },
   "romacs--isolate-wait": {
    "name": "romacs--isolate-wait",

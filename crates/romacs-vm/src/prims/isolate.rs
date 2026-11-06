@@ -205,3 +205,31 @@ fn isolate_job_budget(cx, bytes: Value) {
     cx.isolate_job_budget(id(cx, bytes)? as usize);
     Ok(Value::NIL)
 }}
+
+// (romacs--isolate-thread-id): the calling thread's id.
+defsubr! { name = "romacs--isolate-thread-id", gnu = "romacs:isolate", effect = Reads,
+fn isolate_thread_id(_cx) {
+    Value::integer(i64::from(crate::host::thread_id())).map_err(Fault::Error)
+}}
+
+// (romacs--isolate-affinity TID): (COUNT . DIGEST) of the processors thread
+// TID may run on, DIGEST equal while the set is; nil once it is gone.
+defsubr! { name = "romacs--isolate-affinity", gnu = "romacs:isolate", effect = Reads,
+fn isolate_affinity(cx, tid: Value) {
+    cx.isolate_affinity(id(cx, tid)? as i32)
+}}
+
+// (romacs--isolate-pss &optional ID): worker ID's proportional memory, or
+// every live worker's together, in kilobytes.
+defsubr! { name = "romacs--isolate-pss", gnu = "romacs:isolate", effect = Reads,
+fn isolate_pss(cx; optional isolate: Value) {
+    let isolate = if isolate == Value::NIL { None } else { Some(id(cx, isolate)?) };
+    cx.isolate_pss(isolate)
+}}
+
+// (romacs--isolate-pool-memory): the pool's proportional memory in
+// kilobytes, as last sampled off the evaluator.
+defsubr! { name = "romacs--isolate-pool-memory", gnu = "romacs:isolate", effect = Global,
+fn isolate_pool_memory(cx) {
+    Value::integer(cx.isolate_pool_memory() as i64).map_err(Fault::Error)
+}}

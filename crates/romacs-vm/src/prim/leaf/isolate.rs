@@ -164,4 +164,21 @@ impl Leaf<'_> {
     pub(crate) fn isolate_job_budget(&mut self, bytes: usize) {
         self.vm.isolate_job_budget(bytes);
     }
+
+    pub(crate) fn isolate_affinity(&mut self, tid: i32) -> Out {
+        let Some((count, digest)) = crate::host::thread_affinity(tid) else { return Ok(Value::NIL) };
+        let count = Value::integer(i64::from(count)).map_err(Fault::Error)?;
+        // A fixnum: the digest's top bits dropped.
+        let digest = Value::integer((digest >> 3) as i64).map_err(Fault::Error)?;
+        Ok(self.vm.keymap_cons(count, digest))
+    }
+
+    pub(crate) fn isolate_pss(&mut self, id: Option<u64>) -> Out {
+        let kilobytes = self.vm.isolate_pss(id).map_err(Fault::Error)?;
+        Value::integer(kilobytes as i64).map_err(Fault::Error)
+    }
+
+    pub(crate) fn isolate_pool_memory(&mut self) -> u64 {
+        self.vm.isolate_pool_memory()
+    }
 }

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "125b14a5b90c7b4568b80fa1b5c72f08d28bb96a4dff7aa8187c29eb94199305",
+    "input_hash": "4680e7a07c2cbbbd041ce4ff500ddd19f9e8f1d7fc3fd10598004e7040d09a72",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8297
+    "vm2_universe": 8304
   },
   "schema": 2,
   "vm2": {
-    "count": 1372,
+    "count": 1376,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -874,6 +874,7 @@
       "romacs--insert-file-contents-format",
       "romacs--insert-file-contents-undecide",
       "romacs--insert-printed",
+      "romacs--isolate-affinity",
       "romacs--isolate-children",
       "romacs--isolate-close",
       "romacs--isolate-compact-next",
@@ -891,7 +892,9 @@
       "romacs--isolate-name-process",
       "romacs--isolate-parent-p",
       "romacs--isolate-pid",
+      "romacs--isolate-pool-memory",
       "romacs--isolate-post",
+      "romacs--isolate-pss",
       "romacs--isolate-reap",
       "romacs--isolate-release",
       "romacs--isolate-reserve",
@@ -902,6 +905,7 @@
       "romacs--isolate-start",
       "romacs--isolate-take",
       "romacs--isolate-terminated-p",
+      "romacs--isolate-thread-id",
       "romacs--isolate-wait",
       "romacs--keymap-at-point",
       "romacs--keymap-generation",

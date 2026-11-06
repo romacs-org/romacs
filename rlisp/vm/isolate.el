@@ -45,13 +45,32 @@ into it.  The launcher sets it.")
   "Arguments every worker is started with, after the boot arguments.")
 
 (defvar isolate-pool-size nil
-  "How many pooled workers `isolate-spawn' starts before queueing on them.
-nil means one fewer than the processors this process may run on now,
-asked at each use: affinity and CPU limits change between processes.")
+  "How many pooled jobs run at once before queueing.
+nil means one fewer than the processors the workers may run on: those of a
+zygote's forking thread, whose children inherit them, so whatever pins
+the workers narrows the pool; without a zygote, those of this process.")
 
-(defun isolate--pool-size ()
-  "The pool's bound: `isolate-pool-size', else from `num-processors'."
-  (or isolate-pool-size (max 1 (1- (num-processors)))))
+(defun romacs--isolate-zygote-affinity (zygote)
+  "(COUNT . DIGEST) of the processors ZYGOTE's children would run on, at
+most a second old; nil until it is ready."
+  (let ((cached (aref zygote 14)))
+    (if (and cached (< (- (float-time) (car cached)) 1.0))
+        (cdr cached)
+      (let ((affinity (and (aref zygote 11) (romacs--isolate-affinity (aref zygote 11)))))
+        (aset zygote 14 (cons (float-time) affinity))
+        affinity))))
+
+(defun isolate--pool-size (&optional zygote)
+  "The pool's bound: `isolate-pool-size', else from the processors of
+ZYGOTE's children, of those of any ready zygote, or of this process."
+  (or isolate-pool-size
+      (let ((affinity (and zygote (romacs--isolate-zygote-affinity zygote))))
+        (unless affinity
+          (maphash (lambda (_ other)
+                     (when (and (null affinity) (eq (aref other 3) 'ready))
+                       (setq affinity (romacs--isolate-zygote-affinity other))))
+                   romacs--isolate-zygotes))
+        (max 1 (1- (if affinity (car affinity) (num-processors)))))))
 
 (defvar isolate-zygotes 'world
   "Whether pooled jobs run on workers forked from a zygote.
@@ -70,6 +89,15 @@ computing it again.  An error in FUNCTION is ignored.")
   "Bytes a job on a forked child may grow its heap by.
 Allocation below this runs no collection, whose garbage dies with the
 child; live growth past it signals memory exhaustion in the job.")
+
+(defvar isolate-pool-memory-limit (* 1024 1024 1024)
+  "Bytes the pool may hold, sampled as proportional memory, with
+`isolate-job-memory-headroom' reserved for each running job.
+A job that would pass it waits for room.")
+
+(defvar isolate-zygote-memory-limit (* 256 1024 1024)
+  "Bytes of proportional memory a zygote may hold once prepared; past it,
+its features run on pooled workers.")
 
 (defvar isolate-zygote-limit 4
   "How many zygotes may live at once; the least recently used one goes first.")
@@ -110,7 +138,13 @@ In the spawner SENDER is the worker's isolate; in a worker it is `parent'.")
 (defvar romacs--isolate-cancelled nil "In a worker: generations interrupted before they ran.")
 (defvar romacs--isolate-zygotes (make-hash-table :test 'equal)
   "The zygotes, by feature list: [isolate-zygote ISOLATE FEATURES STATE
-SPARE INPUTS FILES FILES-STAMP DIRECTORIES DIRECTORIES-STAMP USED].")
+SPARE INPUTS FILES FILES-STAMP DIRECTORIES DIRECTORIES-STAMP USED THREAD
+MASK HEADROOM AFFINITY]; THREAD its forking thread, MASK its processors'
+digest at its last fork, HEADROOM the budget of its children, AFFINITY
+\(TIME . (COUNT . DIGEST)) as last asked.")
+(defvar romacs--isolate-waiting nil
+  "Futures of pooled jobs waiting for room in the pool, oldest first; at
+most `isolate-queue-limit'.  Each has no isolate until it is dispatched.")
 (defvar romacs--isolate-forks nil "In a zygote: the generations of the children asked for, oldest first.")
 (defvar romacs--isolate-zygote nil "In a worker: non-nil once it became a zygote.")
 (defvar romacs--isolate-job-worker nil "In a worker: non-nil in a child forked for one job.")
@@ -259,6 +293,8 @@ features.  FRESH asks for a new worker outside the pool's bound."
                    (or (null best) (< (length (aref isolate 5)) (length (aref best 5)))))
           (setq best isolate))))
     (cond (forked forked)
+          ;; A live zygote with no room: the job waits for it.
+          ((and (not fresh) (romacs--isolate-zygote-live-p require)) 'queued)
           (fresh (romacs--isolate-pool-create require allow-source-boot))
           ((and best (null (aref best 5))) best)
           ((< (length live) (isolate--pool-size))
@@ -322,7 +358,8 @@ nil when there is none.  Unlike `isolate-spawn', it never kills a worker of
 other features to make room."
   (or (isolate-idle-worker require)
       (romacs--isolate-zygote-worker require t)
-      (condition-case nil (romacs--isolate-warm-pooled require allow-source-boot) (error nil))
+      (and (not (romacs--isolate-zygote-live-p require))
+           (condition-case nil (romacs--isolate-warm-pooled require allow-source-boot) (error nil)))
       (let (best)
         (dolist (isolate (romacs--isolate-pooled) best)
           (when (and (equal (aref isolate 4) require)
@@ -369,14 +406,38 @@ other features to make room."
   "Queue FUTURE's job again, on a worker with the features it was queued
 for: its worker retired before running it."
   (let* ((job (aref future 6))
-         (require (nth 3 job))
+         (require (thaw (nth 3 job)))
          (isolate (romacs--isolate-acquire require nil t)))
-    (setq romacs--isolate-generation (1+ romacs--isolate-generation))
-    (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
-    (aset future 1 isolate)
-    (aset future 2 romacs--isolate-generation)
-    (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))
-    (when (eq (aref isolate 10) 'job) (romacs--isolate-zygote-take isolate))))
+    (if (eq isolate 'queued)
+        (progn (aset future 1 nil)
+               (setq romacs--isolate-waiting (cons future romacs--isolate-waiting)))
+      (setq romacs--isolate-generation (1+ romacs--isolate-generation))
+      (romacs--isolate-post (romacs--isolate-id isolate) 'job romacs--isolate-generation job)
+      (aset future 1 isolate)
+      (aset future 2 romacs--isolate-generation)
+      (aset isolate 5 (append (aref isolate 5) (list (cons romacs--isolate-generation future))))
+      (when (eq (aref isolate 10) 'job) (romacs--isolate-zygote-take isolate)))))
+
+(defun romacs--isolate-enqueue (function args bindings require directory)
+  "Queue (apply FUNCTION ARGS) for room in the pool: its future, on no
+isolate until it is dispatched."
+  (when (>= (length romacs--isolate-waiting) isolate-queue-limit)
+    (signal 'isolate-queue-full (list require)))
+  (let ((future (romacs--isolate-future nil 0 (freeze (list function args bindings require
+                                                            (or directory default-directory))))))
+    (setq romacs--isolate-waiting (nconc romacs--isolate-waiting (list future)))
+    future))
+
+(defun romacs--isolate-drain-waiting ()
+  "Dispatch the waiting jobs, oldest first, until one is sent back: each
+is judged by its own zygote's room."
+  (let ((going t))
+    (while (and going romacs--isolate-waiting)
+      (let ((future (pop romacs--isolate-waiting)))
+        (when (eq (aref future 3) 'pending)
+          (romacs--isolate-resubmit-or-fail future)
+          ;; Sent back to wait: nothing more goes now.
+          (when (eq (car romacs--isolate-waiting) future) (setq going nil)))))))
 
 (defun isolate-spawn (function &rest args)
   "Run (apply FUNCTION ARGS) in a worker isolate; its future.
@@ -384,7 +445,8 @@ FUNCTION is a symbol the worker calls its own definition of, or a lambda
 form whose free variables come from :bindings, an alist of (SYMBOL . VALUE).
 A closure object is refused.  The keyword tail of ARGS: :name, :bindings,
 :require FEATURES, :directory, :isolate ISOLATE (run there), :fresh t (a
-new worker), :allow-source-boot t."
+new worker), :allow-source-boot t.  With no room in the pool the job waits:
+its future has no isolate until it is dispatched."
   (let (keys plain)
     (while args
       (if (and (keywordp (car args))
@@ -398,7 +460,9 @@ new worker), :allow-source-boot t."
     (let* ((require (plist-get keys :require))
            (isolate (or (plist-get keys :isolate)
                         (romacs--isolate-acquire require (plist-get keys :fresh) (plist-get keys :allow-source-boot)))))
-      (romacs--isolate-submit isolate function plain (plist-get keys :bindings) require (plist-get keys :directory)))))
+      (if (eq isolate 'queued)
+          (romacs--isolate-enqueue function plain (plist-get keys :bindings) require (plist-get keys :directory))
+        (romacs--isolate-submit isolate function plain (plist-get keys :bindings) require (plist-get keys :directory))))))
 
 ;;;; Zygotes
 
@@ -459,7 +523,7 @@ copied (`setenv' changes an entry in place)."
          (stamp (romacs--isolate-stamp directories))
          (isolate (isolate-create :require require :allow-source-boot t))
          (zygote (record 'isolate-zygote isolate require 'preparing nil inputs nil nil
-                         directories stamp (float-time))))
+                         directories stamp (float-time) nil nil isolate-job-memory-headroom nil)))
     (aset isolate 10 'zygote)
     (puthash require zygote romacs--isolate-zygotes)
     (isolate-on-done (romacs--isolate-submit isolate 'romacs--isolate-become-zygote
@@ -479,10 +543,14 @@ copied (`setenv' changes an entry in place)."
 and the idle pooled workers of its features retired; or refused, for the
 rest of the session, its jobs running on pooled workers."
   (when (eq (gethash (aref zygote 2) romacs--isolate-zygotes) zygote)
-    (if (eq (aref future 3) 'done)
+    (if (and (eq (aref future 3) 'done)
+             (<= (* 1024 (romacs--isolate-pss (romacs--isolate-id (aref zygote 1)))) isolate-zygote-memory-limit))
         (let ((value (aref future 4)))
           (aset zygote 6 (car value))
           (aset zygote 7 (nth 1 value))
+          (aset zygote 11 (nth 2 value))
+          ;; A child asked for while it prepared forks with these.
+          (aset zygote 12 (cdr (romacs--isolate-zygote-affinity zygote)))
           (aset zygote 3 'ready)
           ;; The pool's idle workers of these features are not needed now.
           ;; A spare asked for while it prepared is forked now.
@@ -496,9 +564,11 @@ rest of the session, its jobs running on pooled workers."
       (romacs--isolate-end (aref zygote 1)))))
 
 (defun romacs--isolate-zygote-current-p (zygote)
-  "Whether nothing ZYGOTE's preparation read has changed since; while it
-prepares, the files it loads are not known yet."
+  "Whether nothing ZYGOTE's preparation read has changed since, the
+budget its children are forked with included; while it prepares, the
+files it loads are not known yet."
   (and (romacs--isolate-inputs-current-p (aref zygote 5))
+       (eql (aref zygote 13) isolate-job-memory-headroom)
        (eql (aref zygote 9) (romacs--isolate-stamp (aref zygote 8)))
        (or (not (eq (aref zygote 3) 'ready))
            (eql (aref zygote 7) (romacs--isolate-stamp (aref zygote 6))))))
@@ -534,8 +604,35 @@ its death delivered or not."
          (child (romacs--isolate-make id (isolate-name parent) (aref zygote 2) (aref parent 8))))
     (aset child 10 'job)
     (aset child 11 zygote)
+    (when (eq (aref zygote 3) 'ready)
+      (aset zygote 12 (cdr (romacs--isolate-zygote-affinity zygote))))
     (push child romacs--isolates)
     child))
+
+(defun romacs--isolate-reserved ()
+  "The bytes reserved for the running forked jobs: the budget each was
+forked with."
+  (let ((bytes 0))
+    (dolist (isolate romacs--isolates bytes)
+      (when (and (eq (aref isolate 10) 'job) (aref isolate 5))
+        (setq bytes (+ bytes (aref (aref isolate 11) 13)))))))
+
+(defun romacs--isolate-room-p (&optional zygote)
+  "Whether one more forked job fits, on ZYGOTE if given: fewer than the
+pool's width run, and its memory with the reservations of those and this
+one is in bounds.  With nothing running one always fits: no job's end would
+ever let it in."
+  (let ((busy (romacs--isolate-busy-children)))
+    (or (= busy 0)
+        (and (< busy (isolate--pool-size zygote))
+             (<= (+ (* 1024 (romacs--isolate-pool-memory)) (romacs--isolate-reserved) isolate-job-memory-headroom)
+                 isolate-pool-memory-limit)))))
+
+(defun romacs--isolate-zygote-live-p (require)
+  "Whether REQUIRE's zygote prepares or is ready, so its jobs wait for it."
+  (and (romacs--isolate-zygotes-p)
+       (let ((zygote (gethash require romacs--isolate-zygotes)))
+         (and zygote (memq (aref zygote 3) '(preparing ready)) t))))
 
 (defun romacs--isolate-busy-children ()
   "How many forked children run a job."
@@ -546,10 +643,9 @@ its death delivered or not."
 
 (defun romacs--isolate-zygote-worker (require make)
   "The spare child of REQUIRE's zygote, forked now if it has none, when the
-zygote is ready, nothing it read has changed, and fewer than
-`isolate-pool-size' children run; else nil.  A zygote whose inputs changed
-is retired.  MAKE starts a zygote for REQUIRE when there is none, for the
-jobs after this one."
+zygote is ready or preparing, nothing it read has changed, and the pool
+has room (`romacs--isolate-room-p'); else nil.  A zygote whose inputs changed
+is retired.  MAKE starts a zygote for REQUIRE when there is none."
   (when (romacs--isolate-zygotes-p)
     (let ((zygote (gethash require romacs--isolate-zygotes)))
       ;; Dead, its death not delivered yet: forgotten now.
@@ -561,16 +657,21 @@ jobs after this one."
         ;; Ending it may have resubmitted a queued child's job, which made
         ;; its replacement.
         (setq zygote (gethash require romacs--isolate-zygotes)))
-      (cond ((null zygote)
-             (when make (condition-case nil (romacs--isolate-zygote-make require) (error nil)))
-             nil)
+      (when (and make (null zygote))
+        (setq zygote (condition-case nil (romacs--isolate-zygote-make require) (error nil))))
+      (cond ((null zygote) nil)
             ;; A zygote still preparing forks the child once it is ready:
             ;; the job waits for the rest of its preparation, not the session.
             ((not (memq (aref zygote 3) '(preparing ready))) nil)
-            ((>= (romacs--isolate-busy-children) (isolate--pool-size)) nil)
+            ((not (romacs--isolate-room-p zygote)) nil)
             (t (aset zygote 10 (float-time))
                (when (and (aref zygote 4) (romacs--isolate-gone-p (aref zygote 4)))
                  (aset zygote 4 nil))
+               ;; A spare keeps the processors it was forked with.
+               (let ((affinity (romacs--isolate-zygote-affinity zygote)))
+                 (when (and (aref zygote 4) affinity (not (eql (cdr affinity) (aref zygote 12))))
+                   (romacs--isolate-end (aref zygote 4))
+                   (aset zygote 4 nil)))
                (or (aref zygote 4)
                    (condition-case nil (aset zygote 4 (romacs--isolate-zygote-fork zygote)) (error nil))))))))
 
@@ -711,7 +812,8 @@ have sent), its futures settle, the event is reported, and it is forgotten."
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
            ((eq kind 'died)
-            (romacs--isolate-dead isolate 'isolate-died value))))))))
+            (romacs--isolate-dead isolate 'isolate-died value)))))))
+  (romacs--isolate-drain-waiting))
 
 (defun romacs--isolate-check-deadlines ()
   "Kill a worker whose interrupted job has not stopped in time."
@@ -769,6 +871,10 @@ the job running after it is not hit in its place."
   ;; The pump may have queued the job again elsewhere (a retired worker):
   ;; its worker and generation are read after it.
   (let ((isolate (aref future 1)))
+    (when (and (eq (aref future 3) 'pending) (null isolate))
+      ;; Waiting for room: it never ran.
+      (setq romacs--isolate-waiting (delq future romacs--isolate-waiting))
+      (romacs--isolate-resolve future 'cancelled nil))
     (when (eq (aref future 3) 'pending)
       (let ((pending (aref isolate 5)))
         (if (and pending (eq (cdr (car pending)) future))
@@ -983,6 +1089,10 @@ nothing, unless ISOLATE is live and runs nothing."
 
 (defun isolate-kill-all ()
   "Kill every live isolate, as a session's end does."
+  (let ((waiting romacs--isolate-waiting))
+    (setq romacs--isolate-waiting nil)
+    (dolist (future waiting)
+      (romacs--isolate-resolve future 'isolate-killed (list nil nil))))
   (dolist (isolate (copy-sequence romacs--isolates))
     (isolate-kill isolate)))
 
@@ -1145,7 +1255,8 @@ only forks a child per job (worker-vms design §2.2).  The functions WARM
 run first, filling the caches the children inherit; a child's job may grow
 the heap by HEADROOM bytes.  Refused while its
 preparation left a subprocess, a timer or a thread behind, which a child
-would share or lose.  The files the preparation loaded and their stamp."
+would share or lose.  The files the preparation loaded, their stamp, and
+this thread, the one that forks."
   (dolist (function warm)
     (condition-case nil (funcall function) (error nil)))
   (let ((refusal (or (and (fboundp 'process-list) (process-list) "a subprocess")
@@ -1159,7 +1270,7 @@ would share or lose.  The files the preparation loaded and their stamp."
   (romacs--isolate-name-process "romacs-zygote")
   (setq romacs--isolate-zygote t romacs--isolate-job-headroom headroom)
   (let ((files (romacs--isolate-prepared-files)))
-    (list files (romacs--isolate-stamp files))))
+    (list files (romacs--isolate-stamp files) (romacs--isolate-thread-id))))
 
 (defun romacs--isolate-new-timer ()
   "A description of a timer the preparation started, or nil."
