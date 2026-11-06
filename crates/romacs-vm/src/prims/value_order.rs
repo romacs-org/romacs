@@ -36,6 +36,7 @@ fn vectorlike(kind: Kind) -> bool {
             | Kind::Window
             | Kind::Frame
             | Kind::Terminal
+            | Kind::Thread
     )
 }
 
@@ -194,6 +195,7 @@ fn value_cmp(
             | Kind::Window
             | Kind::Frame
             | Kind::Terminal
+            | Kind::Thread
                 if ka == kb =>
             {
                 return Ok(Ordering::Equal);

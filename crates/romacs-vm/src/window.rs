@@ -1402,7 +1402,7 @@ impl Vm {
     }
     pub fn display_apply_layout(&mut self, ends: &[crate::WindowEnd]) -> Result<()> {
         // Validate the complete journal before publishing any per-window end.
-        let mut changes = vec![];
+        let (mut changes, mut bytes) = (vec![], vec![]);
         for &crate::WindowEnd { id, end, .. } in ends {
             let index = self.live_window_index(id).ok_or("layout journal names an unknown live window")?;
             let Object::Window(w) = &self.objects[index] else { unreachable!("live window") };
@@ -1411,12 +1411,13 @@ impl Vm {
             // other, at a byte of the text it published.
             let end = end + self.display_state.base(id);
             let end = self.display_state.segments(id)
-                .map_or(end, |segments| crate::display::buffer_of(segments, end, b.len_bytes()));
+                .map_or(end, |segments| crate::display::shown_end(segments, end, b.len_bytes(), |at| b.newline_at(at)));
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
+            bytes.push(end);
         }
         self.display_state.hosted = true;
-        for end in ends { self.display_state.painted_rows(end); }
+        for (end, &byte) in ends.iter().zip(&bytes) { self.display_state.painted_rows(end, byte); }
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()

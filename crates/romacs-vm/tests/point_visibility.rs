@@ -100,6 +100,15 @@ fn a_window_shows_a_unibyte_buffer_as_pinned_gnu() {
     replay(include_str!("unibyte_window.el"), include_str!("unibyte_window.gnu"), 400);
 }
 
+/// hidden_tail.el: `window-end', with and without UPDATE, ends at the last
+/// row showing text, so M-> recentres when text hidden to the buffer's end
+/// follows that row, and `recenter' counts the rows shown; an edit leaves
+/// the end stale, and UPDATE walks to ZV.
+#[test]
+fn window_end_and_recentring_over_a_hidden_tail_as_pinned_gnu() {
+    replay(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500);
+}
+
 /// Replay PROBE's forms, painting at each `pv-step', against GNU's
 /// ANSWERS; at least LEAST steps run.
 fn replay(probe: &str, answers: &str, least: usize) {
