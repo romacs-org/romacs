@@ -261,6 +261,120 @@
     (romacs-should (equal (funcall face 'rum 'font-lock-variable-name-face :foreground) "#00a6a6"))
     (romacs-should (null (plist-get (romacs-theme-rows 'rum) :floors)))))
 
+(defun romacs-theme-test--pill-contrast ()
+  "The status bar pill's text against its background, as shown."
+  (romacs-color-contrast (romacs-chrome--hex (face-foreground 'romacs-mode-line-pill nil t))
+                         (romacs-chrome--hex (face-background 'romacs-mode-line-pill nil t))))
+
+(romacs-deftest romacs-theme-the-pill-reads-in-every-shipped-theme ()
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (dolist (entry romacs-theme-bundled)
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (load-theme (car entry) t)
+          (romacs-should (equal (list (car entry) (>= (romacs-theme-test--pill-contrast) 3.0)) (list (car entry) t))))
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-theme-a-pill-and-its-text-come-from-one-theme ()
+  ;; A theme that sets only the bar, over the theme that set the pill.
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (load-theme 'default t)
+          (deftheme romacs-pill-test)
+          (custom-theme-set-faces 'romacs-pill-test
+                                  '(mode-line ((t :background "#e8e8e8" :foreground "#202020")))
+                                  '(mode-line-active ((t :background "#e8e8e8" :foreground "#202020"))))
+          (enable-theme 'romacs-pill-test)
+          (romacs-should (equal (face-background 'romacs-mode-line-pill nil t) "#50269a"))
+          (romacs-should (equal (face-foreground 'romacs-mode-line-pill nil t) "#d4c5a0"))
+          (romacs-should (>= (romacs-theme-test--pill-contrast) 4.5))
+          (disable-theme 'romacs-pill-test)
+          (romacs-should (equal (face-background 'romacs-mode-line-pill nil t) "#50269a")))
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-theme-a-pill-keeps-text-its-theme-inherits ()
+  ;; The foreground comes through `:inherit', not from the theme's own row.
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (defface romacs-pill-test-parent '((t :foreground "#fefefe")) "A parent.")
+          (deftheme romacs-pill-inherit-test)
+          (custom-theme-set-faces 'romacs-pill-inherit-test
+                                  '(mode-line-active ((t :background "#202020" :foreground "#eeeeee")))
+                                  '(romacs-mode-line-pill ((t :inherit romacs-pill-test-parent))))
+          (enable-theme 'romacs-pill-inherit-test)
+          (romacs-should (equal (face-foreground 'romacs-mode-line-pill nil t) "#fefefe"))
+          (romacs-should (eq (face-attribute 'romacs-mode-line-pill :foreground) 'unspecified))
+          (disable-theme 'romacs-pill-inherit-test)
+          (romacs-should (equal (face-foreground 'romacs-mode-line-pill nil t)
+                                (face-foreground 'mode-line-active nil t))))
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-theme-a-pill-outlasts-no-theme ()
+  ;; What the pill was given with no theme enabled stays out of the theme's way
+  ;; on a frame made later as on this one.
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (romacs-should (eq (face-attribute 'romacs-mode-line-pill :background t) 'unspecified))
+          (load-theme 'default t)
+          (romacs-should (eq (face-attribute 'romacs-mode-line-pill :background t) 'unspecified)))
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-theme-a-hand-set-pill-outlives-a-theme ()
+  ;; The theme gives the colour the user set, so only the user's stays after.
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (set-face-attribute 'romacs-mode-line-pill nil :background "#abcdef")
+          (romacs-mode-line-pill-faces)
+          (romacs-should (equal (face-background 'romacs-mode-line-pill nil t) "#abcdef"))
+          (deftheme romacs-pill-same-test)
+          (custom-theme-set-faces 'romacs-pill-same-test
+                                  '(romacs-mode-line-pill ((t :background "#abcdef"))))
+          (enable-theme 'romacs-pill-same-test)
+          (disable-theme 'romacs-pill-same-test)
+          (romacs-should (equal (face-background 'romacs-mode-line-pill nil t) "#abcdef")))
+      (set-face-attribute 'romacs-mode-line-pill nil :background 'unspecified)
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
+(romacs-deftest romacs-theme-a-pill-face-keeps-what-is-not-its-colour ()
+  ;; A hand-set weight through a theme that only moves the bar; the state's
+  ;; declared bold through a new colour.
+  (require 'romacs-mode-line)
+  (let ((enabled custom-enabled-themes) (romacs-theme--stock nil))
+    (unwind-protect
+        (progn
+          (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+          (romacs-should (eq (face-attribute 'romacs-mode-line-state :inherit) 'bold))
+          (set-face-attribute 'romacs-mode-line-pill nil :weight 'bold)
+          (deftheme romacs-pill-bar-test)
+          (custom-theme-set-faces 'romacs-pill-bar-test
+                                  '(mode-line-active ((t :background "#123456" :foreground "#fefefe"))))
+          (enable-theme 'romacs-pill-bar-test)
+          (romacs-should (eq (face-attribute 'romacs-mode-line-pill :weight) 'bold))
+          (disable-theme 'romacs-pill-bar-test)
+          (romacs-should (eq (face-attribute 'romacs-mode-line-pill :weight) 'bold))
+          (romacs-should (eq (face-attribute 'romacs-mode-line-state :inherit) 'bold)))
+      (set-face-attribute 'romacs-mode-line-pill nil :weight 'unspecified)
+      (mapc #'disable-theme (copy-sequence custom-enabled-themes))
+      (dolist (theme (reverse enabled)) (enable-theme theme)))))
+
 (romacs-deftest romacs-style-a-theme-declares-its-own ()
   (let ((enabled custom-enabled-themes) (romacs-style-overrides nil))
     (unwind-protect

@@ -132,7 +132,6 @@ through a list must not run code nobody agreed to."
   :group 'customize)
 
 (defvar romacs-theme--stock)
-(defvar romacs-mode-line--pill-colors)
 
 (defvar romacs-theme-preview--base nil
   "The themes enabled when the preview began, highest priority first.")
@@ -148,6 +147,10 @@ a failed `enable-theme' never recorded it as enabled.")
   "Every face as it stood before the first candidate was applied, nil
 until one was: each (FRAME (FACE . VECTOR)...), FRAME nil for new frames'
 defaults.  A frame showing another's faces has none of its own.")
+
+(defvar romacs-theme-preview--specs nil
+  "Every face's default spec when `romacs-theme-preview--faces' was
+taken, (FACE . SPEC): a hook can derive one from a candidate's colours.")
 
 (defvar romacs-theme-preview--names nil
   "A table of the names offered.")
@@ -215,13 +218,18 @@ loads over those themes, which it may read."
         (progn
           (unless (get theme 'theme-settings) (romacs-theme-preview--load theme))
           (unless romacs-theme-preview--faces
-            (setq romacs-theme-preview--faces (romacs-theme-preview--saved-faces)))
+            (setq romacs-theme-preview--faces (romacs-theme-preview--saved-faces)
+                  romacs-theme-preview--specs
+                  (mapcar (lambda (face) (cons face (get face 'face-defface-spec))) (face-list))))
           (setq romacs-theme-preview--candidate theme)
           (enable-theme theme))
       (error (minibuffer-message "Not shown: %s" (error-message-string failure))))))
 
 (defun romacs-theme-preview--restore-faces ()
-  "Every face as it stood, whose local edits no spec holds."
+  "Every face as it stood, whose local edits no spec holds, and its
+default spec."
+  (pcase-dolist (`(,face . ,spec) romacs-theme-preview--specs)
+    (put face 'face-defface-spec spec))
   (pcase-dolist (`(,frame . ,faces) romacs-theme-preview--faces)
     (when (or (null frame) (frame-live-p frame))
       (pcase-dolist (`(,face . ,vector) faces)
@@ -232,12 +240,15 @@ loads over those themes, which it may read."
   "Put back what the preview began with: the themes, then every face,
 then the enable hooks told of those faces, which `disable-theme' alone
 would not do.  They are told as enabling `user' tells them, without
-recalculating what it sets, and what they write goes back too."
-  (romacs-theme-preview--settle)
-  (romacs-theme-preview--restore-faces)
-  (with-demoted-errors "Theme preview: %S"
-    (run-hook-with-args 'enable-theme-functions 'user))
-  (romacs-theme-preview--restore-faces))
+recalculating what it sets, and what they write goes back too, however
+they end."
+  (unwind-protect
+      (progn
+        (romacs-theme-preview--settle)
+        (romacs-theme-preview--restore-faces)
+        (with-demoted-errors "Theme preview: %S"
+          (run-hook-with-args 'enable-theme-functions 'user)))
+    (romacs-theme-preview--restore-faces)))
 
 (defmacro romacs-theme-preview--session (&rest body)
   "Run BODY, whose `romacs-theme-preview--show's are undone at its end,
@@ -246,11 +257,9 @@ however it ends."
   `(let* ((romacs-theme-preview--base custom-enabled-themes)
           (romacs-theme-preview--candidate nil)
           (romacs-theme-preview--faces nil)
+          (romacs-theme-preview--specs nil)
           (romacs-theme--stock (bound-and-true-p romacs-theme--stock))
-          (romacs-theme-preview--stock romacs-theme--stock)
-          ;; What the pill faces were last given: they come back with the
-          ;; other faces, so this does too.
-          (romacs-mode-line--pill-colors (bound-and-true-p romacs-mode-line--pill-colors)))
+          (romacs-theme-preview--stock romacs-theme--stock))
      (unwind-protect (progn ,@body)
        (when romacs-theme-preview--faces
          (let ((inhibit-quit t)) (romacs-theme-preview--revert))))))

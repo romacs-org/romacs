@@ -195,6 +195,33 @@ fn the_status_bar_s_overline_runs_across_it() {
     assert_eq!(bar(None), []);
 }
 
+/// A pill's text takes its foreground; an icon in a colour of its own keeps
+/// it where it reads there. Solarized Light's state on its state pill is
+/// 1.5:1, so its icons take the pill's text; the last pair is just under 3:1.
+#[test]
+fn an_icon_keeps_its_colour_on_a_pill_where_it_reads() {
+    let (own, faint, under, pill, text) = ([0xff; 3], [0x0a, 0x6d, 0xaa], [0x76, 0x05, 0x4e], [0x26, 0x8b, 0xd2], [1, 2, 3]);
+    let run = |bytes: std::ops::Range<usize>, face: u32| romacs_layout_input::FaceRun { bytes, face: FaceHandle(face) };
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 4, y: 150, width: 108, height: 20,
+        text: TextSlice { extends: vec![], utf8: "\u{FE001}\u{FE002}\u{FE003}\u{FE004}a".into(),
+                          face_runs: vec![run(0..4, 1), run(4..8, 2), run(8..12, 3), run(16..17, 1)], raw: vec![] },
+        face: FaceHandle(0), faces: vec![face([9; 3], [30, 40, 50]), face(own, [30, 40, 50]), face(faint, [30, 40, 50]), face(under, [30, 40, 50])],
+        window: 1, focused: true,
+        marks: BandMarks { segments: vec![Segment { bytes: 0..17, name: "buffer".into(),
+                                                    pill: Some(Pill { background: pill, radius: 6, foreground: Some(text) }) }],
+                           icons: vec![] },
+    });
+    let painted = lay_out(snapshot);
+    let colours: Vec<_> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { row_role: GlyphRowRole::StatusBar, face_id, .. } => Some(painted.faces[face_id].foreground),
+        _ => None,
+    }).collect();
+    let pixel = |[r, g, b]: [u8; 3]| romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]));
+    assert_eq!(colours, [pixel(own), pixel(text), pixel(text), pixel(text), pixel(text)]);
+}
+
 /// The status bar's marks (VM2-STATUS-BAR): the part after the
 /// `right-align' marker flush with the right edge and whole, the part
 /// before it clipped where that starts, the marker spanning the room; a

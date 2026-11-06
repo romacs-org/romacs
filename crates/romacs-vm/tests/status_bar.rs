@@ -525,6 +525,30 @@ fn a_click_on_the_bar_runs_the_shown_mode_lines_binding() {
 /// `romacs-mode-line-modified' while the buffer is modified, `%*' drawn
 /// as an icon while Romacs Icons is there; `romacs-status-bar-string' is
 /// what the bar shows, the right side flush with its right edge.
+/// The buffer's pill names the pill's foreground for its text, and the mark
+/// stays in its own face for the layout to keep.
+#[test]
+fn the_buffer_pill_names_its_text_and_leaves_the_mark_its_face() {
+    let mut vm = session();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp");
+    for file in ["romacs-layer.el", "romacs-chrome.el", "romacs-icons.el", "romacs-mode-line.el"] {
+        vm.load_file(&root.join(file)).unwrap();
+    }
+    eval(&mut vm, "(progn (setq romacs-icons--font t) (romacs-mode-line-mode 1)
+                     (set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\" :foreground \"#d4c5a0\")
+                     (set-face-attribute 'romacs-mode-line-mark nil :foreground \"#e06c75\")
+                     (fundamental-mode) (romacs-mode-line-refresh-mode-icon))");
+    let shown = bar(&mut vm);
+    let foreground = |byte: usize| {
+        let run = shown.text.face_runs.iter().find(|run| run.bytes.contains(&byte)).expect("a face");
+        shown.faces[run.face.0 as usize].foreground
+    };
+    let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
+    assert_eq!(buffer.pill.and_then(|p| p.foreground), Some([0xd4, 0xc5, 0xa0]), "the text");
+    let (mark, _) = shown.text.utf8.char_indices().find(|(_, c)| ('\u{FE000}'..='\u{FE0FF}').contains(c)).expect("the mark");
+    assert_eq!(foreground(mark), [0xe0, 0x6c, 0x75], "the mark");
+}
+
 #[test]
 fn the_bar_marks_its_segments_pills_and_icons() {
     let mut vm = session();
@@ -533,7 +557,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
         vm.load_file(&root.join(file)).unwrap();
     }
     eval(&mut vm, "(progn (setq romacs-icons--font t) (romacs-mode-line-mode 1))");
-    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\")");
+    eval(&mut vm, "(set-face-attribute 'romacs-mode-line-pill nil :background \"#5a1414\" :foreground \"#d4c5a0\")");
     let shown = bar(&mut vm);
     let names: Vec<&str> = shown.marks.segments.iter().map(|s| s.name.as_str()).collect();
     for name in ["buffer", "position", "centre-align", "right-align", "major-mode"] {
@@ -541,10 +565,10 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     }
     // The default coding says nothing.
     assert!(!names.contains(&"encoding"), "{names:?}");
-    // The buffer's identity on its pill, in its own faces while unmodified.
+    // The buffer's identity on its pill, in the pill's text while unmodified.
     eval(&mut vm, "(set-face-attribute 'romacs-mode-line-modified nil :foreground \"#e0a030\")");
     let buffer = shown.marks.segments.iter().find(|s| s.name == "buffer").unwrap();
-    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], None)));
+    assert_eq!(buffer.pill.map(|p| (p.background, p.foreground)), Some(([0x5a, 0x14, 0x14], Some([0xd4, 0xc5, 0xa0]))));
     assert!(shown.text.utf8[buffer.bytes.clone()].contains("*scratch*"));
     // `%*' of the unmodified *scratch*: nothing, its `-' dropped.
     assert!(shown.marks.icons.is_empty(), "{:?}", shown.marks.icons);
@@ -603,7 +627,7 @@ fn the_bar_marks_its_segments_pills_and_icons() {
     eval(&mut vm, "(flymake-mode -1)");
     // The state reads in the accent on a band; its pill inverts it.
     eval(&mut vm, "(set-face-attribute 'romacs-pane-focus nil :foreground \"#d48a20\")");
-    eval(&mut vm, "(setq romacs-mode-line--pill-colors nil) (set-face-attribute 'romacs-mode-line-state nil :foreground 'unspecified) (romacs-mode-line-pill-faces)");
+    eval(&mut vm, "(progn (put 'romacs-mode-line-state 'theme-face nil) (romacs-mode-line-pill-faces))");
     assert_eq!(eval(&mut vm, "(face-foreground 'romacs-mode-line-state)"), "\"#d48a20\"");
     eval(&mut vm, "(start-kbd-macro nil)");
     let state = bar(&mut vm).marks.segments.iter().find(|s| s.name == "state").cloned().expect("a state segment");

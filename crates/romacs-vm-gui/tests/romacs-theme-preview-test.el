@@ -89,10 +89,39 @@ enabled now back after it."
   ;; what the enable hooks derive must still come back.
   (romacs-preview-test--themes (directory)
     (mapc #'disable-theme custom-enabled-themes)
-    (let ((pills (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)))
+    (let* ((state (lambda () (list (face-background 'romacs-mode-line-pill)
+                                   (get 'romacs-mode-line-pill 'face-defface-spec)
+                                   (get 'romacs-mode-line-pill 'face-modified))))
+           (pills (funcall state)))
       (romacs-theme-preview--session (romacs-theme-preview--show 'catppuccin-latte))
-      (romacs-should (equal (list (face-background 'romacs-mode-line-pill) romacs-mode-line--pill-colors)
-                            pills)))))
+      (romacs-should (equal (funcall state) pills)))))
+
+(romacs-deftest romacs-theme-preview-gives-back-specs-however-its-hooks-end ()
+  ;; A hook that fails ahead of the pill's stops the list, so the spec a
+  ;; candidate's colours gave the pill faces is not derived again.
+  (romacs-preview-test--themes (directory)
+    (mapc #'disable-theme custom-enabled-themes)
+    (let* ((faces '(romacs-mode-line-pill romacs-mode-line-state romacs-mode-line-state-pill))
+           (state (lambda ()
+                    (mapcar (lambda (face)
+                              (list (get face 'face-defface-spec) (get face 'face-modified)
+                                    (face-attribute face :background) (face-attribute face :foreground)))
+                            faces)))
+           (before (funcall state)))
+      (dolist (failure '(error quit))
+        (let ((fail (lambda (&rest _) (signal failure nil))))
+          (unwind-protect
+              (condition-case nil
+                  (romacs-theme-preview--session
+                    (romacs-theme-preview--show 'catppuccin-latte)
+                    (add-hook 'enable-theme-functions fail -90)
+                    (add-hook 'disable-theme-functions fail -90))
+                (t nil))
+            (remove-hook 'enable-theme-functions fail)
+            (remove-hook 'disable-theme-functions fail))
+          (romacs-should (equal (funcall state) before))
+          (dolist (face faces) (face-spec-recalc face (selected-frame)))
+          (romacs-should (equal (funcall state) before)))))))
 
 (romacs-deftest romacs-theme-preview-ends-with-the-hooks-told ()
   ;; A hook that derives something from the faces has seen the last

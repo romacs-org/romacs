@@ -246,6 +246,19 @@ pub fn tab_bar_extents(frame: &FrameGlyphBuffer) -> Vec<(f32, f32)> {
     }).collect()
 }
 
+/// The WCAG 2 contrast ratio of colours A and B, from 1 to 21.
+fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let luminance = |rgb: [u8; 3]| {
+        let [r, g, b] = rgb.map(|c| {
+            let c = f64::from(c) / 255.0;
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        });
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
 /// Whether CH is one of Romacs's icons (U+FE000-U+FE0FF): one column wide
 /// in any face (VM2-MODE-LINE).
 #[inline]
@@ -317,7 +330,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
     // text in the pill's own foreground where it has one.
-    let mut pill_text: Vec<(std::ops::Range<usize>, [u8; 3])> = vec![];
+    let mut pill_text: Vec<(std::ops::Range<usize>, [u8; 3], [u8; 3])> = vec![];
     for segment in &band.marks.segments {
         let Some(pill) = segment.pill else { continue };
         let first = chars.partition_point(|c| c.0 < segment.bytes.start);
@@ -329,7 +342,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
             bounds: Rect::new(bounds.x + start, bounds.y + inset, last + width - start, bounds.height - 2.0 * inset),
             radius: pill.radius as f32, color: color(pill.background),
         });
-        if let Some(text) = pill.foreground { pill_text.push((first..end, text)); }
+        if let Some(text) = pill.foreground { pill_text.push((first..end, text, pill.background)); }
     }
     // A line folded in from another window (a `context' segment, with its
     // separator) on its own face's background, `mode-line-inactive''s.
@@ -348,8 +361,11 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     let mut next = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(face_base).max(glyphless.end);
     let mut recoloured: std::collections::HashMap<(usize, [u8; 3]), FaceId> = std::collections::HashMap::new();
     let mut ids: Vec<FaceId> = chars.iter().map(|c| FaceId::new(face_base + c.2 as u32)).collect();
-    for (range, foreground) in &pill_text {
+    for (range, foreground, background) in &pill_text {
         for i in range.clone() {
+            // An icon in a colour of its own keeps it, where it reads.
+            let own = band.faces[chars[i].2].foreground;
+            if is_icon(chars[i].1) && own != band.faces[face].foreground && contrast(own, *background) >= 3.0 { continue; }
             let key = (chars[i].2, *foreground);
             let id = match recoloured.get(&key) {
                 Some(&id) => id,

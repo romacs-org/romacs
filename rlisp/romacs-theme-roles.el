@@ -167,13 +167,15 @@ colour.")
         (push (cons name (funcall get name)) resolved)))
     (nreverse resolved)))
 
-(defun romacs-theme-roles--floored-text (resolved)
-  "Rows for the text slots RESOLVED leaves under their floors on `bg'."
-  (let ((bg (cdr (assq 'bg resolved))) (rows nil))
-    (dolist (slot romacs-theme-roles--text-slots rows)
-      (let ((colour (cdr (assq (car slot) resolved))))
+(defun romacs-theme-roles--floored-text (rows index)
+  "Rows for the text slots ROWS leave under their floors on `bg', by INDEX's
+rules.  Only those slots are read."
+  (let* ((get (romacs-theme--reader rows (lambda (name) (gethash name index))))
+         (bg (funcall get 'bg)) (floored nil))
+    (dolist (slot romacs-theme-roles--text-slots floored)
+      (let ((colour (funcall get (car slot))))
         (when (and (romacs-theme-roles--hex colour) (< (romacs-color-contrast colour bg) (cdr slot)))
-          (push (list (car slot) (romacs-color-floor colour bg (cdr slot))) rows))))))
+          (push (list (car slot) (romacs-color-floor colour bg (cdr slot))) floored))))))
 
 (defun romacs-theme-roles-resolve (palette)
   "PALETTE with every slot and role, as an alist (NAME . VALUE): the one
@@ -185,9 +187,8 @@ their floors.  Common overrides are PALETTE's rows too, ahead of its own."
                       (push (cons mode built) romacs-theme-roles--indexes)
                       built)))
          (rows (append romacs-theme-common-palette-overrides romacs-theme-common-palette-user palette))
-         (resolved (romacs-theme-roles--read rows index))
-         (floored (romacs-theme-roles--floored-text resolved)))
-    (if floored (romacs-theme-roles--read (append floored rows) index) resolved)))
+         (floored (romacs-theme-roles--floored-text rows index)))
+    (romacs-theme-roles--read (append floored rows) index)))
 
 ;;;; Floors
 
@@ -210,10 +211,12 @@ their floors.  Common overrides are PALETTE's rows too, ahead of its own."
 (defun romacs-theme-roles--attributes (spec)
   "The attributes face SPEC gives a graphic display: its first clause for a
 display, over its `default' clause."
-  (let ((shown (seq-find (lambda (clause) (not (eq (car clause) 'default))) spec))
-        (base (assq 'default spec)))
-    (append (and shown (romacs-theme--clause-attributes shown))
-            (and base (romacs-theme--clause-attributes base)))))
+  (let ((shown nil) (base nil))
+    (dolist (clause spec)
+      (cond ((eq (car clause) 'default) (setq base clause))
+            ((null shown) (setq shown clause))))
+    (let ((own (and shown (romacs-theme--clause-attributes shown))))
+      (if base (append own (romacs-theme--clause-attributes base)) own))))
 
 (defun romacs-theme-roles--effective (face index memo)
   "FACE's foreground and background, its own else through `:inherit' among

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "6c62e62b9f9dd7e5859d65f84bb9b1fc36a12913faad788520dfc227e6dcf464",
+  "source_fingerprint": "7900d1681d229eb33a2542d6c70def96dff2740365fb375e442fe1123a29376a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1424,
-  "parsed_vm2_only": 1424
+  "parsed_total": 1429,
+  "parsed_vm2_only": 1429
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -5358,6 +5358,31 @@
    "name": "romacs--xml-read-element",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/xml.rs:125"
+  },
+  "romacs-color--in-gamut": {
+   "name": "romacs-color--in-gamut",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/colour.rs:95"
+  },
+  "romacs-color--oklch": {
+   "name": "romacs-color--oklch",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/colour.rs:103"
+  },
+  "romacs-color-from-oklab": {
+   "name": "romacs-color-from-oklab",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/colour.rs:87"
+  },
+  "romacs-color-luminance": {
+   "name": "romacs-color-luminance",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/colour.rs:116"
+  },
+  "romacs-color-oklab": {
+   "name": "romacs-color-oklab",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/colour.rs:72"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
