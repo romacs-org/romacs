@@ -749,7 +749,7 @@ turn starts, and last turn's failures have been seen."
                                                              (plist-get (romacs-agent-options session) :effort)))
                                              " · ")
                                   'face 'romacs-agent-model)
-                      (when-let* ((switch (romacs-agent-switch session)))
+                      (when-let* ((switch (romacs-agent-pending-selection session)))
                         (propertize (format "→ %s next turn" (romacs-agent-ui--selection-label switch)) 'face 'warning))
                       (when-let* ((children (romacs-agent-children-summary session)))
                         (concat (propertize "⇢ " 'face 'romacs-agent-delegate) children))
@@ -994,7 +994,7 @@ harness's own transcript it was imported from, when it was."
           ;; The live session's: its rows come from its own events.
           (romacs-agent-subagents scratch) nil
           ;; The live session's: a confirmation replayed here is not this copy's.
-          (romacs-agent-switch scratch) nil (romacs-agent-models-request scratch) nil
+          (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)

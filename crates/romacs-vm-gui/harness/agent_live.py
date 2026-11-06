@@ -2598,7 +2598,7 @@ def select(args, base):
                 f'(let ((o (romacs-agent-options {a.s(sid)}))) (list (plist-get o :model) (plist-get o :effort)))'))
 
         def settled(sid, seconds=20):
-            until(lambda: a.eval(f'(romacs-agent-switch {a.s(sid)})') == 'nil', seconds, 'selection settled')
+            until(lambda: a.eval(f'(romacs-agent-pending-selection {a.s(sid)})') == 'nil', seconds, 'selection settled')
 
         def controls(sid):
             return [r['in'] for r in a.journal(sid) if isinstance(r.get('in'), dict)
@@ -2632,7 +2632,7 @@ def select(args, base):
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
-        armed = a.eval(f'(and (romacs-agent-switch {a.s(one)}) t)')
+        armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
@@ -2657,7 +2657,7 @@ def select(args, base):
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
         a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
         a.codex_instance()
-        found = a.eval(f'(plist-get (romacs-agent-switch {a.s(one)}) :model)')
+        found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
         settled(one, 30)
         result['restart_armed'] = {'found': found, 'options': options(one),
                                    'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
@@ -2763,7 +2763,7 @@ def select_real(args, base):
 
         sid = start('claude', args.claude_model, 'low', 'Reply with only the word ALPHA.', 'ALPHA')
         a.eval(f'(romacs-agent-select {a.s(sid)} {lisp_text(args.claude_model)} "medium")')
-        until(lambda: a.eval(f'(romacs-agent-switch {a.s(sid)})') == 'nil', 30, 'selection confirmed')
+        until(lambda: a.eval(f'(romacs-agent-pending-selection {a.s(sid)})') == 'nil', 30, 'selection confirmed')
         turn(sid, 'Reply with only the word BRAVO.', 'BRAVO')
         records = a.journal(sid)
         result['claude'] = {
