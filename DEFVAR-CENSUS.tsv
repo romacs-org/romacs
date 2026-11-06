@@ -18,10 +18,10 @@ auto-raise-tab-bar-buttons	absent	xdisp.c; no shipped Lisp reads or sets it
 auto-raise-tool-bar-buttons	absent	xdisp.c; no shipped Lisp reads or sets it
 backtrace-on-redisplay-error	absent	eval.c; no shipped Lisp reads or sets it
 buffer-access-fontified-property	absent	editfns.c; no shipped Lisp reads or sets it
-byte-code-meter	needed	bytecode.c; read by gnu-lisp/emacs-lisp/bytecomp.el
-byte-metering-on	needed	bytecode.c; read by gnu-lisp/emacs-lisp/bytecomp.el
+byte-code-meter	absent	bytecode.c; BYTE_CODE_METER builds only; void in pinned GNU, whose bytecomp.el tests it
+byte-metering-on	absent	bytecode.c; BYTE_CODE_METER builds only; void in pinned GNU, whose bytecomp.el tests it
 bytecomp-version-regexp	absent	lread.c; no shipped Lisp reads or sets it
-cairo-version-string	needed	haikufns.c, pgtkfns.c, xfns.c; read by gnu-lisp/version.el
+cairo-version-string	absent	Cairo builds only; version.el reads it under (featurep 'cairo), which Romacs does not provide
 cannot-suspend	absent	keyboard.c; no shipped Lisp reads or sets it
 charset-revision-table	absent	coding.c; no shipped Lisp reads or sets it
 code-conversion-map-vector	absent	ccl.c; no shipped Lisp reads or sets it
@@ -75,20 +75,20 @@ face-font-lax-matched-attributes	absent	xfaces.c; no shipped Lisp reads or sets 
 face-near-same-color-threshold	absent	xfaces.c; no shipped Lisp reads or sets it
 floats-consed	absent	alloc.c; no shipped Lisp reads or sets it
 global-disable-point-adjustment	absent	keyboard.c; no shipped Lisp reads or sets it
-gtk-version-string	needed	pgtkfns.c, xfns.c; read by gnu-lisp/erc/erc.el and 1 more
+gtk-version-string	absent	GTK builds only; version.el and erc.el read it under (featurep 'gtk), which Romacs does not provide
 haiku-allowed-ui-colors	absent	platform: Haiku build only
 haiku-control-keysym	absent	platform: Haiku build only
 haiku-debug-on-fatal-error	absent	platform: Haiku build only
-haiku-drag-track-function	needed	haikuselect.c; read by gnu-lisp/term/haiku-win.el
-haiku-drag-wheel-function	needed	haikuselect.c; read by gnu-lisp/term/haiku-win.el
+haiku-drag-track-function	absent	platform: Haiku build only
+haiku-drag-wheel-function	absent	platform: Haiku build only
 haiku-initialized	absent	platform: Haiku build only
-haiku-lost-selection-functions	needed	haikuselect.c; read by gnu-lisp/select.el
+haiku-lost-selection-functions	absent	platform: Haiku build only; select.el uses it under (featurep 'haiku)
 haiku-meta-keysym	absent	platform: Haiku build only
 haiku-pass-control-tab-to-system	absent	platform: Haiku build only
 haiku-shift-keysym	absent	platform: Haiku build only
-haiku-signal-invalid-refs	needed	haikuselect.c; read by gnu-lisp/term/haiku-win.el
+haiku-signal-invalid-refs	absent	platform: Haiku build only
 haiku-super-keysym	absent	platform: Haiku build only
-imagemagick-render-type	needed	image.c; read by gnu-lisp/cus-start.el
+imagemagick-render-type	absent	ImageMagick builds only; void in pinned GNU, which cus-start.el allows for
 inhibit-bidi-mirroring	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-eval-during-redisplay	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-free-realized-faces	absent	xdisp.c; no shipped Lisp reads or sets it
@@ -117,7 +117,7 @@ native-comp-enable-subr-trampolines	absent	native compilation: Romacs compiles L
 nobreak-char-ascii-display	absent	xdisp.c; no shipped Lisp reads or sets it
 other-window-scroll-default	absent	window.c; no shipped Lisp reads or sets it
 overriding-local-map-menu-flag	absent	keyboard.c; no shipped Lisp reads or sets it
-overriding-text-conversion-style	needed	textconv.c; read by gnu-lisp/auth-source.el and 6 more
+overriding-text-conversion-style	absent	textconv.c; input-method text conversion builds only; void in pinned GNU, shipped Lisp only binds it
 pdumper-fingerprint	absent	portable dumper: Romacs starts from its own world image
 pgtk-keysym-table	absent	pgtkterm.c; no shipped Lisp reads or sets it
 pgtk-selection-alias-alist	absent	pgtkselect.c; no shipped Lisp reads or sets it
@@ -142,7 +142,7 @@ strings-consed	absent	alloc.c; no shipped Lisp reads or sets it
 suspend-tty-functions	absent	terminal frames: Romacs has none (GUI and batch only)
 symbols-consed	absent	alloc.c; no shipped Lisp reads or sets it
 tab-bar-separator-image-expression	absent	keyboard.c; no shipped Lisp reads or sets it
-text-conversion-edits	needed	textconv.c; read by gnu-lisp/simple.el
+text-conversion-edits	absent	textconv.c; input-method text conversion builds only; void in pinned GNU, read only by its event handler
 text-conversion-face	absent	textconv.c; no shipped Lisp reads or sets it
 tool-bar-border	absent	xdisp.c; no shipped Lisp reads or sets it
 tool-bar-button-relief	absent	xdisp.c; no shipped Lisp reads or sets it
