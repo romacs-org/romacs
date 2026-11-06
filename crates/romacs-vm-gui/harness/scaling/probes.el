@@ -119,6 +119,11 @@ thousandth a stack mark."
   :setup (prog1 (scaling--declare-options "scaling-describe" n) (romacs-option--current))
   :body (dolist (option it) (romacs-option-describe option)))
 
+;; A group's members are walked once: nothing asked of each option.
+(scaling-probe options-search-group :n 2000
+  :setup (prog1 nil (scaling--declare-options "scaling-group" n) (romacs-option--current))
+  :body (dotimes (_ 20) (romacs-option-search "no-such-word" :group 'scaling-options)))
+
 ;; Declaring and adding marks the cache and no more, and one query rebuilds.
 (scaling-probe options-register :n 500
   :setup (progn (require 'romacs-option) (mapcar #'intern (scaling--names "scaling-register" n)))

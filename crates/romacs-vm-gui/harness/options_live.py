@@ -15,6 +15,8 @@ what it was, and at the end a new session must have every saved value.
   nil       `custom-file' saved as nil, then naming the init.
   defaults  a saved value of an option Romacs's defaults also set survives.
   quick     -Q: nothing is written, and no ~/.emacs appears.
+  view      the customize commands typed in a session: rows, no widgets, a
+            value set and saved from a row, the init untouched.
   agent     the option tools over MCP: search, describe, set and save, a value
             that does not fit refused, the init untouched, and set and save
             gone with `romacs-mcp-full-access' off.
@@ -32,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 import parity_live
 from romacs_mcp_client import RomacsMcp
@@ -379,6 +382,19 @@ def agent(args, base):
         unknown = refused('romacs_option_describe', {'name': 'romacs-option-no-such'})
         face = refused('romacs_option_set', {'name': 'bold', 'value': '((t :weight bold))'})
         kept = j.eval('(eql kill-ring-max 61)') == 't'
+        misspelled = refused('romacs_option_search', {'query': 'x', 'group': 'no-such-group'})
+        wrong_kind = refused('romacs_option_search', {'query': 'x', 'kind': 'macro'})
+        # A value past what a reply carries answers, without it.
+        j.eval("""(defcustom optest-text "" "Text." :type 'string :group 'emacs)""")
+        big = answer('romacs_option_set', {'name': 'optest-text', 'value': '"' + '\U0001F600' * 3000 + '"'})
+        # A setter that waits for input ends at the budget, and the session goes on.
+        j.eval("""(defcustom optest-asking nil "Asks." :type 'boolean :group 'emacs
+                     :initialize #'custom-initialize-default
+                     :set (lambda (symbol value) (y-or-n-p "Really? ") (set-default symbol value)))""")
+        started = time.time()
+        asked = refused('romacs_option_set', {'name': 'optest-asking', 'value': 't', 'budgetMs': 500})
+        bounded = time.time() - started < 15
+        j.mcp.call('romacs_wait_idle')
         saved = answer('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'})
         j.check('romacs_option_save')
         told = j.eval('(with-current-buffer "*Messages*" (and (string-search "kill-ring-max: 62" (buffer-string)) t))') == 't'
@@ -391,7 +407,9 @@ def agent(args, base):
             'set': changed['previous'] == described['value'] and changed['value'] == '61' and changed['state'] == 'set',
             'misfit': misfit[0] and ':type natnum' in misfit[1],
             'trailing': trailing[0], 'unknown': unknown[0], 'face': face[0] and 'read-only' in face[1],
-            'refused-left-it': kept,
+            'refused-left-it': kept, 'misspelled-group': misspelled[0], 'wrong-kind': wrong_kind[0],
+            'too-big-to-carry': big['value'] is None and big['state'] == 'set',
+            'asking-setter-bounded': asked[0] and bounded,
             'save': saved['previous'] == '61' and saved['state'] == 'saved' and 'kill-ring-max 62' in j.custom.read_text(),
             'told-the-user': told,
             'listed': 'romacs_option_set' in listed and 'romacs_option_save' in listed,
@@ -403,7 +421,45 @@ def agent(args, base):
         j.close()
 
 
-WORKFLOWS = {'agent': agent, 'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
+VIEW_FACTS = """(list (buffer-name) major-mode buffer-read-only (and custom-options t) (and widget-field-list t)
+  (and (seq-some (lambda (overlay) (overlay-get overlay 'button)) (overlays-in (point-min) (point-max))) t)
+  (and (widget-at (point-min)) t))"""
+
+
+def view(args, base):
+    j = Journey(args, base, 'vw')
+    facts = {}
+    try:
+        j.start()
+
+        def opened(command, shown, answer, buffer):
+            j.command(command)
+            j.prompt(shown, answer)
+            j.until(lambda: buffer in j.eval('(buffer-name)'), 20, f'{command} shows {buffer}')
+            facts[command] = j.eval(VIEW_FACTS)
+            return facts[command]
+        opened('customize-group', 'Customize group', 'killing', '*Customize Group: Killing*')
+        opened('customize-apropos', 'Search for', 'kill-ring-max', '*Customize Apropos*')
+        opened('customize-face', 'Customize face', 'bold', '*Customize Face: Bold*')
+        opened('customize-option', 'Customize variable', 'kill-ring-max', '*Customize Option: Kill Ring Max*')
+        j.keys(('-k', 'Return'))
+        j.replace_value('Set kill-ring-max to', '77')
+        j.until(lambda: j.eval('(eql kill-ring-max 77)') == 't', 20, 'a row set the value')
+        row_set = j.eval('(buffer-substring-no-properties (line-beginning-position) (line-end-position))')
+        j.keys(('s',))
+        j.replace_value('Set kill-ring-max to', '78')
+        j.until(lambda: j.eval('(eql kill-ring-max 78)') == 't', 20, 'a row saved the value')
+        row_saved = j.eval('(buffer-substring-no-properties (line-beginning-position) (line-end-position))')
+        j.check('saved from a row')
+        widgetless = all(' nil nil nil nil)' in value and ' Custom-mode t ' in value for value in facts.values())
+        saved = 'kill-ring-max 78' in j.custom.read_text()
+        return {'facts': facts, 'row_set': row_set, 'row_saved': row_saved, 'steps': j.steps,
+                'ok': widgetless and saved and '[set]' in row_set and '[saved]' in row_saved}
+    finally:
+        j.close()
+
+
+WORKFLOWS = {'agent': agent, 'view': view, 'existing': existing, 'absent': absent, 'nil': nil_or_init, 'defaults': defaults, 'quick': quick}
 
 
 def main():
@@ -423,7 +479,7 @@ def main():
             try:
                 result = WORKFLOWS[name](args, Path(temporary))
             except Exception as error:
-                result = {'ok': False, 'error': f'{type(error).__name__}: {error}'}
+                result = {'ok': False, 'error': f'{type(error).__name__}: {error}', 'trace': traceback.format_exc()}
             report['workflows'][name] = result
             failed = failed or not result.get('ok')
             print(name, 'ok' if result.get('ok') else f'FAIL {result.get("error", "")}', flush=True)

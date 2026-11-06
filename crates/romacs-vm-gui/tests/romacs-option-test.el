@@ -155,6 +155,64 @@ types, choices and hooks.")
     (romacs-should (assq option (romacs-option-search (format "%s more" option) :docs t)))
     (romacs-should (= 1 (length (romacs-option-search "e" :limit 1))))))
 
+(romacs-deftest romacs-option-search-finds-aliases-and-ignores-case ()
+  (romacs-option-test--with-option option 'integer
+    (let ((alias (intern (format "%s-alias" option))) (upper (intern (format "%s-UPPER" option))))
+      (defvaralias alias option)
+      (custom-declare-variable upper 1 "Mixed case." :type 'integer :group 'romacs-option-test)
+      (romacs-should (assq alias (romacs-option-search (symbol-name alias))))
+      (romacs-should (assq upper (romacs-option-search (symbol-name upper)))))))
+
+(romacs-deftest romacs-option-a-group-search-keeps-kinds-and-order ()
+  (romacs-option-test--with-option option 'integer
+    (custom-declare-face 'romacs-option-test-face '((t)) "A face." :group 'romacs-option-group-test)
+    (custom-add-to-group 'romacs-option-group-test option 'custom-variable)
+    (romacs-should (equal (mapcar #'car (romacs-option-search "" :group 'romacs-option-group-test))
+                          (list option 'romacs-option-test-face)))
+    (romacs-should (equal (mapcar #'car (romacs-option-search "" :group 'romacs-option-group-test :kind 'face))
+                          '(romacs-option-test-face)))))
+
+(romacs-deftest romacs-option-printing-comes-back-or-says-nothing ()
+  (romacs-option-test--with-option option 'sexp
+    (romacs-should (equal (read (plist-get (romacs-option-set option '(a "b\nc" 1.5)) :value))
+                          '(a "b\nc" 1.5)))
+    ;; Circular, read back through `print-circle'.
+    (let ((circular (list 'a)))
+      (setcdr circular circular)
+      (let ((printed (plist-get (romacs-option-set option circular) :value)))
+        (romacs-should (eq (car (read printed)) 'a))))
+    ;; An object with no printed form, and text too long to carry: never a
+    ;; fragment, and the previous value was printed before the change.
+    (set-default option 1)
+    (let ((outcome (romacs-option-set option (current-buffer))))
+      (romacs-should (equal (plist-get outcome :previous) "1"))
+      (romacs-should-not (plist-get outcome :value)))
+    (let ((outcome (romacs-option-set option (make-string 20000 ?x))))
+      (romacs-should-not (plist-get outcome :previous))
+      (romacs-should-not (plist-get outcome :value)))
+    (romacs-should-not (plist-get (romacs-option-describe option) :value))
+    (set-default option 1)))
+
+(romacs-deftest romacs-option-standard-is-the-value-not-its-form ()
+  (let ((option (intern (format "romacs-option-test-%d" (cl-incf romacs-option-test--counter)))))
+    (custom-declare-variable option ''(a b) "Quoted." :type '(repeat symbol) :group 'romacs-option-test)
+    (romacs-should (equal (plist-get (romacs-option-describe option) :standard) "(a b)"))))
+
+(romacs-deftest romacs-option-save-says-when-it-lost-its-file ()
+  ;; Saving `custom-file' itself as nil, with the default linked to the init.
+  (let* ((dir (file-name-as-directory (make-temp-file "romacs-option" t)))
+         (user-emacs-directory dir)
+         (user-init-file (expand-file-name "init.el" dir))
+         (custom-file (expand-file-name "mine.el" dir)))
+    (unwind-protect
+        (progn
+          (write-region "; mine\n" nil user-init-file nil 'silent)
+          (make-symbolic-link user-init-file (expand-file-name "custom.el" dir))
+          (romacs-should-error (romacs-option-save 'custom-file nil) :type 'user-error)
+          (romacs-should (equal (with-temp-buffer (insert-file-contents user-init-file) (buffer-string))
+                                "; mine\n")))
+      (delete-directory dir t))))
+
 (romacs-deftest romacs-option-search-leaves-out-the-obsolete ()
   (romacs-option-test--with-option option 'integer
     (make-obsolete-variable option nil "1.0")

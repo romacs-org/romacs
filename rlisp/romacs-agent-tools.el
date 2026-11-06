@@ -246,18 +246,24 @@ call stays running until its answer is ready."
 
 ;;; Evaluation
 
-(defun romacs-agent-tools--eval (arguments)
-  "`romacs_eval' with a budget: quit, as by C-g, when it runs out."
-  (romacs-mcp--instance arguments)
+(defun romacs-agent-tools--bounded (arguments run)
+  "Call RUN within ARGUMENTS' budget: quit, as by C-g, when it runs out."
   (let ((budget (let ((b (gethash "budgetMs" arguments))) (if (integerp b) b romacs-agent-eval-budget)))
         (generation (cl-incf romacs-agent-tools--generation)))
     (when (> budget 0) (romacs--call-deadline generation budget))
-    (unwind-protect
-        ;; A command the agent's code starts gets no editor launch variable
-        ;; either (`romacs-agent--editor-variables').
-        (let ((process-environment (romacs-agent--harness-environment)))
-          (romacs-mcp-eval-string (gethash "code" arguments)))
+    (unwind-protect (funcall run)
       (romacs--call-deadline nil))))
+
+(defun romacs-agent-tools--eval (arguments)
+  "`romacs_eval' with a budget."
+  (romacs-mcp--instance arguments)
+  (romacs-agent-tools--bounded
+   arguments
+   ;; A command the agent's code starts gets no editor launch variable
+   ;; either (`romacs-agent--editor-variables').
+   (lambda ()
+     (let ((process-environment (romacs-agent--harness-environment)))
+       (romacs-mcp-eval-string (gethash "code" arguments))))))
 
 ;;; Delegation (T3 Code's delegate_task, task_status, task_cancel)
 ;;
@@ -611,12 +617,17 @@ from; and each one Romacs cannot run, with why."
 (defun romacs-agent-tools--option-search (arguments)
   (romacs-mcp--instance arguments)
   (require 'romacs-option)
-  (let* ((group (gethash "group" arguments)) (kind (gethash "kind" arguments))
-         (rows (romacs-option-search (gethash "query" arguments)
-                                     :group (and group (intern-soft group))
-                                     :kind (and kind (intern-soft kind))
-                                     :docs (eq (gethash "docs" arguments) t)
-                                     :limit (gethash "limit" arguments 50))))
+  (let* ((name (gethash "group" arguments)) (kind (gethash "kind" arguments))
+         (group (and name (intern-soft name)))
+         (rows (progn
+                 (unless (member kind '(nil "variable" "face")) (user-error "Unknown kind: %s" kind))
+                 (when (and name (not (and group (get group 'custom-group))))
+                   (user-error "Unknown group: %s" name))
+                 (romacs-option-search (gethash "query" arguments)
+                                       :group group
+                                       :kind (and kind (intern kind))
+                                       :docs (eq (gethash "docs" arguments) t)
+                                       :limit (gethash "limit" arguments 50)))))
     (romacs-mcp--object
      "scope" "loaded"
      "options" (vconcat (mapcar (lambda (row)
@@ -630,8 +641,10 @@ from; and each one Romacs cannot run, with why."
 the user sees what an agent changed.  VERB names it."
   (romacs-mcp--instance arguments)
   (require 'romacs-option)
-  (let ((outcome (funcall write (romacs-agent-tools--option-symbol arguments)
-                          (romacs-agent-tools--option-value arguments))))
+  (let ((outcome (romacs-agent-tools--bounded
+                  arguments
+                  (lambda () (funcall write (romacs-agent-tools--option-symbol arguments)
+                                      (romacs-agent-tools--option-value arguments))))))
     (message "Agent %s %s %s: %s" (or (romacs-agent-tools--caller) "over MCP") verb
              (plist-get outcome :option) (plist-get outcome :value))
     (romacs-agent-tools--object outcome)))
@@ -781,15 +794,18 @@ autoloaded option whose library is not loaded says loaded false and little else.
  "Set a user option for this session, through its :set as GNU does. value is Lisp syntax, read and not evaluated: \
 72, t, nil, \"text\", (a b). A value that does not fit :type is refused and nothing changes. The answer gives \
 previous, value and state: set previous back to restore the value, though what a :set function did stays done. \
-Faces are read-only here. Loads the option's library when it must."
- (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string")) '("name" "value"))
+A value is null when it has no printed form or is past 8 KB. A setter that waits for input quits at budgetMs \
+(default 5000). Faces are read-only here. Loads the option's library when it must."
+ (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string") ("budgetMs" . "integer"))
+                     '("name" "value"))
  (lambda (arguments) (romacs-agent-tools--option-write #'romacs-option-set "set" arguments)))
 
 (romacs-mcp-register-tool
  "romacs_option_save"
  "As romacs_option_set, and keep the value for future sessions, in the user's saved settings, never their init. \
-Ask the user first for a risky option. A later saved value replaces this one; the entry itself stays."
- (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string")) '("name" "value"))
+A later saved value replaces this one; the entry itself stays."
+ (romacs-mcp--schema '(("instance" . "string") ("name" . "string") ("value" . "string") ("budgetMs" . "integer"))
+                     '("name" "value"))
  (lambda (arguments) (romacs-agent-tools--option-write #'romacs-option-save "saved" arguments))
  (romacs-mcp--object "destructiveHint" t))
 

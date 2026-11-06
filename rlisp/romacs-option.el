@@ -23,8 +23,10 @@
 (require 'cl-lib)
 (require 'cus-edit)
 
-(defconst romacs-option--value-limit 16384
-  "Characters of a printed value a record carries.")
+(defconst romacs-option--value-limit 8192
+  "Bytes of a printed value or documentation a record carries.
+Every field of a record at this size, doubled by JSON's escaping, stays
+inside one MCP reply (`romacs-mcp--output-limit').")
 
 (defvar romacs-option--options nil
   "The declared options, sorted by name, or nil when stale.")
@@ -47,7 +49,7 @@
   (let ((options nil))
     (clrhash romacs-option--groups)
     (mapatoms (lambda (symbol)
-                (when (get symbol 'standard-value) (push symbol options))
+                (when (get (indirect-variable symbol) 'standard-value) (push symbol options))
                 (dolist (member (get symbol 'custom-group))
                   (push symbol (gethash (car member) romacs-option--groups)))))
     (setq romacs-option--history load-history
@@ -60,48 +62,60 @@
   romacs-option--options)
 
 (defun romacs-option--print (value)
-  "VALUE as `read' takes it, cut at `romacs-option--value-limit'."
-  (let* ((print-length nil) (print-level nil) (print-escape-newlines t)
+  "VALUE as `read' takes it back, or nil if it cannot be: an object with no
+printed form, or text past `romacs-option--value-limit'."
+  (let* ((print-length nil) (print-level nil) (print-circle t)
+         (print-escape-newlines t) (print-escape-control-characters t)
          (text (prin1-to-string value)))
-    (if (> (length text) romacs-option--value-limit)
-        (concat (substring text 0 romacs-option--value-limit) "...")
-      text)))
+    (and (<= (string-bytes text) romacs-option--value-limit)
+         (ignore-errors (read text) t)
+         text)))
+
+(defun romacs-option--doc (doc)
+  "DOC, cut to fit a record: it is prose, so a cut one is still of use."
+  (let ((room (/ romacs-option--value-limit 4)))
+    (if (and (stringp doc) (> (length doc) room)) (concat (substring doc 0 room) "...") doc)))
 
 (defun romacs-option--summary (doc)
   "DOC's first line."
   (and (stringp doc) (substring doc 0 (string-search "\n" doc))))
 
 (defun romacs-option--value (option)
-  "OPTION's value as Custom reads it; its second element says it has one."
-  (if (default-boundp option)
-      (list (funcall (or (get option 'custom-get) #'default-value) option) t)
-    (list nil nil)))
+  "OPTION's value as Custom reads it, nil if it has none."
+  (and (default-boundp option) (funcall (or (get option 'custom-get) #'default-value) option)))
+
+(defun romacs-option--printed (option)
+  "OPTION's value printed, or nil if it has none or cannot be."
+  (and (default-boundp option) (romacs-option--print (romacs-option--value option))))
+
+(defun romacs-option--standard (option)
+  "OPTION's standard value printed, or nil if it has no such value now."
+  (ignore-errors (romacs-option--print (custom--standard-value option))))
 
 (defun romacs-option--describe-variable (option)
   "OPTION's record, OPTION being a variable."
   (romacs-option--current)
-  (let ((value (romacs-option--value option)))
-    (list :name option :kind 'variable
-          :doc (documentation-property option 'variable-documentation t)
-          :groups (gethash option romacs-option--groups)
-          :type (romacs-option--print (get option 'custom-type))
-          :standard (romacs-option--print (car (get option 'standard-value)))
-          :value (and (cadr value) (romacs-option--print (car value)))
-          :state (custom-variable-state option (car value))
-          :themes (mapcar #'car (get option 'theme-value))
-          :risky (and (get option 'risky-local-variable) t)
-          :safe (and (get option 'safe-local-variable) t)
-          :local (and (local-variable-if-set-p option) t)
-          :setter (and (get option 'custom-set) t)
-          :version (get option 'custom-version)
-          :obsolete (and (get option 'byte-obsolete-variable) t)
-          :loaded (and (get option 'standard-value) t))))
+  (list :name option :kind 'variable
+        :doc (romacs-option--doc (documentation-property option 'variable-documentation t))
+        :groups (gethash option romacs-option--groups)
+        :type (romacs-option--print (get option 'custom-type))
+        :standard (romacs-option--standard option)
+        :value (romacs-option--printed option)
+        :state (custom-variable-state option (romacs-option--value option))
+        :themes (mapcar #'car (get option 'theme-value))
+        :risky (and (get option 'risky-local-variable) t)
+        :safe (and (get option 'safe-local-variable) t)
+        :local (and (local-variable-if-set-p option) t)
+        :setter (and (get option 'custom-set) t)
+        :version (get option 'custom-version)
+        :obsolete (and (get option 'byte-obsolete-variable) t)
+        :loaded t))
 
 (defun romacs-option--describe-face (face)
   "FACE's record, aliases followed."
   (let ((face (or (get face 'face-alias) face)))
     (list :name face :kind 'face
-          :doc (face-documentation face)
+          :doc (romacs-option--doc (face-documentation face))
           :standard (romacs-option--print (get face 'face-defface-spec))
           :saved (romacs-option--print (get face 'saved-face))
           :customized (romacs-option--print (get face 'customized-face))
@@ -124,30 +138,36 @@ Values are printed, for `read'.  Signals if SYMBOL is neither."
     (cl-every (lambda (word) (or (string-search word name) (and doc (string-search word doc))))
               words)))
 
-(defun romacs-option--candidates (kind)
-  "The (SYMBOL KIND . DOC-FUNCTION) candidates of KIND, or of both if nil."
-  (let ((variable-doc (lambda (option) (documentation-property option 'variable-documentation t))))
+(defun romacs-option--variables (group members)
+  "The options among MEMBERS of GROUP, or with no GROUP every declared one."
+  (if group
+      (seq-filter (lambda (symbol) (get (indirect-variable symbol) 'standard-value)) members)
+    (append (romacs-option--current) nil)))
+
+(defun romacs-option--candidates (kind group)
+  "The (SYMBOL KIND . DOC-FUNCTION) candidates of KIND, or both if nil, in GROUP.
+A group is walked once, whatever its size, and not asked of each option."
+  (let ((members (and group (sort (mapcar #'car (get group 'custom-group)) #'string<)))
+        (variable-doc (lambda (option) (documentation-property option 'variable-documentation t))))
     (nconc (unless (eq kind 'face)
-             (cl-loop for option across (romacs-option--current)
+             (cl-loop for option in (romacs-option--variables group members)
                       unless (get option 'byte-obsolete-variable)
                       collect (cons option (cons 'variable variable-doc))))
            (unless (eq kind 'variable)
              (mapcar (lambda (face) (cons face (cons 'face #'face-documentation)))
-                     (sort (face-list) #'string<))))))
+                     (if group (seq-filter #'facep members) (sort (face-list) #'string<)))))))
 
 (cl-defun romacs-option-search (query &key group kind docs (limit 50))
   "Options and faces with every word of QUERY in their name, by name, up to LIMIT.
-With DOCS a word may be in the documentation instead.  GROUP keeps that
-group's members, KIND `variable' or `face' that kind.  Obsolete options
-are left out, and options whose library is not loaded are not known.
-A list of (SYMBOL KIND SUMMARY)."
-  (let ((words (split-string (downcase query))) (found nil) (count 0)
-        (members (and group (get group 'custom-group))))
-    (cl-loop for (symbol kind . doc-of) in (romacs-option--candidates kind)
+Case does not matter.  With DOCS a word may be in the documentation
+instead.  GROUP keeps that group's members, KIND `variable' or `face' that
+kind.  Obsolete options are left out, and options whose library is not
+loaded are not known.  A list of (SYMBOL KIND SUMMARY)."
+  (let ((words (split-string (downcase query))) (found nil) (count 0))
+    (cl-loop for (symbol kind . doc-of) in (romacs-option--candidates kind group)
              while (< count limit)
-             when (and (or (null group) (assq symbol members))
-                       (romacs-option--matches-p (symbol-name symbol)
-                                                 (and docs (funcall doc-of symbol)) words))
+             when (romacs-option--matches-p (downcase (symbol-name symbol))
+                                            (and docs (funcall doc-of symbol)) words)
              do (push (list symbol kind (romacs-option--summary (funcall doc-of symbol))) found)
                 (setq count (1+ count)))
     (nreverse found)))
@@ -171,30 +191,31 @@ An option with no `:type' takes anything."
           (t (user-error "Unknown option: %s" symbol)))))
 
 (defun romacs-option--outcome (option previous)
-  "What setting OPTION from PREVIOUS, (VALUE HAD-ONE), came to."
-  (let ((value (romacs-option--value option)))
-    (list :option option
-          :previous (and (cadr previous) (romacs-option--print (car previous)))
-          :value (romacs-option--print (car value))
-          :state (custom-variable-state option (car value)))))
+  "What setting OPTION came to, PREVIOUS being its value printed before."
+  (list :option option :previous previous :value (romacs-option--printed option)
+        :state (custom-variable-state option (romacs-option--value option))))
 
 (defun romacs-option-set (symbol value)
   "Give the option SYMBOL VALUE for this session, through its `:set'.
 Refuses a VALUE that does not fit its `:type', changing nothing.
-Returns (:option :previous :value :state), values printed."
+Returns (:option :previous :value :state), values printed; a value with
+no printed form, or too long to carry, is nil."
   (let* ((option (romacs-option--writable symbol value))
-         (previous (romacs-option--value option)))
+         (previous (romacs-option--printed option)))
     (customize-set-variable option value)
     (romacs-option--outcome option previous)))
 
 (defun romacs-option-save (symbol value)
   "As `romacs-option-set', and keep VALUE for future sessions.
-Refuses before changing anything when there is no file to save to."
+Refuses before changing anything when there is no file to save to, and
+says so if saving this very option took that file away."
   (unless (custom-file t)
     (user-error "Saving is unavailable: no file for saved settings"))
   (let* ((option (romacs-option--writable symbol value))
-         (previous (romacs-option--value option)))
+         (previous (romacs-option--printed option)))
     (customize-save-variable option value)
+    (unless (custom-file t)
+      (user-error "Set for this session only: no file for saved settings"))
     (romacs-option--outcome option previous)))
 
 (provide 'romacs-option)
