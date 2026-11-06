@@ -541,8 +541,10 @@ thousandth a stack mark."
 
 ;; The same bar with a box, and a context window's line folded in: the
 ;; stretches of its box run, and the context's background swept with the
-;; characters, never a walk over the segments for each one.
-(scaling-probe mode-line-bar-boxed :gui t :n 40 :steps 20
+;; characters, never a walk over the segments for each one.  N stays small
+;; enough to fit: a bar too full drops the context and clips the pills, and
+;; the body refuses a run in which either happened.
+(scaling-probe mode-line-bar-boxed :gui t :n 6 :steps 20
   :setup (progn
            (require 'romacs-mode-line)
            (romacs-mode-line-mode 1)
@@ -564,7 +566,13 @@ thousandth a stack mark."
                (switch-to-buffer (get-buffer-create "scaling-bar-context"))
                (setq-local mode-line-format '("q  " "context")))
              buffer))
-  :body (with-current-buffer it (insert "x")))
+  :body (progn
+          (when (zerop i)
+            (let ((shown (romacs-status-bar-string)))
+              (unless (and (string-search "context" shown) (>= (length shown) (* 3 n)))
+                (scaling--mark (list :scaling "unfit" :shown shown))
+                (kill-emacs 3))))
+          (with-current-buffer it (insert "x"))))
 
 ;; N pills on one pill face, each a different character in its own text
 ;; colour, all shown (the right side shows whole): the painter's
