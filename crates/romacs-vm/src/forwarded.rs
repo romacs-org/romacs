@@ -826,10 +826,11 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-access-fontify-functions", gnu: "editfns.c:4834", kind: Kind::Lisp(Init::Nil) },
 ];
 
-/// xdisp.c:38853: (multiple-frames "%b" ("" "%b - GNU Emacs at " system-name)).
+/// xdisp.c:38853's shape, in Romacs's name (VM2-TITLE):
+/// (multiple-frames "%b" ("" "%b - Romacs at " system-name)).
 static TITLE_FORMAT: &[Init] = &[
     Init::Symbol("multiple-frames"), Init::Str("%b"),
-    Init::List(&[Init::Str(""), Init::Str("%b - GNU Emacs at "), Init::Symbol("system-name")]),
+    Init::List(&[Init::Str(""), Init::Str("%b - Romacs at "), Init::Symbol("system-name")]),
 ];
 
 const fn font_entry(entry: &'static [Init]) -> Init { Init::Vector(entry) }

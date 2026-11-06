@@ -5,7 +5,7 @@ use std::process::Command;
 /// Printed alike in both sessions.
 const SAME: &[&str] = &[
     "buffer-access-fontify-functions", "dynamic-library-alist", "echo-area-clear-hook", "emacs-copyright",
-    "face-ignored-fonts", "font-log", "frame-title-format", "icon-title-format", "multiple-frames", "font-slant-table", "font-weight-table", "font-width-table", "fontset-alias-alist",
+    "face-ignored-fonts", "font-log", "multiple-frames", "font-slant-table", "font-weight-table", "font-width-table", "fontset-alias-alist",
     "inhibit-compacting-font-caches", "inhibit-load-charset-map", "internal-make-interpreted-closure-function",
     "load-force-doc-strings", "load-source-file-function", "mouse-position-function", "mwheel-coalesce-scroll-events",
     "operating-system-release", "post-gc-hook", "redisplay--inhibit-bidi", "tool-bar-button-margin", "tool-bar-max-label-size",
@@ -34,6 +34,9 @@ fn c_variables_read_as_pinned_gnu() {
                       (file-directory-p lisp-directory)
                       (and (member \"subr\" preloaded-file-list) t) (and (member \"emacs-lisp/byte-run\" preloaded-file-list) t))";
     assert_eq!(batch(romacs, &dir, form, true), batch(&gnu, &dir, form, false));
+    // GNU's shape in Romacs's name (VM2-TITLE): GNU's with the name put back.
+    let form = "(mapcar (lambda (format) (prin1-to-string format)) (list frame-title-format icon-title-format))";
+    assert_eq!(batch(romacs, &dir, form, true).replace("Romacs at", "GNU Emacs at"), batch(&gnu, &dir, form, false));
     // GNU's is its dump's sysconf, which a process's stack limit can differ from.
     assert_eq!(batch(romacs, &dir, "(and (natnump command-line-max-length) (> command-line-max-length 1000))", true), "t");
     // Only nil or t, and known to byte-opt.el.

@@ -601,10 +601,10 @@ def title(args, base):
         s.pid = int(s.eval('(emacs-pid)'))
         titles = lambda: [json.loads(line)['window_title'] for line in s.log().splitlines() if line.startswith('{"window_title"')]
         host = s.eval('(system-name)').strip('"')
-        wanted = f'a.txt - GNU Emacs at {host}'
+        wanted = f'a.txt - Romacs at {host}'
         until(lambda: wanted in titles(), 30, f'the title {wanted}')
         s.eval('(with-current-buffer "a.txt" (rename-buffer "renamed.txt"))')
-        renamed = f'renamed.txt - GNU Emacs at {host}'
+        renamed = f'renamed.txt - Romacs at {host}'
         s.eval('(force-mode-line-update t)')
         s.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
         until(lambda: renamed in titles(), 30, f'the title {renamed}')
