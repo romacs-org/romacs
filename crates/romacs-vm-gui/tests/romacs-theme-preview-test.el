@@ -108,8 +108,15 @@ enabled now back after it."
             (romacs-theme-preview--session
               (romacs-theme-preview--show 'tango-dark)
               (romacs-should-not (equal seen background)))
-            (romacs-should (equal seen background)))
-        (remove-hook 'enable-theme-functions hook)))))
+            (romacs-should (equal seen background))
+            ;; What they are told of is what stays: a local edit included.
+            (set-face-attribute 'default (selected-frame) :background "#123456")
+            (romacs-theme-preview--session
+              (romacs-theme-preview--show 'tango-dark))
+            (romacs-should (equal seen "#123456"))
+            (romacs-should (equal (face-background 'default) "#123456")))
+        (remove-hook 'enable-theme-functions hook)
+        (set-face-attribute 'default (selected-frame) :background background)))))
 
 (romacs-deftest romacs-theme-preview-never-reads-a-theme-load-theme-would-ask-about ()
   (romacs-preview-test--themes (directory)
@@ -178,6 +185,52 @@ enabled now back after it."
       (dolist (face '(highlight shadow))
         (romacs-should-not (assq 'romacs-preview-broken (get face 'theme-face))))
       (romacs-should (equal (romacs-preview-test--state) before)))))
+
+(romacs-deftest romacs-theme-preview-restores-past-a-failing-setter ()
+  ;; A setter that cannot restore its variable stops `disable-theme'; the
+  ;; variables after it still come back, whichever order they fall in.
+  (romacs-preview-test--themes (directory)
+    (defvar romacs-preview-test-first nil)
+    (defvar romacs-preview-test-second nil)
+    (let ((custom-safe-themes t)
+          (setter (lambda (symbol value)
+                    (when (eq value 'standard) (error "Cannot restore %s" symbol))
+                    (set-default symbol value))))
+      (dolist (case '((romacs-preview-test-first . romacs-preview-test-second)
+                      (romacs-preview-test-second . romacs-preview-test-first)))
+        (set-default (car case) 'standard)
+        (set-default (cdr case) 'standard)
+        (put (car case) 'standard-value '('standard))
+        (put (cdr case) 'standard-value '('standard))
+        (put (car case) 'custom-set setter)
+        (put (cdr case) 'custom-set nil)
+        (let ((theme (intern (format "romacs-preview-%s" (car case)))))
+          (romacs-preview-test--file
+           directory theme
+           (format "(custom-theme-set-variables '%s '(romacs-preview-test-first 'themed) '(romacs-preview-test-second 'themed))" theme))
+          (romacs-theme-preview--session
+            (romacs-theme-preview--show theme)
+            (romacs-should (eq (symbol-value (cdr case)) 'themed)))
+          (romacs-should (eq (symbol-value (cdr case)) 'standard))
+          (romacs-should-not (get (cdr case) 'theme-value)))
+        (put (car case) 'custom-set nil)))))
+
+(romacs-deftest romacs-theme-preview-of-a-refused-theme-replays-nothing ()
+  ;; Nothing was applied, so `user''s settings are not applied again over
+  ;; a value that has changed since they were.
+  (romacs-preview-test--themes (directory)
+    (defvar romacs-preview-test-custom 'saved)
+    (let ((custom-safe-themes '(default)) (settings (get 'user 'theme-settings)))
+      (custom-theme-set-variables 'user '(romacs-preview-test-custom 'saved))
+      (unwind-protect
+          (progn
+            (setq romacs-preview-test-custom 'changed)
+            (romacs-preview-test--file directory 'romacs-preview-refused "(ignore)")
+            (romacs-theme-preview--session
+              (romacs-theme-preview--show 'romacs-preview-refused))
+            (romacs-should (eq romacs-preview-test-custom 'changed)))
+        (put 'user 'theme-settings settings)
+        (put 'romacs-preview-test-custom 'theme-value nil)))))
 
 (romacs-deftest romacs-theme-preview-finishes-past-a-failing-hook ()
   (let* ((before (romacs-preview-test--state))

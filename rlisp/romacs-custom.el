@@ -145,8 +145,9 @@ through a list must not run code nobody agreed to."
 a failed `enable-theme' never recorded it as enabled.")
 
 (defvar romacs-theme-preview--faces nil
-  "Every face as it stood before the first candidate, nil until one:
-each (FRAME (FACE . VECTOR)...), FRAME nil for new frames' defaults.")
+  "Every face as it stood before the first candidate was applied, nil
+until one was: each (FRAME (FACE . VECTOR)...), FRAME nil for new frames'
+defaults.  A frame showing another's faces has none of its own.")
 
 (defvar romacs-theme-preview--names nil
   "A table of the names offered.")
@@ -163,17 +164,23 @@ background mode, which recalculates the others."
               (cons frame (mapcar (lambda (face)
                                     (cons face (copy-sequence (internal-lisp-face-p face frame))))
                                   faces)))
-            (cons nil (frame-list)))))
+            (cons nil (seq-remove #'romacs--frame-shares-faces-p (frame-list))))))
 
 (defun romacs-theme-preview--drop (theme)
-  "Take THEME's settings back, whatever state a failure left them in."
+  "Take THEME's settings back, whatever state a failure left them in:
+one setting that cannot be recalculated leaves the others to be."
   (unless (custom-theme-enabled-p theme) (push theme custom-enabled-themes))
   (condition-case failure
       (disable-theme theme)
     (error
      (message "Theme preview: %S" failure)
      (dolist (setting (get theme 'theme-settings))
-       (put (nth 1 setting) (car setting) (assq-delete-all theme (get (nth 1 setting) (car setting)))))
+       (let ((prop (car setting)) (symbol (nth 1 setting)))
+         (put symbol prop (assq-delete-all theme (get symbol prop)))
+         (with-demoted-errors "Theme preview: %S"
+           (if (eq prop 'theme-value)
+               (custom-theme-recalc-variable symbol)
+             (custom-theme-recalc-face symbol)))))
      (setq custom-enabled-themes (delq theme custom-enabled-themes)))))
 
 (defun romacs-theme-preview--settle ()
@@ -202,28 +209,34 @@ own check, so what it approves is what it reads."
   "Show THEME as `load-theme' would over the themes the preview began
 with; with THEME nil, or one that may not be read, only those.  A theme
 loads over those themes, which it may read."
-  (when (and theme (not romacs-theme-preview--faces))
-    (setq romacs-theme-preview--faces (romacs-theme-preview--saved-faces)))
   (romacs-theme-preview--settle)
   (when theme
     (condition-case failure
         (progn
           (unless (get theme 'theme-settings) (romacs-theme-preview--load theme))
+          (unless romacs-theme-preview--faces
+            (setq romacs-theme-preview--faces (romacs-theme-preview--saved-faces)))
           (setq romacs-theme-preview--candidate theme)
           (enable-theme theme))
       (error (minibuffer-message "Not shown: %s" (error-message-string failure))))))
 
-(defun romacs-theme-preview--revert ()
-  "Put back what the preview began with: the themes; what the enable
-hooks derive from them, which `disable-theme' alone would not tell them;
-and every face as it stood, whose local edits no spec holds."
-  (romacs-theme-preview--settle)
-  (with-demoted-errors "Theme preview: %S" (enable-theme 'user))
+(defun romacs-theme-preview--restore-faces ()
+  "Every face as it stood, whose local edits no spec holds."
   (pcase-dolist (`(,frame . ,faces) romacs-theme-preview--faces)
     (when (or (null frame) (frame-live-p frame))
       (pcase-dolist (`(,face . ,vector) faces)
         (with-demoted-errors "Theme preview: %S"
           (romacs--face-restore face frame vector))))))
+
+(defun romacs-theme-preview--revert ()
+  "Put back what the preview began with: the themes, then every face,
+then the enable hooks told of those faces, which `disable-theme' alone
+would not do.  Enabling `user' to tell them recalculates what it sets, so
+the faces come back once more."
+  (romacs-theme-preview--settle)
+  (romacs-theme-preview--restore-faces)
+  (with-demoted-errors "Theme preview: %S" (enable-theme 'user))
+  (romacs-theme-preview--restore-faces))
 
 (defmacro romacs-theme-preview--session (&rest body)
   "Run BODY, whose `romacs-theme-preview--show's are undone at its end,

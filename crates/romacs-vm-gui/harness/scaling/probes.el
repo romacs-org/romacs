@@ -282,6 +282,58 @@ thousandth a stack mark."
               (romacs-theme-preview--show 'scaling-candidate-b)))
           (with-current-buffer it (insert "x"))))
 
+;; A preview's save and restore: what it copies grows with the faces, and
+;; with the frames that have faces of their own, and not with those that
+;; show another's.
+(defun scaling--preview-theme ()
+  (deftheme scaling-candidate "One face.")
+  (custom-theme-set-faces 'scaling-candidate '(highlight ((t :foreground "#102030")))))
+
+(defun scaling--frames (n owned)
+  "N child frames, OWNED ones with faces of their own."
+  (unless (fboundp 'pgtk-register-dnd-targets) (defalias 'pgtk-register-dnd-targets #'ignore))
+  (dotimes (_ n)
+    (let ((frame (make-frame `((parent-frame . ,(selected-frame)) (visibility . nil) (minibuffer . nil)))))
+      (when owned (set-face-attribute 'highlight frame :weight 'bold)))))
+
+(defun scaling--preview-once (buffer)
+  (romacs-theme-preview--session
+    (romacs-theme-preview--show 'scaling-candidate))
+  (with-current-buffer buffer (insert "x")))
+
+(scaling-probe theme-preview-faces :gui t :n 200 :steps 1
+  :setup (progn
+           (dolist (face (mapcar #'intern (scaling--names "scaling-saved" n)))
+             (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (scaling--preview-theme)
+           (switch-to-buffer (get-buffer-create "scaling-saved")))
+  :body (scaling--preview-once it))
+
+(scaling-probe theme-preview-shared-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (scaling--preview-theme)
+           (scaling--frames n nil)
+           (switch-to-buffer (get-buffer-create "scaling-shared")))
+  :body (scaling--preview-once it))
+
+(scaling-probe theme-preview-owned-frames :gui t :n 8 :steps 1
+  :setup (progn
+           (scaling--preview-theme)
+           (scaling--frames n t)
+           (switch-to-buffer (get-buffer-create "scaling-owned")))
+  :body (scaling--preview-once it))
+
+;; N is the registry, faces times frames with their own: what is saved is
+;; that much, on both sides of the product at once.
+(scaling-probe theme-preview-registry :gui t :n 400 :steps 1
+  :setup (let ((side (floor (sqrt n))))
+           (dolist (face (mapcar #'intern (scaling--names "scaling-registry" side)))
+             (custom-declare-face face '((t :foreground "#a0b0c0")) "A scaling face." :group 'scaling))
+           (scaling--preview-theme)
+           (scaling--frames side t)
+           (switch-to-buffer (get-buffer-create "scaling-registry")))
+  :body (scaling--preview-once it))
+
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1
   :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
