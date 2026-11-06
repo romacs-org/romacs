@@ -14,8 +14,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::attr::{Attribute, Attrs, validate_raw as validate};
 use crate::datum::{BoundedDatum, Datum};
-use crate::spec::FaceError;
-use crate::theme::{Generation, Theme};
+use crate::spec::{FaceDef, FaceError};
+use crate::theme::{Base, Generation, Theme, resolve_reset};
 
 /// One face reference, as `merge_face_ref` (xfaces.c) accepts them.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +50,15 @@ romacs_snapshot::snapshot_struct!(AnonymousFace { attrs, inherit });
 /// Checked face reference. Only the bounded parser can construct it.
 #[derive(Clone, Debug)]
 pub struct FaceRef(Vec<Layer>);
+
+impl FaceRef {
+    /// Every face it names.
+    pub fn names(&self) -> Vec<Arc<str>> {
+        let mut named = Vec::new();
+        layer_names(&self.0, &mut named);
+        named.into_iter().cloned().collect()
+    }
+}
 
 pub fn parse_face_ref(face_ref: &BoundedDatum) -> Result<FaceRef, FaceError> {
     parse_face_ref_raw(face_ref).map(FaceRef)
@@ -142,6 +151,26 @@ fn bad_ref(r: &Datum) -> FaceError {
     }
 }
 
+/// Where a merge reads faces: a [`Theme`], or a host's own live registry
+/// through a [`LiveView`].
+pub trait FaceSource {
+    fn canonical<'a>(&'a self, face: &'a str) -> &'a str;
+    fn def(&self, face: &str) -> Option<&FaceDef>;
+    fn realized_default(&self) -> &Attrs;
+}
+
+impl FaceSource for Theme {
+    fn canonical<'a>(&'a self, face: &'a str) -> &'a str {
+        self.canonical_name(face)
+    }
+    fn def(&self, face: &str) -> Option<&FaceDef> {
+        self.definition(face)
+    }
+    fn realized_default(&self) -> &Attrs {
+        self.default_realized()
+    }
+}
+
 /// An immutable `face-remapping-alist`.
 #[derive(Debug)]
 pub struct Remap {
@@ -192,6 +221,17 @@ impl Remap {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Every face it remaps or names, for a host to define before binding.
+    pub fn names(&self) -> Vec<Arc<str>> {
+        let mut out: Vec<Arc<str>> = self.order.clone();
+        for layers in self.entries.values() {
+            let mut named = Vec::new();
+            layer_names(layers, &mut named);
+            out.extend(named.into_iter().cloned());
+        }
+        out
     }
 
     /// The window parameters its `:filtered` layers test, sorted, once each.
@@ -362,6 +402,130 @@ impl View {
     }
 }
 
+/// A host's faces as a merge reads them: definitions filled in on demand,
+/// as what is shown asks for them, so nothing here scales with the faces a
+/// session has defined. GNU's realized faces work the same way: an lface
+/// vector is read when a face is shown, and a change empties the cache.
+#[derive(Debug)]
+pub struct LiveView {
+    /// Each face asked for: its definition, or None for no such face.
+    defs: FxHashMap<Arc<str>, Option<FaceDef>>,
+    aliases: FxHashMap<Arc<str>, Arc<str>>,
+    resolved: Arc<Remap>,
+    base: Attrs,
+    default_realized: Attrs,
+}
+romacs_snapshot::snapshot_struct!(LiveView { defs, aliases, resolved, base, default_realized });
+
+impl FaceSource for LiveView {
+    fn canonical<'a>(&'a self, mut face: &'a str) -> &'a str {
+        let mut steps = 0;
+        while let Some(target) = self.aliases.get(face) {
+            face = target;
+            steps += 1;
+            if steps > 64 {
+                break;
+            }
+        }
+        face
+    }
+    fn def(&self, face: &str) -> Option<&FaceDef> {
+        self.defs.get(face).and_then(Option::as_ref)
+    }
+    fn realized_default(&self) -> &Attrs {
+        &self.default_realized
+    }
+}
+
+impl LiveView {
+    pub fn new(base: &Base) -> LiveView {
+        LiveView {
+            defs: FxHashMap::default(),
+            aliases: FxHashMap::default(),
+            resolved: Remap::empty(),
+            base: base.attrs().clone(),
+            default_realized: base.attrs().clone(),
+        }
+    }
+
+    /// Whether NAME was asked for already, as a face or as none.
+    pub fn known(&self, name: &str) -> bool {
+        self.defs.contains_key(name) || self.aliases.contains_key(name)
+    }
+
+    pub fn define(&mut self, name: Arc<str>, def: Option<FaceDef>) {
+        self.defs.insert(name, def);
+    }
+
+    pub fn alias(&mut self, name: Arc<str>, target: Arc<str>) {
+        self.aliases.insert(name, target);
+    }
+
+    /// Whether NAME is a face here.
+    pub fn contains(&self, name: &str) -> bool {
+        let name = self.canonical(name);
+        self.def(name).is_some() || self.resolved.entries.contains_key(name)
+    }
+
+    /// Make `default' and REMAP what the merge works from. `default' and
+    /// every face REMAP names (`Remap::names') must be defined first.
+    pub fn bind(&mut self, remap: &Arc<Remap>) -> Result<(), FaceError> {
+        let mut entries = FxHashMap::default();
+        for name in &remap.order {
+            entries
+                .entry(Arc::from(self.canonical(name)))
+                .or_insert_with(|| remap.entries[name].clone());
+        }
+        let normalized = Arc::new(Remap {
+            generation: remap.generation,
+            entries,
+            order: remap.order.clone(),
+        });
+        check_remap_cycles(self, &normalized)?;
+        let own = render_named(self, &Remap::empty(), "default", &Attrs::default());
+        self.default_realized = resolve_reset(&own.merge(&self.base), &self.base);
+        self.default_realized = render_named(self, &normalized, "default", &self.base);
+        self.resolved = normalized;
+        Ok(())
+    }
+
+    /// Replay the C merge over the absolute default, truncating each step.
+    pub fn realize(&self, face: &str) -> Attrs {
+        let name = self.canonical(face);
+        if name == "default" {
+            return self.default_realized.clone();
+        }
+        render_named(self, &self.resolved, name, &self.default_realized)
+    }
+
+    /// The face as text in it shows over the face BASE: what it leaves
+    /// unset is BASE's (xdisp.c face_at_string_position's base face).
+    pub fn realize_over(&self, face: &str, base: &str) -> Attrs {
+        let name = self.canonical(face);
+        // Whole unless a remapping replaces it, perhaps with less.
+        if name == "default" && !self.resolved.entries.contains_key(name) {
+            return self.default_realized.clone();
+        }
+        render_named(self, &self.resolved, name, &self.realize(base))
+    }
+
+    /// Whether the face sets nothing, itself or through what it inherits:
+    /// text in it shows the face it is over.
+    pub fn blank(&self, face: &str) -> bool {
+        let name = self.canonical(face);
+        name != "default" && render_named(self, &self.resolved, name, &Attrs::default()).is_empty()
+    }
+
+    pub fn effective_ref(&self, face_ref: &FaceRef) -> Attrs {
+        render(self, &self.resolved, Task::Layers(&face_ref.0), &Attrs::default())
+    }
+
+    /// A text-property face reference made absolute by the C merge.
+    pub fn realize_ref(&self, face_ref: &FaceRef) -> Attrs {
+        render(self, &self.resolved, Task::Layers(&face_ref.0), &self.default_realized)
+    }
+}
+
 fn layer_names<'a>(layers: &'a [Layer], out: &mut Vec<&'a Arc<str>>) {
     let mut stack: Vec<&Layer> = layers.iter().collect();
     while let Some(layer) = stack.pop() {
@@ -373,7 +537,7 @@ fn layer_names<'a>(layers: &'a [Layer], out: &mut Vec<&'a Arc<str>>) {
     }
 }
 
-fn check_remap_cycles(theme: &Theme, remap: &Remap) -> Result<(), FaceError> {
+fn check_remap_cycles<S: FaceSource>(theme: &S, remap: &Remap) -> Result<(), FaceError> {
     let mut done = FxHashSet::default();
     let mut open = FxHashSet::default();
     let mut roots: Vec<&str> = remap.entries.keys().map(|s| &**s).collect();
@@ -403,7 +567,7 @@ fn check_remap_cycles(theme: &Theme, remap: &Remap) -> Result<(), FaceError> {
             let mut names = Vec::new();
             layer_names(&remap.entries[name], &mut names);
             for dep in names {
-                let dep = theme.canonical_name(dep);
+                let dep = theme.canonical(dep);
                 if dep != name && remap.entries.contains_key(dep) {
                     work.push((dep, false));
                 }
@@ -428,14 +592,14 @@ enum Task<'a> {
     FinishRemap,
 }
 
-pub(crate) fn render_named(theme: &Theme, remap: &Remap, face: &str, under: &Attrs) -> Attrs {
+pub(crate) fn render_named<S: FaceSource>(theme: &S, remap: &Remap, face: &str, under: &Attrs) -> Attrs {
     render(theme, remap, Task::Named(face), under)
 }
 
 /// Explicit-stack merge_named_face/get_lface_attributes/merge_face_vectors.
 /// A REMAP point hides earlier NORMAL points of the same face. A repeated
 /// REMAP falls back to the original definition, including transitively.
-fn render<'a>(theme: &'a Theme, remap: &'a Remap, first: Task<'a>, under: &Attrs) -> Attrs {
+fn render<'a, S: FaceSource>(theme: &'a S, remap: &'a Remap, first: Task<'a>, under: &Attrs) -> Attrs {
     let mut value = under.clone();
     let mut points: Vec<(&str, PointKind, Option<PointKind>)> = Vec::new();
     let mut latest: FxHashMap<&str, PointKind> = FxHashMap::default();
@@ -445,7 +609,7 @@ fn render<'a>(theme: &'a Theme, remap: &'a Remap, first: Task<'a>, under: &Attrs
     while let Some(task) = work.pop() {
         match task {
             Task::Named(name) => {
-                let name = theme.canonical_name(name);
+                let name = theme.canonical(name);
                 let last = latest.get(name).copied();
                 if last == Some(PointKind::Normal) {
                     continue;
@@ -466,7 +630,7 @@ fn render<'a>(theme: &'a Theme, remap: &'a Remap, first: Task<'a>, under: &Attrs
                     work.push(Task::FinishRemap);
                     value = Attrs::default();
                     work.push(Task::Layers(layers));
-                } else if let Some(def) = theme.definition(name) {
+                } else if let Some(def) = theme.def(name) {
                     work.push(Task::Definition(def));
                 }
             }
@@ -489,7 +653,7 @@ fn render<'a>(theme: &'a Theme, remap: &'a Remap, first: Task<'a>, under: &Attrs
                 }
             }
             Task::Attrs(attrs) => {
-                value = crate::theme::resolve_reset(attrs, theme.default_realized()).merge(&value)
+                value = resolve_reset(attrs, theme.realized_default()).merge(&value)
             }
             Task::Pop => {
                 let (name, kind, previous) = points.pop().expect("balanced merge points");

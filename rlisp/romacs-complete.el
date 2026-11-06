@@ -95,7 +95,7 @@ The value should lie between 0 and romacs-complete-count/2."
   :type 'boolean)
 
 (defcustom romacs-complete-multiline
-  (cons #("↲" 0 1 (face romacs-complete-multiline)) #("…" 0 1 (face romacs-complete-multiline)))
+  (cons #("↲" 0 1 (face romacs-complete-multiline)) #("..." 0 3 (face romacs-complete-multiline)))
   "Replacements for multiline strings."
   :type '(cons (string :tag "Newline") (string :tag "Truncation")))
 

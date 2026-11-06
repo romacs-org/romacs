@@ -31,6 +31,9 @@ const HEADER: usize = 10;
 /// the text frames.
 const PACKET: usize = crate::frozen::INLINE_LIMIT + 1024;
 const FLAG_SEALED: u8 = 1;
+/// How long a worker has to end after SIGTERM, past `isolate-kill-timeout',
+/// the spawner's own escalation while it lives.
+const TERMINATION_SECONDS: u32 = 2;
 
 /// Frame kinds. `fork' (spawner to zygote: make a child, whose socket
 /// rides beside the frame), `forked' (zygote to spawner: its pid and
@@ -271,9 +274,37 @@ impl Worker {
     }
 }
 
+/// The pool's memory, measured off the evaluator: reading a process's
+/// `smaps_rollup' walks its page tables, milliseconds each, tens with a
+/// pool running, which a session must not wait for at a dispatch.
+#[derive(Default)]
+struct PoolMemory {
+    /// The processes to measure, as the evaluator last saw them.
+    pids: std::sync::Mutex<Vec<i32>>,
+    /// Their proportional memory together, in kilobytes.
+    kilobytes: std::sync::atomic::AtomicU64,
+}
+
+impl PoolMemory {
+    /// Measure every half second, at a worker's priority, until the VM
+    /// that owns MEMORY is gone.
+    fn sample(memory: std::sync::Weak<PoolMemory>) {
+        crate::host::lower_priority(crate::host::Priority::Worker);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let Some(memory) = memory.upgrade() else { return };
+            let pids = memory.pids.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            let total = pids.iter().filter_map(|&pid| crate::host::process_pss(pid)).sum();
+            memory.kilobytes.store(total, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Isolates {
     workers: HashMap<u64, Worker>,
+    /// In a spawner, from its first use (`isolate_pool_memory').
+    pool_memory: Option<std::sync::Arc<PoolMemory>>,
     next: u64,
     /// In a worker: the socket to its spawner.
     parent: Option<Peer>,
@@ -291,7 +322,7 @@ pub(crate) struct Isolates {
 
 impl Isolates {
     pub(crate) fn is_empty(&self) -> bool {
-        self.workers.is_empty() && self.parent.is_none()
+        self.workers.is_empty() && self.parent.is_none() && self.pool_memory.is_none()
     }
 }
 
@@ -389,6 +420,44 @@ impl Vm {
         crate::host::open_gate(release).map_err(|e| format!("Cannot release a child: {e}"))
     }
 
+    /// The proportional memory of worker ID, or of every live worker, in
+    /// kilobytes: a page shared between them counts once across the sum.
+    pub(crate) fn isolate_pss(&self, id: Option<u64>) -> Result<u64> {
+        let live = |worker: &Worker| if worker.status.is_none() && worker.pid != 0 { crate::host::process_pss(worker.pid) } else { None };
+        Ok(match id {
+            Some(id) => live(self.isolates.workers.get(&id).ok_or_else(|| format!("no isolate {id}"))?).unwrap_or(0),
+            None => self.isolates.workers.values().filter_map(live).sum(),
+        })
+    }
+
+    /// The pool's proportional memory in kilobytes, as last measured off
+    /// the evaluator; the first use measures here, the pool being new.
+    pub(crate) fn isolate_pool_memory(&mut self) -> u64 {
+        let pids: Vec<i32> = self.isolates.workers.values().filter(|w| w.status.is_none() && w.pid != 0).map(|w| w.pid).collect();
+        if let Some(memory) = &self.isolates.pool_memory {
+            *memory.pids.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = pids;
+            return memory.kilobytes.load(std::sync::atomic::Ordering::Relaxed);
+        }
+        let total: u64 = pids.iter().filter_map(|&pid| crate::host::process_pss(pid)).sum();
+        let memory = std::sync::Arc::new(PoolMemory { pids: std::sync::Mutex::new(pids), kilobytes: total.into() });
+        let sampler = std::sync::Arc::downgrade(&memory);
+        // Without the thread the figure stays as first measured.
+        let _ = std::thread::Builder::new().name("romacs-pool-memory".into()).stack_size(64 * 1024).spawn(move || PoolMemory::sample(sampler));
+        self.isolates.pool_memory = Some(memory);
+        total
+    }
+
+    /// Whether a job runs here now, inside its handler.
+    pub(crate) fn isolate_job_running(&self) -> bool {
+        self.isolates.running.is_some()
+    }
+
+    /// In a child: BYTES of growth over the zygote's heap pace its
+    /// collections (`set_job_budget`).
+    pub(crate) fn isolate_job_budget(&mut self, bytes: usize) {
+        self.set_job_budget(bytes);
+    }
+
     /// In a zygote: its children not yet reaped.
     pub(crate) fn isolate_forked(&self) -> usize {
         self.isolates.forked.len()
@@ -442,6 +511,8 @@ impl Vm {
         self.closures.reserve(needed / 16);
         self.cells.reserve(needed / 16);
         self.slots.reserve(needed / 16);
+        // The baseline of its children's budgets.
+        self.measure_retained_payload();
     }
 
     /// In a worker: descriptor FD is the socket to the spawner (peer 0).
@@ -786,6 +857,7 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
         return Err(format!("isolate worker: parent {parent} is gone"));
     }
     crate::host::catch_isolate_signals().map_err(|e| e.to_string())?;
+    crate::host::limit_termination(TERMINATION_SECONDS);
     // SAFETY: the launcher put the socket at FD and nothing else owns it.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }

@@ -319,7 +319,7 @@ fn measuring_counts_a_box_run_s_edges() {
     let text = TextSlice { utf8: "xaby".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
     let mut measure = |faces: Vec<Face>| engine.measure(&MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(), faces, text: text.clone(), no_font: Default::default() }).unwrap();
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), faces, text: text.clone(), no_font: Default::default() }).unwrap();
     let (boxed, unboxed) = (measure(snapshot.faces.clone()), measure(plain));
     let advance = |m: &romacs_layout_input::Measured, i: usize| m.glyphs[i].0;
     assert_eq!((advance(&boxed, 0), advance(&boxed, 1), advance(&boxed, 2), advance(&boxed, 3)),
@@ -346,7 +346,7 @@ fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
     // The cursor at the run's start covers its left side and its glyph.
     snapshot.point_byte = 1;
     let placed = romacs_layout_input::FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), width: 400, height: 300,
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 300,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snapshot.clone() }], background_alpha: 1.0,
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, no_font: Default::default(),
     };
@@ -530,4 +530,23 @@ fn images_take_their_slots_on_the_rows_baseline() {
     let outline = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { bg, width, height, .. }
         if *bg == Color::from_pixel(0xffffff) && (*width == 1.0 || *height == 1.0))).count();
     assert_eq!(outline, 4);
+}
+
+/// A character of another font that wraps to a new row sets that row on
+/// its baseline, though it was reached on the row before.
+#[test]
+fn a_fallback_character_at_a_wrap_shares_its_rows_baseline() {
+    let mut s = scene();
+    let probe = romacs_layout2::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
+    let cell = probe.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { width, .. } => Some(*width), _ => None }).unwrap();
+    let text = "xxxx\u{6f22}x";
+    s.width = (cell * 5.0) as u32;
+    s.text.utf8 = text.into();
+    s.text.face_runs = vec![FaceRun { bytes: 0..text.len(), face: FaceHandle(0) }];
+    let frame = romacs_layout2::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
+    let baseline = |wanted: char, skip: usize| frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char: c, baseline, .. } if *c == wanted => Some(*baseline),
+        _ => None,
+    }).nth(skip).unwrap();
+    assert_eq!(baseline('\u{6f22}', 0), baseline('x', 4));
 }

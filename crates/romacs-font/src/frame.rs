@@ -1,7 +1,6 @@
 //! Publishing resolved fonts into a frame's paint list (Seam P).
 
 use crate::cluster::{is_composition_joiner, representative_char_for_cluster};
-use crate::fontset::FontsetPolicy;
 use crate::resolver::{FontResolveError, FontResolver};
 use crate::style::FontRequest;
 use romacs_display_protocol::font::ResolvedFontId;
@@ -34,10 +33,9 @@ pub fn publish_face_text(
     frame: &mut FrameGlyphBuffer,
     face_id: FaceId,
     request: &FontRequest,
-    policy: &FontsetPolicy,
     text: &str,
 ) -> Result<PublishedFace, FontResolveError> {
-    let primary = resolver.resolve_primary(request, policy)?;
+    let primary = resolver.resolve_primary(request)?;
     let primary_id = primary.id;
     if let Some(face) = frame.faces.get_mut(&face_id) {
         face.default_resolved_font_id = Some(primary_id);
@@ -60,7 +58,7 @@ pub fn publish_face_text(
     let mut bound_chars = 0;
     let mut unresolved = Vec::new();
     for ch in wanted {
-        match resolver.resolve_char(request, ch, policy) {
+        match resolver.resolve_char(request, ch) {
             Ok(resolution) => {
                 frame.fonts.insert(resolution.font.id, resolution.font);
                 frame

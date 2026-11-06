@@ -264,6 +264,22 @@ impl Leaf<'_> {
         })
     }
 
+    pub(crate) fn vm_selected_window(&mut self) -> std::result::Result<Value, Fault> {
+        self.vm.selected_window_value().map_err(Fault::Error)
+    }
+    fn position_or_nil(position: Option<i64>) -> super::super::Out {
+        position.map_or(Ok(Value::NIL), |p| Value::integer(p).map_err(Fault::Error))
+    }
+    pub(crate) fn window_recenter_start(&mut self, window: Value, arg: Option<i64>, lines: (i64, i64)) -> super::super::Out {
+        Self::position_or_nil(self.vm.recenter_start(window, arg, lines).map_err(Fault::Error)?)
+    }
+    pub(crate) fn window_scroll_start(&mut self, window: Value, start: i64, forward: bool, context: i64) -> super::super::Out {
+        Self::position_or_nil(self.vm.scroll_start(window, start, forward, context).map_err(Fault::Error)?)
+    }
+    pub(crate) fn window_rows_shown_from(&mut self, window: Value, start: i64) -> super::super::Out {
+        Self::position_or_nil(self.vm.rows_shown_from(window, start).map_err(Fault::Error)?)
+    }
+
     /// The windows argument `pre-redisplay-function' takes now, if a host
     /// lays the frame out and it has anything to do.
     pub(crate) fn pre_redisplay_call(&mut self) -> std::result::Result<Option<Value>, Fault> {

@@ -164,12 +164,8 @@ impl RenderApp {
                 }
             }
             WindowCommand::SetWindowTitle { title } => {
-                self.frame_windows
-                    .primary_window_mut()
-                    .expect("primary window state")
-                    .chrome_mut()
-                    .title = title.clone();
                 if let Some(primary_state) = self.frame_windows.primary_window_mut() {
+                    primary_state.chrome_mut().title = title.clone();
                     primary_state.set_title(title);
                     if !primary_state.chrome().decorations_enabled {
                         primary_state.render.mark_dirty();
@@ -445,6 +441,8 @@ impl RenderApp {
             WindowCommand::DestroyWindow { frame } => {
                 let emacs_frame_id = frame.raw_id();
                 tracing::info!("DestroyWindow request: frame_id=0x{:x}", emacs_frame_id);
+                // A retired window's PointerLeft is discarded.
+                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.pointer.set(None); }
                 // Cancel CPU preparation immediately, not after GPU readiness.
                 self.frame_windows.pending_creates.retain(|request| {
                     request.emacs_frame_id != emacs_frame_id

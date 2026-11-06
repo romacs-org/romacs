@@ -325,13 +325,14 @@ is cut in its middle."
   :type 'natnum)
 
 (defun romacs-mode-line--middle-cut (name width)
-  "NAME, cut in its middle with `…' to at most WIDTH columns."
+  "NAME, cut in its middle with an ellipsis to at most WIDTH columns."
   (cond
    ((<= (string-width name) width) name)
-   ((zerop width) "")
+   ((<= width (string-width (truncate-string-ellipsis))) (truncate-string-to-width name width))
    (t
-    (let* ((room (1- width)) (tail (/ room 2)) (head (- room tail)))
-      (concat (truncate-string-to-width name head) "…"
+    (let* ((dots (truncate-string-ellipsis))
+           (room (- width (string-width dots))) (tail (/ room 2)) (head (- room tail)))
+      (concat (truncate-string-to-width name head) dots
               (let ((end (length name)) (start (length name)))
                 (while (and (> start 0) (<= (string-width name (1- start) end) tail)) (setq start (1- start)))
                 (substring name start)))))))

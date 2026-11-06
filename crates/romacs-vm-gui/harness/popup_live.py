@@ -532,7 +532,7 @@ def check_toasts(args, output, report, env, process, state, keys, glyphs):
     report['captures'].append({'name': 'path', 'state': shown})
     [(text, visible, x, y, width, height, glow)] = shown['toasts']
     left, top, right, bottom = shown['pane']
-    if not (visible and text.startswith('Wrote ~/') and '…/' in text and text.endswith('romacs-defaults.el')):
+    if not (visible and text.startswith('Wrote ~/') and '.../' in text and text.endswith('romacs-defaults.el')):
         raise AssertionError(f'path toast {text!r} visible {visible}')
     if not (left <= x and x + width <= right and top <= y) or width > 420 or glow:
         raise AssertionError(f'path toast at {x},{y} {width}x{height} in pane {shown["pane"]}, glow {glow}')
@@ -630,7 +630,7 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
     report['checks'].append({'centred': [first, last, setup['width'] / 2], 'right_start': right_start, 'pushed': pushed})
     # A name too long for the bar: cut in its middle, nothing overlapping.
     keys('-k', 'F9')
-    fio.wait(lambda: '…' in bar() and 'middle.el' in bar(), args.timeout, 'long name cut in its middle', process)
+    fio.wait(lambda: '...' in bar() and 'middle.el' in bar(), args.timeout, 'long name cut in its middle', process)
     time.sleep(.5)
     fio.shot(output / 'long-name.png', env, report)
     zones('middle.el', setup)

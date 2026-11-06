@@ -46,6 +46,28 @@ fn recenter(cx; optional arg: Value, redisplay: Value) -> Step {
     enter(cx, "romacs--recenter", vec![arg, redisplay], Value::NIL)
 }}
 
+// The pixel branches of Frecenter and window_scroll_pixel_based, over rows
+// a host lays out: nil where the Lisp half's lines serve.
+defsubr! { name = "romacs--recenter-start", gnu = "romacs:display", effect = Reads,
+fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
+    let window = cx.vm_selected_window()?;
+    let lines = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    cx.window_recenter_start(window, arg.integer_value(), (lines(margin)?, lines(height)?))
+}}
+
+defsubr! { name = "romacs--scroll-start", gnu = "romacs:display", effect = Reads,
+fn scroll_start(cx, start: Value, forward: Value, context: Value) {
+    let window = cx.vm_selected_window()?;
+    let number = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    cx.window_scroll_start(window, number(start)?, forward != Value::NIL, number(context)?)
+}}
+
+defsubr! { name = "romacs--rows-shown-from", gnu = "romacs:display", effect = Reads,
+fn rows_shown_from(cx, start: Value) {
+    let window = cx.vm_selected_window()?;
+    cx.window_rows_shown_from(window, start.integer_value().ok_or(Fault::Wrong("fixnump", start))?)
+}}
+
 defsubr! { name = "scroll-up", gnu = "window.c:7026", effect = Global,
 fn scroll_up(cx; optional arg: Value) -> Step {
     let follow = following(cx)?;

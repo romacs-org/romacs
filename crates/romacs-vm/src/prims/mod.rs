@@ -10,6 +10,8 @@ include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 
 /// T3 tier: Lisp loops that call Lisp per element, over leaf cursors.
 pub(crate) const PRELUDE: &str = include_str!("../../../../rlisp/vm/prelude.el");
+/// safe_run_hooks, for the prelude and the keyboard half alike.
+pub(crate) const HOOKS_LISP: &str = include_str!("../../../../rlisp/vm/hooks.el");
 /// T3 tier: process.c's waits, filters, sentinels and timers over prims/process.rs.
 pub(crate) const PROCESS_PRELUDE: &str = include_str!("../../../../rlisp/vm/subprocess.el");
 /// T3 tier: inotify.c's watch list and event dispatch over prims/inotify.rs.

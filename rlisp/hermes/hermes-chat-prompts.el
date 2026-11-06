@@ -308,7 +308,7 @@ With nil CLAIM, release any claim for KEY."
     (format "Hermes %s pending: %s"
             (downcase (hermes-chat--prompt-display-name prompt))
             (string-trim
-             (truncate-string-to-width (or summary "") 96 nil nil "…")))))
+             (truncate-string-to-width (or summary "") 96 nil nil t)))))
 
 (defun hermes-chat--auto-prompt-schedulable-p (buffer)
   "Return non-nil if BUFFER may schedule an automatic prompt."

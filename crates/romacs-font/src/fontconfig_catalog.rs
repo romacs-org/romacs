@@ -217,6 +217,92 @@ fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<
     Some(out)
 }
 
+/// What ftfont_spec_pattern asks of a listing for a font-spec.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ListSpec {
+    pub family: Option<String>,
+    pub foundry: Option<String>,
+    /// Characters every face must have, and languages it must cover.
+    pub chars: Vec<u32>,
+    pub langs: Vec<String>,
+}
+
+/// `FcFontList' for a [`ListSpec`], with each face's charset, so one listing
+/// answers for any character, as GNU caches font_list_entities and tests
+/// has_char.
+pub(crate) struct FaceList {
+    set: Owned<fontconfig_sys::FcFontSet>,
+    faces: Vec<(usize, ListedFace)>,
+}
+
+impl FaceList {
+    /// The listed faces having CH.
+    pub fn covering(&self, ch: char) -> Vec<ListedFace> {
+        let _serial = serialize();
+        // SAFETY: the set lives as long as self, and each index is one it
+        // listed; the charset belongs to its pattern.
+        unsafe {
+            let fonts = (*self.set.ptr).fonts;
+            self.faces.iter().filter(|(index, _)| {
+                let mut charset = std::ptr::null_mut();
+                fontconfig_sys::FcPatternGetCharSet(*fonts.add(*index), fontconfig::FC_CHARSET.as_ptr(), 0, &mut charset)
+                    == fontconfig_sys::FcResultMatch && fontconfig_sys::FcCharSetHasChar(charset, u32::from(ch)) != 0
+            }).map(|(_, face)| face.clone()).collect()
+        }
+    }
+}
+
+pub(crate) fn list_constrained(spec: &ListSpec) -> Option<FaceList> {
+    handle()?;
+    let _serial = serialize();
+    // SAFETY (whole function): as `list_faces_inner`.
+    let pattern = Owned::new(unsafe { fontconfig_sys::FcPatternCreate() }, fontconfig_sys::FcPatternDestroy)?;
+    for (key, value) in [(fontconfig::FC_FAMILY, &spec.family), (fontconfig::FC_FOUNDRY, &spec.foundry)] {
+        if let Some(value) = value {
+            let value = CString::new(value.as_str()).ok()?;
+            if unsafe { fontconfig_sys::FcPatternAddString(pattern.ptr, key.as_ptr(), value.as_ptr().cast()) } == 0 {
+                return None;
+            }
+        }
+    }
+    let charset = Owned::new(unsafe { fontconfig_sys::FcCharSetCreate() }, fontconfig_sys::FcCharSetDestroy)?;
+    if !spec.chars.is_empty() {
+        for &ch in &spec.chars {
+            if unsafe { fontconfig_sys::FcCharSetAddChar(charset.ptr, ch) } == 0 {
+                return None;
+            }
+        }
+        if unsafe { fontconfig_sys::FcPatternAddCharSet(pattern.ptr, fontconfig::FC_CHARSET.as_ptr(), charset.ptr) } == 0 {
+            return None;
+        }
+    }
+    let langs = Owned::new(unsafe { fontconfig_sys::FcLangSetCreate() }, fontconfig_sys::FcLangSetDestroy)?;
+    if !spec.langs.is_empty() {
+        for lang in &spec.langs {
+            let lang = CString::new(lang.as_str()).ok()?;
+            if unsafe { fontconfig_sys::FcLangSetAdd(langs.ptr, lang.as_ptr().cast()) } == 0 {
+                return None;
+            }
+        }
+        if unsafe { fontconfig_sys::FcPatternAddLangSet(pattern.ptr, fontconfig::FC_LANG.as_ptr(), langs.ptr) } == 0 {
+            return None;
+        }
+    }
+    let objects = Owned::new(unsafe { fontconfig_sys::FcObjectSetCreate() }, fontconfig_sys::FcObjectSetDestroy)?;
+    for key in [fontconfig::FC_FAMILY, fontconfig::FC_FILE, fontconfig::FC_INDEX, fontconfig::FC_WEIGHT, fontconfig::FC_SLANT,
+                fontconfig::FC_WIDTH, fontconfig::FC_SPACING, fontconfig::FC_SCALABLE, fontconfig::FC_VARIABLE,
+                fontconfig::FC_POSTSCRIPT_NAME, fontconfig::FC_FOUNDRY, fontconfig::FC_CHARSET] {
+        if unsafe { fontconfig_sys::FcObjectSetAdd(objects.ptr, key.as_ptr()) } == 0 {
+            return None;
+        }
+    }
+    let set = Owned::new(unsafe { fontconfig_sys::FcFontList(std::ptr::null_mut(), pattern.ptr, objects.ptr) }, fontconfig_sys::FcFontSetDestroy)?;
+    let count = usize::try_from(unsafe { (*set.ptr).nfont }).ok()?;
+    let fonts = unsafe { (*set.ptr).fonts };
+    let faces = (0..count).filter_map(|index| Some((index, listed_face(unsafe { *fonts.add(index) }, spec.family.as_deref())?))).collect();
+    Some(FaceList { set, faces })
+}
+
 /// Every family Fontconfig lists, as GNU's ftfont_list_family asks: one
 /// `FcFontList' pattern per distinct family set, its first name each,
 /// scalable or not.

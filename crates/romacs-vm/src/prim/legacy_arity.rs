@@ -82,7 +82,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | Assq
         | Setcar
         | Setcdr
-        | Remainder
         | DeleteRegion
         | Substring
         | Narrow

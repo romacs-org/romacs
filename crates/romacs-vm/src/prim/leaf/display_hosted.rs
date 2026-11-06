@@ -185,7 +185,7 @@ pub(super) struct Hosted<'l, 'a> {
     /// The host's advance and own row height for the elements from BASE
     /// on, by index since the last reset.
     base: usize,
-    glyphs: Vec<(i64, i64, i64)>,
+    glyphs: Vec<(i64, i64, i64, bool)>,
     /// The elements the next measurement reaches at least: none past the
     /// line after a reset, as motion back a line at a time walks one line,
     /// then doubling up to CHUNK for a long walk.
@@ -208,10 +208,10 @@ impl<'l, 'a> Hosted<'l, 'a> {
     }
     /// The host's advance and own height for element INDEX.
     pub(super) fn glyph(&mut self, index: usize) -> R<(i64, i64)> {
-        self.glyph_rise(index).map(|(w, h, _)| (w, h))
+        self.glyph_rise(index).map(|(w, h, ..)| (w, h))
     }
     /// The host's advance, own height and ascent for element INDEX.
-    fn glyph_rise(&mut self, index: usize) -> R<(i64, i64, i64)> {
+    fn glyph_rise(&mut self, index: usize) -> R<(i64, i64, i64, bool)> {
         if index < self.base || index >= self.base + self.glyphs.len() { self.measure(index)?; }
         self.glyphs.get(index - self.base).copied().ok_or_else(|| Fault::Error("host measurement misses an element".into()))
     }
@@ -235,7 +235,7 @@ impl<'l, 'a> Hosted<'l, 'a> {
         let window = self.source.window();
         let measured = self.source.leaf().vm.host_measure_elements(window, &shown).map_err(Fault::Error)?;
         self.base = index;
-        self.glyphs = measured.glyphs.iter().zip(&measured.ascents).map(|(&(w, h), &a)| (i64::from(w), i64::from(h), i64::from(a))).collect();
+        self.glyphs = measured.glyphs.iter().zip(&measured.ascents).zip(&measured.fallback).map(|((&(w, h), &a), &f)| (i64::from(w), i64::from(h), i64::from(a), f)).collect();
         (self.default_height, self.default_ascent) = (i64::from(measured.face_heights[0]), i64::from(measured.face_ascents[0]));
         Ok(())
     }
@@ -255,14 +255,14 @@ impl Elements for Hosted<'_, '_> {
         let Some(e) = slot.elem else { return Ok(slot) };
         let Some(c) = host_char(&mut self.source, &e)? else { return Ok(slot) };
         if c.is_none() { return Err(not_as_gnu()); }
-        let (width, height, ascent) = self.glyph_rise(index)?;
+        let (width, height, ascent, fallback) = self.glyph_rise(index)?;
         // Every host row reaches the default face's ascent and descent.
         let (ascent, descent) = (ascent.max(self.default_ascent), (height - ascent).max(self.default_height - self.default_ascent));
         let height = ascent + descent;
         let shape = match e.shape {
             Shape::Glyphless { .. } => Shape::PixelStretch {
                 width: StretchWidth::Width { width: glyphless_pixels(&mut self.source, &e)?, zero_ok: false }, unnumbered: None, height, ascent },
-            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent },
+            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height, ascent, fallback },
             // Its own size, not the placeholder's.
             shape @ Shape::Image { .. } => shape,
             Shape::Tab => Shape::PixelTab { space: width, height, ascent },
