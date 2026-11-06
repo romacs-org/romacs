@@ -32,6 +32,7 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'romacs-agent)
+(require 'romacs-key-hint)
 
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))

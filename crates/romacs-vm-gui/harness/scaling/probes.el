@@ -121,7 +121,7 @@ thousandth a stack mark."
 ;; meet tens of them.
 ;; Each distinct hint made once, then found again, the oldest first.
 (scaling-probe key-hint-entries :n 2000
-  :setup (progn (load "romacs-editing" nil t) (scaling--names "\\`C-x' hint" n))
+  :setup (progn (require 'romacs-key-hint) (scaling--names "\\`C-x' hint" n))
   :body (progn (dolist (text it) (romacs-key-hint text))
                (dolist (text it) (romacs-key-hint text))))
 

@@ -29,6 +29,7 @@
 (require 'subr-x)
 (require 'romacs-popup)
 (require 'romacs-icons)
+(require 'romacs-key-hint)
 
 (declare-function mailcap-extension-to-mime "mailcap" (extn))
 

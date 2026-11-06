@@ -338,6 +338,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
 
 
+;;; Generated autoloads from romacs-key-hint.el
+
+(register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))
+
+
 ;;; Generated autoloads from romacs-keymap.el
 
 (register-definition-prefixes "romacs-keymap" '("current-" "key-binding" "minor-mode-key-binding" "posn-point" "romacs-"))
