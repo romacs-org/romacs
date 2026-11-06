@@ -1255,15 +1255,18 @@ X and Y are nil when the mouse is not over the frame, or there is none."
   "Return (X . Y), `mouse-position' on the root frame.
 Romacs's frames measure from the root frame's corner, as a Wayland
 frame's position is not known."
-  (let ((position (cdr (mouse-position))))
-    (cons (or (car position) 0) (or (cdr position) 0))))
+  (let ((position (mouse-position)))
+    (and (framep (car position))
+         (cons (or (car (cdr position)) 0) (or (cdr (cdr position)) 0)))))
 
 (defun romacs--check-mouse-target (frame x y)
   "frame.c's checks of FRAME, X and Y, which nothing warps with.
 pgtkterm.c frame_set_mouse_pixel_position is empty: Wayland has no warp."
   (unless (frame-live-p frame) (signal 'wrong-type-argument (list 'frame-live-p frame)))
   (dolist (n (list x y))
-    (unless (integerp n) (signal 'wrong-type-argument (list 'integerp n)))))
+    (unless (integerp n) (signal 'wrong-type-argument (list 'integerp n)))
+    (unless (<= -2147483648 n 2147483647)
+      (signal 'args-out-of-range (list n -2147483648 2147483647)))))
 
 (defun set-mouse-position (frame x y)
   "Ask to move the mouse pointer to character X, Y of FRAME.

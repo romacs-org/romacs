@@ -721,9 +721,14 @@ def mouse(args, base):
         s.pid = int(s.eval('(emacs-pid)'))
         s.keyboard_ready()
         romacs_seen = seen(ask)
+        # A hidden window has no pointer over it, nor a shown one till it moves.
+        s.eval("(romacs--native-window 'hide)")
+        hidden = s.eval('(cdr (mouse-pixel-position))')
+        s.eval("(romacs--native-window 'show)")
+        shown = s.eval('(cdr (mouse-pixel-position))')
         pixels = [re.match(r'\(\(\d+ \. \d+\)', answer).group() for answer in romacs_seen]
-        return {'gnu': gnu_seen, 'romacs': romacs_seen,
-                'ok': all(map(consistent, gnu_seen + romacs_seen)) and pixels == ['((100 . 60)', '((300 . 200)']}
+        return {'gnu': gnu_seen, 'romacs': romacs_seen, 'hidden': hidden, 'shown': shown,
+                'ok': all(map(consistent, gnu_seen + romacs_seen)) and pixels == ['((100 . 60)', '((300 . 200)'] and hidden == '(nil)'}
     finally:
         s.close()
 
