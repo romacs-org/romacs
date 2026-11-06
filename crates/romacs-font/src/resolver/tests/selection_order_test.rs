@@ -143,9 +143,8 @@ fn selection_order_change_invalidates_primary_and_character_answers() {
     ));
     let mut resolver = FontResolver::new().unwrap();
     let request = FontRequest::new("Noto Sans Mono", 16.0);
-    let policy = FontsetPolicy::default();
-    let primary = resolver.resolve_primary(&request, &policy).unwrap();
-    let character = resolver.resolve_char(&request, 'A', &policy).unwrap();
+    let primary = resolver.resolve_primary(&request).unwrap();
+    let character = resolver.resolve_char(&request, 'A').unwrap();
     assert_eq!(resolver.primary.len(), 1, "primary answer is warm");
     assert_eq!(resolver.chars.len(), 1, "character answer is warm");
     assert_eq!(resolver.selection_order(), DEFAULT_SELECTION_ORDER);
@@ -171,11 +170,11 @@ fn selection_order_change_invalidates_primary_and_character_answers() {
         "changed order invalidates cached character answer"
     );
     assert_eq!(
-        resolver.resolve_primary(&request, &policy).unwrap(),
+        resolver.resolve_primary(&request).unwrap(),
         primary
     );
     assert_eq!(
-        resolver.resolve_char(&request, 'A', &policy).unwrap(),
+        resolver.resolve_char(&request, 'A').unwrap(),
         character
     );
     assert_eq!(resolver.primary.len(), 1, "primary answer is recomputed");

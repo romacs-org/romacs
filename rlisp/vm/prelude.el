@@ -613,6 +613,19 @@ the current buffer's major mode."
         (funcall function)))
     nil))
 
+(defun romacs--pre-redisplay (windows)
+  "xdisp.c prepare_menu_bars's call of `pre-redisplay-function' on WINDOWS,
+as safe_call makes it."
+  (let ((inhibit-redisplay t)
+        (inhibit-quit t))
+    (condition-case err
+        (funcall pre-redisplay-function windows)
+      (error (message "Error during redisplay: %S" err)))))
+
+(defun romacs--native-region (_start _end _window _overlay)
+  "`redisplay-highlight-region-function' while Romacs draws the region itself."
+  nil)
+
 (defun insert-buffer-substring (buffer &optional start end)
   "Insert before point a substring of the contents of BUFFER.
 BUFFER may be a buffer or a buffer name.
@@ -1335,5 +1348,49 @@ goes where that says."
          (kept (constrain-to-field position (point))))
     (goto-char kept)
     (eq kept reached)))
+
+;; lread.c substitute_object_recurse, for edebug.el's reader of `#N=': PLACEHOLDER
+;; replaced by OBJECT everywhere in OBJECT.  With COMPLETED t every node is
+;; remembered; a hash table names the nodes that can start a cycle.
+(defun lread--substitute-object-in-subtree (object placeholder completed)
+  "Replace PLACEHOLDER with OBJECT in OBJECT, as the reader does for `#N='.
+COMPLETED is t, or a hash table of the nodes that may be cycle entry points."
+  (let ((seen (make-hash-table :test 'eq)) (absent (list nil)) recurse)
+    (setq recurse
+          (lambda (tree)
+            (cond
+             ((eq tree placeholder) object)
+             ((or (symbolp tree) (numberp tree) (bool-vector-p tree) (gethash tree seen)) tree)
+             (t
+              (when (or (eq completed t) (not (eq (gethash tree completed absent) absent)))
+                (puthash tree t seen))
+              (cond
+               ((consp tree)
+                (let ((cell tree) (going t))
+                  (while going
+                    (setcar cell (funcall recurse (car cell)))
+                    (let ((next (cdr cell)))
+                      (if (and (consp next) (not (eq next placeholder)) (not (gethash next seen)))
+                          (progn
+                            (when (or (eq completed t) (not (eq (gethash next completed absent) absent)))
+                              (puthash next t seen))
+                            (setq cell next))
+                        (setcdr cell (funcall recurse next))
+                        (setq going nil))))))
+               ((or (vectorp tree) (recordp tree))
+                (dotimes (i (length tree))
+                  (aset tree i (funcall recurse (aref tree i)))))
+               ((hash-table-p tree)
+                (maphash (lambda (key value) (puthash key (funcall recurse value) tree)) tree))
+               ((stringp tree)
+                (dolist (interval (object-intervals tree))
+                  (set-text-properties (nth 0 interval) (nth 1 interval)
+                                       (funcall recurse (nth 2 interval)) tree)))
+               ((or (char-table-p tree) (closurep tree)))
+               (t (signal 'wrong-type-argument (list 'sequencep tree))))
+              tree))))
+    (unless (eq (funcall recurse object) object)
+      (error "Unexpected mutation error in reader"))
+    nil))
 
 ;;; prelude.el ends here

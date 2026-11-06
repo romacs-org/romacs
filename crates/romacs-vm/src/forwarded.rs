@@ -1131,6 +1131,7 @@ impl Vm {
     /// GNU `init_alloc', at each process's start: no collection done yet.
     pub(crate) fn reset_collection_counters(&mut self) {
         self.gc_stats.elapsed_ns = 0;
+        self.collection_log = Default::default();
         let (done, elapsed) = self.forwarded.gc_done;
         self.forwarded.ints[done] = 0;
         self.forwarded.objects[elapsed] = Value::UNBOUND;

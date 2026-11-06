@@ -16,6 +16,11 @@
 ;; session takes on its display.  They supersede the batch steps the chain
 ;; took (`romacs-batch-startup'): a VM restored from a world takes these
 ;; instead (`romacs-startup-function', `romacs-world-restart').
+(defun romacs-gui--startup-ellipsis ()
+  "Truncate with three dots: Iosevka paints `…' two cells wide, where
+`string-width' counts one, so every column after it would shift."
+  (setq truncate-string-ellipsis "..."))
+
 (defun romacs-gui-startup ()
   "Take the per-process startup steps of an interactive session on this display.
 The session leaves batch and has *Messages*, finds its per-user directory,
@@ -28,6 +33,7 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; The session is interactive from here: GNU's C sets `noninteractive'
         ;; from the command line, and only batch keeps it.
         (setq noninteractive nil)
+        (romacs-gui--startup-ellipsis)
         ;; frame.el frame-initialize: a window session has no terminal frame.
         (setq terminal-frame nil)
         ;; emacs.c main (emacs.c:2213) logs an empty message, so every session
@@ -97,7 +103,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
         ;; button's :box) never matches.
         (when initial-window-system
           (frame-set-background-mode (selected-frame) t)
-          (face-set-after-frame-default (selected-frame)))
+          (face-set-after-frame-default (selected-frame))
+          ;; x-win.el and pgtk-win.el's window-system initialization, and
+          ;; fontset_from_font for the frame's font.
+          (romacs--setup-fontsets))
         ;; The root frame's windows are drawn as panes, with a status bar,
         ;; on a window system, in the chrome colours of the faces this
         ;; display shows (romacs-chrome.el, DIVERGENCES.md VM2-PANE-CHROME

@@ -232,7 +232,7 @@ fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
     below.id = 2;
     let frame_snapshot = romacs_layout_input::FrameSnapshot {
         font_selection: romacs_layout_input::FontSelectionState::default(),
-        font_alternatives: romacs_layout_input::FontAlternativeState::default(), no_font: Default::default(),
+        font_alternatives: romacs_layout_input::FontAlternativeState::default(), fontsets: Default::default(), no_font: Default::default(),
         width: 100, height: 120,
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: header },

@@ -49,6 +49,13 @@ fn collected(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
     Ok(Step::Done(Value::TRUE))
 }
 
+// The collections since the last call, for the usage log: (DROPPED RECORD...),
+// each RECORD (KIND MS MET COMMAND) (`Vm::take_collections').
+defsubr! { name = "romacs--take-collections", gnu = "alloc.c:6004", effect = Global,
+fn take_collections(cx) {
+    Ok(cx.take_collections())
+}}
+
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,
 fn make_finalizer(cx, function: Value) {
     if !super::vars::function_p(cx, function)? { return Err(Fault::Wrong("functionp", function)); }
@@ -120,4 +127,12 @@ fn memory_info(cx) -> Step {
         cx.cons(kib, list)
     });
     Ok(Step::Done(list))
+}}
+
+// Each counter wraps past the largest fixnum, as GNU's doc says, and
+// collection never lowers one.
+defsubr! { name = "memory-use-counts", gnu = "alloc.c:7212", effect = Reads,
+fn memory_use_counts(cx) {
+    let counters = cx.consed().map(|n| Value::fixnum((n & Value::MAX_FIXNUM as u64) as i64).unwrap());
+    Ok(counters.iter().rev().fold(Value::NIL, |list, &n| cx.cons(n, list)))
 }}

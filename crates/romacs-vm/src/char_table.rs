@@ -345,6 +345,29 @@ impl Vm {
         Ok(value)
     }
 
+    /// TABLE's own runs of one value, in character order, each slot of the
+    /// table once: char_table_ref_and_range walked over the characters.
+    pub(crate) fn char_table_edits(&self, table: Value) -> Result<u64> {
+        match self.object(table)? {
+            data::Object::CharTable(t) => Ok(t.edits),
+            _ => Err("char-table required".into()),
+        }
+    }
+
+    pub(crate) fn char_table_runs(&self, table: Value) -> Result<Vec<(u32, u32, Value)>> {
+        let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()) };
+        let (mut runs, mut at): (Vec<(u32, u32, Value)>, usize) = (Vec::new(), 0);
+        while at <= crate::lstring::MAX_CHAR as usize {
+            let (value, _, to) = t.span(at)?;
+            match runs.last_mut() {
+                Some(run) if run.2 == value => run.1 = to as u32,
+                _ => runs.push((at as u32, to as u32, value)),
+            }
+            at = to + 1;
+        }
+        Ok(runs)
+    }
+
     pub(crate) fn char_table_get(&self, mut table: Value, index: usize) -> Result<Value> {
         loop {
             let value = self.char_table_own(table, index)?;
@@ -612,8 +635,10 @@ pub(super) struct CharTable {
     pub default: Value,
     pub parent: Value,
     pub extras: Vec<Value>,
+    /// Counts the writes to its characters, for what is derived from them.
+    pub(crate) edits: u64,
 }
-romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras });
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits });
 
 impl CharTable {
     /// Whether no character has a value, as a new table's: read without
@@ -638,6 +663,7 @@ impl Clone for CharTable {
             default: self.default,
             parent: self.parent,
             extras: self.extras.clone(),
+            edits: 0,
         }
     }
 }
@@ -662,7 +688,7 @@ impl CharTable {
         slots
     }
     pub fn new(purpose: Value) -> Self {
-        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![] }
+        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0 }
     }
     // Called before publication, in a leaf allocation window (never collects).
     pub fn initialize(&mut self, count: usize, init: Value) -> Result<()> {
@@ -732,6 +758,7 @@ impl CharTable {
     }
     pub(super) fn set_range_slot(&mut self, from: usize, to: usize, value: CharTableSlot) -> Result<()> {
         if from >= Self::LEN || to >= Self::LEN { return Err("index out of range".into()); }
+        self.edits += 1;
         // Preserve this API's historical no-op for inverted ranges. GNU may
         // retain subdivisions for such a write; that structural divergence is intentional.
         if from > to { return Ok(()); }
@@ -752,6 +779,7 @@ impl CharTable {
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.
     pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
+        self.edits += 1;
         visit_char_table_node_values(&self.root, &mut HashSet::default(), map);
         self.ascii = Self::ascii_from_root(&self.root);
     }

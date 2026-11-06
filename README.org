@@ -1,8 +1,10 @@
+# perfbench-lead-begin
 #+title: Romacs
 
 Romacs is a Lisp machine emulator written in Rust, with Emacs Lisp as its
 runtime.  People and agents program the whole machine in Lisp; editing is one
 application running on it.
+# perfbench-lead-end
 
 #+BEGIN_QUOTE
 All original content in this project has been written with AI Agents
@@ -41,13 +43,13 @@ installs its Lisp in =/usr/share/emacs/site-lisp=, which the init adds to
 
 * Romacs and GNU Emacs compared
 
-Performance against pinned GNU Emacs, measured with the standing benchmark
+Performance against GNU Emacs as a user installs it, measured with the standing benchmark
 suite (=crates/romacs-vm-gui/harness/perfbench/=).  Romacs runs as an
 installation runs it, its Lisp compiled ahead of use.  The tables are regenerated
 from each new run, losses included.  To reproduce them:
 
 #+begin_src sh
-python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --gnu GNU-EMACS
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY
 python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json
 #+end_src
 
@@ -82,6 +84,11 @@ Measured 2026-11-06 on build ~0cfcb823~ against pinned GNU Emacs ~45b0f769~, on 
 
 Not measured in this run: init, gnosis, apps.
 # perfbench-table-end
+
+** Interactive sessions
+
+# perfbench-session-begin
+# perfbench-session-end
 
 ** Headlines
 

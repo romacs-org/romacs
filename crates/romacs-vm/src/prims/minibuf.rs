@@ -32,8 +32,7 @@ defsubr! { name = "read-from-minibuffer", gnu = "minibuf.c:1309", effect = Globa
 fn read_from_minibuffer(cx, prompt: Value; optional initial_contents: Value, keymap: Value,
                         read: Value, hist: Value, default_value: Value,
                         inherit_input_method: Value) -> Step {
-    let _ = inherit_input_method;
-    prepare(cx, [prompt, initial_contents, keymap, read, hist, default_value], true)
+    prepare(cx, [prompt, initial_contents, keymap, read, hist, default_value, inherit_input_method], true)
 }}
 
 defsubr! { name = "read-string", gnu = "minibuf.c:1420", effect = Global,
@@ -41,15 +40,14 @@ fn read_string(cx, prompt: Value; optional initial_input: Value, history: Value,
                default_value: Value, inherit_input_method: Value) -> Step {
     // Fread_string calls Fread_from_minibuffer (prompt, initial, nil, nil,
     // history, default, inherit) directly, not through the symbol.
-    let _ = inherit_input_method;
-    prepare(cx, [prompt, initial_input, Value::NIL, Value::NIL, history, default_value], false)
+    prepare(cx, [prompt, initial_input, Value::NIL, Value::NIL, history, default_value, inherit_input_method], false)
 }}
 
 /// Fread_from_minibuffer's checks, then read_minibuf's, in GNU's order; then
 /// the call into the Lisp half. `minibuffer` selects the caller's tail:
 /// `read-from-minibuffer' (READ) or `read-string' (DEFAULT-VALUE).
-fn prepare(cx: &mut Leaf<'_>, args: [Value; 6], minibuffer: bool) -> Next {
-    let [prompt, initial, keymap, read, hist, default] = args;
+fn prepare(cx: &mut Leaf<'_>, args: [Value; 7], minibuffer: bool) -> Next {
+    let [prompt, initial, keymap, read, hist, default, inherit] = args;
     // barf_if_interaction_inhibited (minibuf.c:1303).
     let inhibit = cx.intern("inhibit-interaction");
     if cx.variable_value(inhibit)?.is_some_and(|v| v != Value::NIL) {
@@ -98,17 +96,17 @@ fn prepare(cx: &mut Leaf<'_>, args: [Value; 6], minibuffer: bool) -> Next {
         return super::keyboard::install(cx, keyboard_ready, [args.to_vec(), vec![flag]].concat());
     }
     let helper = cx.intern("romacs--read-minibuf");
-    let call = [prompt, keymap, initial, pos, histvar, default];
-    let saved = vec![read, default, call[0], call[1], call[2], call[3], call[4], call[5]];
+    let call = [prompt, keymap, initial, pos, histvar, default, inherit];
+    let saved = vec![read, default, call[0], call[1], call[2], call[3], call[4], call[5], call[6]];
     Ok(Step::Call { f: helper, args: call.to_vec(), then: tail(minibuffer), saved })
 }
 
 /// After the keyboard half's install, prepare again from the raw arguments.
 fn keyboard_ready(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let &[prompt, initial, keymap, read, hist, default, caller] = saved else {
-        unreachable!("keyboard install saves seven registers")
+    let &[prompt, initial, keymap, read, hist, default, inherit, caller] = saved else {
+        unreachable!("keyboard install saves eight registers")
     };
-    prepare(cx, [prompt, initial, keymap, read, hist, default], caller != Value::NIL)
+    prepare(cx, [prompt, initial, keymap, read, hist, default, inherit], caller != Value::NIL)
 }
 
 fn tail(minibuffer: bool) -> Then {

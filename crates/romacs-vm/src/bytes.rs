@@ -13,11 +13,13 @@ pub(crate) struct BufferState {
     /// syntax.c's find_start_* cache, tagged with `Vm::defun_start_epoch`
     /// when this buffer wrote it: GNU keeps one cache for the last buffer.
     pub(crate) defun_start: Option<(u64, crate::syntax_scan::DefunStart)>,
+    /// The terminal session this buffer shows, where it shows one.
+    pub(crate) terminal: Option<u64>,
 }
-romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start });
+romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start, terminal });
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
     }
 }
 impl BufferState {
@@ -72,11 +74,27 @@ romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, categ
 
 /// The text of a unibyte buffer as display reads it: each byte one
 /// character, so its positions are the buffer's, a byte above 127 the
-/// raw-byte character GNU shows as an escape. Rebuilt when the bytes change.
+/// raw-byte character GNU shows as an escape. Every edit of the bytes edits
+/// it, and it holds the buffer's overlays.
 #[derive(Clone)]
 pub(crate) struct Mirror {
-    modiff: u64,
     text: crate::annotations::AnnotatedBuffer,
+}
+impl Mirror {
+    /// The byte range of the mirror's text that R, of the buffer's bytes, is.
+    fn range(&self, r: &Range<ByteOffset>) -> Result<Range<ByteOffset>> {
+        let byte = |at: ByteOffset| self.text.byte_of_char(crate::coordinates::CharOffset(at.0));
+        Ok(byte(r.start)?..byte(r.end)?)
+    }
+    /// As the bytes' `replace_with_bias': a replacement inserts before the
+    /// markers at its end and then deletes (adjust_markers_for_replace).
+    fn replace(&mut self, r: &Range<ByteOffset>, inserted: &[u8], before_markers: bool) -> Result<()> {
+        let range = self.range(r)?;
+        let text = crate::text::octets_to_multibyte(inserted);
+        if range.is_empty() { return self.text.replace_with_bias(range, &text, before_markers); }
+        self.text.replace_with_bias(range.end..range.end, &text, true)?;
+        self.text.replace_with_bias(range, b"", false)
+    }
 }
 /// A unibyte buffer's or insertion's text properties, by byte.
 pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
@@ -84,9 +102,9 @@ pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
 impl ByteBuffer {
     /// Bring the mirror to the bytes, narrowing and point now.
     pub(crate) fn mirror_now(&mut self) -> Result<()> {
-        if self.mirror.as_ref().is_none_or(|m| m.modiff != self.state.modiff) {
+        if self.mirror.is_none() {
             let text = crate::text::Text::new(&crate::text::octets_to_multibyte(&self.bytes))?;
-            self.mirror = Some(Box::new(Mirror { modiff: self.state.modiff, text: text.into() }));
+            self.mirror = Some(Box::new(Mirror { text: text.into() }));
         }
         let (restriction, point, state) = (self.restriction.clone(), self.point, self.state.clone());
         let Some(mirror) = &mut self.mirror else { unreachable!("just built") };
@@ -122,9 +140,30 @@ impl ByteBuffer {
         }
         if here.is_some() { ByteOffset(expected).max(start) } else { start }
     }
-    /// The mirror, while it holds these bytes.
+    /// The mirror, once a window has shown these bytes.
     pub(crate) fn shown(&self) -> Option<&crate::annotations::AnnotatedBuffer> {
-        self.mirror.as_ref().filter(|m| m.modiff == self.state.modiff).map(|m| &m.text)
+        self.mirror.as_ref().map(|m| &m.text)
+    }
+    pub(crate) fn shown_mut(&mut self) -> Option<&mut crate::annotations::AnnotatedBuffer> {
+        self.mirror.as_mut().map(|m| &mut m.text)
+    }
+    /// The byte at AT is now BYTE: no marker moves.
+    pub(crate) fn set_byte(&mut self, at: usize, byte: u8) -> Result<()> {
+        self.bytes[at] = byte;
+        let Some(mirror) = &mut self.mirror else { return Ok(()) };
+        let range = mirror.range(&(ByteOffset(at)..ByteOffset(at + 1)))?;
+        mirror.text.rewrite_character(range, &crate::text::octets_to_multibyte(&[byte]))
+    }
+    /// BYTES become the empty buffer's text, every marker staying at BEG.
+    pub(crate) fn fill(&mut self, bytes: &[u8]) -> Result<()> {
+        debug_assert!(self.bytes.is_empty());
+        self.bytes = bytes.to_vec();
+        self.point = ByteOffset(0);
+        self.restriction = ByteOffset(0)..ByteOffset(bytes.len());
+        match &mut self.mirror {
+            Some(mirror) => mirror.replace(&(ByteOffset(0)..ByteOffset(0)), bytes, false),
+            None => Ok(()),
+        }
     }
     /// PROPERTIES, by offset from AT, onto the bytes just inserted there.
     pub(crate) fn graft_properties(&mut self, at: ByteOffset, properties: ByteProperties) {
@@ -204,6 +243,7 @@ impl ByteBuffer {
         })..shift(old.end);
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());
+        if let Some(mirror) = &mut self.mirror { mirror.replace(&r, inserted, before_markers)?; }
         // adjust_markers_for_insert for an insertion; for a replacement,
         // adjust_markers_for_replace: a marker at its end follows the new
         // text and one inside it goes to its start, as inserting before the
@@ -232,6 +272,7 @@ impl ByteBuffer {
         visit(&mut self.local_keymap);
         self.per_buffer.visit_values(visit);
         if let Some(held) = &mut self.held { held.visit_values(visit); }
+        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(visit); }
         for props in self.properties.values_mut() {
             for v in props.values_mut() {
                 visit(v);

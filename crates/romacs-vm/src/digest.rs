@@ -56,6 +56,38 @@ fn sha3(bytes: &[u8], out: usize) -> Vec<u8> {
     state.iter().flat_map(|lane| lane.to_le_bytes()).take(out).collect()
 }
 
+/// RFC 8018 PBKDF2's first block under HMAC-D, which BLOCK is D's block size:
+/// SCRAM's Hi(str, salt, i) (RFC 5802).  The keyed pads are hashed once.
+fn pbkdf2_block<D: sha2::Digest + Clone>(block: usize, password: &[u8], salt: &[u8], iterations: u64) -> Vec<u8> {
+    let key = if password.len() > block { D::digest(password).to_vec() } else { password.to_vec() };
+    let keyed = |pad: u8| {
+        let mut bytes = key.clone();
+        bytes.resize(block, 0);
+        bytes.iter_mut().for_each(|byte| *byte ^= pad);
+        D::new().chain_update(bytes)
+    };
+    let (inner, outer) = (keyed(0x36), keyed(0x5c));
+    let hmac = |message: &[u8]| outer.clone().chain_update(inner.clone().chain_update(message).finalize()).finalize().to_vec();
+    let mut u = hmac(&[salt, &1u32.to_be_bytes()].concat());
+    let mut result = u.clone();
+    for _ in 1..iterations {
+        u = hmac(&u);
+        result.iter_mut().zip(&u).for_each(|(byte, next)| *byte ^= next);
+    }
+    result
+}
+
+/// PBKDF2's first block for PASSWORD and SALT under ALGORITHM's HMAC, the
+/// SHA-1 and SHA-2 ones SCRAM names; ITERATIONS is at least 1.
+pub(crate) fn pbkdf2_hmac(algorithm: &str, password: &[u8], salt: &[u8], iterations: u64) -> Option<Vec<u8>> {
+    Some(match algorithm {
+        "sha1" => pbkdf2_block::<sha1::Sha1>(64, password, salt, iterations),
+        "sha256" => pbkdf2_block::<sha2::Sha256>(64, password, salt, iterations),
+        "sha512" => pbkdf2_block::<sha2::Sha512>(128, password, salt, iterations),
+        _ => return None,
+    })
+}
+
 /// The digest of BYTES under ALGORITHM, a `secure-hash-algorithms' name.
 pub(crate) fn digest(algorithm: &str, bytes: &[u8]) -> Option<Vec<u8>> {
     use sha2::Digest as _;
@@ -72,4 +104,48 @@ pub(crate) fn digest(algorithm: &str, bytes: &[u8]) -> Option<Vec<u8>> {
         "sha3-512" => sha3(bytes, 64),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod pbkdf2_tests {
+    use super::pbkdf2_hmac;
+    fn hex(bytes: &[u8]) -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() }
+
+    // RFC 6070's PBKDF2-HMAC-SHA1 vectors (dkLen 20).
+    #[test]
+    fn rfc6070_sha1_vectors() {
+        for (iterations, expected) in [(1, "0c60c80f961f0e71f3a9b524af6012062fe037a6"),
+                                       (2, "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957"),
+                                       (4096, "4b007901b765489abead49d926f721d065a429c1")] {
+            assert_eq!(hex(&pbkdf2_hmac("sha1", b"password", b"salt", iterations).unwrap()), expected);
+        }
+    }
+
+    // RFC 7914 section 11's PBKDF2-HMAC-SHA256 vector, its first 32 bytes.
+    #[test]
+    fn rfc7914_sha256_vector() {
+        assert_eq!(hex(&pbkdf2_hmac("sha256", b"passwd", b"salt", 1).unwrap()),
+                   "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc");
+    }
+
+    #[test]
+    fn a_long_password_is_hashed_first() {
+        let long = [b'k'; 100];
+        assert_eq!(pbkdf2_hmac("sha1", &long, b"salt", 2), pbkdf2_hmac("sha1", &{ use sha2::Digest; sha1::Sha1::digest(long).to_vec() }, b"salt", 2));
+    }
+
+    // The largest count SCRAM accepts (`sasl-scram-max-iterations').
+    #[test]
+    fn the_largest_count_stays_a_fraction_of_a_second() {
+        let start = std::time::Instant::now();
+        pbkdf2_hmac("sha1", b"password", b"salt", 100_000).unwrap();
+        let took = start.elapsed();
+        eprintln!("pbkdf2 sha1 100000 iterations: {took:?}");
+        assert!(took.as_millis() < 1000, "{took:?}");
+    }
+
+    #[test]
+    fn an_unknown_algorithm_is_none() {
+        assert_eq!(pbkdf2_hmac("md5", b"p", b"s", 1), None);
+    }
 }

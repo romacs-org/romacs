@@ -1196,6 +1196,7 @@ session never came up."
          (jabber-mam-sync--pages (make-hash-table :test #'equal))
          (jabber-mam-sync--timings nil)
          (jabber-mam-sync--disco (make-hash-table :test #'equal))
+         (jabber-mam--longest-hold nil)
          (jabber-mam-sync--unposted (make-hash-table :test #'equal))
          (jabber-db-busy-timeout (max jabber-db-busy-timeout 30000))
          (jabber-mam--room-nicks
@@ -1314,6 +1315,8 @@ session never came up."
                      (when connected (funcall next)))))))
             (jabber-mam-sync--check-disco (float-time))
             (jabber-mam-check-stalls))
+          ;; Counted in the summary: its results and its hold.
+          (ignore-errors (jabber-mam-batch-commit))
           (jabber-mam-sync--summary
            account archives outcomes connected (- (float-time) start)
            (if (memq jc jabber-connections)
@@ -1328,10 +1331,13 @@ session never came up."
                                 (reverse head-outcomes))
                  :heads-seconds (and heads-done (- heads-done start))
                  :connected-seconds (and connected-at (- connected-at start))
+                 :longest-hold jabber-mam--longest-hold
                  :accepted (reverse accepted)
-                 :unposted (progn (ignore-errors (jabber-mam-batch-commit))
-                                  (hash-table-keys jabber-mam-sync--unposted)))))
+                 :unposted (hash-table-keys jabber-mam-sync--unposted))))
       (ignore-errors (jabber-mam-batch-commit))
+      ;; The session left checkpoints to this worker: leave it no WAL to
+      ;; checkpoint on the main VM when it takes them back.
+      (ignore-errors (sqlite-select (jabber-db-ensure-open) "PRAGMA wal_checkpoint(PASSIVE)"))
       (dolist (c jabber-connections)
         (ignore-errors (jabber-disconnect-one c)))
       (advice-remove 'jabber-send-sexp--raw #'jabber-mam-sync--gate)

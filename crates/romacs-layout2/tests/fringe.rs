@@ -33,7 +33,7 @@ fn window(text: &str, wrap: LineWrap) -> WindowSnapshot {
 fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnapshot {
     let y = tab_bar.as_ref().map_or(0, |t| t.height);
     FrameSnapshot {
-        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width: 116, height: 200 + y,
         windows: vec![PlacedWindowSnapshot { x: 8, y, snapshot }], background_alpha: 1.0, children: vec![], tab_bar, chrome: Default::default(), status_bar: None,
     }
 }
@@ -301,7 +301,7 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
     assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
     let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
-        font_selection: Default::default(), font_alternatives: Default::default(), no_font: Default::default(),
+        font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(),
         faces: snapshot.faces.clone(), text: snapshot.text.clone(),
     }).unwrap();
     let advances: Vec<u32> = measured.glyphs.iter().map(|g| g.0).collect();
@@ -349,4 +349,89 @@ fn every_window_but_the_mini_window_is_a_pane() {
     let line = romacs_display_protocol::Color::from_pixel(0x282828);
     assert_eq!(panes.iter().map(|p| (p.bounds.x, p.bounds.width, p.bounds.height, p.radius, p.edge, p.dim)).collect::<Vec<_>>(),
                [(0.0, 116.0, 200.0, 6.0, Some(accent), 0.0), (152.0, 116.0, 200.0, 6.0, Some(line), 0.12)]);
+}
+
+/// Boxed characters side by side in the tab bar are one box run, with no
+/// edge inside it: text over a boxed `tab-bar' takes its box.
+#[test]
+fn the_tab_bar_s_boxed_text_is_one_box_run() {
+    use romacs_display_protocol::BoxVerticalEdges::{self, Left, Neither, Right};
+    use romacs_layout_input::{BoxLine, Decor};
+    let boxed = Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some([200, 10, 10]), style: 1 }), ..Default::default() },
+                       ..face([200; 3], [30, 40, 50]) };
+    let text = TextSlice { extends: vec![], utf8: "abc d".into(), raw: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
+    let tabs = TabBarSnapshot { height: 20, text, face: FaceHandle(0), faces: vec![face([200; 3], [30, 40, 50]), boxed] };
+    let painted = lay_out(frame(window("x", LineWrap::Window), Some(tabs)));
+    let cells: Vec<BoxVerticalEdges> = painted.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. } => Some(*box_vertical_edges),
+        _ => None,
+    }).collect();
+    assert_eq!(cells[..3], [Left, Neither, Right]);
+}
+
+/// A boxed band is one box run, as a mode line is: its characters and the
+/// stretches filling its room, every cell the band's height on one
+/// baseline, and no character a box of its own, as each was. A segment
+/// with a box of its own is a run over its characters; a run ends at what
+/// is not painted against it.
+#[test]
+fn a_bar_s_box_is_one_run_and_a_segment_s_its_own() {
+    use romacs_display_protocol::BoxVerticalEdges::{self, Both, Left, Neither, Right};
+    use romacs_layout_input::{BoxLine, Decor};
+    let line = |color, width| Decor { boxed: Some(BoxLine { vertical: width, horizontal: width, color: Some(color), style: 1 }), ..Default::default() };
+    let boxed = |decor| Face { decor, ..face([200; 3], [30, 40, 50]) };
+    let bar = |text: &str, runs, faces, marks| StatusBarSnapshot {
+        x: 0, y: 150, width: 116, height: 22,
+        text: TextSlice { extends: vec![], utf8: text.into(), raw: vec![], face_runs: runs },
+        face: FaceHandle(0), faces, window: 1, focused: true, marks,
+    };
+    // What the bar paints, in x order: a character or `_' for a stretch,
+    // its edges, its top and bottom, and a character's baseline.
+    let cells = |bar| {
+        let mut snapshot = frame(window("x", LineWrap::Window), None);
+        snapshot.status_bar = Some(bar);
+        let painted = lay_out(snapshot);
+        let mut cells: Vec<(f32, char, BoxVerticalEdges, f32, f32, Option<f32>)> = painted.glyphs.iter().filter_map(|g| match g {
+            FrameGlyph::Char { char, x, y, height, baseline, box_vertical_edges, row_role: GlyphRowRole::StatusBar, .. } =>
+                Some((*x, *char, *box_vertical_edges, *y, *y + *height, Some(*baseline))),
+            FrameGlyph::Stretch { x, y, height, box_vertical_edges, row_role: GlyphRowRole::StatusBar, .. } =>
+                Some((*x, '_', *box_vertical_edges, *y, *y + *height, None)),
+            _ => None,
+        }).collect();
+        cells.sort_by(|a, b| a.0.total_cmp(&b.0));
+        cells
+    };
+    let shape = |cells: &[(f32, char, BoxVerticalEdges, f32, f32, Option<f32>)]| cells.iter().map(|c| (c.1, c.2)).collect::<Vec<_>>();
+    // The band's box over a segment with its own: one baseline, and every
+    // cell fills the band, the box's lines on its edges.
+    let own = vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }];
+    let two = || vec![boxed(line([200, 10, 10], 1)), boxed(line([10, 200, 10], 1))];
+    let shown = cells(bar("abcd", own.clone(), two(), BandMarks::default()));
+    assert_eq!(shape(&shown), [('_', Both), ('a', Left), ('b', Right), ('c', Left), ('d', Neither), ('_', Right)], "{shown:?}");
+    assert!(shown.iter().all(|c| c.3 == 150.0 && c.4 == 172.0), "{shown:?}");
+    let baselines: Vec<_> = shown.iter().filter_map(|c| c.5).collect();
+    assert!(baselines.windows(2).all(|w| w[0] == w[1]), "{baselines:?}");
+    // A character whose face has no box stays in the band's run: a stretch
+    // of the band's lies under it, as a mode line's faces merge over its own.
+    let none = vec![boxed(line([200, 10, 10], 1)), boxed(Decor::default())];
+    let shown = cells(bar("ab", vec![FaceRun { bytes: 0..1, face: FaceHandle(1) }], none, BandMarks::default()));
+    let stretches: Vec<_> = shown.iter().filter(|c| c.1 == '_').map(|c| c.2).collect();
+    assert_eq!(stretches, [Left, Neither, Right], "the run goes on under `a': {shown:?}");
+    assert_eq!(shown.iter().find(|c| c.1 == 'b').map(|c| c.2), Some(Neither));
+    // A band of no box: no stretches, and a segment's run ends with it.
+    let plain = || vec![boxed(Decor::default()), boxed(line([10, 200, 10], 1))];
+    let shown = cells(bar("abcd", own.clone(), plain(), BandMarks::default()));
+    assert_eq!(shape(&shown).iter().take(2).copied().collect::<Vec<_>>(), [('a', Left), ('b', Right)]);
+    assert!(!shown.iter().any(|c| c.1 == '_'));
+    // A marker's room between two characters of one box, with no band box
+    // to fill it: two runs.
+    let marker = Segment { bytes: 1..2, name: "right-align".into(), pill: None };
+    let all = vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }];
+    let shown = cells(bar("a b", all, plain(), BandMarks { segments: vec![marker], icons: vec![] }));
+    assert_eq!(shape(&shown), [('a', Both), ('b', Both)], "{shown:?}");
+    // A character the band clips ends the run before it.
+    let long = "l".repeat(40);
+    let run = vec![FaceRun { bytes: 0..40, face: FaceHandle(1) }];
+    let shown = cells(bar(&long, run, plain(), BandMarks::default()));
+    assert_eq!(shown.last().map(|c| c.2), Some(Right), "{shown:?}");
 }

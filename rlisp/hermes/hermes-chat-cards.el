@@ -25,6 +25,7 @@
 
 ;;; Code:
 
+(require 'romacs-truncate)
 (require 'cl-lib)
 (require 'ewoc)
 (require 'seq)
@@ -64,9 +65,9 @@ stay near the text they describe."
 
 (defun hermes-chat--card-fit (text width)
   "Return TEXT on one line, truncated to WIDTH columns with an ellipsis."
-  (truncate-string-to-width
+  (romacs-truncate
    (string-trim (replace-regexp-in-string "[\t\n\r]+" " " (or text "")))
-   (max 1 width) nil nil "…"))
+   (max 1 width)))
 
 (defun hermes-chat--card-right (text width &optional face)
   "Return TEXT in FACE, right-aligned to the edge of a card WIDTH columns wide.
@@ -83,10 +84,9 @@ one column short of the window edge, as before the cap existed."
 LEFT is truncated to leave room for RIGHT.  Below
 `hermes-chat--card-time-min-width' columns RIGHT is dropped."
   (let ((right (if (< width hermes-chat--card-time-min-width) "" right)))
-    (concat (truncate-string-to-width
+    (concat (romacs-truncate
              left (max 1 (- width (if (string-empty-p right) 0
-                                    (+ (string-width right) 2))))
-             nil nil "…")
+                                    (+ (string-width right) 2)))))
             (hermes-chat--card-right right width face)
             "\n")))
 

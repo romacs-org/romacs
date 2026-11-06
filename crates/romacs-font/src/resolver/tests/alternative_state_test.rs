@@ -15,11 +15,10 @@ fn alternative_family_setter_invalidates_both_warm_caches_even_unchanged_or_roun
     ));
     let mut resolver = FontResolver::new().unwrap();
     let request = FontRequest::new("Noto Sans Mono", 16.0);
-    let policy = FontsetPolicy::new();
     let mut state = FontAlternativeState::default();
     for round_trip in [false, true] {
-        resolver.resolve_primary(&request, &policy).unwrap();
-        resolver.resolve_char(&request, 'A', &policy).unwrap();
+        resolver.resolve_primary(&request).unwrap();
+        resolver.resolve_char(&request, 'A').unwrap();
         assert_eq!(resolver.primary.len(), 1);
         assert_eq!(resolver.chars.len(), 1);
         // Re-adopting the same publication is not a setter invocation.

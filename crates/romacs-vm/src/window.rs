@@ -289,7 +289,7 @@ impl Vm {
         let v = self.allocate_object(Object::Marker(Box::new(annotations::Marker {
             buffer: Value::NIL,
             anchor: None,
-            bias: anchors::Bias::Left,
+            bias: anchors::Bias::Left, last_position: 0
         })));
         self.set_marker_object(v, position, buffer)?;
         Ok(v)

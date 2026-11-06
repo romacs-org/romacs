@@ -301,24 +301,73 @@ A nil entry, or a C beyond a string or vector table, is no translation."
 the host keyboard, before `keyboard-translate-table': keyboard.c
 handle_interrupt's `C-g', which sets `quit-flag' (quit.rs).")
 
-(defun romacs--read-char (&optional seconds)
+(defvar input-method-exit-on-first-char nil
+  "keyboard.c `Fset's this: non-nil when the input method is to return its
+first character at once, as a `read-key-sequence' outside the command loop
+binds it.")
+
+(defvar input-method-use-echo-area nil
+  "keyboard.c `Fset's this: non-nil when the input method is to show its
+guidance through the prompt of its own reads, as every read that is not a
+command's binds it.")
+
+(defun romacs--clear-echo ()
+  "read_char's wipe of the echo area, `echo-area-clear-hook' first."
+  (when (current-message)
+    (romacs--safe-run-hooks 'echo-area-clear-hook)
+    (message nil)))
+
+(defun romacs--input-method-char-p (c)
+  "Whether read_char hands the event C to an input method: printable and
+one byte wide."
+  (and (integerp c) (>= c 32) (< c 256) (/= c 127)))
+
+(defun romacs--record-char (c)
+  "keyboard.c record_char: `recent-keys' and the macro being defined leave
+out keyboard-macro input.  It counts the event too, whichever input it came
+from (keyboard.c:3583), for `auto-save-interval' and the idle auto-save."
+  (unless (or executing-kbd-macro
+              (and (boundp 'inhibit--record-char) inhibit--record-char))
+    (romacs--record-input c)
+    (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))
+    (when defining-kbd-macro (romacs--store-kbd-macro-char c))))
+
+(defun romacs--call-input-method (c keymap-read)
+  "read_char's call of `input-method-function' on the character C: the
+events it returns.  Its own reads make up keys of their own, so the
+command's keys are kept from them.  Unless KEYMAP-READ, the read is not one
+of a key sequence and the method must not use the echo area."
+  (let ((keys romacs--command-keys) (start romacs--single-command-key-start))
+    (setq romacs--command-keys [] romacs--single-command-key-start 0)
+    (romacs--clear-echo)
+    (prog1 (let ((input-method-use-echo-area (or input-method-use-echo-area (not keymap-read))))
+             (funcall input-method-function c))
+      ;; A C-g the method read was the method's key.
+      (setq romacs--command-keys keys romacs--single-command-key-start start
+            romacs--keyboard-quit nil))))
+
+(defun romacs--read-char (&optional seconds prev-event keymap-read)
   "keyboard.c read_char: the next event, recorded as input.
 It comes from `unread-post-input-method-events', `unread-command-events'
 or `unread-input-method-events', in that order, else from the executing
 keyboard macro unless that is at its end, else from the host keyboard,
-waiting at most SECONDS when given (then nil).  No input method runs:
-`input-method-function' is never called (DIVERGENCES.md VM2-KBD1).  With none of those and no host,
-SECONDS gives nil and its absence `end-of-file', as batch GNU's minibuffer
-reports it, raised from the innermost recursive edit when there is one."
-  (let ((reread nil) (recorded nil) c (again t))
+waiting at most SECONDS when given (then nil).  With none of those and no
+host, SECONDS gives nil and its absence `end-of-file', as batch GNU's
+minibuffer reports it, raised from the innermost recursive edit when there
+is one.
+A character from anywhere but `unread-post-input-method-events' goes through
+`input-method-function' unless PREV-EVENT, the event before it in its key
+sequence, says it is not the first; that function's default `list' changes
+nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
+  (let ((reread nil) (recorded nil) (post nil) (previous nil) c (again t))
    (setq romacs--keyboard-quit nil)
    (while again
-    (setq again nil)
+    (setq again nil reread nil recorded nil post nil c nil)
     (cond
      (unread-post-input-method-events
       (setq c (romacs--unwrap-menu-event (car unread-post-input-method-events))
             unread-post-input-method-events (cdr unread-post-input-method-events)
-            reread t))
+            reread t recorded t post t))
      (unread-command-events
       (setq c (car unread-command-events)
             unread-command-events (cdr unread-command-events))
@@ -364,14 +413,20 @@ reports it, raised from the innermost recursive edit when there is one."
       (setq c (and c (romacs--keyboard-translate c)))
       (if (null c)
           (when (romacs--unread-p) (setq again t))
+        ;; An input method sees what was recorded go in, not its own output.
+        (unless recorded
+          (romacs--record-char c)
+          (setq recorded t))
+        ;; What the echo area held, for an input method to refer to.
+        (when (and input-method-function (romacs--input-method-char-p c))
+          (setq previous (current-message)
+                input-method-previous-message previous))
         ;; read_char wipes the echo area for each event from the keyboard,
         ;; other than help, frame and window selection events
         ;; (keyboard.c:3231): a prompt `read-event' showed goes once its
         ;; event comes.
-        (when (and (current-message)
-                   (not (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))))
-          (romacs--safe-run-hooks 'echo-area-clear-hook)
-          (message nil))))
+        (unless (and (consp c) (memq (car c) '(help-echo switch-frame select-window)))
+          (romacs--clear-echo))))
      ;; Without a host keyboard a user signal is still an event
      ;; (kbd_buffer_get_event); a special one runs its binding and the read
      ;; goes on, as read_char's do.
@@ -392,17 +447,23 @@ reports it, raised from the innermost recursive edit when there is one."
      ;; command loop that reports errors cannot spin on this one.
      ((> (recursion-depth) 0)
       (throw 'exit (lambda () (signal 'end-of-file '("Error reading from stdin")))))
-     (t (signal 'end-of-file '("Error reading from stdin")))))
+     (t (signal 'end-of-file '("Error reading from stdin"))))
+    ;; reread_for_input_method.
+    (when (and input-method-function (not post) (null prev-event)
+               (romacs--input-method-char-p c))
+      (if (eq input-method-function 'list)
+          (romacs--clear-echo)
+        (let ((events (romacs--call-input-method c keymap-read)))
+          (if (consp events)
+              (setq c (car events)
+                    unread-post-input-method-events
+                    (nconc (cdr events) unread-post-input-method-events))
+            ;; No event: the message comes back, and the read goes on.
+            (when previous
+              (let ((message-log-max nil)) (message "%s" previous)))
+            (setq c nil again t))))))
     (when c
-      ;; record_char: recent-keys and the macro being defined leave out
-      ;; keyboard-macro input.  It counts the event too, whichever input it
-      ;; came from (keyboard.c:3583), for `auto-save-interval' and the idle
-      ;; auto-save.
-      (unless (or recorded executing-kbd-macro
-                  (and (boundp 'inhibit--record-char) inhibit--record-char))
-        (romacs--record-input c)
-        (setq num-nonmacro-input-events (1+ num-nonmacro-input-events))
-        (when defining-kbd-macro (romacs--store-kbd-macro-char c)))
+      (unless recorded (romacs--record-char c))
       ;; A read with SECONDS leaves its event out of the command's keys.
       (when (and (null seconds)
                  (or (not reread) (= (length romacs--command-keys) 0)))
@@ -412,13 +473,14 @@ reports it, raised from the innermost recursive edit when there is one."
 
 ;; keyboard.c read_filtered_event, behind read-event, read-char and
 ;; read-char-exclusive (Fread_char's modifier resolution is Rust).
-(defun romacs--read-filtered-event (prompt seconds ascii-required error-nonascii)
+(defun romacs--read-filtered-event (prompt seconds ascii-required error-nonascii input-method)
   (when inhibit-interaction (signal 'inhibited-interaction nil))
   ;; message_with_string's echo, which is not logged (keyboard.c:10776).
   (when prompt (let ((message-log-max nil)) (message "%s" prompt)))
   (let ((seconds (and (numberp seconds) seconds)) val)
     (while (progn
-             (setq val (romacs--read-char seconds))
+             ;; PREV-EVENT t keeps the input method out unless INPUT-METHOD.
+             (setq val (romacs--read-char seconds (not input-method)))
              ;; read_char's quit: a C-g from the keyboard set `quit-flag',
              ;; or cleared it under `inhibit-quit' and is read as a key;
              ;; maybe_quit acts on it before the event is returned.
@@ -623,7 +685,7 @@ and one takes it."
                      (setq key (aref keys n) checkpoint nil)
                      (romacs--add-command-key key))
                     ((and executing-kbd-macro (romacs--at-end-of-macro-p)
-                          (not unread-command-events))
+                          (not (romacs--unread-p)))
                      (setq state 'end))
                     ;; A C-g read here is a key: read_key_sequence clears
                     ;; the `quit-flag' it set (keyboard.c:11352).
@@ -637,7 +699,7 @@ and one takes it."
                                                 (and defining-kbd-macro romacs--kbd-macro-events))
                                clean (not (or unread-command-events executing-kbd-macro
                                               (and (boundp 'inhibit--record-char) inhibit--record-char)))))
-                       (setq key (romacs--read-char)
+                       (setq key (romacs--read-char nil last-nonmenu-event t)
                              quit-flag nil
                              raw (vconcat raw (list key))
                              keys (vconcat keys (list key)))
@@ -732,7 +794,7 @@ and one takes it."
      (when started (run-hooks 'romacs--sequence-end-functions)))))
 
 ;; keyboard.c read_key_sequence_vs; Fread_key_sequence's string form is Rust.
-(defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last _cmd-loop)
+(defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last cmd-loop)
   (and prompt (not (stringp prompt))
        (signal 'wrong-type-argument (list 'stringp prompt)))
   ;; read_key_sequence (keyboard.c:10993): an interactive read installs
@@ -741,7 +803,9 @@ and one takes it."
     (let ((message-log-max nil)) (message "%s" prompt)))
   (unless continue-echo
     (setq romacs--command-keys [] romacs--single-command-key-start 0))
-  (or (romacs--read-key-sequence dont-downcase-last) []))
+  (let ((input-method-exit-on-first-char (not cmd-loop))
+        (input-method-use-echo-area (not cmd-loop)))
+    (or (romacs--read-key-sequence dont-downcase-last) [])))
 
 ;;;; command_loop_1
 

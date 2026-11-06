@@ -174,20 +174,17 @@ fn read_key_sequence_vector(cx, prompt: Value; optional continue_echo: Value, do
 // keyboard.c read_filtered_event (NO-SWITCH-FRAME, ASCII-REQUIRED, ERROR-NONASCII).
 defsubr! { name = "read-event", gnu = "keyboard.c:10749", effect = Global,
 fn read_event(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    let _ = inherit_input_method;
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::NIL, Value::NIL], DONE)
+    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::NIL, Value::NIL, inherit_input_method], DONE)
 }}
 
 defsubr! { name = "read-char", gnu = "keyboard.c:10700", effect = Global,
 fn read_char(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    let _ = inherit_input_method;
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::TRUE], CHAR)
+    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::TRUE, inherit_input_method], CHAR)
 }}
 
 defsubr! { name = "read-char-exclusive", gnu = "keyboard.c:10784", effect = Global,
 fn read_char_exclusive(cx; optional prompt: Value, inherit_input_method: Value, seconds: Value) -> Step {
-    let _ = inherit_input_method;
-    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::NIL], CHAR)
+    enter(cx, "romacs--read-filtered-event", vec![prompt, seconds, Value::TRUE, Value::NIL, inherit_input_method], CHAR)
 }}
 
 /// This command's keys, `this_command_keys[0 .. this_command_key_count]'.

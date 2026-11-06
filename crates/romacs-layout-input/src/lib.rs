@@ -1,6 +1,8 @@
 //! Seam L: owned layout input. No evaluator, heap reference or glyph matrix.
 use std::ops::Range;
 pub mod cluster;
+pub mod fontset;
+pub use fontset::{Alternative, Alternatives, FontDef, Fontset, FontsetMode, FontsetState, FontsetTarget, OpenedDefFont, OtfSpec};
 
 /// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +85,8 @@ impl FontAlternativeState {
 pub struct FrameSnapshot {
     pub font_selection: FontSelectionState,
     pub font_alternatives: FontAlternativeState,
+    /// The fontsets characters resolve through.
+    pub fontsets: std::sync::Arc<FontsetState>,
     pub width: u32,
     pub height: u32,
     pub windows: Vec<PlacedWindowSnapshot>,
@@ -170,6 +174,7 @@ impl FrameSnapshot {
     pub fn lays_out_like(&self, other: &Self) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
+            && self.fontsets == other.fontsets
             && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
             && self.status_bar == other.status_bar
@@ -259,7 +264,7 @@ pub struct Face {
 romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size, weight, italic, width, decor });
 
 /// A face's lines, GNU's `:underline', `:overline' and `:strike-through'.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Decor {
     pub underline: Option<Line>,
     pub overline: Option<Line>,
@@ -274,7 +279,7 @@ romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike, boxed });
 /// each drawn outside the text when positive (widening the run and the
 /// row) and inside it when negative; COLOR, else the foreground; STYLE 1 a
 /// line, 2 a released button, 3 a pressed one (protocol `BoxType' codes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BoxLine {
     pub vertical: i16,
     pub horizontal: i16,
@@ -288,7 +293,7 @@ romacs_snapshot::snapshot_struct!(BoxLine { vertical, horizontal, color, style }
 /// overlines and strike-throughs are 1), COLOR the line's own colour, else
 /// the face's foreground; for an underline POSITION, `:position' (at the
 /// descent line, that many pixels above it), else where the font says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Line {
     pub style: u8,
     pub color: Option<[u8; 3]>,
@@ -835,6 +840,14 @@ romacs_snapshot::snapshot_enum!(LineWrap {
     LineWrap::Word => (),
 });
 
+/// Whether face lists A and B agree on every handle both can hold. A list
+/// is a table's as far as it had grown, and a handle past the shorter one
+/// shows in the runs: another window showing a new face changes nothing here.
+fn faces_agree(a: &[Face], b: &[Face]) -> bool {
+    let shared = a.len().min(b.len());
+    a[..shared] == b[..shared]
+}
+
 impl WindowSnapshot {
     /// Whether OTHER lays out to the same glyphs, cursor aside: equal but
     /// for `buffer_version' (the VM's conservative redraw signal, which also
@@ -845,7 +858,7 @@ impl WindowSnapshot {
             text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
-            && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && *faces == other.faces && *chrome == other.chrome
+            && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && faces_agree(faces, &other.faces) && *chrome == other.chrome
             && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
     }
 }
@@ -888,6 +901,7 @@ pub fn stretch_advance(width: StretchWidth, x: f64, line_x: f64, last_visible_x:
 pub struct MeasureInput {
     pub font_selection: FontSelectionState,
     pub font_alternatives: FontAlternativeState,
+    pub fontsets: std::sync::Arc<FontsetState>,
     pub faces: Vec<Face>,
     pub text: TextSlice,
     /// How a character no font has a glyph for shows, as the frame's.

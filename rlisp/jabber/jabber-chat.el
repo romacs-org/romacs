@@ -948,6 +948,23 @@ body with \"[LABEL: could not decrypt]\" and return XML-DATA."
 (defvar jabber-chat--crypto-loaded nil
   "Non-nil after crypto modules have been loaded.")
 
+(defun jabber-chat--load-crypto ()
+  "Load the crypto modules, once.
+Loading them holds the main VM tens of milliseconds, so no plain message
+pays for it: a room's first one would, in the middle of the join's flood."
+  (unless jabber-chat--crypto-loaded
+    (condition-case nil (require 'jabber-omemo nil t) (error nil))
+    (condition-case nil (require 'jabber-openpgp nil t) (error nil))
+    (condition-case nil (require 'jabber-openpgp-legacy nil t) (error nil))
+    (setq jabber-chat--crypto-loaded t)))
+
+(defun jabber-chat--load-crypto-when-idle (&rest _)
+  "Load the crypto modules at the next idle moment.
+In `jabber-post-connect-hooks': an encrypted message then finds them."
+  (run-with-idle-timer 2 nil #'jabber-chat--load-crypto))
+
+(add-hook 'jabber-post-connect-hooks #'jabber-chat--load-crypto-when-idle)
+
 (defvar jabber-chat--decrypt-consumed-p nil
   "Non-nil when a decrypt handler consumed state before failing.")
 
@@ -1082,8 +1099,9 @@ has none, nil when decryption failed (placeholder body)."
 
 (defun jabber-chat--decrypt-if-needed (jc xml-data)
   "Dispatch XML-DATA to the first matching decrypt handler.
-On first call, loads crypto modules so their handlers are registered.
-Tries handlers in :priority order.  Returns XML-DATA, possibly
+An encrypted message loads the crypto modules, so their handlers are
+registered, unless the first idle moment after connecting already did
+\(`jabber-chat--load-crypto-when-idle').  Tries handlers in :priority order.  Returns XML-DATA, possibly
 with its body replaced by decrypted plaintext (or an error
 placeholder).  Skips dispatch when XML-DATA has no `from' attribute.
 A cached outcome reaches its handler at most once per session:
@@ -1094,11 +1112,8 @@ consumption are cached; payload failures leave a placeholder body while
 empty failures stay bodyless.  Handlers may additionally schedule their
 own repair (see `jabber-omemo--recover-prekey-failure').  JC is the
 Jabber connection."
-  (unless jabber-chat--crypto-loaded
-    (condition-case nil (require 'jabber-omemo nil t) (error nil))
-    (condition-case nil (require 'jabber-openpgp nil t) (error nil))
-    (condition-case nil (require 'jabber-openpgp-legacy nil t) (error nil))
-    (setq jabber-chat--crypto-loaded t))
+  (when (jabber-xml-encrypted-p xml-data)
+    (jabber-chat--load-crypto))
   (if (null (jabber-xml-get-attribute xml-data 'from))
       xml-data
     (let* ((key (and (jabber-xml-encrypted-p xml-data)
@@ -1772,7 +1787,7 @@ is in the body the reply context is already visible inline."
   "Return the first line of TEXT, truncated to LIMIT characters."
   (let ((line (car (split-string text "\n"))))
     (if (> (length line) limit)
-        (concat (substring line 0 limit) "…")
+        (concat (substring line 0 limit) (truncate-string-ellipsis))
       line)))
 
 (defun jabber-chat--reply-context-snippet (msg)

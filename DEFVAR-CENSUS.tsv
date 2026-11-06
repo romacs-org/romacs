@@ -149,7 +149,6 @@ tty-cursor-movement-use-TAB	absent	terminal frames: Romacs has none (GUI and bat
 tty-cursor-movement-use-TAB-BS	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-display-emoji-force-wide	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-menu-calls-mouse-position-function	absent	terminal frames: Romacs has none (GUI and batch only)
-use-default-font-for-symbols	absent	fontset.c; no shipped Lisp reads or sets it
 vector-cells-consed	absent	alloc.c; no shipped Lisp reads or sets it
 w32--terminal-is-conhost	absent	platform: MS-Windows build only
 w32-add-wrapped-menu-bar-lines	absent	platform: MS-Windows build only

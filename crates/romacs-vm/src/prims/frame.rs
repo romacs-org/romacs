@@ -282,11 +282,12 @@ fn handle_frame_parameter(cx: &mut Leaf<'_>, frame: Value, key: Value, value: Va
         cx.windows().set_frame_alpha(frame, alpha, limit)
     } else if let Some(attribute) = [(cx.intern("foreground-color"), ":foreground"), (cx.intern("background-color"), ":background")]
         .iter().find(|(k, _)| *k == key).map(|&(_, attribute)| attribute)
-        && matches!(cx.kind(value), leaf::Kind::String) && !unspecified_colour(cx, value) && super::face::displayed_faces(cx, frame)? {
+        && matches!(cx.kind(value), leaf::Kind::String) && !unspecified_colour(cx, value) && !cx.frame_shares_faces(frame)? {
         // update_face_from_frame_parameter (xfaces.c:3887): the frame's
         // default face takes the colour, and a new background its
-        // background mode. A child frame's colours paint only it
-        // (VM2-CHILD-FRAME). The initial terminal's "unspecified-fg" and
+        // background mode. A child frame showing another's faces has no
+        // default face of its own to take it, and its colours paint only
+        // it (VM2-CHILD-FRAME). The initial terminal's "unspecified-fg" and
         // "unspecified-bg", which an alist read there carries, name no colour.
         let (default, attribute) = (cx.intern("default"), cx.intern(attribute));
         super::face::set_lisp_face_attribute(cx, default, attribute, value, frame).map(|_| ())
