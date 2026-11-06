@@ -831,6 +831,27 @@ fn a_remapping_added_after_a_paint_makes_a_band_new() {
     assert_eq!(changed.faces[0].foreground, [0, 255, 0], "the window shows the new table");
 }
 
+/// A face that sets nothing merges nothing (xfaces.c merge_named_face): in
+/// a band its text keeps the band's face, not `default''s, and in a window
+/// it stays on the window's own default row.
+#[test]
+fn a_face_that_sets_nothing_leaves_the_face_under_it_showing() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (defface blank-face '((t)) "b")
+                           (defface band-face '((t (:foreground "#0000ff"))) "b")
+                           (set-buffer (get-buffer-create "faces"))
+                           (insert (propertize "text" 'face 'blank-face))
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "a" 'face 'blank-face)
+                                                        (propertize "b" 'face 'band-face))))"##);
+    let shown = vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
+    let band = shown.mode_line.as_ref().expect("the band is shown");
+    assert_eq!(band.face_runs.iter().map(|run| run.bytes.clone()).collect::<Vec<_>>(), vec![1..2], "only the face with colours makes a run");
+    assert!(shown.text.face_runs.iter().all(|run| run.face.0 == 0), "the text stays on the default row");
+}
+
 /// The header line takes the mode line's shortcut: a redisplay that keeps
 /// a window's text, faces and start evaluates its header line again, as
 /// display_mode_lines builds both bands; a header line the window starts

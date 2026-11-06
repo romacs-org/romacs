@@ -45,7 +45,7 @@ impl Vm {
         let mut face_runs = vec![];
         for (i, (start, name)) in named.iter().enumerate() {
             let end = named.get(i + 1).map_or(text.len(), |next| next.0);
-            let Some(handle) = name.as_deref().and_then(|name| self.named(&table, name)) else { continue };
+            let Some(handle) = name.as_deref().and_then(|name| self.band_face(&table, name)) else { continue };
             let local = match handles.iter().find(|(h, _)| *h == handle.0) {
                 Some((_, local)) => *local,
                 None => {

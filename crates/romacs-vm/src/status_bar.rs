@@ -98,7 +98,7 @@ impl Vm {
         let mut local: std::collections::HashMap<u32, FaceHandle> = std::collections::HashMap::new();
         let mut face_runs = vec![];
         for (bytes, name) in runs {
-            let Some(handle) = self.named(&table, &name) else { continue };
+            let Some(handle) = self.band_face(&table, &name) else { continue };
             let face = *local.entry(handle.0).or_insert_with(|| {
                 faces.push(table.face(handle));
                 FaceHandle(faces.len() as u32 - 1)
@@ -248,7 +248,7 @@ impl Vm {
     /// The segment PROJECTED names over BYTES, if it names one.
     fn segment_of(&self, bytes: &std::ops::Range<usize>, projected: &mode_line::Projected, table: &super::FaceTable) -> Option<Segment> {
         let value = |name: &str| projected.iter().find(|(n, _)| *n == name).and_then(|(_, form)| self.ml_form_name(form));
-        let face = |name: &str| value(name).and_then(|face| self.named(table, &face)).map(|h| table.face(h));
+        let face = |name: &str| value(name).and_then(|face| self.band_face(table, &face)).map(|h| table.face(h));
         let name = value("romacs-segment")?;
         let pill = face("romacs-pill").map(|f| Pill { background: f.background, radius: PILL_RADIUS,
                                                       foreground: face("romacs-pill-text").map(|t| t.foreground) });

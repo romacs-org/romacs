@@ -492,7 +492,7 @@ fn band_slice(vm: &Vm, table: &FaceTable, band: mode_line::Band) -> TextSlice {
     let (utf8, runs) = shown_band(&band.text, band.runs);
     TextSlice { extends: vec![],
         face_runs: runs.into_iter()
-            .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: vm.named(table, &face)? }))
+            .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: vm.band_face(table, &face)? }))
             .collect(),
         utf8,
         raw: vec![],
@@ -2655,21 +2655,30 @@ impl Vm {
         })
     }
     /// The handle of the face NAME in TABLE, realised the first time
-    /// something shows it; None for no such face.
+    /// something shows it; None for no such face, and the default row for
+    /// one that sets nothing.
     pub(crate) fn named(&self, table: &FaceTable, name: &str) -> Option<FaceHandle> {
         if let Some(known) = table.index.borrow().get(name) { return known.map(FaceHandle); }
-        let realized = {
+        let handle = {
             let mut view = table.view.borrow_mut();
             self.define_faces(&mut view, vec![name.into()]);
-            view.contains(name).then(|| face_of_attrs(&view.realize(name), name).ok()).flatten()
+            if !view.contains(name) { None }
+            else if view.blank(name) { Some(0) }
+            else {
+                face_of_attrs(&view.realize(name), name).ok().map(|face| {
+                    let mut faces = table.faces.borrow_mut();
+                    faces.push(face);
+                    faces.len() as u32 - 1
+                })
+            }
         };
-        let handle = realized.map(|face| {
-            let mut faces = table.faces.borrow_mut();
-            faces.push(face);
-            faces.len() as u32 - 1
-        });
         table.index.borrow_mut().insert(name.to_owned(), handle);
         handle.map(FaceHandle)
+    }
+    /// The handle of the face NAME for a band's text, None where the
+    /// band's own face shows: no such face, or one that sets nothing.
+    pub(crate) fn band_face(&self, table: &FaceTable, name: &str) -> Option<FaceHandle> {
+        self.named(table, name).filter(|handle| handle.0 != 0 || name == "default")
     }
     /// FACE_REF's face in TABLE, its faces read first.
     fn realized_ref(&self, table: &FaceTable, face_ref: &romacs_face::FaceRef) -> romacs_face::Attrs {

@@ -498,6 +498,13 @@ impl LiveView {
         render_named(self, &self.resolved, name, &self.default_realized)
     }
 
+    /// Whether the face sets nothing, itself or through what it inherits:
+    /// text in it shows the face it is over.
+    pub fn blank(&self, face: &str) -> bool {
+        let name = self.canonical(face);
+        name != "default" && render_named(self, &self.resolved, name, &Attrs::default()).is_empty()
+    }
+
     pub fn effective_ref(&self, face_ref: &FaceRef) -> Attrs {
         render(self, &self.resolved, Task::Layers(&face_ref.0), &Attrs::default())
     }

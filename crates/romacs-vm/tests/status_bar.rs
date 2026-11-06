@@ -161,6 +161,23 @@ fn the_bar_expands_the_mode_line_at_its_own_columns() {
 /// `window-mode-line-height' is 0 and its body takes that line; header
 /// lines stay. Without the bar (a batch frame) GNU's bands and geometry
 /// return.
+/// A face that sets nothing merges nothing (xfaces.c merge_named_face):
+/// text in one keeps the bar's colours, and a coloured face makes a run.
+#[test]
+fn a_face_that_sets_nothing_leaves_the_bars_colours() {
+    let mut vm = session();
+    eval(&mut vm, r##"(progn (defface blank-face '((t)) "b")
+                             (defface coloured-face '((t :foreground "#0000ff")) "c")
+                             (setq mode-line-format (list (propertize "x" 'face 'blank-face)
+                                                          (propertize "y" 'face 'coloured-face))))"##);
+    let shown = bar(&mut vm);
+    let at = |c: char| shown.text.utf8.find(c).unwrap_or_else(|| panic!("{c} in {:?}", shown.text.utf8));
+    let run_at = |byte: usize| shown.text.face_runs.iter().find(|run| run.bytes.contains(&byte));
+    assert!(run_at(at('x')).is_none(), "the bar's own face shows");
+    let run = run_at(at('y')).expect("a run for the face with colours");
+    assert_eq!(shown.faces[run.face.0 as usize].foreground, [0, 0, 255]);
+}
+
 #[test]
 fn no_window_draws_a_band_of_its_own() {
     let mut vm = session();
