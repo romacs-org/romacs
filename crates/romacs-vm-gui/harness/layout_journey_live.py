@@ -172,7 +172,8 @@ def main():
     for line in usage.read_text().splitlines() if usage.exists() else []:
         record = json.loads(line)
         commands += record.get('n', 0) if record.get('kind') == 'command' else 0
-        if record.get('kind') == 'error' and not any(s in record.get('error', '') for s in ('quit', 'Beginning of buffer', 'End of buffer')):
+        # The usage log tags the user's own: a C-g, the buffer's end, a refusal.
+        if record.get('kind') == 'error' and not record.get('user'):
             report['errors'].append(record)
         if record.get('kind') == 'refusal':
             report['refusals'].append(record)

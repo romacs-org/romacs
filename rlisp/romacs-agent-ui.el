@@ -825,7 +825,9 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
                                      (or romacs-agent-ui--history-draft "")))))
 
 (defun romacs-agent-ui--turn-bounds ()
-  "The turn at point: (START . END), from its prompt to the next one's."
+  "The turn at point: (START . END), from its prompt to the next one's.
+A buffer of this mode no session shows has no turns."
+  (unless (markerp romacs-agent-ui--end) (user-error "No session here"))
   (let* ((here (point))
          (start (save-excursion (if (get-text-property here 'romacs-agent-turn) (forward-char 1))
                                 (if (romacs-agent-ui--move-to 'romacs-agent-turn -1) (point) (point-min))))
@@ -843,7 +845,10 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
 (defun romacs-agent-chat-edit-turn ()
   "Put the prompt of the turn at point in the composer, to edit and send."
   (interactive)
-  (let* ((start (car (romacs-agent-ui--turn-bounds)))
+  (let* ((start (let ((start (car (romacs-agent-ui--turn-bounds))))
+                  ;; Before the first prompt: nothing to edit, and the draft stays.
+                  (unless (get-text-property start 'romacs-agent-turn) (user-error "No turn here"))
+                  start))
          (end (or (next-single-property-change start 'romacs-agent-turn nil romacs-agent-ui--end) romacs-agent-ui--end))
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
     (delete-region romacs-agent-ui--end (point-max))
