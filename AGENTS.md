@@ -26,6 +26,10 @@ possible; say so where you do.
 - A build or fix request authorizes focused edits, checks, review, and a local
   commit. Questions, explanations, and reviews remain read-only unless changes
   are requested.
+- In Lisp the user sees, use faces, not bare strings: key hints through
+  `substitute-command-keys` or `help-key-binding`, mode-line and status text in
+  named faces that inherit theme faces. A command that only makes sense in a mode
+  declares it (`(interactive nil some-mode)`), so `M-x` lists what applies.
 - Make operations discoverable, queryable, and composable from Lisp. Agent
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
