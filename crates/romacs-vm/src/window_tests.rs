@@ -576,10 +576,10 @@ fn g3a_geometry_and_layout_end_journal() {
     let snapshot = vm.display_snapshot(800, 576).unwrap();
     vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], point: None }]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
-    // A laid-out window lays itself out again for UPDATE, which needs the
-    // host's layout attached.
+    // UPDATE answers a current end as recorded; a stale one lays the window
+    // out again, which needs the host's layout attached.
+    yes(&mut vm, "(= (window-end nil t) 4)");
     let refused = r#"(equal (condition-case e (window-end nil t) (error (car (cdr e)))) "VM2 window-end in a displayed window is unsupported")"#;
-    yes(&mut vm, refused);
     run(&mut vm, "(insert \"z\")");
     yes(&mut vm, refused);
     yes(&mut vm, "(= (window-end nil) 5)");

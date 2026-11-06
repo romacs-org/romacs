@@ -1260,6 +1260,12 @@ pub struct FrameGlyphBuffer {
     /// The status bar's band, while the frame shows one (VM2-STATUS-BAR).
     pub status_bar: Option<Rect>,
 
+    /// Where the painter put each character of the status bar's text, in
+    /// its order: its left edge in the frame and its width, or None where
+    /// the bar clipped it; a marker's characters span its room. A click
+    /// reads it (`romacs_layout2::status_bar_extents`).
+    pub status_bar_places: Vec<Option<(f32, f32)>>,
+
     /// Rounded backgrounds behind chrome rows' text (`RoundedFill`).
     pub rounded_fills: Vec<RoundedFill>,
 
@@ -1635,6 +1641,7 @@ impl FrameGlyphBuffer {
             window_infos: Vec::with_capacity(16),
             panes: Vec::new(),
             status_bar: None,
+            status_bar_places: Vec::new(),
             rounded_fills: Vec::new(),
             transition_hints: Vec::with_capacity(16),
             window_cursors: Vec::with_capacity(8),
@@ -1679,6 +1686,7 @@ impl FrameGlyphBuffer {
         self.window_infos.clear();
         self.panes.clear();
         self.status_bar = None;
+        self.status_bar_places.clear();
         self.rounded_fills.clear();
         self.transition_hints.clear();
         self.window_cursors.clear();

@@ -66,6 +66,24 @@ pub(crate) fn buffer_of(segments: &[Segment], display: usize, buffer_end: usize)
         .map_or(buffer_end, |s| if s.string { s.buffer } else { s.buffer + display - s.display })
 }
 
+/// The buffer byte a window showing SEGMENTS ends at, its layout ending at
+/// display byte DISPLAY: the end of its last row showing text (GNU's
+/// window_end_pos, from try_window's last_text_row). A display that runs
+/// past the last element (`Vm::window_text' closes SEGMENTS with the end of
+/// the text published) ends there, but for text hidden from just after a
+/// shown newline: the empty row left for it shows no text, so the row
+/// before it ends the window. NEWLINE says whether a buffer byte is one.
+pub(crate) fn shown_end(segments: &[Segment], display: usize, buffer_end: usize, newline: impl Fn(usize) -> bool) -> usize {
+    let end = buffer_of(segments, display, buffer_end);
+    match segments {
+        [.., last, past] if display >= past.display && !last.string && last.len > 0 => {
+            let hidden = last.buffer + last.len;
+            if hidden < past.buffer && newline(hidden - 1) { hidden } else { end }
+        }
+        _ => end,
+    }
+}
+
 /// The display's face runs: RUNS over buffer bytes moved to where SEGMENTS
 /// show that text, and STRINGS, already in display bytes, between them.
 pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings: Vec<FaceRun>) -> Vec<FaceRun> {
