@@ -259,6 +259,30 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
     }
 }
 
+/// `car' or `cdr' of a private cons or nil, with no stack frame: tag bits
+/// alone say cons, the image bit puts an index past the arena, and whatever
+/// else arrives leaves by tail call.
+macro_rules! half {
+    ($name:ident, $general:ident, $field:tt) => {
+        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+            unsafe {
+                let i = &*pc;
+                let x = *r.add(i.d);
+                if x.0 & 7 == 3 {
+                    let index = (x.0 >> 3) as usize;
+                    if index < e.vm.conses.len() {
+                        *r.add(i.a) = e.vm.conses.get_unchecked(index).$field;
+                        return advance(e, r, pc);
+                    }
+                } else if x == Value::NIL {
+                    *r.add(i.a) = Value::NIL;
+                    return advance(e, r, pc);
+                }
+                $general(e, r, pc)
+            }
+        }
+    };
+}
 macro_rules! handler {
     ($name:ident, $p:ident) => {
         pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
@@ -275,8 +299,10 @@ macro_rules! handler {
         }
     };
 }
-handler!(car, Car);
-handler!(cdr, Cdr);
+handler!(mapped_car, Car);
+handler!(mapped_cdr, Cdr);
+half!(car, mapped_car, 0);
+half!(cdr, mapped_cdr, 1);
 handler!(null, Null);
 handler!(eq, Eq);
 handler!(memq, Memq);

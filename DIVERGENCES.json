@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "06081d883fbf8c80f7baa58912a96bdfd98dec3a610f7c7ac28f9256fb4a8887",
+  "input_hash": "9c8a085a31e3a4ccca9a995df7b936b62526683de519651bbef403c413957919",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4987,10 +4987,10 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`aset` of a non-ASCII character into a string",
-   "gnu": "Pinned `Faset` (`src/data.c`) stores a byte into a unibyte string and refuses a non-ASCII character in a multibyte one. Romacs ASCII strings are multibyte where GNU's are unibyte, so it stores the character.",
-   "romacs": "Refusing here would break code that GNU runs as a byte store, until host literals are unibyte.",
-   "why": "Goes with that literal change. `tests/byte_op_kernels.rs` keeps both cases listed.",
+   "mechanism": "`aset` of a non-ASCII character into a multibyte string",
+   "gnu": "Pinned `Faset` (`src/data.c`) refuses a non-ASCII character in a multibyte string. Romacs stores it.",
+   "romacs": "Romacs's ASCII strings are multibyte where GNU's are unibyte, and GNU stores a byte in those, so refusing here would refuse stores GNU allows.",
+   "why": "`tests/byte_op_kernels.rs` keeps both cases listed.",
    "symbols": [
     "aset"
    ],

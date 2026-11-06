@@ -1692,6 +1692,12 @@ fn lower_function(
                 inst
             })
             .collect();
+        // Branches hold their distance, so they need no code table.
+        for (at, inst) in code[id].iter_mut().enumerate() {
+            if let Op::Jump(to) | Op::Unless(_, to) = inst.op {
+                inst.c = (to as isize - at as isize) as usize;
+            }
+        }
     }
     Ok(())
 }
@@ -1729,9 +1735,34 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.handler = kernel(i.value, e).unwrap_or(sealed_call);
         }
         Op::Global(a, b) => {
-            i.handler = global;
+            // Two plain-looking variables whose value is the buffer's.
+            i.handler = if b == vm.multibyte_slot || b == vm.truncate_lines_slot { cold } else { global };
             i.a = a;
             i.b = b;
+        }
+        Op::Cell(a) => {
+            i.handler = cell;
+            i.a = a;
+        }
+        Op::Closure(a, b, c) => {
+            i.handler = closure;
+            i.a = a;
+            i.b = b;
+            i.c = c;
+        }
+        Op::SetGlobal(a, b) => {
+            i.handler = assign_global;
+            i.a = a;
+            i.b = b;
+        }
+        Op::Bind(a, b) => {
+            i.handler = bind;
+            i.a = a;
+            i.b = b;
+        }
+        Op::Unbind(a) => {
+            i.handler = unbind;
+            i.a = a;
         }
         Op::ReadCell(a, b) => {
             i.handler = read_cell;
@@ -2080,10 +2111,7 @@ fn poll_collect_unless_key(e: &mut Engine<'_>, until_key: bool) -> bool {
 unsafe fn global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
-        if i.b == e.vm.multibyte_slot
-            || i.b == e.vm.truncate_lines_slot
-            || e.vm.variable_redirects.get(i.b) != Some(&Some(VariableRedirect::Plain))
-        {
+        if e.vm.variable_redirects.get(i.b) != Some(&Some(VariableRedirect::Plain)) {
             return cold(e, r, pc);
         }
         let value = e.vm.slots[i.b].value;
@@ -2171,7 +2199,7 @@ unsafe fn write_cell(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Valu
 )]
 unsafe fn jump(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
-        let to = e.code.get_unchecked(e.function).as_ptr().add((*pc).a);
+        let to = pc.offset((*pc).c as isize);
         if to <= pc {
             e.budget -= 1;
             if e.budget < 0 {
@@ -2188,7 +2216,7 @@ unsafe fn jump(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
 unsafe fn unless(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         if *r.add((*pc).a) == Value::NIL {
-            next(e, r, e.code.get_unchecked(e.function).as_ptr().add((*pc).b))
+            next(e, r, pc.offset((*pc).c as isize))
         } else {
             advance(e, r, pc)
         }
@@ -2522,7 +2550,6 @@ unsafe fn direct(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         direct_generic(e, r, pc)
     }
 }
-#[cold]
 unsafe fn direct_generic(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
         let i = &*pc;
@@ -2650,7 +2677,6 @@ unsafe fn invoke(
         enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
-#[cold]
 #[inline(never)]
 unsafe fn resolve_entry(
     e: &mut Engine<'_>,
@@ -4424,11 +4450,11 @@ macro_rules! predicate {
         }
     };
 }
-predicate!(consp, |_vm, x| x.tag() == 3);
-predicate!(listp, |_vm, x| x == Value::NIL || x.tag() == 3);
-predicate!(symbolp, |_vm, x| x == Value::NIL || x == Value::TRUE || x.tag() == 7 && x != Value::UNBOUND);
-predicate!(integerp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_))));
-predicate!(numberp, |vm, x| x.tag() == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_) | data::Object::Float(_))));
+predicate!(consp, |_vm, x| x.0 & 7 == 3);
+predicate!(listp, |_vm, x| x == Value::NIL || x.0 & 7 == 3);
+predicate!(symbolp, |_vm, x| x == Value::NIL || x == Value::TRUE || x.0 & 7 == 7 && x != Value::UNBOUND);
+predicate!(integerp, |vm, x| x.0 & 3 == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_))));
+predicate!(numberp, |vm, x| x.0 & 3 == 1 || matches!(vm.object_if(x), Some(data::Object::Bignum(_) | data::Object::Float(_))));
 predicate!(stringp, |vm, x| is_string(vm, x));
 /// Out of line, returning a register-sized value: a wide or address-taken
 /// result in the handler keeps a native frame across its dispatch (the
@@ -4535,6 +4561,74 @@ unsafe fn cold(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
         }
     }
 }
+unsafe fn cell(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        let reg = (*pc).a;
+        let index = e.vm.alloc_cell(*r.add(reg));
+        *r.add(reg) = Value::reference(index, 5);
+        advance(e, r, pc)
+    }
+}
+#[inline(never)]
+unsafe fn make_closure(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) {
+    unsafe {
+        let i = &*pc;
+        let captures = e.vm.functions[e.function].sites[i.c].iter().map(|&reg| *r.add(reg)).collect();
+        *r.add(i.a) = e.vm.alloc_closure(Closure { function: i.b, captures, metadata: vec![], document: Value::NIL });
+    }
+}
+unsafe fn closure(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe {
+        make_closure(e, r, pc);
+        advance(e, r, pc)
+    }
+}
+/// A step's outcome as dispatch wants it: an error or an escape stops.
+fn stepped(e: &mut Engine<'_>, outcome: Result<()>) -> bool {
+    match outcome {
+        Ok(()) => e.escape.is_none(),
+        Err(error) => {
+            e.error = Some(error);
+            false
+        }
+    }
+}
+#[inline(never)]
+unsafe fn assign_global_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool {
+    unsafe {
+        let outcome = set_global(e, (*pc).a, r, (*pc).b);
+        stepped(e, outcome)
+    }
+}
+#[inline(never)]
+unsafe fn bind_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool {
+    unsafe {
+        let outcome = bind_special(e, (*pc).a, *r.add((*pc).b));
+        stepped(e, outcome)
+    }
+}
+#[inline(never)]
+unsafe fn unbind_step(e: &mut Engine<'_>, pc: *const Inst) -> bool {
+    unsafe {
+        let n = (*pc).a;
+        if n > e.vm.dynamic.len() - e.dynamic {
+            return stepped(e, Err("invalid image dynamic binding depth".into()));
+        }
+        if let Some(signal) = checked_unbind(e, n) {
+            e.escape = Some(signal);
+        }
+        e.escape.is_none()
+    }
+}
+unsafe fn assign_global(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if assign_global_step(e, r, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
+}
+unsafe fn bind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if bind_step(e, r, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
+}
+unsafe fn unbind(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+    unsafe { if unbind_step(e, pc) { advance(e, r, pc) } else { Value::UNBOUND } }
+}
 // Owned result/error/control payloads must be dropped before tail dispatch.
 // Keeping them in `cold` retains one native frame per cold instruction even
 // when the Lisp program's activation depth stays constant.
@@ -4544,13 +4638,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
     unsafe {
         let outcome = (|| -> Result<()> {
             match (*pc).op {
-                Op::Cell(reg) => {
-                    let index = e.vm.alloc_cell(*r.add(reg));
-                    *r.add(reg) = Value::reference(index, 5);
-                }
                 Op::Global(reg, slot) => *r.add(reg) = global_value(e, slot)?,
-                Op::SetGlobal(slot, reg) => set_global(e, slot, r, reg)?,
-                Op::Bind(slot, reg) => bind_special(e, slot, *r.add(reg))?,
                 // A late binding (Op::BindLate): dynamic when its symbol is
                 // special now, its cell then forwarding to the dynamic value.
                 Op::BindLate(slot, cell) => {
@@ -4579,15 +4667,6 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         set_global(e, slot, r, reg)?;
                     } else {
                         late_set(e, r, cell, *r.add(reg));
-                    }
-                }
-                Op::Unbind(n) => {
-                    if n > e.vm.dynamic.len() - e.dynamic {
-                        return Err("invalid image dynamic binding depth".into());
-                    }
-                    if let Some(signal) = checked_unbind(e, n) {
-                        e.escape = Some(signal);
-                        return Ok(());
                     }
                 }
                 Op::Catch(dest, tag, target) => {
@@ -4664,13 +4743,6 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         release_control(e, &control);
                     }
                 }
-                Op::Closure(reg, function, site) => {
-                    let captures = e.vm.functions[e.function].sites[site]
-                        .iter()
-                        .map(|&reg| *r.add(reg))
-                        .collect();
-                    *r.add(reg) = e.vm.alloc_closure(Closure { function, captures, metadata: vec![], document: Value::NIL });
-                }
                 Op::DeclareSpecial(slot) => {
                     e.vm.specials.insert(e.vm.symbol_names[slot].clone());
                 }
@@ -4685,6 +4757,11 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 }
                 Op::Const(..)
                 | Op::Move(..)
+                | Op::Cell(..)
+                | Op::SetGlobal(..)
+                | Op::Bind(..)
+                | Op::Unbind(..)
+                | Op::Closure(..)
                 | Op::ReadCell(..)
                 | Op::WriteCell(..)
                 | Op::LateForwarded(..)
