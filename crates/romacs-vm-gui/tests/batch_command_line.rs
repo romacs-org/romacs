@@ -88,7 +88,7 @@ fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, 
 }
 
 /// A batch program's settings stay out of an init, as a session's do
-/// (rlisp/romacs-custom.el, in the chain): `disable-command' creates no
+/// (rlisp/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.
 #[test]
 fn batch_writers_leave_the_init_alone() {
