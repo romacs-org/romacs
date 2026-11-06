@@ -1,8 +1,10 @@
+# perfbench-lead-begin
 #+title: Romacs
 
 Romacs is a Lisp machine emulator written in Rust, with Emacs Lisp as its
 runtime.  People and agents program the whole machine in Lisp; editing is one
 application running on it.
+# perfbench-lead-end
 
 #+BEGIN_QUOTE
 All original content in this project has been written with AI Agents
