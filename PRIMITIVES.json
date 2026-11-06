@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "cae87f222981e834a5fdb8cc7c7e64175e558e261842568eee229ab2dc7628d3",
+  "source_fingerprint": "1e86891ae739bdb58f8699969cfde2fe9d71d0ec381dd61cf75e20d8b609bd8f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1369,
-  "parsed_vm2_only": 1369
+  "parsed_total": 1370,
+  "parsed_vm2_only": 1370
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -554,7 +554,7 @@
   "buffer-hash": {
    "name": "buffer-hash",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/digest.rs:27"
+   "registered_at": "crates/romacs-vm/src/prims/digest.rs:49"
   },
   "buffer-list": {
    "name": "buffer-list",
@@ -5129,6 +5129,11 @@
    "name": "romacs-native-stack-room",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/profiler.rs:52"
+  },
+  "romacs-pbkdf2-hmac": {
+   "name": "romacs-pbkdf2-hmac",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/digest.rs:28"
   },
   "romacs-status-bar-height": {
    "name": "romacs-status-bar-height",
