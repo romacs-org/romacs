@@ -24,6 +24,8 @@ pub(super) struct FaceTable {
     faces: std::cell::RefCell<Vec<Face>>,
     /// Each name asked for: its handle, or None for no such face.
     index: std::cell::RefCell<std::collections::HashMap<String, Option<u32>>>,
+    /// Each band's face asked for, then each name shown over it: its handle.
+    over: std::cell::RefCell<std::collections::HashMap<String, std::collections::HashMap<String, Option<u32>>>>,
     /// The faces merged for text, by content: windows share one index
     /// space, since a band's handle outlives the window text it came with.
     merged: std::cell::RefCell<std::collections::HashMap<u64, Vec<u32>>>,
@@ -57,7 +59,7 @@ impl FaceTable {
         FaceHandle(faces.len() as u32 - 1)
     }
 }
-romacs_snapshot::snapshot_struct!(FaceTable { faces, index, merged, view, id, floor });
+romacs_snapshot::snapshot_struct!(FaceTable { faces, index, over, merged, view, id, floor });
 
 /// More faces than a screen shows in a long while: a table past this is
 /// dropped, so one that outlives many distinct merged faces stays small.
@@ -2896,6 +2898,7 @@ impl Vm {
         Ok(FaceTable {
             faces: std::cell::RefCell::new(vec![default]),
             index: std::cell::RefCell::new(std::iter::once(("default".to_owned(), Some(0))).collect()),
+            over: Default::default(),
             merged: Default::default(),
             view: std::cell::RefCell::new(view),
             id,
@@ -2928,15 +2931,14 @@ impl Vm {
     /// no such face, or one that sets nothing.
     pub(crate) fn band_face(&self, table: &FaceTable, name: &str, base: &str) -> Option<FaceHandle> {
         self.named(table, name).filter(|handle| handle.0 != 0 || name == "default")?;
-        let key = format!("{name}\0{base}");
-        if let Some(known) = table.index.borrow().get(&key) { return known.map(FaceHandle); }
+        if let Some(known) = table.over.borrow().get(base).and_then(|names| names.get(name)) { return known.map(FaceHandle); }
         let face = {
             let mut view = table.view.borrow_mut();
             self.define_faces(&mut view, vec![base.into()]);
             face_of_attrs(&view.realize_over(name, base), name).ok()
         };
         let handle = face.map(|face| table.add(face).0);
-        table.index.borrow_mut().insert(key, handle);
+        table.over.borrow_mut().entry(base.to_owned()).or_default().insert(name.to_owned(), handle);
         handle.map(FaceHandle)
     }
     /// FACE_REF's face in TABLE, its faces read first.

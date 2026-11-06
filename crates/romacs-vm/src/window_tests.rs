@@ -860,6 +860,30 @@ fn a_face_in_a_band_takes_what_it_leaves_from_the_band() {
     assert_ne!(face.background, shown.faces[0].background, "not the default's");
 }
 
+/// A run in `default' over a band: whole, unless a remapping replaces
+/// `default' with less, when the band gives the rest (face-remap-set-base).
+#[test]
+fn a_run_in_default_over_a_band_follows_its_remapping() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r##"(progn (set-buffer (get-buffer-create "faces")) (insert "text")
+                           (set-window-buffer nil (current-buffer))
+                           (setq mode-line-format (list (propertize "m" 'face 'default))))"##);
+    let run_face = |vm: &mut Vm| {
+        let shown = vm.frame_snapshot(800, 600).unwrap().windows[0].snapshot.clone();
+        let band = shown.mode_line.as_ref().expect("the band is shown");
+        let face = band.face_runs[0].face.0 as usize;
+        (shown.faces[face].background, shown.faces[shown.mode_line_face.0 as usize].background, shown.faces[face].weight)
+    };
+    let (whole, band, _) = run_face(&mut vm);
+    assert_ne!(whole, band, "unremapped, `default' sets its background");
+    run(&mut vm, r##"(set (make-local-variable 'face-remapping-alist) '((default (:weight bold))))"##);
+    let (remapped, band, weight) = run_face(&mut vm);
+    assert_eq!(remapped, band, "remapped to a weight alone, the band's background stays");
+    assert_eq!(weight, 700);
+}
+
 /// A face that sets nothing merges nothing (xfaces.c merge_named_face): in
 /// a band its text keeps the band's face, not `default''s, and in a window
 /// it stays on the window's own default row.

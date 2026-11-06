@@ -502,7 +502,8 @@ impl LiveView {
     /// unset is BASE's (xdisp.c face_at_string_position's base face).
     pub fn realize_over(&self, face: &str, base: &str) -> Attrs {
         let name = self.canonical(face);
-        if name == "default" {
+        // Whole unless a remapping replaces it, perhaps with less.
+        if name == "default" && !self.resolved.entries.contains_key(name) {
             return self.default_realized.clone();
         }
         render_named(self, &self.resolved, name, &self.realize(base))

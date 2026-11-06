@@ -351,6 +351,24 @@ fn every_window_but_the_mini_window_is_a_pane() {
                [(0.0, 116.0, 200.0, 6.0, Some(accent), 0.0), (152.0, 116.0, 200.0, 6.0, Some(line), 0.12)]);
 }
 
+/// Boxed characters side by side in the tab bar are one box run, with no
+/// edge inside it: text over a boxed `tab-bar' takes its box.
+#[test]
+fn the_tab_bar_s_boxed_text_is_one_box_run() {
+    use romacs_display_protocol::BoxVerticalEdges::{self, Left, Neither, Right};
+    use romacs_layout_input::{BoxLine, Decor};
+    let boxed = Face { decor: Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some([200, 10, 10]), style: 1 }), ..Default::default() },
+                       ..face([200; 3], [30, 40, 50]) };
+    let text = TextSlice { extends: vec![], utf8: "abc d".into(), raw: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
+    let tabs = TabBarSnapshot { height: 20, text, face: FaceHandle(0), faces: vec![face([200; 3], [30, 40, 50]), boxed] };
+    let painted = lay_out(frame(window("x", LineWrap::Window), Some(tabs)));
+    let cells: Vec<BoxVerticalEdges> = painted.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { box_vertical_edges, row_role: GlyphRowRole::TabBar, .. } => Some(*box_vertical_edges),
+        _ => None,
+    }).collect();
+    assert_eq!(cells[..3], [Left, Neither, Right]);
+}
+
 /// A boxed band is one box run, as a mode line is: its characters and the
 /// stretches filling its room, every cell the band's height on one
 /// baseline, and no character a box of its own, as each was. A segment

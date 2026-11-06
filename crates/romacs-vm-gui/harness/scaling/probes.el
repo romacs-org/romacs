@@ -413,6 +413,19 @@ thousandth a stack mark."
           (set-face-attribute 'highlight nil :weight (if (= (% i 2) 0) 'bold 'normal))
           (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x"))))
 
+;; A tab bar of N characters, each in a face of its own: realised on the
+;; first step, found on the others, each run once.
+(scaling-probe tab-bar-faces :gui t :n 100 :steps 4
+  :setup (let* ((faces (mapcar #'intern (scaling--names "scaling-tab" n)))
+                (row (progn
+                       (dolist (face faces)
+                         (custom-declare-face face '((t :weight bold)) "A scaling face." :group 'scaling))
+                       (mapconcat (lambda (face) (propertize "x" 'face face)) faces ""))))
+           (defalias 'romacs--tab-bar-string (lambda () row))
+           (modify-frame-parameters nil '((tab-bar-lines . 1)))
+           (switch-to-buffer (get-buffer-create "scaling-tab")))
+  :body (with-current-buffer it (insert "x")))
+
 ;; N faces differing only in an underline's colour, merged for text.
 (scaling-probe faces-merged-decor :gui t :n 200 :steps 1
   :setup (let ((buffer (switch-to-buffer (get-buffer-create "scaling-decor"))))
