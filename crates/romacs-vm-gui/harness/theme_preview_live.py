@@ -108,7 +108,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--binary', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--budget', type=float, default=90e6, help='instructions per candidate: two switches at the switch budget')
+    ap.add_argument('--budget', type=float, default=90e6, help='instructions per candidate: about two cycled switches')
     ap.add_argument('--rounds', type=int, default=20, help='two previews each; two digits, as the M-: over none is typed the same')
     ap.add_argument('--settle', type=float, default=2)
     ap.add_argument('--timeout', type=float, default=600)

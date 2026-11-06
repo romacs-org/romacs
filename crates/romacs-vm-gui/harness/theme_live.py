@@ -26,13 +26,16 @@ measure, which divides it among all its switches, is judged.
 The run fails when
   * a switch signals, or a theme is not the one enabled after it;
   * a cycled switch of the first round costs more than --budget
-    instructions.  Pinned GNU, cycling the same shape (its Rum on
-    modus-themes 5.3.0, modus-vivendi, tango-dark; four cycled rounds and a
-    redisplay in one command, net of a command that switches nothing, its
-    whole process counted, 203 faces), costs 46.0 M per switch, and 78.0 M
-    when the no-theme state between themes flips the background mode as
-    it does here.  The budget, 43.2 M, stayed from a run in which
-    modus-vivendi was never loaded (36.0 M), and is held to;
+    instructions, 1.2 times pinned GNU's.  Pinned GNU, cycling the same
+    shape (its Rum on modus-themes 5.3.0, modus-vivendi, tango-dark; four
+    cycled rounds and a redisplay in one command, net of a command that
+    switches nothing, its whole process counted, 203 faces), costs 46.0 M
+    per switch, and 78.0 M when the no-theme state between themes flips
+    the background mode as it does here.  The budget is 1.2 x 46.0 M,
+    55.2 M.  An earlier 43.2 M came from a run in which modus-vivendi was
+    never loaded (36.0 M), so it measured an empty theme: a corrected
+    reference, not a raised budget.  GNU ships none of these themes, so
+    its nearest shape stays the reference;
   * a round's cycled switch grows faster than its face count: its ratio
     to the first round's exceeds --slack times the ratio of the face
     counts (cost linear in the faces passes; quadratic does not);
@@ -42,7 +45,7 @@ The run fails when
   * `C-g' during a long cycle takes more than --quit-limit to end it.
 
 usage: theme_live.py --binary PATH --output DIR [--themes default,catppuccin-latte,tokyonight-night]
-                     [--extra 1000] [--budget 43.2e6] [--slack 1.5] [--rounds 40]
+                     [--extra 1000] [--budget 55.2e6] [--slack 1.5] [--rounds 40]
                      [--tools DIR:DIR]
 """
 import argparse
@@ -59,7 +62,9 @@ import perkey_live as perkey
 # 1.2 x pinned GNU's `load-theme' of modus-vivendi with a redisplay, whole
 # process, from a key in a -Q session: 788 M on a first visit, which reads
 # its library, and 311 M to 380 M on a repeat.  It is the nearest GNU has to
-# a port: a table of every package's faces.  The ports are judged by it.
+# a port: a table of every package's faces.  The ports are judged by it,
+# and the repeat is a target they do not meet yet: nearly all of a port's
+# load is its role pipeline in Lisp, not the switch.
 LOAD_BUDGETS = {'first': {'catppuccin-latte': 946e6, 'tokyonight-night': 946e6},
                 'repeat': {'catppuccin-latte': 373e6, 'tokyonight-night': 373e6}}
 
@@ -199,7 +204,7 @@ def main():
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--themes', default='default,catppuccin-latte,tokyonight-night')
     ap.add_argument('--extra', default='1000', help='comma-separated face counts to add between rounds')
-    ap.add_argument('--budget', type=float, default=43.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
+    ap.add_argument('--budget', type=float, default=55.2e6, help='instructions per cycled switch at the session\'s faces (1.2 x GNU)')
     ap.add_argument('--slack', type=float, default=1.5)
     ap.add_argument('--rounds', type=int, default=40, help='passes through --themes in the cycled measure: one M-: costs ten switches and varies by more')
     ap.add_argument('--quit-limit', type=float, default=.25, help='seconds from C-g to the end of a long cycle, key delivery included')
