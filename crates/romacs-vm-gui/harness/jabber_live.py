@@ -170,6 +170,8 @@ and the callers of `journey-profile-callees'."
     (journey--dump (expand-file-name "events.eld" directory) (reverse journey-events)))
   (when (boundp 'journey-passes)
     (journey--dump (expand-file-name "passes.eld" directory) (reverse journey-passes)))
+  (when (boundp 'journey-slow-timers)
+    (journey--dump (expand-file-name "slow-timers.eld" directory) (reverse journey-slow-timers)))
   (when (fboundp 'journey-db-identities)
     (journey--dump (expand-file-name "identities.eld" directory) (journey-db-identities)))
   (length journey-records))
@@ -221,6 +223,16 @@ JABBER = r'''
                     (when (> took 0.01)
                       (push (list start took (- romacs--timers-run run) (input-pending-p))
                             journey-passes)))))))
+(defvar journey-slow-timers nil "Timers over 20 ms: (START SECONDS FUNCTION ARGS), newest first.")
+(advice-add 'timer-event-handler :around
+            (lambda (function timer)
+              (let ((start (float-time)))
+                (prog1 (funcall function timer)
+                  (let ((took (- (float-time) start)))
+                    (when (> took 0.02)
+                      (push (list start took (format "%.80S" (timer--function timer))
+                                  (format "%.120S" (timer--args timer)))
+                            journey-slow-timers)))))))
 (defvar journey-chat-window nil "The window F7 shows chats in.")
 (defvar journey-chat-index 0)
 (defvar journey-sent 0 "Messages F8 sent.")
@@ -711,8 +723,11 @@ def main():
         if args.profile:
             engine.ask("(progn (profiler-start 'cpu) t)")
         connect_at = time.time()
+        report['clock'] = {'wall': time.time(), 'monotonic_ns': time.monotonic_ns()}
         if args.variant != 'none':
+            asked = time.time()
             engine.ask('(progn (jabber-connect-all) t)', timeout=60)
+            report['clock']['connect_ask_s'] = round(time.time() - asked, 3)
             deadline = time.time() + 60
             while time.time() < deadline and not engine.ask(
                     '(and jabber-connections (eq (get (car jabber-connections) :state) :session-established) t)'):
@@ -720,7 +735,9 @@ def main():
             if restricted:
                 engine.ask('(journey-request-rooms)', timeout=60)
             elif args.account == 'fixture':
+                asked = time.time()
                 engine.ask('(journey-open-rooms)', timeout=60)
+                report['clock']['open_rooms_ask_s'] = round(time.time() - asked, 3)
         time.sleep(args.lead)
         cpu0, start = cpu_seconds(stat), time.time()
         records_before = engine.ask('(length journey-records)')
