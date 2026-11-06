@@ -601,6 +601,13 @@ fn romacs_theme_lisp_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-custom-test.el");
 }
 
+/// Saved settings stay out of the init (tests/romacs-custom-test.el), with
+/// GNU's cus-edit and novice.el, whose functions it changes.
+#[test]
+fn romacs_custom_lisp_tests_pass() {
+    theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-custom-test.el");
+}
+
 /// `rum' is the configured Rum look, face for face
 /// (tests/romacs-theme-rum-test.el), in a session of its own: the
 /// comparison defines faces and realises them for a graphic display.

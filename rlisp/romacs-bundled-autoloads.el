@@ -212,6 +212,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-custom.el
+
+(register-definition-prefixes "romacs-custom" '("romacs-custom-"))
+
+
 ;;; Generated autoloads from romacs-defaults.el
 
 (register-definition-prefixes "romacs-defaults" '("romacs-defaults-"))
