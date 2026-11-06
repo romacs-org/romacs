@@ -18,8 +18,6 @@ auto-raise-tab-bar-buttons	absent	xdisp.c; no shipped Lisp reads or sets it
 auto-raise-tool-bar-buttons	absent	xdisp.c; no shipped Lisp reads or sets it
 backtrace-on-redisplay-error	absent	eval.c; no shipped Lisp reads or sets it
 buffer-access-fontified-property	absent	editfns.c; no shipped Lisp reads or sets it
-buffer-access-fontify-functions	needed	editfns.c; read by gnu-lisp/loadhist.el and 1 more
-byte-boolean-vars	needed	lread.c; read by gnu-lisp/emacs-lisp/byte-opt.el
 byte-code-meter	needed	bytecode.c; read by gnu-lisp/emacs-lisp/bytecomp.el
 byte-metering-on	needed	bytecode.c; read by gnu-lisp/emacs-lisp/bytecomp.el
 bytecomp-version-regexp	absent	lread.c; no shipped Lisp reads or sets it
@@ -27,7 +25,6 @@ cairo-version-string	needed	haikufns.c, pgtkfns.c, xfns.c; read by gnu-lisp/vers
 cannot-suspend	absent	keyboard.c; no shipped Lisp reads or sets it
 charset-revision-table	absent	coding.c; no shipped Lisp reads or sets it
 code-conversion-map-vector	absent	ccl.c; no shipped Lisp reads or sets it
-command-line-max-length	needed	callproc.c; read by gnu-lisp/net/tramp-sh.el and 1 more
 comp--#$	absent	native compilation: Romacs compiles Lisp its own way
 comp-abi-hash	absent	native compilation: Romacs compiles Lisp its own way
 comp-ctxt	absent	native compilation: Romacs compiles Lisp its own way
@@ -71,22 +68,14 @@ dos-timezone-offset	absent	platform: MS-DOS build only
 dos-unsupported-char-glyph	absent	platform: MS-DOS build only
 dos-version	absent	platform: MS-DOS build only
 dos-windows-version	absent	platform: MS-DOS build only
-dynamic-library-alist	needed	emacs.c; read by gnu-lisp/ldefs-boot.el and 2 more
 echo-area-clear-hook	needed	keyboard.c; read by gnu-lisp/nxml/rng-valid.el and 1 more
-emacs-copyright	needed	emacs.c; read by gnu-lisp/calc/calc-help.el and 1 more
 extra-keyboard-modifiers	absent	keyboard.c; no shipped Lisp reads or sets it
 face-default-stipple	absent	xfaces.c; no shipped Lisp reads or sets it
 face-filters-always-match	absent	xfaces.c; no shipped Lisp reads or sets it
 face-font-lax-matched-attributes	absent	xfaces.c; no shipped Lisp reads or sets it
-face-ignored-fonts	needed	xfaces.c; read by gnu-lisp/startup.el
 face-near-same-color-threshold	absent	xfaces.c; no shipped Lisp reads or sets it
 find-word-boundary-function-table	needed	syntax.c; read by gnu-lisp/bindings.el and 3 more
 floats-consed	absent	alloc.c; no shipped Lisp reads or sets it
-font-log	needed	font.c; read by gnu-lisp/international/mule-diag.el
-font-slant-table	needed	font.c; read by gnu-lisp/faces.el
-font-weight-table	needed	font.c; read by gnu-lisp/faces.el
-font-width-table	needed	font.c; read by gnu-lisp/faces.el
-fontset-alias-alist	needed	fontset.c; read by gnu-lisp/international/fontset.el and 1 more
 frame-title-format	needed	xdisp.c; read by gnu-lisp/ansi-osc.el and 10 more
 global-disable-point-adjustment	absent	keyboard.c; no shipped Lisp reads or sets it
 gtk-version-string	needed	pgtkfns.c, xfns.c; read by gnu-lisp/erc/erc.el and 1 more
@@ -105,10 +94,8 @@ haiku-super-keysym	absent	platform: Haiku build only
 icon-title-format	needed	xdisp.c; read by gnu-lisp/files.el and 3 more
 imagemagick-render-type	needed	image.c; read by gnu-lisp/cus-start.el
 inhibit-bidi-mirroring	absent	xdisp.c; no shipped Lisp reads or sets it
-inhibit-compacting-font-caches	needed	font.c; read by gnu-lisp/files.el and 1 more
 inhibit-eval-during-redisplay	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-free-realized-faces	absent	xdisp.c; no shipped Lisp reads or sets it
-inhibit-load-charset-map	needed	charset.c; read by gnu-lisp/loadup.el
 inhibit-menubar-update	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-try-cursor-movement	absent	xdisp.c; no shipped Lisp reads or sets it
 inhibit-try-window-id	absent	xdisp.c; no shipped Lisp reads or sets it
@@ -116,30 +103,23 @@ inhibit-try-window-reusing	absent	xdisp.c; no shipped Lisp reads or sets it
 input-pending-p-filter-events	absent	keyboard.c; no shipped Lisp reads or sets it
 integer-width	absent	alloc.c; no shipped Lisp reads or sets it
 internal-interpreter-environment	absent	eval.c; no shipped Lisp reads or sets it
-internal-make-interpreted-closure-function	needed	eval.c; read by gnu-lisp/emacs-lisp/cconv.el and 1 more
 intervals-consed	absent	alloc.c; no shipped Lisp reads or sets it
 kill-emacs-on-sigint	absent	keyboard.c; no shipped Lisp reads or sets it
 large-hscroll-threshold	absent	buffer.c; no shipped Lisp reads or sets it
 last-code-conversion-error	absent	coding.c; no shipped Lisp reads or sets it
-load-force-doc-strings	needed	lread.c; read by gnu-lisp/jka-compr.el and 1 more
 load-no-native	absent	lread.c; no shipped Lisp reads or sets it
-load-source-file-function	needed	lread.c; read by gnu-lisp/emacs-lisp/package-activate.el and 2 more
 long-line-optimizations-bol-search-limit	absent	buffer.c; no shipped Lisp reads or sets it
 long-line-optimizations-region-size	absent	buffer.c; no shipped Lisp reads or sets it
 long-line-threshold	absent	buffer.c; no shipped Lisp reads or sets it
 lucid--menu-grab-keyboard	absent	keyboard.c; no shipped Lisp reads or sets it
 make-window-start-visible	absent	xdisp.c; no shipped Lisp reads or sets it
 max-redisplay-ticks	absent	xdisp.c; no shipped Lisp reads or sets it
-memory-signal-data	needed	alloc.c; read by gnu-lisp/startup.el
 menu-prompt-more-char	absent	keyboard.c; no shipped Lisp reads or sets it
 motif-version-string	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
-mouse-position-function	needed	frame.c; read by gnu-lisp/loadhist.el and 1 more
 multiple-frames	absent	xdisp.c; no shipped Lisp reads or sets it
-mwheel-coalesce-scroll-events	needed	keyboard.c; read by gnu-lisp/pixel-scroll.el
 native-comp-eln-load-path	absent	native compilation: Romacs compiles Lisp its own way
 native-comp-enable-subr-trampolines	absent	native compilation: Romacs compiles Lisp its own way
 nobreak-char-ascii-display	absent	xdisp.c; no shipped Lisp reads or sets it
-operating-system-release	needed	editfns.c; read by gnu-lisp/subr.el
 other-window-scroll-default	absent	window.c; no shipped Lisp reads or sets it
 overriding-local-map-menu-flag	absent	keyboard.c; no shipped Lisp reads or sets it
 overriding-text-conversion-style	needed	textconv.c; read by gnu-lisp/auth-source.el and 6 more
@@ -151,11 +131,9 @@ pgtk-sent-selection-functions	absent	pgtkselect.c; no shipped Lisp reads or sets
 pgtk-sent-selection-hooks	absent	pgtkselect.c; no shipped Lisp reads or sets it
 pgtk-wait-for-event-timeout	absent	pgtkterm.c; no shipped Lisp reads or sets it
 post-gc-hook	absent	alloc.c; no shipped Lisp reads or sets it
-preloaded-file-list	needed	lread.c; read by gnu-lisp/apropos.el and 3 more
 print--unreadable-callback-buffer	absent	print.c; no shipped Lisp reads or sets it
 query-all-font-backends	absent	font.c; no shipped Lisp reads or sets it
 redisplay--all-windows-cause	absent	xdisp.c; no shipped Lisp reads or sets it
-redisplay--inhibit-bidi	needed	xdisp.c; read by gnu-lisp/loadup.el
 redisplay--mode-lines-cause	absent	xdisp.c; no shipped Lisp reads or sets it
 redisplay-skip-fontification-on-input	absent	xdisp.c; no shipped Lisp reads or sets it
 redisplay-skip-initial-frame	absent	xdisp.c; no shipped Lisp reads or sets it
@@ -168,18 +146,13 @@ string-chars-consed	absent	alloc.c; no shipped Lisp reads or sets it
 strings-consed	absent	alloc.c; no shipped Lisp reads or sets it
 suspend-tty-functions	absent	terminal frames: Romacs has none (GUI and batch only)
 symbols-consed	absent	alloc.c; no shipped Lisp reads or sets it
-system-configuration-features	needed	emacs.c; read by gnu-lisp/mail/emacsbug.el
 tab-bar-separator-image-expression	absent	keyboard.c; no shipped Lisp reads or sets it
-terminal-frame	needed	frame.c; read by gnu-lisp/desktop.el and 10 more
 text-conversion-edits	needed	textconv.c; read by gnu-lisp/simple.el
 text-conversion-face	absent	textconv.c; no shipped Lisp reads or sets it
 tool-bar-border	absent	xdisp.c; no shipped Lisp reads or sets it
-tool-bar-button-margin	needed	xdisp.c; read by gnu-lisp/obsolete/idlw-toolbar.el
 tool-bar-button-relief	absent	xdisp.c; no shipped Lisp reads or sets it
-tool-bar-max-label-size	needed	xdisp.c; read by gnu-lisp/cus-start.el
 tty-cursor-movement-use-TAB	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-cursor-movement-use-TAB-BS	absent	terminal frames: Romacs has none (GUI and batch only)
-tty-defined-color-alist	needed	xfaces.c; read by gnu-lisp/term/tty-colors.el
 tty-display-emoji-force-wide	absent	terminal frames: Romacs has none (GUI and batch only)
 tty-menu-calls-mouse-position-function	absent	terminal frames: Romacs has none (GUI and batch only)
 use-default-font-for-symbols	absent	fontset.c; no shipped Lisp reads or sets it
@@ -291,7 +264,6 @@ x-session-previous-id	absent	platform: X11 build only (Romacs frames are Wayland
 x-set-frame-visibility-more-laxly	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-show-tooltip-timeout	absent	dispnew.c; no shipped Lisp reads or sets it
 x-super-keysym	absent	androidterm.c, pgtkterm.c, xterm.c; no shipped Lisp reads or sets it
-x-toolkit-scroll-bars	needed	androidterm.c, haikuterm.c, pgtkterm.c, w32term.c, xterm.c; read by gnu-lisp/calendar/calendar.el and 4 more
 x-treat-local-requests-remotely	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-use-fast-mouse-position	absent	platform: X11 build only (Romacs frames are Wayland, pgtk-style)
 x-wait-for-event-timeout	absent	platform: MS-Windows and X11 builds only (Romacs frames are Wayland, pgtk-style)

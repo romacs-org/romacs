@@ -31,6 +31,8 @@
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
 (load "international/mule-conf.el" nil t t)
+;; loadup.el:143.
+(setq load-source-file-function #'load-with-code-conversion)
 (load "env.el" nil t t)
 (load "format.el" nil t t)
 (load "bindings.el" nil t t)
@@ -216,6 +218,16 @@ Custom delayed, gets its record's position as `variable-documentation'."
 ;; loadup.el:569: with the preloaded files in, `debug-early' gives way to
 ;; the full debugger.
 (setq debugger #'debug)
+;; loadup.el:391.
+(setq internal-make-interpreted-closure-function #'cconv-make-interpreted-closure)
+;; lread.c Fload keeps the name of each file the dump loads, newest first:
+;; GNU's Lisp in this chain, relative to its directory.
+(setq preloaded-file-list
+      (let ((root (file-name-directory (locate-file "simple" load-path '(".el")))))
+        (delq nil (mapcar (lambda (entry)
+                            (and (stringp (car entry)) (string-prefix-p root (car entry))
+                                 (file-name-sans-extension (substring (car entry) (length root)))))
+                          load-history))))
 
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
@@ -294,6 +306,8 @@ chain left (`romacs--locale-defaults'); `command-line' \(startup.el:1300)
 then begins initialization, in the directory the process started in."
   (setq eol-mnemonic-dos "(DOS)"
         eol-mnemonic-mac "(Mac)")
+  ;; startup.el command-line (startup.el:1343): where this process's Lisp is.
+  (setq lisp-directory (file-name-directory (locate-file "simple" load-path '(".el"))))
   ;; The replay is startup's, before the user's init only.
   (if romacs--locale-defaults
       (romacs--restore-locale-state romacs--locale-defaults)
@@ -325,6 +339,9 @@ and `after-init-time' its clock."
                   startup--xdg-config-default)))
         (setq user-emacs-directory
               (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+        ;; The frame init_display made; a window session has none
+        ;; (rlisp/romacs-gui-loadup.el).
+        (setq terminal-frame (selected-frame))
         (romacs--startup-environment)
         (let ((user-emacs-directory-warning nil))
           (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
