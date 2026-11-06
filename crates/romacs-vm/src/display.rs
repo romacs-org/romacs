@@ -455,6 +455,9 @@ impl ShownKey {
     /// OTHER shows what this showed (GNU's test that a window's current
     /// matrix is up to date: its buffer's text, overlays and narrowing,
     /// its start, size, scroll and faces), whatever Lisp ran between.
+    fn same_size(&self, other: &Self) -> bool {
+        self.geometry == other.geometry
+    }
     fn same_display(&self, other: &Self) -> bool {
         (self.buffer, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
             == (other.buffer, other.modiff, other.accessible, other.start, other.overlays, other.geometry, other.min_hscroll, other.suspended)
@@ -667,8 +670,12 @@ impl Vm {
     }
     /// Freeze every live leaf and the inactive minibuffer; no heap handles escape.
     pub fn frame_snapshot(&mut self, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot> {
-        // redisplay_internal runs the window change functions first.
-        if !self.redisplay_inhibited()? { self.run_window_change_functions()?; }
+        // redisplay_internal's order: prepare_menu_bars, then the window
+        // change functions.
+        if !self.redisplay_inhibited()? {
+            self.run_pre_redisplay()?;
+            self.run_window_change_functions()?;
+        }
         let font_alternatives = self.font_alternative_state()?;
         let place = |(x, y, snapshot)| romacs_layout_input::PlacedWindowSnapshot { x, y, snapshot };
         let mut windows = self.frame_window_snapshots(width, height)?;
@@ -2201,6 +2208,40 @@ impl Vm {
         };
         merged.insert(value.0, handle);
         handle
+    }
+    /// prepare_menu_bars's WINDOWS: nil while only the selected window
+    /// needs redisplay; else, once a buffer or the selection changed, those
+    /// that do (needs_no_redisplay): every window showing that buffer, the
+    /// windows selection left and reached, one whose point moved, or all, the
+    /// mini-window too, when a window's size did; t for a window not shown
+    /// yet, as GNU for a change to the frame.
+    pub(crate) fn pre_redisplay_windows(&mut self) -> Result<Value> {
+        let (selected, leaves, windows) = (self.selected_window_value()?, self.leaf_windows()?, self.displayed_windows());
+        let (mut buffers, mut picked, mut moved, mut all) = (vec![], vec![], vec![], false);
+        for &window in &windows {
+            let (width, height) = self.window_body_size(window)?;
+            let key = self.shown_key(window, width, height)?;
+            let point = self.window_point_value(window)?.integer_value();
+            let id = self.window(window)?.id;
+            match self.display_state.shown.get(&id) {
+                Some(shown) if !shown.key.same_size(&key) => all = true,
+                Some(shown) if shown.key.same_display(&key) => {
+                    // Selection flags the window it left and the one it reached.
+                    if shown.key.selected != key.selected && (shown.key.selected == window || key.selected == window) { picked.push(window); }
+                    else if point != Some(shown.point) { moved.push(window); }
+                }
+                Some(_) => buffers.push(key.buffer),
+                // A mini-window or child frame's window keeps no record.
+                None if !leaves.contains(&window) => {}
+                None => return Ok(Value::TRUE),
+            }
+        }
+        // Point alone asks for nothing beyond the selected window.
+        if buffers.is_empty() && picked.is_empty() && !all { return Ok(Value::NIL); }
+        let list: Vec<Value> = windows.into_iter().filter(|&v| all || picked.contains(&v) || moved.contains(&v)
+            || self.window(v).is_ok_and(|w| buffers.contains(&w.buffer))).collect();
+        if list.iter().all(|&w| w == selected) { return Ok(Value::NIL); }
+        Ok(self.list_value(&list))
     }
     /// Fredisplay's part VM2 does inside a command (VM2-REDISPLAY1): each
     /// live window's point visibility (`keep_point_visible'), its buffer
