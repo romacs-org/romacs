@@ -371,7 +371,8 @@ and that nothing answers at."
       (when (romacs-agent--own-directory-p routes)
         (dolist (route (directory-files routes t "\\.sock\\'"))
           (unless (file-directory-p (expand-file-name (file-name-base route) (romacs-agent--state-root)))
-            (when (file-symlink-p route) (delete-file route))))))
+            ;; Another HOME's process sees no record of a live session here.
+            (when (and (file-symlink-p route) (romacs-agent--stale-p route)) (delete-file route))))))
     (let ((editor (expand-file-name "editor/" runtime)))
       (when (romacs-agent--own-directory-p editor)
         (dolist (socket (directory-files editor t "\\`[0-9]+\\.sock\\'"))
