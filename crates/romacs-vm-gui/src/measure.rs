@@ -122,6 +122,7 @@ mod tests {
             at.push((pos, ch, cursor, glyph.map(|g| (g.3, g.4))));
         }
         assert!(painted.next().is_none(), "{text:?}: every painted glyph is a character's");
+        let mixed = text.chars().any(|c| c >= '\u{2e80}');
         let mut rows: Vec<f32> = at.iter().filter_map(|a| a.2.map(|c| c.1)).collect();
         rows.sort_by(f32::total_cmp);
         rows.dedup();
@@ -131,6 +132,13 @@ mod tests {
             // Past a truncation glyph the host shows nothing; GNU's
             // iterator still places the position (not compared).
             let Some((x, y, cursor_width, _)) = cursor else { continue };
+            // On a row of fonts of several ascents the cursor sits on its
+            // glyph and pos_visible_p reads the last glyph produced: those
+            // answers are GNU's in fallback_rows_live.py.
+            if mixed {
+                assert!(visible.starts_with(&format!("({} ", x as i64)), "{text:?}: visible {pos}: {visible}");
+                continue;
+            }
             assert_eq!(visible, format!("({} {})", x as i64, y as i64), "{text:?}: visible {pos}");
             // A truncated row's last character is under its `$'.
             if glyph.is_none() && ch != '\n' { continue; }
@@ -140,6 +148,8 @@ mod tests {
             let want = format!("(t ({pos} {} 0 nil {pos} ({col} . {row}) nil (0 . 0) {}))", cons(x, y), cons(w, ht));
             assert_eq!(posn, want, "{text:?}: posn-at-point {pos} {ch:?}");
         }
+        // Cursors say where rows are only on rows of one ascent.
+        if mixed { return; }
         // A line is as wide as its newline's x, or the last visible x when
         // continued or truncated, and as tall as the next line's y less its own.
         let y_at = |pos: usize| at[pos - 1].2.unwrap().1;
@@ -292,8 +302,10 @@ mod tests {
                         "{step}: row {row} at y {y} of {body}");
                 } else if step.contains(" -") {
                     assert_eq!(h.eval("(window-start)"), row, "{step}: point on the first row");
-                } else {
-                    // One row more above would not show point whole.
+                } else if h.eval("(text-property-any (window-start) (window-end nil t) 'face 'hosted-big)") == "nil" {
+                    // One row more above would not show point whole: over
+                    // rows of mixed heights try_scrolling's amount may
+                    // take more (fallback_rows_live.py).
                     let up = h.eval("(save-excursion (goto-char (window-start)) (vertical-motion -1) (point))");
                     let shown = h.eval(&format!("(let ((s (window-start))) (set-window-start nil {up} t) (prog1 (pos-visible-in-window-p (point) nil t) (set-window-start nil s t)))"));
                     assert!(shown == "nil" || shown.split(' ').count() != 2, "{step}: start {up} shows point too: {shown}");

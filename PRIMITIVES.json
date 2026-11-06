@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "3bf2b81a9fa791047d71ad895ed41bf9de4f3840462dc84c1a44f05e70e8b937",
+  "source_fingerprint": "73c4247fcd3b2338172964e296c1fe1675890529bb706f87e418c485cb48b922",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1383,
-  "parsed_vm2_only": 1383
+  "parsed_total": 1386,
+  "parsed_vm2_only": 1386
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3484,7 +3484,7 @@
   "move-to-window-line": {
    "name": "move-to-window-line",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:61"
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:83"
   },
   "multibyte-char-to-unibyte": {
    "name": "multibyte-char-to-unibyte",
@@ -4910,6 +4910,11 @@
    "variant": "Primitive::ReadHostEvent",
    "registered_at": "crates/romacs-vm/src/lib.rs:843"
   },
+  "romacs--recenter-start": {
+   "name": "romacs--recenter-start",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:51"
+  },
   "romacs--record-input": {
    "name": "romacs--record-input",
    "implementation": "vm2",
@@ -4945,6 +4950,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:84"
   },
+  "romacs--rows-shown-from": {
+   "name": "romacs--rows-shown-from",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:65"
+  },
   "romacs--run-host-command": {
    "name": "romacs--run-host-command",
    "implementation": "vm2",
@@ -4969,6 +4979,11 @@
    "name": "romacs--save-restriction",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:81"
+  },
+  "romacs--scroll-start": {
+   "name": "romacs--scroll-start",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:58"
   },
   "romacs--secure-hash": {
    "name": "romacs--secure-hash",
@@ -5268,7 +5283,7 @@
   "scroll-down": {
    "name": "scroll-down",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:55"
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:77"
   },
   "scroll-left": {
    "name": "scroll-left",
@@ -5283,7 +5298,7 @@
   "scroll-up": {
    "name": "scroll-up",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:49"
+   "registered_at": "crates/romacs-vm/src/prims/window_scroll.rs:71"
   },
   "search-backward": {
    "name": "search-backward",

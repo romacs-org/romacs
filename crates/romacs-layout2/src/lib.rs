@@ -704,6 +704,9 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     // row being built, and where its glyphs start (`settle_row').
     let mut box_open = false;
     let (mut row_box_top, mut row_glyphs) = (0.0f32, frame.glyphs.len());
+    // A character on this row is in a font of other metrics than its face's.
+    let mut row_mixed = false;
+    let mut cluster_rise = (metrics[0].0, metrics[0].1);
     let mut drawing = line_start == snapshot.start_byte;
     // The first byte of the row being built, and the end of the rows
     // above it that show whole: a row is fully visible when it lies
@@ -752,8 +755,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                     }
                 }
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte + 1; }
-                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
-                (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0 || row_mixed, &row_images, &metrics, face_base, (&mut point_rect, y));
+                (row_box_top, row_mixed, row_glyphs) = (0.0, false, frame.glyphs.len());
                 row_images.clear();
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: shift > 0.0 });
@@ -796,7 +799,11 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             None => shown_at(&snapshot.text, byte, ch, stretch, &mut inside, frame, id, cell),
         };
         // An image's slot is its own height (produce_image_glyph).
-        let (ascent, height) = match &shown { Shown::Image(i) => (i.ascent as f32, (i.ascent + i.descent) as f32), _ => (ascent, height) };
+        let (ascent, height) = match &shown {
+            Shown::Image(i) => (i.ascent as f32, (i.ascent + i.descent) as f32),
+            _ => shown_rise(frame, id, (&snapshot.text.utf8, byte, ch), &shown, (ascent, height), &mut cluster_rise),
+        };
+        let own_mixed = (ascent, height) != (metrics[index].0, metrics[index].1) && !matches!(shown, Shown::Image(_));
         // X on the row and from the line's start (`continued' before it);
         // a TAB stops as from after the line number (x_produce_glyphs).
         let width = |frame: &FrameGlyphBuffer, x: f32, line_x: f32, x0: f32|
@@ -821,8 +828,8 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if glyphs_mark && drawing && y < body_height && y + metrics[0].1 > 0.0 { glyph(frame, special, ox + x, oy + y, metrics[0], default_id)?; }
             if drawing {
                 if visible_end == row_start && fully_visible(y, row_height) { visible_end = byte; }
-                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
-                (row_box_top, row_glyphs) = (0.0, frame.glyphs.len());
+                row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0 || row_mixed, &row_images, &metrics, face_base, (&mut point_rect, y));
+                (row_box_top, row_mixed, row_glyphs) = (0.0, false, frame.glyphs.len());
                 row_images.clear();
                 rows.push(Row { start: row_start, y, height: row_height });
                 marks.push(RowMarks { continued: true, continuation, truncated: false, truncated_left: false });
@@ -848,6 +855,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             if at_point { point_rect = Some((x, y, metrics[0].2, row_height, metrics[0].0)); }
         }
         row_height = row_height.max(height);
+        row_mixed |= own_mixed;
         let visible = drawing && body_height > 0.0 && y < body_height && y + height > 0.0 && x - shift < snapshot.width as f32;
         if truncate && x + advance_px > last_x + shift && !matches!(shown, Shown::Inside) {
             if visible && glyphs_mark { glyph(frame, special, ox + x - shift, oy + y, metrics[0], default_id)?; }
@@ -1029,7 +1037,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     }
     if end_byte == text.len() && y < body_height {
         let scrolled = shift > 0.0 && row_start < text.len();
-        row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0, &row_images, &metrics, face_base);
+        row_height = settle_row(frame, row_glyphs, oy + y, row_height, row_box_top > 0.0 || row_mixed, &row_images, &metrics, face_base, (&mut point_rect, y));
         rows.push(Row { start: row_start, y, height: row_height });
         marks.push(RowMarks { continued: false, continuation, truncated: hidden, truncated_left: scrolled });
         if scrolled && left_mark(shift) > 0.0 && y + metrics[0].1 > 0.0 { glyph(frame, left_glyph, ox + x0, oy + y, metrics[0], default_id)?; }
@@ -1168,7 +1176,7 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
     }
     // One baseline for the band, a box's top included.
     if boxed_top {
-        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &[], &metrics, face_base + offset);
+        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &[], &metrics, face_base + offset, (&mut None, 0.0));
     }
     Ok(())
 }
@@ -1222,9 +1230,9 @@ fn shows_box(faces: &[Face], text: &TextSlice) -> bool {
 /// (a boxed glyph's grown by its box's top): each character and each
 /// stretch shorter than the row moves down by that ascent less its own
 /// (the ascent METRICS[face - FACE_BASE] gives a stretch); the row's new height.  Only a
-/// row with a box (BOXED) is settled.
+/// row with a box or characters of another font's metrics (BOXED) is settled.
 fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, boxed: bool, images: &[(usize, f32)],
-              metrics: &[(f32, f32, f32, f32)], face_base: u32) -> f32 {
+              metrics: &[(f32, f32, f32, f32)], face_base: u32, (cursor, row_y): (&mut Option<(f32, f32, f32, f32, f32)>, f32)) -> f32 {
     use romacs_display_protocol::FrameGlyph;
     if !boxed && images.is_empty() { return height; }
     // An image's slot and the image in it rise to its own ascent.
@@ -1254,6 +1262,12 @@ fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, 
             }
             _ => {}
         }
+    }
+    // The cursor sits on its glyph: down by as much, within this row.
+    if let Some(cursor) = cursor.as_mut().filter(|c| c.1 == row_y) {
+        let shift = (row_ascent - cursor.4).max(0.0);
+        cursor.1 += shift;
+        cursor.3 = cursor.3.min(bottom - shift);
     }
     bottom
 }
@@ -1758,6 +1772,32 @@ fn font_request(face: &Face) -> FontRequest {
 
 /// The advance painting CH in face ID takes: its resolved glyph's, else
 /// the face's nominal CELL.
+/// The ascent and height CH adds to its row (gui_produce_glyphs): those of
+/// the font it is shown in, which a character outside face ID's font takes
+/// from its fontset; FACE's otherwise, as for every ASCII character.
+fn font_rise(frame: &FrameGlyphBuffer, id: FaceId, ch: char, face: (f32, f32)) -> (f32, f32) {
+    if ch.is_ascii() { return face; }
+    let font = frame.char_fonts.get(&id).and_then(|chars| chars.get(&ch)).and_then(|glyph| frame.fonts.get(&glyph.resolved_font_id));
+    font.map_or(face, |font| { let ascent = font.ascent_px.round(); (ascent, ascent + font.descent_px.round()) })
+}
+
+/// The ascent and height a character adds to its row, shown as SHOWN at
+/// byte AT of TEXT: a composed sequence's are its representative's, whose
+/// font shows it (`shown_at'), and a character within one takes them
+/// (CLUSTER); others show nothing of a font.
+fn shown_rise(frame: &FrameGlyphBuffer, id: FaceId, (text, at, ch): (&str, usize, char), shown: &Shown, face: (f32, f32), cluster: &mut (f32, f32)) -> (f32, f32) {
+    match shown {
+        Shown::Glyphs(_) => font_rise(frame, id, ch, face),
+        Shown::Composed { end, .. } => {
+            let representative = romacs_font::cluster::representative_char_for_cluster(&text[at..*end]).unwrap_or(ch);
+            *cluster = font_rise(frame, id, representative, face);
+            *cluster
+        }
+        Shown::Inside => *cluster,
+        _ => face,
+    }
+}
+
 fn advance(frame: &FrameGlyphBuffer, id: FaceId, ch: char, cell: f32) -> f32 {
     // An icon is one column in any family and size (VM2-MODE-LINE).
     if is_icon(ch) { return cell; }
@@ -1785,12 +1825,14 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     let face_ascents: Vec<u32> = metrics.iter().map(|m| m.0.round().max(0.0) as u32).collect();
     let mut glyphs = Vec::with_capacity(input.text.utf8.len());
     let mut ascents = Vec::with_capacity(input.text.utf8.len());
+    let mut fallback = Vec::with_capacity(input.text.utf8.len());
+    let mut cluster_rise = (face_ascents[0] as f32, face_heights[0] as f32);
     let mut inside = 0;
     // A box run's outside side edges add to its first and last glyphs'
     // advances, as append_window paints them.
     let (boxes, mut box_open) = (shows_box(&input.faces, &input.text), false);
     for (byte, ch) in input.text.utf8.char_indices() {
-        if ch == '\n' { glyphs.push((0, face_heights[0])); ascents.push(face_ascents[0]); box_open = false; continue; }
+        if ch == '\n' { glyphs.push((0, face_heights[0])); ascents.push(face_ascents[0]); fallback.push(false); box_open = false; continue; }
         let index = face_at(&input.text, byte, 0);
         let (_, _, cell, space) = metrics[index];
         let id = FaceId::new(index as u32);
@@ -1803,8 +1845,11 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
             Shown::Composed { advance, .. } => advance,
             Shown::Inside => 0.0,
         };
-        glyphs.push((pixels(width)?, face_heights[index]));
-        ascents.push(face_ascents[index]);
+        let face = (face_ascents[index] as f32, face_heights[index] as f32);
+        let (ascent, height) = shown_rise(&frame, id, (&input.text.utf8, byte, ch), &shown, face, &mut cluster_rise);
+        glyphs.push((pixels(width)?, pixels(height)?));
+        ascents.push(ascent as u32);
+        fallback.push((ascent, height) != face);
     }
-    Ok(Measured { glyphs, face_heights, ascents, face_ascents })
+    Ok(Measured { glyphs, face_heights, ascents, face_ascents, fallback })
 }
