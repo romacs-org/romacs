@@ -138,6 +138,7 @@ mod intervals;
 mod properties;
 pub mod text;
 mod backtrace;
+mod inspect;
 mod profiler;
 mod threaded;
 
