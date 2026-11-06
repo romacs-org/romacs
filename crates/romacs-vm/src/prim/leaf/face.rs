@@ -174,7 +174,7 @@ impl Leaf<'_> {
             table = self.face_table_new(hash::Weakness::Key);
             self.vm.slots[root].value = table;
         }
-        if let Some(local) = self.vm.eq_hash_get(table, frame) { return Ok(local); }
+        if let Some(local) = self.vm.declaration_hash_get(table, frame).map_err(Fault::Error)? { return Ok(local); }
         if !create { return Ok(Value::NIL); }
         let local = self.face_table_new(hash::Weakness::None);
         self.vm.declaration_hash_put(table, frame, local).map_err(Fault::Error)?;
@@ -182,8 +182,9 @@ impl Leaf<'_> {
     }
 
     /// TABLE's entry for FACE: a memo, or a frame's lface; nil for none.
-    pub(crate) fn face_memo(&self, table: Value, face: Value) -> Value {
-        self.vm.eq_hash_get(table, face).unwrap_or(Value::NIL)
+    /// A table a collection left stale is repaired, not scanned per face.
+    pub(crate) fn face_memo(&mut self, table: Value, face: Value) -> Value {
+        self.vm.declaration_hash_get(table, face).ok().flatten().unwrap_or(Value::NIL)
     }
 
     pub(crate) fn face_memo_put(&mut self, memos: Value, face: Value, memo: Value) -> std::result::Result<(), Fault> {

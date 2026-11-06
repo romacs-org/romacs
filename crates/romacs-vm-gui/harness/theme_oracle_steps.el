@@ -120,7 +120,9 @@
   (deftheme ot-lower "Oracle: writes an `:inherit' a theme above replaces.")
   (custom-theme-set-faces 'ot-lower '(ot-cycle-b ((t :inherit ot-cycle-a))))
   (deftheme ot-upper "Oracle: over `ot-lower'.")
-  (custom-theme-set-faces 'ot-upper '(ot-cycle-b ((t :inherit nil)))))
+  (custom-theme-set-faces 'ot-upper '(ot-cycle-b ((t :inherit nil))))
+  (deftheme ot-black-default "Oracle: a `default' that flips the background mode in its own replay.")
+  (custom-theme-set-faces 'ot-black-default '(default ((t :background "#000000")))))
 
 (defun ot-reset ()
   (mapc #'disable-theme custom-enabled-themes))
@@ -184,6 +186,16 @@
     (dolist (face '(ot-plain ot-bad ot-local))
       (put face 'theme-face (assq-delete-all 'ot-broken (get face 'theme-face)))
       (face-spec-recalc face (selected-frame))))
+  ;; A write of `default''s background flips the mode in the middle of the
+  ;; replay: what is chosen after it chooses by the new mode.
+  (ot-step override-after-flip
+    (put 'default 'face-override-spec '((((background dark)) :foreground "pale green")
+                                        (t :foreground "dark green")))
+    (enable-theme 'ot-black-default))
+  (ot-step override-after-flip-back
+    (disable-theme 'ot-black-default)
+    (put 'default 'face-override-spec nil)
+    (face-spec-recalc 'default (selected-frame)))
   (ot-step malformed-defface-under-theme
     (put 'ot-plain 'face-defface-spec '((((nonsense 1)) :foreground "red")))
     (enable-theme 'ot-dark))

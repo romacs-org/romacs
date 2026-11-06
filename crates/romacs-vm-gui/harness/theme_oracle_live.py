@@ -38,7 +38,7 @@ KNOWN = {
 FONT_FILLED = {(':slant', 'normal', 'unspecified'), (':weight', 'regular', 'unspecified')}
 FONT_SLOTS = {attr: gnu for attr, gnu, _ in FONT_FILLED}
 # Fewer steps than this in GNU's dump means the script stopped early.
-MINIMUM_STEPS = 50
+MINIMUM_STEPS = 52
 
 
 def known(key):

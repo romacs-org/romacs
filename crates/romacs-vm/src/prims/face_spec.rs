@@ -4,7 +4,7 @@
 //! land where GNU's do; what goes is the Lisp around each write
 //! (DIVERGENCES.md VM2-FACE-ENGINE).
 use super::*;
-use super::face::{carries_effects, display_supports, graphic_record, make_lisp_face, note_height, resolve, shows_changes, signal, slot, slot_effects, validate};
+use super::face::{carries_effects, display_supports, graphic_record, make_lisp_face, note_height, resolve, signal, slot, slot_effects, validate};
 use crate::prim::{FaceKeys, FaceProps, Kind};
 use romacs_face::registry::LFACE_VECTOR_SIZE;
 
@@ -223,6 +223,8 @@ struct Replay {
     /// Whether what the display realized is gone since Lisp last ran: a
     /// callback may realize faces from the vector as it stands.
     invalidated: bool,
+    /// Whether Lisp ran since CLASS was read.
+    reentered: bool,
     /// The slots this replay wrote, by bit.
     written: u32,
     /// How many times a plist wrote `:inherit'.
@@ -236,6 +238,16 @@ impl Replay {
             cx.clear_face_cache();
             self.invalidated = true;
         }
+    }
+
+    /// The frame's class now: each spec is chosen on the frame as it is
+    /// then, and a write may have flipped its background mode.
+    fn class_now(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<Class, Fault> {
+        if self.reentered {
+            self.class = frame_class(cx, &self.keys, self.frame)?;
+            self.reentered = false;
+        }
+        Ok(self.class)
     }
 
     fn store(&mut self, cx: &mut Leaf<'_>, index: usize, value: Value) -> std::result::Result<(), Fault> {
@@ -252,6 +264,7 @@ impl Replay {
         if !self.effects || value == self.keys.unspecified || value == self.keys.ignore_defface || value == self.keys.reset { return Ok(()); }
         if cx.equal(old, value).map_err(|_| Fault::Circular(value))? { return Ok(()); }
         let done = slot_effects(cx, &self.keys, self.face, index, value, self.frame, false);
+        self.reentered = true;
         self.invalidated = false;
         done
     }
@@ -261,7 +274,10 @@ impl Replay {
         let keys = self.keys;
         let checked = validate(cx, &keys, self.face, attr, value, self.frame, false);
         // A function's :height runs Lisp in validation.
-        if attr == keys.keywords[slot::HEIGHT - 1] { self.invalidated = false; }
+        if attr == keys.keywords[slot::HEIGHT - 1] {
+            self.invalidated = false;
+            self.reentered |= !is_number(cx, value);
+        }
         match checked? {
             Some((index, value)) => self.store(cx, index, value),
             None => Ok(()),
@@ -341,7 +357,7 @@ impl Replay {
 
     /// `face-spec-recalc' from the reset on.
     fn run(&mut self, cx: &mut Leaf<'_>, props: &FaceProps) -> std::result::Result<(), Fault> {
-        let (keys, class, face, frame) = (self.keys, self.class, self.face, self.frame);
+        let (keys, face, frame) = (self.keys, self.face, self.frame);
         self.reset(cx)?;
         let mut stack = vec![];
         let mut tail = props.theme_face;
@@ -349,12 +365,14 @@ impl Replay {
         let mut themed = false;
         for entry in stack.into_iter().rev() {
             let spec = uncons(cx, uncons(cx, entry)?.1)?.0;
+            let class = self.class_now(cx)?;
             if let Some(attrs) = choose(cx, &keys, &class, spec, frame)? {
                 self.apply(cx, attrs)?;
                 themed = true;
             }
         }
         // Chosen whatever a theme did: a bad spec signals either way.
+        let class = self.class_now(cx)?;
         let defaults = choose(cx, &keys, &class, props.defface, frame)?.unwrap_or(Value::NIL);
         if !themed {
             self.apply(cx, defaults)?;
@@ -367,6 +385,7 @@ impl Replay {
                 self.apply(cx, pair)?;
             }
         }
+        let class = self.class_now(cx)?;
         let attrs = choose(cx, &keys, &class, props.over, frame)?.unwrap_or(Value::NIL);
         self.apply(cx, attrs)?;
         if face == keys.scroll_bar {
@@ -398,6 +417,10 @@ const RESULT_SLOTS: usize = 6;
 const RESULT_SIZE: usize = RESULT_SLOTS + LFACE_VECTOR_SIZE;
 const MEMO_SIZE: usize = MEMO_RESULTS + 2 * RESULT_SIZE;
 
+fn is_number(cx: &Leaf<'_>, value: Value) -> bool {
+    value.integer_value().is_some() || cx.kind(value) == Kind::Float
+}
+
 /// A replay of SPEC is a function of the spec and the frame class only: in
 /// no alternative does it ask `supports', whose answers read `default', or
 /// carry a function `:height', which runs Lisp.
@@ -413,9 +436,11 @@ fn memoisable(cx: &Leaf<'_>, keys: &FaceKeys, spec: Value) -> bool {
         }
         let plist = match cx.pair(attrs) { Some((first, more)) if more == Value::NIL => first, _ => attrs };
         let height = keys.keywords[slot::HEIGHT - 1];
-        if let Some(tail) = plist_member(cx, plist, height) {
-            let value = cx.pair(tail).and_then(|(_, rest)| cx.pair(rest)).map_or(Value::NIL, |(value, _)| value);
-            if value.integer_value().is_none() && cx.kind(value) != Kind::Float { return false; }
+        let mut rest = plist;
+        while let Some(tail) = plist_member(cx, rest, height) {
+            let (value, after) = cx.pair(tail).and_then(|(_, rest)| cx.pair(rest)).unwrap_or((Value::NIL, Value::NIL));
+            if !is_number(cx, value) { return false; }
+            rest = after;
         }
     }
     true
@@ -505,10 +530,10 @@ fn record_memo(cx: &mut Leaf<'_>, replay: &Replay, props: &FaceProps, resources:
     Ok(())
 }
 
-/// `face-spec-recalc' under CLASS. A frame showing another's faces has
-/// nothing to recompute: they are recomputed where they live
-/// (VM2-CHILD-FRAME).
-fn recalc_in(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Value, frame: Value) -> Out {
+/// `face-spec-recalc' under CLASS, left as the frame is after it. A frame
+/// showing another's faces has nothing to recompute: they are recomputed
+/// where they live (VM2-CHILD-FRAME).
+fn recalc_in(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &mut Class, face: Value, frame: Value) -> Out {
     let mut face = if cx.kind(face) == Kind::Symbol { face } else { resolve(cx, face, true)? };
     let mut props = cx.face_props(face)?;
     if props.alias != Value::NIL {
@@ -527,8 +552,9 @@ fn recalc_in(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Value, fra
             Memoed::Replay { record: wanted } => record = wanted,
         }
     }
-    let mut replay = Replay { keys: *keys, class: *class, face, frame, lface, effects, shown, invalidated: false, written: 0, inherits: 0 };
+    let mut replay = Replay { keys: *keys, class: *class, face, frame, lface, effects, shown, invalidated: false, reentered: false, written: 0, inherits: 0 };
     replay.run(cx, &props)?;
+    *class = replay.class_now(cx)?;
     if record { record_memo(cx, &replay, &props, resources)?; }
     Ok(Value::NIL)
 }
@@ -537,8 +563,8 @@ fn recalc_in(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Value, fra
 pub(super) fn recalc(cx: &mut Leaf<'_>, face: Value, frame: Value) -> Out {
     let keys = cx.face_keys();
     let frame = cx.face_frame(frame, true)?;
-    let class = frame_class(cx, &keys, frame)?;
-    recalc_in(cx, &keys, &class, face, frame)
+    let mut class = frame_class(cx, &keys, frame)?;
+    recalc_in(cx, &keys, &mut class, face, frame)
 }
 
 /// `defface' without faces.el (`#:vm2-defface'): the spec recorded and
@@ -657,16 +683,18 @@ fn romacs_recalc_all_faces(cx, frame: Value) {
     let mut faces = cx.face_ids()?;
     faces.sort_unstable_by_key(|&(id, _)| id);
     for (_, face) in faces {
-        let done = recalc_in(cx, &keys, &class, face, frame).and_then(|_| super::face::merge_in_global(cx, face, frame));
-        if let Err(fault) = done { cx.swallow_face_error(fault)?; }
-        if carries_effects(&keys, face) { class = frame_class(cx, &keys, frame)?; }
+        let done = recalc_in(cx, &keys, &mut class, face, frame).and_then(|_| super::face::merge_in_global(cx, face, frame));
+        if let Err(fault) = done {
+            cx.swallow_face_error(fault)?;
+            class = frame_class(cx, &keys, frame)?;
+        }
         cx.face_loop_quit()?;
     }
     Ok(Value::NIL)
 }}
 
 /// Whether FACE on FRAME is left alone when the background mode changes.
-fn locally_modified(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Value, frame: Value, shown: Value, memos: Value) -> std::result::Result<bool, Fault> {
+fn locally_modified(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Value, frame: Value, shown: Value, own: Value, memos: Value) -> std::result::Result<bool, Fault> {
     let props = cx.face_props(face)?;
     if props.over != Value::NIL { return Ok(false); }
     let lface = cx.face_memo(shown, face);
@@ -682,8 +710,10 @@ fn locally_modified(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Val
     let known = cx.vector_slots(memo).filter(|held| memo_current(held, &props, resources) && held[MEMO_STABLE] != Value::NIL)
         .and_then(|held| memo_result(held, class).map(|at| (at, held[at + RESULT_MATCH])));
     let Some((at, answer)) = known else { return Ok(!matched(cx)?) };
+    // The memo is FRAME's: the answer stands while FRAME's vector does.
+    let target = if own == Value::NIL { Value::NIL } else { cx.face_memo(own, face) };
     let held = cx.vector_slots(memo).expect("a memo is a vector");
-    let vector = cx.vector_slots(lface).ok_or(Fault::Wrong("vectorp", lface))?;
+    let Some(vector) = cx.vector_slots(target) else { return Ok(!matched(cx)?) };
     if !result_held(keys, held, at, vector) { return Ok(!matched(cx)?); }
     if answer != keys.unwritten { return Ok(answer == Value::NIL); }
     let result = matched(cx)?;
@@ -702,13 +732,14 @@ fn romacs_faces_modified_on(cx, frame: Value) {
     let selected = cx.face_frame(Value::NIL, true)?;
     let owner = cx.face_owner(selected)?;
     let shown = cx.face_table(owner, true)?;
+    let own = cx.face_table(frame, false)?;
     let memos = cx.face_memos(frame, false)?;
     let class = frame_class(cx, &keys, frame)?;
     let mut faces = cx.face_ids()?;
     faces.sort_unstable_by_key(|&(id, _)| std::cmp::Reverse(id));
     let mut modified = Value::NIL;
     for (_, face) in faces {
-        if locally_modified(cx, &keys, &class, face, frame, shown, memos)? { modified = cx.cons(face, modified); }
+        if locally_modified(cx, &keys, &class, face, frame, shown, own, memos)? { modified = cx.cons(face, modified); }
         cx.face_loop_quit()?;
     }
     Ok(modified)
@@ -728,8 +759,7 @@ fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
     faces.sort_unstable_by_key(|&(id, _)| std::cmp::Reverse(id));
     for (_, face) in faces {
         if !kept.contains(&face.0) {
-            recalc_in(cx, &keys, &class, face, frame)?;
-            if carries_effects(&keys, face) { class = frame_class(cx, &keys, frame)?; }
+            recalc_in(cx, &keys, &mut class, face, frame)?;
         }
         cx.face_loop_quit()?;
     }
