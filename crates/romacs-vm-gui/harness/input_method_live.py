@@ -171,7 +171,7 @@ WORKFLOWS = {
         ('plain-prompt', [K('F6')], PROMPT_STARTS('Plain')),
         ('plain-text', [T('ab')], CONTENTS('ab')),
         ('plain-exit', [K('Return')], GOT('ab')),
-        ('read-char', [K('F7')], 't'),
+        ('read-char', [K('F7')], 't', 'echo'),
         ('read-char-keys', [T('ab')], f'(equal im-got (list {ord("α")} ?b))', 'echo'),
         ('quoted', [C('q'), T('a')], TEXT('a')),
         ('password', [K('F8')], PROMPT_STARTS('Password')),
