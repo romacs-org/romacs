@@ -76,6 +76,11 @@ INIT = r'''
 (defvar chrome-live-dir (getenv "CHROME_LIVE_DIR"))
 (defun chrome-live--hex (color)
   (and color (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) (color-values color)))))
+(defun chrome-live--note-laid-out (name)
+  "Note NAME once the host has redisplayed since the mark: a theme's rows take
+effect in the layout, which the bar's height and the windows' edges report."
+  (if (romacs--redisplay-since-mark) (chrome-live--note name)
+    (run-with-timer 0.05 nil #'chrome-live--note-laid-out name)))
 (defun chrome-live--note (name)
   "Record the chrome and the windows' edges in NAME, a JSON file."
   (let ((state (romacs-chrome-state)))
@@ -108,7 +113,7 @@ STEPS = r'''
 '''
 THEME = r'''
 (run-at-time {at} nil (lambda () (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t)
-                        (chrome-live--note "{theme}")))
+                        (romacs--redisplay-since-mark t) (chrome-live--note-laid-out "{theme}")))
 '''
 SCENES = r'''
 (setq trusted-content :all)
@@ -363,7 +368,7 @@ def main():
                         # accent block at its left edge.
                         x0, x1, top, height = state['border'], state['native_width'] - state['border'], state['bar_top'], state['bar_height']
                         mid = round((top + height / 2) * s)
-                        # The middle of the line: the right-align marker's room.
+                        # The middle of the line, above the identity's pill.
                         checks[f'line-{step}'] = [pixel(png, round((x0 + x1) / 2 * s), round((top + 2) * s)), state['bar_background']]
                         checks[f'accent-{step}'] = [pixel(png, round((x0 + 1) * s), mid), state['focus']]
                         # No window draws a band of its own: the bar is the mode line.

@@ -280,7 +280,14 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     validate_runs(text, band.faces.len())?;
     if face >= band.faces.len() || text.utf8.chars().any(char::is_control) { return Err("invalid marked band".into()); }
     let background = band.faces[face].background;
-    let faces: Vec<Face> = band.faces.iter().map(|f| Face { background, ..f.clone() }).collect();
+    // The band's box goes round the band once (`band_box'); a face that has
+    // it draws none of its own, or each glyph would be a box.
+    let boxed = band.faces[face].decor.boxed;
+    let faces: Vec<Face> = band.faces.iter().map(|f| {
+        let mut own = Face { background, ..f.clone() };
+        if own.decor.boxed == boxed { own.decor.boxed = None; }
+        own
+    }).collect();
     let face_base = frame.faces.keys().map(|id| id.get() + 1).max().unwrap_or(0);
     let mut face_text = face_text(faces.len(), &[(text, face)]);
     for &(byte, icon) in &band.marks.icons { face_text[face_at(text, byte, face)].push(icon); }
@@ -301,6 +308,7 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     if let Some(line) = band.faces[face].decor.overline {
         frame.add_background(bounds.x, bounds.y, bounds.width, 1.0, color(line.color.unwrap_or(band.faces[face].foreground)));
     }
+    if let Some(line) = boxed { band_box(frame, bounds, line, band.faces[face].foreground); }
     if let Some(accent) = band.accent { frame.add_background(bounds.x, bounds.y, STATUS_BAR_ACCENT, bounds.height, color(accent)); }
     // Each pill over what its segment shows, a little inside the band; its
     // text in the pill's own foreground where it has one.
@@ -362,18 +370,38 @@ fn paint_marked(frame: &mut FrameGlyphBuffer, band: &Marked, owner: (DisplayWind
     }
     frame.set_draw_context(owner.0, owner.1, Some(bounds));
     let [_, centre_marker, _, right_marker, _] = band.marks.zones(text);
+    // Text sits below the box's top, which the band's height includes.
+    let top = bounds.y + boxed.map_or(0.0, |line| f32::from(line.horizontal.max(0)));
+    // A box of its own runs over the characters that share it.
+    let shares = |i: Option<usize>, own| i.and_then(|i| chars.get(i)).is_some_and(|c| faces[c.2].decor.boxed == Some(own));
     for (i, (&(_, shown, index, _), place)) in chars.iter().zip(&places).enumerate() {
         let Some((x, width)) = *place else { continue };
         if centre_marker.contains(&i) || right_marker.contains(&i) { continue; }
         let (ascent, height, _, _) = metrics[index];
-        if let Some(glyph) = glyphless.get(index, shown) {
-            glyphless.paint(frame, index, glyph, bounds.x + x, bounds.y, (ascent, height), ids[i], true, 0.0)?;
-            continue;
+        let at = match glyphless.get(index, shown) {
+            Some(glyph) => glyphless.paint(frame, index, glyph, bounds.x + x, top, (ascent, height), ids[i], true, 0.0)?,
+            None => {
+                frame.add_char(shown, bounds.x + x, top, width, height, ascent, false);
+                *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
+                frame.glyphs.len() - 1
+            }
+        };
+        if let Some(own) = faces[index].decor.boxed {
+            set_glyph_box_edges(frame, at, edges(!shares(i.checked_sub(1), own), !shares(Some(i + 1), own)));
         }
-        frame.add_char(shown, bounds.x + x, bounds.y, width, height, ascent, false);
-        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing marked band face")? = ids[i];
     }
     Ok(places)
+}
+
+/// LINE, a marked band's box, round BOUNDS: its height includes the box, as
+/// a mode line's does, and FOREGROUND is its colour where it names none.
+fn band_box(frame: &mut FrameGlyphBuffer, bounds: Rect, line: romacs_layout_input::BoxLine, foreground: [u8; 3]) {
+    let (side, rule) = (f32::from(line.vertical.unsigned_abs()), f32::from(line.horizontal.unsigned_abs()));
+    let ink = color(line.color.unwrap_or(foreground));
+    frame.add_background(bounds.x, bounds.y, bounds.width, rule, ink);
+    frame.add_background(bounds.x, bounds.y + bounds.height - rule, bounds.width, rule, ink);
+    frame.add_background(bounds.x, bounds.y, side, bounds.height, ink);
+    frame.add_background(bounds.x + bounds.width - side, bounds.y, side, bounds.height, ink);
 }
 
 /// Where each character of BAR is as FRAME paints it, in its text's

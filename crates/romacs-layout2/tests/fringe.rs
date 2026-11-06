@@ -350,3 +350,37 @@ fn every_window_but_the_mini_window_is_a_pane() {
     assert_eq!(panes.iter().map(|p| (p.bounds.x, p.bounds.width, p.bounds.height, p.radius, p.edge, p.dim)).collect::<Vec<_>>(),
                [(0.0, 116.0, 200.0, 6.0, Some(accent), 0.0), (152.0, 116.0, 200.0, 6.0, Some(line), 0.12)]);
 }
+
+/// A boxed band face's box goes round the bar once, and its height holds
+/// the box: no glyph in that face is a box of its own, as each was. A
+/// segment with a box of its own is one run over its characters.
+#[test]
+fn a_bar_s_box_goes_round_it_and_a_segment_s_is_one_run() {
+    use romacs_display_protocol::BoxVerticalEdges::{Left, Neither, Right};
+    use romacs_layout_input::{BoxLine, Decor};
+    let line = |color| Decor { boxed: Some(BoxLine { vertical: 1, horizontal: 1, color: Some(color), style: 1 }), ..Default::default() };
+    let boxed = |decor| Face { decor, ..face([200; 3], [30, 40, 50]) };
+    let mut snapshot = frame(window("x", LineWrap::Window), None);
+    snapshot.status_bar = Some(StatusBarSnapshot {
+        x: 0, y: 150, width: 116, height: 22,
+        text: TextSlice { extends: vec![], utf8: "abcd".into(), raw: vec![], face_runs: vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }] },
+        face: FaceHandle(0), faces: vec![boxed(line([200, 10, 10])), boxed(line([10, 200, 10]))], window: 1, focused: true,
+        marks: BandMarks::default(),
+    });
+    let painted = lay_out(snapshot);
+    let glyphs: Vec<_> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, y, face_id, box_vertical_edges, row_role: GlyphRowRole::StatusBar, .. } => Some((*char, *y, *face_id, *box_vertical_edges)),
+        _ => None,
+    }).collect();
+    assert_eq!(glyphs.iter().map(|g| (g.0, g.3)).take(2).collect::<Vec<_>>(), [('a', Left), ('b', Right)]);
+    assert!(glyphs.iter().all(|g| g.1 == 151.0), "below the box's top: {glyphs:?}");
+    let has_box = |id| painted.faces[&id].box_type != romacs_display_protocol::BoxType::None;
+    assert_eq!(glyphs.iter().map(|g| (g.0, has_box(g.2))).collect::<Vec<_>>(), [('a', true), ('b', true), ('c', false), ('d', false)]);
+    let lines: Vec<_> = painted.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Background { bounds, .. } if bounds.y >= 150.0 => Some((bounds.x, bounds.y, bounds.width, bounds.height)),
+        _ => None,
+    }).collect();
+    for edge in [(0.0, 150.0, 116.0, 1.0), (0.0, 171.0, 116.0, 1.0), (115.0, 150.0, 1.0, 22.0)] {
+        assert!(lines.contains(&edge), "{edge:?} in {lines:?}");
+    }
+}
