@@ -420,10 +420,9 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (romacs-agent-attach-tests--with-chat session
     (let ((broken (expand-file-name "b.png" dir)))
       (write-region "x" nil broken nil 'silent)
-      (romacs-agent--note-attachments session "see" (list broken "/gone/c.png"))
       (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
                 ((symbol-function 'create-image) (lambda (&rest _) (error "Bad image"))))
-        (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "see") (current-buffer))
+        (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "see" :images (list broken "/gone/c.png")) (current-buffer))
         (romacs-agent-ui--draw session (list :type 'input :seq 2 :text "next") (current-buffer)))
       (should (string-match-p "b.png (cannot show)" (buffer-string)))
       (should (string-match-p "c.png (cannot show)" (buffer-string)))
@@ -447,19 +446,68 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (romacs-agent-chat-edit-turn)
       (should-not romacs-agent-ui--draft-images))))
 
-(ert-deftest romacs-agent-attachments-outlive-the-session-object ()
-  ;; Edit-turn and a rebuilt transcript read what was attached, not the text.
+(ert-deftest romacs-agent-a-turn-owns-its-images-whatever-its-text ()
+  ;; The same words with and without an image, and two image-only messages.
   (romacs-agent-attach-tests--with-chat session
-    (romacs-agent--note-attachments session "see" '("/a.png" "/b.png"))
-    (remhash (romacs-agent-id session) romacs-agent--attachments)
-    (should (equal (romacs-agent-attachments session "see") '("/a.png" "/b.png")))
-    (should-not (romacs-agent-attachments session "other"))
-    (remhash (romacs-agent-id session) romacs-agent--attachments)
-    (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "see") (current-buffer))
+    (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "same" :images '("/a.png")) (current-buffer))
+    (romacs-agent-ui--draw session (list :type 'input :seq 2 :text "same") (current-buffer))
     (goto-char (point-min))
     (romacs-agent-chat-edit-turn)
-    (should (equal romacs-agent-ui--draft-images '("/a.png" "/b.png")))
-    (should (equal (romacs-agent-ui--composer-text) "see"))))
+    (should (equal romacs-agent-ui--draft-images '("/a.png")))
+    (romacs-agent-ui--set-draft-parts "" nil)
+    (goto-char (point-min))
+    (search-forward "> same" nil t 2)
+    (romacs-agent-chat-edit-turn)
+    (should-not romacs-agent-ui--draft-images)
+    (should (equal (romacs-agent-ui--composer-text) "same"))))
+
+(ert-deftest romacs-agent-the-journal-keeps-references-not-bytes ()
+  (romacs-agent-attach-tests--with-chat session
+    (let ((image (expand-file-name "a.png" dir)) (wire nil) (kept nil))
+      (write-region "PNGBYTES" nil image nil 'silent)
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ w j) (setq wire w kept j))))
+        (romacs-agent--input session "see" (list image)))
+      ;; The harness gets the bytes; the journal the words and the file.
+      (should (string-match-p (regexp-quote (base64-encode-string "PNGBYTES" t)) (romacs-agent--json wire)))
+      (should-not (string-match-p (regexp-quote (base64-encode-string "PNGBYTES" t)) (romacs-agent--json kept)))
+      (let ((event (car (romacs-agent--claude-input-events session kept))))
+        (should (equal (plist-get event :text) "see"))
+        (should (equal (plist-get event :images) (list image))))
+      ;; Without images there is one line, and no images in its event.
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ w &optional j) (setq wire w kept j))))
+        (romacs-agent--input session "plain"))
+      (should-not kept)
+      (should-not (plist-get (car (romacs-agent--claude-input-events session wire)) :images)))))
+
+(ert-deftest romacs-agent-codex-record-carries-its-images ()
+  (let ((record (make-hash-table :test #'equal)))
+    (puthash "text" "see" record)
+    (puthash "images" ["/a.png"] record)
+    (let ((event (car (romacs-agent--codex-input-events nil record))))
+      (should (equal (plist-get event :text) "see"))
+      (should (equal (plist-get event :images) '("/a.png"))))))
+
+(ert-deftest romacs-agent-attach-refuses-an-oversized-image ()
+  (romacs-agent-attach-tests--with-chat session
+    (let ((image (expand-file-name "big.png" dir)) (romacs-agent-image-max-bytes 4))
+      (write-region "12345" nil image nil 'silent)
+      (should-error (romacs-agent-chat-attach image) :type 'user-error)
+      (should-not romacs-agent-ui--draft-images))))
+
+(ert-deftest romacs-agent-a-refused-turn-says-why ()
+  (let ((result (make-hash-table :test #'equal)))
+    (puthash "is_error" t result)
+    (puthash "errors" ["Image too large" "Try a smaller one"] result)
+    (should (equal (romacs-agent--claude-reason result) "Image too large; Try a smaller one"))
+    (remhash "errors" result)
+    (puthash "result" "API Error" result)
+    (should (equal (romacs-agent--claude-reason result) "API Error"))
+    (puthash "is_error" :false result)
+    (should-not (romacs-agent--claude-reason result)))
+  (romacs-agent-attach-tests--with-chat session
+    (cl-letf (((symbol-function 'romacs-agent-ui--footer) #'ignore))
+      (romacs-agent-ui--draw session (list :type 'done :seq 1 :error t :reason "Image too large") (current-buffer)))
+    (should (string-match-p "! Image too large" (buffer-string)))))
 
 (ert-deftest romacs-agent-claude-is-given-attached-images-as-content ()
   (romacs-agent-attach-tests--with-chat session
@@ -566,21 +614,23 @@ size hook firing as `read-key' waits: the result and the layouts shown."
   (romacs-agent-attach-tests--with-chat session
     (let ((image (expand-file-name "a.png" dir)))
       (write-region "x" nil image nil 'silent)
-      (romacs-agent--note-attachments session "see this" (list image))
       (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
                 ((symbol-function 'create-image) (lambda (file &rest _) (list 'image :file file)))
                 ((symbol-function 'romacs-agent-ui--png-size) (lambda (_) '(100 . 50)))
                 ((symbol-function 'default-line-height) (lambda () 20)))
-        (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "see this") (current-buffer)))
+        (romacs-agent-ui--draw session (list :type 'input :seq 1 :text "see this" :images (list image)) (current-buffer)))
       (goto-char (point-min))
       (should (looking-at-p "> see this\n"))
       ;; Below the prompt, the image as rows outside the turn's text.
       (forward-line 1)
-      (should (= (count-lines (point) romacs-agent-ui--end) 3))
+      (should (= (count-lines (point) romacs-agent-ui--end) 4))
       (let ((display (get-text-property (point) 'display)))
         (should (equal (car display) '(slice 0 0 100 20)))
         (should (equal (cadr display) (list 'image :file image))))
       ;; A strip per line, the last what is left.
       (forward-line 2)
       (should (equal (car (get-text-property (point) 'display)) '(slice 0 40 100 10)))
-      (should-not (get-text-property (point) 'romacs-agent-turn)))))
+      (should-not (get-text-property (point) 'romacs-agent-turn))
+      ;; Its name below, should the image draw blank.
+      (forward-line 1)
+      (should (looking-at-p "  ▣ a.png\n")))))

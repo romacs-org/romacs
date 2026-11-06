@@ -19,6 +19,10 @@ never read from the prompt: `--image' uploads the file."
   (mapcan (lambda (file) (list "--image" file))
           (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
 
+(defun romacs-agent--codex-input-events (_session record)
+  "The events of RECORD, a prompt journaled with its attached images."
+  (list (list :type 'input :text (gethash "text" record) :images (append (gethash "images" record) nil))))
+
 (defun romacs-agent--codex-argv (session resume)
   "`codex exec''s command line for one turn of SESSION, its prompt on
 stdin; RESUME non-nil continues its thread."
@@ -112,6 +116,7 @@ stdin; RESUME non-nil continues its thread."
            "CODEX_SESSION_ID" "CODEX_THREAD_ID" "CODEX_TOOL_CALL_ID" "CODEX_VERSION")
   :lifetime 'per-turn
   :argv #'romacs-agent--codex-argv
+  :input-events #'romacs-agent--codex-input-events
   :interrupt (lambda (_session) 'signal)
   :events #'romacs-agent--codex-events
   :native-id-p #'romacs-agent--uuid-p

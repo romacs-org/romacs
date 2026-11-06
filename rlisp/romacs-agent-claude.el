@@ -64,6 +64,14 @@ the model is given them, and no file is named for it to open."
                                        (mapcar #'romacs-agent--claude-image images))
                             text)))))
 
+(defun romacs-agent--claude-reason (result)
+  "Why RESULT, a turn's end, failed, in the harness's words, or nil."
+  (when (eq (gethash "is_error" result) t)
+    (let ((errors (append (romacs-agent--value (gethash "errors" result)) nil)))
+      (if errors
+          (mapconcat (lambda (e) (if (stringp e) e (romacs-agent--json e))) errors "; ")
+        (romacs-agent--value (gethash "result" result))))))
+
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
   (let ((type (gethash "type" line))
@@ -133,6 +141,7 @@ the model is given them, and no file is named for it to open."
       ("result"
        (list (list :type 'done :cost (gethash "total_cost_usd" line)
                    :error (eq (gethash "is_error" line) t) :text (gethash "result" line)
+                   :reason (romacs-agent--claude-reason line)
                    :duration (let ((ms (gethash "duration_ms" line))) (and (numberp ms) (/ ms 1000.0)))
                    :context-window (let ((usage (gethash "modelUsage" line)) (window nil))
                                      (when (hash-table-p usage)
@@ -186,7 +195,8 @@ start: its answer comes with the other control responses."
   "The events of LINE, written to SESSION's harness: a user's prompt, or
 an approval answered."
   (pcase (gethash "type" line)
-    ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line))))))
+    ("user" (list (list :type 'input :text (romacs-agent--text-of (gethash "content" (gethash "message" line)))
+                        :images (append (gethash "images" line) nil))))
     ("control_response"
      (let ((id (gethash "request_id" (gethash "response" line))))
        (remhash id (romacs-agent-approvals session))

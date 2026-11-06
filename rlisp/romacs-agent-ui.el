@@ -217,11 +217,12 @@ decoded as they come into view, not when it is replayed."
       (apply #'concat (nreverse strips)))))
 
 (defun romacs-agent-ui--image-rows (file)
-  "What the transcript shows for attached image FILE: its rows, or a line
-saying it cannot, so an image is never silently missing."
-  (or (and (display-images-p) (romacs-agent-image-file-p file) (romacs-agent-ui--image-strips file))
-      (propertize (format "  ▣ %s (cannot show)\n" (file-name-nondirectory file))
-                  'face 'romacs-agent-dim 'romacs-agent-strip t)))
+  "What the transcript shows for attached image FILE: its rows and its name,
+or the name and that it cannot be shown.  The name is always there: rows are
+laid out before the image is decoded, so a corrupt one can still draw blank."
+  (let ((rows (and (display-images-p) (romacs-agent-image-file-p file) (romacs-agent-ui--image-strips file))))
+    (concat rows (propertize (format "  ▣ %s%s\n" (file-name-nondirectory file) (if rows "" " (cannot show)"))
+                             'face 'romacs-agent-dim 'romacs-agent-strip t))))
 
 (defun romacs-agent-ui--delegation (name input)
   "What a card shows for tool NAME's INPUT, (TITLE DETAIL), or nil when
@@ -495,7 +496,7 @@ or a repeat."
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
              (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
-             (let ((images (romacs-agent-attachments session (plist-get event :text))))
+             (let ((images (plist-get event :images)))
                (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t
                                         'romacs-agent-images images)
                (romacs-agent-ui--insert "\n")
@@ -542,7 +543,9 @@ or a repeat."
          (romacs-agent-ui--line session event (format "  %s" (pcase (plist-get event :behavior)
                                                                ("allow" "✓ allowed") ("deny" "! denied") (_ "answered")))
                                 'face 'romacs-agent-dim))
-        ('done (romacs-agent-ui--footer session event)
+        ('done (when-let* ((reason (plist-get event :reason)))
+                 (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
+               (romacs-agent-ui--footer session event)
                (when (get-buffer-window buffer 'visible)
                  (setf (romacs-agent-seen-seq session) (romacs-agent-done-seq session))))
         ('status
@@ -1087,6 +1090,11 @@ A buffer of this mode no session shows has no turns."
          (prompt (string-remove-prefix "> " (string-trim-right (buffer-substring-no-properties start end)))))
     (romacs-agent-ui--set-draft-parts prompt images)))
 
+(defcustom romacs-agent-image-max-bytes (* 20 1024 1024)
+  "The largest image `romacs-agent-chat-attach' takes: one goes whole into a
+message, and a harness refuses what is far beyond this."
+  :type 'natnum :group 'romacs-agent)
+
 (defcustom romacs-agent-image-directory "~/Pictures/Screenshots/"
   "Where `romacs-agent-chat-attach' offers images from."
   :type 'directory :group 'romacs-agent)
@@ -1136,6 +1144,10 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
   ;; Codex's --image splits its value at commas.
   (when (string-match-p "," file)
     (user-error "An image's file name cannot hold a comma: %s" file))
+  (let ((size (file-attribute-size (file-attributes file))))
+    (when (and size (> size romacs-agent-image-max-bytes))
+      (user-error "%s is %s, over `romacs-agent-image-max-bytes' (%s)" (file-name-nondirectory file)
+                  (file-size-human-readable size) (file-size-human-readable romacs-agent-image-max-bytes))))
   (require 'romacs-agent-images)
   (setq romacs-agent-ui--draft-images (append romacs-agent-ui--draft-images (list file)))
   (romacs-agent-ui--tray))

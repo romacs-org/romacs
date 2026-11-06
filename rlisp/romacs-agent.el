@@ -763,13 +763,17 @@ with ASK-EFFORT, or when nothing gives the chosen model one."
     (append (when-let* ((model (plist-get options :model))) (list model-flag model))
             (when-let* ((effort (plist-get options :effort))) (list effort-flag effort)))))
 
-(defun romacs-agent--line (session object)
-  "Write OBJECT as one line to SESSION's harness.  A detached session whose
-supervisor still runs is attached first; one whose supervisor ended says
-so: it resumes with `romacs-agent-resume'."
+(defun romacs-agent--line (session object &optional journal)
+  "Write OBJECT as one line to SESSION's harness; JOURNAL, when given, is
+what the journal keeps of it.  A detached session whose supervisor still
+runs is attached first; one whose supervisor ended says so: it resumes with
+`romacs-agent-resume'."
   (let ((connection (romacs-agent-connection session))
         ;; The harness's line is text inside the envelope: serialized once.
-        (line (concat (json-serialize (romacs-mcp--object "write" (romacs-agent--json object)))
+        (line (concat (json-serialize
+                       (if journal
+                           (romacs-mcp--object "write" (romacs-agent--json object) "journal" (romacs-agent--json journal))
+                         (romacs-mcp--object "write" (romacs-agent--json object))))
                       "\n")))
     (cond ((process-live-p connection) (process-send-string connection line))
           ;; A stopped supervisor leaves its socket: only a connection says it listens.
@@ -800,11 +804,23 @@ so: it resumes with `romacs-agent-resume'."
   "SESSION's harness's command line, RESUME going on with its conversation."
   (funcall (romacs-agent--harness-get session :argv) session resume))
 
+(defvar romacs-agent--message-images nil
+  "The images the user attached to the message being written to a harness,
+for its driver.  Only what was attached: nothing is ever read from a
+message's text, which a child's result or a quote can fill.")
+
 (defun romacs-agent--input (session text &optional images)
   "Write TEXT to SESSION's persistent harness as the user's message, with
-the attached IMAGES."
-  (romacs-agent--line session (let ((romacs-agent--message-images images))
-                                (funcall (romacs-agent--harness-get session :input) session text))))
+the attached IMAGES.  The journal keeps the message as it would be without
+them, and their files: a replay reads every record, and no image's bytes."
+  (let ((input (romacs-agent--harness-get session :input)))
+    (if (not images)
+        (romacs-agent--line session (funcall input session text))
+      (let ((record (funcall input session text)))
+        (puthash "images" (vconcat images) record)
+        (romacs-agent--line session
+                            (let ((romacs-agent--message-images images)) (funcall input session text))
+                            record)))))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -841,39 +857,6 @@ a digest of its identity, UUID-shaped."
                               key)))
                 (hash-table-values romacs-agent--sessions))))
 
-(defvar romacs-agent--message-images nil
-  "The images the user attached to the message being written to a harness,
-for its driver.  Only what was attached: nothing is ever read from a
-message's text, which a child's result or a quote can fill.")
-
-(defvar romacs-agent--attachments (make-hash-table :test #'equal)
-  "A session's id to its table of a message's text to its attached images,
-read once from its `attachments.jsonl'.")
-
-(defun romacs-agent--attachments-file (session)
-  (expand-file-name "attachments.jsonl" (romacs-agent-dir session)))
-
-(defun romacs-agent--attachment-table (session)
-  (or (gethash (romacs-agent-id session) romacs-agent--attachments)
-      (let ((table (make-hash-table :test #'equal)) (file (romacs-agent--attachments-file session)))
-        (when (file-readable-p file)
-          (dolist (line (split-string (with-temp-buffer (insert-file-contents file) (buffer-string)) "\n" t))
-            (let ((entry (json-parse-string line :array-type 'list)))
-              (puthash (gethash "text" entry) (gethash "images" entry) table))))
-        (puthash (romacs-agent-id session) table romacs-agent--attachments))))
-
-(defun romacs-agent--note-attachments (session text images)
-  "Remember that the user sent TEXT to SESSION with IMAGES: the journal has
-only what the harness was given, and a transcript shows and edits a turn."
-  (when images
-    (puthash text images (romacs-agent--attachment-table session))
-    (write-region (concat (json-serialize (romacs-mcp--object "text" text "images" (vconcat images))) "\n")
-                  nil (romacs-agent--attachments-file session) t 'silent)))
-
-(defun romacs-agent-attachments (session text)
-  "The images the user attached to the message TEXT sent to SESSION."
-  (gethash text (romacs-agent--attachment-table session)))
-
 (defun romacs-agent--turn (session text &optional images)
   "Run one turn of SESSION's per-turn harness on prompt TEXT with the
 attached IMAGES.  The supervisor journals TEXT and gives it to the harness
@@ -885,7 +868,8 @@ itself, so the turn goes on whatever becomes of this server."
     (set-file-modes input #o600)
     (setf (romacs-agent-journal-start session)
           (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t)) input))
+    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
+                          input images))
   (setf (romacs-agent-state session) 'starting)
   (romacs-agent--attach session 50))
 
@@ -1209,7 +1193,6 @@ ends, now when none runs; FIRST puts it ahead of the messages already
 waiting."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
       (romacs-agent-send session text nil nil images)
-    (romacs-agent--note-attachments session text images)
     (if (and first (romacs-agent-queue session))
         (progn (push (list text nil nil images) (romacs-agent-queue session))
                (cl-incf (romacs-agent-queue-length session)))
@@ -1291,10 +1274,11 @@ shows on a command line other users can read."
            when (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)=" entry)
            collect (concat "--setenv=" (match-string 1 entry))))
 
-(defun romacs-agent--launch (session argv &optional input)
+(defun romacs-agent--launch (session argv &optional input images)
   "Run SESSION's supervisor with harness ARGV, as a user unit when a user
 manager answers, else detached.  INPUT is a file the supervisor gives the
-harness as its whole stdin."
+harness as its whole stdin, and IMAGES what the journal keeps as attached
+to it."
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
   (let* ((host (romacs-agent--program "romacs-agent-host"))
@@ -1303,6 +1287,7 @@ harness as its whole stdin."
                                 ;; Journaled first: where this run's records start.
                                 "--note" "{\"type\":\"run\"}")
                           (and input (list "--input" input))
+                          (and images (list "--input-images" (json-serialize (vconcat images))))
                           (cons "--" argv)))
          (unit (format "romacs-agent-%s" (romacs-agent--key (romacs-agent-id session))))
          (default-directory (file-name-as-directory (romacs-agent-cwd session))))
@@ -1468,7 +1453,6 @@ DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
 given, then says it is no longer wanted.  IMAGES are the files the user
 attached to it."
-  (romacs-agent--note-attachments session text images)
   (cond ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
          (romacs-agent--input session text images)
          (when delivered (funcall delivered)))
