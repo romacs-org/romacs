@@ -2683,7 +2683,13 @@ impl Vm {
         let buffer_name = self.buffer_state(buffer)?.name.clone().unwrap_or_default();
         let window = self.slots[root].value;
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1) as usize;
-        let point = self.window_point_value(window)?.as_integer()? as usize;
+        // A buffer the window does not show (`format-mode-line' BUFFER)
+        // stands at its own point.
+        let point = match self.object(buffer)? {
+            Object::Buffer(b) if self.window(window)?.buffer != buffer => b.char_of_byte(b.point)?.0 + 1,
+            Object::ByteBuffer(b) if self.window(window)?.buffer != buffer => b.point.0 + 1,
+            _ => self.window_point_value(window)?.as_integer()? as usize,
+        };
         let rule = self.width_rule()?;
         let (_, displayed) = self.window_rows(text_height);
         let frame_cols = (self.window_state.width / self.window_state.column.max(1)).max(1) as usize;
