@@ -110,12 +110,28 @@ pub(crate) struct FreeEntries {
     /// Bytes the funnels have handed out, ever: the memory profiler's
     /// meter (profiler.rs), which table growth no longer measures.
     pub(crate) allocated: u64,
+    /// GNU's consing counters, ever (`memory-use-counts').
+    pub(crate) consed: Consed,
     /// The next collection compacts (`Vm::collect_compacting').
     pub(crate) compact: bool,
     /// Collections a due compaction has waited for an idle one.
     deferred: u8,
 }
-romacs_snapshot::snapshot_struct!(FreeEntries { conses, closures, cells, objects, quarantined, allocated, compact, deferred });
+romacs_snapshot::snapshot_struct!(FreeEntries { conses, closures, cells, objects, quarantined, allocated, consed, compact, deferred });
+
+/// What `memory-use-counts' reports, in its units; symbols are counted from
+/// the symbol table, less its private binding slots, and VM2 has no intervals
+/// to count (VM2-MEMCOUNT1).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Consed {
+    pub(crate) conses: u64,
+    pub(crate) floats: u64,
+    pub(crate) vector_cells: u64,
+    pub(crate) reused_symbols: u64,
+    pub(crate) string_chars: u64,
+    pub(crate) strings: u64,
+}
+romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_symbols, string_chars, strings });
 
 impl FreeEntries {
     /// Free entries, in all four tables.
@@ -622,10 +638,18 @@ impl Vm {
             _ => true,
         }
     }
-    /// `romacs--run-finalizers' when a collection has doomed finalizers
-    /// and the prelude defines it.
+    /// Whether `post-gc-hook' has something to run for a collection that
+    /// ended.  Lisp runs it, never the collector (`romacs--run-finalizers').
+    pub(crate) fn post_gc_runs(&mut self) -> bool {
+        if !self.post_gc_due { return false; }
+        let hook = self.slot("post-gc-hook");
+        self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
+        self.post_gc_due
+    }
+    /// `romacs--run-finalizers' when a collection has doomed finalizers or
+    /// a `post-gc-hook' to run, and the prelude defines it.
     pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
-        if self.doomed_finalizers.is_empty() { return None; }
+        if self.doomed_finalizers.is_empty() && !self.post_gc_runs() { return None; }
         let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
         let slot = runner.payload() as usize - 1;
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)

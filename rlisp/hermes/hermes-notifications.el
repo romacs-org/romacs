@@ -64,7 +64,7 @@ WIDTH defaults to 160 columns."
    (string-trim
     (replace-regexp-in-string
      "[[:space:]\n\r]+" " " (substring-no-properties (or text ""))))
-   (or width 160) nil nil "…"))
+   (or width 160) nil nil t))
 
 (defun hermes-notifications--buffer-attended-p (buffer)
   "Return whether BUFFER is in the selected window of the focused frame.

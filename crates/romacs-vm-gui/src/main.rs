@@ -24,6 +24,7 @@ mod eval_last_sexp;
 mod presentation;
 mod latency;
 mod echo;
+mod title;
 mod prompt;
 mod terminal_service;
 mod terminal_wait;
@@ -486,7 +487,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
     let windows_alike = |a: &[romacs_layout_input::PlacedWindowSnapshot], b: &[romacs_layout_input::PlacedWindowSnapshot]| a.len() == b.len()
         && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && paints_alike(&a.snapshot, &b.snapshot));
     a.font_selection == b.font_selection
-        && a.font_alternatives == b.font_alternatives && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
+        && a.font_alternatives == b.font_alternatives && a.fontsets == b.fontsets && (a.width, a.height, a.background_alpha) == (b.width, b.height, b.background_alpha)
         && a.no_font == b.no_font
         && a.chrome == b.chrome
         && windows_alike(&a.windows, &b.windows)
@@ -546,7 +547,7 @@ fn snapshot(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<romacs_lay
     if g1 {
         // Preserve G1's explicitly full-height legacy selected-window fixture.
         Ok(romacs_layout_input::FrameSnapshot { font_selection: vm.font_selection_state(),
-            font_alternatives: vm.font_alternative_state()?, no_font: Default::default(),
+            font_alternatives: vm.font_alternative_state()?, fontsets: vm.fontset_state(), no_font: Default::default(),
             width: 400, height: 300,
             background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
                 x: 0, y: 0, snapshot: vm.display_snapshot(400, 300)?,
@@ -1339,6 +1340,7 @@ fn evaluate(
         paint(&mut engine.borrow_mut(), &mut vm, sender, &images, last_presentation(), force_gc, floor, initial, &mut pending,
               if live { Wait::Bounded } else { Wait::Rendered }, &mut paint_timings)?
     };
+    title::consider(&mut vm, sender, &host);
     let mut live_presentation = presentation::Presentation::new();
     if live && host.borrow().window_shown() && sender.wait_for_render(previous.presentation, std::time::Duration::ZERO).is_err() {
         // Not drawn (hidden as it starts): the loop waits for it, stalled.
@@ -1485,6 +1487,7 @@ fn evaluate(
                 let snapshot_ns = if !live {
                     let snapshot_start = Instant::now();
                     let next = frame(&mut vm, g1, width, height)?;
+                    title::consider(&mut vm, sender, &host);
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     let presentation = next_presentation(&host)?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, &images, presentation, force_gc, floor, next, &mut pending, Wait::Rendered, &mut paint_timings)?;
@@ -1568,6 +1571,7 @@ fn evaluate(
                 if !host.borrow().window_shown() { return Ok(None); }
                 let snapshot_start = Instant::now();
                 let next = frame(&mut vm, g1, width, height)?;
+                title::consider(&mut vm, sender, &host);
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
@@ -1665,6 +1669,7 @@ fn evaluate(
         // An evaluation may mutate before signalling; its error must not hide that paint.
         vm.land_images()?;
         let next = frame(&mut vm, g1, width, height)?;
+        title::consider(&mut vm, sender, &host);
         // Asked apart: a borrow in the condition would outlive it into paint's publication.
         let lost = images.borrow().must_repaint(sender.as_ref());
         if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation(), lost)? {

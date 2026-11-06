@@ -1293,8 +1293,6 @@ once the fresh query succeeds, so canceled callbacks cannot append stale data."
   (setq-local tabulated-list-printer #'gnosis-dashboard--print-entry)
   (add-hook 'gnosis-tl-after-insert-functions
             #'gnosis-dashboard--project-marks nil t)
-  ;; Character "…" can mess up column-width depending on the font used.
-  (setq-local truncate-string-ellipsis "...")
   (setq-local gnosis-center-content t)
   (setq tabulated-list-padding 2
         tabulated-list-entries nil

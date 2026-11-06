@@ -300,7 +300,6 @@ fn assert_menu_heading_pixels(compact: bool) {
                     .resolve_char(
                         &romacs_font::FontRequest::new("monospace", size),
                         '中',
-                        &romacs_font::FontsetPolicy::new(),
                     )
                     .expect("requires a CJK fallback font");
                 let glyphs = text

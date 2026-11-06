@@ -30,7 +30,7 @@
   :type 'number)
 
 (defcustom romacs-eval-chip-max-width 60
-  "Most columns an eval chip's text takes; a longer value is cut with …."
+  "Most columns an eval chip's text takes; a longer value is cut with an ellipsis."
   :type 'natnum)
 
 (defcustom romacs-eval-chip-command-errors t
@@ -126,7 +126,8 @@ sequence ends it, with no hook run for each key.")
   (let* ((line (car (split-string text "\n")))
          (room (max 20 (min romacs-eval-chip-max-width (- (window-body-width window) 4)))))
     (concat "⇒ " (if (or (> (string-width line) room) (string-match-p "\n" text))
-                     (concat (truncate-string-to-width line (1- room)) "…")
+                     (let ((dots (truncate-string-ellipsis)))
+                       (concat (truncate-string-to-width line (- room (string-width dots))) dots))
                    line))))
 
 (defun romacs-eval-chip--columns (chip window)

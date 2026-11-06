@@ -19,6 +19,12 @@ impl Leaf<'_> {
     /// `romacs--native-window': ACTION `query', `show' or `hide' asked of
     /// the host; t when its window shows after the request, nil when it
     /// does not or the host has no native windows.
+    /// (X . Y) of the pointer over the host frame, else nil.
+    pub(crate) fn pointer(&mut self) -> Out {
+        let Some((x, y)) = self.vm.host_input.as_mut().and_then(|host| host.pointer()) else { return Ok(Value::NIL) };
+        let [x, y] = [x, y].map(|n| Value::integer(i64::from(n)).expect("a pixel is a fixnum"));
+        Ok(self.cons(x, y))
+    }
     pub(crate) fn native_window(&mut self, action: Value) -> Out {
         let action = match self.symbol_name(action).ok().as_deref() {
             Some("query") => crate::NativeWindow::Query,

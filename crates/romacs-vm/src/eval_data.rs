@@ -203,9 +203,29 @@ impl Vm {
         // Listing the unreadable objects is not the print itself.
         if !matches!(options.unreadable, Unreadable::Met(_)) {
             let slot = if bound_table.is_none() { Some(table_slot) } else { None };
-            self.publish_print_number_table(slot, table, options.graph.get_mut())?;
+            self.publish_print_number_table(slot, table, options.graph.get_mut(), false)?;
         }
         Ok((printed?, options.unreadable))
+    }
+
+    /// Fprint_preprocess: under print-circle, fill print-number-table with
+    /// OBJECT's circle candidates, keeping those seen once as t, for
+    /// cl-print's own printing.
+    pub(super) fn print_preprocess_only(&mut self, object: Value) -> Result<()> {
+        let mut options = PrintOptions::default();
+        for (key, name) in [("circle", "print-circle"), ("gensym", "print-gensym")] {
+            let slot = self.slot(name);
+            let v = self.variable_value(slot)?;
+            if v != Value::UNBOUND { options.set(key, v); }
+        }
+        if !options.circle { return Ok(()); }
+        self.print_number_index = 0;
+        let slot = self.slot("print-number-table");
+        let table = self.variable_value(slot)?;
+        let continuous = self.slot("print-continuous-numbering");
+        let continuous = !matches!(self.variable_value(continuous)?, Value::NIL | Value::UNBOUND);
+        self.print_preprocess(object, true, &mut options, continuous, table)?;
+        self.publish_print_number_table(Some(slot), table, options.graph.get_mut(), true)
     }
 
     /// print_string for princ of a plain string into a multibyte buffer:
@@ -303,10 +323,10 @@ impl Vm {
 
     /// Store the marks in print-number-table as print.c does: entries keep
     /// the insertion order of the traversal, and objects seen once are
-    /// removed. Sub-char-tables have no Lisp key and stay private. A new
-    /// table goes to the variable's SLOT; without one (an overriding
-    /// binding) nothing outlives the call to see it.
-    fn publish_print_number_table(&mut self, slot: Option<usize>, mut table: Value, graph: &PrintGraph) -> Result<()> {
+    /// removed, unless KEEP_ONCE. Sub-char-tables have no Lisp key and stay
+    /// private. A new table goes to the variable's SLOT; without one (an
+    /// overriding binding) nothing outlives the call to see it.
+    fn publish_print_number_table(&mut self, slot: Option<usize>, mut table: Value, graph: &PrintGraph, keep_once: bool) -> Result<()> {
         if !matches!(self.object_if(table), Some(data::Object::HashTable(_))) {
             let Some(slot) = slot.filter(|_| !graph.inserted.is_empty()) else { return Ok(()) };
             table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new(hash::Test::Eq, hash::Weakness::None, 0))));
@@ -320,7 +340,7 @@ impl Vm {
                 Some(CircleMark::Pending(n)) => self.declaration_hash_put(table, key, Value::integer(-n)?)?,
                 Some(CircleMark::Printed(n)) => self.declaration_hash_put(table, key, Value::integer(*n)?)?,
                 Some(CircleMark::Other(_)) => {}
-                Some(CircleMark::Once) | None => if mark == Value::TRUE { self.declaration_hash_remove(table, key)? },
+                Some(CircleMark::Once) | None => if mark == Value::TRUE && !keep_once { self.declaration_hash_remove(table, key)? },
             }
         }
         Ok(())
