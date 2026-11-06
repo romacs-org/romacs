@@ -307,6 +307,22 @@ fn lisp_a_leaf_reaches_sees_the_leafs_frame() {
     assert_eq!(eval(&mut vm, "(progn (setq seen nil) (mapbacktrace (lambda (_e function _a _f) (if (eq function 'buffer-local-value) (setq seen t)))) seen)"), "nil");
 }
 
+/// A debug-on-exit flag on the leaf's frame leaves with the frame, as it does
+/// from any primitive's: the caller's return does not stop for it.
+#[test]
+fn a_flag_on_a_leafs_frame_leaves_with_the_frame() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().expect("prelude");
+    eval(&mut vm, "(progn (setq stopped nil debugger (lambda (&rest _) (setq stopped t) 'replaced))
+  (defun romacs--world-force (_i)
+    (backtrace-debug 0 t 'buffer-local-value)
+    (set-default 'pf 1))
+  (defvar pf 'stale)
+  (defun read-pf () (buffer-local-value 'pf (current-buffer))))");
+    assert_eq!(eval(&mut vm, "(romacs--world-pend 'pf 0)"), "t");
+    assert_eq!(eval(&mut vm, "(list (read-pf) stopped)"), "(1 nil)");
+}
+
 /// A form the init gives after a secret reader ran is noted withheld, never
 /// as its text, which may hold what the reader returned.
 #[test]

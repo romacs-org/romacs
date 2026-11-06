@@ -1399,8 +1399,8 @@ impl Vm {
         } else {
             vec![function, self.list_value(args)]
         };
-        // Every call of Lisp from native code comes here, so Lisp a leaf
-        // reaches sees the leaf's frame, whatever way it got here.
+        // A leaf's Lisp comes here, by pending variables, `safe_call' and
+        // watchers: it sees the leaf's frame, whichever way it came.
         let site = std::mem::replace(&mut self.site_leaf, (0, 0));
         let mark = self.record_site_leaf(site);
         self.suspend_stack();
@@ -1413,7 +1413,7 @@ impl Vm {
         self.resume_stack();
         self.end_nested_execution();
         if let Some(mark) = mark {
-            self.backtrace.leave(mark);
+            self.trace_leave(mark);
         }
         self.site_leaf = site;
         result

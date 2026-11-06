@@ -188,6 +188,41 @@ impl crate::HostInput for PanickingHost {
     }
 }
 
+struct PanickingPoll;
+impl crate::HostInput for PanickingPoll {
+    fn input_pending(&mut self) -> bool { panic!("host failure while a leaf polls") }
+    fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(vec![]) }
+    fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
+        Err("no events".into())
+    }
+}
+
+/// A panic out of a leaf a site runs leaves no address of that site behind,
+/// for the next call into Lisp to read as a live leaf.
+#[test]
+fn a_panic_out_of_a_site_leaf_forgets_the_site() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(defun spare-poll () (input-pending-p))").unwrap();
+    vm.set_host_input(Some(Box::new(PanickingPoll)));
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw("(spare-poll)")));
+    assert!(caught.is_err(), "the host panic propagates");
+    assert_eq!(vm.site_leaf, (0, 0));
+    vm.set_host_input(None);
+    let poll = vm.intern("spare-poll");
+    assert_eq!(vm.reader_call(poll, &[]).unwrap(), Value::NIL);
+}
+
+/// A world cannot hold the address of a leaf in flight.
+#[test]
+fn a_world_refuses_a_site_leaf_in_flight() {
+    let mut vm = Vm::new();
+    vm.world_normalize();
+    assert_eq!(vm.world_quiescent(), Ok(()));
+    vm.site_leaf = (1, 1);
+    assert!(vm.world_quiescent().unwrap_err().contains("site_leaf"));
+    vm.site_leaf = (0, 0);
+}
+
 /// A panic out of a host wait, with engines suspended by `eval' and the
 /// prompt, leaves no suspension state behind once caught: a collection
 /// then traces only live engines, and Lisp runs and collects again.
