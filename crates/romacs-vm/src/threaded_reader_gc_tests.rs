@@ -67,16 +67,16 @@ fn callback_wrappers_reuse_request_slots_without_retaining_dead_callbacks() {
         .compile_source("(let ((payload (cons 1 2))) (lambda () payload))")
         .unwrap();
     vm.collect(&mut []);
-    let conses = vm.conses.len() - vm.free.of(0);
-    let closures = vm.closures.len() - vm.free.of(1);
+    let conses = vm.conses.live();
+    let closures = vm.closures.live();
     for _ in 0..128 {
         let callback = vm.execute_raw(maker).unwrap();
         let result = vm.reader_call(callback, &[]).unwrap();
         assert_eq!(vm.display(result).unwrap(), "(1 . 2)");
     }
     vm.collect(&mut []);
-    assert_eq!(vm.conses.len() - vm.free.of(0), conses, "callback captures were retained");
-    assert_eq!(vm.closures.len() - vm.free.of(1), closures, "callbacks were retained");
+    assert_eq!(vm.conses.live(), conses, "callback captures were retained");
+    assert_eq!(vm.closures.live(), closures, "callbacks were retained");
 }
 
 #[test]

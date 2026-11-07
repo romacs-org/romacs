@@ -439,6 +439,10 @@ struct EntryCache {
     primitive: Option<PrimitiveCall>,
 }
 
+// SAFETY: its `entry' points into its program's code, and only the engine
+// running that program follows it; a mark's threads read the rest.
+unsafe impl Sync for EntryCache {}
+
 // A deliberately narrow expression language, not copied IR. Operands contain
 // only argument indices or immediate scalars, never an untraced heap Value.
 #[derive(Clone, Copy)]
@@ -649,6 +653,20 @@ impl Program {
     pub(super) fn sites(&self) -> usize {
         self.entries.len()
     }
+    /// What function ID's lowered code holds, each instruction read on a copy,
+    /// and the functions its entry caches enter: for verify's reference
+    /// marker (gc_check.rs), apart from `trace_function'.
+    pub(super) fn lowered_values(&self, id: usize, value: &mut impl FnMut(Value), function: &mut impl FnMut(usize)) {
+        for inst in self.code.get(id).into_iter().flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
+            let entry = self.entries[inst.site];
+            value(entry.target);
+            if !entry.entry.is_null() {
+                function(entry.function);
+            }
+        }
+    }
     pub(super) fn trace_function(
         &self,
         id: usize,
@@ -739,8 +757,14 @@ impl SuspendedCode {
 }
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
     for inst in code.iter_mut().flatten() {
-        visit(&mut inst.value);
-        inst.op.visit_values(visit);
+        inst.visit_values(visit);
+    }
+}
+impl Inst {
+    /// Every Value it holds: the one visitor, which a read takes on a copy.
+    fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        visit(&mut self.value);
+        self.op.visit_values(visit);
     }
 }
 /// One record per call: the suspended caller's resume state, and the

@@ -1723,10 +1723,31 @@ pub fn monotonic() -> Instant {
     Instant::now()
 }
 
-/// When a collection started, for `gc-elapsed'; none in build mode, so a
-/// world's heap never depends on how long its collections took.
+/// F with every signal blocked on this thread, so threads it starts leave
+/// signals to the threads that handle them.
+pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
+    /// The mask before, put back however F ends.
+    struct Restore(libc::sigset_t);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &self.0, std::ptr::null_mut()) };
+        }
+    }
+    let mut all = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    let mut old = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    let _restore = unsafe {
+        libc::sigfillset(all.as_mut_ptr());
+        libc::pthread_sigmask(libc::SIG_SETMASK, all.as_ptr(), old.as_mut_ptr());
+        Restore(old.assume_init())
+    };
+    f()
+}
+
+/// When a collection started, for `gc-elapsed'; none in build mode, nor in
+/// a builder whose recording has ended (its capture collects), so a world's
+/// heap never depends on how long its collections took.
 pub fn collection_clock() -> Option<Instant> {
-    (!building()).then(Instant::now)
+    (!building() && !crate::world::arena::heap_is_image()).then(Instant::now)
 }
 
 // Effects.

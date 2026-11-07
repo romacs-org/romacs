@@ -586,6 +586,12 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         stalled (default 2000): editing goes on, once told
 ";
 
+/// A session marks on several threads. Only sessions ask: an isolate worker
+/// and the tools may fork, and must hold no thread.
+fn use_collector_threads() {
+    romacs_vm::set_gc_workers(std::thread::available_parallelism().map_or(1, |n| n.get()).min(8));
+}
+
 fn main() {
     // A session's every end says why (exit.rs); other modes keep their own.
     let end = match std::panic::catch_unwind(run) {
@@ -679,7 +685,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()).map(|()| None),
-            "--batch" => return batch::run(args.collect(), quick, world_store).map(|()| None),
+            "--batch" => {
+                use_collector_threads();
+                return batch::run(args.collect(), quick, world_store).map(|()| None);
+            }
             "--compile-lisp-tree" => {
                 let jobs = match (args.next().as_deref(), args.next()) {
                     (None, _) => 4,
@@ -719,6 +728,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
         return Ok(None);
     }
+    use_collector_threads();
     TRACE_LATENCY.store(trace_latency, std::sync::atomic::Ordering::Relaxed);
     SCENE_DUMPS.store(!live || trace_scene, std::sync::atomic::Ordering::Relaxed);
     DIAGNOSTICS.store(!live || trace_scene || trace_latency || std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"),

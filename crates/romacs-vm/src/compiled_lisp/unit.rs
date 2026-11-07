@@ -927,7 +927,7 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                         }
                     }
                 }
-                vm.free.allocated += properties(vm).saturating_sub(plain) as u64;
+                vm.allocation.allocated += properties(vm).saturating_sub(plain) as u64;
             }
             Node::Cell(content) => {
                 let content = resolve(content)?;
@@ -936,7 +936,7 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
             Node::Closure(_, captures, metadata, document) => {
                 let (captures, metadata, document) = (all(captures)?, all(metadata)?, resolve(document)?);
                 // The funnel charged the closure empty (data.rs `alloc_closure').
-                vm.free.allocated += ((captures.len() + metadata.len()) * size_of::<Value>()) as u64;
+                vm.allocation.allocated += ((captures.len() + metadata.len()) * size_of::<Value>()) as u64;
                 let closure = &mut vm.closures[v.index(4)?];
                 closure.captures = captures;
                 closure.metadata = metadata;

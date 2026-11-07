@@ -27,6 +27,7 @@ mod interpreted_closure;
 mod oclosure;
 mod host_input;
 mod quit;
+pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
 mod bidi;
 mod layout_host;
@@ -103,6 +104,9 @@ mod undo;
 mod insdel;
 mod indirect;
 mod gc;
+mod gc_check;
+mod gc_mark;
+mod table;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
@@ -1466,6 +1470,8 @@ pub struct Vm {
     gc_stats: HeapStats,
     /// Where the last collection's time went (`romacs--gc-phases').
     gc_times: gc::GcTimes,
+    /// What the last mark counted (`garbage-collect's statistics).
+    gc_census: gc::Census,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1507,8 +1513,8 @@ pub struct Vm {
     rooted_write: bool,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
-    /// The tables' free entries and allocation meter (gc.rs).
-    free: gc::FreeEntries,
+    /// What the funnels have handed out (gc.rs).
+    allocation: gc::Allocation,
     names: NameMap<String, usize>,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
@@ -1544,8 +1550,8 @@ pub struct Vm {
     /// By argument count, the permanent function through which native code
     /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
     reader_trampolines: Vec<Option<usize>>,
-    closures: Vec<Closure>,
-    cells: Vec<Value>,
+    closures: table::Table<Closure>,
+    cells: table::Table<Value>,
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
@@ -1566,8 +1572,8 @@ pub struct Vm {
     recent_keys: std::collections::VecDeque<RecentKey>,
     /// keyboard.c lossage_limit: how many RECENT_KEYS entries are kept.
     lossage_limit: usize,
-    conses: Vec<(Value, Value)>,
-    objects: Vec<data::Object>,
+    conses: table::Table<(Value, Value)>,
+    objects: table::Table<data::Object>,
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
@@ -1690,6 +1696,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     free_local_binding_slots,
     gc_stats,
     gc_times,
+    gc_census,
     collection_log,
     gc_retained,
     gc_payload_bytes,
@@ -1700,7 +1707,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     running_engines,
     rooted_write,
     gc_stress,
-    free,
+    allocation,
     suspended_stacks,
     gc_floor,
     job_budget,
@@ -1807,7 +1814,7 @@ impl Vm {
         self.private_objects() + self.region_weight()
     }
     pub(crate) fn private_objects(&self) -> usize {
-        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len() - self.free.len()
+        self.conses.live() + self.cells.live() + self.closures.live() + self.objects.live()
     }
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
@@ -1915,6 +1922,7 @@ impl Vm {
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
+            gc_census: Default::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
@@ -1928,7 +1936,7 @@ impl Vm {
             running_engines: 0,
             rooted_write: false,
             gc_stress: gc::Stress::from_env(),
-            free: gc::FreeEntries::default(),
+            allocation: Default::default(),
             names: NameMap::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
@@ -1949,8 +1957,8 @@ impl Vm {
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),
-            closures: vec![],
-            cells: vec![],
+            closures: Default::default(),
+            cells: Default::default(),
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             fence: None,
@@ -1960,8 +1968,8 @@ impl Vm {
             local_zone: LocalZone::Process,
             recent_keys: std::collections::VecDeque::new(),
             lossage_limit: RECENT_KEYS,
-            conses: vec![],
-            objects: vec![],
+            conses: Default::default(),
+            objects: Default::default(),
             referrers: None,
             local_owners: None,
             completion_walks: 0,
@@ -4109,7 +4117,7 @@ mod capture_tests {
         let mut roots = [value];
         vm.collect(&mut roots);
         assert_eq!(
-            vm.conses.len() - vm.free.of(0),
+            vm.conses.live(),
             1,
             "closure must not retain the unused cons"
         );

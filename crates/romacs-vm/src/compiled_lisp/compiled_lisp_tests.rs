@@ -28,9 +28,9 @@ fn install_charge(vm: &mut Vm, form: &str) -> u64 {
     let slots = Arc::new(names.names.iter().map(|n| vm.slot(n)).collect::<Vec<usize>>());
     let bytes = Arc::new(bytes);
     let mut reader = codec::Reader::new(&bytes);
-    let before = vm.free.allocated;
+    let before = vm.allocation.allocated;
     let entry = unit::Install { bytes: &bytes, slots: &slots }.unit(vm, &mut reader).unwrap();
-    let charged = vm.free.allocated - before;
+    let charged = vm.allocation.allocated - before;
     vm.release_request_entry(entry);
     charged
 }

@@ -506,7 +506,7 @@ impl Vm {
     /// then push into fresh pages instead of reusing free entries spread
     /// over shared ones, or copying a whole table to grow it.
     pub(crate) fn isolate_compact_next(&mut self) {
-        self.free.compact = true;
+        self.allocation.compact = true;
     }
 
     pub(crate) fn isolate_reserve(&mut self, needed: usize) {
@@ -856,6 +856,9 @@ impl Vm {
 /// gone before the prctl leaves another), the isolate signals caught, and
 /// descriptor FD taken as the control socket.
 pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedFd, String> {
+    // Before any VM: a zygote must hold no thread, and an isolate inherits
+    // whatever asks for them.
+    crate::gc_mark::forbid_threads();
     crate::host::set_parent_death_signal(libc::SIGTERM).map_err(|e| e.to_string())?;
     if let Some(parent) = parent && crate::host::parent_pid() != parent {
         return Err(format!("isolate worker: parent {parent} is gone"));

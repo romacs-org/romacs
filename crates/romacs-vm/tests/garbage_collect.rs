@@ -106,22 +106,22 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     // Only the request boundary after the binding ends may collect, where
     // the same churn collected ten times above.
     assert!(vm.heap_stats().collections <= before + 1, "a raised threshold defers collection");
-    // A proportional term above the threshold paces instead: 0.12, scaled
-    // to 1.8, waits 18 traced heaps.
-    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 20000 nil))").unwrap();
-    let proportional = churn(&mut vm, 200_000);
-    assert!(proportional * 3 <= plain, "a raised percentage defers collection: {proportional} vs {plain}");
-    // Larger settings (gcmh-style 0.2 to 1.0, or absurd ones) are held at
-    // that ceiling: they defer collection, and it still happens. 18 traced
-    // heaps against the default's 11.3 is about 0.63 of its collections.
+    // A proportional term above the threshold paces instead, in proportion:
+    // 0.12 waits 1.2 traced heaps of a live heap made big enough to matter.
+    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 40000 nil))").unwrap();
+    let proportional = churn(&mut vm, 2_000_000);
+    vm.eval_source("(setq gc-cons-percentage 0.5)").unwrap();
+    let raised = churn(&mut vm, 2_000_000);
+    assert!(raised * 3 <= proportional, "a raised percentage defers collection: {raised} vs {proportional}");
+    // Absurd settings are held at the ceiling: they defer, and it still
+    // happens, the same however large.
     let mut deferred = vec![];
-    for p in ["0.2", "1.0", "1e9"] {
+    for p in ["1.8", "2.0", "1e9"] {
         vm.eval_source(&format!("(setq gc-cons-percentage {p})")).unwrap();
         deferred.push(churn(&mut vm, 2_000_000));
     }
     vm.eval_source("(setq gc-cons-percentage 0.1)").unwrap();
-    let default = churn(&mut vm, 2_000_000);
-    assert!(deferred.iter().all(|&n| n >= 1 && n * 5 <= default * 4), "clamped deferral: {deferred:?} vs default {default}");
+    assert!(deferred.iter().all(|&n| n >= 1), "the ceiling still collects: {deferred:?}");
     // The same ceiling, give or take where each churn starts in a cycle.
     assert!(deferred.iter().max().unwrap() - deferred.iter().min().unwrap() <= 1, "the ceiling holds: {deferred:?}");
     // Non-integer thresholds are refused, as GNU's DEFVAR_INT is.

@@ -4757,6 +4757,7 @@ dependencies = [
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-deque",
  "flate2",
  "foldhash",
  "icu_casemap",

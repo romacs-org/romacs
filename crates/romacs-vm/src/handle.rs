@@ -210,7 +210,7 @@ impl Vm {
     /// collections free in place and compact only on demand (gc.rs
     /// `compacts').
     pub fn collect_compacting(&mut self) {
-        self.free.compact = true;
+        self.allocation.compact = true;
         self.collect(&mut []);
     }
     /// The command loop's idle collection: as `collect_garbage', but
@@ -362,10 +362,13 @@ impl Vm {
             self.gc_times = last;
         }
         if collected {
-            let mut lap = crate::gc::Lap::start();
-            // What the collection and the work before it freed goes back.
-            crate::world::arena::trim();
-            lap.lap(&mut self.gc_times, crate::gc::Phase::Trim);
+            // What it freed goes back while nobody waits. Elsewhere the
+            // next allocations want it, and would fault it in again.
+            if until_key {
+                let mut lap = crate::gc::Lap::start();
+                crate::world::arena::trim();
+                lap.lap(&mut self.gc_times, crate::gc::Phase::Trim);
+            }
             let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
             self.count_collection(elapsed);
             self.note_collection(elapsed, until_key);
@@ -434,6 +437,49 @@ mod tests {
         fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
             Err("no events".into())
         }
+    }
+
+    /// A host that panics at its Nth look for a key.
+    struct PanicAfter(usize);
+    impl crate::HostInput for PanicAfter {
+        fn input_pending(&mut self) -> bool { false }
+        fn key_pending(&mut self) -> bool {
+            self.0 = self.0.saturating_sub(1);
+            assert!(self.0 > 0, "the host failed");
+            false
+        }
+        fn redisplay(&mut self, _: crate::HostFrame) -> std::result::Result<Vec<crate::WindowEnd>, String> { Ok(vec![]) }
+        fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
+            Err("no events".into())
+        }
+    }
+
+    /// A panic part way through a mark leaves no marks: the next mark would
+    /// stop at the entries the first reached, and sweep what they hold.
+    #[test]
+    fn an_unwinding_mark_leaves_no_marks_behind() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defvar kept nil) (let ((i 0)) (while (< i 300000) (setq kept (cons i kept)) (setq i (1+ i))))").unwrap();
+        vm.collect_garbage();
+        vm.set_host_input(Some(Box::new(PanicAfter(3))));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_garbage_until_key()));
+        assert!(unwound.is_err(), "the fixture panics part way through");
+        vm.set_host_input(None);
+        vm.collect_garbage();
+        vm.eval_source_raw("(let ((i 0)) (while (< i 300000) (cons i nil) (setq i (1+ i))))").unwrap();
+        vm.collect_garbage();
+        assert_eq!(vm.eval_source_raw("(apply '+ kept)").unwrap().as_integer().unwrap(), 300_000 * 299_999 / 2);
+    }
+
+    /// A long vector of immediates pushes nothing to trace, and still counts
+    /// as work: the key is looked for all the way through it.
+    #[test]
+    fn a_long_vector_is_no_blind_stretch_for_a_key_press() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defvar kept (make-vector 4000000 0))").unwrap();
+        vm.set_host_input(Some(Box::new(KeyAfter(100))));
+        assert!(!vm.collect_garbage_until_key(), "the hundredth look came before the end");
+        vm.set_host_input(None);
     }
 
     /// A collection a key press abandoned is no collection: the report

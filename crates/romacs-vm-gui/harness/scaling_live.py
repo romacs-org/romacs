@@ -167,8 +167,9 @@ def probe_entry(raw):
 # Sessions.
 
 def private_env(home, extra=None):
-    """A private HOME/XDG/TMPDIR environment with no display."""
-    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8',
+    """A private HOME/XDG/TMPDIR environment with no display. The collector marks
+    on the evaluating thread alone, so that thread's instructions are all the work."""
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_GC_WORKERS': '1',
            'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
            'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(home / 'tmp')}
     for name in ('ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_GNU_SOURCE', 'ROMACS_GATE_FONTCONFIG'):

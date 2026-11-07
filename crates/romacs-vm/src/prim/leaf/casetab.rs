@@ -135,7 +135,7 @@ impl Leaf<'_> {
     fn initialize_case_roots(&mut self) -> std::result::Result<(), Fault> {
         self.standard_case_table()?;
         let roots = self.vm.standard_case_tables;
-        for object in &mut self.vm.objects {
+        for object in self.vm.objects.iter_mut() {
             let buffer_roots = match object {
                 Object::Buffer(b) if b.state.live => &mut b.case_tables,
                 Object::ByteBuffer(b) if b.state.live => &mut b.case_tables,
