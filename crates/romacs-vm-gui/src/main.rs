@@ -498,7 +498,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    a.lays_out_like(b) && a.cursor_off == b.cursor_off && a.no_cursor == b.no_cursor
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
