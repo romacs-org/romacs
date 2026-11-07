@@ -26,6 +26,7 @@ pub use composition_ring::CompositionRing;
 mod content;
 mod cursor_effects;
 mod cursor_look;
+pub use cursor_look::cursor_light_outset;
 mod cursor_presentation;
 mod deform;
 mod draw;

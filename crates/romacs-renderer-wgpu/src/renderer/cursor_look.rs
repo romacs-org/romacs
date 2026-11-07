@@ -18,6 +18,20 @@ pub(super) struct CursorLight {
     pub(super) hollow_box: bool,
 }
 
+/// How far beyond a cursor's own rect its look may touch pixels: the
+/// glow's reach and the one pixel its quad's edge shades; none for
+/// `plain'.  The cursor layer's footprint is the cursor's rect grown by
+/// this on every side, and the glow is drawn within it (its quad is padded
+/// by exactly this, `glow_reach' + 1).
+pub fn cursor_light_outset(look: &CursorLookConfig) -> f32 {
+    if look.style == CursorLookStyle::Plain { 0.0 } else { glow_reach(look) + 1.0 }
+}
+
+/// How far the glow around a lit bar reaches.
+pub(super) fn glow_reach(look: &CursorLookConfig) -> f32 {
+    look.glow_reach.max(0.0)
+}
+
 /// The light of a cursor of STYLE under LOOK: ACTIVE when it is its
 /// frame's selected window's cursor, FOCUS the frame's focus light (1
 /// focused, 0 not, between while it fades).
@@ -38,6 +52,14 @@ pub(super) fn cursor_light(look: &CursorLookConfig, style: CursorStyle, active: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_footprint_grows_by_the_glow_and_not_at_all_for_plain() {
+        let soft = CursorLookConfig::default();
+        assert_eq!(cursor_light_outset(&soft), soft.glow_reach + 1.0);
+        let plain = CursorLookConfig { style: CursorLookStyle::Plain, ..Default::default() };
+        assert_eq!(cursor_light_outset(&plain), 0.0);
+    }
 
     #[test]
     fn plain_draws_every_cursor_whole_and_unlit() {

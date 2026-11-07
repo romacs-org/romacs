@@ -1173,8 +1173,10 @@ impl WgpuRenderer {
                 _ => (cx, cy, cw, ch),
             };
             let glow = Color { a: light.glow, ..paint.body_background };
+            // Style 12 pads its quad by the reach plus one: the footprint
+            // `cursor_light_outset' promises.
             self.add_rounded_rect_styled(cursor_glow_vertices, (x, y, w, h), w.min(h) / 2.0, &glow,
-                                         12, self.cursor_look.glow_reach);
+                                         12, super::cursor_look::glow_reach(&self.cursor_look));
         }
 
         if matches!(style, CursorStyle::FilledBox) {
