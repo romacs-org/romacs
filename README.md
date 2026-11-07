@@ -25,8 +25,8 @@ Your packages, your init and your muscle memory come with you.
    menu, with every running agent listed.
 5. **The install line.**
 
-Every frame is the real program at real speed; the captions are added, and
-the only edits are cuts between scenes.
+Every frame is the real program.  The race runs at real speed.  Captions are
+added, and scenes are cut and briefly held so you can read them.
 
 ## Why you'll switch
 
