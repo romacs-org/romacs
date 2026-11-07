@@ -315,7 +315,7 @@ def lead_results(**overrides):
     def made(name, gnu, romacs):
         return pb.row(name, 'session', 'run', gnu, romacs, 3)
     rows = [made(readme.VC_HISTORY, {'wall': 19.0, 'check': '183574 abc'}, {'wall': 3.0, 'key': .005, 'check': '183574 abc'}),
-            made(readme.OPEN_XDISP, {'wall': .65}, {'wall': .77}),
+            made('session find-file xdisp.c', {'wall': .65}, {'wall': .77}),
             made(readme.OPEN_HEADER, {'wall': 2.0}, {'wall': 1.0}),
             made(readme.THEME, {'wall': .05}, {'wall': .06})]
     made_results = results(rows)
