@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "f6935bde2ce917265eaf8a313c714d652b30d848d7b638f3ef8988654ba20d64",
+    "input_hash": "6abeccf4b9f86015bcf1e83346280c2c32aa53c3d5724cae74697128b6d9cdd5",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8624
+    "vm2_universe": 8635
   },
   "schema": 2,
   "vm2": {
-    "count": 1439,
+    "count": 1444,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -880,6 +880,8 @@
       "romacs--decompress-prepare",
       "romacs--display-animates",
       "romacs--doc-variable-records",
+      "romacs--effect-replace",
+      "romacs--effect-set",
       "romacs--face-attr-match-p",
       "romacs--face-list",
       "romacs--face-restore",
@@ -1062,6 +1064,9 @@
       "romacs-color-from-oklab",
       "romacs-color-luminance",
       "romacs-color-oklab",
+      "romacs-effect-get",
+      "romacs-effect-names",
+      "romacs-effect-schema",
       "romacs-find-buffer-visiting",
       "romacs-image-header-size",
       "romacs-instructions",

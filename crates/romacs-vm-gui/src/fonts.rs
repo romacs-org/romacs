@@ -40,6 +40,7 @@ pub struct Display {
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
+    visual_hook: Option<Box<dyn FnMut(&romacs_display_protocol::VisualConfig)>>,
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
     /// of each image the VM's cache holds, by id, for the renderer
     /// (residency.rs).
@@ -113,7 +114,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
-                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
     }
@@ -193,6 +194,10 @@ impl Display {
     /// This display, sending each `alpha' setter to HOOK.
     pub fn with_alpha_hook(self, hook: impl FnMut(u64, [f32; 2], f32) + 'static) -> Self {
         Self { alpha_hook: Some(Box::new(hook)), ..self }
+    }
+    /// Call HOOK with each visual configuration Lisp asks for.
+    pub fn with_visual_hook(self, hook: impl FnMut(&romacs_display_protocol::VisualConfig) + 'static) -> Self {
+        Self { visual_hook: Some(Box::new(hook)), ..self }
     }
     fn open_uncached(entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont> {
         let metrics = romacs_font::probe::probe_font_px_metrics(&entity.file, entity.index, u32::try_from(pixel_size).ok()?.max(1), None)?;
@@ -302,6 +307,9 @@ impl romacs_vm::DisplayHost for Display {
     }
     fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) {
         if let Some(hook) = &mut self.alpha_hook { hook(frame, alpha, limit); }
+    }
+    fn set_visual_config(&mut self, config: &romacs_display_protocol::VisualConfig) {
+        if let Some(hook) = &mut self.visual_hook { hook(config); }
     }
     fn decode_image(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
         let (id, request) = self.prepare(query)?;

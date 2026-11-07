@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 39] = [
+        let checks: [(&str, bool); 40] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -32,6 +32,9 @@ impl Vm {
             ("host_input", self.host_input.is_none()),
             ("layout_host", self.layout_host.is_none()),
             ("display", self.display.is_none()),
+            // Restored as the renderer's default, which the options in the
+            // image must then also hold (rlisp/romacs-effects.el).
+            ("visual", *self.visual == romacs_display_protocol::VisualConfig::default()),
             ("session_host", self.session_host.is_none()),
             ("terminal_host", self.terminal_host.is_none()),
             ("terminal_bindings", self.terminal_bindings.is_empty()),

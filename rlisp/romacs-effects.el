@@ -12,16 +12,15 @@
 ;;
 ;; The properties themselves are defined in Rust and published by
 ;; `romacs-effect-schema', which reports each property's kind, its bounds and,
-;; for a symbol-valued property, the names it accepts.  The options below are
-;; written against that schema, and `romacs-effects--check-schema' verifies at
-;; load time that they still match it — so a property renamed in Rust is a
-;; warning here rather than a value that is silently ignored.
+;; for a symbol-valued property, the names it accepts.  Option
+;; `romacs-EFFECT-PROPERTY' holds EFFECT's PROPERTY, and
+;; `romacs-effects--connect' watches each one, as `romacs-effects--define-gallery'
+;; watches each decorative effect's plist option, so any way of setting it
+;; reaches the renderer (`setq', `setopt', `let', \[customize]).  It also
+;; warns at load time about a property with no option, so a property renamed
+;; in Rust is a warning here rather than a value that is silently ignored.
 
 ;;; Code:
-
-(declare-function romacs-effect-schema "romacsterm.c" (effect))
-(declare-function romacs-effect-names "romacsterm.c" (&optional scope))
-(declare-function romacs--effect-set "romacsterm.c" (effect &rest properties))
 
 (defgroup romacs nil
   "The Romacs renderer."
@@ -55,13 +54,6 @@ Blinking is GNU's `blink-cursor-mode'."
   "Animated transitions when a window's contents change."
   :group 'romacs
   :prefix "romacs-")
-
-(defun romacs-effects--set (effect property value)
-  "Push VALUE for PROPERTY of EFFECT to the renderer, if it is running.
-Silently does nothing in batch mode or before the renderer exists, so that
-loading a configuration file cannot fail for want of a display."
-  (when (fboundp 'romacs--effect-set)
-    (ignore-errors (romacs--effect-set effect property value))))
 
 (defmacro romacs-effects--defslot (slot summary occasion &rest defaults)
   "Define the ten options of window-animation SLOT.
@@ -113,10 +105,7 @@ When nil, %s happens immediately.
 the previous frame in a texture, which it must do to animate from it — see
 `%s' for the cheaper way to say that." master)))
           :type 'boolean
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :enabled value)))
+          :group ',group)
 
        (defcustom ,(funcall sym "kind") ,(funcall get :kind ''spring)
           ,(format "Which family of curve animates %s.
@@ -127,20 +116,14 @@ duration at all — it is described by its stiffness and damping ratio, and
 settles when it arrives." summary name name)
           :type '(choice (const :tag "Fixed-duration curve" easing)
                          (const :tag "Second-order spring" spring))
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :kind value)))
+          :group ',group)
 
        (defcustom ,(funcall sym "duration") ,(funcall get :duration 0.15)
           ,(format "Seconds %s takes, when `romacs-%s-kind' is `easing'.
 Zero disables this slot, exactly as setting `romacs-%s-enabled' to nil does.
 Ignored for a spring, which has no duration." summary name name)
           :type 'number
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :duration value)))
+          :group ',group)
 
        (defcustom ,(funcall sym "easing") ,(funcall get :easing ''ease-out-quad)
           ,(format "Curve shape for %s, when `romacs-%s-kind' is `easing'.
@@ -156,10 +139,7 @@ same thing as setting `romacs-%s-kind' to `spring'." summary name name name)
                          (const ease-in-out-cubic)
                          (const :tag "Spring-shaped curve" spring)
                          (const :tag "Custom cubic Bezier" cubic-bezier))
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :easing value)))
+          :group ',group)
 
        ,@(let ((axes '(("bezier-x1" :bezier-x1 0.0 "first control point's time")
                        ("bezier-y1" :bezier-y1 0.0 "first control point's value")
@@ -178,10 +158,7 @@ Time is clamped to 0.0-1.0 so the curve stays solvable; value is deliberately
 not, because overshooting past 1.0 is the point of a curve like
 `cubic-bezier(0.34, 1.56, 0.64, 1.0)'." what summary name)
                    :type 'number
-                   :group ',group
-                   :set (lambda (symbol value)
-                          (set-default symbol value)
-                          (romacs-effects--set ',slot ,keyword value)))))
+                   :group ',group)))
             axes))
 
        (defcustom ,(funcall sym "damping-ratio") ,(funcall get :damping-ratio 1.0)
@@ -191,10 +168,7 @@ not, because overshooting past 1.0 is the point of a curve like
 1.0 the motion bounces past its destination before returning, and above 1.0 it
 creeps in more slowly than it needs to.  Clamped to 0.1-10.0." summary name)
           :type 'number
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :damping-ratio value)))
+          :group ',group)
 
        (defcustom ,(funcall sym "stiffness") ,(funcall get :stiffness 800)
           ,(format "How hard the spring pulls %s toward its destination.
@@ -203,10 +177,7 @@ Higher is faster.  With the default damping ratio, 800 settles in about a third
 of a second.  This is the same number a niri configuration gives as
 `stiffness', and it means the same thing." summary)
           :type 'integer
-          :group ',group
-          :set (lambda (symbol value)
-                 (set-default symbol value)
-                 (romacs-effects--set ',slot :stiffness value)))
+          :group ',group)
 
        ,@(append
           (when (plist-get defaults :slide)
@@ -220,10 +191,7 @@ reduces %s to a pure fade.  The displacement shares the slot's own curve,
 so a spring-shaped slot overshoots through its placement and settles back."
                  summary name)
                 :type 'number
-                :group ',group
-                :set (lambda (symbol value)
-                       (set-default symbol value)
-                       (romacs-effects--set ',slot :slide-pixels value)))))
+                :group ',group)))
           (when (plist-get defaults :scale)
             `((defcustom ,(funcall sym "scale-from")
                   ,(funcall get :scale 1.0)
@@ -235,10 +203,7 @@ top-left so the picture grows outward from the point that anchored it.  The
 scale shares the slot's own curve, unclamped like the slide: a spring's
 overshoot past the settled size is the point." summary)
                 :type 'number
-                :group ',group
-                :set (lambda (symbol value)
-                       (set-default symbol value)
-                       (romacs-effects--set ',slot :scale-from value)))))))))
+                :group ',group)))))))
 
 (romacs-effects--defslot window-open
   "a window appearing"
@@ -296,7 +261,7 @@ popups are the kind that follow the cursor."
   :group 'romacs-child-frame
   :master 'romacs-child-frame-animations-off
   :enabled-doc "Nothing else needs to be composed offscreen for it."
-  :kind 'easing :duration 0.15 :easing 'ease-out-expo :slide 8.0 :scale 1.0)
+  :kind 'easing :duration 0.14 :easing 'ease-out-cubic :slide 8.0 :scale 1.0)
 
 (romacs-effects--defslot child-frame-close
   "a child frame going away"
@@ -304,7 +269,7 @@ popups are the kind that follow the cursor."
   :group 'romacs-child-frame
   :master 'romacs-child-frame-animations-off
   :enabled-doc "Nothing else needs to be composed offscreen for it."
-  :kind 'easing :duration 0.15 :easing 'ease-out-quad :slide 0.0 :scale 1.0)
+  :kind 'easing :duration 0.09 :easing 'ease-out-cubic :slide 0.0 :scale 1.0)
 
 (romacs-effects--defslot child-frame-movement
   "a child frame whose anchor moved"
@@ -312,7 +277,7 @@ popups are the kind that follow the cursor."
   :group 'romacs-child-frame
   :master 'romacs-child-frame-animations-off
   :enabled-doc "Nothing else needs to be composed offscreen for it."
-  :slide 0.0 :scale 1.0)
+  :enabled nil :slide 0.0 :scale 1.0)
 
 (romacs-effects--defslot child-frame-resize
   "a child frame whose size changes"
@@ -323,7 +288,7 @@ popups are the kind that follow the cursor."
 Turning this on today does nothing: the slot is wired for a future
 content-crossfade, and until then a resize is instant, exactly as GNU Emacs
 does it."
-  :slide 0.0 :scale 1.0)
+  :kind 'easing :duration 0.08 :easing 'ease-out-cubic :slide 0.0 :scale 1.0)
 
 
 ;;;; Global controls
@@ -338,10 +303,7 @@ offscreen ring — two full-frame textures and one extra blit per frame, whether
 or not anything is moving.  Setting this reclaims that; clearing an individual
 slot's `enabled' does not, because the others still need the previous picture."
   :type 'boolean
-  :group 'romacs-window-animation
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'window-animations :off value)))
+  :group 'romacs-window-animation)
 
 (defcustom romacs-window-animations-slowdown 1.0
   "Multiplier on the length of every window animation.
@@ -354,10 +316,7 @@ a 337ms motion, and two of the four slots are springs with no duration to
 lengthen by hand, so before this the only way to see one was to rebuild with a
 probe."
   :type 'number
-  :group 'romacs-window-animation
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'window-animations :slowdown value)))
+  :group 'romacs-window-animation)
 
 (defcustom romacs-child-frame-animations-off nil
   "Whether to disable every child-frame-animation slot at once.
@@ -368,10 +327,7 @@ carry an animation state and a standing scheduler demand, and every frame of
 a fade redraws the popup.  Setting this reclaims that; clearing an
 individual slot's `enabled' does not, because the others still need it."
   :type 'boolean
-  :group 'romacs-child-frame
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'child-frame-animations :off value)))
+  :group 'romacs-child-frame)
 
 (defcustom romacs-child-frame-animations-slowdown 1.0
   "Multiplier on the length of every child-frame animation.
@@ -380,10 +336,7 @@ individual slot's `enabled' does not, because the others still need it."
 `romacs-window-animations-slowdown' is: springs have no duration to
 lengthen by hand."
   :type 'number
-  :group 'romacs-child-frame
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'child-frame-animations :slowdown value)))
+  :group 'romacs-child-frame)
 
 ;;;; Cursor
 
@@ -391,26 +344,24 @@ lengthen by hand."
   "Whether the cursor slides between positions instead of jumping.
 When nil the cursor is drawn at its new position on the next frame."
   :type 'boolean
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :enabled value)))
+  :group 'romacs-cursor)
 
 (defcustom romacs-cursor-motion-speed 1.0
   "How fast the cursor travels, as a multiplier.
 Higher is faster.  Interacts with `romacs-cursor-motion-style': a style with
 its own duration uses `romacs-cursor-motion-duration' instead."
   :type 'number
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :speed value)))
+  :group 'romacs-cursor)
 
 (defcustom romacs-cursor-motion-style 'neovide
   "The curve the cursor follows between positions.
 
-`neovide' uses per-corner exponential easing, distance-adjusted timing,
-and `romacs-cursor-motion-trail-size', matching Neovide's cursor motion.
+`neovide' moves each corner on its own spring.  A short move, within two
+cells and one row, carries the cursor whole in
+`romacs-cursor-motion-short-duration'.  A longer jump, or a move to another
+window, stretches the cursor along its travel: the leading corners arrive
+first, by `romacs-cursor-motion-trail-size', and the jump takes
+`romacs-cursor-motion-duration', longer as it is farther.
 `exponential' eases toward the target without a fixed arrival time.
 `critically-damped-spring' arrives as fast as possible without overshooting.
 The remaining choices are fixed-duration curves and use
@@ -423,57 +374,48 @@ The remaining choices are fixed-duration curves and use
                  (const ease-out-cubic)
                  (const ease-out-expo)
                  (const ease-in-out-cubic))
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :style value)))
+  :group 'romacs-cursor)
 
-(defcustom romacs-cursor-motion-duration 0.06
+(defcustom romacs-cursor-motion-duration 0.1
   "Seconds the cursor takes to reach its new position.
-For `neovide', this is the base duration, scaled by travel distance and
-corner alignment.  For `critically-damped-spring', it sets spring timing.
+For `neovide', this is the time a long jump's trailing corners take, up to
+1.6 times it for the farthest jumps; short moves take
+`romacs-cursor-motion-short-duration'.  For `critically-damped-spring', it sets spring timing.
 Used directly by fixed-duration styles; ignored by `exponential'."
   :type 'number
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :duration value)))
+  :group 'romacs-cursor)
+
+(defcustom romacs-cursor-motion-short-duration 0.04
+  "Seconds a short cursor move takes in the `neovide' motion style.
+A short move stays within two cells and one row of the same window, such as
+typing or moving by a line; the cursor slides there whole, without a trail."
+  :type 'number
+  :group 'romacs-cursor)
 
 (defcustom romacs-cursor-motion-trail-size 0.7
   "How much of a trail the moving cursor leaves, from 0.0 to 1.0.
 Zero draws no trail."
   :type 'number
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :trail-size value)))
+  :group 'romacs-cursor)
 
 (defcustom romacs-cursor-motion-distance-length-adjust t
   "Whether longer cursor jumps take longer in the `neovide' motion style.
-Scale the base duration by the logarithm of the travel distance."
+Scale `romacs-cursor-motion-duration' by the logarithm of the distance in
+cells, up to 1.6 times it."
   :type 'boolean
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-motion :distance-length-adjust value)))
+  :group 'romacs-cursor)
 
 (defcustom romacs-cursor-size-transition-enabled nil
   "Whether the cursor animates when it changes shape or size.
 This is the change from a box to a bar when entering `overwrite-mode', or
 between characters of different widths."
   :type 'boolean
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-size-transition :enabled value)))
+  :group 'romacs-cursor)
 
-(defcustom romacs-cursor-size-transition-duration 0.1
+(defcustom romacs-cursor-size-transition-duration 0.15
   "Seconds a cursor size or shape change takes."
   :type 'number
-  :group 'romacs-cursor
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'cursor-size-transition :duration value)))
+  :group 'romacs-cursor)
 
 ;;;; Content transitions
 
@@ -481,20 +423,14 @@ between characters of different widths."
   "Whether switching the buffer shown in a window is animated.
 When nil the new buffer is drawn on the next frame."
   :type 'boolean
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :enabled value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-buffer-transition-duration 0.2
   "Seconds a buffer switch takes."
   :type 'number
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :duration value)))
+  :group 'romacs-transitions)
 
-(defcustom romacs-buffer-transition-effect 'crossfade
+(defcustom romacs-buffer-transition-effect 'slide
   "How the outgoing buffer gives way to the incoming one.
 `crossfade' blends them; `slide' moves one across the other; the remainder are
 decorative."
@@ -506,55 +442,37 @@ decorative."
                  (const chromatic-aberration) (const ghost-trails)
                  (const color-temperature) (const crt-scanlines)
                  (const depth-of-field) (const typewriter-reveal))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :effect value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-buffer-transition-easing 'ease-out-quad
   "Curve shape for a buffer switch."
   :type '(choice (const linear) (const ease-out-quad) (const ease-out-cubic)
                  (const ease-out-expo) (const ease-in-out-cubic)
                  (const spring) (const cubic-bezier))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :easing value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-buffer-transition-axis 'auto
   "Which way a directional buffer transition moves.
 `auto' lets the effect choose, usually horizontally."
   :type '(choice (const auto) (const horizontal) (const vertical))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :axis value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-buffer-transition-direction 'forward
   "Which sense a directional buffer transition runs in.
 Used when nothing about the switch implies a direction of its own."
   :type '(choice (const forward) (const backward))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'buffer-transition :direction value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-scroll-transition-enabled nil
   "Whether scrolling a window is animated.
 When nil the viewport jumps to its new position on the next frame."
   :type 'boolean
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'scroll-transition :enabled value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-scroll-transition-duration 0.15
   "Seconds a scroll takes."
   :type 'number
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'scroll-transition :duration value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-scroll-transition-effect 'slide
   "How the viewport moves when scrolling."
@@ -566,20 +484,14 @@ When nil the viewport jumps to its new position on the next frame."
                  (const chromatic-aberration) (const ghost-trails)
                  (const color-temperature) (const crt-scanlines)
                  (const depth-of-field) (const typewriter-reveal))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'scroll-transition :effect value)))
+  :group 'romacs-transitions)
 
 (defcustom romacs-scroll-transition-easing 'ease-out-quad
   "Curve shape for a scroll."
   :type '(choice (const linear) (const ease-out-quad) (const ease-out-cubic)
                  (const ease-out-expo) (const ease-in-out-cubic)
                  (const spring) (const cubic-bezier))
-  :group 'romacs-transitions
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (romacs-effects--set 'scroll-transition :easing value)))
+  :group 'romacs-transitions)
 
 
 ;;;; The gallery
@@ -628,15 +540,15 @@ When nil the viewport jumps to its new position on the next frame."
        (format "Properties of the `%s' renderer effect.
 
 A plist of the properties this effect accepts; see the widget for the type of
-each.  Decorative effects are configured one effect at a time rather than one
-property at a time — see the commentary in romacs-effects.el."
+each.  A property the plist leaves out has the renderer's default.  Decorative
+effects are configured one effect at a time rather than one property at a
+time — see the commentary in romacs-effects.el."
                effect)
        :type (romacs-effects--plist-type schema)
-       :group 'romacs-effects-gallery
-       :set (lambda (symbol value)
-              (set-default symbol value)
-              (when (fboundp 'romacs--effect-set)
-                (ignore-errors (apply #'romacs--effect-set effect value))))))))
+       :group 'romacs-effects-gallery)
+      ;; Watched only once defined: the default is the renderer's own.
+      (put symbol 'romacs-effect (list effect))
+      (add-variable-watcher symbol #'romacs-effects--watch))))
 
 (defgroup romacs-effects-gallery nil
   "Decorative renderer effects.
@@ -646,34 +558,49 @@ backgrounds.  Each is one option holding that effect's properties."
   :group 'romacs
   :prefix "romacs-effect-")
 
-;;;; Keeping the options honest
+;;;; Reaching the renderer
 
-(defun romacs-effects--check-schema ()
-  "Warn if the options above no longer match what the renderer accepts.
+(defconst romacs-effects--behavioural
+  '(window-open window-close window-resize window-movement window-animations
+    cursor-motion cursor-size-transition buffer-transition scroll-transition
+    child-frame-open child-frame-close child-frame-movement child-frame-resize
+    child-frame-animations)
+  "The effects whose properties are written out above, one option each.")
 
-The behavioural options are written by hand, so a property renamed or removed
-in Rust would leave an option that silently does nothing.  This compares the
-two and reports the difference rather than letting it rot."
-  (dolist (effect (list 'window-open 'window-close 'window-resize
-                        'window-movement 'window-animations
-                        'cursor-motion 'cursor-size-transition
-                        'buffer-transition 'scroll-transition
-                        'child-frame-open 'child-frame-close
-                        'child-frame-movement 'child-frame-resize
-                        'child-frame-animations))
+(defun romacs-effects--watch (symbol value operation where)
+  "Send VALUE, SYMBOL's new global value, to the renderer.
+A watcher (`add-variable-watcher') for OPERATION in buffer WHERE.  SYMBOL's
+`romacs-effect' property is (EFFECT PROPERTY) for an option holding one
+property, or (EFFECT) for a gallery option holding EFFECT's plist.  A value
+the renderer refuses is an error, before SYMBOL changes: the variable never
+holds a value the renderer does not show."
+  (when (and (memq operation '(set let unlet)) (null where))
+    (pcase-let ((`(,effect ,property) (get symbol 'romacs-effect)))
+      (condition-case failure
+          (if property
+              (romacs--effect-set effect property value)
+            (apply #'romacs--effect-replace effect value))
+        (error (user-error "`%s': %s" symbol (error-message-string failure)))))))
+
+(defun romacs-effects--connect ()
+  "Watch each behavioural option, and warn about a property without one.
+The options are written by hand, so a property renamed or removed in Rust
+would leave an option that silently does nothing; this reports it instead."
+  (dolist (effect romacs-effects--behavioural)
     (dolist (entry (romacs-effect-schema effect))
-      (let* ((property (substring (symbol-name (car entry)) 1))
-             (symbol (intern (format "romacs-%s-%s" effect property))))
-        (unless (boundp symbol)
-          (display-warning
-           'romacs
-           (format "%s accepts :%s but there is no `%s' to set it"
-                   effect property symbol)
-           :warning))))))
+      (let ((symbol (intern (format "romacs-%s-%s" effect
+                                    (substring (symbol-name (car entry)) 1)))))
+        (if (not (boundp symbol))
+            (display-warning
+             'romacs
+             (format "%s accepts %s but there is no `%s' to set it"
+                     effect (car entry) symbol)
+             :warning)
+          (put symbol 'romacs-effect (list effect (car entry)))
+          (add-variable-watcher symbol #'romacs-effects--watch))))))
 
-(when (fboundp 'romacs-effect-schema)
-  (romacs-effects--define-gallery)
-  (romacs-effects--check-schema))
+(romacs-effects--define-gallery)
+(romacs-effects--connect)
 
 (provide 'romacs-effects)
 

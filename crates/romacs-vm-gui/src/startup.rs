@@ -633,6 +633,8 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         // Pane chrome, applied to the frame once the session is on its
         // display (romacs-gui-loadup.el), and the chrome colours layers use.
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
+        // The renderer's options: cursor motion, transitions, effects.
+        vm.eval_source(include_str!("../../../rlisp/romacs-effects.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
         // Romacs's menus over layers: one look, motion and keyboard model.
         vm.eval_source(include_str!("../../../rlisp/romacs-popup.el"))?;
