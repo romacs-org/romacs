@@ -9,23 +9,43 @@ Romacs is a new machine for Emacs Lisp: a Rust runtime, a GPU-rendered
 display, and worker VMs that keep you typing while real work runs beside it.
 Your packages, your init and your muscle memory come with you.
 
+### What you're seeing
+
+1. **Two startup screens.** Romacs's logo is drawn live on the GPU, beside
+   GNU Emacs as it ships.
+2. **A race.** Both editors run the same command, `vc-print-root-log`, on
+   Emacs's own repository: every commit since 1985.  Both press `M->` once a
+   second to chase the end of the log.  The big number is how far back each
+   one has reached.  Romacs gets to the first commit in 2.7 s; GNU Emacs
+   needs 18.7 s.
+3. **The theme picker.** Each theme applies live as you move through the
+   list, before you choose.
+4. **Agents.** Claude works in a Romacs chat, hands a review to Codex as a
+   subagent, and the header shows it running.  `C-c C-o` opens the chat's
+   menu, with every running agent listed.
+5. **The install line.**
+
+Every frame is the real program at real speed; the captions are added, and
+the only edits are cuts between scenes.
+
 ## Why you'll switch
 
 ### It's fast where you feel it
 
-- **The entire Emacs git history in a log buffer:** 183,254
-  commits in 2.8 s, against 17.3 s in GNU Emacs,
-  and the median key takes 4.78 ms while it streams in.
-- **Huge files open fast:** a 15 MB generated header, faces and
-  all, in 1.03 s, against 5.69 s.
-- **Typing lands first:** in `xdisp.c`, a key reaches the screen in about
-  11 ms, against 15 ms in GNU Emacs.
-- **Themes switch in a blink:** 3.92 ms against 19.9 ms, with a
-  live preview of every theme before you choose.
+| What you do | Romacs | GNU Emacs |
+| --- | ---: | ---: |
+| Log the entire Emacs history, 183,254 commits | **2.8 s** | 17.3 s |
+| Open a 15 MB generated C header, faces and all | **1.03 s** | 5.69 s |
+| Switch themes | **3.92 ms** | 19.9 ms |
+| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms |
+| Open `xdisp.c`, faces and all | 222 ms | **143 ms** |
 
-These are the first headlines, and we keep pushing them.  `perfbench`
-regenerates the numbers from each run, and anything that gets worse stays in
-the table below.
+Keys stay at a median of 4.78 ms while that whole history streams
+in.  Romacs parses `xdisp.c` with tree-sitter on open, where GNU Emacs's C mode
+uses regexps, and that's the row we're coming for next.  Org and dired are
+slower too, and every number, wins and losses, is in the tables below.  These
+are the first headlines, and we keep pushing them.  `perfbench` regenerates
+them from each run.
 
 ### It stays in your hands
 

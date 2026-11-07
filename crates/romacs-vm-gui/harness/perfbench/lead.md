@@ -8,23 +8,43 @@ Romacs is a new machine for Emacs Lisp: a Rust runtime, a GPU-rendered
 display, and worker VMs that keep you typing while real work runs beside it.
 Your packages, your init and your muscle memory come with you.
 
+### What you're seeing
+
+1. **Two startup screens.** Romacs's logo is drawn live on the GPU, beside
+   GNU Emacs as it ships.
+2. **A race.** Both editors run the same command, `vc-print-root-log`, on
+   Emacs's own repository: every commit since 1985.  Both press `M->` once a
+   second to chase the end of the log.  The big number is how far back each
+   one has reached.  Romacs gets to the first commit in 2.7 s; GNU Emacs
+   needs 18.7 s.
+3. **The theme picker.** Each theme applies live as you move through the
+   list, before you choose.
+4. **Agents.** Claude works in a Romacs chat, hands a review to Codex as a
+   subagent, and the header shows it running.  `C-c C-o` opens the chat's
+   menu, with every running agent listed.
+5. **The install line.**
+
+Every frame is the real program at real speed; the captions are added, and
+the only edits are cuts between scenes.
+
 ## Why you'll switch
 
 ### It's fast where you feel it
 
-- **The entire Emacs git history in a log buffer:** {{vc-history-commits}}
-  commits in {{vc-history-romacs}}, against {{vc-history-gnu}} in GNU Emacs,
-  and the median key takes {{vc-history-key}} while it streams in.
-- **Huge files open fast:** a {{open-big-size}} generated header, faces and
-  all, in {{open-big-romacs}}, against {{open-big-gnu}}.
-- **Typing lands first:** in `xdisp.c`, a key reaches the screen in about
-  11 ms, against 15 ms in GNU Emacs.
-- **Themes switch in a blink:** {{theme-romacs}} against {{theme-gnu}}, with a
-  live preview of every theme before you choose.
+| What you do | Romacs | GNU Emacs |
+| --- | ---: | ---: |
+| Log the entire Emacs history, {{vc-history-commits}} commits | **{{vc-history-romacs}}** | {{vc-history-gnu}} |
+| Open a {{open-big-size}} generated C header, faces and all | **{{open-big-romacs}}** | {{open-big-gnu}} |
+| Switch themes | **{{theme-romacs}}** | {{theme-gnu}} |
+| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms |
+| Open `xdisp.c`, faces and all | {{open-xdisp-romacs}} | **{{open-xdisp-gnu}}** |
 
-These are the first headlines, and we keep pushing them.  `perfbench`
-regenerates the numbers from each run, and anything that gets worse stays in
-the table below.
+Keys stay at a median of {{vc-history-key}} while that whole history streams
+in.  Romacs parses `xdisp.c` with tree-sitter on open, where GNU Emacs's C mode
+uses regexps, and that's the row we're coming for next.  Org and dired are
+slower too, and every number, wins and losses, is in the tables below.  These
+are the first headlines, and we keep pushing them.  `perfbench` regenerates
+them from each run.
 
 ### It stays in your hands
 
