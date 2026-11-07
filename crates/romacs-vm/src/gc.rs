@@ -93,6 +93,36 @@ pub(crate) struct CollectionLog {
 }
 romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
 
+/// What a collection does, in order.
+#[derive(Clone, Copy)]
+pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep, Shrink, Settle, Rewrite, Trim }
+/// The names `romacs--gc-phases' answers, by `Phase'.
+const PHASES: [&str; 12] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite", "trim"];
+/// Where the last completed collection's time went, in nanoseconds by
+/// `Phase': zero in a world build, whose heap never depends on a clock.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct GcTimes {
+    pub(crate) ns: [u64; PHASES.len()],
+    /// Entries marked, per table: conses, closures, cells, objects.
+    pub(crate) marked: [usize; 4],
+    /// Entries the collection found in each table.
+    pub(crate) entries: [usize; 4],
+}
+romacs_snapshot::snapshot_struct!(GcTimes { ns, marked, entries });
+
+/// A running phase clock (`GcTimes').
+pub(crate) struct Lap(Option<std::time::Instant>);
+impl Lap {
+    pub(crate) fn start() -> Self { Self(crate::host::collection_clock()) }
+    /// Charge the time since the last lap to PHASE of TIMES.
+    pub(crate) fn lap(&mut self, times: &mut GcTimes, phase: Phase) {
+        let Some(at) = self.0 else { return };
+        let now = std::time::Instant::now();
+        times.ns[phase as usize] += (now - at).as_nanos() as u64;
+        self.0 = Some(now);
+    }
+}
+
 /// The tables' free entries (design note §4.4, S3.1): collections leave
 /// every live entry where it is and list the others here, one stack per
 /// table with the lowest index on top, which the allocation funnels pop
@@ -641,18 +671,15 @@ impl Vm {
             _ => true,
         }
     }
-    /// Whether `post-gc-hook' has something to run for a collection that
-    /// ended.  Lisp runs it, never the collector (`romacs--run-finalizers').
-    pub(crate) fn post_gc_runs(&mut self) -> bool {
-        if !self.post_gc_due { return false; }
-        let hook = self.slot("post-gc-hook");
-        self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
-        self.post_gc_due
-    }
-    /// `romacs--run-finalizers' when a collection has doomed finalizers or
-    /// a `post-gc-hook' to run, and the prelude defines it.
+    /// `romacs--run-finalizers' when a collection left doomed finalizers or a
+    /// `post-gc-hook' to run, and the prelude defines it. Lisp runs them, never
+    /// the collector.
     pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
-        if self.doomed_finalizers.is_empty() && !self.post_gc_runs() { return None; }
+        if self.post_gc_due {
+            let hook = self.slot("post-gc-hook");
+            self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
+        }
+        if self.doomed_finalizers.is_empty() && !self.post_gc_due { return None; }
         let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
         let slot = runner.payload() as usize - 1;
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
@@ -958,6 +985,7 @@ impl Vm {
     /// collected, and the heap is as it was (marking writes only caches and
     /// local marks). Whether it collected.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        let mut lap = Lap::start();
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
@@ -983,12 +1011,13 @@ impl Vm {
         }
         // Membership by slot, tested for every symbol and slot visited below.
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
+        lap.lap(&mut self.gc_times, Phase::Setup);
         let keep = |v: &Value| traced(*v, &in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend(self.stack.iter().copied().filter(keep));
         pending.extend(self.suspended_stacks.iter().flatten().copied().filter(keep));
         pending.extend_from_slice(&self.external_roots);
-        pending.extend_from_slice(&self.doomed_finalizers);
+        pending.extend(self.doomed_finalizers.iter().copied());
         for code in &self.suspended_code {
             // SAFETY: each entry's engine is suspended in a nested call.
             unsafe { code.visit_values(&mut |v| if keep(v) { pending.push(*v) }) };
@@ -1055,6 +1084,7 @@ impl Vm {
                 for &(key, value) in &entry.properties { pending.extend([key, value]); }
             }
         }
+        lap.lap(&mut self.gc_times, Phase::Roots);
         // Entries marked, per table: conses, closures, cells, objects.
         let mut counts = [0usize; 4];
         let mut native_nodes = HashSet::default();
@@ -1240,10 +1270,13 @@ impl Vm {
         if until_key && self.host_key_pending() {
             return false;
         }
+        lap.lap(&mut self.gc_times, Phase::Mark);
+        self.gc_times.marked = counts;
+        self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         if !doomed.is_empty() {
             let gone: HashSet<u64> = doomed.iter().map(|f| f.0).collect();
             self.finalizers.retain(|f| !gone.contains(&f.0));
-            self.doomed_finalizers.extend_from_slice(&doomed);
+            self.doomed_finalizers.extend(doomed.iter().copied());
         }
         self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         let pads = self.gc_stress.take_pads();
@@ -1303,7 +1336,9 @@ impl Vm {
                 self.free_local_binding_slots.push(slot);
             }
         }
+        lap.lap(&mut self.gc_times, Phase::Weak);
         self.retire_code(&code_marks);
+        lap.lap(&mut self.gc_times, Phase::Retire);
         // The code this collection traced, for the next one's pacing.
         self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
             + self.execution.code_len()
@@ -1318,6 +1353,7 @@ impl Vm {
         // entry into one is left (swept above), so their ids can be reused.
         self.sweep_regions(&region_marks);
         let compacting = self.compacts(&counts, until_key);
+        lap.lap(&mut self.gc_times, Phase::Census);
         // A completely live heap frees nothing; a compaction still closes
         // the free entries it has.
         let marked: usize = counts.iter().sum();
@@ -1326,18 +1362,23 @@ impl Vm {
         {
             self.gc_retained = self.heap_objects();
             self.settle_payload();
+            lap.lap(&mut self.gc_times, Phase::Settle);
             self.gc_stats.collections += 1;
             return true;
         }
         if !compacting {
             self.reclaim_obarray_symbols(&obarray_symbols_live);
+            lap.lap(&mut self.gc_times, Phase::Obarray);
             self.sweep_tables(&marks, &obarray_symbols_live);
             self.cell_pairs.retain(|&i, _| marks[2][i]);
             self.referrers = None;
             self.local_owners = None;
+            lap.lap(&mut self.gc_times, Phase::Sweep);
             self.shrink_tables();
+            lap.lap(&mut self.gc_times, Phase::Shrink);
             self.gc_retained = self.heap_objects();
             self.settle_payload();
+            lap.lap(&mut self.gc_times, Phase::Settle);
             self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
             self.gc_stats.collections += 1;
             return true;
@@ -1542,12 +1583,39 @@ impl Vm {
         self.objects.splice(0..0, std::iter::repeat_with(|| {
             data::Object::String(Box::new(data::LispString::from_bytes(vec![], true)))
         }).take(fill[3]));
+        lap.lap(&mut self.gc_times, Phase::Rewrite);
         self.shrink_tables();
+        lap.lap(&mut self.gc_times, Phase::Shrink);
         self.gc_retained = self.heap_objects();
         self.settle_payload();
+        lap.lap(&mut self.gc_times, Phase::Settle);
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
         true
+    }
+    /// The last completed collection: ((PHASE . SECONDS)...), then
+    /// (marked CONSES CLOSURES CELLS OBJECTS) and (entries ...) likewise.
+    pub(crate) fn gc_phases(&mut self) -> Value {
+        let times = self.gc_times;
+        let counts = |vm: &mut Vm, name: &str, row: [usize; 4]| {
+            let mut list = Value::NIL;
+            for n in row.into_iter().rev() {
+                list = vm.keymap_cons(Value::integer(n as i64).expect("a count fits fixnum"), list);
+            }
+            let symbol = vm.intern(name);
+            vm.keymap_cons(symbol, list)
+        };
+        let entries = counts(self, "entries", times.entries);
+        let marked = counts(self, "marked", times.marked);
+        let mut result = self.keymap_cons(entries, Value::NIL);
+        result = self.keymap_cons(marked, result);
+        for (name, ns) in PHASES.iter().zip(times.ns).rev() {
+            let symbol = self.intern(name);
+            let seconds = self.allocate_object(data::Object::Float(ns as f64 / 1e9));
+            let row = self.keymap_cons(symbol, seconds);
+            result = self.keymap_cons(row, result);
+        }
+        result
     }
 }
 

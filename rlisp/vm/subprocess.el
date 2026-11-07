@@ -1002,7 +1002,7 @@ no time limit: start idling, then run ripe timers as its wait does.  Return
 \=(RAN . DELAY): whether a timer ran, so the caller redisplays, and the
 seconds until the next timer, or nil."
   (romacs--timer-start-idle)
-  ;; Finalizers an automatic collection doomed run before the wait.
+  ;; A collection at a request boundary had no engine to finish it in.
   (romacs--run-finalizers)
   (let* ((run romacs--timers-run)
          (delay (romacs--timer-check)))

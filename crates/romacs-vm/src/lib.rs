@@ -1464,6 +1464,8 @@ pub struct Vm {
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
+    /// Where the last collection's time went (`romacs--gc-phases').
+    gc_times: gc::GcTimes,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1591,8 +1593,8 @@ pub struct Vm {
     finalizers: Vec<Value>,
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
-    doomed_finalizers: Vec<Value>,
-    /// A collection ended since `post-gc-hook' last ran (`Vm::post_gc_runs').
+    doomed_finalizers: std::collections::VecDeque<Value>,
+    /// A collection ended since `post-gc-hook' last ran (`Vm::finalizer_runner').
     post_gc_due: bool,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
@@ -1687,6 +1689,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
+    gc_times,
     collection_log,
     gc_retained,
     gc_payload_bytes,
@@ -1911,6 +1914,7 @@ impl Vm {
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
+            gc_times: Default::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
@@ -1966,7 +1970,7 @@ impl Vm {
             stack: vec![],
             external_roots: vec![],
             finalizers: vec![],
-            doomed_finalizers: vec![],
+            doomed_finalizers: Default::default(),
             post_gc_due: false,
             suspended_stacks: vec![],
             suspended_code: vec![],

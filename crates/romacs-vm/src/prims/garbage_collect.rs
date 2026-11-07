@@ -56,17 +56,26 @@ fn take_collections(cx) {
     Ok(cx.take_collections())
 }}
 
+// Where the last completed collection's time went: ((PHASE . SECONDS)...), the
+// phases in order, then (marked CONSES CLOSURES CELLS OBJECTS) and (entries
+// ...), what it kept of what it found (`Vm::gc_phases'). `gc-elapsed' holds
+// the total.
+defsubr! { name = "romacs--gc-phases", gnu = "alloc.c:6004", effect = Global,
+fn gc_phases(cx) {
+    Ok(cx.gc_phases())
+}}
+
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,
 fn make_finalizer(cx, function: Value) {
     if !super::vars::function_p(cx, function)? { return Err(Fault::Wrong("functionp", function)); }
     Ok(cx.make_finalizer(function))
 }}
 
-// The functions of the finalizers the collections since the last call
-// found unreachable, for `romacs--run-finalizers' (rlisp/vm/prelude.el).
-defsubr! { name = "romacs--take-doomed-finalizers", gnu = "alloc.c:3960", effect = Global,
-fn take_doomed_finalizers(cx) {
-    Ok(cx.take_doomed_finalizers())
+// The function of the oldest finalizer a collection found unreachable, or
+// nil, for `romacs--run-finalizers' (rlisp/vm/prelude.el).
+defsubr! { name = "romacs--take-doomed-finalizer", gnu = "alloc.c:3960", effect = Global,
+fn take_doomed_finalizer(cx) {
+    Ok(cx.take_doomed_finalizer())
 }}
 
 // Whether `post-gc-hook' is due, for `romacs--run-finalizers'; asking
@@ -83,12 +92,6 @@ fn hold_collection(cx, on: Value) {
     cx.hold_collection(on != Value::NIL);
     Ok(Value::NIL)
 }}
-
-/// The engine's continuation after `romacs--run-finalizers', which
-/// returns the collection's statistics it was given.
-pub(crate) fn finalizers_ran(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(value))
-}
 
 // Where the process's heap bytes are: a plist of the production
 // allocator's :platform-allocated and :platform-resident bytes

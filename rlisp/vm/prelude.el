@@ -942,24 +942,25 @@ CONDITIONS or has a regexp matching ERROR's message."
 
 ;;; Finalizers
 
-(defun romacs--run-finalizers (&optional value)
+(defun romacs--run-finalizers ()
   "alloc.c run_finalizers: call the function of each finalizer the
 collections since the last run found unreachable, once each, with quits
 inhibited; a signal is logged to *Messages*, as `add_to_log' does.  Then
-`post-gc-hook', if a collection ended since it last ran.
-Return VALUE, the statistics of the collection that ran it."
-  (dolist (function (romacs--take-doomed-finalizers))
-    (let ((inhibit-quit t))
+`post-gc-hook', if a collection ended since it last ran.  This run owns that
+collection's hook from the start, so it runs after the finalizers."
+  (let ((hook (romacs--take-post-gc))
+        (inhibit-quit t)
+        function)
+    (while (setq function (romacs--take-doomed-finalizer))
       (condition-case err
           (funcall function)
         (t (let ((inhibit-message t))
-             (message "finalizer failed: %S" err))))))
-  ;; garbage_collect's end, with collection inhibited.
-  (when (romacs--take-post-gc)
-    (romacs--hold-collection t)
-    (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
-      (romacs--hold-collection nil)))
-  value)
+             (message "finalizer failed: %S" err)))))
+    ;; garbage_collect's end, with collection inhibited.
+    (when hook
+      (romacs--hold-collection t)
+      (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
+        (romacs--hold-collection nil)))))
 
 ;;; Evaluating buffer text: lread.c readevalloop
 

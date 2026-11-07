@@ -2078,7 +2078,7 @@ fn fail(e: &mut Engine<'_>, message: &str) -> Value {
 }
 #[cold]
 #[inline(never)]
-unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+unsafe fn poll_resume(e: &mut Engine<'_>, mut r: *mut Value, pc: *const Inst) -> Value {
     e.budget = 10_000;
     #[cfg(test)]
     POLLS.with(|polls| polls.set(polls.get() + 1));
@@ -2103,6 +2103,15 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
         if e.vm.may_collect(1) {
             poll_collect(e);
             if e.vm.take_job_exhaustion() { return job_memory_full(e); }
+            // GNU's garbage_collect ends with its finalizers and `post-gc-hook',
+            // here and now, unless the top control is a cleanup's, which a
+            // `throw' from them would skip: they wait for a later collection.
+            if !matches!(e.controls.last(), Some(Control { kind: ControlKind::Resume { .. }, .. })) {
+                match unsafe { finish_collection(e, r) } {
+                    Some(moved) => r = moved,
+                    None => return Value::UNBOUND,
+                }
+            }
         }
     } else {
         e.vm.collect_poll = false;
@@ -2493,20 +2502,23 @@ fn debugger_form(vm: &Vm, args: &[Value]) -> Form {
 /// two hundred levels. Its value, or None with its escape pending.
 unsafe fn hook_debugger(e: &mut Engine<'_>, r: *mut Value, args: &[Value]) -> Option<(*mut Value, Value)> {
     let form = debugger_form(e.vm, args);
-    // The reserve is borrowed at the engine's depth, which `eval_depth'
-    // learns only at a nested boundary.
-    let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
-    let token = e.vm.max_ensure_room(200);
-    e.vm.eval_depth = saved_depth;
-    let out = unsafe {
-        nested_then(e, r, |vm| {
+    unsafe {
+        nested_with_room(e, r, |vm| {
             let function = vm.compile(&form)?;
             vm.propagate_next = true;
             let result = vm.execute_raw(function);
             vm.propagate_next = false;
             result
         })
-    };
+    }
+}
+/// `nested_then', with two hundred levels borrowed. The reserve is taken at
+/// the engine's depth, which `eval_depth' learns only at a nested boundary.
+unsafe fn nested_with_room(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut Vm) -> Result<Value>) -> Option<(*mut Value, Value)> {
+    let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+    let token = e.vm.max_ensure_room(200);
+    e.vm.eval_depth = saved_depth;
+    let out = unsafe { nested_then(e, r, run) };
     if let Some(old) = token { e.vm.restore_stack_limits(old); }
     out
 }
@@ -3223,30 +3235,29 @@ unsafe fn take_step(
             }
             Ok(prim::Step::Collect) => {
                 leave_native(e);
-                if e.vm.may_collect(1) {
-                    e.vm.collection_log.explicit = true;
-                    poll_collect(e);
-                    let statistics = e.vm.garbage_collect_statistics();
-                    // garbage_collect's run_finalizers, before it returns.
-                    match e.vm.finalizer_runner() {
-                        Some(runner) => (runner, vec![statistics], prim::prims::garbage_collect::finalizers_ran as prim::Then, Vec::new()),
-                        None => {
-                            *r.add((*pc).a) = statistics;
-                            return Continue::At(r, pc.add(1));
-                        }
-                    }
-                } else {
+                if !e.vm.may_collect(1) {
                     // A frame below holds untraced Values (`Vm::may_collect`):
                     // GNU's garbage_collection_inhibited early return.
                     *r.add((*pc).a) = Value::NIL;
                     return Continue::At(r, pc.add(1));
                 }
+                e.vm.collection_log.explicit = true;
+                poll_collect(e);
+                *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                return match finish_collection(e, r) {
+                    Some(r) => Continue::At(r, pc.add(1)),
+                    None => Continue::Stop,
+                };
             }
             Ok(prim::Step::CollectIdle) => {
                 leave_native(e);
                 let collected = e.vm.may_collect(1) && poll_collect_unless_key(e, true);
                 *r.add((*pc).a) = if collected { Value::TRUE } else { Value::NIL };
-                return Continue::At(r, pc.add(1));
+                if !collected { return Continue::At(r, pc.add(1)); }
+                return match finish_collection(e, r) {
+                    Some(r) => Continue::At(r, pc.add(1)),
+                    None => Continue::Stop,
+                };
             }
             Ok(prim::Step::Done(value)) => {
                 leave_native(e);
@@ -4198,6 +4209,24 @@ unsafe fn nested_then(e: &mut Engine<'_>, r: *mut Value, run: impl FnOnce(&mut V
             }
         }
     }
+}
+/// GNU garbage_collect's end, for a collection this engine just ran: the
+/// doomed finalizers and `post-gc-hook' (`romacs--run-finalizers'), borrowing
+/// room for them near the depth limit, as GNU's handlers have. The rebased
+/// registers, or None with an escape pending.
+#[cold]
+#[inline(never)]
+unsafe fn finish_collection(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
+    let Some(runner) = e.vm.finalizer_runner() else { return Some(r) };
+    debug_assert_eq!(r, e.regs, "a collection runs in the current frame");
+    let run = |vm: &mut Vm| {
+        let trampoline = vm.reader_trampoline(0)?;
+        vm.propagate_next = true;
+        let result = execute_args(vm, trampoline, &[runner]);
+        vm.propagate_next = false;
+        result
+    };
+    unsafe { nested_with_room(e, r, run) }.map(|(r, _)| r)
 }
 // eval, load, require, macroexpand, autoload-do-load and the host read run
 // Lisp with this frame suspended (`call_suspended`). The work, and the copy of

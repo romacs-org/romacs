@@ -356,10 +356,16 @@ impl Vm {
     pub(crate) fn collect_until_key(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         self.profile_collection_begin();
         let start = crate::host::collection_clock();
+        let last = std::mem::take(&mut self.gc_times);
         let collected = self.collect_rooted(roots, until_key);
+        if !collected {
+            self.gc_times = last;
+        }
         if collected {
+            let mut lap = crate::gc::Lap::start();
             // What the collection and the work before it freed goes back.
             crate::world::arena::trim();
+            lap.lap(&mut self.gc_times, crate::gc::Phase::Trim);
             let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
             self.count_collection(elapsed);
             self.note_collection(elapsed, until_key);
@@ -428,6 +434,21 @@ mod tests {
         fn next_event(&mut self, _: Option<std::time::Duration>) -> std::result::Result<crate::HostEvent, String> {
             Err("no events".into())
         }
+    }
+
+    /// A collection a key press abandoned is no collection: the report
+    /// stays the last completed one's.
+    #[test]
+    fn an_abandoned_collection_keeps_the_last_report() {
+        let mut vm = Vm::new();
+        let mut kept = [vm.alloc_cons(crate::Value::NIL, crate::Value::NIL)];
+        vm.collect(&mut kept);
+        let before = vm.gc_times.entries;
+        assert_ne!(before, [0; 4], "a report");
+        vm.set_host_input(Some(Box::new(KeyAfter(1))));
+        assert!(!vm.collect_garbage_until_key());
+        assert_eq!(vm.gc_times.entries, before);
+        vm.set_host_input(None);
     }
 
     /// An idle collection gives way to a key press that arrives while it

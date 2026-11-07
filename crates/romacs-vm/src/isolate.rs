@@ -493,6 +493,10 @@ impl Vm {
         self.idle_since = None;
         self.gc_stress.rearm();
         self.reset_collection_counters();
+        // A finalizer runs once: in the zygote, not in each child.
+        self.finalizers.clear();
+        self.doomed_finalizers.clear();
+        self.post_gc_due = false;
         let hello = Payload::Text(hello("fork"));
         self.isolates.parent.as_ref().expect("adopted").send(Kind::Hello, 0, &hello, true).map_err(|e| e.to_string())
     }

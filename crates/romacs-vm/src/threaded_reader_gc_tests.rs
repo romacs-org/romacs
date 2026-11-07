@@ -250,3 +250,27 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     assert_eq!(vm.display(value).unwrap(), "(after \"aa\")");
     assert!(vm.heap_stats().collections > before);
 }
+
+/// Finishing a collection at a safepoint can widen the registers under the
+/// frame that polled: a hook compiling a function wider than any before moves
+/// them, and that frame must come back to its own Values.
+#[test]
+fn a_hook_at_a_safepoint_can_widen_the_registers_under_it() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let wide: String = (0..600).map(|i| format!("(v{i} {i})")).collect::<Vec<_>>().join(" ");
+    let sum: String = (0..600).map(|i| format!("v{i}")).collect::<Vec<_>>().join(" ");
+    let width = vm.register_width;
+    let source = format!("(progn
+      (defvar fw-sum nil)
+      (fset 'fw-hook (lambda () (unless fw-sum (setq fw-sum (funcall (eval '(lambda () (let* ({wide}) (+ {sum}))) t))))))
+      (setq post-gc-hook '(fw-hook))
+      (let ((kept (list 1 2 3)) (i 0))
+        (while (and (< i 10000000) (not fw-sum)) (cons i nil) (setq i (1+ i)))
+        (setq post-gc-hook nil)
+        (list fw-sum (car kept) (car (cdr kept)) (car (cdr (cdr kept))) (> i 0))))");
+    let value = vm.eval_source(&source).unwrap().display().unwrap();
+    assert_eq!(value, "(179700 1 2 3 t)");
+    assert!(vm.register_width > width, "the hook widened them: {} from {width}", vm.register_width);
+}

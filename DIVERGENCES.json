@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "0a423a79470a3eb3c288e0b5b71f1b3acc42029a4e24de0c0ef4bd7aade91000",
+  "input_hash": "9730f028357f12b85089ebf00786cbf239e570e0beeff10c7ce87c1da24a3307",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4885,8 +4885,8 @@
    "planned": false,
    "mechanism": "When finalizers run",
    "gnu": "`make-finalizer` (`alloc.c:3978`) makes an object whose function runs once after the collection that finds it unreachable: `garbage_collect` dooms the unmarked finalizers after the roots and before weak tables (`queue_doomed_finalizers`), keeps them and their functions, and calls each before it returns, with `inhibit-quit` t and a signal logged to *Messages* as `finalizer failed: ...` (`run_finalizers`, `alloc.c:3960`), automatic collections included. Its conservative stack scan may keep a finalizer a C frame still mentions.",
-   "romacs": "The collector dooms finalizers at GNU's point in marking and keeps them, with their functions, until they run (`crates/romacs-vm/src/gc.rs`). `romacs--run-finalizers` (`rlisp/vm/prelude.el`) calls them as `run_finalizers` does, from the engine just after an explicit `garbage-collect` returns its statistics, and before each wait for a command key (`romacs--timer-check-idle`): an automatic collection runs inside an allocation, where no Lisp may run, so its doomed finalizers wait for one of those. A finalizer a register of the running top-level evaluation still holds survives until that register is reused.",
-   "why": "Lisp cannot run inside an allocation. Test: `crates/romacs-vm/tests/garbage_collect.rs` (GNU-compared), `finalizer-object-type` in GNU's alloc-tests.el.",
+   "romacs": "The collector dooms finalizers at GNU's point in marking and keeps them, with their functions, until they run (`crates/romacs-vm/src/gc.rs`). `romacs--run-finalizers` (`rlisp/vm/prelude.el`) calls them as `run_finalizers` does, and then `post-gc-hook`, in the engine that collected, explicit or automatic, as `garbage_collect` does. Two collections are not finished there and leave their work for the next that is, or for a wait for a command key (`romacs--timer-check-idle`): one at a request boundary, which has no engine, and one while the top control is a cleanup's, because a `throw` from the hook would skip the rest of it, where GNU's abandons it. Left work is kept, not dropped: the doomed stay rooted, but `post-gc-hook` runs once for all the collections it waited through, and a batch session that exits first runs neither. A finalizer a register of the running top-level evaluation still holds survives until that register is reused. A child forked from a zygote drops the finalizers it inherits, each running once, in the zygote; the `post-gc-hook` it inherits runs for its own collections.",
+   "why": "A collection at a request boundary has no engine to run Lisp in. Test: `crates/romacs-vm/tests/garbage_collect.rs` (GNU-compared), `finalizer-object-type` in GNU's alloc-tests.el.",
    "symbols": [
     "make-finalizer",
     "garbage-collect"

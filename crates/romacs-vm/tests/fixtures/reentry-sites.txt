@@ -185,7 +185,6 @@ threaded.rs run_in_signal compile 1 held  # an open compiler builder holds colle
 threaded.rs run_in_signal execute_raw 1 clean  # inside call_suspended; nothing held
 threaded.rs hook_debugger compile 1 held  # an open compiler builder holds collection
 threaded.rs hook_debugger execute_raw 1 clean  # inside nested_then's call_suspended; nothing held
-threaded.rs hook_debugger nested_then 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
 threaded.rs checked_unbind unbind_one 1 suspended  # inside watched_write
 threaded.rs checked_unbind watched_write 1 suspended  # the engine is suspended when any variable is watched
 threaded.rs bind_step bind_special 1 suspended  # the value is read from its register; nothing is reused after
@@ -209,6 +208,12 @@ threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased fr
 threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
 threaded.rs poll_collect poll_collect_unless_key 1 collector  # the engine is suspended first
 threaded.rs poll_collect_unless_key collect_until_key 1 collector  # the engine is suspended first
+threaded.rs finish_collection execute_args 1 clean  # inside nested_then's call_suspended; nothing held
+threaded.rs finish_collection nested_with_room 1 suspended  # the runner is the call's own; registers are rebased from the result
+threaded.rs hook_debugger nested_with_room 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
+threaded.rs nested_with_room nested_then 1 suspended  # the caller's registers are rebased from the result
+threaded.rs take_step finish_collection 2 suspended  # the statistics or t are in a register; registers are rebased from the result
+threaded.rs poll_resume finish_collection 1 suspended  # when may_collect(1); registers are rebased from the result, an escape returns
 threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
 threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
