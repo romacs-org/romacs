@@ -35,6 +35,13 @@ headless labwc, HOME, XDG and TMPDIR (parity_live.py).
              files lands on an empty session, by `romacs' and `emacsclient
              -c', and not with `initial-buffer-choice' or
              `inhibit-startup-screen' set, nor beside work.
+  first_frame  no frame of a launch shows *scratch* before the landing, by the
+             launcher's client path and a plain launch: every frame the host
+             submits, from its scene dumps; a window shown again to a new
+             client, by `romacs' and `emacsclient -c', judged as well from
+             screenshots, which see what the renderer presents.  A launch that
+             opts out (`inhibit-startup-screen') shows *scratch*; one with a
+             file never shows the landing.
   daemon     pinned GNU `--fg-daemon=dm' and a Romacs server dm, in turn in
              the same tree: `noninteractive', `daemonp' and
              `daemon-initialized' before and after `emacsclient -c' are
@@ -59,6 +66,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import parity_live
@@ -340,6 +348,130 @@ def landing(args, base):
         return result
     finally:
         s.close()
+
+
+def shown_buffers(log, start=0):
+    """From LOG, the scene dumps of `--trace-scene' from character START on:
+    for each frame, which of the two buffers it shows."""
+    frames = []
+    for line in log[start:].split('\n'):
+        if '"submitted-scene"' not in line:
+            continue
+        try:
+            scene = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows = {}
+        for glyph in scene['glyphs']:
+            rows.setdefault(glyph['y'], []).append((glyph['x'], glyph.get('char') or ''))
+        text = '\n'.join(''.join(c for _, c in sorted(row)) for _, row in sorted(rows.items()))
+        frames.append('*Romacs*' if '*Romacs*' in text else '*scratch*' if '*scratch*' in text else 'other')
+    return frames
+
+
+def first_frame(args, base):
+    plain_init = ';; -*- lexical-binding: t -*-\n'
+    s = Server(args, base, 'ff', init=plain_init)
+    current = lambda: s.eval('(buffer-name (window-buffer (selected-window)))')
+    show = ('--trace-scene', '-n')
+
+    def bar(name):
+        """A screenshot's status bar, where a buffer's name is, as a file."""
+        path = s.root / f'{name}.png'
+        subprocess.run([f'{args.tools}/grim', str(path)], env=s.env, check=True, timeout=15)
+        subprocess.run(['magick', str(path), '-gravity', 'South', '-crop', '400x40+0+0', '+repage', str(path)], check=True, timeout=15)
+        return path
+
+    def differs(a, b):
+        done = subprocess.run(['magick', 'compare', '-metric', 'AE', str(a), str(b), 'null:'], capture_output=True, text=True, timeout=15)
+        return float(done.stderr.split()[0])
+
+    def burst(work, reference, name):
+        """Screenshots while WORK runs, and how many show each of REFERENCE,
+        the bars over *scratch* and the landing: a shot far from both, before
+        the window shows, counts as neither."""
+        done = threading.Event()
+        shots = []
+
+        def shoot():
+            while not done.is_set() and len(shots) < 40:
+                try:
+                    shots.append(bar(f'{name}-{len(shots)}'))
+                except subprocess.CalledProcessError:
+                    pass  # no output yet
+        thread = threading.Thread(target=shoot)
+        thread.start()
+        work()
+        time.sleep(1.5)
+        done.set()
+        thread.join()
+        near = differs(*reference) * 2
+        if not near:
+            raise RuntimeError('the two bars look alike')
+        apart = [(differs(shot, reference[0]), differs(shot, reference[1])) for shot in shots]
+        return len(shots), sum(s < min(near, l) for s, l in apart), sum(l < min(near, s) for s, l in apart)
+
+    try:
+        # The launcher's path: a client starts the server.
+        s.client(*show)
+        until(lambda: shown_buffers(s.log()), 20, 'a frame')
+        launcher = shown_buffers(s.log())
+        s.keyboard_ready()
+        landing_bar = bar('ref-landing')
+        s.keys('-k', 'q')
+        until(lambda: current() == '"*scratch*"', 15, 'q leaves the landing')
+        time.sleep(1)
+        scratch_bar = bar('ref-scratch')
+        # A window shown again to a new client, of either kind.
+        again = {}
+        for kind, work in (('native', lambda: s.client('-n')), ('emacsclient', lambda: s.emacsclient('-c', '-n'))):
+            s.eval("(progn (when (get-buffer \"*Romacs*\") (kill-buffer \"*Romacs*\")) (romacs--native-window 'hide))")
+            until(lambda: s.eval("(romacs--native-window 'query)") == 'nil', 10, 'the window hides')
+            time.sleep(.5)
+            start = len(s.log())
+            shots, scratch, landing_shots = burst(work, (scratch_bar, landing_bar), kind)
+            again[kind] = {'frames': shown_buffers(s.log(), start), 'shots': shots, 'scratch_shots': scratch,
+                           'landing_shots': landing_shots, 'current': current()}
+        s.client('--stop=none')
+        until(lambda: not (s.runtime / 'romacs/ff/server.sock').exists(), 15, 'the server stops')
+        # A file: the landing never shows.
+        a = s.file('a.txt')
+        s.client('--trace-scene', '-n', str(a))
+        until(lambda: shown_buffers(s.log()), 20, 'a frame')
+        time.sleep(1)
+        with_file = shown_buffers(s.log())
+        s.client('--stop=none')
+        until(lambda: not (s.runtime / 'romacs/ff/server.sock').exists(), 15, 'the server stops')
+        # A plain launch, no server.
+        log = s.root / 'plain.log'
+        with log.open('w') as out:
+            plain = subprocess.Popen([args.romacs, '--loadup', '--trace-scene'], env=s.env, cwd=s.root / 'work',
+                                     stdin=subprocess.DEVNULL, stdout=out, stderr=out)
+        try:
+            until(lambda: shown_buffers(log.read_text(errors='replace')), 30, 'a plain launch paints')
+            time.sleep(1)
+        finally:
+            plain.terminate()
+            plain.wait(10)
+        direct = shown_buffers(log.read_text(errors='replace'))
+    finally:
+        s.close()
+    # A launch that opts out, as the harnesses do, lands on *scratch*.
+    s = Server(args, base, 'fo')
+    try:
+        s.client(*show)
+        until(lambda: shown_buffers(s.log()), 20, 'a frame')
+        opted_out = shown_buffers(s.log())
+        s.client('--stop=none')
+    finally:
+        s.close()
+    only = lambda frames, buffer: bool(frames) and set(frames) == {buffer}
+    landing_only = lambda frames: only(frames, '*Romacs*')
+    result = {'launcher': launcher, 'again': again, 'plain': direct, 'with_file': with_file, 'opted_out': opted_out}
+    result['ok'] = (landing_only(launcher) and landing_only(direct) and '*Romacs*' not in with_file
+                    and all(landing_only(a['frames']) and a['scratch_shots'] == 0 and a['landing_shots'] > 0 for a in again.values())
+                    and only(opted_out, '*scratch*'))
+    return result
 
 
 def waiters(args, base):
@@ -831,7 +963,7 @@ def lisp_read(text):
 
 
 WORKFLOWS = {'stop': stop, 'lifecycle': lifecycle, 'waiters': waiters, 'unit': unit, 'crash': crash, 'build': build,
-             'probe': probe, 'daemon': daemon, 'title': title, 'mouse': mouse, 'landing': landing}
+             'probe': probe, 'daemon': daemon, 'title': title, 'mouse': mouse, 'landing': landing, 'first_frame': first_frame}
 
 
 def main():
@@ -846,7 +978,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['lifecycle', 'waiters', 'landing', 'stop', 'build', 'probe']:
+    for name in args.workflow or ['lifecycle', 'waiters', 'landing', 'first_frame', 'stop', 'build', 'probe']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
