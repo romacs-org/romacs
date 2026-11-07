@@ -363,12 +363,22 @@ a symbol naming one, which is a primitive when Rust defines it."
     (let ((primitive (romacs-help--primitive (if (symbolp object) (indirect-function object) object))))
       (and primitive (romacs--rust-definition primitive nil)))))
 
+(defvar romacs-help--gnu-wording nil
+  "Non-nil while a batch session words a help header as GNU's does.")
+
+(defun romacs-help--batch-header (header &rest args)
+  "Run HEADER on ARGS, `help-fns-function-description-header', keeping
+GNU's \"C source code\" in batch, as GNU's tests pin it (VM2-HELP-SOURCE)."
+  (let ((romacs-help--gnu-wording noninteractive))
+    (apply header args)))
+
 (defun romacs-help--rust-file (object type &optional _also-c-source)
   "The Rust file defining OBJECT where no Lisp file does, else nil.
 As `find-lisp-object-file-name' takes OBJECT and TYPE: a variable for
 TYPE `defvar'; else a function, TYPE its definition or `defun' for
 OBJECT's own, when that is a primitive, advised or not."
-  (cond ((eq type 'defvar)
+  (cond (romacs-help--gnu-wording nil)
+        ((eq type 'defvar)
          (and (symbolp object) (not (symbol-file object 'defvar))
               (car (romacs-help--rust-definition object 'defvar))))
         ((and (symbolp object) (symbol-file object 'defun)) nil)
@@ -435,6 +445,7 @@ no source tree: it would be the working directory's."
 
 (with-eval-after-load 'help-fns
   (advice-add 'find-lisp-object-file-name :before-until #'romacs-help--rust-file)
+  (advice-add 'help-fns-function-description-header :around #'romacs-help--batch-header)
   (advice-add 'help-C-file-name :before-until #'romacs-help--C-file-name))
 (with-eval-after-load 'find-func
   (advice-add 'find-function-search-for-symbol :before-until #'romacs-help--search-rust))

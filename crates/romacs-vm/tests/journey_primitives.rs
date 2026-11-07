@@ -234,7 +234,7 @@ fn help_describes_a_function_a_variable_and_a_mode() {
         &help("(with-temp-buffer (emacs-lisp-mode) (describe-mode))", r#"(search-forward "In addition") (match-beginning 0)"#),
         "(buffer-size (get-buffer-create \" jp-sized\"))",
         "(buffer-size 'jp-not-a-buffer)",
-    ], &[(&buffer_size, "‘C source code’", "(car (romacs--rust-definition (symbol-function 'buffer-size) nil))")]);
+    ], &[]);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
