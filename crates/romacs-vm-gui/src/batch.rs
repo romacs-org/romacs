@@ -268,7 +268,14 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
             }
             std::process::exit(if result.is_ok() { 0 } else { 1 })
         }
-        Launch::Chain { .. } => chain(&dir),
+        Launch::Chain { reason } => {
+            // Quiet as GNU's batch, unless a harness asks why the world
+            // was not used.
+            if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
+                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+            }
+            chain(&dir)
+        }
     }
 }
 

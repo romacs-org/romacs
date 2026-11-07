@@ -672,7 +672,7 @@ pub fn runtime_root() -> PathBuf {
 /// `gnu-lisp/` directory.
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
-    metadata(root.join("gnu-lisp")).is_ok_and(|m| m.is_dir()).then_some(root)
+    probe(Probe::IsDir, root.join("gnu-lisp")).then_some(root)
 }
 
 /// The checkout this crate was built from: a compile-time path that no
