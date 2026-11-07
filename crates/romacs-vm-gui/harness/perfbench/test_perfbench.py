@@ -329,7 +329,7 @@ class Lead(unittest.TestCase):
     def test_every_name_in_the_template_is_filled_and_none_is_left(self):
         text = readme.lead_section(lead_results())
         self.assertNotIn('{{', text)
-        for part in ('3 s', '19 s', '183,574', '5 ms', '650 ms', '770 ms', '16 MB', '50 ms', '60 ms'):
+        for part in ('3 s', '19 s', '183,574', '5 ms', '16 MB', '50 ms', '60 ms'):
             self.assertIn(part, text)
 
     def test_the_template_keeps_the_names_of_the_draft(self):
@@ -338,12 +338,12 @@ class Lead(unittest.TestCase):
 
     def test_a_value_the_run_lacks_stops_it_and_says_which(self):
         def refuse(made):
-            made['rows'][1]['romacs']['wall_refused'] = made['rows'][1]['romacs'].pop('wall')
+            made['rows'][2]['romacs']['wall_refused'] = made['rows'][2]['romacs'].pop('wall')
         made = lead_results(x=refuse)
-        self.assertEqual(readme.lead_missing(made), ['open-xdisp-romacs'])
+        self.assertEqual(readme.lead_missing(made), ['open-big-romacs'])
         with self.assertRaises(SystemExit) as stopped:
             readme.lead_section(made)
-        self.assertIn('open-xdisp-romacs', str(stopped.exception))
+        self.assertIn('open-big-romacs', str(stopped.exception))
 
     def test_a_refused_value_the_lead_does_not_quote_is_no_failure(self):
         def refuse(made):
@@ -377,7 +377,7 @@ class Lead(unittest.TestCase):
         self.assertTrue(pb.selected(args(only=['session']), 'session', 'session', False))
         self.assertFalse(pb.selected(args(quick=True), 'session', 'session', False))
         self.assertFalse(pb.selected(args(only=['elb']), 'session', 'session', False))
-        self.assertEqual(len(readme.lead_missing(results([]))), 11)
+        self.assertEqual(len(readme.lead_missing(results([]))), 9)
 
     def test_a_failed_lead_leaves_the_readme_alone(self):
         def refuse(made):
