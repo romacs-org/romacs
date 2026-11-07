@@ -464,6 +464,7 @@ mod tests {
         vm.set_host_input(Some(Box::new(PanicAfter(3))));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.collect_garbage_until_key()));
         assert!(unwound.is_err(), "the fixture panics part way through");
+        assert!(vm.host_input.is_some(), "the host is back after the panic");
         vm.set_host_input(None);
         vm.collect_garbage();
         vm.eval_source_raw("(let ((i 0)) (while (< i 300000) (cons i nil) (setq i (1+ i))))").unwrap();

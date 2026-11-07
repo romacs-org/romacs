@@ -65,7 +65,8 @@ pub(crate) struct Stress {
     /// Faults a test plants in this VM's collections, and no other's.
     #[cfg(test)]
     pub(crate) faults: Faults,
-    /// Graves this VM's collections have buried, for a test to ask.
+    /// Graves this VM's collections have handed the dropper (or held, for a
+    /// test that holds them), for a test to ask.
     #[cfg(test)]
     pub(crate) buried: usize,
 }
@@ -859,13 +860,6 @@ impl Vm {
     fn compacts(&mut self) -> bool {
         std::mem::take(&mut self.allocation.compact) || (self.gc_stress.every > 0 && !self.gc_stress.inplace) || self.gc_stress.moving
     }
-    /// Whether the tables are as MARKING found them (`RawTable::holds'):
-    /// between a mark and its sweep the VM is written, and nothing there may
-    /// allocate, grow or cut a table that MARKING will sweep through.
-    fn tables_held(&self, marking: &gc_mark::Marking) -> bool {
-        marking.conses.holds(&self.conses) && marking.closures.holds(&self.closures)
-            && marking.cells.holds(&self.cells) && marking.objects.holds(&self.objects)
-    }
     /// A collection stopped: the tables hold no marks.
     pub(crate) fn clear_marks(&mut self) {
         self.conses.clear_marks();
@@ -1043,8 +1037,7 @@ impl Vm {
         if before_scan {
             let _ = self.alloc_cons(Value::NIL, Value::NIL);
         }
-        assert!(self.tables_held(&marking), "a table changed between its mark and its sweep");
-        let dead = marking.dead_objects(&mut own);
+        let dead = marking.dead_objects(self, &mut own);
         for &i in &dead {
             if let data::Object::Marker(m) = &self.objects[i as usize] && let Some(anchor) = m.anchor {
                 let buffer = m.buffer;
@@ -1104,8 +1097,7 @@ impl Vm {
             if before_sweep {
                 let _ = self.alloc_cons(Value::NIL, Value::NIL);
             }
-            assert!(self.tables_held(&marking), "a table changed between its mark and its sweep");
-            let swept = marking.sweep(&mut own);
+            let swept = marking.sweep(self, &mut own);
             self.conses.swept(swept[0].0, swept[0].1, verify);
             self.closures.swept(swept[1].0, swept[1].1, verify);
             self.cells.swept(swept[2].0, swept[2].1, verify);
@@ -1361,13 +1353,16 @@ impl Vm {
         // tables' contents are marked.
         let mut finalizers_doomed = false;
         let mut doomed = Vec::new();
-        let marking = gc_mark::Marking::new(self, n);
+        // SAFETY: from here to the sweep the collection grows, shrinks,
+        // sweeps and re-marks no table but through MARKING (`verify_mark'
+        // hands its own on), and its scan and sweep check that first.
+        let marking = unsafe { gc_mark::Marking::new(self, n) };
         let mut own = gc_mark::Worker::default();
         // All a mark wants of the VM but to read it, while nothing else asks.
         let mut host = if until_key { self.host_input.take() } else { None };
         let this = &*self;
         let view = this.mark_view(in_obarray, local_binding, &code_marks);
-        let finished = marking.crew(&view, || {
+        let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
             // lowered code, through the visitor a compaction rewrites it with.
@@ -1391,8 +1386,11 @@ impl Vm {
                 }
                 return true;
             }
-        });
+        })));
+        // The host goes back however the mark ended: a session that lost it
+        // would see no key at any later idle collection.
         if until_key { self.host_input = host; }
+        let finished = finished.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         if !finished { return None; }
         let census = marking.census(&own);
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();

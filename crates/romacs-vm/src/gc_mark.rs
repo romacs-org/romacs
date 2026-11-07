@@ -72,6 +72,18 @@ fn pool(n: usize) -> &'static rayon::ThreadPool {
     POOL.get_or_init(|| threads_named("romacs-gc", n))
 }
 
+/// Whether a collection's graves are with the dropper now, any VM's. One
+/// batch waits at a time: while it does, later collections drop theirs where
+/// they swept them, so a slow dropper holds at most one collection's dead
+/// (pacing sizes that at about one traced heap), and none waits for it.
+static DROPPING: AtomicBool = AtomicBool::new(false);
+
+/// Whether a batch is with the dropper, for a test.
+#[cfg(test)]
+pub(crate) fn dropping() -> bool {
+    DROPPING.load(Ordering::Acquire)
+}
+
 /// The thread that drops graves, apart from the pool, so that no collection
 /// after it waits for a drop.
 fn undertaker() -> &'static rayon::ThreadPool {
@@ -136,11 +148,11 @@ impl RawTable<data::Object> {
 /// What a dead object owned, for any thread to drop. `Object' is not `Send',
 /// and each of these is, so a kind that holds more cannot get in here.
 enum Grave {
-    Bignum(#[allow(dead_code)] Box<num_bigint::BigInt>),
-    String(#[allow(dead_code)] Box<data::LispString>),
-    Values(#[allow(dead_code)] Vec<Value>),
-    Bytes(#[allow(dead_code)] Vec<u8>),
-    Bits(#[allow(dead_code)] Box<data::BoolVector>),
+    Bignum(Box<num_bigint::BigInt>),
+    String(Box<data::LispString>),
+    Values(Vec<Value>),
+    Bytes(Vec<u8>),
+    Bits(Box<data::BoolVector>),
 }
 
 impl Grave {
@@ -223,6 +235,8 @@ pub(super) struct Marking {
     pub(super) objects: RawTable<data::Object>,
     verify: bool,
     n: usize,
+    /// Each sweeping thread's graves, for the dropper as one batch.
+    batch: Mutex<Vec<Vec<Grave>>>,
     queue: Injector<Work>,
     /// The VM's planted faults (`gc::Faults'), for its own threads only, the
     /// worker panic taken by the first worker to come to it.
@@ -271,15 +285,24 @@ impl Drop for Leaving<'_> {
 }
 
 impl Marking {
-    /// A collection's shared state over VM's tables. Whoever uses it after
-    /// the VM has been written asks `Vm::tables_held' first.
-    pub(super) fn new(vm: &mut Vm, n: usize) -> Self {
-        // SAFETY: a collection's tables neither go nor change but through
-        // these until its sweep, which `Vm::tables_held' asserts.
+    /// A collection's shared state over VM's tables.
+    ///
+    /// SAFETY: until its last read of them (`Marking::sweep', or on a
+    /// compacting collection `Marking::dead_objects'; burying graves reads
+    /// none), VM's four tables are not dropped,
+    /// and change only in place: no entry allocated, no growth,
+    /// sweep, compaction or cut, and no mark begun or cleared but through
+    /// this. The collector writes entries in place meanwhile (a dead object
+    /// made `Free', a cell given its value, a weak table pruned), which is
+    /// why the borrow is not in the type; `dead_objects' and `sweep' check
+    /// shape and marks (`holds') before they read, where a violation would
+    /// otherwise become a sweep through freed memory or of the live heap.
+    pub(super) unsafe fn new(vm: &mut Vm, n: usize) -> Self {
+        // SAFETY: the caller's.
         let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(), vm.closures.raw(), vm.cells.raw(), vm.objects.raw()) };
         Self {
             conses, closures, cells, objects,
-            verify: vm.gc_stress.verify, n,
+            verify: vm.gc_stress.verify, n, batch: Mutex::default(),
             queue: Injector::new(), outstanding: AtomicUsize::new(0),
             stop: AtomicBool::new(false), parked: AtomicUsize::new(0), park: Mutex::new(()), wake: Condvar::new(),
             serial: Mutex::new(Vec::new()), census: Mutex::default(),
@@ -319,7 +342,7 @@ impl Marking {
                 scope.spawn(|_| {
                     let mut w = Worker::default();
                     run(&mut w);
-                    self.bury(w.graves);
+                    if !w.graves.is_empty() { self.batch.lock().unwrap().push(w.graves); }
                 });
             }
             run(own);
@@ -336,22 +359,28 @@ impl Marking {
         census.add(&own.census);
         census
     }
-    /// The collection is over but for its coordinator's graves.
+    /// The collection is over: its graves, each thread's list as it is, go to
+    /// the dropper as one batch, off the pause, unless another VM's got there
+    /// first since `sweep' looked: then this batch is dropped here, on this
+    /// thread alone, in the pause, which is rare and costs more than not having
+    /// deferred.
     pub(super) fn finish(&self, own: Worker) {
-        self.bury(own.graves);
-    }
-    /// GRAVES go to be dropped, off the pause, each thread's as it is, so no
-    /// list of the dead is copied, by a thread no collection waits for.
-    fn bury(&self, graves: Vec<Grave>) {
-        if graves.is_empty() { return; }
+        let mut batch = std::mem::take(&mut *self.batch.lock().unwrap());
+        if !own.graves.is_empty() { batch.push(own.graves); }
+        if batch.is_empty() { return; }
         #[cfg(test)]
-        self.buried.fetch_add(graves.len(), Ordering::AcqRel);
+        if test::HOLD_GRAVES.load(Ordering::Acquire) {
+            self.buried.fetch_add(batch.iter().map(Vec::len).sum(), Ordering::AcqRel);
+            return test::GRAVES.lock().unwrap().extend(batch);
+        }
+        if DROPPING.swap(true, Ordering::AcqRel) { return drop(batch); }
         #[cfg(test)]
-        if test::HOLD_GRAVES.load(Ordering::Acquire) { return test::GRAVES.lock().unwrap().push(graves); }
+        self.buried.fetch_add(batch.iter().map(Vec::len).sum(), Ordering::AcqRel);
         undertaker().spawn(move || {
             #[cfg(test)]
             test::slow_drop();
-            drop(graves);
+            drop(batch);
+            DROPPING.store(false, Ordering::Release);
         });
     }
     fn publish(&self, work: Work) {
@@ -549,8 +578,16 @@ impl Marking {
     pub(super) fn add(&self, w: &mut Worker, values: &mut Vec<Value>) {
         w.stack.append(values);
     }
-    /// The dead objects `buried' refuses, found by all threads.
-    pub(super) fn dead_objects(&self, own: &mut Worker) -> Vec<u32> {
+    /// Whether VM's tables are as this found them (`RawTable::holds'): the
+    /// VM is written between a mark and its sweep, and nothing there may
+    /// allocate, grow or cut a table, or begin or clear a mark.
+    fn holds(&self, vm: &Vm) -> bool {
+        self.conses.holds(&vm.conses) && self.closures.holds(&vm.closures)
+            && self.cells.holds(&vm.cells) && self.objects.holds(&vm.objects)
+    }
+    /// The dead objects `buried' refuses in VM, found by all threads.
+    pub(super) fn dead_objects(&self, vm: &Vm, own: &mut Worker) -> Vec<u32> {
+        assert!(self.holds(vm), "a table changed between its mark and its sweep");
         let len = self.objects.len();
         let dead = Mutex::new(Vec::new());
         self.share_out(own, len.div_ceil(RANGE), |_, i| {
@@ -561,8 +598,11 @@ impl Marking {
         });
         dead.into_inner().unwrap()
     }
-    /// Sweep the tables: their freed counts and ends.
-    pub(super) fn sweep(&self, own: &mut Worker) -> [(usize, usize); 4] {
+    /// Sweep VM's tables: their freed counts and ends.
+    pub(super) fn sweep(&self, vm: &Vm, own: &mut Worker) -> [(usize, usize); 4] {
+        assert!(self.holds(vm), "a table changed between its mark and its sweep");
+        // One batch waits at a time (`DROPPING'); on one thread there is none.
+        let defer = self.n > 1 && !DROPPING.load(Ordering::Acquire);
         let lens = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         let chunks: Vec<(usize, Range<usize>)> = lens.iter().enumerate()
             .flat_map(|(table, &len)| (0..len).step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(len))))
@@ -570,7 +610,7 @@ impl Marking {
         let swept = Mutex::new([(0, 0); 4]);
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last) = self.sweep_range(w, table, range);
+            let (freed, last) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
             swept[table] = (swept[table].0 + freed, swept[table].1.max(last));
         });
@@ -578,8 +618,9 @@ impl Marking {
     }
     /// One range of a sweep: its freed count and the end of its last entry in
     /// use. Conses and cells own nothing; a closure's vectors are small and
-    /// few; what an object owns goes to W's graves, or at once on one thread.
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>) -> (usize, usize) {
+    /// few; what an object owns goes to W's graves when DEFER, or is dropped
+    /// here (one thread, or the dropper busy).
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
         unsafe {
@@ -588,8 +629,9 @@ impl Marking {
                 1 => self.closures.sweep_range(range, self.verify, |c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
                 2 => self.cells.sweep_range(range, self.verify, |cell| *cell = dead),
                 _ => self.objects.sweep_range(range, self.verify, |object| {
-                    let grave = Grave::of(std::mem::replace(object, data::Object::Free));
-                    if self.n > 1 { w.graves.extend(grave); }
+                    if let Some(grave) = Grave::of(std::mem::replace(object, data::Object::Free)) && defer {
+                        w.graves.push(grave);
+                    }
                 }),
             }
         }
@@ -805,7 +847,12 @@ pub(crate) mod test {
     /// One test at a time of those that set the statics above.
     static ALONE: Mutex<()> = Mutex::new(());
     pub(crate) fn alone() -> std::sync::MutexGuard<'static, ()> {
-        ALONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        let guard = ALONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // What an earlier test left for the dropper is gone first.
+        let start = std::time::Instant::now();
+        while super::dropping() && start.elapsed() < Duration::from_secs(20) { std::thread::yield_now(); }
+        assert!(!super::dropping(), "the dropper did not drain what an earlier test left it");
+        guard
     }
     pub(super) fn slow_drop() {
         DROPS_STARTED.fetch_add(1, Ordering::AcqRel);
@@ -841,7 +888,8 @@ mod tests {
         let in_obarray = vec![false; vm.slots.len()];
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
-        let marking = Marking::new(&mut vm, 1);
+        // SAFETY: the tables are left alone until the marking is dropped.
+        let marking = unsafe { Marking::new(&mut vm, 1) };
         let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
         let mut own = Worker::default();
         own.serial.push(first);
@@ -885,6 +933,8 @@ mod tests {
     /// invented, whichever thread reached it. Across many, racing differently.
     #[test]
     fn threads_reach_what_one_thread_reaches() {
+        // On threads, its graves would take the dropper from another test's.
+        let _alone = test::alone();
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         vm.set_gc_threads(4);
@@ -1164,6 +1214,49 @@ mod tests {
         }
     }
 
+    /// One batch of graves waits for the dropper at a time. With the dropper
+    /// held, the first collection hands its batch over, and every later one
+    /// drops its own where it swept, and finishes: a slow dropper holds one
+    /// collection's dead, and no collection waits behind it. Once it drains, a
+    /// collection hands over again. Bignums are graves like the rest.
+    #[test]
+    fn one_batch_waits_at_a_time() {
+        let _alone = test::alone();
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_threads(4);
+        vm.set_gc_verify(false);
+        vm.set_gc_stress(0);
+        vm.eval_source_raw("(defvar kept (make-list 1000 nil))").unwrap();
+        test::SLOW_DROPS.store(true, Ordering::Release);
+        let watchdog = std::thread::spawn(|| {
+            let start = std::time::Instant::now();
+            while test::SLOW_DROPS.load(Ordering::Acquire) && start.elapsed() < Duration::from_secs(60) { std::thread::sleep(Duration::from_millis(10)); }
+            test::SLOW_DROPS.swap(false, Ordering::AcqRel)
+        });
+        let garbage = "(let ((i 0)) (while (< i 20000) (make-string 64 ?g) (ash 1 4000) (make-vector 8 nil) (setq i (1+ i))))";
+        let mut handed = Vec::new();
+        // Each round's collections, the automatic ones its garbage starts too.
+        for _ in 0..8 {
+            let before = vm.gc_stress.buried;
+            vm.eval_source_raw(garbage).unwrap();
+            vm.collect_garbage();
+            handed.push(vm.gc_stress.buried - before);
+        }
+        test::SLOW_DROPS.store(false, Ordering::Release);
+        assert!(!watchdog.join().unwrap(), "a collection waited for a drop");
+        assert!(handed[0] > 0, "the first round's first collection handed its graves over: {handed:?}");
+        assert!(handed[1..].iter().all(|&n| n == 0), "while a batch waited, later collections dropped their own: {handed:?}");
+        let start = std::time::Instant::now();
+        while dropping() && start.elapsed() < Duration::from_secs(20) { std::thread::yield_now(); }
+        assert!(!dropping(), "the dropper drained");
+        let before = vm.gc_stress.buried;
+        vm.eval_source_raw(garbage).unwrap();
+        vm.collect_garbage();
+        assert!(vm.gc_stress.buried > before, "a drained dropper takes a batch again");
+        assert_eq!(vm.eval_source_raw("(length kept)").unwrap().as_integer().unwrap(), 1000);
+    }
+
     /// The budget stops code tracing too, however many functions are queued.
     #[test]
     fn a_budget_stops_at_code() {
@@ -1172,7 +1265,8 @@ mod tests {
         let in_obarray = vec![false; vm.slots.len()];
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
-        let marking = Marking::new(&mut vm, 1);
+        // SAFETY: the tables are left alone until the marking is dropped.
+        let marking = unsafe { Marking::new(&mut vm, 1) };
         let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
         let mut own = Worker::default();
         own.code = (0..vm.functions.len()).collect();
