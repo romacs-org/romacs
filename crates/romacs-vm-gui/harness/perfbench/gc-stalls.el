@@ -1,6 +1,7 @@
 ;;; gc-stalls.el --- The stalls a running program sees  -*- lexical-binding: t -*-
 ;; Gaps between loop iterations while it allocates, at one live heap per process,
 ;; in any Emacs, byte-compiled for GNU:
+;; (Recompile the .elc after any edit: a stale one runs the old harness.)
 ;;   TAG=name SCEN=small|mid|big|real [FIX=gnu-tree] [PHASES=1] emacs -Q --batch -l gc-stalls.elc
 ;; SCEN is the live heap: 10k, 500k or 2M (cons + cons + string) items, or `real':
 ;; common libraries and three large files of FIX, whose setup it reports, so the
@@ -52,7 +53,10 @@
     (find-file (expand-file-name file tree))
     (let ((failed (condition-case e (progn (font-lock-ensure) nil) (error e))) (runs 0) (at (point-min)))
       (while (setq at (next-single-property-change at 'face)) (setq runs (1+ runs)))
-      (princ (format "  setup %s: %s, %d chars, %d face runs, error %S\n" file major-mode (buffer-size) runs failed)))))
+      (princ (format "  setup %s: %s, %d chars, %d face runs, error %S\n" file major-mode (buffer-size) runs failed))
+      ;; A row from a broken fixture would compare nothing: stop the run.
+      (when failed (signal (car failed) (cdr failed)))
+      (when (zerop runs) (error "Setup %s: no face runs" file)))))
 (let* ((scen (getenv "SCEN"))
        (keep (pcase scen
                ("small" (gap-live 10000))
