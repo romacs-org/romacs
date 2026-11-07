@@ -6,7 +6,8 @@
 ;; The built-in modes and options an interactive Romacs session turns on
 ;; where GNU leaves them off, so that a new user needs no configuration
 ;; and no package for them: paired delimiters, minibuffer history, recent
-;; files and places kept across sessions, key hints, buffers that follow their files, relative line numbers in
+;; files and places kept across sessions, key hints, a cursor that does not
+;; blink, buffers that follow their files, relative line numbers in
 ;; programming buffers, tree-sitter modes for the languages whose
 ;; grammars Romacs ships, backups and auto-saves kept out of the
 ;; directories being edited, and VC logs of the whole history, which
@@ -72,6 +73,9 @@
     (recentf-mode t)
     (global-auto-revert-mode t idle)
     (column-number-mode t)
+    ;; A steady cursor: the renderer animates its motion, and a blink
+    ;; would flash it away mid-glide.
+    (blink-cursor-mode nil)
     ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
     ;; counted from point, the current line by its own number.
     (display-line-numbers-type 'relative)

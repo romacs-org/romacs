@@ -97,7 +97,7 @@ const NOT_STANDARD: &str = "(delq nil (mapcar (lambda (setting)
 const SEEN: &str = "(list electric-pair-mode savehist-mode save-place-mode recentf-mode repeat-mode
   global-auto-revert-mode column-number-mode which-key-mode which-key-popup-type
   save-interprogram-paste-before-kill kill-do-not-save-duplicates read-extended-command-predicate
-  imenu-auto-rescan imenu-flatten)";
+  imenu-auto-rescan imenu-flatten blink-cursor-mode)";
 
 fn pair(vm: &mut Vm, name: &str) -> String {
     vm.eval_source(&format!("(switch-to-buffer (get-buffer-create {}))", quoted(name))).unwrap();
@@ -168,12 +168,12 @@ fn an_interactive_session_turns_the_defaults_on_and_the_switch_turns_them_off() 
         "(pgtk t t)",
         "(nil t nil nil t (savehist-mode global-auto-revert-mode omarchy-mode))",
         "(t t nil t)",
-        "(t t t t nil nil t t custom t t command-completion-default-include-p t prefix)",
+        "(t t t t nil nil t t custom t t command-completion-default-include-p t prefix nil)",
         "(global-auto-revert-mode)",
         "(t t t t t t)",
         "(\"(a)\" 3)",
         "(nil \"o\" nil)",
-        "(nil nil nil nil nil nil nil nil side-window nil mine nil nil nil)",
+        "(nil nil nil nil nil nil nil nil side-window nil mine nil nil nil t)",
         "((kill-do-not-save-duplicates . mine))",
         "(\"(a\" 3)",
         "(nil \"o\" nil)",
@@ -219,7 +219,7 @@ fn a_quick_session_keeps_gnus_values() {
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         "(nil nil)",
-        "(nil nil nil nil nil nil nil nil side-window nil nil nil nil nil)",
+        "(nil nil nil nil nil nil nil nil side-window nil nil nil nil nil t)",
         "nil",
         "nil",
         "t",
