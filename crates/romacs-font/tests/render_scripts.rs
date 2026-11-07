@@ -240,12 +240,7 @@ struct Rendered {
 }
 
 fn render(frame: &FrameGlyphBuffer) -> Rendered {
-    // Concurrent Vulkan instance creation crashes inside the NVIDIA ICD
-    // loader (SIGSEGV in vkEnumerateInstanceExtensionProperties under
-    // `cargo test`'s threads; nextest's process-per-test hides it).
-    static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _gpu = GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut renderer = WgpuRenderer::new(None, W, H)
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H)
         .expect("a wgpu adapter is required; this test does not skip without one");
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     atlas.set_current_frame_fonts(frame.font_bindings());

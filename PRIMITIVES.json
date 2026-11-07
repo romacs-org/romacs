@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e2d5df8e1305fc55cdab903b70429e9c8fc7016360d9370013411ff7f365f716",
+  "source_fingerprint": "55a861ba3cb1331cce4f9d0cb9db72db9be433b5dd763cff915f07bcc48cba9e",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1436,
-  "parsed_vm2_only": 1436
+  "parsed_total": 1437,
+  "parsed_vm2_only": 1437
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4452,6 +4452,11 @@
    "name": "romacs--custom-theme-recalc-face",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face_spec.rs:605"
+  },
+  "romacs--debug-lose-device": {
+   "name": "romacs--debug-lose-device",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/display_debug.rs:7"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",

@@ -142,22 +142,11 @@ fn stale_root_presentation_does_not_own_newly_exposed_surface_area() {
 }
 
 fn make_test_device() -> Option<wgpu::Device> {
-    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    instance_descriptor.backends = wgpu::Backends::all();
-    let instance = wgpu::Instance::new(instance_descriptor);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-        apply_limit_buckets: false,
-    }))
-    .ok()?;
-    let (device, _queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    romacs_renderer_wgpu::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("input test device"),
         ..Default::default()
-    }))
-    .ok()?;
-    Some(device)
+    })
+    .map(|(device, _queue)| device)
 }
 
 fn test_present_mapping(
@@ -461,7 +450,7 @@ struct PresentedPointerRuntimeRenderHarness {
 fn presented_pointer_runtime_render_harness() -> Option<PresentedPointerRuntimeRenderHarness> {
     const WIDTH: u32 = 140;
     const HEIGHT: u32 = 24;
-    let renderer = romacs_renderer_wgpu::WgpuRenderer::new(None, WIDTH, HEIGHT).ok()?;
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(WIDTH, HEIGHT).ok()?;
     let mut atlas = romacs_renderer_wgpu::WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());

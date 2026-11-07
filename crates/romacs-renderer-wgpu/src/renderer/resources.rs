@@ -201,10 +201,9 @@ mod tests;
 
 #[cfg(test)]
 mod deferred_tests {
-    use super::super::WgpuRenderer;
     #[test]
     fn unused_pipelines_wait_until_first_use_and_all_compile_when_requested() {
-        let renderer = WgpuRenderer::new(None, 80, 40).expect("hardware/offscreen renderer");
+        let renderer = crate::gpu_policy::test_gpu::renderer(80, 40).expect("hardware/offscreen renderer");
         let pipelines = [
             ("rect", &renderer.pipelines.rect),
             ("background_rect", &renderer.pipelines.background_rect),

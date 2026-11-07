@@ -1204,6 +1204,7 @@ fn evaluate(
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
     let visual_sender = sender.clone();
+    let lose_sender = sender.clone();
     let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
@@ -1216,7 +1217,8 @@ fn evaluate(
         .with_visual_hook(move |config| {
             // Only a closed render thread refuses, and then nothing paints.
             let _ = visual_sender.set_visual_config(config.clone());
-        }))));
+        })
+        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false)))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):

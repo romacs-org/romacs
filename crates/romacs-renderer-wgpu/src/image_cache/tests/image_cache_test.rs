@@ -159,6 +159,7 @@ fn decoder_worker_survives_a_panicking_request() {
             Arc::new(Mutex::new(request_rx)),
             outcome_tx,
             Arc::new(ImageSequenceCache::new()),
+            Default::default(),
         )
     });
     let mut loads = ImageLoadLifecycle::default();
@@ -1933,6 +1934,17 @@ fn decode_with_bands(
     scale: f32,
     bands: &mut Vec<DecodedBand>,
 ) -> Option<DecodedPixels> {
+    decode_until(data, scale, bands, usize::MAX)
+}
+
+/// Decode DATA at SCALE, its sink collecting into BANDS and abandoning the
+/// banded attempt once it holds STOP of them.
+fn decode_until(
+    data: &[u8],
+    scale: f32,
+    bands: &mut Vec<DecodedBand>,
+    stop: usize,
+) -> Option<DecodedPixels> {
     Decode::decode_data(
         EncodedBytes::copy_of(data),
         ImageSizeSpec::default(),
@@ -1945,7 +1957,14 @@ fn decode_with_bands(
         crate::svg::SvgResourceContext::Isolated,
         &ImageSequenceCache::new(),
         ImageSequenceId::new(1).expect("non-zero test sequence"),
-        Some(&mut |band| bands.push(band)),
+        Some(&mut |band| {
+            bands.push(band);
+            if bands.len() >= stop {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        }),
     )
 }
 
@@ -2032,19 +2051,16 @@ fn the_threshold_is_the_boundary_between_the_two_paths() {
 ///
 /// Both decoders read the same bytes, so no real fixture can express "the
 /// row-wise decode fails where the whole one succeeds" — a source truncated
-/// enough to break one breaks both. The abandonment is therefore injected: the
-/// attempt is cut short after a band, and what the test pins is the consequence
-/// the requirement is about.
+/// enough to break one breaks both. The abandonment therefore comes from the
+/// sink, which cuts the attempt short after a band; what the test pins is the
+/// consequence the requirement is about.
 #[test]
 fn an_abandoned_banded_decode_still_yields_the_whole_image() {
     let (width, height) = (2000, 2000);
     let data = varying_png(width, height);
     let mut bands = Vec::new();
 
-    let remaining = ABANDON_AFTER_BANDS.load(Ordering::Relaxed);
-    ABANDON_AFTER_BANDS.store(1, Ordering::Relaxed);
-    let decoded = decode_with_bands(&data, 1.0, &mut bands);
-    ABANDON_AFTER_BANDS.store(remaining, Ordering::Relaxed);
+    let decoded = decode_until(&data, 1.0, &mut bands, 1);
 
     let decoded = decoded.expect("an abandoned attempt must still produce the image");
     assert_eq!(bands.len(), 1, "the attempt was abandoned mid-stream");
@@ -2140,7 +2156,10 @@ fn every_band_lands_in_the_raster_the_finished_upload_resolves() {
             crate::svg::SvgResourceContext::Isolated,
             &ImageSequenceCache::new(),
             ImageSequenceId::new(1).expect("non-zero test sequence"),
-            Some(&mut |band| bands.push(band)),
+            Some(&mut |band| {
+            bands.push(band);
+            std::ops::ControlFlow::Continue(())
+        }),
         )
         .expect("decode");
         assert!(!bands.is_empty(), "{width}x{height}@{scale} bands");
@@ -2222,7 +2241,10 @@ fn a_rotation_or_a_rewriting_mask_decodes_the_whole_image() {
             crate::svg::SvgResourceContext::Isolated,
             &ImageSequenceCache::new(),
             ImageSequenceId::new(1).expect("non-zero test sequence"),
-            Some(&mut |band| bands.push(band)),
+            Some(&mut |band| {
+            bands.push(band);
+            std::ops::ControlFlow::Continue(())
+        }),
         )
         .expect("decode");
 
@@ -2374,7 +2396,10 @@ fn a_source_below_the_threshold_keeps_the_whole_image_paths_filter() {
         crate::svg::SvgResourceContext::Isolated,
         &ImageSequenceCache::new(),
         ImageSequenceId::new(1).expect("non-zero test sequence"),
-        Some(&mut |band| bands.push(band)),
+        Some(&mut |band| {
+            bands.push(band);
+            std::ops::ControlFlow::Continue(())
+        }),
     )
     .expect("decode");
     assert!(bands.is_empty(), "a source this small does not band");
@@ -2419,7 +2444,10 @@ fn the_rows_a_band_hands_over_are_the_rows_the_finished_image_holds() {
         crate::svg::SvgResourceContext::Isolated,
         &ImageSequenceCache::new(),
         ImageSequenceId::new(1).expect("non-zero test sequence"),
-        Some(&mut |band| bands.push(band)),
+        Some(&mut |band| {
+            bands.push(band);
+            std::ops::ControlFlow::Continue(())
+        }),
     )
     .expect("decode");
     assert!(!bands.is_empty(), "a four-megapixel source bands");

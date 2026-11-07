@@ -56,7 +56,7 @@ struct Harness {
 }
 
 fn try_harness() -> Option<Harness> {
-    let renderer = WgpuRenderer::new(None, W, H).ok()?;
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok()?;
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());
@@ -2102,20 +2102,31 @@ fn read_image_texture(
     out
 }
 
-/// Load `data` through the renderer and drain image events the way the frame
-/// loop does. Stops, leaving the decode running, the first time `watch` is
-/// satisfied — which is how a test asks for a frame drawn at one particular
-/// point of the fill rather than after it — and otherwise runs to the end.
-///
-/// Returns every fill observed while rows were still arriving, in order; an
-/// empty list says the decode was never caught mid-flight.
-fn drive_banded_load(
+/// A decode held at a band (`BandHold`), let go when this is dropped, so a
+/// failing assertion cannot leave a decoder waiting forever.
+struct Held(std::sync::Arc<romacs_renderer_wgpu::image_cache::BandHold>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+/// Load `data` through the renderer with its decode held at the first band
+/// that reaches `hold` of the image's rows, and drain image events the way
+/// the frame loop does until that band has landed. Returns the fill there,
+/// with the decode waiting on the returned [`Held`]: the test acts at that
+/// point of the fill however the decoder and this thread are scheduled,
+/// rather than racing a decoder that may finish before it looks.
+fn load_held(
     h: &mut Harness,
     image: u32,
     data: &[u8],
     realization: ImageRealization,
-    watch: impl Fn(FilledRows) -> bool,
-) -> Vec<FilledRows> {
+    hold: f32,
+) -> (FilledRows, Held) {
+    let held = Held(std::sync::Arc::clone(h.renderer.image_cache().band_hold()));
+    held.0.hold(ImageId::new(image), hold);
     h.renderer.load_image_data_with_id(
         test_image_load(image),
         EncodedBytes::copy_of(data),
@@ -2132,25 +2143,27 @@ fn drive_banded_load(
     );
     let image_id = ImageId::new(image);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    let mut partial = Vec::new();
     while std::time::Instant::now() < deadline {
         h.renderer.process_pending_images();
         if let Some(cached) = h.renderer.image_cache().get(image_id)
-            && !cached.filled.is_complete()
-            && partial.last() != Some(&cached.filled)
+            && cached.filled.filled_fraction() >= hold
         {
-            partial.push(cached.filled);
-            if watch(cached.filled) {
-                return partial;
-            }
-        }
-        if h.renderer.is_image_ready(image_id) {
-            break;
+            return (cached.filled, held);
         }
         std::thread::yield_now();
     }
+    panic!("the held band of image {image} never landed");
+}
+
+/// Drain image events until `image` has decoded.
+fn drain_until_ready(h: &mut Harness, image: u32) {
+    let image_id = ImageId::new(image);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline && !h.renderer.is_image_ready(image_id) {
+        h.renderer.process_pending_images();
+        std::thread::yield_now();
+    }
     assert!(h.renderer.is_image_ready(image_id), "the image must decode");
-    partial
 }
 
 /// `sin(pi * t) / (pi * t)`, with the removable singularity at zero taken.
@@ -2372,17 +2385,14 @@ fn a_banded_image_ends_in_the_texture_its_own_filter_defines() {
     // one, and the clamping is part of what this pins.
     let (width, height) = (5000u32, 1000u32);
     let data = banding_png(width, height);
-    let fills = drive_banded_load(
-        &mut h,
-        907,
-        &data,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        |_| false,
-    );
+    // Held at its first band, so the image is caught arriving in bands.
+    let (first, held) = load_held(&mut h, 907, &data, ImageRealization::with_device_scale(1.0, 1.0), 0.0);
     assert!(
-        !fills.is_empty(),
-        "a five-megapixel PNG is still arriving when the first frame is drained"
+        !first.is_complete(),
+        "a five-megapixel PNG arrives in bands, not in one"
     );
+    drop(held);
+    drain_until_ready(&mut h, 907);
 
     let cached = h
         .renderer
@@ -2464,19 +2474,15 @@ fn a_frame_drawn_mid_decode_shows_only_the_rows_that_have_arrived() {
 
     let (width, height) = (5000u32, 1000u32);
     let data = banding_png(width, height);
-    // Stopped somewhere in the middle of the decode, so the boundary between
+    // Held in the middle of the decode, so the boundary between
     // drawn and undrawn rows lands inside the target: one row of it drawn, or
     // all but one, would not exercise the boundary at all.
-    let fills = drive_banded_load(
-        &mut h,
-        908,
-        &data,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        |filled| (0.2..0.8).contains(&filled.filled_fraction()),
+    let (filled, _held) = load_held(&mut h, 908, &data, ImageRealization::with_device_scale(1.0, 1.0), 0.2);
+    assert!(
+        (0.2..0.8).contains(&filled.filled_fraction()),
+        "the decode must be held part-way through, got {}",
+        filled.filled_fraction()
     );
-    let filled = *fills
-        .last()
-        .expect("the decode must be caught part-way through");
     let image_id = ImageId::new(908);
 
     let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
@@ -2556,30 +2562,15 @@ fn a_failed_banded_decode_leaves_no_partial_texture() {
     let (width, height) = (5000u32, 1000u32);
     let full = banding_png(width, height);
     let data = &full[..full.len() * 2 / 5];
-    h.renderer.load_image_data_with_id(
-        test_image_load(909),
-        EncodedBytes::copy_of(data),
-        ImageSizeSpec::default(),
-        ImageRotation::None,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        ImageColorContext::default(),
-        ImageMaskPolicy::Preserve,
-        romacs_display_protocol::ImageAnimationPolicy::disabled(),
-        ImageFrameIndex::default(),
-        ImageSequenceId::new(909).expect("non-zero test sequence"),
-        romacs_renderer_wgpu::SvgResourceContext::Isolated,
-        romacs_display_protocol::image_diagnostic::ImageLoadIdentity::unspecified(),
-    );
+    // Held at its first band: the band is in the texture before the decode
+    // can go on to fail.
+    let (first, held) = load_held(&mut h, 909, data, ImageRealization::with_device_scale(1.0, 1.0), 0.0);
+    let saw_band = !first.is_complete();
+    drop(held);
     let image_id = ImageId::new(909);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    let mut saw_band = false;
     while std::time::Instant::now() < deadline {
         h.renderer.process_pending_images();
-        saw_band |= h
-            .renderer
-            .image_cache()
-            .get(image_id)
-            .is_some_and(|cached| !cached.filled.is_complete());
         if matches!(
             h.renderer.image_cache().get_state(image_id),
             Some(romacs_renderer_wgpu::ImageState::Failed(_))

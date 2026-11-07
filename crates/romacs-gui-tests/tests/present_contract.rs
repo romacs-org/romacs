@@ -214,18 +214,15 @@ impl ContractApp {
             .with_surface_size(PhysicalSize::new(INITIAL.0, INITIAL.1));
         let window = event_loop.create_window(attrs).unwrap();
         let window: Arc<dyn Window> = Arc::from(window);
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
-                Box::new(event_loop.owned_display_handle()),
-            ));
+        let instance = romacs_renderer_wgpu::new_instance(
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+                event_loop.owned_display_handle(),
+            )),
+        );
         let surface = instance.create_surface(window.clone()).unwrap();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-            apply_limit_buckets: false,
-        }))
-        .expect("present contract found an adapter");
+        let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+        let adapter = romacs_renderer_wgpu::choose_adapter(adapters, Some(&surface))
+            .expect("present contract found an adapter");
         let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .expect("present contract created a device");
         let backend = adapter.get_info().backend;
