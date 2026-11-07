@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Build assets/fonts/RomacsIcons.ttf from assets/icons/*.svg.
 
-Each SVG is one glyph: a single <path> in a box 500 wide and 1000 tall,
+Each SVG is one glyph: a single <path> around a box 500 wide and 1000 tall,
 the baseline at y=800 (DIVERGENCES.md VM2-MODE-LINE). assets/icons/
 codepoints.txt gives each icon's name its codepoint in the Supplementary
-Private Use Area-A (U+FE000-U+FE0FF). The font is 1000 units per em,
-every advance 500, ascent 800 and descent 200, and its name table names
+Private Use Area-A (U+FE000-U+FE0FF). The font is 1000 units per em, every
+advance 500, ascent 800 and descent 200.  An icon is one column (DIVERGENCES.md
+VM2-MODE-LINE) and most drawings are wider than one: each is scaled, whole, to
+SIDE clear of the cell either side and centred in it, about its own middle
+height, so no icon reaches into the character beside it or past the edge of a
+window.  FULL_SIZE names the exception.  Its name table names
 the family Romacs Icons, a Modified Version of Symbols Nerd Font under the
 SIL Open Font License 1.1, and its glyph sets' licences (assets/icons/LICENSE).
 
@@ -23,6 +27,7 @@ import sys
 from pathlib import Path
 
 from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -38,7 +43,14 @@ COPYRIGHT = ('Copyright (c) 2014, Ryan L McIntyre (Symbols Nerd Font, Nerd Fonts
 LICENSE = ('This Font Software is licensed under the SIL Open Font License, Version 1.1; its Material Design Icons glyphs '
            'also under the Apache License 2.0, its Devicon, Octicons and Nerd Fonts glyphs under MIT. '
            'See assets/fonts/OFL.txt and assets/icons/LICENSE in Romacs.')
-ADVANCE, ASCENT, DESCENT, BASELINE = 500, 800, 200, 800
+ADVANCE, SIDE, ASCENT, DESCENT, BASELINE = 500, 10, 800, 200, 800
+# The R, Romacs's mark, keeps its size, centred on its cell and wider than it:
+# fitted it is too small to read as the mark.  Only the status bar's identity
+# pill draws it (romacs-mode-line.el `mode-icon'), with a space cell either side
+# that holds the overhang.  A bar so narrow it clips the pill right after the R
+# loses the space after it, and the R overhangs by its 145 units: a few pixels,
+# nothing cut.  Another use needs that padding too; nothing enforces it.
+FULL_SIZE = {'romacs'}
 
 
 def codepoints(root):
@@ -50,11 +62,18 @@ def codepoints(root):
     return found
 
 
-def glyph(svg):
+def glyph(svg, fit=True):
+    """The drawing SVG as a glyph centred in its cell, fitting it if FIT."""
     d = re.search(r'\sd="([^"]+)"', svg).group(1)
+    bounds = BoundsPen(None)
+    parse_path(d, bounds)
+    left, top, right, bottom = bounds.bounds
+    scale = min(1, (ADVANCE - 2 * SIDE) / (right - left)) if fit else 1
+    middle = (top + bottom) / 2
     pen = TTGlyphPen(None)
     # SVG y grows down from the top of the box; font y up from the baseline.
-    parse_path(d, TransformPen(Cu2QuPen(pen, max_err=1.0, reverse_direction=True), (1, 0, 0, -1, 0, BASELINE)))
+    transform = (scale, 0, 0, -scale, ADVANCE / 2 - scale * (left + right) / 2, BASELINE - middle + scale * middle)
+    parse_path(d, TransformPen(Cu2QuPen(pen, max_err=1.0, reverse_direction=True), transform))
     return pen.glyph()
 
 
@@ -69,7 +88,7 @@ def build(root):
     fb.setupGlyphOrder(order)
     fb.setupCharacterMap({points[n]: n for n in names})
     glyphs = {'.notdef': TTGlyphPen(None).glyph()}
-    glyphs.update({n: glyph((root / f'assets/icons/{n}.svg').read_text()) for n in names})
+    glyphs.update({n: glyph((root / f'assets/icons/{n}.svg').read_text(), n not in FULL_SIZE) for n in names})
     fb.setupGlyf(glyphs)
     fb.setupHorizontalMetrics({n: (ADVANCE, glyphs[n].xMin if hasattr(glyphs[n], 'xMin') else 0) for n in order})
     fb.setupHorizontalHeader(ascent=ASCENT, descent=-DESCENT)

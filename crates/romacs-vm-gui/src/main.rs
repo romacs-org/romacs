@@ -614,6 +614,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let mut args = argv.into_iter();
     let mut serve = None;
     let mut serve_frame = false;
+    let mut serve_landing = false;
     let mut socket = None;
     let mut floor = None;
     let mut force_gc = false;
@@ -645,6 +646,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
             // The client that starts a server and asks for its window: the
             // window comes up while the world restores, as a session's does.
             "--serve-frame" => serve_frame = true,
+            // Its client has nothing to visit: the first paint is the landing.
+            "--serve-landing" => serve_landing = true,
             // A layer builder's: the init, the plan digest and the entries left out (world.rs).
             "--init-layer" => {
                 let mut word = || args.next().ok_or("--init-layer needs INIT DIGEST EXCLUDED");
@@ -843,7 +846,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, quit, prune, serve, early_window)
+                     isolate_world, worlds, first_presentation, quit, prune, serve, serve_landing, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1166,6 +1169,7 @@ fn evaluate(
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
     serve: Option<String>,
+    serve_landing: bool,
     early_window: Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
@@ -1330,6 +1334,11 @@ fn evaluate(
         host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
         vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
             .map_err(|error| format!("server {name}: {error}"))?;
+        // `daemonp' kept startup from showing the screen, and the window
+        // paints before the client that asked for it is served.
+        if serve_landing && let Err(error) = vm.eval_source("(romacs-server--landing)") {
+            eprintln!("romacs: landing: {error}");
+        }
     }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
