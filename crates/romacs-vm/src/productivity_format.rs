@@ -61,6 +61,7 @@ impl FormatSpec {
     }
 
     fn pad_number(&self, prefix: &str, body: &str, integer: bool) -> String {
+        if prefix.is_empty() && self.width <= body.len() { return body.to_owned(); }
         let padding = self.width.saturating_sub(prefix.len() + body.len());
         let zeros = self.zero && !self.left && (!integer || self.precision.is_none())
             && body.as_bytes().first().is_some_and(u8::is_ascii_hexdigit);
@@ -69,16 +70,38 @@ impl FormatSpec {
         else { format!("{}{prefix}{body}", " ".repeat(padding)) }
     }
 
+    fn radix(&self) -> u32 {
+        match self.conversion { 'b' | 'B' => 2, 'o' => 8, 'x' | 'X' => 16, _ => 10 }
+    }
+
     pub fn integer(&self, number: &BigInt) -> String {
-        let radix = match self.conversion { 'b' | 'B' => 2, 'o' => 8, 'x' | 'X' => 16, _ => 10 };
-        let nonzero = number.sign() != Sign::NoSign;
-        let raw = number.to_str_radix(radix);
-        let raw = raw.strip_prefix('-').unwrap_or(&raw);
+        let raw = number.to_str_radix(self.radix());
+        self.integer_digits(raw.strip_prefix('-').unwrap_or(&raw), number.sign() == Sign::Minus)
+    }
+
+    /// `integer' for a fixnum, which needs no bignum to print.
+    pub fn fixnum(&self, number: i64) -> String {
+        let radix = u64::from(self.radix());
+        // Base 2 of the largest magnitude, the longest of all.
+        let mut digits = [0u8; 64];
+        let (mut left, mut at) = (number.unsigned_abs(), digits.len());
+        loop {
+            at -= 1;
+            digits[at] = b"0123456789abcdef"[(left % radix) as usize];
+            left /= radix;
+            if left == 0 { break; }
+        }
+        self.integer_digits(std::str::from_utf8(&digits[at..]).expect("ASCII digits"), number < 0)
+    }
+
+    /// RAW, a magnitude's digits in this conversion's radix, as a field.
+    fn integer_digits(&self, raw: &str, negative: bool) -> String {
+        let nonzero = raw != "0";
         let mut body = if self.precision == Some(0) && !nonzero { String::new() } else { raw.to_owned() };
         let zeros = self.precision.unwrap_or(0).saturating_sub(body.len());
         body.insert_str(0, &"0".repeat(zeros));
         if self.conversion == 'X' { body.make_ascii_uppercase(); }
-        let mut prefix = self.sign(number.sign() == Sign::Minus).to_owned();
+        let mut prefix = self.sign(negative).to_owned();
         if self.alternate {
             match self.conversion {
                 'b' | 'B' | 'x' | 'X' if nonzero => { prefix.push('0'); prefix.push(self.conversion); }
