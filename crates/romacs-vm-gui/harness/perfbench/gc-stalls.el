@@ -6,6 +6,10 @@
 ;; common libraries and three large files of FIX, whose setup it reports, so the
 ;; two sides can be seen to do the same work. A stall is a gap over 2 ms; it need
 ;; not be a collection. PHASES prints where Romacs's collections spent their time.
+;; Reading memory allocates, so nothing here does while the clock runs: `anon' is
+;; the end of the run, and peak-anon.py samples a run's peak from outside it.
+;; `explicit' is the median of 21 collections. Pin both sides to the same physical
+;; cores of one chiplet (taskset), off SMT siblings, for a spread under 3%.
 (require 'cl-lib)
 (defvar gap-log nil)
 (defun gap-note () (when (fboundp 'romacs--gc-phases) (push (funcall 'romacs--gc-phases) gap-log)))
@@ -35,11 +39,12 @@
           (setq last now))))
     (let* ((p (sort gaps #'<)) (k (length p)))
       (list (- (float-time) t0) k (* 1000 (if p (nth (/ k 2) p) 0)) (* 1000 (if p (car (last p)) 0)) (apply #'+ p)))))
-(defun gap-hwm ()
+(defun gap-status (field)
+  "FIELD of /proc/self/status, in MB."
   (with-temp-buffer
     (insert-file-contents "/proc/self/status")
     (goto-char (point-min))
-    (re-search-forward "VmHWM:[ \t]*\\([0-9]+\\)")
+    (re-search-forward (concat field ":[ \t]*\\([0-9]+\\)"))
     (/ (string-to-number (match-string 1)) 1024)))
 (defun gap-real (tree)
   (dolist (library '(org dired eshell gnus calc cc-mode)) (require library))
@@ -58,11 +63,11 @@
        (elapsed gc-elapsed) (done gcs-done)
        (first (let ((t0 (float-time))) (garbage-collect) (* 1000 (- (float-time) t0)))))
   (when (getenv "PHASES") (add-hook 'post-gc-hook #'gap-note))
-  (let* ((explicit (prog1 (gap-explicit 7) (gap-phases "explicit")))
+  (let* ((explicit (prog1 (gap-explicit 21) (gap-phases "explicit")))
          (churn (prog1 (gap-churn 6000000) (gap-phases "churn")))
-         (after (gap-explicit 7)))
-    (princ (format "%s %s first %.1f after-churn %.1f explicit %.1f (%.1f-%.1f) ms | wall %.2f s stalls %d median %.2f ms max %.2f ms total %.2f s | gcs %d gc-elapsed %.3f hwm %d MB\n"
+         (after (gap-explicit 21)))
+    (princ (format "%s %s first %.2f after-churn %.2f explicit %.2f (%.2f-%.2f) ms | wall %.2f s stalls %d median %.2f ms max %.2f ms total %.2f s | gcs %d gc-elapsed %.3f anon %d hwm %d MB\n"
                    (getenv "TAG") scen first (car after) (nth 0 explicit) (nth 1 explicit) (nth 2 explicit)
                    (nth 0 churn) (nth 1 churn) (nth 2 churn) (nth 3 churn) (nth 4 churn)
-                   (- gcs-done done) (- gc-elapsed elapsed) (gap-hwm)))
+                   (- gcs-done done) (- gc-elapsed elapsed) (gap-status "RssAnon") (gap-status "VmHWM")))
     (ignore keep)))
