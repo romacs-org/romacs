@@ -3,7 +3,7 @@ use crate::render_thread::frame_windows::GuiFrameRenderState;
 use romacs_display_protocol::frame_time;
 use romacs_display_protocol::motion_spec::{MotionDuration, MotionSpec, TweenSpec};
 use romacs_display_protocol::scroll_animation::TransitionEasing;
-use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
+use romacs_renderer_wgpu::SnapshotSize;
 
 const ROOT: u64 = 1;
 
@@ -21,7 +21,7 @@ fn tween_100ms() -> MotionSpec {
 /// only while it runs.
 #[test]
 fn compositions_showing_an_older_picture_are_recognised_while_they_run() {
-    let Ok(mut renderer) = WgpuRenderer::new(None, 80, 40) else {
+    let Ok(mut renderer) = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(80, 40) else {
         assert!(std::env::var_os("ROMACS_REQUIRE_GPU_TESTS").is_none());
         return;
     };

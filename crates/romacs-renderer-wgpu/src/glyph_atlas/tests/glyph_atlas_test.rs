@@ -412,20 +412,10 @@ fn glyph_font_identity_discriminates_resolved_font_id() {
 }
 
 fn try_test_device_and_atlas() -> Option<(wgpu::Device, wgpu::Queue, WgpuGlyphAtlas)> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let (device, queue) = crate::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("glyph-atlas-font-boundary-test"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: Default::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()?;
+        ..Default::default()
+    })?;
     let atlas = WgpuGlyphAtlas::new(&device);
     Some((device, queue, atlas))
 }

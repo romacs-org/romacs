@@ -636,8 +636,9 @@ impl ImageCache {
                     // this.
                     let mut publish_band = |decoded: DecodedBand| {
                         let _ = tx.send(WorkerDecodeOutcome::Band { load, decoded });
+                        std::ops::ControlFlow::Continue(())
                     };
-                    let sink: Option<&mut dyn FnMut(DecodedBand)> = Some(&mut publish_band);
+                    let sink: Option<romacs_imaging::decode::BandSink<'_>> = Some(&mut publish_band);
                     // The chain below answers `Option` and each arm collapses
                     // its own reason, so what the failure is worded *about* is
                     // captured before the bytes are handed over: the source

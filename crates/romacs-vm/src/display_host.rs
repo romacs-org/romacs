@@ -121,6 +121,10 @@ pub trait DisplayHost {
     /// inactive, negative leaving its opacity alone, raised to LIMIT,
     /// `frame-alpha-lower-limit'.
     fn set_frame_alpha(&mut self, _frame: u64, _alpha: [f32; 2], _limit: f32) {}
+    /// Debug: make the display lose its GPU device as a driver reset would,
+    /// so its device-loss recovery runs (`romacs--debug-lose-device'). Whether
+    /// the request reached a display that has a device to lose.
+    fn lose_device(&mut self) -> bool { false }
     /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
     /// pixels under the facts' id until `release_image'.  An error is the
     /// loader's message; the image then shows as a placeholder.

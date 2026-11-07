@@ -121,7 +121,7 @@ fn mixed_policy_child_admission_tracks_applied_highlight_under_held_pressure() {
         return;
     }
     let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for applied-alpha admission");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for applied-alpha admission");
     let origin = observe_platform_now();
     let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
     let mut root = picture(42, 0, W as f32);
@@ -344,7 +344,7 @@ fn production_split_delete_placements_keep_background_opacity() {
     use romacs_display_protocol::types::Rect;
     use romacs_renderer_wgpu::PaneSource;
     let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for runtime pane regression");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for runtime pane regression");
     let size = SnapshotSize::new(W, H).unwrap();
     let old = renderer.acquire_snapshot(size).unwrap();
     let new = renderer.acquire_snapshot(size).unwrap();
@@ -436,7 +436,7 @@ fn expired_child_lifecycle_needs_no_scratch_under_unchanged_pressure() {
     }
     for closing in [false, true] {
         let mut renderer =
-            WgpuRenderer::new(None, W, H).expect("GPU required for lifecycle expiry regression");
+            romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for lifecycle expiry regression");
         let origin = observe_platform_now();
         let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
         let mut root = FrameGlyphBuffer::with_size(W as f32, H as f32);
@@ -631,7 +631,7 @@ fn px(data: &[u8], x: u32, y: u32) -> [u8; 4] {
 #[test]
 fn missing_child_scratch_returns_retry_without_drawing_and_recovers() {
     let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for preparation regression");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for preparation regression");
     let origin = observe_platform_now();
     let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
     let mut root = picture(42, 0, W as f32);

@@ -11,7 +11,7 @@ use romacs_display_protocol::model::ModelView;
 /// A headless renderer, or `None` to skip; `ROMACS_MODEL_REQUIRE_EVIDENCE=1`
 /// makes a missing adapter a failure instead of a silent pass.
 fn try_renderer() -> Option<WgpuRenderer> {
-    let renderer = WgpuRenderer::new(None, 64, 64).ok();
+    let renderer = crate::gpu_policy::test_gpu::renderer(64, 64).ok();
     assert!(
         renderer.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
         "GPU evidence required but no headless wgpu adapter"

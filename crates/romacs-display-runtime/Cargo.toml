@@ -61,6 +61,7 @@ romacs-video = { workspace = true, optional = true }
 romacs-webview.workspace = true
 
 [dev-dependencies]
+romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-infra.workspace = true
 png.workspace = true
 

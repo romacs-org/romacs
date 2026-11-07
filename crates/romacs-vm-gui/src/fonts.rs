@@ -40,6 +40,7 @@ pub struct Display {
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
+    lose_device_hook: Option<Box<dyn FnMut() -> bool>>,
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
     /// of each image the VM's cache holds, by id, for the renderer
     /// (residency.rs).
@@ -113,7 +114,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
-                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, lose_device_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
     }
@@ -193,6 +194,10 @@ impl Display {
     /// This display, sending each `alpha' setter to HOOK.
     pub fn with_alpha_hook(self, hook: impl FnMut(u64, [f32; 2], f32) + 'static) -> Self {
         Self { alpha_hook: Some(Box::new(hook)), ..self }
+    }
+    /// Call HOOK for `romacs--debug-lose-device`: whether the request went.
+    pub fn with_lose_device_hook(self, hook: impl FnMut() -> bool + 'static) -> Self {
+        Self { lose_device_hook: Some(Box::new(hook)), ..self }
     }
     fn open_uncached(entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont> {
         let metrics = romacs_font::probe::probe_font_px_metrics(&entity.file, entity.index, u32::try_from(pixel_size).ok()?.max(1), None)?;
@@ -302,6 +307,9 @@ impl romacs_vm::DisplayHost for Display {
     }
     fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32) {
         if let Some(hook) = &mut self.alpha_hook { hook(frame, alpha, limit); }
+    }
+    fn lose_device(&mut self) -> bool {
+        self.lose_device_hook.as_mut().is_some_and(|hook| hook())
     }
     fn decode_image(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
         let (id, request) = self.prepare(query)?;
@@ -445,6 +453,26 @@ mod tests {
     /// each value is stored, then validated; painting gets the background
     /// opacity the last valid setter applied, and every valid `alpha' setter
     /// reaches the window, as GNU's set_frame_alpha_hook. Without a window
+    /// `romacs--debug-lose-device' asks the open display to lose its device:
+    /// t when the display took it, nil before the display opens or when it
+    /// has no device to lose.
+    #[test]
+    fn losing_the_device_is_asked_of_the_open_display() {
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = asked.clone();
+        let mut vm = displayed();
+        vm.set_display_host(Some(Box::new(Display::new().unwrap().with_lose_device_hook(move || {
+            seen.set(seen.get() + 1);
+            true
+        }))));
+        assert_eq!((printed(&mut vm, "(romacs--debug-lose-device)"), asked.get()), ("nil".into(), 0));
+        assert!(vm.open_display());
+        assert_eq!((printed(&mut vm, "(romacs--debug-lose-device)"), asked.get()), ("t".into(), 1));
+        vm.set_display_host(Some(Box::new(Display::new().unwrap())));
+        assert!(vm.open_display());
+        assert_eq!(printed(&mut vm, "(romacs--debug-lose-device)"), "nil");
+    }
+
     /// system they are only stored.
     #[test]
     fn opacity_parameters_validate_as_gnu_and_reach_the_window() {

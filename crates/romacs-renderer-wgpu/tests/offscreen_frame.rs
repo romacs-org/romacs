@@ -56,7 +56,7 @@ struct Harness {
 }
 
 fn try_harness() -> Option<Harness> {
-    let renderer = WgpuRenderer::new(None, W, H).ok()?;
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok()?;
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());

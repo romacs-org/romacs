@@ -416,6 +416,12 @@ impl PaintSender {
         self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset
     }
 
+    /// Debug: rebuild the GPU state as after a device loss
+    /// (`romacs--debug-lose-device`). Whether the request went.
+    pub fn debug_lose_device(&self) -> Result<bool, String> {
+        self.send_asset(crate::thread_comm::AssetCommand::DebugSimulateDeviceLoss)
+    }
+
     /// Send an asset COMMAND: whether it went, false while the channel is
     /// full (its sender sends it again later).
     fn send_asset(&self, command: crate::thread_comm::AssetCommand) -> Result<bool, String> {

@@ -2,12 +2,12 @@
 use romacs_display_protocol::{
     DeviceScale, GeometrySize, LogicalPixels, PresentMapping, PresentationExtent, SurfaceState,
 };
-use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
+use romacs_renderer_wgpu::WgpuGlyphAtlas;
 #[test]
 fn scene_projection_uses_zero_emergency_font_lookups() {
     let mut vm = romacs_vm::Vm::new();
     vm.eval_source(include_str!("../scene.el")).unwrap();
-    let mut renderer = WgpuRenderer::new(None, 400, 300).expect("real GPU renderer");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(400, 300).expect("real GPU renderer");
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("G1a font diagnostic"),
