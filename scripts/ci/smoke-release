@@ -49,11 +49,17 @@ if [ "$actual" != "$expected" ]; then
 fi
 echo "smoke-release: --batch evaluates GNU Lisp from $prefix/share/romacs"
 
-# The mode line's icons draw only with this font, and nothing else says so.
+# The mode line's icons draw only with the icon font, and the default face
+# falls back to some system font without Iosevka; nothing else says so.
 if [ ! -f "$prefix/share/romacs/assets/fonts/RomacsIcons.ttf" ]; then
     echo "smoke-release: FAIL no icon font in $prefix/share/romacs/assets/fonts" >&2
     exit 1
 fi
+if ! python3 -B "$repo/tools/bundled_fonts.py" check --root "$prefix/share/romacs"; then
+    echo "smoke-release: FAIL the bundled fonts in $prefix/share/romacs/assets/fonts are not sources.json's" >&2
+    exit 1
+fi
+echo "smoke-release: the icon font and the bundled Iosevka are in $prefix/share/romacs/assets/fonts"
 
 "$prefix/bin/romacs" -Q --loadup --world-build
 if [ -z "$(ls -A "$XDG_CACHE_HOME/romacs/worlds")" ]; then

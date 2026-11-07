@@ -1,0 +1,18 @@
+{
+  "Iosevka": {
+    "version": "34.9.1",
+    "url": "https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgTTF-Iosevka-34.9.1.zip",
+    "sha256": "7a77a3dfa0e2d713a8920a30624863e23df2867a1f55a5e3d6d23dad07c14c65",
+    "files": {
+      "Iosevka-Regular.ttf": "1ba24b81d82df65a68c9d0bb44bda306fdcdb5d7763afe89b0dea29ea827d1a2",
+      "Iosevka-Bold.ttf": "1988973571c96725d240c97bd2131b5deecdedfc537ffd30e11aff6ec0286488",
+      "Iosevka-Italic.ttf": "8bb76fdd0bda08193781e9f1703e4021d3afca6b48a3e7bbb61b699efe989115",
+      "Iosevka-BoldItalic.ttf": "13579582b40296b7b79200c3d419d99de2c8b1ef051ec92c9fbc1df841991bec"
+    },
+    "licence": {
+      "file": "Iosevka-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/be5invis/Iosevka/v34.9.1/LICENSE.md",
+      "sha256": "4ba53c7c1cb39279aae5f8d7d22054c485c71169920e5a36ed098b115e2e3c5d"
+    }
+  }
+}

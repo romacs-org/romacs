@@ -13,8 +13,10 @@
 ;;; Code:
 
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
-;; The default face's font; its colours, and every other face's, are the
-;; stock theme's (etc/themes/default-theme.el, rlisp/romacs-theme.el).
+;; The default face's font: Iosevka, which Romacs ships and registers for
+;; itself (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED); its colours, and
+;; every other face's, are the stock theme's (etc/themes/default-theme.el,
+;; rlisp/romacs-theme.el).
 (defface default '((t (:family "Iosevka"))) "The launch font.")
 (defface romacs-comment '((t (:inherit font-lock-comment-face))) "A dim annotation.")
 (defface romacs-code '((t (:inherit font-lock-string-face))) "Source shown as text.")

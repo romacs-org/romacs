@@ -5,6 +5,8 @@
 //! With `--owner-emoji` the policy carries
 //! `(set-fontset-font t 'emoji "Noto Color Emoji" nil 'prepend)`, approximated by
 //! U+1F300..U+1FAFF (the test carries GNU's exact emoji ranges). `--bold` and `--italic` change the requested style.
+//! With `--bundled` the fonts Romacs ships (assets/fonts) are registered first,
+//! as the GUI registers them, so the primary line names the file that wins.
 
 use romacs_font::{
     FontDef, FontRequest, FontResolver, Fontset, FontsetMode, FontsetState, FontsetTarget,
@@ -20,6 +22,15 @@ fn main() {
     let owner_emoji = flag(&mut args, "--owner-emoji");
     let bold = flag(&mut args, "--bold");
     let italic = flag(&mut args, "--italic");
+    if flag(&mut args, "--bundled") {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
+        let mut fonts: Vec<_> = std::fs::read_dir(&dir).expect("assets/fonts").filter_map(|entry| Some(entry.ok()?.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "ttf")).collect();
+        fonts.sort();
+        for font in fonts {
+            assert!(romacs_font::register_font_file(&font), "Fontconfig refused {font:?}");
+        }
+    }
     let family = args.first().map_or("monospace", String::as_str);
     let size: f32 = args
         .get(1)

@@ -609,8 +609,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
-    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
-    fonts::register_icon_font();
+    // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
+    for refused in fonts::register_bundled_fonts() {
+        eprintln!("romacs: Fontconfig refused the bundled font {}", refused.display());
+    }
     let mut args = argv.into_iter();
     let mut serve = None;
     let mut serve_frame = false;
