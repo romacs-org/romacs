@@ -8,12 +8,10 @@ use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
 /// Romacs's icon font (assets/fonts/RomacsIcons.ttf, DIVERGENCES.md
-/// VM2-MODE-LINE): under `ROMACS_RUNTIME_ROOT' (an installed
-/// share/romacs), else in the checkout this binary was built from.
+/// VM2-MODE-LINE), in the runtime tree: an installation's share/romacs, or
+/// the checkout this binary was built from.
 pub fn icon_font() -> std::path::PathBuf {
-    std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-        .join("assets/fonts/RomacsIcons.ttf")
+    romacs_vm::host::runtime_root().join("assets/fonts/RomacsIcons.ttf")
 }
 
 /// Make the icon font a Fontconfig application font, so a character only

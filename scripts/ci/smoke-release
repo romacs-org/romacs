@@ -49,6 +49,12 @@ if [ "$actual" != "$expected" ]; then
 fi
 echo "smoke-release: --batch evaluates GNU Lisp from $prefix/share/romacs"
 
+# The mode line's icons draw only with this font, and nothing else says so.
+if [ ! -f "$prefix/share/romacs/assets/fonts/RomacsIcons.ttf" ]; then
+    echo "smoke-release: FAIL no icon font in $prefix/share/romacs/assets/fonts" >&2
+    exit 1
+fi
+
 "$prefix/bin/romacs" -Q --loadup --world-build
 if [ -z "$(ls -A "$XDG_CACHE_HOME/romacs/worlds")" ]; then
     echo "smoke-release: FAIL --world-build left no world in $XDG_CACHE_HOME/romacs/worlds" >&2
