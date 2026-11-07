@@ -80,6 +80,18 @@ so that comes second."
         :detail (lambda () (symbol-name (buffer-local-value 'major-mode (get-buffer name))))
         :cleanup (lambda () (perfbench-session--kill name))))
 
+(defun perfbench-session--open-ts (file name)
+  "As `perfbench-session--open', with C files in `c-ts-mode' in either engine."
+  (let ((steps (perfbench-session--open file name)))
+    (plist-put steps :setup
+               (lambda ()
+                 (setq large-file-warning-threshold nil)
+                 (add-to-list 'major-mode-remap-alist '(c-mode . c-ts-mode))))
+    (plist-put steps :cleanup
+               (lambda ()
+                 (perfbench-session--kill name)
+                 (setq major-mode-remap-alist (delete '(c-mode . c-ts-mode) major-mode-remap-alist))))))
+
 (defun perfbench-session--switch (theme load)
   "Make THEME the only enabled theme, first loading it when LOAD."
   (setq perfbench-session--theme theme)
@@ -98,6 +110,8 @@ so that comes second."
 (defconst perfbench-session-commands
   `((open-xdisp . ,(perfbench-session--open (lambda () (perfbench-session--file "src/xdisp.c")) "xdisp.c"))
     (open-header . ,(perfbench-session--open (lambda () perfbench-session-header) "generated.h"))
+    (open-xdisp-ts . ,(perfbench-session--open-ts (lambda () (perfbench-session--file "src/xdisp.c")) "xdisp.c"))
+    (open-header-ts . ,(perfbench-session--open-ts (lambda () perfbench-session-header) "generated.h"))
     (vc-history
      :setup ,(lambda () (require 'vc) (require 'vc-git) (require 'log-view))
      :run ,(lambda () (let ((default-directory (file-name-as-directory perfbench-session-history))

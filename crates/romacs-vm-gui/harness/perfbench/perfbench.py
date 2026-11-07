@@ -189,6 +189,12 @@ MICRO = [('loop', 'nil', True),
          ('mapcar 1', '(mapcar f0 (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr l))))))))))', False),
          ('mapcar 10', '(mapcar f0 l)', False),
          ('dolist + funcall 10', '(dolist (x l) (funcall f0 x))', False)]
+# Lisp no one compiled, as an init file's top level or M-: runs: GNU reads the
+# source into its interpreter; Romacs runs it as it ships.  Whole iterations,
+# the loop included, since that loop is itself what is being interpreted.
+UNCOMPILED = [('arithmetic', '(setq s (+ s (% i 97)))', True),
+              ('named call', '(m-id i)', True),
+              ('dolist 10', '(dolist (x l) (setq s (+ s x)))', True)]
 ERT_FILES = ['lisp/emacs-lisp/cl-lib-tests.el', 'lisp/emacs-lisp/cl-macs-tests.el', 'lisp/emacs-lisp/cl-generic-tests.el',
              'lisp/emacs-lisp/seq-tests.el', 'lisp/emacs-lisp/pcase-tests.el', 'lisp/emacs-lisp/map-tests.el',
              'lisp/emacs-lisp/generator-tests.el', 'lisp/emacs-lisp/eieio-tests/eieio-tests.el',
@@ -215,7 +221,7 @@ ELB_COLUMNS = (('gnu', 'gnu', 'elc'), ('gnu_native', 'gnu', 'eln'), ('romacs', '
 ELB_ERROR = re.compile(r'(?:^|: )(Error(?: loading| running)?: .*)', re.M)
 GROUPS = ('batch', 'micro', 'ert', 'elb', 'session', 'gui', 'init', 'apps')
 SESSION_LISP = HERE / 'perfbench-session.el'
-SESSION_METRICS = ('wall', 'block', 'instructions', 'first', 'key', 'keys')
+SESSION_METRICS = ('wall', 'block', 'instructions', 'first', 'key', 'keys', 'cores')
 # (row, command in perfbench-session.el, whether it ends in a prompt to leave)
 SESSION_COMMANDS = [('session dired 5,000 files', 'dired', False),
                     ('session occur xdisp.c', 'occur', False),
@@ -231,6 +237,8 @@ SESSION_COMMANDS = [('session dired 5,000 files', 'dired', False),
 # cycled rows load their themes.
 SESSION_SHIPPED = [('session find-file xdisp.c', 'open-xdisp', 1, 120),
                    ('session find-file generated header', 'open-header', 1, 300),
+                   ('session find-file xdisp.c, tree-sitter in both', 'open-xdisp-ts', 3, 120),
+                   ('session find-file generated header, tree-sitter in both', 'open-header-ts', 3, 300),
                    ('session vc-print-root-log whole history', 'vc-history', 1, 300),
                    ('session theme switch, first visit', 'theme-first', 1, 120),
                    ('session theme switch, cycled', 'theme-cycle', 3, 120)]
@@ -825,6 +833,37 @@ def micro_rows(ctx, batch):
         engines = {engine: figures(name, engine) for engine in ctx.compared}
         rows.append(with_neomacs(row(f'micro {name}', 'micro', 'iteration', engines['gnu'], engines['romacs'], ctx.runs,
                                      f'{body}; GNU compiled; {ctx.romacs_note(samples[name]["romacs"])}'), engines))
+    return rows + uncompiled_rows(ctx, batch)
+
+
+def uncompiled_rows(ctx, batch):
+    """Each UNCOMPILED row, per whole iteration, GNU from source in its interpreter."""
+    directory = ctx.cache / 'uncompiled'
+    directory.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for name, body, quick in UNCOMPILED:
+        if ctx.quick and not quick:
+            continue
+        text = MICRO_HEAD.replace('BODY', body)
+        source = directory / f'{hashlib.sha256(text.encode()).hexdigest()[:12]}.el'
+        source.write_text(text)
+        loaded = {'gnu': source, 'romacs': source.with_suffix('') if ctx.store else source, 'neomacs': source}
+
+        def runs(engine):
+            extra = {'PERFBENCH_MICRO': str(loaded[engine]), 'PERFBENCH_N': str(MICRO_N)}
+            if engine == 'romacs' and ctx.store:
+                batch.once('romacs', 'micro', skip=True, extra=extra)
+            return [batch.once(engine, 'micro', extra=extra) for _ in range(ctx.runs)]
+        samples = {engine: ctx.attempt(engine, lambda e=engine: runs(e)) for engine in ctx.compared}
+
+        def figures(engine):
+            taken = samples[engine]
+            return taken if isinstance(taken, dict) else {
+                'instructions': median(s['instructions'] for s in taken) / MICRO_N,
+                'wall': median(s['seconds'] for s in taken) / MICRO_N, 'check': None}
+        engines = {engine: figures(engine) for engine in ctx.compared}
+        rows.append(with_neomacs(row(f'uncompiled {name}', 'micro', 'iteration', engines['gnu'], engines['romacs'], ctx.runs,
+                                     f'{body}; GNU interpreted; {ctx.romacs_note(samples["romacs"])}'), engines))
     return rows
 
 
@@ -1079,6 +1118,28 @@ def generated_header(lines):
     return ''.join(line(n) for n in range(lines))
 
 
+def tree_cpu(pid):
+    """CPU seconds so far of process PID and its descendants, reaped children included."""
+    tick = os.sysconf('SC_CLK_TCK')
+    parents, ticks = {}, {}
+    for entry in Path('/proc').iterdir():
+        if entry.name.isdigit():
+            try:
+                fields = (entry / 'stat').read_text().rpartition(')')[2].split()
+            except OSError:
+                continue
+            parents[int(entry.name)] = int(fields[1])
+            ticks[int(entry.name)] = sum(int(f) for f in fields[11:15])
+
+    def within(candidate):
+        while candidate in parents:
+            if candidate == pid:
+                return True
+            candidate = parents[candidate]
+        return False
+    return sum(t for p, t in ticks.items() if within(p)) / tick
+
+
 def session_command(session, name, leave, rate, rounds, timeout=120):
     """Wall, block and instructions of command NAME, the median of ROUNDS, each
     allowed TIMEOUT seconds, and what it showed first and how its keys fared."""
@@ -1091,9 +1152,12 @@ def session_command(session, name, leave, rate, rounds, timeout=120):
         def act():
             session.engine.keys(['-k', 'F5'])
             parity_live.wait(done.exists, timeout, f'{name} result', session.engine.process, .01)
+        cpu = tree_cpu(session.engine.process.pid)
         instructions, elapsed = session.counted(act, timeout)
+        cpu = tree_cpu(session.engine.process.pid) - cpu
         seconds, block, first, key, keys = parity_live.read_sexp(done.read_text())
         samples.append({'wall': seconds, 'block': block, 'first': first, 'key': key, 'keys': keys,
+                        'cores': cpu / elapsed if elapsed else None,
                         'instructions': None if instructions is None else instructions - rate * elapsed})
         if leave:
             session.engine.keys(parity_live.C('g'))

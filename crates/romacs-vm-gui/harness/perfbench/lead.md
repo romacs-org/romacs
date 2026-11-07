@@ -31,20 +31,39 @@ added, and scenes are cut and briefly held so you can read them.
 
 ### It's fast where you feel it
 
-| What you do | Romacs | GNU Emacs |
-| --- | ---: | ---: |
-| Log the entire Emacs history, {{vc-history-commits}} commits | **{{vc-history-romacs}}** | {{vc-history-gnu}} |
-| Open a {{open-big-size}} generated C header, faces and all | **{{open-big-romacs}}** | {{open-big-gnu}} |
-| Switch themes | **{{theme-romacs}}** | {{theme-gnu}} |
-| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms |
-| Open `xdisp.c`, faces and all | {{open-xdisp-romacs}} | **{{open-xdisp-gnu}}** |
+| What you do | Romacs | GNU Emacs | GNU with tree-sitter |
+| --- | ---: | ---: | ---: |
+| Log the entire Emacs history, {{vc-history-commits}} commits | **{{vc-history-romacs}}** | {{vc-history-gnu}} | |
+| Open a {{open-big-size}} generated C header, faces and all | **{{open-big-romacs}}** | {{open-big-gnu}} | {{open-big-ts-gnu}} |
+| Open `xdisp.c`, faces and all | {{open-xdisp-romacs}} | **{{open-xdisp-gnu}}** | {{open-xdisp-ts-gnu}} |
+| Switch themes | **{{theme-romacs}}** | {{theme-gnu}} | |
+| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms | |
+| Uncompiled Lisp, one arithmetic step | **{{uncompiled-arith-romacs}}** | {{uncompiled-arith-gnu}} | |
+| Uncompiled Lisp, one function call | **{{uncompiled-call-romacs}}** | {{uncompiled-call-gnu}} | |
+| Uncompiled Lisp, a 10-item list loop | **{{uncompiled-list-romacs}}** | {{uncompiled-list-gnu}} | |
 
-Keys stay at a median of {{vc-history-key}} while that whole history streams
-in.  Romacs parses `xdisp.c` with tree-sitter on open, where GNU Emacs's C mode
-uses regexps, and that's the row we're coming for next.  Org and dired are
-slower too, and every number, wins and losses, is in the tables below.  These
-are the first headlines, and we keep pushing them.  `perfbench` regenerates
-them from each run.
+Tree-sitter is the default, so C files use it out of the box: Romacs is about
+twice as fast as GNU Emacs's tree-sitter mode, and GNU's regexp C mode still
+opens `xdisp.c` quicker.  GNU shows its first text after about 25 ms there,
+where Romacs shows the file once it's parsed.
+
+**No compile step needed.**  Your init, `M-:` and anything
+uncompiled run 8 to 17 times faster than in GNU's interpreter, with no compile
+step.  Our target is native-compilation speed for all of it.  We're not there
+yet: on pure compute, compiled GNU Lisp is still ahead, and the benchmarks
+below show by how much.
+
+**More than one core.**  GNU Emacs does its work on one.  Romacs's whole-history
+log uses 2.4 cores, and worker VMs take searches off the main VM: during
+`project-find-regexp` it's blocked for 59 ms, against 432 ms in GNU Emacs,
+though the search itself takes a little longer today.
+
+**Smooth is the goal, and this is early development.**  Keys stay at a median
+of {{vc-history-key}} while the whole history streams in.  Garbage collection
+is the honest gap: under heavy allocation Romacs spends a third of GNU's time
+collecting, but in longer pauses, 65 ms against 5 ms.  Org and dired are slower
+too.  Every number, wins and losses, is in the tables below, and `perfbench`
+regenerates them from each run.
 
 ### It stays in your hands
 

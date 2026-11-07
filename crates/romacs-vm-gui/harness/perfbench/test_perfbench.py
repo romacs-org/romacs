@@ -316,6 +316,9 @@ def lead_results(**overrides):
         return pb.row(name, 'session', 'run', gnu, romacs, 3)
     rows = [made(readme.VC_HISTORY, {'wall': 19.0, 'check': '183574 abc'}, {'wall': 3.0, 'key': .005, 'check': '183574 abc'}),
             made(readme.OPEN_XDISP, {'wall': .65}, {'wall': .77}),
+            made(readme.OPEN_XDISP_TS, {'wall': .4}, {'wall': .4}),
+            made(readme.OPEN_HEADER_TS, {'wall': 2.0}, {'wall': 2.0}),
+            *[made(row, {'wall': 1e-7}, {'wall': 2e-8}) for row in readme.UNCOMPILED.values()],
             made(readme.OPEN_HEADER, {'wall': 2.0}, {'wall': 1.0}),
             made(readme.THEME, {'wall': .05}, {'wall': .06})]
     made_results = results(rows)
@@ -377,7 +380,7 @@ class Lead(unittest.TestCase):
         self.assertTrue(pb.selected(args(only=['session']), 'session', 'session', False))
         self.assertFalse(pb.selected(args(quick=True), 'session', 'session', False))
         self.assertFalse(pb.selected(args(only=['elb']), 'session', 'session', False))
-        self.assertEqual(len(readme.lead_missing(results([]))), 11)
+        self.assertEqual(len(readme.lead_missing(results([]))), len(readme.lead_values(results([]))))
 
     def test_a_failed_lead_leaves_the_readme_alone(self):
         def refuse(made):
@@ -528,7 +531,7 @@ class Neomacs(unittest.TestCase):
         pb.neomacs_compiled = refused
         with tempfile.TemporaryDirectory() as directory:
             rows = pb.micro_rows(Ctx(directory), Batch)
-        self.assertEqual(len(rows), len(pb.MICRO) - 1)
+        self.assertEqual(len(rows), len(pb.MICRO) - 1 + len(pb.UNCOMPILED))
         self.assertIsNotNone(rows[0]['gnu']['instructions'])
         self.assertIn('not run: compile timed out', rows[0]['neomacs']['failed'])
 

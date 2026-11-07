@@ -32,20 +32,39 @@ added, and scenes are cut and briefly held so you can read them.
 
 ### It's fast where you feel it
 
-| What you do | Romacs | GNU Emacs |
-| --- | ---: | ---: |
-| Log the entire Emacs history, 183,254 commits | **2.8 s** | 17.3 s |
-| Open a 15 MB generated C header, faces and all | **1.03 s** | 5.69 s |
-| Switch themes | **3.92 ms** | 19.9 ms |
-| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms |
-| Open `xdisp.c`, faces and all | 222 ms | **143 ms** |
+| What you do | Romacs | GNU Emacs | GNU with tree-sitter |
+| --- | ---: | ---: | ---: |
+| Log the entire Emacs history, 183,254 commits | **2.82 s** | 18 s | |
+| Open a 15 MB generated C header, faces and all | **1.05 s** | 6.85 s | 1.94 s |
+| Open `xdisp.c`, faces and all | 228 ms | **154 ms** | 433 ms |
+| Switch themes | **4.5 ms** | 23.7 ms | |
+| A typed key reaches the screen, in `xdisp.c` | **11 ms** | 15 ms | |
+| Uncompiled Lisp, one arithmetic step | **18.4 ns** | 149 ns | |
+| Uncompiled Lisp, one function call | **16.2 ns** | 257 ns | |
+| Uncompiled Lisp, a 10-item list loop | **165 ns** | 2.87 µs | |
 
-Keys stay at a median of 4.78 ms while that whole history streams
-in.  Romacs parses `xdisp.c` with tree-sitter on open, where GNU Emacs's C mode
-uses regexps, and that's the row we're coming for next.  Org and dired are
-slower too, and every number, wins and losses, is in the tables below.  These
-are the first headlines, and we keep pushing them.  `perfbench` regenerates
-them from each run.
+Tree-sitter is the default, so C files use it out of the box: Romacs is about
+twice as fast as GNU Emacs's tree-sitter mode, and GNU's regexp C mode still
+opens `xdisp.c` quicker.  GNU shows its first text after about 25 ms there,
+where Romacs shows the file once it's parsed.
+
+**No compile step needed.**  Your init, `M-:` and anything
+uncompiled run 8 to 17 times faster than in GNU's interpreter, with no compile
+step.  Our target is native-compilation speed for all of it.  We're not there
+yet: on pure compute, compiled GNU Lisp is still ahead, and the benchmarks
+below show by how much.
+
+**More than one core.**  GNU Emacs does its work on one.  Romacs's whole-history
+log uses 2.4 cores, and worker VMs take searches off the main VM: during
+`project-find-regexp` it's blocked for 59 ms, against 432 ms in GNU Emacs,
+though the search itself takes a little longer today.
+
+**Smooth is the goal, and this is early development.**  Keys stay at a median
+of 4.82 ms while the whole history streams in.  Garbage collection
+is the honest gap: under heavy allocation Romacs spends a third of GNU's time
+collecting, but in longer pauses, 65 ms against 5 ms.  Org and dired are slower
+too.  Every number, wins and losses, is in the tables below, and `perfbench`
+regenerates them from each run.
 
 ### It stays in your hands
 
@@ -153,11 +172,6 @@ Measured 2026-11-07 on build `19f44056` against the installed GNU Emacs 32.0.50,
 | describe-function find-file | run | 43.1 ms | 73.5 ms | 1.70x | 1.26x | less its setup; Romacs: compiled store, 6 of 7 loads compiled, read as source: shortdoc-doc.el |
 | shell-command 20 runs | run | 25.7 ms | 30.3 ms | 1.18x | 1.24x | less its setup; Romacs: compiled store, 0 of 0 loads compiled |
 | eshell 20 commands | run | 36.8 ms | 70.2 ms | 1.91x | 0.76x | less its setup; Romacs: 25 artifacts compiled on first use, before these runs; Romacs: compiled store, 33 of 33 loads compiled |
-| micro named call | iteration | 10.9 ns | 4.88 ns | 0.45x | 0.59x | (m-id i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
-| micro closure call | iteration | 10.2 ns | 18.7 ns | 1.83x | 1.85x | (funcall f0 i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
-| micro mapcar 1 | iteration | 93.4 ns | 128 ns | 1.37x | 1.45x | (mapcar f0 (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr l)))))))))); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
-| micro mapcar 10 | iteration | 673 ns | 643 ns | 0.96x | 0.88x | (mapcar f0 l); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
-| micro dolist + funcall 10 | iteration | 165 ns | 263 ns | 1.60x | 1.61x | (dolist (x l) (funcall f0 x)); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
 | ERT 25 files | total | 15.3 s | 19.3 s | 1.26x | 1.36x | GNU 927/929 expected, Romacs 894/929 expected; wall summed per file; Romacs: compiled store, 39 of 42 loads compiled, read as source: cus-load.el, uni-name.el, uni-old-name.el, loads not checked in 9 of 75 runs; test files read as source in both |
 | first-start world build | run | - | 2.63 s | - | - | Romacs only: --loadup --world-build in a fresh store; a world build reads source, never the compiled store |
 | warm launch to first paint | run | - | 260 ms | - | - | Romacs only (its --trace-latency first-paint); GNU has no paint mark; Romacs: compiled store, 0 of 0 loads compiled |
@@ -167,6 +181,14 @@ Measured 2026-11-07 on build `19f44056` against the installed GNU Emacs 32.0.50,
 | key C-n | key | 2.43 ms | 1.45 ms | 0.59x | 0.77x | 40 keys x 3; wall pre-command to idle; samples GNU 120, Romacs 120; Romacs: compiled store, 1 of 1 loads compiled |
 | C-x C-f 5,000 files, per key | key | 69.5 ms | 51.8 ms | 0.75x | 0.67x | fido-vertical, keys of file-1; candidates GNU 1000, Romacs 1000; Romacs: compiled store, 1 of 1 loads compiled |
 | C-x C-f 5,000 files, per key, romacs-complete | key | - | 2.83 ms | - | - | Romacs only: its default completion (the layer, fzf), keys of file-1; candidates 2084, minibuffer 'file-1'; Romacs: compiled store, 1 of 1 loads compiled |
+| micro named call | iteration | 9.14 ns | 5.07 ns | 0.55x | 0.59x | (m-id i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro closure call | iteration | 8.53 ns | 18.7 ns | 2.19x | 1.85x | (funcall f0 i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro mapcar 1 | iteration | 95.4 ns | 128 ns | 1.34x | 1.45x | (mapcar f0 (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr l)))))))))); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro mapcar 10 | iteration | 730 ns | 632 ns | 0.87x | 0.88x | (mapcar f0 l); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro dolist + funcall 10 | iteration | 168 ns | 261 ns | 1.56x | 1.61x | (dolist (x l) (funcall f0 x)); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| uncompiled arithmetic | iteration | 149 ns | 18.4 ns | 0.12x | 0.15x | (setq s (+ s (% i 97))); GNU interpreted; Romacs: compiled store, 0 of 1 loads compiled, read as source: b2d0c8442cb8.el |
+| uncompiled named call | iteration | 257 ns | 16.2 ns | 0.06x | 0.13x | (m-id i); GNU interpreted; Romacs: compiled store, 0 of 1 loads compiled, read as source: c38ab8dd7f42.el |
+| uncompiled dolist 10 | iteration | 2.87 µs | 165 ns | 0.06x | 0.06x | (dolist (x l) (setq s (+ s x))); GNU interpreted; Romacs: compiled store, 0 of 1 loads compiled, read as source: daba0119891f.el |
 <!-- perfbench-table-end -->
 
 ### Interactive sessions
@@ -178,26 +200,28 @@ Measured 2026-11-07 on build `19f44056` against the installed GNU Emacs 32.0.50,
 
 | Row | Per | GNU | Romacs | GNU block | Romacs block | Romacs/GNU (time) | Romacs/GNU (block) | Romacs/GNU (instructions) | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| dired 5,000 files | run | 129 ms | 281 ms | 126 ms | 281 ms | 2.18x | 2.23x | 3.05x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| occur xdisp.c | run | 1.35 s | 1.87 s | 1.35 s | 1.87 s | 1.39x | 1.39x | 1.64x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| project-find-regexp | run | 412 ms | 571 ms | 411 ms | 59.2 ms | 1.38x | 0.14x | 0.31x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| project-find-file | run | 32.4 ms | 67.7 ms | 32 ms | 13.8 ms | 2.09x | 0.43x | 1.00x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| vc-log 2,000 commits | run | 45.5 ms | 38.6 ms | 18.8 ms | 11.2 ms | 0.85x | 0.60x | 1.20x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| vc-diff xdisp.c | run | 281 ms | 279 ms | 279 ms | 278 ms | 0.99x | 1.00x | 1.55x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| vc-dir | run | 59.9 ms | 48.9 ms | 25.6 ms | 17.7 ms | 0.82x | 0.69x | 1.85x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| M-x shell, one command | run | 6.64 ms | 28.1 ms | 5.82 ms | 28 ms | 4.23x | 4.81x | 1.33x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| org-agenda, a month | run | 2.94 s | 11.4 s | 2.94 s | 11.4 s | 3.86x | 3.86x | 4.09x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| kill-line, per key | key | 1.64 ms | 1.46 ms | 30.9 ms | 6.82 ms | 0.89x | 0.22x | 7.43x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| yank, per key | key | 1.62 ms | 1.64 ms | 30.9 ms | 6.98 ms | 1.01x | 0.23x | 3.32x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| undo, per key | key | 1.11 ms | 1.29 ms | 30 ms | 6.86 ms | 1.16x | 0.23x | 59.96x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| isearch xdisp.c, per key | key | 2.89 ms | 3.47 ms | 26.7 ms | 15.9 ms | 1.20x | 0.60x | 1.61x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| Org self-insert, per key | key | 1.21 ms | 3.05 ms | 31 ms | 81.7 ms | 2.52x | 2.64x | 18.88x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| Org TAB, per key | key | 2.48 ms | 44.2 ms | 33.9 ms | 334 ms | 17.84x | 9.85x | 49.69x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
-| find-file xdisp.c | run | 143 ms | 222 ms | 138 ms | 221 ms | 1.55x | 1.60x | 1.89x | first shown GNU 138 ms, Romacs 221 ms; mode GNU c-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
-| find-file generated header | run | 5.69 s | 1.03 s | 4.43 s | 1.03 s | 0.18x | 0.23x | 0.26x | first shown GNU 4.43 s, Romacs 1.03 s; mode GNU c-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
-| vc-print-root-log whole history | run | 17.3 s | 2.8 s | 55.6 ms | 37.8 ms | 0.16x | 0.68x | 0.25x | first shown GNU 9.08 ms, Romacs 10.6 ms; median key GNU 4.59 ms, Romacs 4.78 ms; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
-| theme switch, first visit | run | 27.7 ms | 17 ms | 26.7 ms | 16.9 ms | 0.61x | 0.63x | 6.26x | Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
-| theme switch, cycled | run | 19.9 ms | 3.92 ms | 19.3 ms | 3.9 ms | 0.20x | 0.20x | 0.68x | Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
+| dired 5,000 files | run | 127 ms | 292 ms | 124 ms | 292 ms | 2.30x | 2.35x | 3.04x | CPU cores GNU 0.4, Romacs 0.5; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| occur xdisp.c | run | 1.55 s | 1.94 s | 1.55 s | 1.94 s | 1.25x | 1.25x | 1.66x | CPU cores GNU 0.8, Romacs 1.9; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| project-find-regexp | run | 434 ms | 593 ms | 432 ms | 58.9 ms | 1.37x | 0.14x | 0.31x | CPU cores GNU 0.6, Romacs 0.7; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| project-find-file | run | 37.2 ms | 71.7 ms | 36.7 ms | 16.2 ms | 1.93x | 0.44x | 1.02x | CPU cores GNU 0.3, Romacs 0.4; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| vc-log 2,000 commits | run | 48.6 ms | 41.2 ms | 19.5 ms | 11.3 ms | 0.85x | 0.58x | 1.11x | CPU cores GNU 0.3, Romacs 0.4; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| vc-diff xdisp.c | run | 294 ms | 289 ms | 292 ms | 288 ms | 0.98x | 0.99x | 1.55x | CPU cores GNU 0.6, Romacs 1.5; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| vc-dir | run | 46 ms | 52.2 ms | 13.8 ms | 18.3 ms | 1.13x | 1.33x | 4.38x | CPU cores GNU 0.4, Romacs 0.4; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| M-x shell, one command | run | 2.81 ms | 29 ms | 2.8 ms | 28.9 ms | 10.31x | 10.35x | - | CPU cores GNU 0.2, Romacs 0.4; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| org-agenda, a month | run | 3.05 s | 11.7 s | 3.05 s | 11.7 s | 3.83x | 3.83x | 4.09x | CPU cores GNU 0.9, Romacs 1.0; Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| kill-line, per key | key | 1.76 ms | 1.58 ms | 32.4 ms | 6.67 ms | 0.90x | 0.21x | 13.85x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| yank, per key | key | 1.64 ms | 1.7 ms | 29.7 ms | 6.75 ms | 1.03x | 0.23x | 3.29x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| undo, per key | key | 1.1 ms | 1.34 ms | 31 ms | 6.59 ms | 1.23x | 0.21x | 70.88x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| isearch xdisp.c, per key | key | 2.94 ms | 3.95 ms | 28.8 ms | 18.2 ms | 1.34x | 0.63x | 1.64x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| Org self-insert, per key | key | 1.23 ms | 3.2 ms | 35.6 ms | 77.7 ms | 2.60x | 2.18x | 18.56x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| Org TAB, per key | key | 2.43 ms | 42.8 ms | 36.6 ms | 331 ms | 17.60x | 9.06x | 49.24x | Romacs: compiled store, 202 of 204 loads compiled, read as source: cus-load.el, org-version.el |
+| find-file xdisp.c | run | 154 ms | 228 ms | 149 ms | 228 ms | 1.48x | 1.53x | 1.89x | first shown GNU 149 ms, Romacs 228 ms; CPU cores GNU 0.4, Romacs 0.4; mode GNU c-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| find-file generated header | run | 6.85 s | 1.05 s | 5.45 s | 1.05 s | 0.15x | 0.19x | 0.26x | first shown GNU 5.45 s, Romacs 1.05 s; CPU cores GNU 0.9, Romacs 0.7; mode GNU c-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| find-file xdisp.c, tree-sitter in both | run | 433 ms | 227 ms | 407 ms | 227 ms | 0.53x | 0.56x | 0.54x | first shown GNU 23.6 ms, Romacs 227 ms; CPU cores GNU 0.6, Romacs 0.4; mode GNU c-ts-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| find-file generated header, tree-sitter in both | run | 1.94 s | 1.07 s | 1.91 s | 1.07 s | 0.55x | 0.56x | 0.50x | first shown GNU 27.9 ms, Romacs 1.07 s; CPU cores GNU 0.8, Romacs 0.7; mode GNU c-ts-mode, Romacs c-ts-mode; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| vc-print-root-log whole history | run | 18 s | 2.82 s | 57.5 ms | 35.7 ms | 0.16x | 0.62x | 0.25x | first shown GNU 9.81 ms, Romacs 9.55 ms; median key GNU 4.78 ms, Romacs 4.82 ms; CPU cores GNU 1.1, Romacs 2.4; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| theme switch, first visit | run | 18.5 ms | 13.6 ms | 17.5 ms | 13.6 ms | 0.74x | 0.78x | 6.83x | CPU cores GNU 0.3, Romacs 0.1; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
+| theme switch, cycled | run | 23.7 ms | 4.5 ms | 22.4 ms | 4.48 ms | 0.19x | 0.20x | 0.62x | CPU cores GNU 0.3, Romacs 0.1; Romacs: compiled store, 36 of 43 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
 <!-- perfbench-session-end -->
 
 ### Headlines
@@ -208,15 +232,20 @@ Every row of this run where Romacs beats a rival by at least 20%: 0.80x or bette
 | Row | Against | Instructions | Time | Block | Build | Rerun |
 | --- | --- | --- | --- | --- | --- | --- |
 | how-many xdisp.c | GNU | 0.10x | 0.16x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'how-many xdisp.c'` |
-| micro named call | GNU | 0.59x | 0.45x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'micro'` |
 | elb bubble-no-cons | GNU | 0.66x | 0.68x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'elb'` |
 | elb fibn | GNU | 0.47x | 0.57x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'elb'` |
-| session find-file generated header | GNU | 0.26x | 0.18x | 0.23x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
-| session vc-print-root-log whole history | GNU | 0.25x | 0.16x | 0.68x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
-| session theme switch, first visit | GNU | 6.26x | 0.61x | 0.63x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
-| session theme switch, cycled | GNU | 0.68x | 0.20x | 0.20x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
 | key C-n | GNU | 0.77x | 0.59x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'keys'` |
 | C-x C-f 5,000 files, per key | GNU | 0.67x | 0.75x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'keys'` |
+| micro named call | GNU | 0.59x | 0.55x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'micro'` |
+| uncompiled arithmetic | GNU | 0.15x | 0.12x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'micro'` |
+| uncompiled named call | GNU | 0.13x | 0.06x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'micro'` |
+| uncompiled dolist 10 | GNU | 0.06x | 0.06x | - | `19f44056` | `perfbench.py --romacs BINARY --only 'micro'` |
+| session find-file generated header | GNU | 0.26x | 0.15x | 0.19x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
+| session find-file xdisp.c, tree-sitter in both | GNU | 0.54x | 0.53x | 0.56x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
+| session find-file generated header, tree-sitter in both | GNU | 0.50x | 0.55x | 0.56x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
+| session vc-print-root-log whole history | GNU | 0.25x | 0.16x | 0.62x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
+| session theme switch, first visit | GNU | 6.83x | 0.74x | 0.78x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
+| session theme switch, cycled | GNU | 0.62x | 0.19x | 0.20x | `19f44056` | `perfbench.py --romacs BINARY --only 'session'` |
 <!-- perfbench-headlines-end -->
 
 ### Lisp compute: GNU's elisp-benchmarks

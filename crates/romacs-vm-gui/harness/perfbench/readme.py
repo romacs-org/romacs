@@ -38,8 +38,11 @@ SUMMARIES = ('elb geometric mean', 'elb median')
 VC_HISTORY = 'session vc-print-root-log whole history'
 OPEN_XDISP = 'session find-file xdisp.c'
 OPEN_HEADER = 'session find-file generated header'
+OPEN_XDISP_TS = 'session find-file xdisp.c, tree-sitter in both'
+OPEN_HEADER_TS = 'session find-file generated header, tree-sitter in both'
+UNCOMPILED = {'arith': 'uncompiled arithmetic', 'call': 'uncompiled named call', 'list': 'uncompiled dolist 10'}
 THEME = 'session theme switch, cycled'
-LEAD_ROWS = (VC_HISTORY, OPEN_XDISP, OPEN_HEADER, THEME)
+LEAD_ROWS = (VC_HISTORY, OPEN_XDISP, OPEN_HEADER, OPEN_XDISP_TS, OPEN_HEADER_TS, THEME, *UNCOMPILED.values())
 
 
 def scaled(value, unit):
@@ -190,6 +193,8 @@ def session_extras(made):
     parts = [f'{label} {", ".join(f"{name} {scaled(value, unit)}" for name, value in figures)}'
              for label, metric, unit in (('first shown', 'first', 's'), ('median key', 'key', 's'))
              if (figures := per_engine(metric))]
+    if cores := per_engine('cores'):
+        parts.append(f'CPU cores {", ".join(f"{name} {value:.1f}" for name, value in cores)}')
     if details := per_engine('detail'):
         parts.append(f'mode {", ".join(f"{name} {value}" for name, value in details)}')
     return '; '.join(parts)
@@ -219,7 +224,10 @@ def lead_values(results):
             'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'), 'open-xdisp-gnu': figure(OPEN_XDISP, 'gnu'),
             'open-big-size': f'{size / 1e6:.0f} MB' if size else None,
             'open-big-romacs': figure(OPEN_HEADER, 'romacs'), 'open-big-gnu': figure(OPEN_HEADER, 'gnu'),
-            'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu')}
+            'open-xdisp-ts-gnu': figure(OPEN_XDISP_TS, 'gnu'), 'open-big-ts-gnu': figure(OPEN_HEADER_TS, 'gnu'),
+            'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu'),
+            **{f'uncompiled-{key}-{engine}': figure(row, engine)
+               for key, row in UNCOMPILED.items() for engine in ('romacs', 'gnu')}}
 
 
 def lead_measured(results):
