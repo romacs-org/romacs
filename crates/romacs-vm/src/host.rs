@@ -672,7 +672,7 @@ pub fn runtime_root() -> PathBuf {
 /// `gnu-lisp/` directory.
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
-    metadata(root.join("gnu-lisp")).is_ok_and(|m| m.is_dir()).then_some(root)
+    probe(Probe::IsDir, root.join("gnu-lisp")).then_some(root)
 }
 
 /// The checkout this crate was built from: a compile-time path that no
@@ -685,15 +685,17 @@ pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
 /// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
 /// build's own root while it is a git checkout of one, else none.  A gate's
 /// build slot mirrors a checkout without `.git`, so a build made there
-/// names no tree it would not find again.
+/// names no tree it would not find again.  Both checks are kinds of entry,
+/// not stats: a world built while the tree is edited stays valid when a
+/// file under it is added or renamed, or a commit touches `.git`.
 pub fn source_directory() -> Option<PathBuf> {
-    let tree = |dir: &Path| metadata(dir.join("crates/romacs-vm/src/prims")).is_ok_and(|m| m.is_dir());
+    let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
     if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
         // Absolute, so a buffer's own directory never resolves it.
         return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
     }
     let root = build_root();
-    (tree(&root) && symlink_metadata(root.join(".git")).is_ok()).then_some(root)
+    (tree(&root) && entry_type(&root.join(".git")).is_ok()).then_some(root)
 }
 
 pub(crate) fn build_root() -> PathBuf {
@@ -3033,6 +3035,23 @@ mod tests {
         assert!(root.is_absolute(), "{}", root.display());
         assert!(!root.components().any(|c| matches!(c, std::path::Component::ParentDir)), "{}", root.display());
         assert!(root.join("gnu-lisp").is_dir() && root.join("etc").is_dir(), "{}", root.display());
+    }
+    /// A world built from a checkout keys only the kinds of the tree's
+    /// entries, never their times, so editing the tree leaves it valid.
+    #[test]
+    fn source_directory_keys_no_times_of_the_tree() {
+        enter_build(Pinned { clock: SystemTime::UNIX_EPOCH, pid: 0, seed: [0; 4] });
+        begin_recipe();
+        let found = source_directory();
+        let trace = leave_build().expect("a build trace");
+        let root = build_root();
+        let watched = [root.join("crates/romacs-vm/src/prims"), root.join(".git")];
+        let probes: Vec<_> = trace["records"].as_array().unwrap().iter()
+            .filter(|r| r["kind"] == "probe" && watched.iter().any(|p| decoded(&r["path"]).as_deref() == Some(p.as_os_str().as_bytes())))
+            .map(|r| r["probe"].as_str().unwrap_or("").to_owned())
+            .collect();
+        assert!(!probes.is_empty(), "the tree checks are recorded");
+        assert!(probes.iter().all(|p| p == "IsDir" || p == "entry-type"), "{probes:?}, found {found:?}");
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]

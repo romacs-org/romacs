@@ -121,6 +121,9 @@ pub trait DisplayHost {
     /// inactive, negative leaving its opacity alone, raised to LIMIT,
     /// `frame-alpha-lower-limit'.
     fn set_frame_alpha(&mut self, _frame: u64, _alpha: [f32; 2], _limit: f32) {}
+    /// Show CONFIG, the visual configuration Lisp asked for
+    /// (`romacs--effect-set'): cursor motion, transitions, effects.
+    fn set_visual_config(&mut self, _config: &romacs_display_protocol::VisualConfig) {}
     /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
     /// pixels under the facts' id until `release_image'.  An error is the
     /// loader's message; the image then shows as a placeholder.
@@ -171,7 +174,13 @@ impl Vm {
     /// initialization does: from here `framep' and `window-system' answer
     /// the display's backend. False when no display is attached.
     pub fn open_display(&mut self) -> bool {
-        self.display.as_mut().map(|display| display.open = true).is_some()
+        let Some(display) = self.display.as_mut() else { return false };
+        display.open = true;
+        // What Lisp asked for before the display opened shows on it.
+        if *self.visual != romacs_display_protocol::VisualConfig::default() {
+            display.host.set_visual_config(&self.visual);
+        }
+        true
     }
     /// The open display's host, if the frame is on one.
     pub(crate) fn window_system_host(&mut self) -> Option<&mut (dyn DisplayHost + 'static)> {

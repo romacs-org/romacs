@@ -55,11 +55,11 @@ crates/romacs-vm/src/image.rs:383 std::fs the code-image store, reached only thr
 crates/romacs-vm/src/image.rs:386 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:392 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:397 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
-crates/romacs-vm/src/lib.rs:2018 slot:exec-path declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2018 slot:initial-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2018 slot:process-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:2098 delayed-variable declares the variable; reads no slot
-crates/romacs-vm/src/lib.rs:3557 dynamic:saved unbind: restores the saved value as the binding ends
+crates/romacs-vm/src/lib.rs:2023 slot:exec-path declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:2023 slot:initial-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:2023 slot:process-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:2103 delayed-variable declares the variable; reads no slot
+crates/romacs-vm/src/lib.rs:3562 dynamic:saved unbind: restores the saved value as the binding ends
 crates/romacs-vm/src/prim.rs:1018 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:1028 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
 crates/romacs-vm/src/prim.rs:1040 dynamic:saved saved-binding accessor: checks the fence on the entry first (F2)
@@ -83,7 +83,7 @@ crates/romacs-vm/src/world/arena.rs:593 libc::file the world allocator checks an
 crates/romacs-vm/src/world/arena.rs:717 libc::file the world allocator maps its own executable read-only where an image expects it; no Lisp value depends on it
 crates/romacs-vm/src/world/arena.rs:1136 libc::file copies the builder arena's backing file into the image file the builder opened through host
 crates/romacs-vm/src/world/arena.rs:1149 libc::file copies the builder arena's backing file into the image file the builder opened through host
-crates/romacs-vm/src/world/image.rs:81 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
+crates/romacs-vm/src/world/image.rs:84 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
 crates/romacs-vm/src/world/mod.rs:124 slot:initial-environment fences the environment lists by name; reads no slot
 crates/romacs-vm/src/world/mod.rs:124 slot:process-environment fences the environment lists by name; reads no slot
 crates/romacs-vm/src/world/mod.rs:125 slot:exec-path fences the environment lists by name; reads no slot

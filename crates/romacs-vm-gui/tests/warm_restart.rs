@@ -206,6 +206,27 @@ fn an_agent_chat_comes_back_on_its_session_with_its_draft() {
     assert_eq!(tagged(&restored, "CHATS"), "((\"*agent: probe chat*\" \"0a1b2c3d-test\" \"half a question\"))");
 }
 
+/// A generated widget buffer isn't an edit: its text alone can't work, so
+/// it stays behind for its package to rebuild, and typed text still comes.
+#[test]
+fn a_widget_buffer_is_dropped_and_a_typed_view_is_carried() {
+    let dir = dir("widgets");
+    let out = batch(&dir,
+        "(require 'wid-edit)
+         (define-derived-mode wr-view-mode fundamental-mode \"View\")
+         (with-current-buffer (get-buffer-create \"*wr-widgets*\")
+           (wr-view-mode)
+           (widget-create 'push-button \"Go\")
+           (widget-setup))
+         (with-current-buffer (get-buffer-create \"*wr-typed*\")
+           (wr-view-mode)
+           (insert \"notes\"))
+         (princ (format \"CLASS %S\\n\"
+                        (list (with-current-buffer \"*wr-widgets*\" (car (warm-restart--classify)))
+                              (with-current-buffer \"*wr-typed*\" (car (warm-restart--classify))))))");
+    assert_eq!(tagged(&out, "CLASS"), "(dropped text)");
+}
+
 #[test]
 fn clones_own_their_ids_and_dired_and_edited_views_come_back() {
     let dir = dir("views");

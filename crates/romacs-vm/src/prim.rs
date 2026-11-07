@@ -1817,6 +1817,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod effects;
     mod clipboard;
     mod keyboard;
     mod filesave;
