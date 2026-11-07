@@ -1199,6 +1199,7 @@ fn evaluate(
     if live { vm.set_session_host(Some(Box::new(|code| std::panic::resume_unwind(Box::new(SessionEnd(code)))))); }
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
+    let visual_sender = sender.clone();
     let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
@@ -1207,6 +1208,10 @@ fn evaluate(
         .with_alpha_hook(move |frame, alpha, limit| {
             // Only a closed window refuses, and then nothing shows it.
             let _ = alpha_sender.set_frame_alpha(frame, alpha, limit);
+        })
+        .with_visual_hook(move |config| {
+            // Only a closed render thread refuses, and then nothing paints.
+            let _ = visual_sender.set_visual_config(config.clone());
         }))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }

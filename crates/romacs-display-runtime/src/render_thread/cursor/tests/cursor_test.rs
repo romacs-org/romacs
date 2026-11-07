@@ -240,103 +240,132 @@ fn default_state_animation_enabled() {
     assert!(!state.animating);
     assert_eq!(state.anim_speed, 1.0);
     assert_eq!(state.anim_style, CursorAnimStyle::Neovide);
-    assert_eq!(state.anim_duration, 0.06);
+    assert_eq!(state.anim_duration, 0.1);
+    assert_eq!(state.short_duration, 0.04);
     assert_eq!(state.trail_size, 0.7);
 }
 
-#[test]
-fn neovide_motion_matches_corner_easing_and_distance_timing() {
-    let at = t0();
+/// A state with its cursor at rest at (X, Y), 10 by 20, in window 1.
+fn resting_at(x: f32, y: f32, at: romacs_display_protocol::frame_time::EventTime) -> CursorState {
     let mut state = CursorState::new(at);
-    state.set_target(
-        make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
-    state.set_target(
-        make_target(100.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
-    state.tick_animation(at.plus(Duration::from_millis(10)));
-    let corners = state.animated_cursor().unwrap().corners.unwrap();
-    // Neovide computes the clock using distance to the destination center,
-    // then eases each corner toward its own destination.
-    for (i, (start_x, start_y, sign_x, sign_y)) in [
-        (0.0_f32, 0.0_f32, -1.0, -1.0),
-        (10.0, 0.0, 1.0, -1.0),
-        (10.0, 20.0, 1.0, 1.0),
-        (0.0, 20.0, -1.0, 1.0),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let dx = 105.0 - start_x;
-        let dy = 10.0 - start_y;
-        let distance = dx.hypot(dy);
-        let alignment = (dx * sign_x + dy * sign_y) / distance / 2.0_f32.sqrt();
-        let progress = 0.01 * (1.0 + 0.7 * alignment) / (0.06 * distance.log10());
-        let expected_x = start_x + 100.0 * (1.0 - 2.0_f32.powf(-10.0 * progress));
-        assert!((corners[i].0 - expected_x).abs() < 0.0001);
-        assert_eq!(corners[i].1, start_y);
-    }
-    assert!(
-        corners[1].0 - corners[0].0 > 10.0,
-        "leading corners must stretch the cursor"
-    );
-    state.tick_animation(at.plus(Duration::from_secs(2)));
-    assert!(!state.animating);
-    assert_eq!(state.current_x, 100.0);
+    state.set_target(make_target(x, y, 10.0, 20.0, CursorStyle::FilledBox), at);
+    state
+}
+
+fn corner_xs(state: &CursorState) -> [f32; 4] {
+    state.corner_springs.map(|spring| spring.x)
 }
 
 #[test]
-fn neovide_retarget_is_continuous_and_zero_duration_snaps() {
+fn a_short_move_slides_the_cursor_whole_and_quickly() {
     let at = t0();
-    let mut state = CursorState::new(at);
-    state.set_target(
-        make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
-    state.set_target(
-        make_target(100.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
-    let middle = at.plus(Duration::from_millis(10));
+    let mut state = resting_at(0.0, 0.0, at);
+    state.set_target(make_target(10.0, 20.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    assert!(state.corner_springs.iter().all(|spring| (spring.omega - ARRIVAL / 0.04).abs() < 1e-2));
+    state.tick_animation(at.plus(Duration::from_millis(16)));
+    let [left, right, _, _] = corner_xs(&state);
+    assert!(state.animating && left > 0.0 && left < 10.0);
+    assert!((right - left - 10.0).abs() < 1e-3, "a short move does not stretch the cursor");
+    // At rest by twice the short duration: no sub-pixel tail.
+    for ms in [32, 48, 64, 80] {
+        state.tick_animation(at.plus(Duration::from_millis(ms)));
+    }
+    assert!(!state.animating);
+    assert_eq!((state.current_x, state.current_y), (10.0, 20.0));
+}
+
+#[test]
+fn a_long_jump_stretches_along_its_travel_and_settles() {
+    let at = t0();
+    let mut state = resting_at(0.0, 0.0, at);
+    state.set_target(make_target(0.0, 800.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    // 40 rows: the trailing corners take 1.5 times the duration, the
+    // leading ones the trail's share of that.
+    let [top, _, bottom, _] = state.corner_springs.map(|spring| spring.omega);
+    assert!((top - ARRIVAL / 0.15).abs() < 1e-2, "{top}");
+    assert!((bottom - ARRIVAL / (0.15 * 0.3)).abs() < 1e-1, "{bottom}");
+    state.tick_animation(at.plus(Duration::from_millis(16)));
+    state.tick_animation(at.plus(Duration::from_millis(32)));
+    assert!(state.current_h > 100.0, "the leading edge runs ahead: {}", state.current_h);
+    assert!((state.current_w - 10.0).abs() < 1e-3, "it stretches only along the travel");
+    for ms in (48..=2000).step_by(16) {
+        state.tick_animation(at.plus(Duration::from_millis(ms)));
+    }
+    assert!(!state.animating);
+    assert_eq!((state.current_y, state.current_h), (800.0, 20.0));
+}
+
+#[test]
+fn a_move_to_another_window_is_never_short() {
+    let at = t0();
+    let mut state = resting_at(0.0, 0.0, at);
+    let mut next = make_target(10.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox);
+    next.window_id = 2;
+    state.set_target(next, at);
+    state.tick_animation(at.plus(Duration::from_millis(16)));
+    let [left, right, _, _] = corner_xs(&state);
+    assert!(right - left > 10.5, "the leading corners pull ahead: {left} {right}");
+}
+
+#[test]
+fn a_retarget_keeps_the_cursor_where_it_is() {
+    let at = t0();
+    let mut state = resting_at(0.0, 0.0, at);
+    state.set_target(make_target(500.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    let middle = at.plus(Duration::from_millis(30));
     state.tick_animation(middle);
     let before = state.animated_cursor().unwrap().corners;
-    state.set_target(
-        make_target(-50.0, 40.0, 10.0, 20.0, CursorStyle::FilledBox),
-        middle,
-    );
-    state.tick_animation(middle);
+    state.set_target(make_target(-50.0, 400.0, 10.0, 20.0, CursorStyle::FilledBox), middle);
     assert_eq!(state.animated_cursor().unwrap().corners, before);
-    state.anim_duration = 0.0;
-    state.tick_animation(middle.plus(Duration::from_millis(10)));
-    assert!(!state.animating);
-    assert_eq!((state.current_x, state.current_y), (-50.0, 40.0));
 }
 
 #[test]
-fn neovide_without_trail_or_distance_adjustment_is_a_rigid_timed_slide() {
+fn no_time_and_no_motion_both_arrive_at_once() {
     let at = t0();
-    let mut state = CursorState::new(at);
+    let mut state = resting_at(0.0, 0.0, at);
+    state.anim_duration = 0.0;
+    state.set_target(make_target(0.0, 400.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    state.tick_animation(at.plus(Duration::from_millis(16)));
+    assert!(!state.animating);
+    assert_eq!(state.current_y, 400.0);
+
+    let mut config = VisualConfig::default();
+    config.cursor_motion.enabled = false;
+    state.apply_visual_config(&config);
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    assert!(!state.animating);
+    assert_eq!(state.current_y, 0.0);
+    assert!(state.animated_cursor().is_none(), "a cursor without motion is drawn where it is");
+}
+
+#[test]
+fn turning_motion_off_midway_lands_the_cursor() {
+    let at = t0();
+    let mut state = resting_at(0.0, 0.0, at);
+    state.set_target(make_target(0.0, 400.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    state.tick_animation(at.plus(Duration::from_millis(16)));
+    assert!(state.animating && state.current_y < 400.0);
+    let mut config = VisualConfig::default();
+    config.cursor_motion.enabled = false;
+    state.apply_visual_config(&config);
+    state.apply_visual_config(&VisualConfig::default());
+    assert!(!state.animating);
+    assert_eq!((state.current_y, state.current_h), (400.0, 20.0));
+    assert!(state.corner_springs.iter().all(|spring| spring.vx == 0.0 && spring.vy == 0.0));
+}
+
+#[test]
+fn without_trail_or_reach_a_long_jump_is_a_rigid_slide() {
+    let at = t0();
     let mut config = VisualConfig::default();
     config.cursor_motion.trail_size = 0.0;
     config.cursor_motion.distance_length_adjust = false;
+    let mut state = resting_at(0.0, 0.0, at);
     state.apply_visual_config(&config);
-    state.set_target(
-        make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
-    state.set_target(
-        make_target(1000.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox),
-        at,
-    );
+    state.set_target(make_target(1000.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    assert!(state.corner_springs.iter().all(|spring| (spring.omega - ARRIVAL / 0.1).abs() < 1e-3));
     state.tick_animation(at.plus(Duration::from_millis(30)));
-    assert!((state.current_x - 968.75).abs() < 0.001);
-    assert!((state.current_w - 10.0).abs() < 0.001);
-    assert_eq!(state.current_h, 20.0);
-    state.tick_animation(at.plus(Duration::from_millis(60)));
-    assert!(!state.animating);
-    assert_eq!(state.current_x, 1000.0);
+    assert!((state.current_w - 10.0).abs() < 1e-3);
 }
 
 #[test]

@@ -34,14 +34,9 @@ pub(super) struct CornerSpring {
     pub(super) omega: f32,
 }
 
-/// Timing for Neovide's independently eased corners. Positions are shared
-/// with the spring mode so changing between corner modes stays continuous.
-#[derive(Clone, Copy, Default)]
-struct CornerEase {
-    start: (f32, f32),
-    progress: f32,
-    length_multiplier: f32,
-}
+/// A critically damped spring with angular frequency w has come 99% of
+/// its way at time ARRIVAL / w: (1 + u) e^-u = 0.01 at u = 6.64.
+const ARRIVAL: f32 = 6.64;
 
 /// Copyable cursor settings, excluding live animation and target state.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,6 +45,7 @@ pub(super) struct CursorConfigSnapshot {
     anim_speed: f32,
     anim_style: CursorAnimStyle,
     anim_duration: f32,
+    short_duration: f32,
     trail_size: f32,
     distance_length_adjust: bool,
     size_transition_enabled: bool,
@@ -65,6 +61,8 @@ pub(super) struct CursorState {
     pub(super) anim_speed: f32,
     pub(super) anim_style: CursorAnimStyle,
     pub(super) anim_duration: f32, // seconds, for non-Exponential styles
+    /// Seconds a short move takes in the `neovide` style.
+    pub(super) short_duration: f32,
     pub(super) target: Option<CursorTarget>,
     pub(super) current_x: f32,
     pub(super) current_y: f32,
@@ -80,12 +78,8 @@ pub(super) struct CursorState {
     pub(super) anim_start_time: romacs_display_protocol::frame_time::EventTime,
     // 4-corner spring trail state (TL, TR, BR, BL)
     pub(super) corner_springs: [CornerSpring; 4],
-    corner_easing: [CornerEase; 4],
     pub(super) trail_size: f32,
     distance_length_adjust: bool,
-    // Previous target center for computing travel direction
-    pub(super) prev_target_cx: f32,
-    pub(super) prev_target_cy: f32,
 
     // Size transition (independent of position animation)
     pub(super) size_transition_enabled: bool,
@@ -111,6 +105,7 @@ impl CursorState {
             anim_speed: visual.cursor_motion.speed,
             anim_style: visual.cursor_motion.style,
             anim_duration: visual.cursor_motion.duration.as_secs_f32(),
+            short_duration: visual.cursor_motion.short_duration.as_secs_f32(),
             target: None,
             current_x: 0.0,
             current_y: 0.0,
@@ -134,9 +129,6 @@ impl CursorState {
             }; 4],
             trail_size: visual.cursor_motion.trail_size,
             distance_length_adjust: visual.cursor_motion.distance_length_adjust,
-            corner_easing: [CornerEase::default(); 4],
-            prev_target_cx: 0.0,
-            prev_target_cy: 0.0,
             size_transition_enabled: visual.cursor_size_transition.enabled,
             size_transition_duration: visual.cursor_size_transition.duration.as_secs_f32(),
             size_animating: false,
@@ -155,14 +147,26 @@ impl CursorState {
         self.anim_speed = config.cursor_motion.speed;
         self.anim_style = config.cursor_motion.style;
         self.anim_duration = config.cursor_motion.duration.as_secs_f32();
+        self.short_duration = config.cursor_motion.short_duration.as_secs_f32();
         self.trail_size = config.cursor_motion.trail_size;
         self.distance_length_adjust = config.cursor_motion.distance_length_adjust;
         self.size_transition_enabled = config.cursor_size_transition.enabled;
         self.size_transition_duration = config.cursor_size_transition.duration.as_secs_f32();
-        if !self.anim_enabled {
-            self.animating = false;
+        self.settle_disabled();
+    }
+
+    /// Bring a motion that was just turned off to where it was going: a
+    /// glide stopped midway would otherwise strand the cursor there.
+    fn settle_disabled(&mut self) {
+        if !self.anim_enabled && self.animating {
+            match self.target.clone() {
+                Some(target) => self.snap(&target),
+                None => self.animating = false,
+            }
         }
-        if !self.size_transition_enabled {
+        if !self.size_transition_enabled && self.size_animating {
+            self.current_w = self.size_target_w;
+            self.current_h = self.size_target_h;
             self.size_animating = false;
         }
     }
@@ -173,6 +177,7 @@ impl CursorState {
             anim_speed: self.anim_speed,
             anim_style: self.anim_style,
             anim_duration: self.anim_duration,
+            short_duration: self.short_duration,
             trail_size: self.trail_size,
             distance_length_adjust: self.distance_length_adjust,
             size_transition_enabled: self.size_transition_enabled,
@@ -185,16 +190,12 @@ impl CursorState {
         self.anim_speed = config.anim_speed;
         self.anim_style = config.anim_style;
         self.anim_duration = config.anim_duration;
+        self.short_duration = config.short_duration;
         self.trail_size = config.trail_size;
         self.distance_length_adjust = config.distance_length_adjust;
         self.size_transition_enabled = config.size_transition_enabled;
         self.size_transition_duration = config.size_transition_duration;
-        if !self.anim_enabled {
-            self.animating = false;
-        }
-        if !self.size_transition_enabled {
-            self.size_animating = false;
-        }
+        self.settle_disabled();
     }
 
     pub(super) fn set_target(
@@ -203,6 +204,9 @@ impl CursorState {
         at: romacs_display_protocol::frame_time::EventTime,
     ) -> (bool, bool) {
         let had_target = self.target.is_some();
+        let same_window = self.target.as_ref().is_some_and(|old| {
+            old.window_id == new_target.window_id && old.frame_id == new_target.frame_id
+        });
         let target_moved = self.target.as_ref().is_none_or(|old| {
             (old.x - new_target.x).abs() > 0.5
                 || (old.y - new_target.y).abs() > 0.5
@@ -225,8 +229,6 @@ impl CursorState {
                 spring.target_x = x;
                 spring.target_y = y;
             }
-            self.prev_target_cx = new_target.x + new_target.width / 2.0;
-            self.prev_target_cy = new_target.y + new_target.height / 2.0;
         } else if target_moved {
             self.animating = true;
             self.last_anim_time = at;
@@ -236,68 +238,11 @@ impl CursorState {
             self.start_h = self.current_h;
             self.anim_start_time = at;
 
-            if self.anim_style == CursorAnimStyle::Neovide {
-                let center = (
-                    new_target.x + new_target.width * 0.5,
-                    new_target.y + new_target.height * 0.5,
-                );
-                for (i, spring) in self.corner_springs.iter_mut().enumerate() {
-                    self.corner_easing[i] = CornerEase {
-                        start: (spring.x, spring.y),
-                        progress: 0.0,
-                        length_multiplier: if self.distance_length_adjust {
-                            (center.0 - spring.x)
-                                .hypot(center.1 - spring.y)
-                                .log10()
-                                .max(0.0)
-                        } else {
-                            1.0
-                        },
-                    };
-                }
-            }
-
-            if self.anim_style == CursorAnimStyle::CriticallyDampedSpring {
-                let new_corners = Self::target_corners(&new_target);
-                let new_cx = new_target.x + new_target.width / 2.0;
-                let new_cy = new_target.y + new_target.height / 2.0;
-                let old_cx = self.prev_target_cx;
-                let old_cy = self.prev_target_cy;
-
-                let dx = new_cx - old_cx;
-                let dy = new_cy - old_cy;
-                let len = (dx * dx + dy * dy).sqrt();
-                let (dir_x, dir_y) = if len > 0.001 {
-                    (dx / len, dy / len)
-                } else {
-                    (1.0, 0.0)
-                };
-
-                let corner_dirs: [(f32, f32); 4] =
-                    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
-
-                let mut dots: [(f32, usize); 4] = corner_dirs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (cx, cy))| (cx * dir_x + cy * dir_y, i))
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap();
-                dots.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-                let base_dur = self.anim_duration;
-                for (rank, &(_dot, corner_idx)) in dots.iter().enumerate() {
-                    let factor = 1.0 - self.trail_size * (rank as f32 / 3.0);
-                    let duration_i = (base_dur * factor).max(0.01);
-                    let omega_i = 4.0 / duration_i;
-
-                    self.corner_springs[corner_idx].target_x = new_corners[corner_idx].0;
-                    self.corner_springs[corner_idx].target_y = new_corners[corner_idx].1;
-                    self.corner_springs[corner_idx].omega = omega_i;
-                }
-
-                self.prev_target_cx = new_cx;
-                self.prev_target_cy = new_cy;
+            if matches!(
+                self.anim_style,
+                CursorAnimStyle::Neovide | CursorAnimStyle::CriticallyDampedSpring
+            ) {
+                self.aim_corners(&new_target, same_window);
             }
         }
 
@@ -362,6 +307,58 @@ impl CursorState {
         self.animating || self.size_animating
     }
 
+    /// Point each corner's spring at NEW's matching corner, with its own
+    /// timing, so the cursor keeps the velocity it has.
+    ///
+    /// In the `neovide` style a short move, within two cells and one row
+    /// of the same window, carries the cursor whole in `short_duration`:
+    /// typing and line motion stay quiet. Anything farther, and any move
+    /// to another window, stretches the cursor along its travel: the
+    /// corners leading it take `1 - trail_size` of the time the trailing
+    /// ones take, and with `distance_length_adjust` that time grows with
+    /// the jump's length in cells, to 1.6 times `duration`. Each time is
+    /// when a corner has come 99% of its way. The
+    /// `critically-damped-spring` style always stretches, in `duration`.
+    fn aim_corners(&mut self, new: &CursorTarget, same_window: bool) {
+        let neovide = self.anim_style == CursorAnimStyle::Neovide;
+        let corners = Self::target_corners(new);
+        let dx = (new.x + new.width / 2.0) - (self.current_x + self.current_w / 2.0);
+        let dy = (new.y + new.height / 2.0) - (self.current_y + self.current_h / 2.0);
+        let cells = (dx / new.width.max(1.0), dy / new.height.max(1.0));
+        let short = neovide && same_window && cells.0.abs() <= 2.0 + f32::EPSILON
+            && cells.1.abs() <= 1.0 + f32::EPSILON;
+        let durations = if short {
+            [self.short_duration; 4]
+        } else {
+            let reach = if neovide && self.distance_length_adjust {
+                (1.0 + 0.5 * (cells.0.hypot(cells.1) / 4.0).log10().max(0.0)).min(1.6)
+            } else {
+                1.0
+            };
+            let trailing = self.anim_duration * reach;
+            let length = dx.hypot(dy);
+            let (dir_x, dir_y) = if length > 0.001 { (dx / length, dy / length) } else { (1.0, 0.0) };
+            // How far each corner points along the travel, from the
+            // trailing (0) to the leading (1): corners the travel treats
+            // alike move alike, so a straight move does not shear.
+            let along = [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+                .map(|(x, y)| x * dir_x + y * dir_y);
+            let (low, high) = along.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &a| {
+                (lo.min(a), hi.max(a))
+            });
+            let trail = self.trail_size.clamp(0.0, 1.0);
+            along.map(|a| {
+                let lead = if high - low > 1e-3 { (a - low) / (high - low) } else { 0.0 };
+                trailing * (1.0 - trail * lead)
+            })
+        };
+        for ((spring, corner), duration) in self.corner_springs.iter_mut().zip(corners).zip(durations) {
+            spring.target_x = corner.0;
+            spring.target_y = corner.1;
+            spring.omega = if duration > 0.0 { ARRIVAL / duration } else { f32::INFINITY };
+        }
+    }
+
     /// Compute the 4 target corners for a cursor based on its style.
     /// Returns [TL, TR, BR, BL] as (x, y) tuples.
     pub(super) fn target_corners(target: &CursorTarget) -> [(f32, f32); 4] {
@@ -423,64 +420,6 @@ impl CursorState {
         };
 
         match self.anim_style {
-            CursorAnimStyle::Neovide => {
-                let corners = Self::target_corners(&target);
-                let center = (
-                    target.x + target.width * 0.5,
-                    target.y + target.height * 0.5,
-                );
-                for (i, corner) in self.corner_springs.iter_mut().enumerate() {
-                    let timing = &mut self.corner_easing[i];
-                    let dx = center.0 - corner.x;
-                    let dy = center.1 - corner.y;
-                    let distance = dx.hypot(dy);
-                    let relative_x = (corners[i].0 - center.0) / target.width.max(f32::EPSILON);
-                    let relative_y = (corners[i].1 - center.1) / target.height.max(f32::EPSILON);
-                    let relative_length = relative_x.hypot(relative_y);
-                    let alignment = if distance > 0.0 && relative_length > 0.0 {
-                        (dx * relative_x + dy * relative_y) / (distance * relative_length)
-                    } else {
-                        0.0
-                    };
-                    // Same per-corner clock as Neovide: the leading corners
-                    // advance faster, and longer jumps take logarithmically longer.
-                    let corner_dt = dt * (1.0 + self.trail_size.clamp(0.0, 1.0) * alignment);
-                    let duration = self.anim_duration * timing.length_multiplier;
-                    timing.progress = if duration > 0.0 {
-                        (timing.progress + corner_dt / duration).min(1.0)
-                    } else {
-                        1.0
-                    };
-                    let eased = ease_out_expo(timing.progress);
-                    corner.x = timing.start.0 + (corners[i].0 - timing.start.0) * eased;
-                    corner.y = timing.start.1 + (corners[i].1 - timing.start.1) * eased;
-                }
-                self.current_x = self
-                    .corner_springs
-                    .iter()
-                    .map(|c| c.x)
-                    .fold(f32::INFINITY, f32::min);
-                self.current_y = self
-                    .corner_springs
-                    .iter()
-                    .map(|c| c.y)
-                    .fold(f32::INFINITY, f32::min);
-                self.current_w = self
-                    .corner_springs
-                    .iter()
-                    .map(|c| c.x)
-                    .fold(f32::NEG_INFINITY, f32::max)
-                    - self.current_x;
-                self.current_h = self
-                    .corner_springs
-                    .iter()
-                    .map(|c| c.y)
-                    .fold(f32::NEG_INFINITY, f32::max)
-                    - self.current_y;
-                if self.corner_easing.iter().all(|c| c.progress >= 1.0) {
-                    self.snap(&target);
-                }
-            }
             CursorAnimStyle::Exponential => {
                 let factor = 1.0 - (-self.anim_speed * dt).exp();
                 let dx = target.x - self.current_x;
@@ -495,11 +434,17 @@ impl CursorState {
                     self.snap(&target);
                 }
             }
-            CursorAnimStyle::CriticallyDampedSpring => {
+            CursorAnimStyle::Neovide | CursorAnimStyle::CriticallyDampedSpring => {
                 let mut all_settled = true;
                 for i in 0..4 {
                     let spring = &mut self.corner_springs[i];
                     let omega = spring.omega;
+                    if !omega.is_finite() {
+                        // A corner given no time arrives at once.
+                        (spring.x, spring.y, spring.vx, spring.vy) =
+                            (spring.target_x, spring.target_y, 0.0, 0.0);
+                        continue;
+                    }
                     let exp_term = (-omega * dt).exp();
 
                     let x0 = spring.x - spring.target_x;
@@ -519,7 +464,10 @@ impl CursorState {
                     let dist =
                         (spring.x - spring.target_x).abs() + (spring.y - spring.target_y).abs();
                     let vel = spring.vx.abs() + spring.vy.abs();
-                    if dist > 0.5 || vel > 1.0 {
+                    // At rest once it is within half a pixel and would
+                    // move less than that in a 60 Hz frame: a spring's tail
+                    // creeps on long after it looks arrived.
+                    if dist > 0.5 || vel > 30.0 {
                         all_settled = false;
                     }
                 }

@@ -26,6 +26,9 @@ pub struct CursorMotionConfig {
     pub speed: f32,
     pub style: CursorAnimStyle,
     pub duration: Duration,
+    /// How long a short move takes in the `neovide` style: within two
+    /// cells and one row of the same window.
+    pub short_duration: Duration,
     pub trail_size: f32,
     pub distance_length_adjust: bool,
 }
@@ -36,7 +39,8 @@ impl Default for CursorMotionConfig {
             enabled: true,
             speed: 1.0,
             style: CursorAnimStyle::Neovide,
-            duration: Duration::from_millis(60),
+            duration: Duration::from_millis(100),
+            short_duration: Duration::from_millis(40),
             trail_size: 0.7,
             distance_length_adjust: true,
         }
@@ -199,6 +203,7 @@ crate::effect_schema!(CursorMotionConfig {
     speed: f32,
     style: CursorAnimStyle,
     duration: Duration,
+    short_duration: Duration,
     trail_size: f32,
     distance_length_adjust: bool,
 });
