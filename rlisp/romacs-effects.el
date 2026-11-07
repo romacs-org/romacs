@@ -45,7 +45,7 @@ visible than the motion itself."
   :prefix "romacs-window-")
 
 (defgroup romacs-cursor nil
-  "Cursor motion and size transitions.
+  "The cursor's motion and look.
 Blinking is GNU's `blink-cursor-mode'."
   :group 'romacs
   :prefix "romacs-cursor-")
@@ -434,7 +434,12 @@ from 0.0 (not at all) to 1.0 (as the selected one)."
   :group 'romacs-cursor)
 
 (defcustom romacs-cursor-look-morph 0.12
-  "Seconds a change of cursor kind and a focus change take to show."
+  "Seconds a change of cursor kind or size, and a focus change, take to show.
+The kind changes as a bar becoming a block, the size between characters
+of different widths; 0 shows both at once, as the `plain' look always
+does.  When the cursor also moves, its glide carries the change.  A box
+and an hbar do not morph into each other: an hbar's thickness is not a
+height the morph eases."
   :type 'number
   :group 'romacs-cursor)
 
@@ -445,18 +450,6 @@ effects.  Set from the desktop's own setting at startup when it asks for
 less motion."
   :type 'boolean
   :group 'romacs)
-
-(defcustom romacs-cursor-size-transition-enabled nil
-  "Whether the cursor animates when it changes shape or size.
-This is the change from a box to a bar when entering `overwrite-mode', or
-between characters of different widths."
-  :type 'boolean
-  :group 'romacs-cursor)
-
-(defcustom romacs-cursor-size-transition-duration 0.15
-  "Seconds a cursor size or shape change takes."
-  :type 'number
-  :group 'romacs-cursor)
 
 ;;;; Content transitions
 
@@ -610,11 +603,18 @@ backgrounds.  Each is one option holding that effect's properties."
                                     "enable-animations")))
               "false")))
 
-(defun romacs-motion-follow-desktop ()
+(defcustom romacs-motion-follow-desktop t
+  "Whether the desktop's own reduced-motion setting turns on
+`romacs-motion-reduced' at startup.  Nil keeps the motion this session
+chose, as an init file's (setopt romacs-motion-reduced nil) cannot say."
+  :type 'boolean
+  :group 'romacs)
+
+(defun romacs-motion--follow-desktop ()
   "Reduce motion when the desktop asks for it and the user has not chosen.
-The user's choice is `romacs-motion-reduced' saved, customized, or set
-non-nil."
-  (unless (or romacs-motion-reduced
+The user's choice is `romacs-motion-follow-desktop' nil, or
+`romacs-motion-reduced' saved, customized, or set non-nil."
+  (unless (or (not romacs-motion-follow-desktop) romacs-motion-reduced
               (get 'romacs-motion-reduced 'saved-value)
               (get 'romacs-motion-reduced 'customized-value))
     (when (romacs-motion--desktop-reduced-p)
@@ -627,7 +627,7 @@ non-nil."
 
 (defconst romacs-effects--behavioural
   '(window-open window-close window-resize window-movement window-animations
-    cursor-motion cursor-size-transition cursor-look motion buffer-transition scroll-transition
+    cursor-motion cursor-look motion buffer-transition scroll-transition
     child-frame-open child-frame-close child-frame-movement child-frame-resize
     child-frame-animations)
   "The effects whose properties are written out above, one option each.")

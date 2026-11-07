@@ -54,6 +54,9 @@ pub(super) fn render_frame_root_glyphs(
     }
     // Only the frame's own glyphs and cursors decide its pixels: no raster,
     // gradient, animated cursor, pointer highlight or running effect.
+    // The cursor's light is the renderer's before any root is painted or
+    // reused: a child frame drawn after a reused root reads it too.
+    renderer.cursor_light = render.cursor.light;
     let stable = raster.is_none()
         && bg_gradient.is_none()
         && root_animated_cursor.is_none()
@@ -61,13 +64,13 @@ pub(super) fn render_frame_root_glyphs(
         && hovered_scroll_bar.is_none()
         && render.overlays.idle_dim.current_alpha == 0.0
         && super::retained_scroll::static_body_effects(&renderer.effects)
-        && !render.compositor.renderer_effects.needs_redraw();
+        && !render.compositor.renderer_effects.needs_redraw()
+        && !render.cursor.light_fading();
     let key = romacs_renderer_wgpu::SnapshotSize::new(renderer.width(), renderer.height()).and_then(|size| {
-        super::retained_root::key(frame, cursor_visible, size, renderer.scale_factor(), stable)
+        super::retained_root::key(frame, cursor_visible, (&renderer.cursor_look, renderer.cursor_light), size, renderer.scale_factor(), stable)
     });
     let repeats = render.compositor.child_frames.has_animation_activity();
     super::retained_root::paint(renderer, render, surface_view, present_mapping, key, repeats, |renderer, render, view| {
-        renderer.cursor_light = render.cursor.light;
         renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
             renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
             renderer.render_frame_glyphs(

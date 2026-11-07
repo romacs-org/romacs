@@ -60,7 +60,7 @@ An editable buffer's cursor is `romacs-cursor-edit-type', a read-only or
 special buffer's `romacs-cursor-view-type'."
   :global t
   :group 'romacs-cursor-shape
-  (dolist (hook '(after-change-major-mode-hook read-only-mode-hook))
+  (dolist (hook '(after-change-major-mode-hook read-only-mode-hook view-mode-hook))
     (if romacs-cursor-shape-mode
         (add-hook hook #'romacs-cursor--shape)
       (remove-hook hook #'romacs-cursor--shape)))

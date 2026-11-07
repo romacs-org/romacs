@@ -2116,6 +2116,7 @@ impl GuiFrameWindowManager {
             }
             let winit_id = native.window.id();
             let surface_state = native.surface_state();
+            window_state.render.cursor.seed_focus(native.window.has_focus());
             self.primary_winit_id = Some(winit_id);
             window_state.lifecycle = FrameLifecycle::Active {
                 native,
@@ -2348,6 +2349,7 @@ impl GuiFrameWindowManager {
                         )
                         .expect("native surface dimensions have finite logical extents"),
                     );
+                    render.cursor.seed_focus(window.has_focus());
                     self.windows.insert(
                         FrameKey::Adopted(req.emacs_frame_id),
                         GuiFrameWindowState {
@@ -2794,6 +2796,22 @@ impl GuiFrameWindowManager {
     ) {
         self.for_each_top_level_window_mut(|window_state| {
             window_state.render.compositor.child_frame_motion = specs;
+        });
+    }
+
+    /// End every running pane morph of every top-level window, so its panes
+    /// show where the presentation puts them; repaint the windows where one
+    /// ran.
+    pub(super) fn settle_top_level_pane_layouts(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            if window_state.render.compositor.layout.wants_frames() {
+                window_state.render.compositor.layout =
+                    crate::render_thread::frame_compositor::layout_driver::LayoutDriver::Settled;
+                window_state.render.compositor.interaction_stale = true;
+                window_state.render.compositor.current_scene_generation =
+                    crate::render_thread::frame_state::next_scene_generation();
+                window_state.render.mark_dirty();
+            }
         });
     }
 

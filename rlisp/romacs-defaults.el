@@ -259,8 +259,8 @@ session's standard state."
   (mapc #'custom-reevaluate-setting romacs-defaults--session-options)
   ;; Less motion when the desktop asks for it, once, when idle: an
   ;; accessibility setting, so -Q follows it too.
-  (when (fboundp 'romacs-motion-follow-desktop)
-    (run-with-idle-timer 1 nil #'romacs-motion-follow-desktop))
+  (when (fboundp 'romacs-motion--follow-desktop)
+    (run-with-idle-timer 1 nil #'romacs-motion--follow-desktop))
   (unless quick
     (put 'romacs-defaults-mode 'standard-value '(t))
     (romacs-defaults-mode 1)))

@@ -125,10 +125,12 @@ fn reduced_motion_follows_the_desktop_unless_the_user_chose() {
     let follow = |vm: &mut Vm, desktop: &str, chosen: &str| printed(vm, &format!("(progn
       (setq romacs-motion-reduced nil) (put 'romacs-motion-reduced 'customized-value {chosen})
       (cl-letf (((symbol-function 'romacs-motion--desktop-reduced-p) (lambda () {desktop})))
-        (romacs-motion-follow-desktop))
+        (romacs-motion--follow-desktop))
       romacs-motion-reduced)"));
     assert_eq!(follow(&mut vm, "nil", "nil"), "nil");
     assert_eq!(follow(&mut vm, "t", "nil"), "t");
     assert!(sent.borrow().last().unwrap().motion.reduced, "it reaches the renderer");
     assert_eq!(follow(&mut vm, "t", "'(nil)"), "nil", "the user's own choice stands");
+    printed(&mut vm, "(setq romacs-motion-follow-desktop nil)");
+    assert_eq!(follow(&mut vm, "t", "nil"), "nil", "an init file's nil stands with following off");
 }

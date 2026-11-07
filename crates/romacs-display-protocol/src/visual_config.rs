@@ -80,21 +80,6 @@ pub struct MotionConfig {
     pub reduced: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CursorSizeTransitionConfig {
-    pub enabled: bool,
-    pub duration: Duration,
-}
-
-impl Default for CursorSizeTransitionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            duration: Duration::from_millis(150),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BufferTransitionConfig {
     pub enabled: bool,
@@ -161,7 +146,6 @@ pub struct VisualConfig {
     #[serde(flatten)]
     pub effects: EffectsConfig,
     pub cursor_motion: CursorMotionConfig,
-    pub cursor_size_transition: CursorSizeTransitionConfig,
     #[serde(default)]
     pub cursor_look: CursorLookConfig,
     #[serde(default)]
@@ -214,7 +198,6 @@ impl Default for VisualConfig {
         Self {
             effects: EffectsConfig::default(),
             cursor_motion: CursorMotionConfig::default(),
-            cursor_size_transition: CursorSizeTransitionConfig::default(),
             cursor_look: CursorLookConfig::default(),
             motion: MotionConfig::default(),
             buffer_transition: BufferTransitionConfig::default(),
@@ -254,10 +237,6 @@ crate::effect_schema!(CursorLookConfig {
     morph: Duration,
 });
 crate::effect_schema!(MotionConfig { reduced: bool });
-crate::effect_schema!(CursorSizeTransitionConfig {
-    enabled: bool,
-    duration: Duration
-});
 crate::effect_schema!(BufferTransitionConfig {
     enabled: bool,
     duration: Duration,

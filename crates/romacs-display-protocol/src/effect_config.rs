@@ -1964,9 +1964,6 @@ macro_rules! effect_schema_table {
                 "cursor_motion" => Some(crate::visual_config::CursorMotionConfig::PROPERTIES),
                 "cursor_look" => Some(crate::visual_config::CursorLookConfig::PROPERTIES),
                 "motion" => Some(crate::visual_config::MotionConfig::PROPERTIES),
-                "cursor_size_transition" => {
-                    Some(crate::visual_config::CursorSizeTransitionConfig::PROPERTIES)
-                }
                 "buffer_transition" => Some(crate::visual_config::BufferTransitionConfig::PROPERTIES),
                 "scroll_transition" => Some(crate::visual_config::ScrollTransitionConfig::PROPERTIES),
                 "window_animations" => {

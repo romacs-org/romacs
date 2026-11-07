@@ -141,7 +141,7 @@ impl RenderQualityPolicy {
             QualityMode::Full => requested.clone(),
             QualityMode::SoftwareCompatibility => software_compat_visual_config(requested),
         };
-        let effective_visual_config = with_look_and_motion(chosen);
+        let effective_visual_config = with_motion(chosen);
         Self {
             profile,
             mode,
@@ -406,21 +406,10 @@ fn layer_animation_forced() -> Option<f32> {
     std::env::var("ROMACS_LAYER_ANIMATION").ok()?.parse().ok().filter(|slowdown: &f32| *slowdown >= 1.0)
 }
 
-/// CONFIG as the renderer runs it: a cursor look other than `plain' morphs
-/// between kinds through the cursor's size transition, in the look's time
-/// (none when motionless zeroed it); reduced motion (`romacs-motion-reduced',
-/// or the desktop's) is motionless.
-pub(super) fn with_look_and_motion(mut config: VisualConfig) -> VisualConfig {
-    if config.cursor_look.style != romacs_display_protocol::CursorLookStyle::Plain
-        && !config.cursor_look.morph.is_zero()
-    {
-        config.cursor_size_transition.enabled = true;
-        config.cursor_size_transition.duration = config.cursor_look.morph;
-    }
-    if config.motion.reduced {
-        config = motionless(config);
-    }
-    config
+/// CONFIG as the renderer runs it: under reduced motion
+/// (`romacs-motion-reduced', or the desktop's), motionless.
+pub(super) fn with_motion(config: VisualConfig) -> VisualConfig {
+    if config.motion.reduced { motionless(config) } else { config }
 }
 
 /// CONFIG with nothing moving: no glide, no morph, no transition, no window
@@ -428,7 +417,6 @@ pub(super) fn with_look_and_motion(mut config: VisualConfig) -> VisualConfig {
 /// so reduced motion and a software adapter cannot drift apart.
 fn motionless(mut config: VisualConfig) -> VisualConfig {
     config.cursor_motion.enabled = false;
-    config.cursor_size_transition.enabled = false;
     config.cursor_look.morph = std::time::Duration::ZERO;
     config.buffer_transition.enabled = false;
     config.scroll_transition.enabled = false;
