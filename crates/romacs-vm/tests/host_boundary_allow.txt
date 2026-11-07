@@ -39,8 +39,8 @@ crates/romacs-vm/src/gc.rs:321 std::env::var the collector's test mode (ROMACS_G
 crates/romacs-vm/src/gc.rs:322 std::env::var_os the collector's verify mode (ROMACS_GC_VERIFY): freed entries are poisoned, never reused; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs:323 std::env::var the collector's thread count for a test (ROMACS_GC_WORKERS): what a collection leaves is the same at any count; invisible to Lisp, read again on restore (Stress::rearm)
 crates/romacs-vm/src/gc.rs:324 std::env::var_os the collector's in-place stress mode (ROMACS_GC_INPLACE): stress collections free in place instead of moving; invisible to Lisp, read again on restore (Stress::rearm)
-crates/romacs-vm/src/gc.rs:1207 dynamic:saved collector: marks the saved values
-crates/romacs-vm/src/gc.rs:1322 dynamic:saved collector: forwards the saved values
+crates/romacs-vm/src/gc.rs:1213 dynamic:saved collector: marks the saved values
+crates/romacs-vm/src/gc.rs:1328 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/gc_check.rs:82 dynamic:saved verify's reference marker: the saved values are roots it reads again
 crates/romacs-vm/src/hash.rs:919 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)

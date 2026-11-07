@@ -1600,7 +1600,7 @@ pub struct Vm {
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
     doomed_finalizers: std::collections::VecDeque<Value>,
-    /// A collection ended since `post-gc-hook' last ran (`Vm::finalizer_runner').
+    /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.

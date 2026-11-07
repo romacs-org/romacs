@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "a50e0613bfbc2650df006025dd5e45e48dd64ebd9edae3015f2cafb31f238634",
+  "input_hash": "27a3cab3f8d5746db5bef6b92f1a2d2da1b9a69d3a30a262ad30a0723a7ad0ed",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -8406,9 +8406,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "When `post-gc-hook` runs",
-   "gnu": "`alloc.c:6022`, at the end of every `garbage_collect`, inside whatever allocated, with collection inhibited",
-   "romacs": "After an explicit `garbage-collect`, as GNU's, after its finalizers and with collection held; after an automatic collection, at the next safe point (`romacs--run-finalizers`: before a wait for input), as Romacs's finalizers run, since the engine may not enter Lisp there. Several automatic collections before that point run it once",
-   "why": "**Package-observable** only for counting runs of the hook, or a long computation that never waits",
+   "gnu": "`alloc.c:6022`, at the end of every `garbage_collect`, inside whatever allocated, with collection inhibited (`garbage-collect` there answers nil); a collection inside a finalizer runs its own hook before the outer one, `(hook fin-gc hook)`. The finalizers and the hook run in the allocating code's match data and current buffer, so one that searches or switches buffer changes them under that code",
+   "romacs": "After an explicit `garbage-collect`, as GNU's, after its finalizers; after an automatic collection, at the engine's next safe point; after one at a request boundary or under stress, at the next wait for input (`romacs--run-finalizers`). Several collections before that point run it once. Collection is not inhibited: a collection inside the run, in a finalizer or the hook, is an ordinary one that runs its own finalizers, and its hook is the run's, which runs once after the finalizers: `(fin-gc hook)`. The run keeps the match data and current buffer of the code it interrupted, as a process filter's caller does",
+   "why": "**Package-observable** for counting runs of the hook, or a hook that collects, searches or switches buffer. GNU's inhibition only stops the hook recursing; it leaves a long hook's allocation uncollected and `garbage-collect` there answering nil. One hook run per outer collection is simpler, and bounded without a hold. Running arbitrary Lisp at an allocation point in the allocating code's state is the hole of bug#63253: code that allocated finds its match data or buffer changed. Tests: `crates/romacs-vm/tests/garbage_collect.rs`, against pinned GNU",
    "symbols": [
     "post-gc-hook"
    ],

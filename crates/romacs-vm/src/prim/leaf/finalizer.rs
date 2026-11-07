@@ -9,14 +9,12 @@ impl Leaf<'_> {
         self.vm.finalizers.push(finalizer);
         finalizer
     }
-    /// Whether a collection ended since the last call: the caller, not a
-    /// later poll, now owns running `post-gc-hook' for it.
+    /// Whether `post-gc-hook' is due (`Vm::post_gc_hook_due'): the caller,
+    /// not a later poll, now owns running it.
     pub(crate) fn take_post_gc(&mut self) -> bool {
-        std::mem::take(&mut self.vm.post_gc_due)
-    }
-    /// alloc.c inhibit_garbage_collection, and its unwinding when not ON.
-    pub(crate) fn hold_collection(&mut self, on: bool) {
-        if on { self.vm.gc_holds += 1; } else { self.vm.gc_holds -= 1; }
+        let due = self.vm.post_gc_hook_due();
+        self.vm.post_gc_due = false;
+        due
     }
     /// run_finalizers' step: the function of the oldest doomed finalizer
     /// that has one, the finalizer emptied so that it never runs again, or

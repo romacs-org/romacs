@@ -85,14 +85,6 @@ fn take_post_gc(cx) {
     Ok(if cx.take_post_gc() { Value::TRUE } else { Value::NIL })
 }}
 
-// alloc.c inhibit_garbage_collection, for the length of `post-gc-hook':
-// non-nil ON holds collection, nil lets it go.
-defsubr! { name = "romacs--hold-collection", gnu = "alloc.c:5458", effect = Global,
-fn hold_collection(cx, on: Value) {
-    cx.hold_collection(on != Value::NIL);
-    Ok(Value::NIL)
-}}
-
 // Where the process's heap bytes are: a plist of the production
 // allocator's :platform-allocated and :platform-resident bytes
 // (`romacs_allocator::stats`, 0 where it keeps none), the arenas' :used,

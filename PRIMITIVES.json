@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e10090fe2cab644d21f21fd43c9e87c3007888caceb929f740d7bdcfb078e528",
+  "source_fingerprint": "39a56e61ce779914da1dc6764abc17cc132a6765c8418f0da92cf8945e79aa1d",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1432,
-  "parsed_vm2_only": 1432
+  "parsed_total": 1431,
+  "parsed_vm2_only": 1431
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3372,12 +3372,12 @@
   "memory-info": {
    "name": "memory-info",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:123"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:115"
   },
   "memory-use-counts": {
    "name": "memory-use-counts",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:137"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:129"
   },
   "memq": {
    "name": "memq",
@@ -4346,7 +4346,7 @@
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:102"
+   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:94"
   },
   "romacs--auto-save-1": {
    "name": "romacs--auto-save-1",
@@ -4567,11 +4567,6 @@
    "name": "romacs--gnutls-verify",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/gnutls.rs:30"
-  },
-  "romacs--hold-collection": {
-   "name": "romacs--hold-collection",
-   "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:90"
   },
   "romacs--host-minibuffer": {
    "name": "romacs--host-minibuffer",

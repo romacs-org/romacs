@@ -295,6 +295,120 @@ fn a_throw_from_the_hook_leaves_a_cleanup() {
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), expected, "candidate");
 }
 
+/// What pinned GNU and a fresh candidate print for CHECK after FORMS, each
+/// form at top level of its own.
+fn gnu_and_candidate(forms: &[&str], check: &str) -> (String, String) {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let printed = format!("(prin1 {check})");
+    let mut args = vec!["-Q", "--batch"];
+    for form in forms.iter().chain([&printed.as_str()]) {
+        args.extend(["--eval", form]);
+    }
+    let output = std::process::Command::new(oracle).args(args).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    for form in forms {
+        vm.eval_source(form).unwrap();
+    }
+    let candidate = vm.eval_source(check).unwrap().display().unwrap();
+    (String::from_utf8(output.stdout).unwrap(), candidate)
+}
+
+/// A collection inside `post-gc-hook' is an ordinary one (VM2-POST-GC):
+/// `garbage-collect' there collects and answers its rows, where GNU's
+/// inhibition answers nil; allocation there collects too; and the hook runs
+/// once for the collection that started it, the collections inside being
+/// its own. (GNU's runs again: what its first run allocated uncollected
+/// starts the next collection as the hook ends.)
+#[test]
+fn a_collection_inside_post_gc_hook_is_an_ordinary_one() {
+    let setup = "(progn (defvar hk-runs 0) (defvar hk-inner nil) (defvar hk-churned nil) \
+        (fset 'hk-churn (lambda () (let ((done gcs-done) (i 0)) \
+          (while (< i 3000000) (cons i nil) (setq i (1+ i))) (- gcs-done done)))) t)";
+    let check = "(let ((done gcs-done)) \
+          (setq post-gc-hook (list (lambda () (setq hk-runs (1+ hk-runs) \
+                                                    hk-inner (consp (garbage-collect)) \
+                                                    hk-churned (> (hk-churn) 0))))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (list hk-inner hk-churned hk-runs (> (- gcs-done done) 2)))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup], check);
+    assert!(gnu.starts_with("(nil nil "), "pinned GNU inhibits collection in the hook: {gnu}");
+    assert_eq!(candidate, "(t t 1 t)", "the candidate collects there, and runs the hook once");
+}
+
+/// A finalizer that a collection inside `post-gc-hook' dooms runs in that
+/// collection's own run, inside the hook, which still runs once; GNU's
+/// inhibited `garbage-collect' there dooms nothing, so it runs later.
+#[test]
+fn a_finalizer_doomed_inside_the_hook_runs_there() {
+    let setup = "(progn (defvar nh-log nil) (defvar nh-runs 0) (defvar nh-kept nil) t)";
+    // Made in a top-level form of its own, and kept only in NH-KEPT, which
+    // the hook drops: no register of the running evaluation holds it
+    // (VM2-GC-FINALIZER).
+    let made = "(progn (setq nh-kept (make-finalizer (lambda () (setq nh-log (cons (cons 'fin nh-runs) nh-log))))) nil)";
+    let check = "(progn \
+          (setq post-gc-hook (list (lambda () (setq nh-runs (1+ nh-runs)) \
+                                     (when (= nh-runs 1) \
+                                       (setq nh-kept nil) (garbage-collect) (setq nh-log (cons 'after-gc nh-log)))))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (list nh-runs (reverse nh-log)))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup, made], check);
+    // The finalizer logs the hook run it fell in: 1 is inside the first.
+    assert_eq!(gnu, "(1 (after-gc))", "pinned GNU runs no finalizer inside the hook");
+    assert_eq!(candidate, "(1 ((fin . 1) after-gc))", "candidate");
+}
+
+/// A collection inside a run of finalizers, here a finalizer's own
+/// `garbage-collect', runs as an ordinary one, but its `post-gc-hook' is the
+/// run's, which runs once after the finalizers; GNU runs it again inside the
+/// finalizer first.
+#[test]
+fn a_collection_in_a_finalizer_leaves_the_hook_to_its_run() {
+    let setup = "(progn (defvar nf-log nil) (fset 'nf-note (lambda (x) (setq nf-log (cons x nf-log)))) t)";
+    // A top-level form of its own: a register of the running one keeps what
+    // it held alive (VM2-GC-FINALIZER).
+    let doom = "(progn (make-finalizer (lambda () (nf-note (if (consp (garbage-collect)) 'fin-gc 'fin-nil)))) nil)";
+    let check = "(progn (setq post-gc-hook '((lambda () (nf-note 'hook)))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (reverse nf-log))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup, doom], check);
+    assert_eq!(gnu, "(hook fin-gc hook)", "pinned GNU");
+    assert_eq!(candidate, "(fin-gc hook)", "candidate");
+}
+
+/// Finalizers and `post-gc-hook' end an automatic collection inside
+/// whatever code allocated, which keeps its match data and current buffer
+/// (VM2-POST-GC), as a process filter's caller does; GNU's hook overwrites
+/// both.
+#[test]
+fn post_gc_work_keeps_the_match_data_and_buffer_it_interrupted() {
+    let setup = "(progn (set-buffer (get-buffer-create \"md-subject\")) (insert \"abc\") (goto-char 1) \
+        (re-search-forward \"b\") \
+        (defvar md-finalized nil) \
+        (make-finalizer (lambda () (setq md-finalized t) (string-match \"z\" \"xz\") (set-buffer (get-buffer-create \" md-other\")))) \
+        (setq post-gc-hook (list (lambda () (string-match \"q\" \"aq\") (set-buffer (get-buffer-create \" md-other\"))))) \
+        nil)";
+    let automatic = "(let ((buffer (current-buffer)) (data (match-data)) (done gcs-done) (i 0)) \
+          (while (< i 3000000) (cons i nil) (setq i (1+ i))) \
+          (setq post-gc-hook nil) \
+          (list (> gcs-done done) md-finalized (eq buffer (current-buffer)) (equal data (match-data))))";
+    // And after an explicit `garbage-collect', whose caller GNU's hook
+    // leaves in its buffer with its match data.
+    let explicit = "(progn (set-buffer (get-buffer-create \"md-subject\")) (goto-char 1) (re-search-forward \"b\") \
+          (setq post-gc-hook (list (lambda () (string-match \"q\" \"aq\") (set-buffer (get-buffer-create \" md-other\"))))) \
+          (let ((buffer (current-buffer)) (data (match-data))) \
+            (garbage-collect) \
+            (setq post-gc-hook nil) \
+            (list (eq buffer (current-buffer)) (equal data (match-data)))))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup], &format!("(list {automatic} {explicit})"));
+    assert_eq!(gnu, "((t t nil nil) (nil nil))", "pinned GNU");
+    assert_eq!(candidate, "((t t t t) (t t))", "candidate");
+}
+
 /// `gcs-done' and `gc-elapsed' count every collection, `garbage-collect'
 /// and automatic ones (alloc.c:6004); `garbage-collect-maybe' collects only
 /// past 1/FACTOR of the automatic trigger's allocation (alloc.c:6110).

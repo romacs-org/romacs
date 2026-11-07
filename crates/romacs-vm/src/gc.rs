@@ -674,15 +674,21 @@ impl Vm {
             _ => true,
         }
     }
-    /// `romacs--run-finalizers' when a collection left doomed finalizers or a
-    /// `post-gc-hook' to run, and the prelude defines it. Lisp runs them, never
-    /// the collector.
-    pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
+    /// Whether a collection ended since `post-gc-hook' last ran and the hook
+    /// has a function to run; with none, the collection needs no run. The
+    /// one place that decides, for the runner's callers and its own take.
+    pub(crate) fn post_gc_hook_due(&mut self) -> bool {
         if self.post_gc_due {
             let hook = self.slot("post-gc-hook");
             self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
         }
-        if self.doomed_finalizers.is_empty() && !self.post_gc_due { return None; }
+        self.post_gc_due
+    }
+    /// `romacs--run-finalizers' when a collection left doomed finalizers or a
+    /// `post-gc-hook' to run, and the prelude defines it. Lisp runs them, never
+    /// the collector.
+    pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
+        if self.doomed_finalizers.is_empty() && !self.post_gc_hook_due() { return None; }
         let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
         let slot = runner.payload() as usize - 1;
         (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
