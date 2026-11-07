@@ -11,15 +11,7 @@ fn t0() -> romacs_display_protocol::frame_time::EventTime {
 // Helper: create a CursorTarget with given position/size/style
 // ---------------------------------------------------------------
 fn make_target(x: f32, y: f32, w: f32, h: f32, style: CursorStyle) -> CursorTarget {
-    CursorTarget {
-        window_id: 1,
-        x,
-        y,
-        width: w,
-        height: h,
-        style,
-        frame_id: 0,
-    }
+    CursorTarget::new(1, (x, y, w, h), style, 0)
 }
 
 #[test]
@@ -1551,7 +1543,7 @@ fn cursor_target_clone() {
     let cloned = target.clone();
     assert_eq!(cloned.x, 10.0);
     assert_eq!(cloned.y, 20.0);
-    assert_eq!(cloned.width, 30.0);
+    assert_eq!((cloned.width, cloned.cell), (2.0, 30.0), "a bar shows its thickness on its cell");
     assert_eq!(cloned.height, 40.0);
     assert_eq!(cloned.style, CursorStyle::Bar(2.0));
     assert_eq!(cloned.window_id, 1);
@@ -1858,4 +1850,44 @@ fn tick_size_animation_reaches_its_target_at_exactly_its_duration() {
     assert_eq!(state.current_w, 60.0);
     assert_eq!(state.current_h, 100.0);
     assert!(!state.size_animating);
+}
+
+#[test]
+fn the_focus_light_fades_over_the_morph_and_settles() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.1;
+    assert!(!state.tick_light(at), "lit and focused: nothing to do");
+    state.set_focused(false, at);
+    assert!(state.is_animating(), "a fade keeps frames coming");
+    state.tick_light(at.plus(Duration::from_millis(50)));
+    assert!((state.light - 0.5).abs() < 1e-3, "{}", state.light);
+    // Focus back midway fades up from where it is.
+    state.set_focused(true, at.plus(Duration::from_millis(50)));
+    state.tick_light(at.plus(Duration::from_millis(100)));
+    assert!((state.light - 0.75).abs() < 1e-3, "{}", state.light);
+    state.tick_light(at.plus(Duration::from_millis(200)));
+    assert_eq!(state.light, 1.0);
+    assert!(!state.is_animating());
+    // Without a morph the light changes at once.
+    state.size_transition_enabled = false;
+    state.set_focused(false, at.plus(Duration::from_millis(300)));
+    state.tick_light(at.plus(Duration::from_millis(300)));
+    assert_eq!(state.light, 0.0);
+}
+
+#[test]
+fn a_bar_becoming_a_block_widens_through_the_morph() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.1;
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::Bar(2.0)), at);
+    assert_eq!(state.current_w, 2.0, "a bar shows at its thickness");
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    state.tick_size_animation(at.plus(Duration::from_millis(50)));
+    assert!(state.current_w > 2.0 && state.current_w < 10.0, "midway: {}", state.current_w);
+    state.tick_size_animation(at.plus(Duration::from_millis(100)));
+    assert_eq!(state.current_w, 10.0);
 }

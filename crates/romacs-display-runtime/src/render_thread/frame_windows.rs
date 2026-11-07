@@ -2052,15 +2052,7 @@ impl GuiFrameWindowManager {
                 cursor.ascent,
                 (cursor.x, cursor.y, cursor.width, cursor.height),
             );
-            CursorTarget {
-                window_id: cursor.window_id.get(),
-                x,
-                y,
-                width,
-                height,
-                style: cursor.style,
-                frame_id: emacs_frame_id,
-            }
+            CursorTarget::new(cursor.window_id.get(), (x, y, width, height), cursor.style, emacs_frame_id)
         })
     }
 

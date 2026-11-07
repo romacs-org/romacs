@@ -25,6 +25,7 @@ mod composition_ring;
 pub use composition_ring::CompositionRing;
 mod content;
 mod cursor_effects;
+mod cursor_look;
 mod cursor_presentation;
 mod deform;
 mod draw;
@@ -233,6 +234,11 @@ pub struct WgpuRenderer {
 
     // All visual effect configurations
     pub effects: crate::effect_config::EffectsConfig,
+    /// How cursors are drawn (`romacs-cursor-look-*').
+    pub cursor_look: romacs_display_protocol::CursorLookConfig,
+    /// The frame's focus light for its cursor: 1 focused, 0 not, between
+    /// while it fades; the compositor sets it before each frame.
+    pub cursor_light: f32,
     /// Grouped per-effect animation state (transferred by frame-effects swaps)
     pub(super) fx: EffectsState,
     /// Free-running animation clocks (transferred with preserve-if-unset semantics)
@@ -1192,6 +1198,8 @@ impl WgpuRenderer {
             height,
             scale_factor,
             effects: crate::effect_config::EffectsConfig::default(),
+            cursor_look: romacs_display_protocol::CursorLookConfig::default(),
+            cursor_light: 1.0,
             fx: EffectsState::default(),
             clocks: EffectClocks::default(),
             ambient: AmbientClocks::default(),

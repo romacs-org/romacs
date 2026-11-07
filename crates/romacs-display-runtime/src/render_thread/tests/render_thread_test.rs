@@ -344,7 +344,10 @@ fn backend_recovery_rederives_quality_from_the_unchanged_request() {
     let requested = app.requested_visual_config.clone();
 
     app.install_backend_profile(RenderBackendProfile::hardware());
-    assert_eq!(app.render_policy.effective_visual_config(), &requested);
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_look_and_motion(requested.clone())
+    );
     assert_eq!(
         app.comms.capabilities.frame_shader_availability(),
         FrameShaderAvailability::Available
@@ -364,7 +367,10 @@ fn backend_recovery_rederives_quality_from_the_unchanged_request() {
     );
 
     app.install_backend_profile(RenderBackendProfile::hardware());
-    assert_eq!(app.render_policy.effective_visual_config(), &requested);
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_look_and_motion(requested.clone())
+    );
     assert_eq!(
         app.comms.capabilities.frame_shader_availability(),
         FrameShaderAvailability::Available

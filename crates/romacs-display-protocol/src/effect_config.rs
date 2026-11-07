@@ -126,6 +126,7 @@ symbol_property!(crate::TransitionEffect);
 symbol_property!(crate::TransitionAxisPreference);
 symbol_property!(crate::TransitionDirection);
 symbol_property!(crate::CursorAnimStyle);
+symbol_property!(crate::CursorLookStyle);
 symbol_property!(crate::window_animation::MotionKind);
 
 /// One property, as a customization widget would need it.
@@ -1961,6 +1962,8 @@ macro_rules! effect_schema_table {
                 // The behavioural slots are not fields of `EffectsConfig`; they
                 // sit beside it on `VisualConfig`.
                 "cursor_motion" => Some(crate::visual_config::CursorMotionConfig::PROPERTIES),
+                "cursor_look" => Some(crate::visual_config::CursorLookConfig::PROPERTIES),
+                "motion" => Some(crate::visual_config::MotionConfig::PROPERTIES),
                 "cursor_size_transition" => {
                     Some(crate::visual_config::CursorSizeTransitionConfig::PROPERTIES)
                 }

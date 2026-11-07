@@ -14,10 +14,6 @@ use super::super::glyph_atlas::{
 use super::super::vertex::{CoverageGlyphVertex, GlyphVertex, RectVertex, RoundedRectVertex};
 use super::GlyphRenderStats;
 use super::WgpuRenderer;
-use super::cursor_presentation::{
-    CursorColorPolicy, CursorShape, FilledBoxPresentation, PresentedCursorPaint,
-    ResolvedCursorPaint,
-};
 use super::frame_pass::{BoxSpan, collect_frame_box_spans};
 use super::glyphs::{
     build_coverage_vertices, coverage_background_color, coverage_foreground_color,
@@ -28,9 +24,7 @@ use super::layer_media::{MediaQuad, clipped_media_rect, textured_quad_vertices_u
 use cosmic_text::SubpixelBin;
 use romacs_display_protocol::DeviceScale;
 use romacs_display_protocol::face::{Face, FaceAttributes, UnderlineStyle};
-use romacs_display_protocol::frame_glyphs::{
-    CursorStyle, FrameGlyph, FrameGlyphBuffer, MaterializedFaceData,
-};
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer, MaterializedFaceData};
 use romacs_display_protocol::types::FaceId;
 use romacs_display_protocol::types::Rect;
 use romacs_display_protocol::types::{AnimatedCursor, Color};
@@ -523,131 +517,37 @@ impl WgpuRenderer {
             ..animated
         });
 
-        // One entry per window (selected window's entry is `active`); draw each.
+        // One entry per window (the selected window's is `active'): every
+        // cursor draws through the emitter the frame pass uses, so a child
+        // frame's looks and moves as the root frame's does.
+        let mut behind_text_cursor_vertices: Vec<RectVertex> = Vec::new();
+        let mut cursor_glow_vertices = Vec::new();
         for cursor in &frame.window_cursors {
-            if !cursor_visible && !cursor.style.is_hollow() {
-                continue;
-            }
-
-            let (target_x, target_y, target_width, target_height) = frame.cursor_draw_rect(
+            let cursor_effects = frame.effective_window_cursor_effects(cursor.window_id, &self.effects).clone();
+            let (x, y, width, height) = frame.cursor_draw_rect(
                 cursor.slot_id,
                 cursor.style,
                 cursor.ascent,
                 (cursor.x, cursor.y, cursor.width, cursor.height),
             );
-            let destination = Rect::new(
-                target_x + offset_x,
-                target_y + offset_y,
-                target_width,
-                target_height,
+            self.emit_cursor_visual(
+                cursor.window_id,
+                (x + offset_x, y + offset_y, width, height),
+                cursor.slot_id,
+                cursor.style,
+                &cursor.color,
+                cursor.cursor_fg,
+                &cursor_effects,
+                cursor_visible,
+                &animated_cursor_with_offset,
+                cursor.active,
+                &mut cursor_bg_vertices,
+                &mut behind_text_cursor_vertices,
+                &mut cursor_glow_vertices,
+                &mut cursor_vertices,
             );
-            let (gx, gy, gw, gh) = if !cursor.style.is_hollow() {
-                if let Some(ref ac) = animated_cursor_with_offset {
-                    if ac.window_id == cursor.window_id {
-                        (ac.x, ac.y, ac.width, ac.height)
-                    } else {
-                        (
-                            destination.x,
-                            destination.y,
-                            destination.width,
-                            destination.height,
-                        )
-                    }
-                } else {
-                    (
-                        destination.x,
-                        destination.y,
-                        destination.width,
-                        destination.height,
-                    )
-                }
-            } else {
-                (
-                    destination.x,
-                    destination.y,
-                    destination.width,
-                    destination.height,
-                )
-            };
-
-            match cursor.style {
-                CursorStyle::FilledBox => {
-                    let paint = PresentedCursorPaint::resolve(
-                        ResolvedCursorPaint::new(cursor.color, cursor.cursor_fg),
-                        CursorColorPolicy::Inherit,
-                        self.frame_sample.presentation_time(),
-                    );
-                    let presentation = FilledBoxPresentation::resolve(
-                        cursor.window_id,
-                        cursor.slot_id,
-                        destination,
-                        animated_cursor_with_offset.as_ref(),
-                        paint,
-                    );
-                    match presentation {
-                        FilledBoxPresentation::Settled { rect, .. } => self.add_rect(
-                            &mut cursor_bg_vertices,
-                            rect.x,
-                            rect.y,
-                            rect.width,
-                            rect.height,
-                            &paint.body_background,
-                        ),
-                        FilledBoxPresentation::InFlight { shape, .. } => match shape {
-                            CursorShape::Rect(rect) => self.add_rect(
-                                &mut cursor_bg_vertices,
-                                rect.x,
-                                rect.y,
-                                rect.width,
-                                rect.height,
-                                &paint.body_background,
-                            ),
-                            CursorShape::Quad(corners) => self.add_quad(
-                                &mut cursor_bg_vertices,
-                                &corners,
-                                &paint.body_background,
-                            ),
-                        },
-                    }
-                    if cursor.active {
-                        cursor_inverse_video = presentation.inverse_video();
-                    }
-                }
-                CursorStyle::Bar(bar_w) => {
-                    self.add_rect(&mut cursor_vertices, gx, gy, bar_w, gh, &cursor.color);
-                }
-                CursorStyle::Hbar(hbar_h) => {
-                    self.add_rect(
-                        &mut cursor_vertices,
-                        gx,
-                        gy + gh - hbar_h,
-                        gw,
-                        hbar_h,
-                        &cursor.color,
-                    );
-                }
-                CursorStyle::Hollow => {
-                    self.add_rect(&mut cursor_vertices, gx, gy, gw, 1.0, &cursor.color);
-                    self.add_rect(
-                        &mut cursor_vertices,
-                        gx,
-                        gy + gh - 1.0,
-                        gw,
-                        1.0,
-                        &cursor.color,
-                    );
-                    self.add_rect(&mut cursor_vertices, gx, gy, 1.0, gh, &cursor.color);
-                    self.add_rect(
-                        &mut cursor_vertices,
-                        gx + gw - 1.0,
-                        gy,
-                        1.0,
-                        gh,
-                        &cursor.color,
-                    );
-                }
-            }
         }
+        cursor_inverse_video = self.active_cursor_inverse_video(frame, cursor_visible, animated_cursor.as_ref());
 
         // --- Step 2: Collect text glyphs (with overstrike and composed) ---
         let mut mask_data: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])> = Vec::new();
@@ -1435,6 +1335,15 @@ impl WgpuRenderer {
                 pass.set_vertex_buffer(0, upload.buffer_slice());
                 pass.draw(0..cursor_bg_vertices.len() as u32, 0..1);
             }
+            if let Some(upload) =
+                self.arenas
+                    .rect
+                    .upload(&self.device, &self.queue, &behind_text_cursor_vertices)
+            {
+                pass.set_pipeline(rect_pl);
+                pass.set_vertex_buffer(0, upload.buffer_slice());
+                pass.draw(0..behind_text_cursor_vertices.len() as u32, 0..1);
+            }
 
             // --- Draw rounded box fills ---
             if let Some(upload) =
@@ -1841,6 +1750,16 @@ impl WgpuRenderer {
             }
 
             // --- Draw cursors and borders (on top of everything) ---
+            // The light around lit cursors, with them (`draw_cursor_glow').
+            if let Some(upload) =
+                self.arenas
+                    .rounded
+                    .upload(&self.device, &self.queue, &cursor_glow_vertices)
+            {
+                pass.set_pipeline(rounded_rect_pl);
+                pass.set_vertex_buffer(0, upload.buffer_slice());
+                pass.draw(0..cursor_glow_vertices.len() as u32, 0..1);
+            }
             if let Some(upload) =
                 self.arenas
                     .rect

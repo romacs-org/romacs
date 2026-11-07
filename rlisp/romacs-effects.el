@@ -405,6 +405,47 @@ cells, up to 1.6 times it."
   :type 'boolean
   :group 'romacs-cursor)
 
+(defcustom romacs-cursor-look-style 'soft
+  "How the cursor is drawn.
+
+`soft' lights the selected window's cursor with a glow while the frame
+has focus, shows an unselected or unfocused cursor as a faint ghost
+(`romacs-cursor-look-ghost-opacity'), and morphs between kinds, a bar
+becoming a block, in `romacs-cursor-look-morph'.  `plain' draws GNU's
+shapes, unlit."
+  :type '(choice (const :tag "Soft: lit, with an eased morph" soft)
+                 (const :tag "Plain: GNU's shapes" plain))
+  :group 'romacs-cursor)
+
+(defcustom romacs-cursor-look-glow-reach 6.0
+  "How far, in pixels, the glow around a lit bar or hbar cursor reaches."
+  :type 'number
+  :group 'romacs-cursor)
+
+(defcustom romacs-cursor-look-glow-opacity 0.35
+  "How strong the glow around a lit cursor is, from 0.0 (none) to 1.0."
+  :type 'number
+  :group 'romacs-cursor)
+
+(defcustom romacs-cursor-look-ghost-opacity 0.35
+  "How visible an unselected window's or an unfocused frame's cursor is,
+from 0.0 (not at all) to 1.0 (as the selected one)."
+  :type 'number
+  :group 'romacs-cursor)
+
+(defcustom romacs-cursor-look-morph 0.12
+  "Seconds a change of cursor kind and a focus change take to show."
+  :type 'number
+  :group 'romacs-cursor)
+
+(defcustom romacs-motion-reduced nil
+  "Whether to turn every animation off: the cursor's glide and morph,
+buffer and scroll transitions, window and layer animations, and animated
+effects.  Set from the desktop's own setting at startup when it asks for
+less motion."
+  :type 'boolean
+  :group 'romacs)
+
 (defcustom romacs-cursor-size-transition-enabled nil
   "Whether the cursor animates when it changes shape or size.
 This is the change from a box to a bar when entering `overwrite-mode', or
@@ -558,11 +599,35 @@ backgrounds.  Each is one option holding that effect's properties."
   :group 'romacs
   :prefix "romacs-effect-")
 
+;;;; The desktop's motion
+
+(defun romacs-motion--desktop-reduced-p ()
+  "Whether the desktop asks for less motion: GNOME's and GTK's
+`enable-animations' turned off."
+  (and (executable-find "gsettings")
+       (equal (car (ignore-errors
+                     (process-lines "gsettings" "get" "org.gnome.desktop.interface"
+                                    "enable-animations")))
+              "false")))
+
+(defun romacs-motion-follow-desktop ()
+  "Reduce motion when the desktop asks for it and the user has not chosen.
+The user's choice is `romacs-motion-reduced' saved, customized, or set
+non-nil."
+  (unless (or romacs-motion-reduced
+              (get 'romacs-motion-reduced 'saved-value)
+              (get 'romacs-motion-reduced 'customized-value))
+    (when (romacs-motion--desktop-reduced-p)
+      ;; Not `setopt': its macro autoloads cus-edit, which loads cus-start
+      ;; again where the session's world is being built.  The watcher
+      ;; reaches the renderer either way.
+      (set-default 'romacs-motion-reduced t))))
+
 ;;;; Reaching the renderer
 
 (defconst romacs-effects--behavioural
   '(window-open window-close window-resize window-movement window-animations
-    cursor-motion cursor-size-transition buffer-transition scroll-transition
+    cursor-motion cursor-size-transition cursor-look motion buffer-transition scroll-transition
     child-frame-open child-frame-close child-frame-movement child-frame-resize
     child-frame-animations)
   "The effects whose properties are written out above, one option each.")

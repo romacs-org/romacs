@@ -1095,6 +1095,7 @@ impl RenderApp {
         self.effects = effective.effects.clone();
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.effects = self.effects.clone();
+            renderer.cursor_look = effective.cursor_look.clone();
         }
         self.frame_windows
             .sync_top_level_cursor_config(&self.cursor_defaults, true);

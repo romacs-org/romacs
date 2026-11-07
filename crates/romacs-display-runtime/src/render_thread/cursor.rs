@@ -14,11 +14,27 @@ pub(super) struct CursorTarget {
     pub(super) window_id: i64,
     pub(super) x: f32,
     pub(super) y: f32,
+    /// The width the cursor shows at (`CursorTarget::new`): a bar's
+    /// thickness, else its cell's, so a change of kind is a change of width
+    /// the size transition morphs.
     pub(super) width: f32,
+    /// The width of the cell it stands on, the glide's measure of distance.
+    pub(super) cell: f32,
     pub(super) height: f32,
     pub(super) style: CursorStyle,
     /// Which frame owns this cursor (0 = root frame, non-zero = child frame_id)
     pub(super) frame_id: u64,
+}
+
+impl CursorTarget {
+    /// A cursor of STYLE on the cell at X, Y, CELL by HEIGHT.
+    pub(super) fn new(window_id: i64, (x, y, cell, height): (f32, f32, f32, f32), style: CursorStyle, frame_id: u64) -> Self {
+        let width = match style {
+            CursorStyle::Bar(thickness) => thickness.min(cell),
+            _ => cell,
+        };
+        Self { window_id, x, y, width, cell, height, style, frame_id }
+    }
 }
 
 /// Per-corner spring state for the 4-corner cursor trail animation.
@@ -90,6 +106,13 @@ pub(super) struct CursorState {
     pub(super) size_target_w: f32,
     pub(super) size_target_h: f32,
     pub(super) size_anim_start: romacs_display_protocol::frame_time::EventTime,
+
+    // The frame's focus as its cursor shows it (`romacs-cursor-look'): 1
+    // focused, 0 not, eased between over the size transition's time.
+    pub(super) light: f32,
+    light_from: f32,
+    focused: bool,
+    focus_since: romacs_display_protocol::frame_time::EventTime,
 }
 
 impl CursorState {
@@ -137,6 +160,10 @@ impl CursorState {
             size_target_w: 0.0,
             size_target_h: 0.0,
             size_anim_start: at,
+            light: 1.0,
+            light_from: 1.0,
+            focused: true,
+            focus_since: at,
         }
     }
 }
@@ -207,6 +234,16 @@ impl CursorState {
         let same_window = self.target.as_ref().is_some_and(|old| {
             old.window_id == new_target.window_id && old.frame_id == new_target.frame_id
         });
+        // A change of kind where the cursor stands (a bar becoming a block)
+        // is the size transition's morph alone: the glide does not also
+        // reshape it, or the two would pull the width between them.
+        let reshaped = self.size_transition_enabled
+            && self.target.as_ref().is_some_and(|old| {
+                same_window
+                    && (old.x - new_target.x).abs() <= 0.5
+                    && (old.y - new_target.y).abs() <= 0.5
+                    && old.style != new_target.style
+            });
         let target_moved = self.target.as_ref().is_none_or(|old| {
             (old.x - new_target.x).abs() > 0.5
                 || (old.y - new_target.y).abs() > 0.5
@@ -214,10 +251,12 @@ impl CursorState {
                 || (old.height - new_target.height).abs() > 0.5
         });
 
-        if !had_target || !self.anim_enabled {
+        if !had_target || !self.anim_enabled || reshaped {
             self.current_x = new_target.x;
             self.current_y = new_target.y;
-            self.current_w = new_target.width;
+            if !reshaped {
+                self.current_w = new_target.width;
+            }
             self.current_h = new_target.height;
             self.animating = false;
             let corners = Self::target_corners(&new_target);
@@ -304,7 +343,35 @@ impl CursorState {
     }
 
     pub(super) fn is_animating(&self) -> bool {
-        self.animating || self.size_animating
+        self.animating || self.size_animating || self.light != self.light_target()
+    }
+
+    fn light_target(&self) -> f32 {
+        if self.focused { 1.0 } else { 0.0 }
+    }
+
+    /// The frame gained or lost focus AT: its cursor's light fades from
+    /// where it is toward lit or unlit.
+    pub(super) fn set_focused(&mut self, focused: bool, at: romacs_display_protocol::frame_time::EventTime) {
+        if focused != self.focused {
+            self.light_from = self.light;
+            self.focused = focused;
+            self.focus_since = at;
+        }
+    }
+
+    /// Advance the focus light to AT; whether it changed (needs redraw).
+    pub(super) fn tick_light(&mut self, at: romacs_display_protocol::frame_time::EventTime) -> bool {
+        let target = self.light_target();
+        let next = if !self.size_transition_enabled || self.size_transition_duration <= 0.0 {
+            target
+        } else {
+            let t = (at.saturating_since(self.focus_since).as_secs_f32() / self.size_transition_duration).min(1.0);
+            self.light_from + (target - self.light_from) * t
+        };
+        let changed = next != self.light;
+        self.light = next;
+        changed
     }
 
     /// Point each corner's spring at NEW's matching corner, with its own
@@ -324,7 +391,7 @@ impl CursorState {
         let corners = Self::target_corners(new);
         let dx = (new.x + new.width / 2.0) - (self.current_x + self.current_w / 2.0);
         let dy = (new.y + new.height / 2.0) - (self.current_y + self.current_h / 2.0);
-        let cells = (dx / new.width.max(1.0), dy / new.height.max(1.0));
+        let cells = (dx / new.cell.max(1.0), dy / new.height.max(1.0));
         let short = neovide && same_window && cells.0.abs() <= 2.0 + f32::EPSILON
             && cells.1.abs() <= 1.0 + f32::EPSILON;
         let durations = if short {

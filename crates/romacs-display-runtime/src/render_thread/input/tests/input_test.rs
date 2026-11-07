@@ -1594,15 +1594,7 @@ fn nested_child_ime_cursor_area_uses_presented_root_relative_placement() {
     set_test_frame_placement(&mut nested, 0x51, 0x50, 15.0, 12.0, 2);
     assert!(render.update_child_frame(nested));
 
-    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget {
-        window_id: 9,
-        x: 7.0,
-        y: 9.0,
-        width: 8.0,
-        height: 16.0,
-        style: crate::core::frame_glyphs::CursorStyle::FilledBox,
-        frame_id: 0x51,
-    });
+    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget::new(9, (7.0, 9.0, 8.0, 16.0), crate::core::frame_glyphs::CursorStyle::FilledBox, 0x51));
 
     assert_eq!(
         area,

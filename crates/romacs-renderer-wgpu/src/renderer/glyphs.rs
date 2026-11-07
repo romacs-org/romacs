@@ -1069,7 +1069,7 @@ impl WgpuRenderer {
         PresentedCursorPaint::resolve(resolved, policy, self.frame_sample.presentation_time())
     }
 
-    fn active_cursor_inverse_video(
+    pub(super) fn active_cursor_inverse_video(
         &self,
         frame_glyphs: &FrameGlyphBuffer,
         cursor_visible: bool,
@@ -1079,7 +1079,9 @@ impl WgpuRenderer {
             return None;
         }
         let cursor = frame_glyphs.active_cursor()?;
-        if !matches!(cursor.style, CursorStyle::FilledBox) {
+        if !matches!(cursor.style, CursorStyle::FilledBox)
+            || super::cursor_look::cursor_light(&self.cursor_look, cursor.style, true, self.cursor_light).hollow_box
+        {
             return None;
         }
         let effects = frame_glyphs.effective_window_cursor_effects(cursor.window_id, &self.effects);
@@ -1130,12 +1132,19 @@ impl WgpuRenderer {
         effects: &EffectsConfig,
         cursor_visible: bool,
         animated_cursor: &Option<AnimatedCursor>,
+        active: bool,
         cursor_bg_vertices: &mut Vec<RectVertex>,
         behind_text_cursor_vertices: &mut Vec<RectVertex>,
+        cursor_glow_vertices: &mut Vec<crate::vertex::RoundedRectVertex>,
         cursor_vertices: &mut Vec<RectVertex>,
     ) {
         let paint = self.presented_cursor_paint(style, *color, cursor_fg, effects);
-        let effective_color = &paint.body_background;
+        // The look: an unfocused frame's box shows as its outline, a cursor
+        // not lit as a ghost, a lit bar with light around it.
+        let light = super::cursor_look::cursor_light(&self.cursor_look, style, active, self.cursor_light);
+        let style = if light.hollow_box { CursorStyle::Hollow } else { style };
+        let lit_color = Color { a: paint.body_background.a * light.body, ..paint.body_background };
+        let effective_color = &lit_color;
 
         let wake = self.cursor_wake_factor_for(effects);
         let wake_active = wake != 1.0 && !style.is_hollow();
@@ -1151,6 +1160,22 @@ impl WgpuRenderer {
             }
             _ => static_rect,
         };
+        // An animated cursor's width is the width it shows (a bar's thickness
+        // once settled), so a box becoming a bar narrows through it; a static
+        // bar takes its thickness from its style.
+        let animated = animated_cursor.as_ref().is_some_and(|anim| anim.window_id == window_id);
+        let bar_width = |thickness: f32| if animated { cw } else { thickness.min(cw) };
+
+        if light.glow > 0.0 && cursor_visible {
+            let (x, y, w, h) = match style {
+                CursorStyle::Bar(bar_w) => (cx, cy, bar_width(bar_w), ch),
+                CursorStyle::Hbar(hbar_h) => (cx, cy + ch - hbar_h, cw, hbar_h),
+                _ => (cx, cy, cw, ch),
+            };
+            let glow = Color { a: light.glow, ..paint.body_background };
+            self.add_rounded_rect_styled(cursor_glow_vertices, (x, y, w, h), w.min(h) / 2.0, &glow,
+                                         12, self.cursor_look.glow_reach);
+        }
 
         if matches!(style, CursorStyle::FilledBox) {
             if cursor_visible {
@@ -1216,6 +1241,7 @@ impl WgpuRenderer {
 
         match style {
             CursorStyle::Bar(bar_w) => {
+                let bar_w = bar_width(bar_w);
                 if wake_active {
                     let (sx, sy, sw, sh) = Self::scale_rect(cx, cy, bar_w, ch, wake);
                     self.add_rect(cursor_vertices, sx, sy, sw, sh, effective_color);
@@ -1925,6 +1951,8 @@ impl WgpuRenderer {
                 &chrome.cursor_bg,
                 &chrome.behind_text_cursor,
             );
+            let rounded = wgpu::RenderPipeline::clone(&self.pipelines.rounded_rect);
+            self.draw_cursor_glow(&mut render_pass, &rounded, &chrome.cursor_glow);
             if let Some(upload) =
                 self.arenas
                     .rect

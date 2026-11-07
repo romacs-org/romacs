@@ -67,6 +67,7 @@ pub(super) fn render_frame_root_glyphs(
     });
     let repeats = render.compositor.child_frames.has_animation_activity();
     super::retained_root::paint(renderer, render, surface_view, present_mapping, key, repeats, |renderer, render, view| {
+        renderer.cursor_light = render.cursor.light;
         renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
             renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
             renderer.render_frame_glyphs(
