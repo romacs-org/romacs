@@ -36,9 +36,10 @@ MARGIN = .80
 RIVALS = (('GNU', 'gnu', ''), ('GNU native', 'gnu_native', 'native_'), ('neomacs', 'neomacs', 'neomacs_'))
 SUMMARIES = ('elb geometric mean', 'elb median')
 VC_HISTORY = 'session vc-print-root-log whole history'
+OPEN_XDISP = 'session find-file xdisp.c'
 OPEN_HEADER = 'session find-file generated header'
 THEME = 'session theme switch, cycled'
-LEAD_ROWS = (VC_HISTORY, OPEN_HEADER, THEME)
+LEAD_ROWS = (VC_HISTORY, OPEN_XDISP, OPEN_HEADER, THEME)
 
 
 def scaled(value, unit):
@@ -215,6 +216,7 @@ def lead_values(results):
     return {'vc-history-romacs': figure(VC_HISTORY, 'romacs'), 'vc-history-gnu': figure(VC_HISTORY, 'gnu'),
             'vc-history-commits': commits(rows, results['meta'].get('history_commits')),
             'vc-history-key': figure(VC_HISTORY, 'romacs', 'key'),
+            'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'), 'open-xdisp-gnu': figure(OPEN_XDISP, 'gnu'),
             'open-big-size': f'{size / 1e6:.0f} MB' if size else None,
             'open-big-romacs': figure(OPEN_HEADER, 'romacs'), 'open-big-gnu': figure(OPEN_HEADER, 'gnu'),
             'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu')}
