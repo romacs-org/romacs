@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "68a90160a155e2ed998ee7acd62ba0bf2693c9ccdafb9e622e6a1d501a595949",
+    "input_hash": "0fdf9a089182ef4c6a4d7da0b2de9b0736b39b2b8880a501012279c95e4b7a6e",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8655
+    "vm2_universe": 8660
   },
   "schema": 2,
   "vm2": {
-    "count": 1444,
+    "count": 1445,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -1013,6 +1013,7 @@
       "romacs--run-host-command",
       "romacs--run-special-event",
       "romacs--rust-definition",
+      "romacs--safepoint",
       "romacs--save-excursion",
       "romacs--save-restriction",
       "romacs--scroll-start",

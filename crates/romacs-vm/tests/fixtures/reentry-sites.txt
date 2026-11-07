@@ -44,6 +44,7 @@ handle.rs collect_garbage_until_key collect_until_key 1 collector  # embedder AP
 handle.rs eval_form eval_form_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 handle.rs eval_source eval_source_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
+handle.rs execute finish_request 1 collector  # the outcome is its root, rewritten in place
 handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
 host_input.rs host_wait_state call_prepared_source_raw 1 clean  # no arguments; its value is printed before anything else allocates
@@ -158,6 +159,7 @@ request_code.rs eval_form_raw compile_request 1 held  # an open compiler builder
 request_code.rs eval_form_raw execute_raw 1 clean  # FORM's objects are rooted
 request_code.rs eval_form_raw finish_request 1 collector  # the request's result is its root
 request_code.rs finish_request collect 1 collector  # at a request boundary, when may_collect(0)
+request_code.rs finish_request run_aftermath 1 rooted  # the outcome's value is a RootFrame across the run, read back
 source_cache.rs cached_datum compile_guarded 1 held  # an open compiler builder holds collection
 source_cache.rs cached_source_form compile 1 held  # an open compiler builder holds collection
 source_cache.rs cached_source_form compile_guarded 1 held  # an open compiler builder holds collection
@@ -208,12 +210,14 @@ threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased fr
 threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
 threaded.rs poll_collect poll_collect_unless_key 1 collector  # the engine is suspended first
 threaded.rs poll_collect_unless_key collect_until_key 1 collector  # the engine is suspended first
-threaded.rs finish_collection execute_args 1 clean  # inside nested_then's call_suspended; nothing held
+threaded.rs finish_collection run_aftermath 1 clean  # inside nested_then's call_suspended; the runner is a symbol
+threaded.rs run_aftermath execute_args 1 clean  # the runner is a symbol; nothing else is held
 threaded.rs finish_collection nested_with_room 1 suspended  # the runner is the call's own; registers are rebased from the result
 threaded.rs hook_debugger nested_with_room 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
 threaded.rs nested_with_room nested_then 1 suspended  # the caller's registers are rebased from the result
 threaded.rs take_step finish_collection 2 suspended  # the statistics or t are in a register; registers are rebased from the result
-threaded.rs poll_resume finish_collection 1 suspended  # when may_collect(1); registers are rebased from the result, an escape returns
+threaded.rs poll_resume finish_collection 1 suspended  # when safe_runner(1) gives a runner; registers are rebased from the result, an escape returns
+threaded.rs cleanup_entry poll_collect 1 collector  # when may_collect(1); the exit is the resume record's, traced
 threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
 threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
 threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended

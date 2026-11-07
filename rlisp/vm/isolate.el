@@ -1156,6 +1156,10 @@ gone gets nothing."
                         (list 'result
                               (apply (if (and (consp function) (eq (car function) 'lambda)) (eval function t) function)
                                      args))))
+                  ;; The job's end, inside its generation and handler: a
+                  ;; collection due, its memory (which replaces the
+                  ;; result), what collections left pending.
+                  (romacs--safepoint)
                   (romacs--isolate-running nil))
               (quit (romacs--isolate-running nil)
                     (list 'error (list 'quit nil nil '(quit))))

@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 40] = [
+        let checks: [(&str, bool); 41] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -64,6 +64,7 @@ impl Vm {
             ("suspended_stacks", self.suspended_stacks.is_empty()),
             ("running_engines", self.running_engines == 0),
             ("gc_holds", self.gc_holds == 0),
+            ("aftermath_held", self.aftermath_held == 0),
             ("rooted_write", !self.rooted_write),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];

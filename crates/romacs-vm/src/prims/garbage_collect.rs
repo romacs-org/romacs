@@ -15,6 +15,15 @@ fn collect_idle(_cx) -> Step {
     Ok(Step::CollectIdle)
 }}
 
+// A safe point for a collection's work (VM2-GC-FINALIZER): what an engine's
+// poll does, now: collect if due, a job's memory signal, the aftermath
+// collections left pending (finalizers, `post-gc-hook') where the gate allows,
+// a quit. Waits for input and a job's end call it.
+defsubr! { name = "romacs--safepoint", gnu = "alloc.c:5806", effect = Global,
+fn safepoint(_cx) -> Step {
+    Ok(Step::Safepoint)
+}}
+
 defsubr! { name = "garbage-collect-maybe", gnu = "alloc.c:6110", effect = Global,
 fn garbage_collect_maybe(cx, factor: Value) -> Step {
     let factor = factor.integer_value().filter(|n| *n >= 0).ok_or(Fault::Wrong("wholenump", factor))?;
@@ -78,7 +87,8 @@ fn take_doomed_finalizer(cx) {
     Ok(cx.take_doomed_finalizer())
 }}
 
-// Whether `post-gc-hook' is due, for `romacs--run-finalizers'; asking
+// Whether a collection ended since the last ask, for
+// `romacs--run-finalizers', which then owns its `post-gc-hook'; asking
 // takes it.
 defsubr! { name = "romacs--take-post-gc", gnu = "alloc.c:6022", effect = Global,
 fn take_post_gc(cx) {

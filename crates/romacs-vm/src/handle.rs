@@ -232,9 +232,12 @@ impl Vm {
         Ok(Local::new(self, value))
     }
     /// Execute a live zero-argument function. Invalid or retired IDs return an
-    /// `"invalid function"` error; IDs returned by `compile` remain live.
+    /// `"invalid function"` error; IDs returned by `compile` remain live. Its
+    /// end is a request's (`finish_request'): a collection due runs, then what
+    /// collections left pending (VM2-GC-FINALIZER).
     pub fn execute(&mut self, function: usize) -> Result<Local<'_>> {
-        let value = self.execute_raw(function)?;
+        let outcome = self.execute_raw(function);
+        let value = self.finish_request(outcome)?;
         Ok(Local::new(self, value))
     }
     pub fn load_file(&mut self, path: &std::path::Path) -> Result<Local<'_>> {

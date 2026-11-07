@@ -251,6 +251,91 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
     assert!(vm.heap_stats().collections > before);
 }
 
+/// The same with a cleanup running and with a run of finalizers in progress
+/// as the host panics: the hold on aftermath (`Vm::aftermath_held') comes
+/// back to zero once caught, and a collection's aftermath runs again, at the
+/// next request's end.
+#[test]
+fn a_panic_inside_a_cleanup_or_a_run_leaves_aftermath_idle() {
+    let reading = "(lambda () (read-from-minibuffer \"P: \"))";
+    let cases = [
+        ("a cleanup", String::new(), format!("(unwind-protect nil (eval '(funcall {reading})))")),
+        ("a run", format!("(progn (setq pr-kept (make-finalizer {reading})) nil)"), "(progn (setq pr-kept nil) (garbage-collect))".into()),
+    ];
+    for (name, setup, form) in cases {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) t)").unwrap();
+        if !setup.is_empty() { vm.eval_source_raw(&setup).unwrap(); }
+        vm.set_host_input(Some(Box::new(PanickingHost)));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw(&form)));
+        assert!(caught.is_err(), "{name}: the host panic propagates");
+        assert_eq!(vm.aftermath_held, 0, "{name}: idle again");
+        assert_eq!((vm.running_engines, vm.gc_holds), (0, 0), "{name}");
+        vm.set_host_input(None);
+        assert_finalizers_run(&mut vm, name);
+    }
+}
+
+/// A finalizer doomed by a collection with no engine runs at the next
+/// request's end: the gate is open.
+fn assert_finalizers_run(vm: &mut Vm, name: &str) {
+    vm.eval_source_raw("(progn (setq pr-ran nil pr-kept (make-finalizer (lambda () (setq pr-ran t)))) nil)").unwrap();
+    vm.eval_source_raw("(setq pr-kept nil)").unwrap();
+    vm.collect(&mut []);
+    vm.eval_source_raw("nil").unwrap();
+    let ran = vm.eval_source_raw("pr-ran").unwrap();
+    assert_eq!(vm.display(ran).unwrap(), "t", "{name}: the gate opens again");
+}
+
+/// A panic in a run with no engine below it, a request's end or public
+/// `Vm::execute''s, gives back that run's hold and the result's root frame,
+/// which no engine's mark covers there: a later finalizer runs.
+#[test]
+fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
+    for name in ["a request's end", "an execution's end"] {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) t)").unwrap();
+        vm.eval_source_raw("(progn (setq pr-kept (make-finalizer (lambda () (read-from-minibuffer \"P: \")))) nil)").unwrap();
+        vm.eval_source_raw("(setq pr-kept nil)").unwrap();
+        let nil = vm.compile_source("nil").unwrap();
+        // The embedder's collection dooms it and leaves it pending.
+        vm.collect(&mut []);
+        let roots = vm.external_roots.len();
+        vm.set_host_input(Some(Box::new(PanickingHost)));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match name {
+            "a request's end" => vm.eval_source_raw("nil").map(|_| ()),
+            _ => vm.execute(nil).map(|_| ()),
+        }));
+        assert!(caught.is_err(), "{name}: the host panic propagates");
+        assert_eq!(vm.aftermath_held, 0, "{name}: idle again");
+        assert_eq!(vm.external_roots.len(), roots, "{name}: no root frame left behind");
+        assert_eq!((vm.running_engines, vm.gc_holds), (0, 0), "{name}");
+        vm.set_host_input(None);
+        assert_finalizers_run(&mut vm, name);
+    }
+}
+
+/// The hold on aftermath is exact across engines: escapes through nested
+/// engines' cleanups, caught or ending the request, leave it at zero.
+#[test]
+fn escapes_through_nested_engines_leave_no_unwinding() {
+    let mut vm = Vm::new();
+    for source in [
+        "(catch 'x (eval '(unwind-protect (eval '(throw 'x 1)) (setq ne-a 1))))",
+        "(condition-case nil (eval '(unwind-protect (signal 'error nil) (eval '(unwind-protect (throw 'ne-none 2) nil)))) (error 'caught))",
+        "(eval '(unwind-protect (error \"out\") (eval '(unwind-protect nil (error \"cleanup\")))))",
+        "(catch 'z (unwind-protect nil (catch 'w (unwind-protect (throw 'w 1) (eval '(throw 'z 2))))))",
+        "(progn (defvar ne-i 0) (while (< ne-i 100) (condition-case nil (eval '(unwind-protect (signal 'error nil) (setq ne-i (1+ ne-i)))) (error nil))) ne-i)",
+    ] {
+        let _ = vm.eval_source_raw(source);
+        assert_eq!(vm.aftermath_held, 0, "{source}");
+    }
+}
+
 /// Finishing a collection at a safepoint can widen the registers under the
 /// frame that polled: a hook compiling a function wider than any before moves
 /// them, and that frame must come back to its own Values.

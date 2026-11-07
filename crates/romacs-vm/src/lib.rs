@@ -1483,8 +1483,9 @@ pub struct Vm {
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
     /// Payload since the last collection crossed another `POLL_PAYLOAD'
-    /// bytes: the engine polls, and collects if due, at its next jump or
-    /// call (`leave_native'), as GNU's maybe_gc runs at every call.
+    /// bytes, or an engine ended with a collection's aftermath pending: the
+    /// engine polls, and collects if due, at its next jump or call
+    /// (`leave_native'), as GNU's maybe_gc runs at every call.
     collect_poll: bool,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
@@ -1605,6 +1606,12 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// What holds a collection's automatic aftermath back, over every engine:
+    /// each escape `threaded::route_escape' is unwinding, each live resume
+    /// record (a cleanup running) and each run of aftermath in progress
+    /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
+    /// zero whenever no engine runs.
+    aftermath_held: usize,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1752,6 +1759,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
+    aftermath_held,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1985,6 +1993,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
+            aftermath_held: 0,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),

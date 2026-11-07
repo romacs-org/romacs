@@ -238,11 +238,11 @@ pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
 /// The state nested Lisp runs push and pop on the VM: suspended engines and
 /// their register stacks, root frames, collection holds, the running-engine
-/// count, handler and backtrace marks. A panic unwinding a frame that took
-/// this mark restores it, so no entry outlives the engine or frame it
-/// describes (a suspended engine's code pointers would dangle) and the VM
-/// stays usable once the panic is caught. Dynamic bindings stay as the
-/// panic left them.
+/// count, the hold on aftermath (`Vm::aftermath_held'), handler and backtrace
+/// marks. A panic unwinding a frame that took this mark restores it,
+/// so no entry outlives the engine or frame it describes (a suspended engine's
+/// code pointers would dangle) and the VM stays usable once the panic is
+/// caught. Dynamic bindings stay as the panic left them.
 #[must_use = "the mark restores on unwinding only while it lives"]
 pub(crate) struct UnwindMark {
     vm: *mut Vm,
@@ -251,6 +251,7 @@ pub(crate) struct UnwindMark {
     roots: usize,
     engines: usize,
     holds: usize,
+    aftermath_held: usize,
     rooted_write: bool,
     stack_empty: bool,
     handlers: usize,
@@ -272,6 +273,7 @@ impl Drop for UnwindMark {
         vm.external_roots.truncate(self.roots);
         vm.running_engines = self.engines;
         vm.gc_holds = self.holds;
+        vm.aftermath_held = self.aftermath_held;
         vm.rooted_write = self.rooted_write;
         vm.site_leaf = self.site_leaf;
         if self.stack_empty {
@@ -443,6 +445,7 @@ impl Vm {
             roots: self.external_roots.len(),
             engines: self.running_engines,
             holds: self.gc_holds,
+            aftermath_held: self.aftermath_held,
             rooted_write: self.rooted_write,
             stack_empty: self.stack.is_empty(),
             handlers: self.signal_handlers.len(),
@@ -675,23 +678,46 @@ impl Vm {
         }
     }
     /// Whether a collection ended since `post-gc-hook' last ran and the hook
-    /// has a function to run; with none, the collection needs no run. The
-    /// one place that decides, for the runner's callers and its own take.
+    /// has a function to run; with none, the flag clears. A run started for
+    /// finalizers takes the collection itself and looks at the hook after
+    /// them (`romacs--run-finalizers').
     pub(crate) fn post_gc_hook_due(&mut self) -> bool {
-        if self.post_gc_due {
-            let hook = self.slot("post-gc-hook");
+        // Asked after every collection: a hook never interned is nil, and
+        // asking interns nothing.
+        if self.post_gc_due && let Some(&hook) = self.names.get("post-gc-hook") {
             self.post_gc_due = self.variable_value(hook).is_ok_and(|value| value != Value::NIL);
+        } else {
+            self.post_gc_due = false;
         }
         self.post_gc_due
     }
     /// `romacs--run-finalizers' when a collection left doomed finalizers or a
     /// `post-gc-hook' to run, and the prelude defines it. Lisp runs them, never
-    /// the collector.
+    /// the collector. With finalizers doomed the hook is not looked at here:
+    /// one of them may yet add to it.
     pub(crate) fn finalizer_runner(&mut self) -> Option<Value> {
-        if self.doomed_finalizers.is_empty() && !self.post_gc_hook_due() { return None; }
-        let runner = Value::reference(self.slot("romacs--run-finalizers") + 1, 7);
-        let slot = runner.payload() as usize - 1;
-        (self.slots[slot].function != Value::NIL && self.slots[slot].function != Value::UNBOUND).then_some(runner)
+        if !self.aftermath_pending() { return None; }
+        let &slot = self.names.get("romacs--run-finalizers")?;
+        let function = self.slots[slot].function;
+        (function != Value::NIL && function != Value::UNBOUND).then(|| Value::reference(slot + 1, 7))
+    }
+    /// A collection's aftermath waits: doomed finalizers (one may yet add to
+    /// the hook), or a collection ended with a `post-gc-hook' to run. Cheap,
+    /// for the places that make a poll come soon (a cleanup's end, an
+    /// engine's): the hook is read once per collection, the flag clearing
+    /// when it is nil (`post_gc_hook_due').
+    pub(crate) fn aftermath_pending(&mut self) -> bool {
+        !self.doomed_finalizers.is_empty() || self.post_gc_hook_due()
+    }
+    /// The gate for every automatic path, with OWN engines of its own running
+    /// (1 at an engine's poll or wait, 0 at a request's end): the runner, when
+    /// aftermath is pending, nothing holds it back (`Vm::aftermath_held': no
+    /// escape unwound, no cleanup or run in progress, in any engine) and the
+    /// heap may be collected (VM2-GC-FINALIZER). An explicit `garbage-collect'
+    /// asks `finalizer_runner' itself.
+    pub(crate) fn safe_runner(&mut self, own: usize) -> Option<Value> {
+        if self.aftermath_held != 0 || !self.may_collect(own) { return None; }
+        self.finalizer_runner()
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,

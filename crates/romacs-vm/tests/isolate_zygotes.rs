@@ -271,6 +271,37 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                                             (error (list 'error (nth 1 e))))"));
         assert!(out.starts_with("(error \"Memory exhausted"), "{item}: {out}");
     }
+    // The same inside protected bodies, whose normal end enters a cleanup: a
+    // collection there signals nothing; the next ordinary poll checks it.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (let ((i 0) (cleaned 0) kept)
+                                                                  (while (< i 100)
+                                                                    (unwind-protect (setq kept (cons (make-string 1000000 ?x) kept))
+                                                                      (setq cleaned (1+ cleaned)))
+                                                                    (setq i (1+ i)))
+                                                                  'survived))) 30)
+                               (error (list 'error (nth 1 e))))");
+    assert!(out.starts_with("(error \"Memory exhausted"), "protected bodies: {out}");
+    // And a finite job with no back-jump at all, its growth in one protected
+    // body: the job's end checks it before it replies.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (unwind-protect (progn (setq jb-kept (make-string 40000000 ?x)) 'survived)
+                                                                  nil))) 30)
+                               (error (list 'error (nth 1 e))))");
+    assert!(out.starts_with("(error \"Memory exhausted"), "one protected body: {out}");
+    // A job growing inside a cleanup is stopped there: its memory follows the
+    // quit rule, not the aftermath's, and the job catches it in the cleanup.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (condition-case nil
+                                                                    (unwind-protect nil
+                                                                      (let ((i 0) kept)
+                                                                        (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i)))))
+                                                                  (error 'stopped-in-cleanup)))) 30)
+                               (error (list 'error (nth 1 e))))");
+    assert_eq!(out, "stopped-in-cleanup", "a loop inside a cleanup");
     // An argument past the budget is the job's error, not the child's death.
     let out = eval(&mut vm, "(condition-case e
                                (isolate-await (isolate-spawn '(lambda (text)

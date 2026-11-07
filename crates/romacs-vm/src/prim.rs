@@ -107,6 +107,10 @@ pub(crate) enum Step {
     /// The command loop's idle collection there (`Vm::collect_garbage_until_key'):
     /// t when it collected, nil when held or abandoned for a key press.
     CollectIdle,
+    /// An ordinary poll of the engine at the next instruction, nil returned:
+    /// a collection due, a job's memory, a collection's aftermath through the
+    /// gate, a quit (`threaded::poll_resume').
+    Safepoint,
     /// Return this value from the primitive.
     Done(Value),
     /// Establish non-unwinding signal handlers for the dynamic extent of BODY.
@@ -2535,7 +2539,7 @@ mod tests {
             Body::Leaf(f) | Body::Reader(f) => f(&mut cx, args),
             Body::Call(f) => match f(&mut cx, args)? {
                 Step::Done(v) => Ok(v),
-                Step::Call { .. } | Step::Handle { .. } | Step::Collect | Step::CollectIdle => panic!("expected immediate test result"),
+                Step::Call { .. } | Step::Handle { .. } | Step::Collect | Step::CollectIdle | Step::Safepoint => panic!("expected immediate test result"),
             },
         }
     }

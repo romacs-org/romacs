@@ -1002,8 +1002,9 @@ no time limit: start idling, then run ripe timers as its wait does.  Return
 \=(RAN . DELAY): whether a timer ran, so the caller redisplays, and the
 seconds until the next timer, or nil."
   (romacs--timer-start-idle)
-  ;; A collection at a request boundary had no engine to finish it in.
-  (romacs--run-finalizers)
+  ;; A wait for input is a safe point: what collections left pending runs
+  ;; here, unless this wait is reached inside a cleanup (VM2-GC-FINALIZER).
+  (romacs--safepoint)
   (let* ((run romacs--timers-run)
          (delay (romacs--timer-check)))
     (cons (/= run romacs--timers-run) delay)))

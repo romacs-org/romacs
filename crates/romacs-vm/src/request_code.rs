@@ -360,6 +360,20 @@ impl Vm {
                 Ok(value) => self.collect(std::slice::from_mut(value)),
                 Err(_) => self.collect(&mut []),
             }
+            // A nested request's caller polls soon for what this left.
+            self.collect_poll |= self.eval_depth > 0 && self.aftermath_pending();
+        }
+        // An embedder's request ends here: a safe point for what collections
+        // left pending, its result rooted (VM2-GC-FINALIZER). The run's
+        // failures are its own (its finalizers' are logged). No engine's mark
+        // is below: a panic in the run gives back its hold and frame here.
+        debug_assert!(self.eval_depth > 0 || self.aftermath_held == 0, "no engine runs at a request's end");
+        if self.eval_depth == 0 && let Some(runner) = self.safe_runner(0) {
+            let _unwind = self.unwind_mark();
+            let frame = self.root_frame(&[*outcome.as_ref().unwrap_or(&Value::NIL)]);
+            let _ = self.run_aftermath(runner, false);
+            let [value] = self.release_frame(frame);
+            if let Ok(kept) = &mut outcome { *kept = value; }
         }
         outcome
     }
