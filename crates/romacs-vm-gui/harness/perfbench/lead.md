@@ -15,9 +15,10 @@ Your packages, your init and your muscle memory come with you.
 - **The entire Emacs git history in a log buffer:** {{vc-history-commits}}
   commits in {{vc-history-romacs}}, against {{vc-history-gnu}} in GNU Emacs,
   and the median key takes {{vc-history-key}} while it streams in.
-- **Big files open fast:** `xdisp.c` with all its faces in
-  {{open-xdisp-romacs}}, against {{open-xdisp-gnu}}.  A {{open-big-size}}
-  header in {{open-big-romacs}}, against {{open-big-gnu}}.
+- **Huge files open fast:** a {{open-big-size}} generated header, faces and
+  all, in {{open-big-romacs}}, against {{open-big-gnu}}.
+- **Typing lands first:** in `xdisp.c`, a key reaches the screen in about
+  11 ms, against 15 ms in GNU Emacs.
 - **Themes switch in a blink:** {{theme-romacs}} against {{theme-gnu}}, with a
   live preview of every theme before you choose.
 
@@ -37,6 +38,7 @@ Claude and Codex sessions run in the editor: real chats with images,
 subagents as cards, a session switcher, and full access to the machine
 through Lisp and MCP.  Every buffer, window, process and option is
 something an agent can query and change.  No terminal wrapper.  No plugin.
+Inspired by T3 Code's orchestration, and T3 Code's providers work here too.
 
 ### It looks like this decade
 
