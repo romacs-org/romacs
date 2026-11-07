@@ -2103,14 +2103,10 @@ unsafe fn poll_resume(e: &mut Engine<'_>, mut r: *mut Value, pc: *const Inst) ->
         if e.vm.may_collect(1) {
             poll_collect(e);
             if e.vm.take_job_exhaustion() { return job_memory_full(e); }
-            // GNU's garbage_collect ends with its finalizers and `post-gc-hook',
-            // here and now, unless the top control is a cleanup's, which a
-            // `throw' from them would skip: they wait for a later collection.
-            if !matches!(e.controls.last(), Some(Control { kind: ControlKind::Resume { .. }, .. })) {
-                match unsafe { finish_collection(e, r) } {
-                    Some(moved) => r = moved,
-                    None => return Value::UNBOUND,
-                }
+            // GNU's garbage_collect ends with its finalizers and `post-gc-hook'.
+            match unsafe { finish_collection(e, r) } {
+                Some(moved) => r = moved,
+                None => return Value::UNBOUND,
             }
         }
     } else {

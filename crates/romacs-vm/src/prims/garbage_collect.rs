@@ -7,9 +7,9 @@ fn garbage_collect(_cx) -> Step {
 }}
 
 // The command loop's idle collection in a wait inside Lisp (a prompt's,
-// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics or
-// finalizers, and abandoned with nothing collected if a key press arrives
-// while it is still marking. t when it collected.
+// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics, and
+// abandoned with nothing collected if a key press arrives while it is still
+// marking. t when it collected.
 defsubr! { name = "romacs--collect-idle", gnu = "keyboard.c:2880", effect = Global,
 fn collect_idle(_cx) -> Step {
     Ok(Step::CollectIdle)

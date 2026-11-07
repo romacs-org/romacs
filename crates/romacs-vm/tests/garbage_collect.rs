@@ -273,32 +273,26 @@ fn a_collection_finishes_near_the_depth_limit() {
     assert_eq!(eval(&mut vm, "lisp-eval-depth-reserve"), reserve, "and the reserve");
 }
 
-/// Not GNU's rule: its hook runs wherever the collection did, and a `throw'
-/// out of it abandons a cleanup. Here a collection in a cleanup's own code
-/// leaves its finalizers and hook for a later one, and the cleanup finishes.
+/// A collection finishes wherever it ran, a cleanup included: a `throw' from
+/// the hook leaves the cleanup there, as it does in GNU.
 #[test]
-fn a_collection_in_a_cleanup_waits_to_finish() {
+fn a_throw_from_the_hook_leaves_a_cleanup() {
+    let form = "(progn (defvar cl-done nil) \
+        (list (catch 'out \
+                (setq post-gc-hook (list (lambda () (setq post-gc-hook nil) (throw 'out 'hook-threw)))) \
+                (unwind-protect (throw 'out 'payload) \
+                  (garbage-collect) \
+                  (setq cl-done t))) \
+              cl-done))";
+    let expected = "(hook-threw nil)";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_collection_floor(1);
-    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
-    eval(&mut vm, "(progn (defvar cl-done nil) (defvar cl-during 0) (defvar cl-ran 0) (defvar cl-same nil) \
-        (fset 'cl-churn (lambda (n) (let ((i 0)) (while (< i n) (cons i nil) (setq i (1+ i)))))) \
-        (fset 'cl-doom (lambda () (make-finalizer (lambda () (setq cl-ran (1+ cl-ran)))) nil)) t)");
-    let caught = "(catch 'out \
-        (setq post-gc-hook (list (lambda () (throw 'out 'hook-threw)))) \
-        (unwind-protect (throw 'out 'payload) \
-          (let ((before gcs-done) (ran cl-ran)) \
-            (cl-doom) \
-            (cl-churn 300000) \
-            (setq cl-during (- gcs-done before) cl-same (= ran cl-ran) cl-done t))))";
-    assert_eq!(eval(&mut vm, caught), "payload", "the first escape, not the hook's");
-    assert_eq!(eval(&mut vm, "(list cl-done (> cl-during 0) cl-same)"), "(t t t)", "collections ran in the cleanup, and finished nothing");
-    assert_eq!(eval(&mut vm, "(progn \
-        (setq post-gc-hook (list (lambda () (setq cl-ran (+ cl-ran 10))))) \
-        (cl-churn 300000) \
-        (setq post-gc-hook nil) \
-        (list (> cl-ran 10) (% cl-ran 10)))"), "(t 1)", "a later collection does: the hook, and the finalizer once");
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), expected, "candidate");
 }
 
 /// `gcs-done' and `gc-elapsed' count every collection, `garbage-collect'
