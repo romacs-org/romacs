@@ -197,8 +197,11 @@ reach an image."
   (run-hook-with-args-until-success 'warm-restart-blocker-functions))
 
 (defun warm-restart--edited-p ()
-  "Non-nil when the current buffer is writable and holds unsaved edits."
-  (and (not buffer-read-only) (buffer-modified-p)))
+  "Non-nil when the current buffer is writable and holds unsaved edits.
+A widget buffer is neither: its text is generated, and its widgets, which
+are what make it work, can't be carried."
+  (and (not buffer-read-only) (buffer-modified-p)
+       (not (memq 'widget-before-change before-change-functions))))
 
 (defun warm-restart--handler ()
   "The desktop handler restoring the current buffer, or nil."
