@@ -147,6 +147,7 @@ impl RawTable<data::Object> {
 
 /// What a dead object owned, for any thread to drop. `Object' is not `Send',
 /// and each of these is, so a kind that holds more cannot get in here.
+#[expect(dead_code, reason = "a grave's storage is held only to be dropped, never read")]
 enum Grave {
     Bignum(Box<num_bigint::BigInt>),
     String(Box<data::LispString>),
