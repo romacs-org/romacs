@@ -231,6 +231,11 @@ disabled.
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
 
 
+;;; Generated autoloads from romacs-cursor.el
+
+(register-definition-prefixes "romacs-cursor" '("romacs-cursor-"))
+
+
 ;;; Generated autoloads from romacs-custom.el
 
 (register-definition-prefixes "romacs-custom" '("disable-theme" "enable-theme" "romacs-theme-preview"))

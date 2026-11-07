@@ -35,7 +35,7 @@ impl RenderApp {
         ImeCursorArea {
             x: (x as f64 * scale_factor).round() as i32,
             y: (y as f64 * scale_factor).round() as i32,
-            width: ((target.width as f64 * scale_factor).max(1.0)).round() as u32,
+            width: ((target.cell as f64 * scale_factor).max(1.0)).round() as u32,
             height: ((target.height as f64 * scale_factor).max(1.0)).round() as u32,
         }
     }

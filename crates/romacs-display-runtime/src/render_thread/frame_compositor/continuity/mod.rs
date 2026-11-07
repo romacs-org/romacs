@@ -117,7 +117,10 @@ impl GuiFrameRenderState {
         self.compositor.input_scroll.submit();
         if let Some(projection) = projection {
             self.compositor.interaction = Some(projection);
+        } else if self.compositor.interaction_stale {
+            self.compositor.interaction = None;
         }
+        self.compositor.interaction_stale = false;
     }
 
     /// Measure how far each window's viewport moved into the presentation being

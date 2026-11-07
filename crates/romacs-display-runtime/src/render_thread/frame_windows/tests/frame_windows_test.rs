@@ -501,15 +501,7 @@ fn secondary_frame_cursor_state_clears_when_no_target_remains() {
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
     state.set_target(
-        crate::render_thread::cursor::CursorTarget {
-            window_id: 7,
-            x: 10.0,
-            y: 20.0,
-            width: 8.0,
-            height: 16.0,
-            style: CursorStyle::Bar(2.0),
-            frame_id: 0x42,
-        },
+        crate::render_thread::cursor::CursorTarget::new(7, (10.0, 20.0, 8.0, 16.0), CursorStyle::Bar(2.0), 0x42),
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
 
@@ -536,15 +528,7 @@ fn frame_render_state_syncs_visual_cursor_config_from_defaults() {
             romacs_display_protocol::frame_time::observe_platform_now(),
         );
         cursor.set_target(
-            CursorTarget {
-                window_id: 7,
-                x: 1.0,
-                y: 2.0,
-                width: 3.0,
-                height: 4.0,
-                style: CursorStyle::Bar(1.0),
-                frame_id: 0x42,
-            },
+            CursorTarget::new(7, (1.0, 2.0, 3.0, 4.0), CursorStyle::Bar(1.0), 0x42),
             romacs_display_protocol::frame_time::observe_platform_now(),
         );
         cursor
@@ -678,15 +662,7 @@ fn frame_render_state_applies_visual_cursor_animation_rects() {
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
     visual.set_target(
-        CursorTarget {
-            window_id: -7,
-            x: 11.0,
-            y: 12.0,
-            width: 13.0,
-            height: 14.0,
-            style: CursorStyle::Hollow,
-            frame_id: 0x42,
-        },
+        CursorTarget::new(-7, (11.0, 12.0, 13.0, 14.0), CursorStyle::Hollow, 0x42),
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
     render.compositor.visual_cursors.insert(-7, visual);
@@ -1093,15 +1069,7 @@ fn frame_render_state_remove_child_cursor_clears_preedit() {
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
     render.cursor.set_target(
-        CursorTarget {
-            window_id: 7,
-            x: 1.0,
-            y: 2.0,
-            width: 3.0,
-            height: 4.0,
-            style: CursorStyle::Bar(1.0),
-            frame_id: 0x99,
-        },
+        CursorTarget::new(7, (1.0, 2.0, 3.0, 4.0), CursorStyle::Bar(1.0), 0x99),
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
     render.set_ime_preedit("preedit".to_string(), Some((7, 7)));

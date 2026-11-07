@@ -716,6 +716,19 @@ pub struct AnimatedCursor {
     pub frame_id: DisplayFrameId,
 }
 
+/// How the cursor is drawn: `plain' draws GNU's shapes square and flat;
+/// `soft', the default, lights the selected cursor with a glow, shows an
+/// unselected or unfocused one as a faint ghost, and morphs between kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[derive(strum::VariantNames)]
+#[strum(serialize_all = "kebab-case")]
+pub enum CursorLookStyle {
+    Plain,
+    #[default]
+    Soft,
+}
+
 /// Cursor animation style.
 ///
 /// Controls how the smooth cursor interpolates between positions.

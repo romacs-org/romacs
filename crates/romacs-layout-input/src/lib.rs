@@ -378,10 +378,10 @@ pub struct WindowSnapshot {
     /// GNU's `w->cursor_off_p': `internal-show-cursor' hid this window's
     /// cursor, as blink-cursor-mode's timer does every other blink.
     pub cursor_off: bool,
-    /// This window's buffer has no cursor (`cursor-type' nil,
-    /// get_window_cursor_type's NO_CURSOR): not a blink, so nothing of a
-    /// cursor stands, an IME's anchor included.
-    pub no_cursor: bool,
+    /// The window's cursor when it is selected and when it is not
+    /// (xdisp.c get_window_cursor_type). `CursorKind::None` is not a
+    /// blink: nothing of a cursor stands, an IME's anchor included.
+    pub cursor: CursorKinds,
     /// The characters of TEXT shown as stretches, in byte order.
     pub stretches: Vec<Stretch>,
     /// The characters of TEXT shown as images, in byte order.
@@ -403,7 +403,7 @@ pub struct WindowSnapshot {
     /// text area's left edge, as GNU's display of a band measures it.
     pub band_stretches: BandStretches,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, no_cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
+romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
 
 /// A window's header-line and mode-line stretches (`WindowSnapshot').
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -779,6 +779,58 @@ romacs_snapshot::snapshot_struct!(InlineImage { byte, image, width, ascent, desc
 /// A stretch's width before it depends on where it is laid out, in pixels
 /// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,
 /// or `:align-to' TARGET pixels from the text area's left edge.
+/// A cursor's shape (xdisp.c text_cursor_kinds), with a bar's width or an
+/// hbar's height in pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorKind { #[default] Box, Hollow, Bar(u32), Hbar(u32), None }
+romacs_snapshot::snapshot_enum!(CursorKind {
+    CursorKind::Box => (),
+    CursorKind::Hollow => (),
+    CursorKind::Bar(width) => (width),
+    CursorKind::Hbar(height) => (height),
+    CursorKind::None => (),
+});
+
+impl CursorKind {
+    /// The kind a `cursor-type' value names (xdisp.c
+    /// get_specified_cursor_type): nil none, `box', `hollow', `bar' and
+    /// `hbar' two pixels thick, (KIND . N) N pixels, anything else hollow.
+    /// `t' is the frame's, resolved by the caller.
+    pub fn specified(name: Option<&str>, size: Option<u32>) -> Self {
+        match (name, size) {
+            (Some("nil"), None) => Self::None,
+            (Some("box"), _) => Self::Box,
+            (Some("hollow"), None) => Self::Hollow,
+            (Some("bar"), size) => Self::Bar(size.unwrap_or(2)),
+            (Some("hbar"), size) => Self::Hbar(size.unwrap_or(2)),
+            _ => Self::Hollow,
+        }
+    }
+}
+
+/// A window's cursor when selected and when not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorKinds { pub selected: CursorKind, pub unselected: CursorKind }
+romacs_snapshot::snapshot_struct!(CursorKinds { selected, unselected });
+
+impl Default for CursorKinds {
+    fn default() -> Self { Self { selected: CursorKind::Box, unselected: CursorKind::Hollow } }
+}
+
+impl CursorKinds {
+    /// SELECTED's kinds where `cursor-in-non-selected-windows' is t: an
+    /// unselected window's box is hollow and its bar a pixel thinner
+    /// (get_window_cursor_type's non_selected arm).
+    pub fn modified(selected: CursorKind) -> Self {
+        let unselected = match selected {
+            CursorKind::Box => CursorKind::Hollow,
+            CursorKind::Bar(width) if width > 1 => CursorKind::Bar(width - 1),
+            other => other,
+        };
+        Self { selected, unselected }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StretchWidth { Width { width: i64, zero_ok: bool }, AlignTo(i64) }
 romacs_snapshot::snapshot_enum!(StretchWidth {
@@ -853,17 +905,19 @@ fn faces_agree(a: &[Face], b: &[Face]) -> bool {
 }
 
 impl WindowSnapshot {
-    /// Whether OTHER lays out to the same glyphs, cursor aside: equal but
+    /// Whether OTHER lays out to the same glyphs and cursor kinds: equal but
     /// for `buffer_version' (the VM's conservative redraw signal, which also
-    /// moves when nothing shown changed) and `cursor_off'.
+    /// moves when nothing shown changed) and `cursor_off' (a blink, which
+    /// the last layout shows less that cursor).
     pub fn lays_out_like(&self, other: &Self) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, no_cursor: _, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
         (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
             == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
             && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && faces_agree(faces, &other.faces) && *chrome == other.chrome
             && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
+            && *cursor == other.cursor
     }
 }
 

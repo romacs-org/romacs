@@ -23,7 +23,7 @@ fn backend_profile_projects_wgpu_device_cost_class_once() {
 fn software_compat_policy_preserves_request_and_owns_every_feature_decision() {
     let mut requested = VisualConfig::default();
     requested.cursor_motion.enabled = true;
-    requested.cursor_size_transition.enabled = true;
+    requested.cursor_look.morph = std::time::Duration::from_millis(90);
     requested.buffer_transition.enabled = true;
     requested.scroll_transition.enabled = true;
     requested.effects.cursor_glow.enabled = true;
@@ -63,7 +63,7 @@ fn full_policy_preserves_requested_features() {
     let policy = RenderQualityPolicy::negotiate(RenderBackendProfile::hardware(), &requested);
 
     assert_eq!(policy.mode(), QualityMode::Full);
-    assert_eq!(policy.effective_visual_config(), &requested);
+    assert_eq!(policy.effective_visual_config(), &with_motion(requested.clone()));
     assert_eq!(
         policy.frame_post_disposition(),
         FramePostDisposition::Enabled
@@ -99,4 +99,18 @@ fn layers_animate_on_hardware_and_not_on_a_software_adapter() {
     assert!(reduced.resize.is_instant() && reduced.selection.is_instant() && reduced.movement.is_instant());
     assert_eq!(full.for_layer(LayerAnimation::Off), ChildFrameMotionSpecs::INSTANT);
     assert_eq!(full.for_layer(LayerAnimation::Full), full);
+}
+
+#[test]
+fn reduced_motion_turns_every_animation_off() {
+    let mut requested = VisualConfig::default();
+    requested.effects.cursor_glow.enabled = true;
+    requested.buffer_transition.enabled = true;
+    requested.motion.reduced = true;
+    let effective = with_motion(requested);
+    assert!(!effective.cursor_motion.enabled);
+    assert!(effective.cursor_look.morph.is_zero());
+    assert!(!effective.buffer_transition.enabled && !effective.scroll_transition.enabled);
+    assert!(effective.window_animations.off && effective.child_frame_animations.off);
+    assert!(!effective.effects.cursor_glow.enabled);
 }

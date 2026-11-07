@@ -117,6 +117,10 @@ pub(crate) struct FrameCompositor {
     /// while nothing is in motion it is the settled projection, which maps by
     /// identity — the ordinary case, not a fallback.
     pub(super) interaction: Option<romacs_display_protocol::InteractionProjection>,
+    /// A morph ended by force (`settle_top_level_pane_layouts`) left
+    /// `interaction` mid-flight: the next submitted frame, settled, maps by
+    /// identity again.
+    pub(super) interaction_stale: bool,
     /// How panes should travel, from the current quality policy.
     pub(super) pane_motion: crate::render_thread::render_quality::WindowAnimationSpecs,
     /// How child frames live and die, from the current quality policy.
@@ -217,6 +221,7 @@ impl FrameCompositor {
             reflow_imprints: ReflowImprintsByWindow::default(),
             baseline: None,
             interaction: None,
+            interaction_stale: false,
             pane_motion: crate::render_thread::render_quality::WindowAnimationSpecs::INSTANT,
             child_frame_motion:
                 crate::render_thread::render_quality::ChildFrameMotionSpecs::INSTANT,

@@ -1641,57 +1641,89 @@ fn popup_redraw_preserves_unchanged_main_frame_pixels() {
 // Stage 4 reuse invariant: a retained static scene built once is reused
 // across cursor color changes. The static region stays bit-identical while
 // only the cursor color updates — the actual cursor-cycling win.
-#[test]
-fn retained_static_reused_across_cursor_colors() {
-    let Some(mut h) = try_harness() else {
-        return;
-    };
+/// The retained (cursorless) static scene of a bar-cursor frame, rendered
+/// ONCE, then composited through the cursor-only path with a red and then a
+/// blue cursor, as the compositor reuses it across cursor-only frames.
+/// Returns (the static scene alone, the red composite, the blue composite).
+fn composite_cursor_colors(h: &mut Harness) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     // The default config cycles cursor color from time; disable it so the
     // frame's explicit cursor colors drive the pixels for this test.
     h.renderer.effects.cursor_color_cycle.enabled = false;
     let frame_a = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0)); // red cursor
     let frame_b = frame_with_cursor(Color::rgb(0.0, 0.4, 1.0)); // blue cursor
 
-    // Build the retained (cursorless) static scene ONCE.
     let (_ts, vs) = make_tex(&h.renderer, "static");
-    h.renderer.render_frame_glyphs(
-        &vs,
-        &frame_a,
-        &mut h.atlas,
-        mapping_for(&frame_a, W, H),
-        false,
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
+    h.renderer.render_frame_glyphs(&vs, &frame_a, &mut h.atlas, mapping_for(&frame_a, W, H), false, None, None, None, None, None);
     let bg = h.renderer.create_texture_bind_group(&vs);
 
-    // Composite the SAME retained scene with the red then blue cursor.
-    let (tr, vr) = make_tex(&h.renderer, "comp-red");
-    h.renderer
-        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-            &vr,
-            mapping_for(&frame_a, W, H).surface(),
-        ))
-        .blit_retained(&bg);
-    h.renderer
-        .render_cursor_only(&vr, &frame_a, mapping_for(&frame_a, W, H), true, None, None);
-    let red = read_tex(&h.renderer, &tr);
+    let composite = |h: &mut Harness, frame: Option<&FrameGlyphBuffer>, label: &str| {
+        let (texture, view) = make_tex(&h.renderer, label);
+        h.renderer
+            .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(&view, mapping_for(&frame_a, W, H).surface()))
+            .blit_retained(&bg);
+        if let Some(frame) = frame {
+            h.renderer.render_cursor_only(&view, frame, mapping_for(frame, W, H), true, None, None);
+        }
+        read_tex(&h.renderer, &texture)
+    };
+    let alone = composite(h, None, "static-alone");
+    let red = composite(h, Some(&frame_a), "comp-red");
+    let blue = composite(h, Some(&frame_b), "comp-blue");
+    (alone, red, blue)
+}
 
-    let (tb, vb) = make_tex(&h.renderer, "comp-blue");
-    h.renderer
-        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-            &vb,
-            mapping_for(&frame_b, W, H).surface(),
-        ))
-        .blit_retained(&bg);
-    h.renderer
-        .render_cursor_only(&vb, &frame_b, mapping_for(&frame_b, W, H), true, None, None);
-    let blue = read_tex(&h.renderer, &tb);
+/// Whether the cursor slot (x 8..12, y 8..31) shows red in RED and blue in BLUE.
+fn cursor_slot_changed(red: &[u8], blue: &[u8]) -> bool {
+    (8..31).any(|y| {
+        (8..12).any(|x| {
+            let (r, b) = (pxb(red, x, y), pxb(blue, x, y));
+            r[0] > b[0] + 40 && b[2] > r[2] + 40
+        })
+    })
+}
 
-    // Outside the cursor slot (x>=16), the two composites are bit-identical.
+/// The retained static scene is reused across cursor-only frames: rendered
+/// once, it composites with either cursor color, and only the cursor
+/// layer's footprint differs.  Under the default `soft' look the cursor
+/// lights a glow around itself, so the footprint is the cursor's slot grown
+/// by `cursor_light_outset': outside it the composites are bit-identical,
+/// and identical to the static scene alone (the glow stays inside it).
+#[test]
+fn retained_static_reused_across_cursor_colors() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let outset = romacs_renderer_wgpu::renderer::cursor_light_outset(&h.renderer.cursor_look);
+    assert!(outset > 0.0, "the soft look lights beyond the slot");
+    let (alone, red, blue) = composite_cursor_colors(&mut h);
+    let (x0, x1) = ((8.0 - outset).floor() as u32, (12.0 + outset).ceil() as u32);
+    let (y0, y1) = ((8.0 - outset).floor().max(0.0) as u32, (32.0 + outset).ceil() as u32);
+    let outside = |x: u32, y: u32| x < x0 || x >= x1 || y < y0 || y >= y1;
+    let (mut static_diffs, mut stray) = (0, 0);
+    for y in 0..H {
+        for x in 0..W {
+            if outside(x, y) {
+                static_diffs += usize::from(pxb(&red, x, y) != pxb(&blue, x, y));
+                stray += usize::from(pxb(&red, x, y) != pxb(&alone, x, y));
+            }
+        }
+    }
+    assert_eq!(static_diffs, 0, "static scene must be identical across cursor colors outside the cursor's footprint");
+    assert_eq!(stray, 0, "the cursor layer draws nothing beyond its footprint");
+    assert!(cursor_slot_changed(&red, &blue), "cursor color must change between composites");
+}
+
+/// Under the `plain' look (GNU's cursor) the cursor layer is the slot and
+/// nothing else: the composites stay pixel-exact outside it, as before any
+/// look existed.
+#[test]
+fn retained_static_reused_across_cursor_colors_plain() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    h.renderer.cursor_look.style = romacs_display_protocol::CursorLookStyle::Plain;
+    assert_eq!(romacs_renderer_wgpu::renderer::cursor_light_outset(&h.renderer.cursor_look), 0.0);
+    let (_alone, red, blue) = composite_cursor_colors(&mut h);
     let mut static_diffs = 0;
     for y in 0..H {
         for x in 16..W {
@@ -1700,26 +1732,8 @@ fn retained_static_reused_across_cursor_colors() {
             }
         }
     }
-    assert_eq!(
-        static_diffs, 0,
-        "static scene must be identical across cursor colors"
-    );
-
-    // The cursor slot itself differs (red vs blue).
-    let mut cursor_changed = false;
-    for y in 8..31 {
-        for x in 8..12 {
-            let r = pxb(&red, x, y);
-            let b = pxb(&blue, x, y);
-            if r[0] > b[0] + 40 && b[2] > r[2] + 40 {
-                cursor_changed = true;
-            }
-        }
-    }
-    assert!(
-        cursor_changed,
-        "cursor color must change between composites"
-    );
+    assert_eq!(static_diffs, 0, "static scene must be identical across cursor colors");
+    assert!(cursor_slot_changed(&red, &blue), "cursor color must change between composites");
 }
 
 // Filled-box cursor over a glyph: the composite (static cursorless scene +
