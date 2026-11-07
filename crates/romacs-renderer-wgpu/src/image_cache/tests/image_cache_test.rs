@@ -159,6 +159,7 @@ fn decoder_worker_survives_a_panicking_request() {
             Arc::new(Mutex::new(request_rx)),
             outcome_tx,
             Arc::new(ImageSequenceCache::new()),
+            Default::default(),
         )
     });
     let mut loads = ImageLoadLifecycle::default();
