@@ -7,20 +7,27 @@ use romacs_font::{FontRequest, FontResolver, entity};
 use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
-/// Romacs's icon font (assets/fonts/RomacsIcons.ttf, DIVERGENCES.md
-/// VM2-MODE-LINE), in the runtime tree: an installation's share/romacs, or
-/// the checkout this binary was built from.
-pub fn icon_font() -> std::path::PathBuf {
-    romacs_vm::host::runtime_root().join("assets/fonts/RomacsIcons.ttf")
+/// The fonts Romacs ships (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED),
+/// in the runtime tree: an installation's share/romacs, or the checkout
+/// this binary was built from.
+fn bundled_fonts_dir() -> std::path::PathBuf {
+    romacs_vm::host::runtime_root().join("assets/fonts")
 }
 
-/// Make the icon font a Fontconfig application font, so a character only
-/// it has resolves to it as any font's fallback does. Run before a
-/// resolver is built, so none has cached its codepoints as missing. False
-/// when the file is absent or Fontconfig refused it.
-pub fn register_icon_font() -> bool {
-    let font = icon_font();
-    font.is_file() && romacs_font::register_font_file(&font)
+/// Make every font Romacs ships a Fontconfig application font, for this
+/// process only: the icon font, so a character only it has resolves to it
+/// as any font's fallback does, and Iosevka, the default face's family,
+/// which wins a tie with a system copy of the same face. Nothing is
+/// installed into a font directory. Run before a resolver is built, so
+/// none has cached a codepoint or family as missing. The files Fontconfig
+/// refused; none when the directory is absent.
+pub fn register_bundled_fonts() -> Vec<std::path::PathBuf> {
+    let mut fonts: Vec<_> = std::fs::read_dir(bundled_fonts_dir()).into_iter().flatten()
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext, "ttf" | "otf" | "ttc")))
+        .collect();
+    fonts.sort();
+    fonts.into_iter().filter(|font| !romacs_font::register_font_file(font)).collect()
 }
 
 /// The decoded pixels this display keeps for the renderer.
@@ -428,11 +435,14 @@ mod tests {
         vm.eval_source(source).unwrap_or_else(|e| panic!("{source}: {e}")).display().unwrap()
     }
 
-    /// A character in the icons' range resolves to Romacs's icon font, for
-    /// a face of any family: it is the only font with it.
+    /// A character in the icons' range resolves to Romacs's icon font
+    /// (RomacsIcons.ttf, DIVERGENCES.md VM2-MODE-LINE), for a face of any
+    /// family: it is the only font with it.
     #[test]
     fn an_icon_resolves_to_the_icon_font() {
-        assert!(register_icon_font());
+        assert_eq!(register_bundled_fonts(), Vec::<std::path::PathBuf>::new());
+        let icon_font = || bundled_fonts_dir().join("RomacsIcons.ttf");
+        assert!(icon_font().is_file());
         let mut resolver = FontResolver::new().unwrap();
         for family in ["Liberation Mono", "PlemolJP Console NF"] {
             let resolved = resolver.resolve_char(&FontRequest::new(family, 15.0), '\u{FE001}').unwrap();

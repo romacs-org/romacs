@@ -140,7 +140,28 @@ fn pinned_fixture(
     .as_path()
 }
 
-/// Nerd Fonts v3.4.0 `Symbols Nerd Font Mono`: an icon-only monospace face
+/// The Iosevka files Romacs ships (assets/fonts/sources.json): Regular,
+/// Bold, Italic and Bold Italic, in that order. They are in the checkout,
+/// so nothing is downloaded.
+#[must_use]
+pub fn bundled_iosevka() -> [PathBuf; 4] {
+    ["Regular", "Bold", "Italic", "BoldItalic"]
+        .map(|style| workspace_root().join(format!("assets/fonts/Iosevka-{style}.ttf")))
+}
+
+/// A Fontconfig configuration under ROOT whose only font directories are
+/// FONT_DIRS (none: only the fonts a test registers), with its cache under
+/// ROOT too; its path, for FONTCONFIG_FILE, so no host font takes part.
+pub fn isolated_fontconfig(root: &Path, font_dirs: &[&Path]) -> io::Result<PathBuf> {
+    fs::create_dir_all(root)?;
+    let dirs: String = font_dirs.iter().map(|dir| format!("<dir>{}</dir>", dir.display())).collect();
+    let config = root.join("fonts.conf");
+    fs::write(&config, format!("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
+        <fontconfig>{dirs}<cachedir>{}</cachedir></fontconfig>\n", root.join("cache").display()))?;
+    Ok(config)
+}
+
+
 /// whose cmap has no ASCII, not even U+0020.
 #[must_use]
 pub fn symbols_nerd_font_mono_3_4_0() -> &'static Path {

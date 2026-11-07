@@ -214,7 +214,32 @@ fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<
             out.push(listed);
         }
     }
+    registered_first(&mut out, |face| &face.file);
     Some(out)
+}
+
+/// The files of the fonts Romacs registered (`register_font_file`), as
+/// Fontconfig names them: its application font set.
+fn application_files() -> std::collections::HashSet<String> {
+    // SAFETY: a null config names the current one, which owns the set; its
+    // patterns are only read, under the caller's `serialize' guard.
+    let set = unsafe { fontconfig_sys::FcConfigGetFonts(std::ptr::null_mut(), fontconfig_sys::FcSetApplication) };
+    if set.is_null() {
+        return Default::default();
+    }
+    let count = usize::try_from(unsafe { (*set).nfont }).unwrap_or(0);
+    (0..count).filter_map(|index| get_string(unsafe { *(*set).fonts.add(index) }, fontconfig::FC_FILE)).collect()
+}
+
+/// LISTED with the faces of fonts Romacs registered first, each group in
+/// Fontconfig's order, so a font Romacs ships wins a tie with a system
+/// face of the same family and style (`best_face' keeps the first best):
+/// the bundled Iosevka, not a system copy of another version.
+fn registered_first<T>(listed: &mut [T], file: impl Fn(&T) -> &str) {
+    let registered = application_files();
+    if !registered.is_empty() {
+        listed.sort_by_key(|face| !registered.contains(file(face)));
+    }
 }
 
 /// What ftfont_spec_pattern asks of a listing for a font-spec.
@@ -299,7 +324,8 @@ pub(crate) fn list_constrained(spec: &ListSpec) -> Option<FaceList> {
     let set = Owned::new(unsafe { fontconfig_sys::FcFontList(std::ptr::null_mut(), pattern.ptr, objects.ptr) }, fontconfig_sys::FcFontSetDestroy)?;
     let count = usize::try_from(unsafe { (*set.ptr).nfont }).ok()?;
     let fonts = unsafe { (*set.ptr).fonts };
-    let faces = (0..count).filter_map(|index| Some((index, listed_face(unsafe { *fonts.add(index) }, spec.family.as_deref())?))).collect();
+    let mut faces: Vec<_> = (0..count).filter_map(|index| Some((index, listed_face(unsafe { *fonts.add(index) }, spec.family.as_deref())?))).collect();
+    registered_first(&mut faces, |(_, face)| &face.file);
     Some(FaceList { set, faces })
 }
 
