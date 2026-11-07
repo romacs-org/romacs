@@ -1342,6 +1342,9 @@ pub struct Vm {
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
     display: Option<display_host::Display>,
+    /// The visual configuration Lisp asked for (`romacs--effect-set'),
+    /// which the open display shows.
+    visual: Box<romacs_display_protocol::VisualConfig>,
     /// The embedder's end of the session while one is attached (session_host.rs).
     session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
@@ -1766,6 +1769,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     host_input,
     layout_host,
     display,
+    visual,
     session_host,
     terminal_host,
     subprocesses,
@@ -1857,6 +1861,7 @@ impl Vm {
             host_input: None,
             layout_host: None,
             display: None,
+            visual: Box::default(),
             session_host: None,
             idle_since: None,
             redisplay_since_mark: None,

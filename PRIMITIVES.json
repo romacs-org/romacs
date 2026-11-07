@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c8d14c3ad97340b318c9f1206b8bb36eb2c93be152ae9844e5ece3beb2883503",
+  "source_fingerprint": "55a861ba3cb1331cce4f9d0cb9db72db9be433b5dd763cff915f07bcc48cba9e",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1432,
-  "parsed_vm2_only": 1432
+  "parsed_total": 1437,
+  "parsed_vm2_only": 1437
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4483,6 +4483,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/doc.rs:73"
   },
+  "romacs--effect-replace": {
+   "name": "romacs--effect-replace",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/effects.rs:13"
+  },
+  "romacs--effect-set": {
+   "name": "romacs--effect-set",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/effects.rs:8"
+  },
   "romacs--face-attr-match-p": {
    "name": "romacs--face-attr-match-p",
    "implementation": "vm2",
@@ -5398,6 +5408,21 @@
    "name": "romacs-color-oklab",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/colour.rs:72"
+  },
+  "romacs-effect-get": {
+   "name": "romacs-effect-get",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/effects.rs:17"
+  },
+  "romacs-effect-names": {
+   "name": "romacs-effect-names",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/effects.rs:21"
+  },
+  "romacs-effect-schema": {
+   "name": "romacs-effect-schema",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/effects.rs:25"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",

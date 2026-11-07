@@ -510,6 +510,19 @@ impl PaintSender {
         result
     }
 
+    /// Show CONFIG, the visual configuration Lisp asked for, on every
+    /// window from the next paint. Sent rather than tried: a dropped
+    /// configuration would leave an option silently without effect.
+    pub fn set_visual_config(&self, config: romacs_display_protocol::VisualConfig) -> Result<(), String> {
+        let result = self
+            .comms
+            .cmd_tx
+            .send(RenderCommand::Config(crate::thread_comm::ConfigCommand::SetVisualConfig(config)))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
     /// Ask the compositor to bring the primary window to the user.
     pub fn raise_primary(&self) -> Result<(), String> {
         let result = self
