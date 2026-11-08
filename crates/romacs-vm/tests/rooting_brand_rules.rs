@@ -550,7 +550,7 @@ fn count(toks: &[Token], pattern: &[&str]) -> usize {
 /// Mints and deferrals, counted in every converted module: each count only
 /// goes down, and a module not listed has none. The census rows they answer
 /// to are in the design note (§4.14).
-const MINT_PATTERNS: &[&[&str]] = &[&["Gc", ":", ":", "unchecked"], &["lend", ":", ":", "deferred"], &[".", "defer", "("]];
+const MINT_PATTERNS: &[&[&str]] = &[&["Gc", ":", ":", "unchecked"], &["threaded", ":", ":", "toplevel"], &["lend", ":", ":", "deferred"], &[".", "defer", "("]];
 const MINTS: &[(&str, &[&str], usize)] = &[
     // The engine's entry for callers not yet converted (S1 gives them `Gc`).
     ("threaded.rs", &["Gc", ":", ":", "unchecked"], 1),
@@ -558,6 +558,8 @@ const MINTS: &[(&str, &[&str], usize)] = &[
     ("threaded.rs", &["lend", ":", ":", "deferred"], 1),
     // `provide''s after-load hooks, from a cached primitive call.
     ("threaded.rs", &[".", "defer", "("], 1),
+    // The embedder's command: its Rust caller holds no Value (`Toplevel` closes this).
+    ("command.rs", &["threaded", ":", ":", "toplevel"], 1),
 ];
 
 #[test]

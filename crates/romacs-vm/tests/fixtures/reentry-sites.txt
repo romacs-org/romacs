@@ -22,7 +22,6 @@ autoload.rs load_source_named load_file_kind 1 clean  # FILE is read before the 
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
 autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
-command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
 compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
 compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
 compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is in the initial obarray, whose symbols are never reclaimed
@@ -143,8 +142,8 @@ tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; on
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
 threaded.rs bind_special_now bind_variable 1 clean  # only a variable no watcher hears gets here: it runs no Lisp
 threaded.rs execute execute_args 1 clean  # a tail call
-threaded.rs execute_args_inner force_lazy 1 clean  # before the engine exists; FUNCTION is an index and the ARGS are copied after
-threaded.rs execute_args_inner unwind 1 clean  # the run is over: its result is the driver's rooted VALUE
+threaded.rs execute_args_inner force_lazy 1 held  # an open compiler builder holds collection; ARGS are kept across it and copied to the registers after
+threaded.rs execute_args_inner unwind 1 clean  # taken only with nothing to pop or no watchers at all, so it runs no Lisp; the other branch roots VALUE
 threaded.rs primitive_target loader_primitive 1 held  # `Vm::defer''s hold: a legacy primitive's engine runs unsuspended
 threaded.rs reader_call execute_args 1 suspended  # the caller set its engine aside; ARGS become the callee's registers before it can collect
 threaded.rs resolve_entry force_lazy 1 held  # `lend::deferred''s hold, a safe call of the facade
@@ -157,6 +156,7 @@ threaded.rs unwind_lent unwind 1 suspended  # `lend::unwind', which takes the pe
 threaded_lend.rs callback reader_call 1 suspended  # FUNCTION and OBJECT stay in the caller's frame; the reader boundary forwards the registers
 threaded_lend.rs collect collect_until_key 1 collector  # the facade's collection: the code is suspended, its roots traced
 threaded_lend.rs deferred_write perform_deferred 1 suspended  # the write is in the queue's frame, read back
+threaded_lend.rs eval_form eval_form_raw 1 clean  # orchestration's request: its caller holds the permission and no Value, and THEN consumes the value at once
 threaded_lend.rs run autoload_do_load 1 suspended  # FUNCTION and FUNDEF stay in the caller's frame
 threaded_lend.rs run compile 1 suspended  # FORM is Rust data whose objects are rooted
 threaded_lend.rs run execute_raw 1 suspended  # the function is an index; its value is the caller's to consume

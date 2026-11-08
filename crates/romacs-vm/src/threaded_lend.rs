@@ -152,6 +152,17 @@ impl Engine<'_> {
     }
 }
 
+/// An embedder's request, from no engine: BODY holds the top-level permission
+/// (`Gc::top`), and what it returns is plain. Counted in `rooting_brand_rules`.
+pub(crate) fn toplevel<A: Plain, N: Plain + 'static>(vm: &mut Vm, a: A, body: for<'m, 'b, 'g> fn(Mx<'m, 'b, Vm>, Gc<'g, 'b>, A) -> N) -> N {
+    crate::brand::orchestrate(crate::brand::Eng::lend(vm, Gc::top(&EngineKey)), a, body, |_, next| next)
+}
+/// Evaluate FORM as a request, THEN consuming its value at once.
+pub(crate) fn eval_form<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| vm.eval_form_raw(form), b, then)
+}
+
 /// Lisp a suspended engine runs nested.
 pub(super) enum Nested<'f> {
     /// Compile FORM and run it as an `eval` (the signal hook, the debugger).

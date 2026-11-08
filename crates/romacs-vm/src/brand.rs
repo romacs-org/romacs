@@ -141,6 +141,15 @@ impl<'b, E> Mx<'_, 'b, E> {
     pub fn raw<K: Key>(&mut self, _key: &K) -> &mut E {
         self.e
     }
+    /// A collecting request, for the key holder: RUN may collect, and what it
+    /// returns goes straight to the leaf THEN, whose result is plain. So nothing
+    /// RUN returned outlives the request in orchestration.
+    #[inline(always)]
+    pub fn request<K: Key, T, B: Plain, R: Plain>(&mut self, _key: &K, _gc: Gc<'_, 'b>, run: impl FnOnce(&mut E) -> T, b: B,
+        then: impl FnOnce(&mut E, B, T) -> R + Copy + 'static) -> R {
+        let out = run(self.e);
+        then(self.e, b, out)
+    }
 }
 
 /// Raw mode to orchestration and back, consuming the handle. BODY is a

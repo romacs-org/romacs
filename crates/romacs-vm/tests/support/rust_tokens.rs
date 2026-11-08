@@ -5,7 +5,7 @@
 /// Modules converted to rooting as a type (`src/brand.rs`): the compiler
 /// keeps their rule, so the census skips them and the brand's own source
 /// checks cover what the types leave.
-pub const CONVERTED: &[&str] = &["brand.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
+pub const CONVERTED: &[&str] = &["brand.rs", "command.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
