@@ -54,6 +54,12 @@
 ;; loadup.el: add-hook is interpreted here, so gv is required now.
 (require 'gv)
 (load "emacs-lisp/cl-preloaded.el" nil t t)
+;; cl-preloaded.el's `eval-when-compile' requires cl-macs from source
+;; before it defines `cl--define-derived-type', so cl-macs's `static-if'
+;; left out its derived types (`character', `base-char', `extended-char',
+;; `real').  GNU's cl-macs.elc took that branch when it was compiled, so
+;; cl-macs loads again now that the function exists.
+(load "emacs-lisp/cl-macs.el" nil t t)
 (load "emacs-lisp/oclosure.el" nil t t)
 (load "obarray.el" nil t t)
 (load "abbrev.el" nil t t)
@@ -121,6 +127,11 @@
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 ;; SCRAM's key derivation natively (VM2-SCRAM1).
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
+;; package.el and package-vc.el install; their long work runs in a worker VM
+;; in a session (romacs-package.el).  GNU's own test suite, which
+;; `EMACS_TEST_DIRECTORY' marks, tests them as they are.
+(unless (getenv "EMACS_TEST_DIRECTORY")
+  (with-eval-after-load 'package (require 'romacs-package)))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of
