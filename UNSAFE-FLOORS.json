@@ -16,7 +16,7 @@
     "romacs-terminfo": {"sites": 18, "undocumented": 4},
     "romacs-tui-tests": {"sites": 10, "undocumented": 6},
     "romacs-video": {"sites": 172, "undocumented": 168},
-    "romacs-vm": {"sites": 890, "undocumented": 704},
+    "romacs-vm": {"sites": 889, "undocumented": 704},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2},
     "romacs-webview": {"sites": 219, "undocumented": 197}
   },
