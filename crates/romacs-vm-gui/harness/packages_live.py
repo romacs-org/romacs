@@ -45,7 +45,7 @@ def watched(s, form, done, seconds, typed):
             return dict(returned=returned, elapsed=time.time() - started, max_round_trip=max(trips),
                         rounds=len(trips))
         time.sleep(.2)
-    raise RuntimeError(f'{form} did not finish: {s.log()[-2000:]}')
+    raise RuntimeError(f'{form} did not finish: ' + s.eval('(with-current-buffer "*Messages*" (buffer-substring (max 1 (- (point-max) 1500)) (point-max)))'))
 
 
 def main():
@@ -94,8 +94,13 @@ def main():
             time.sleep(.25)
             report['toast'] = s.eval('(mapcar (lambda (toast) (with-current-buffer (car toast) (buffer-string))) romacs-layer--toasts)')
             subprocess.run([f'{args.tools}/grim', str(args.output / 'toast.png')], env=s.env, check=False, timeout=15)
-            report['vc'] = watched(s, f'(progn (package-vc-install "{GIT_URL}") t)',
+            # As the user runs it, so it goes to a worker.
+            report['vc'] = watched(s, f'(let ((this-command (quote package-vc-install))) (package-vc-install "{GIT_URL}") t)',
                                    f"(package-installed-p '{GIT_PACKAGE})", 120, typed)
+            # Two at once wait their turn; a Lisp caller gets GNU's call.
+            report['queued'] = watched(s, "(let ((this-command 'package-install)) (package-install 'dash) (package-install 'vertico) (list romacs-package--running (length romacs-package--queue)))",
+                                       "(and (package-installed-p 'dash) (package-installed-p 'vertico) (null romacs-package--running))", 200, typed)
+            report['lisp_caller'] = s.eval("(let ((this-command 'other)) (package-install 'orderless) (package-installed-p 'orderless))")
             until(lambda: s.eval('(with-current-buffer romacs-test-buffer (buffer-size))') == str(typed[0]),
                   10, f'{typed[0]} typed keys in the buffer')
             report['typed'] = typed[0]
@@ -103,7 +108,7 @@ def main():
             report['elc'] = s.eval('(length (directory-files-recursively package-user-dir "\\\\.elc\\\\\'"))')
             report['user_dir'] = s.eval('package-user-dir')
             report['selected'] = s.eval('package-selected-packages')
-            report['ok'] = report['elc'] == '0' and report['require'] == '(t t)' and report['prompt_closed'] < 1 and 'Magit installed' in report['toast']
+            report['ok'] = report['elc'] == '0' and report['require'] == '(t t)' and report['prompt_closed'] < 1 and 'Magit installed' in report['toast'] and report['lisp_caller'] == 't'
         finally:
             (args.output / 'server.log').write_text(s.log())
             s.close()

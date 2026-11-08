@@ -1282,7 +1282,7 @@ fn evaluate(
                 }
                 // GNU's step before the init (startup.el:1560): installed
                 // packages activate.
-                if let Err(error) = vm.eval_source("(when package-enable-at-startup (package-activate-all))") {
+                if let Err(error) = vm.eval_source("(romacs--activate-packages)") {
                     eprintln!("romacs: packages: {error}");
                 }
                                 // What the init loads is its layer's plan (world.rs).

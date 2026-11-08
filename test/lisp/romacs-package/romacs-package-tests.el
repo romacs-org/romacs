@@ -72,5 +72,36 @@ A worker needs a world to adopt: harness/packages_live.py runs the session."
       (should-error (isolate-await future 120))
       (should-not (package-installed-p 'no-such-package)))))
 
+(ert-deftest romacs-package-settling-twice-leaves-one-descriptor ()
+  (romacs-package-tests--with-archive
+    (package-install 'simple-single)
+    (romacs-package--settled)
+    (romacs-package--settled)
+    (should (= 1 (length (cdr (assq 'simple-single package-alist)))))))
+
+(ert-deftest romacs-package-deleting-the-last-empties-the-selection ()
+  (romacs-package-tests--with-archive
+    (let ((after-init-time (current-time)))
+      (package-install 'simple-single)
+      (package-delete (cadr (assq 'simple-single package-alist)))
+      (should-not package-selected-packages)
+      (should-not (with-temp-buffer
+                    (insert-file-contents (romacs-package--selected-file))
+                    (read (current-buffer)))))))
+
+(ert-deftest romacs-package-a-descriptor-crosses-by-name-and-version ()
+  (romacs-package-tests--with-archive
+    (let* ((desc (cadr (assq 'simple-single package-archive-contents)))
+           (crossing (romacs-package--crossing (list desc 'other))))
+      (should (eq (romacs-package--crossed (car crossing)) desc))
+      (should (eq (cadr crossing) 'other)))))
+
+(ert-deftest romacs-package-lisp-callers-get-gnus-call ()
+  "A Lisp caller, and anything out of a session, expects the package afterwards."
+  (romacs-package-tests--with-archive
+    (let ((this-command 'other))
+      (package-install 'simple-single)
+      (should (package-installed-p 'simple-single)))))
+
 (provide 'romacs-package-tests)
 ;;; romacs-package-tests.el ends here

@@ -132,6 +132,21 @@
 ;; `EMACS_TEST_DIRECTORY' marks, tests them as they are.
 (unless (getenv "EMACS_TEST_DIRECTORY")
   (with-eval-after-load 'package (require 'romacs-package)))
+
+(defun romacs--activate-packages ()
+  "startup.el's step before the init: activate packages if any is installed,
+and load nothing when none is."
+  (and package-enable-at-startup
+       (not (bound-and-true-p package--activated))
+       (catch 'found
+         (dolist (dir (cons package-user-dir package-directory-list))
+           (when (file-directory-p dir)
+             (dolist (name (directory-files dir))
+               (let ((subdir (expand-file-name name dir)))
+                 (when (and (file-directory-p subdir)
+                            (file-exists-p (expand-file-name (package--description-file subdir) subdir)))
+                   (throw 'found t)))))))
+       (package-activate-all)))
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of

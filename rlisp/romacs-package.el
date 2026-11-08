@@ -8,10 +8,11 @@
 ;; package.el and package-vc.el install packages.  Romacs changes what they
 ;; do in three small ways, and nothing else:
 ;;
-;; - In a session, a command that downloads runs in a worker VM, so typing
-;;   goes on; the session activates what it installed when it ends.  In
-;;   batch and during startup the command runs where it is called, as GNU's
-;;   does, since its caller expects the package afterwards.
+;; - In a session, a command the user runs that downloads goes to a worker VM,
+;;   one at a time, so typing goes on; the session takes in what is on disk
+;;   when it ends, and says so.  Lisp callers, `use-package' among them, and
+;;   batch and startup run it where they call it, as GNU's do, since they
+;;   expect the package afterwards.
 ;; - Nothing is byte compiled (`package--compile' goes away): a package loads
 ;;   from its source.
 ;; - The list of selected packages lives beside the packages, since nothing
@@ -27,20 +28,24 @@
 (declare-function isolate-on-done "isolate")
 (declare-function isolate-await "isolate")
 (declare-function isolate-main-p "isolate")
+(declare-function package-menu--post-refresh "package")
 (declare-function romacs-layer-notify "romacs-layer")
 
 (defconst romacs-package--settings
   '(package-archives package-archive-priorities package-pinned-packages package-user-dir
     package-gnupghome-dir package-directory-list package-load-list package-check-signature
-    package-selected-packages package-vc-selected-packages url-proxy-services)
+    package-selected-packages package-vc-selected-packages package-install-upgrade-built-in
+    package-retention-policy
+    url-proxy-services current-prefix-arg)
   "The options a worker installs under, as the session has them.")
 
 (defun romacs-package--selected-file ()
   (expand-file-name "selected-packages.eld" package-user-dir))
 
 (defun romacs-package--save-selected (&optional value)
-  "`package--save-selected-packages', beside the packages."
-  (when value (setq package-selected-packages value))
+  "`package--save-selected-packages', beside the packages.
+VALUE nil is valid after startup: the last package was deleted."
+  (when (or value after-init-time) (setq package-selected-packages value))
   (make-directory package-user-dir t)
   (with-temp-file (romacs-package--selected-file)
     (prin1 package-selected-packages (current-buffer))))
@@ -54,21 +59,47 @@
 
 (defun romacs-package--settled (&optional selected)
   "The session takes in what a worker left on disk: SELECTED, the descriptors
-and the archives' contents; it activates the new packages."
-  (when selected (setq package-selected-packages selected))
-  (package-read-all-archive-contents)
-  (package-load-all-descriptors)
-  (package-activate-all))
+and the archives' contents.  A package with a new directory activates, reloading
+what the old one had loaded; a directory gone leaves `load-path'."
+  (let ((before (cl-loop for (name desc) in package-alist
+                         collect (cons name (package-desc-dir desc)))))
+    (when selected (setq package-selected-packages selected))
+    (setq package-alist nil)
+    (package-read-all-archive-contents)
+    (package-load-all-descriptors)
+    (pcase-dolist (`(,name . ,dir) before)
+      (unless (equal dir (let ((new (cadr (assq name package-alist))))
+                           (and new (package-desc-dir new))))
+        (setq load-path (delete (directory-file-name dir) (delete dir load-path)))))
+    (pcase-dolist (`(,name ,desc) package-alist)
+      (let ((old (alist-get name before)))
+        (unless (equal old (package-desc-dir desc))
+          (package-activate-1 desc (and old t) t))))
+    (add-hook 'post-command-hook #'package-menu--post-refresh)))
+
+(defun romacs-package--crossing (argument)
+  "ARGUMENT as it crosses to a worker: a descriptor by its name and version,
+in a list too."
+  (cond ((package-desc-p argument)
+         (list :package (package-desc-name argument) (package-desc-version argument)))
+        ((consp argument) (mapcar #'romacs-package--crossing argument))
+        (t argument)))
+
+(defun romacs-package--crossed (argument)
+  "ARGUMENT back from `romacs-package--crossing', on the worker's descriptors."
+  (cond ((eq (car-safe argument) :package)
+         (pcase-let ((`(,_ ,name ,version) argument))
+           (cl-find version (append (cdr (assq name package-alist))
+                                    (cdr (assq name package-archive-contents)))
+                    :key #'package-desc-version :test #'equal)))
+        ((consp argument) (mapcar #'romacs-package--crossed argument))
+        (t argument)))
 
 (defun romacs-package--job (command args)
   "In a worker: run GNU's COMMAND on ARGS; the selected packages."
   (package-initialize)
-  (apply command args)
+  (apply command (mapcar #'romacs-package--crossed args))
   package-selected-packages)
-
-(defun romacs-package--argument (arg)
-  "ARG as it crosses to a worker: a package by its name."
-  (if (package-desc-p arg) (package-desc-name arg) arg))
 
 (defconst romacs-package--done
   '((package-install . "installed") (package-vc-install . "installed")
@@ -77,14 +108,16 @@ and the archives' contents; it activates the new packages."
 
 (defun romacs-package--subject (argument)
   "The name to show for ARGUMENT, a package or its git URL."
-  (capitalize (if (stringp argument) (file-name-base argument) (format "%s" argument))))
+  (capitalize (cond ((stringp argument) (file-name-base argument))
+                    ((package-desc-p argument) (symbol-name (package-desc-name argument)))
+                    (t (format "%s" argument)))))
 
 (defun romacs-package--done-message (command args)
   "What the session says when COMMAND on ARGS has ended well."
   (let ((verb (alist-get command romacs-package--done)))
-    (cond (verb (format "%s %s \N{WHITE HEAVY CHECK MARK}" (romacs-package--subject (car args)) verb))
-          ((eq command 'package-refresh-contents) "Package lists updated \N{WHITE HEAVY CHECK MARK}")
-          (t "Packages updated \N{WHITE HEAVY CHECK MARK}"))))
+    (if verb
+        (format "%s %s \N{WHITE HEAVY CHECK MARK}" (romacs-package--subject (car args)) verb)
+      "Packages updated \N{WHITE HEAVY CHECK MARK}")))
 
 (defun romacs-package--notify (text &optional kind)
   "Say TEXT, which the user asked for a while ago: in *Messages*, and as a
@@ -92,52 +125,80 @@ toast that outlasts their typing."
   (let ((inhibit-message (fboundp 'romacs-layer-notify))) (message "%s" text))
   (when (fboundp 'romacs-layer-notify) (romacs-layer-notify text kind)))
 
-(defvar romacs-package--refresh nil
-  "The future of the package lists being fetched, or nil.")
-
 (defun romacs-package--spawn (command args)
-  "Run COMMAND on ARGS in a worker VM: its future.
-The session says so when it ends, and takes the result in."
-  (let* ((names (mapcar #'romacs-package--argument args))
-         (future (isolate-spawn 'romacs-package--job command names
-                                :name (symbol-name command)
-                                :require '(romacs-package package-vc)
-                                :allow-source-boot t
-                                :bindings (cl-loop for s in romacs-package--settings
-                                                   when (boundp s) collect (cons s (symbol-value s))))))
-    (when (eq command 'package-refresh-contents) (setq romacs-package--refresh future))
-    (isolate-on-done
-     future
-     (lambda (done)
-       (condition-case err
-           (progn (romacs-package--settled (isolate-await done))
-                  (romacs-package--notify (romacs-package--done-message command names)))
-         (error (romacs-package--notify
-                 (format "%s failed: %s" (if names (romacs-package--subject (car names)) command)
-                         (error-message-string err))
-                 'error)))))
-    future))
+  "Run COMMAND on ARGS in a worker VM: its future."
+  (isolate-spawn 'romacs-package--job command (mapcar #'romacs-package--crossing args)
+                 :name (symbol-name command)
+                 :require '(romacs-package package-vc)
+                 :allow-source-boot t
+                 :bindings (cl-loop for s in romacs-package--settings
+                                    when (boundp s) collect (cons s (symbol-value s)))))
 
-(defun romacs-package--await-lists (&rest _)
-  "After `package--archives-initialize': a command about to read a package's
-name waits for the lists it started fetching.  The display stays live."
-  (while (and romacs-package--refresh (not (isolate-future-done-p romacs-package--refresh)))
-    (sit-for 0.05))
-  (setq romacs-package--refresh nil))
+(defvar romacs-package--queue nil
+  "The (COMMAND . ARGS) waiting for a worker; one runs at a time, as they share
+the package directory and the selected list.")
+
+(defvar romacs-package--running nil
+  "The future of the job a worker is running, or nil.")
+
+(defun romacs-package--next ()
+  "Start the next waiting job, unless one is running."
+  (when (and romacs-package--queue (not romacs-package--running))
+    (pcase-let ((`(,command . ,args) (pop romacs-package--queue)))
+      (setq romacs-package--running (romacs-package--spawn command args))
+      (isolate-on-done romacs-package--running
+                       (lambda (done) (romacs-package--finish done command args))))))
+
+(defun romacs-package--finish (done command args)
+  "DONE, the future of COMMAND on ARGS, ended: take in the disk, whatever it
+left, and say how it went."
+  (setq romacs-package--running nil)
+  (condition-case err
+      (let ((selected (isolate-await done)))
+        (romacs-package--settled selected)
+        (romacs-package--notify (romacs-package--done-message command args)))
+    (error
+     (ignore-errors (romacs-package--settled))
+     (romacs-package--notify
+      (format "%s failed: %s" (if args (romacs-package--subject (car args)) command)
+              (error-message-string err))
+      'error)))
+  (romacs-package--next))
+
+(defun romacs-package--session-p ()
+  "Whether this is a running session's main VM, where a worker can take a job."
+  (and after-init-time (not noninteractive) (fboundp 'isolate-main-p) (isolate-main-p)))
 
 (defun romacs-package--dispatch (command original &rest args)
-  "Run COMMAND in a worker from a running session, else as GNU does."
-  (if (and after-init-time (not noninteractive)
-           (fboundp 'isolate-main-p) (isolate-main-p))
-      (romacs-package--spawn command args)
-    (apply original args)))
+  "The user running COMMAND in a session gets a worker, else GNU's call."
+  (if (not (and (romacs-package--session-p)
+                (or (eq this-command command)
+                    (eq command 'package-menu--perform-transaction))))
+      (apply original args)
+    ;; Its question must be asked here: a worker has no user.
+    (when (eq command 'package-upgrade-all)
+      (unless (or (null (car args)) (yes-or-no-p "Refresh the lists and upgrade all packages? "))
+        (user-error "Nothing done"))
+      (setq args nil))
+    (setq romacs-package--queue (append romacs-package--queue (list (cons command args))))
+    (romacs-package--next)
+    nil))
 
-(dolist (command '(package-install package-upgrade package-upgrade-all package-refresh-contents
-                   package-install-selected-packages package-vc-install package-vc-upgrade
-                   package-vc-upgrade-all))
+(defun romacs-package--archives-initialize (original)
+  "`package--archives-initialize': a session with no lists yet fetches them in a
+worker, whose errors are the caller's, and goes on when it has them."
+  (when (and (romacs-package--session-p) (null package-archive-contents))
+    (unless package--initialized (package-initialize))
+    (unless package-archive-contents
+      (message "Fetching the package lists...")
+      (romacs-package--settled (isolate-await (romacs-package--spawn 'package-refresh-contents nil)))))
+  (funcall original))
+
+(dolist (command '(package-install package-upgrade package-upgrade-all package-vc-install
+                   package-vc-upgrade package-menu--perform-transaction))
   (advice-add command :around (apply-partially #'romacs-package--dispatch command)))
 
-(advice-add 'package--archives-initialize :after #'romacs-package--await-lists)
+(advice-add 'package--archives-initialize :around #'romacs-package--archives-initialize)
 (advice-add 'package--compile :override #'ignore)
 (advice-add 'package--save-selected-packages :override #'romacs-package--save-selected)
 (romacs-package--read-selected)
