@@ -95,6 +95,8 @@ impl<T> RawTable<T> {
         let dead = if quarantine { QUARANTINED } else { FREE };
         // Only this range: other threads hold the ones beside it.
         let base = range.start;
+        // SAFETY: RANGE lies in the colours and is this caller's alone (this
+        // function's contract), and AtomicU8 has the layout of u8.
         let colors = unsafe { std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()) };
         let (mut freed, mut last) = (0, 0);
         let mut at = 0;
@@ -117,6 +119,8 @@ impl<T> RawTable<T> {
             for i in at..end {
                 match colors[i] {
                     ALLOCATED => {
+                        // SAFETY: a dead entry of RANGE, in bounds and this
+                        // caller's alone; no mark reached it, so nothing reads it.
                         destroy(unsafe { &mut *self.entries.add(base + i) });
                         colors[i] = dead;
                         freed += 1;
@@ -137,6 +141,8 @@ impl<T> RawTable<T> {
     /// The dead entries of RANGE that WANTED, given each index, accepts.
     pub(crate) fn dead_in(&self, range: std::ops::Range<usize>, wanted: impl Fn(usize) -> bool, found: &mut Vec<u32>) {
         assert!(range.end <= self.len, "a range past its table");
+        // SAFETY: the table's colours, and AtomicU8 has the layout of u8. This
+        // runs after a mark and before its sweep, when no thread writes one.
         let colors = unsafe { std::slice::from_raw_parts(self.colors as *const u8, self.len) };
         let mut at = range.start;
         while at < range.end {
@@ -160,6 +166,7 @@ impl<T> RawTable<T> {
     where
         T: Sync,
     {
+        // SAFETY: this function's contract, and T: Sync lets any thread read it.
         unsafe { self.get_unsync(i) }
     }
     /// Entry I, for a view that reads no part of it a `Cell' or a lock guards.
@@ -167,6 +174,7 @@ impl<T> RawTable<T> {
     #[inline(always)]
     pub(crate) unsafe fn get_unsync(&self, i: usize) -> &T {
         assert!(i < self.len, "a Value past its table");
+        // SAFETY: in bounds, and nothing writes it while this lives (the contract).
         unsafe { &*self.entries.add(i) }
     }
     /// Entry I, the caller's alone. SAFETY: the caller claimed it, and nothing
@@ -175,6 +183,7 @@ impl<T> RawTable<T> {
     #[inline(always)]
     pub(crate) unsafe fn get_mut(&self, i: usize) -> &mut T {
         assert!(i < self.len, "a Value past its table");
+        // SAFETY: in bounds, and only the caller reaches it while this lives (the contract).
         unsafe { &mut *self.entries.add(i) }
     }
 }
@@ -463,6 +472,12 @@ impl<T> Table<T> {
 mod tests {
     use super::*;
 
+    /// The table for a mark, as these tests use it.
+    fn raw_of(t: &mut Table<u64>) -> RawTable<u64> {
+        // SAFETY: each test drops its table only after the last use of this,
+        // and whatever else changes the table is what `holds' is to notice.
+        unsafe { t.raw() }
+    }
     fn table(n: u64) -> Table<u64> {
         let mut table = Table::default();
         table.extend(0..n);
@@ -608,34 +623,35 @@ mod tests {
         };
         for colors in [true, false] {
             let mut t = table(100);
-            let raw = unsafe { t.raw() };
+            let raw = raw_of(&mut t);
             assert!(raw.holds(&t));
             moved(&mut t, colors);
             assert!(!raw.holds(&t), "moved {}", if colors { "colours" } else { "entries" });
         }
         let mut t = table(100);
         sweep(&mut t, &[0, 1]);
-        let raw = unsafe { t.raw() };
+        let raw = raw_of(&mut t);
         t.alloc(7);
         assert!(!raw.holds(&t), "an entry handed out");
         let mut t = table(100);
-        let raw = unsafe { t.raw() };
+        let raw = raw_of(&mut t);
         t.clear_marks();
         assert!(!raw.holds(&t), "its marks cleared");
         let mut t = table(100);
-        let raw = unsafe { t.raw() };
-        let _again = unsafe { t.raw() };
+        let raw = raw_of(&mut t);
+        let _again = raw_of(&mut t);
         assert!(!raw.holds(&t), "a mark begun again");
         // All live, so nothing about its shape changes: its marks still go.
         let mut t = table(100);
-        let raw = unsafe { t.raw() };
+        let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
         t.compact(|_| {});
         assert!(!raw.holds(&t), "compacted with every entry kept");
         let mut t = table(100);
-        let raw = unsafe { t.raw() };
+        let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
         let len = t.len();
+        // SAFETY: the whole table, on this test's one thread; it starts at 0.
         let (freed, last) = unsafe { raw.sweep_range(0..len, false, |_| {}) };
         t.swept(freed, last, false);
         assert!(!raw.holds(&t), "swept with every entry kept");
