@@ -37,6 +37,20 @@ const CASES: &str = r###"
 (progn (setq log nil) (defvar wv-w 1) (fset 'wv-log LOG) (add-variable-watcher 'wv-w 'wv-log) (with-temp-buffer (rename-buffer "wv-5") (make-local-variable 'wv-w) (setq wv-w 2) (let ((wv-w 3)) (kill-local-variable 'wv-w) (make-local-variable 'wv-w) (setq wv-w 9))) (list (nreverse log) wv-w))
 (progn (defvar wv-y 1) (defvar wv-yz 0) (with-temp-buffer (make-local-variable 'wv-y) (setq wv-y 2) (add-variable-watcher 'wv-y (lambda (s n o w) (when (eq o 'unlet) (kill-local-variable 'wv-y) (garbage-collect) (make-local-variable 'wv-yz) (setq wv-yz 'sentinel)))) (list (let ((wv-y 3)) wv-y) wv-y wv-yz (local-variable-p 'wv-y) (default-value 'wv-y))))
 (progn (defvar wv-x2 1) (with-temp-buffer (make-local-variable 'wv-x2) (setq wv-x2 2) (add-variable-watcher 'wv-x2 (lambda (s n o w) (when (eq o 'unlet) (kill-local-variable 'wv-x2) (garbage-collect) (make-local-variable 'wv-x2) (setq wv-x2 9)))) (list (let ((wv-x2 3)) wv-x2) wv-x2 (default-value 'wv-x2))))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'last-command-event 'wv-log) (with-temp-buffer (let ((last-command-event ?a)) (self-insert-command 1 ?b) (setq log (nreverse log)) (list log last-command-event (buffer-string)))))
+(let ((current-load-list nil)) (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'current-load-list 'wv-log) (defalias 'wv-df #'ignore) (list log (length current-load-list)))
+(progn (setq log nil) (fset 'wv-log LOG) (defvar wv-hk nil) (put 'wv-hk 'permanent-local 'permanent-local-hook) (put 'wv-keep 'permanent-local-hook t) (with-temp-buffer (rename-buffer "wv-hb") (set (make-local-variable 'wv-hk) (list 'wv-keep 'wv-drop t)) (add-variable-watcher 'wv-hk 'wv-log) (kill-all-local-variables) (list wv-hk (nreverse log))))
+(progn (setq log nil) (fset 'wv-log LOG) (defvar wv-hl '(global)) (put 'wv-hl 'permanent-local 'permanent-local-hook) (with-temp-buffer (rename-buffer "wv-hb") (set (make-local-variable 'wv-hl) nil) (add-variable-watcher 'wv-hl 'wv-log) (kill-all-local-variables) (list wv-hl (nreverse log))))
+(progn (setq log nil) (fset 'wv-log LOG) (with-temp-buffer (rename-buffer "wv-hb") (mapc (lambda (s) (add-variable-watcher s 'wv-log) (make-local-variable s)) '(abbrev-mode auto-fill-function bidi-display-reordering bidi-paragraph-direction bidi-paragraph-separate-re bidi-paragraph-start-re buffer-auto-save-file-format buffer-auto-save-file-name buffer-backed-up buffer-display-count buffer-display-table buffer-display-time buffer-file-coding-system buffer-file-format buffer-file-name buffer-file-truename buffer-invisibility-spec buffer-read-only buffer-saved-size buffer-undo-list cache-long-scans ctl-arrow cursor-in-non-selected-windows cursor-type default-directory fill-column fringe-cursor-alist fringe-indicator-alist fringes-outside-margins header-line-format horizontal-scroll-bar indicate-buffer-boundaries indicate-empty-lines left-fringe-width left-margin left-margin-width line-spacing local-abbrev-table local-minor-modes major-mode mark-active mode-line-format mode-name overwrite-mode point-before-scroll right-fringe-width right-margin-width scroll-bar-height scroll-bar-width scroll-down-aggressively scroll-up-aggressively selective-display selective-display-ellipses tab-line-format tab-width text-conversion-style truncate-lines vertical-scroll-bar word-wrap)) (kill-all-local-variables) log))
+(progn (setq log nil) (fset 'wv-log LOG) (with-temp-buffer (rename-buffer "wv-hb") (add-variable-watcher 'case-symbols-as-words 'wv-log) (set (make-local-variable 'case-symbols-as-words) t) (kill-all-local-variables) (list case-symbols-as-words (nreverse log))))
+"###;
+
+/// Writes GNU's C makes by assignment (`Vname = value`), which no watcher
+/// hears, reached through the real coding systems and commands.
+const LOADED_CASES: &str = r###"
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'last-coding-system-used 'wv-log) (decode-coding-string "abc" 'utf-8) (encode-coding-string "abc" 'utf-8) (list log last-coding-system-used))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'coding-category-list 'wv-log) (set-coding-system-priority 'utf-8) (list log (car (coding-system-priority-list))))
+(progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'this-command 'wv-log) (add-variable-watcher 'real-this-command 'wv-log) (let ((this-command 'wv-outer)) (setq log nil) (call-interactively 'ignore) (list log this-command)))
 "###;
 
 const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w) (buffer-name w) w) (if (boundp s) (symbol-value s) 'void)) log)))";
@@ -46,26 +60,55 @@ const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w)
 /// and restores each variable as a `let' does, keeps load-in-progress bound
 /// over the after-load forms, and propagates an unlet watcher's signal from
 /// a load that otherwise succeeded, leaving that binding installed; through
-/// `require', the failed load's feature is undone.
+/// `require', the failed load's feature is undone. A `(defvar NAME)' records NAME
+/// in `macroexp--dynvars' with a `set' its watchers hear. That variable is forwarded
+/// in GNU, so restoring its binding reports `set' as well as `unlet', which Romacs's
+/// does not; the case reports only the declaration's write.
 const LOAD_CASES: &[(&str, &str)] = &[
     (";;; -*- lexical-binding: t -*-\n(setq wv-in (list load-file-name load-true-file-name load-in-progress current-load-list))\n",
      "(progn (setq log nil) (setq wv-outer current-load-list) (fset 'wv-log (lambda (s n o w) (setq log (cons (list s o (cond ((equal n FILE) 'file) ((equal n (list FILE)) '(file)) ((and (eq s 'current-load-list) (eq n wv-outer)) 'outer) (t n)) w) log)))) (dolist (v '(load-file-name load-true-file-name load-in-progress current-load-list)) (add-variable-watcher v 'wv-log)) (fset 'do-after-load-evaluation (lambda (f) (setq wv-after (list (equal f FILE) load-in-progress load-file-name)))) (list (load FILE nil t) (nreverse log) (equal wv-in (list FILE FILE t (list FILE))) wv-after load-file-name load-true-file-name load-in-progress (eq current-load-list wv-outer)))"),
     (";;; -*- lexical-binding: t -*-\n(setq wv-z 1)\n",
      "(progn (fset 'wv-cll (lambda (s n o w) (if (eq o 'unlet) (error \"No unlet\")))) (add-variable-watcher 'current-load-list 'wv-cll) (list (condition-case e (load FILE nil t) (error e)) (progn (remove-variable-watcher 'current-load-list 'wv-cll) current-load-list) load-file-name load-true-file-name load-in-progress wv-z))"),
+    (";;; -*- lexical-binding: t -*-\n(defvar wv-declared)\n(setq wv-after t)\n",
+     "(progn (setq log nil) (fset 'wv-dyn (lambda (s n o w) (if (and (eq o 'set) n) (setq log (cons (list s (car n) o) log))))) (add-variable-watcher 'macroexp--dynvars 'wv-dyn) (load FILE nil t) log)"),
     (";;; -*- lexical-binding: t -*-\n(provide 'wv-feature)\n",
      "(progn (fset 'wv-cll (lambda (s n o w) (if (eq o 'unlet) (error \"No unlet\")))) (add-variable-watcher 'current-load-list 'wv-cll) (list (condition-case e (require 'wv-feature FILE) (error e)) (progn (remove-variable-watcher 'current-load-list 'wv-cll) (featurep 'wv-feature)) load-file-name load-in-progress))"),
 ];
 
+fn prelude() -> Vm {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm
+}
+
+/// The loadup chain (process.rs's), for coding systems and commands.
+fn bootstrapped() -> Vm {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = Vm::new();
+    vm.eval_source("(setq noninteractive t)").unwrap();
+    let lisp = root.join("gnu-lisp");
+    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
+        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
+        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
+        .collect();
+    names.sort();
+    let mut paths = vec![lisp.clone()];
+    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
+    paths.push(root.join("rlisp"));
+    vm.set_load_path(&paths).unwrap();
+    vm.install_lisp_prelude().unwrap();
+    vm.load_file(&root.join("rlisp/romacs-loadup-bootstrap.el")).unwrap();
+    vm
+}
+
 /// EXPRESSION's printed value from pinned GNU and from Romacs, as a failure
 /// report when they differ.
-fn compare(binary: &str, expression: &str) -> Option<String> {
+fn compare(binary: &str, expression: &str, mut vm: Vm) -> Option<String> {
     // As character codes, as tests/json.rs compares.
     let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
     let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let expected = String::from_utf8(output.stdout).unwrap();
-    let mut vm = Vm::new();
-    vm.install_lisp_prelude().unwrap();
     // Collect at every safepoint, so a watcher that ran while collection
     // was inhibited is followed by collections that would expose an
     // unforwarded register.
@@ -82,7 +125,15 @@ fn compare(binary: &str, expression: &str) -> Option<String> {
 fn lisp_watchers_match_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let failures: Vec<_> = CASES.lines().filter(|line| !line.is_empty())
-        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG))).collect();
+        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG), prelude())).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_assignments_match_pinned_gnu() {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let failures: Vec<_> = LOADED_CASES.lines().filter(|line| !line.is_empty())
+        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG), bootstrapped())).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -94,7 +145,7 @@ fn load_bindings_match_pinned_gnu() {
         let file = std::env::temp_dir().join(format!("romacs-watchers-{}-{i}.el", std::process::id()));
         std::fs::write(&file, contents).unwrap();
         let name = format!("{:?}", file.to_str().unwrap());
-        failures.extend(compare(&binary, &expression.replace("FILE", &name)));
+        failures.extend(compare(&binary, &expression.replace("FILE", &name), prelude()));
         std::fs::remove_file(&file).unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

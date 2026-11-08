@@ -100,6 +100,12 @@ impl Leaf<'_> {
                 if !(file_coding && kill_permanent == Value::NIL) { self.clear_local_slot(slot, buffer)?; }
                 continue;
             }
+            // reset_buffer_local_variables (buffer.c:1190) keeping permanent
+            // locals reports every localized one, before it looks at any.
+            // `truncate-lines' is per-buffer there, though a local here.
+            if kill_permanent == Value::NIL && slot != self.vm.truncate_lines_slot {
+                self.notify(slot, Value::NIL, "makunbound", Some(buffer))?;
+            }
             let property = self.vm.symbol_property(symbol, permanent).map_err(Fault::Error)?;
             let builtin_permanent = slot == self.vm.truncate_lines_slot || file_coding;
             if kill_permanent == Value::NIL && (property != Value::NIL || builtin_permanent) {
@@ -109,7 +115,9 @@ impl Leaf<'_> {
                         Err(Fault::VoidVariable(_)) => return Err(Fault::Wrong("arrayp", self.vm.forwarded_unbound_symbol())),
                         Err(fault) => return Err(fault),
                     };
-                    if self.pair(value).is_some() {
+                    if value == Value::NIL {
+                        self.notify(slot, value, "makunbound", Some(buffer))?;
+                    } else if self.pair(value).is_some() {
                         let mut values = Vec::new();
                         let mut rest = value;
                         while let Some((item, tail)) = self.pair(rest) {
@@ -119,7 +127,8 @@ impl Leaf<'_> {
                             rest = tail;
                         }
                         let filtered = self.vm.list_value(&values);
-                        self.vm.set_variable_value(slot, filtered).map_err(Fault::Error)?;
+                        self.notify(slot, filtered, "makunbound", Some(buffer))?;
+                        self.vm.assign_variable(slot, filtered).map_err(Fault::Error)?;
                     }
                 }
             } else { self.clear_local_slot(slot, buffer)?; }

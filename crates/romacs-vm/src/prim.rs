@@ -1170,6 +1170,12 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             self.vm.set_variable_value(slot, value).map_err(|text| self.watcher_fault(text))
         }
+        /// GNU C's `Vname = value', which no watcher hears (`variable_set' is
+        /// `Fset'): a variable C assigns directly, or Romacs's own state.
+        pub fn store_variable(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(v)?;
+            self.vm.assign_variable(slot, value).map_err(Fault::Error)
+        }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
         /// the named slot, holding its own constant value.
@@ -1233,7 +1239,7 @@ mod leaf {
             let slot = self.vm.slot("current-load-list");
             let old = self.vm.variable_value(slot).map_err(Fault::Error)?;
             let history = self.cons(symbol, old);
-            self.vm.set_variable_value(slot, history).map_err(Fault::Error)
+            self.vm.assign_variable(slot, history).map_err(Fault::Error)
         }
         /// Declaration metadata only: GNU custom.el's custom-autoload/custom-add-load.
         pub fn custom_autoload_metadata(&mut self, symbol: Value, load: Value, noset: Value) -> super::Out {
@@ -1637,9 +1643,9 @@ mod leaf {
             self.vm.char_table_runs(table).map_err(Fault::Error)
         }
         /// Fset or Fset_default of a plain global variable.
-        pub fn set_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
+        pub fn store_variable_named(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
             let symbol = self.intern(name);
-            self.variable_set(symbol, value)
+            self.store_variable(symbol, value)
         }
         /// The one string naming font NAME: GNU's font-object holds its name,
         /// and face-font and query-font answer that very string, which
@@ -2221,7 +2227,7 @@ impl Vm {
             let previous = cx.variable_value(last)?.unwrap_or(Value::NIL);
             let string = cx.make_string(bytes.to_vec(), false);
             let decoded = cx.coding_convert_string(string, found, Value::NIL, Value::NIL, false);
-            cx.variable_set(last, previous)?;
+            cx.store_variable(last, previous)?;
             let view = cx.string_view(decoded?)?;
             if view.is_multibyte() { return Ok(view.bytes().to_vec()) }
             let mut out = Vec::with_capacity(view.bytes().len());

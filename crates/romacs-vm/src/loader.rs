@@ -839,7 +839,7 @@ impl Vm {
         let entry = self.list_value(&entry);
         kept.insert(0, entry);
         let history = self.list_value(&kept);
-        self.set_variable_value(slot, history)?;
+        self.assign_variable(slot, history)?;
         // lread.c:2112 stores t without notifying; the load's unbinding
         // restores the outer list.
         let fwd = self.native_forwarding(history_slot).expect("current-load-list is forwarded");

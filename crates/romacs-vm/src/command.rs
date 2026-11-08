@@ -303,7 +303,7 @@ impl Vm {
         // roots it; eval_form may compact on every invocation.
         let symbol = binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned());
         let this_command = self.slot("this-command");
-        self.set_variable_value(this_command, binding)?;
+        self.assign_variable(this_command, binding)?;
         let command = match &symbol {
             Some(name) => name.clone(),
             None => self.display(binding)?,

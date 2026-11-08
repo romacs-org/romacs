@@ -100,7 +100,7 @@ impl Vm {
                 let history = self.slot("current-load-list");
                 let old = self.variable_value(history)?;
                 let cons = self.alloc_cons(entry, old);
-                self.set_variable_value(history, cons)?;
+                self.assign_variable(history, cons)?;
                 self.defalias_documentation(&a)?;
                 Ok(a[0])
             }

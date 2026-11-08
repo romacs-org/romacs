@@ -112,5 +112,5 @@ fn inhibited(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
 /// The echo area holds the last message; nil clears it.
 fn show(cx: &mut Leaf<'_>, text: Value) -> std::result::Result<(), Fault> {
     let echo = cx.intern(crate::prim::ECHO_AREA_MESSAGE);
-    cx.variable_set(echo, text)
+    cx.store_variable(echo, text)
 }

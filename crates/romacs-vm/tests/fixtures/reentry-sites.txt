@@ -22,9 +22,7 @@ autoload.rs load_source_named load_file_kind 1 clean  # FILE is read before the 
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
 autoload.rs load_with_autoload_queue unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
-bootstrap.rs bootstrap_primitive set_variable_value 1 held  # defalias's LOADHIST_ATTACH to current-load-list: a native writer, its watchers hold collection (rooted_write unset)
 command.rs command_event eval_form_raw 6 clean  # events become forms and the binding a name before each call
-command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
 compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
 compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
 compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is in the initial obarray, whose symbols are never reclaimed
@@ -68,7 +66,6 @@ lib.rs unbind_after unwind 1 held  # native unbinding: watchers hold collection 
 lib.rs unbind_one unbind 1 clean  # backtrace bookkeeping, runs no Lisp
 lib.rs unwind unbind_one 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 loader.rs bind_named bind_variable 1 held  # a native writer: its watchers hold collection (rooted_write unset)
-loader.rs build_load_history set_variable_value 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 loader.rs eval_load_toplevel compile_request 1 held  # an open compiler builder holds collection
 loader.rs eval_load_toplevel eval_load_toplevel 3 clean  # FORM's objects are rooted; only the last child's value is returned
 loader.rs eval_load_toplevel execute_raw 1 clean  # FORM's objects are rooted
@@ -98,44 +95,21 @@ macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONME
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s); the window and buffer are #: slots (display.rs); %s reads only the result
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
-prim.rs attach_variable_history set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs default_cell_set notify 2 held  # a leaf or T2 continuation: its engine is not suspended
-prim.rs detected_source variable_set 1 held  # a native writer: its watchers hold collection (rooted_write unset)
 prim.rs install_lisp_prelude_raw eval_source_raw 5 boundary  # VM setup: no caller Values
 prim.rs make_variable_alias notify 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs notify notify_watchers_at 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
-prim.rs set_variable_named variable_set 1 held  # a leaf: its engine is not suspended
 prim.rs variable_set set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/buffer_locals.rs kill_local notify 1 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/buffer_locals.rs reset_buffer_locals set_variable_value 1 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/coding.rs coding_convert variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/coding.rs coding_string_result variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/coding.rs set_coding_system_priority variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
-prim/leaf/coding.rs set_coding_category_order variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
+prim/leaf/coding.rs set_coding_system_priority variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prim/leaf/graphics.rs land_images call_prepared_source_raw 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
-prim/leaf/process.rs decode_output variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/autosave.rs auto_save_done variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/autosave.rs write_auto_save variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/callint.rs keep_all_history variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/callint.rs run_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/coding.rs set_safe_terminal_coding_system_internal variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/expand_file_name.rs decode_file variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not suspended
-prims/face.rs slot_effects variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/fileio.rs write_chosen variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
 prims/frame.rs frame_or_buffer_changed_p variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/insdel.rs self_insert_command variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/insert_coding.rs advance variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/insert_coding.rs decided variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/insert_coding.rs decode variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/insert_coding.rs encoded_name variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 prims/insert_coding.rs read_undecided variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/insert_coding.rs unlocked variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/keyboard.rs clear_this_command_keys variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/keyboard.rs set_this_command_keys variable_set 2 held  # a leaf or T2 continuation: its engine is not suspended
-prims/message.rs show variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
-prims/system_process.rs locale_decoded variable_set 1 held  # a leaf: its engine is not suspended; last-coding-system-used is restored after decoding
 prims/vars.rs defvaralias variable_set 1 held  # a leaf or T2 continuation: its engine is not suspended
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
 protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect
@@ -194,3 +168,4 @@ world/layer.rs world_layer_load eval_source_raw 3 boundary  # a layer build's to
 world/pending.rs force_pending safe_call 1 held  # gc_holds is raised across the call; INDEX is a fixnum and nothing heap is used after it
 world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds
 prim/leaf/face.rs call_propagating call_lisp_at_write 1 held  # a leaf: its engine is not suspended; its callers hold only symbols, frames and lface vectors the leaf's held collection keeps in place
+prim/leaf/buffer_locals.rs reset_buffer_locals notify 3 held  # a leaf or T2 continuation: its engine is not suspended
