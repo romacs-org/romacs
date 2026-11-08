@@ -92,3 +92,51 @@ From the repository root:
 cargo build --release --locked -p romacs-vm-gui
 scripts/romacs
 #+end_src
+
+* Elisp tests
+
+Run module suites with real ERT on a prebuilt Romacs executable. Lisp source
+edits take effect on the next invocation without a Rust rebuild:
+
+#+begin_src sh
+export ROMACS_TEST_BINARY=/path/to/romacs-vm-gui
+make test-elisp-list
+make test-elisp MODULE=gnosis-agent-romacs
+make test-elisp MODULE=romacs-agent
+make test-elisp-gnosis-agent-review
+#+end_src
+
+=MODULE= selects a bundled package or library. Package names select that
+package's test suites; library names select matching suites and extensions.
+No module is selected implicitly. Narrow a run with GNU ERT selectors or
+explicit files, as in GNU Emacs's =test/Makefile.in=:
+
+#+begin_src sh
+make test-elisp MODULE=romacs-agent SELECTOR=romacs-agent-driver-registry
+make test-elisp MODULE=gnosis-agent-review SELECTOR='"gnosis-provider-"'
+make test-elisp TEST_FILES='test/lisp/gnosis/gnosis-test-agent-romacs.el'
+#+end_src
+
+The default host is =$CARGO_TARGET_DIR/gate/romacs-vm-gui=, falling back to
+=target/gate/romacs-vm-gui=. An installed host uses its adjacent =gnu-lisp/=
+for compatible startup; =ROMACS_LISP_DIR= can select another runtime. Bundled
+module and test load paths always come from this checkout. The named library
+is explicitly loaded from source before its suites.
+
+Each invocation has an isolated HOME and XDG directories and a 55-second total
+execution budget, including startup and loading. =TEST_TIMEOUT= can lower the
+budget. A timeout kills the owned process group and fails the run. Large
+package suites can exceed this budget; use a library or file selection for
+the fast loop. Runs are serial within ERT. Skips are reported, and empty,
+entirely skipped or incomplete execution and unexpected results fail. This
+target does not exercise native command-loop or display journeys. On Linux,
+the runner adopts and cleans up detached test descendants as well as the
+original process group, with a one-second cleanup allowance.
+
+Runner checks use real ERT on the pinned GNU reference plus negative process
+controls. They verify assertion failures, errors, empty selections, missing
+completion, source edits and timeout cleanup:
+
+#+begin_src sh
+ROMACS_GNU_ORACLE=/path/to/pinned/emacs make test-elisp-runner
+#+end_src

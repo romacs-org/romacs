@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Run a module's source ERT suites on a prebuilt host, without Cargo.
+
+Like GNU test/Makefile.in, select files and a quoted ERT SELECTOR.  A module
+is a bundled package (gnosis) or library (gnosis-agent-romacs, romacs-agent).
+"""
+import argparse
+import ctypes
+import json
+import math
+import os
+from pathlib import Path
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'gnu-tests'))
+sys.path.insert(0, str(ROOT / 'tools'))
+from ert_report import PREFIX, ReportError, parse_report
+from bundled_autoloads import directories
+
+TEST_SUPPORT = {'gnosis-test-db.el', 'gnosis-test-helpers.el', 'gnosis-test-schema-v8.el'}
+PR_SET_CHILD_SUBREAPER = 36
+
+
+def test_files(module):
+    """Select suites by package directory or source-library naming convention."""
+    tests = ROOT / 'test/lisp'
+    if not module or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in module):
+        raise ValueError('MODULE must be a bundled package or library name')
+    bases = directories(ROOT)
+    if not any(base.name == module or (base / (module + '.el')).is_file() for base in bases):
+        return []
+    package = tests / module
+    if package.is_dir():
+        return sorted(p for p in package.glob('*.el')
+                      if p.name not in TEST_SUPPORT
+                      and (p.name.startswith(module + '-test-')
+                           or p.name.endswith(('-tests.el', '-test.el'))))
+    patterns = [module + '-tests.el', module + '-*-tests.el']
+    if module.startswith('gnosis-'):
+        stem = module.replace('gnosis-', 'gnosis-test-', 1)
+        patterns.extend([stem + '.el', stem + '-*.el'])
+    return sorted({p for pattern in patterns for p in tests.rglob(pattern)
+                   if p.name not in TEST_SUPPORT})
+
+
+def module_names():
+    bases = directories(ROOT)
+    names = {p.stem for base in bases for p in base.glob('*.el')}
+    names.update(base.name for base in bases)
+    return sorted(name for name in names if test_files(name))
+
+
+def descendants():
+    """Return descendants, including orphaned sessions adopted by this subreaper."""
+    parents = {}
+    for entry in Path('/proc').iterdir():
+        if entry.name.isdigit():
+            try:
+                fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+                parents[int(entry.name)] = int(fields[1])
+            except (OSError, ValueError, IndexError):
+                continue
+    owned = {os.getpid()}
+    while True:
+        children = {pid for pid, parent in parents.items() if parent in owned}
+        if children <= owned:
+            return owned - {os.getpid()}
+        owned.update(children)
+
+
+def cleanup(process):
+    """Bound cleanup even if a detached descendant retains the output pipe."""
+    deadline = time.monotonic() + 1
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    while time.monotonic() < deadline:
+        for pid in descendants():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.poll()
+        try:
+            child, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if not child:
+            time.sleep(0.01)
+    raise OSError('Test descendants did not exit within the cleanup deadline')
+
+
+def run(command, env, timeout):
+    if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), 'Cannot own detached test descendants')
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, encoding='utf-8', errors='replace', env=env,
+                               cwd=ROOT, start_new_session=True)
+    try:
+        try:
+            output, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            output = error.output or b''
+            sys.stdout.write(output.decode('utf-8', errors='replace')
+                             if isinstance(output, bytes) else output)
+            raise
+        return output, process.returncode
+    finally:
+        cleanup(process)
+        process.stdout.close()
+
+
+def main():
+    started = time.monotonic()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--module', default=os.environ.get('MODULE', ''))
+    parser.add_argument('--list', action='store_true')
+    parser.add_argument('--binary', default=os.environ.get('ROMACS_TEST_BINARY'))
+    parser.add_argument('--selector', default=os.environ.get('SELECTOR', 't'))
+    parser.add_argument('--file', action='append', type=Path, default=[])
+    parser.add_argument('--timeout', type=float, default=os.environ.get('TEST_TIMEOUT', 55))
+    args = parser.parse_args()
+    if args.list:
+        print('\n'.join(module_names()))
+        return 0
+    if not math.isfinite(args.timeout) or not 0 < args.timeout <= 55:
+        parser.error('timeout must be positive and at most 55 seconds')
+    files = args.file or [Path(p) for p in shlex.split(os.environ.get('TEST_FILES', ''))]
+    try:
+        selected = test_files(args.module) if args.module else []
+    except ValueError as error:
+        parser.error(str(error))
+    if not files:
+        files = selected
+    if not files:
+        parser.error('No suites selected. Use make test-elisp-list, then '
+                     'make test-elisp MODULE=NAME (or set TEST_FILES).')
+    files = sorted({p.resolve() for p in files})
+    if any(not p.is_file() or p.suffix != '.el' for p in files):
+        parser.error('Every selected suite must be an existing .el file')
+    target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    binary = Path(args.binary or target / 'gate/romacs-vm-gui').expanduser().resolve()
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        parser.error('Prebuilt host missing; set ROMACS_TEST_BINARY to its executable')
+    quote = lambda value: json.dumps(str(value), ensure_ascii=False)
+    load_paths = directories(ROOT) + sorted({p.parent for p in files})
+    source = '(setq load-prefer-newer t)\n(require \'ert)\n'
+    if args.module:
+        sources = [base / (args.module + '.el') for base in directories(ROOT)]
+        source += ''.join(f'(load {quote(p)} nil t t)\n' for p in sources if p.is_file())
+    source += ''.join(f'(load {quote(p)} nil t t)\n' for p in files)
+    source += f"(setq ert-scoreboard-selector '{args.selector})\n"
+    reporter = (ROOT / 'gnu-tests/harness/romacs-real-ert-reporter.el').read_text()
+    source += f'(kill-emacs (progn {reporter}))\n'
+    print(f'ERT module={args.module or "explicit files"} files={len(files)} '
+          f'selector={args.selector} host={binary}', flush=True)
+    for path in files:
+        print(f'  {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}', flush=True)
+    with tempfile.TemporaryDirectory(prefix='romacs-module-ert-') as temp:
+        home = Path(temp)
+        env = os.environ.copy()
+        for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'EMACSLOADPATH',
+                    'EMACS_TEST_JUNIT_REPORT', 'MAIL', 'MAILDIR', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE'):
+            env.pop(key, None)
+        env.update(HOME=temp, TMPDIR=temp, ROMACS_WORLD='off', ROMACS_COMPILED_LISP='off')
+        for key in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'):
+            directory = home / key.lower()
+            directory.mkdir()
+            env[key] = str(directory)
+        runtime = binary.parent / 'gnu-lisp'
+        env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'gnu-lisp'))
+        driver = home / 'module-tests.el'
+        driver.write_text(source)
+        command = [str(binary), '-Q', '--batch']
+        for path in load_paths:
+            command.extend(['-L', str(path)])
+        command.extend(['-l', str(driver)])
+        remaining = args.timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise ValueError('Module setup exceeded the total time budget')
+        output, status = run(command, env, remaining)
+    for line in output.split('\n'):
+        if not line.startswith(PREFIX):
+            print(line)
+    report = parse_report(output, status)
+    counts = report['summary']
+    print(f"ERT complete: selected={report['execution']['selected']} "
+          f"started={report['execution']['started']} completed={report['execution']['terminal']} "
+          f"passed={counts['passed']} failed={counts['failed']} skipped={counts['skipped']} "
+          f"elapsed={time.monotonic() - started:.2f}s")
+    if counts['total'] == counts['skipped']:
+        raise ReportError('All selected tests skipped; no test bodies completed')
+    return status
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (ReportError, OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print(f'ERT incomplete: {error}', file=sys.stderr)
+        raise SystemExit(1)

@@ -947,6 +947,7 @@ def gnosis(args, base):
     try:
         a.up()
         a.codex_instance()
+        a.eval('(setq romacs-agent-default-provider "claude")')
         helpers = Path(__file__).resolve().parents[3] / 'test/lisp/gnosis/gnosis-test-helpers.el'
         ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
         with RomacsMcp.for_server(a, agent_tools=True) as mcp:
