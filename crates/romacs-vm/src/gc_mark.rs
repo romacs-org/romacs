@@ -965,9 +965,10 @@ mod tests {
         let (ended, wait) = std::sync::mpsc::channel::<()>();
         let found = std::thread::scope(|scope| {
             // What a mark that never looked would finish on, to say so.
-            scope.spawn(|| {
+            let outstanding = &marking.outstanding;
+            scope.spawn(move || {
                 let _ = wait.recv_timeout(Duration::from_secs(5));
-                marking.outstanding.fetch_sub(1, Ordering::AcqRel);
+                outstanding.fetch_sub(1, Ordering::AcqRel);
             });
             let mut own = Worker::default();
             let found = !marking.round(&view, &mut own, usize::MAX, &mut |_, _| {}, &mut || true);
