@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "64a34a264cda694c88ccd42be45ce46c46e37890d7747f3e424448cc3ecc3550",
+  "source_fingerprint": "6a60c43204c61f037dc8076c189c3c0b359332c8464091cf2012c9f17cc9e599",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1438,
-  "parsed_vm2_only": 1438
+  "parsed_total": 1439,
+  "parsed_vm2_only": 1439
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -275,7 +275,7 @@
   "add-variable-watcher": {
    "name": "add-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:38"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:48"
   },
   "all-completions": {
    "name": "all-completions",
@@ -355,7 +355,7 @@
   "autoload": {
    "name": "autoload",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:78"
   },
   "autoload-do-load": {
    "name": "autoload-do-load",
@@ -1241,7 +1241,7 @@
   "default-boundp": {
    "name": "default-boundp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:113"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:118"
   },
   "default-file-modes": {
    "name": "default-file-modes",
@@ -1251,12 +1251,12 @@
   "default-toplevel-value": {
    "name": "default-toplevel-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:201"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:206"
   },
   "default-value": {
    "name": "default-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:119"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:124"
   },
   "defconst": {
    "name": "defconst",
@@ -2229,7 +2229,7 @@
   "functionp": {
    "name": "functionp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:130"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:135"
   },
   "gap-size": {
    "name": "gap-size",
@@ -2343,7 +2343,7 @@
   "get-variable-watchers": {
    "name": "get-variable-watchers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:64"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:74"
   },
   "getenv-internal": {
    "name": "getenv-internal",
@@ -2555,7 +2555,7 @@
   "indirect-variable": {
    "name": "indirect-variable",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:252"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:257"
   },
   "init-image-library": {
    "name": "init-image-library",
@@ -2672,7 +2672,7 @@
   "internal-delete-indirect-variable": {
    "name": "internal-delete-indirect-variable",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:236"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:241"
   },
   "internal-event-symbol-parse-modifiers": {
    "name": "internal-event-symbol-parse-modifiers",
@@ -4300,7 +4300,7 @@
   "remove-variable-watcher": {
    "name": "remove-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:49"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:59"
   },
   "rename-buffer": {
    "name": "rename-buffer",
@@ -4846,7 +4846,7 @@
   "romacs--local-toplevel-cell": {
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:223"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:228"
   },
   "romacs--logo-frame": {
    "name": "romacs--logo-frame",
@@ -5202,7 +5202,7 @@
   "romacs--set-local-toplevel-cell": {
    "name": "romacs--set-local-toplevel-cell",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:228"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:233"
   },
   "romacs--signal-description": {
    "name": "romacs--signal-description",
@@ -5660,7 +5660,7 @@
   "set-buffer-redisplay": {
    "name": "set-buffer-redisplay",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:72"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:82"
   },
   "set-case-table": {
    "name": "set-case-table",
@@ -5705,7 +5705,7 @@
   "set-default": {
    "name": "set-default",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:170"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:175"
   },
   "set-default-file-modes": {
    "name": "set-default-file-modes",
@@ -5715,7 +5715,7 @@
   "set-default-toplevel-value": {
    "name": "set-default-toplevel-value",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:212"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:217"
   },
   "set-file-acl": {
    "name": "set-file-acl",
@@ -7108,10 +7108,15 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:78"
   },
+  "window-configuration-equal-p": {
+   "name": "window-configuration-equal-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:56"
+  },
   "window-configuration-frame": {
    "name": "window-configuration-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:56"
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:61"
   },
   "window-configuration-p": {
    "name": "window-configuration-p",

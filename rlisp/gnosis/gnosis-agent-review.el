@@ -32,7 +32,6 @@
 (require 'gnosis-agent-eval)
 (require 'gnosis-agent-review-data)
 
-(autoload 'gnosis-agent-review-hermes "gnosis-agent-review-hermes")
 (autoload 'gnosis-agent-review-romacs "gnosis-agent-romacs")
 
 (defcustom gnosis-agent-review-function #'gnosis-agent-review-romacs
@@ -51,8 +50,7 @@ unseen tail may change; captured/prepared IDs cannot be requeued.
 Legacy saved sessions use API 1: evaluate resolves only the evaluation,
 then adapt supplies a plan after acceptance.  Ordinary agent-eval is separate.
 Never mutate requests or write grades.  Errors preserve answers for retry.
-The default tutors in a Romacs agent session (gnosis-agent-romacs.el);
-`gnosis-agent-review-hermes' tutors through Hermes."
+The default tutors in a Romacs agent session (gnosis-agent-romacs.el)."
   :type 'function :group 'gnosis)
 
 (defvar gnosis-agent-review--providers nil

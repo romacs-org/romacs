@@ -6596,8 +6596,6 @@
   }
  ],
  "pinned": {
-  "per-buffer/049": "SIGNAL-VS-VALUE",
-  "defvar/036": "VALUE",
-  "defvar/038": "VALUE"
+  "per-buffer/049": "SIGNAL-VS-VALUE"
  }
 }

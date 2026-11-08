@@ -53,6 +53,11 @@ fn window_configuration_p(cx, object: Value) {
     Ok(cx.windows().window_configuration_p(object))
 }}
 
+defsubr! { name = "window-configuration-equal-p", gnu = "window.c:9135", effect = Reads,
+fn window_configuration_equal_p(cx, x: Value, y: Value) {
+    cx.windows().window_configuration_equal_p(x, y)
+}}
+
 defsubr! { name = "window-configuration-frame", gnu = "window.c:7647", effect = Reads,
 fn window_configuration_frame(cx, config: Value) {
     cx.windows().window_configuration_frame(config)

@@ -97,10 +97,7 @@ impl Vm {
                 // `symbol-file' reads.
                 let defun = self.intern("defun");
                 let entry = self.alloc_cons(defun, a[0]);
-                let history = self.slot("current-load-list");
-                let old = self.variable_value(history)?;
-                let cons = self.alloc_cons(entry, old);
-                self.set_variable_value(history, cons)?;
+                self.attach_load_history(entry)?;
                 self.defalias_documentation(&a)?;
                 Ok(a[0])
             }

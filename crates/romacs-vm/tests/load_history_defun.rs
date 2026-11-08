@@ -1,7 +1,6 @@
 //! `defalias' records (defun . SYMBOL) in the loading file's history
 //! (data.c defalias, LOADHIST_ATTACH), so `symbol-file' names the file that
-//! defined a function, as pinned GNU does.  `autoload' and `defvar' attach
-//! nothing yet (DIVERGENCES.md VM2-LOADHIST1).
+//! defined a function, as pinned GNU does.
 use romacs_vm::Vm;
 
 #[test]
