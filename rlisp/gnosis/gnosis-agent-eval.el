@@ -28,7 +28,6 @@
 (require 'gnosis-review)
 (require 'subr-x)
 
-(autoload 'gnosis-agent-eval-hermes "gnosis-agent-eval-hermes")
 (autoload 'gnosis-agent-eval-romacs "gnosis-agent-romacs")
 
 (defcustom gnosis-agent-eval-function #'gnosis-agent-eval-romacs
@@ -43,8 +42,7 @@ Callbacks may arrive after cancellation; Gnosis ignores retired attempts.
 Do not write grades or mutate REQUEST.  Unknown or malformed results,
 rejections and abstentions never become a failed grade.  The default
 evaluates in a Romacs agent session (`gnosis-agent-romacs-provider',
-`gnosis-agent-romacs-model'); `gnosis-agent-eval-hermes' evaluates through
-Hermes, loaded only when an evaluation is requested."
+`gnosis-agent-romacs-model'), loaded only when evaluation is requested."
   :type 'function
   :group 'gnosis)
 
