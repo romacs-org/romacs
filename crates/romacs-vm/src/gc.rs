@@ -125,9 +125,9 @@ romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
 
 /// What a collection does, in order.
 #[derive(Clone, Copy)]
-pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep, Shrink, Settle, Rewrite, Trim }
+pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep, Shrink, Settle, Rewrite }
 /// The names `romacs--gc-phases' answers, by `Phase'.
-const PHASES: [&str; 12] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite", "trim"];
+const PHASES: [&str; 11] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite"];
 /// Where the last completed collection's time went, in nanoseconds by
 /// `Phase': zero in a world build, whose heap never depends on a clock.
 #[derive(Clone, Copy, Debug, Default)]

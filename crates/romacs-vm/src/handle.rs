@@ -368,9 +368,7 @@ impl Vm {
             // What it freed goes back while nobody waits. Elsewhere the
             // next allocations want it, and would fault it in again.
             if until_key {
-                let mut lap = crate::gc::Lap::start();
                 crate::gc_mark::trim_after_graves(self.gc_stress.threads);
-                lap.lap(&mut self.gc_times, crate::gc::Phase::Trim);
             }
             let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
             self.count_collection(elapsed);
@@ -506,6 +504,7 @@ mod tests {
     /// or moved, and a later collection collects as ever.
     #[test]
     fn an_idle_collection_gives_way_to_a_key_press() {
+        let _alone = crate::gc_mark::test::alone();
         let abandoned = |vm: &mut Vm, looks| {
             vm.set_host_input(Some(Box::new(KeyAfter(looks))));
             let (objects, collections) = (vm.heap_objects(), vm.heap_stats().collections);

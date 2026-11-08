@@ -962,15 +962,16 @@ mod tests {
         let marking = marking_of(&mut vm, 2);
         let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
         marking.outstanding.fetch_add(1, Ordering::AcqRel);
+        let (ended, wait) = std::sync::mpsc::channel::<()>();
         let found = std::thread::scope(|scope| {
             // What a mark that never looked would finish on, to say so.
-            let other = scope.spawn(|| {
-                std::thread::sleep(Duration::from_secs(5));
+            scope.spawn(|| {
+                let _ = wait.recv_timeout(Duration::from_secs(5));
                 marking.outstanding.fetch_sub(1, Ordering::AcqRel);
             });
             let mut own = Worker::default();
             let found = !marking.round(&view, &mut own, usize::MAX, &mut |_, _| {}, &mut || true);
-            other.join().unwrap();
+            let _ = ended.send(());
             found
         });
         assert!(found, "the mark ended without a look for the key");
