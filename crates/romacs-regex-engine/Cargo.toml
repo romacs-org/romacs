@@ -36,3 +36,6 @@ unicode-general-category.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

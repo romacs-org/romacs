@@ -26,3 +26,6 @@ tempfile.workspace = true
 romacs-display-protocol.workspace = true
 
 serde_json.workspace = true
+
+[lints]
+workspace = true

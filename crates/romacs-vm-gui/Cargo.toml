@@ -28,3 +28,6 @@ alacritty_terminal = { git = "https://github.com/alacritty/alacritty.git", rev =
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-test-fonts.workspace = true
 wgpu.workspace = true
+
+[lints]
+workspace = true

@@ -8,3 +8,6 @@ publish = false
 [dev-dependencies]
 romacs-text = { path = "../../crates/romacs-text" }
 romacs-chars = { path = "../../crates/romacs-chars" }
+
+[lints]
+workspace = true

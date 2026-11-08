@@ -19,3 +19,6 @@ tempfile = "3"
 [[bin]]
 name = "romacs-introspect-live"
 path = "src/main.rs"
+
+[lints]
+workspace = true
