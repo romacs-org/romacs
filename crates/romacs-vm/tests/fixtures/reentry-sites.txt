@@ -16,7 +16,7 @@
 #              writer that has not rooted its frame.
 #   boundary   an embedder or top-level request: the caller keeps no raw Value.
 #   collector  a collection point; its caller passes every root.
-autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is a symbol
+autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is its caller's: a register, a root frame, or a form's under its row
 autoload.rs autoload_do_load unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 autoload.rs load_source_named load_file_kind 1 clean  # FILE is read before the load
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
@@ -27,8 +27,8 @@ command.rs command_event eval_form_raw 6 clean  # events become forms and the bi
 command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
 compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
 compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
-compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is a symbol, which never moves
-compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is a symbol, which never moves
+compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is in the initial obarray, whose symbols are never reclaimed
+compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is in the initial obarray, whose symbols are never reclaimed
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
@@ -87,7 +87,7 @@ loader.rs load_file_as unwind 1 held  # native unbinding: watchers hold collecti
 loader.rs loader_primitive autoload_do_load 1 clean  # ARGS are not used after the load
 loader.rs loader_primitive eval_primitive 1 clean  # ARGS are not used after the evaluation
 loader.rs loader_primitive load_file_kind 1 clean  # ARGS are read before the load
-loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is a symbol, which never moves
+loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is the primitive's argument, live in its caller's registers or root frame across the load
 loader.rs loader_primitive macroexpand_primitive 1 clean  # ARGS are not used after the expansion
 loader.rs loader_primitive read_host_event 1 clean  # SECONDS is read before the wait
 macroexpand.rs call_macro_expander compile_request 1 held  # an open compiler builder holds collection
@@ -183,7 +183,7 @@ variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a fram
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended; the file-local defvar returns its symbol, which never moves
+variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended, so nothing collects; the file-local defvar returns its symbol
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
