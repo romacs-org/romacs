@@ -71,8 +71,8 @@ type NameSet<K> = std::collections::HashSet<K, NameState>;
 /// foldhash's own `RandomState` reads a seed each process draws anew.
 #[derive(Clone)]
 pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
-// Its own seed is a number, and its shared seed the one `default` leaked
-// to the heap, never foldhash's global one in a writable static.
+// SAFETY: its own seed is a number, and its shared seed the one `default`
+// leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
 
 impl Default for NameState {
@@ -1385,6 +1385,10 @@ pub struct Vm {
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
+    /// Variables whose watchers run now, each trapped again as its call ends
+    /// (`Vm::notify_watchers_at'), or as a panic unwinds past it
+    /// (`UnwindMark').
+    retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
@@ -1497,10 +1501,9 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
-    /// In a child forked for one job: the heap it was forked with, the
-    /// growth over it allowed now, and the grace added after each signal of
-    /// exhaustion, in objects (`Vm::set_job_budget`).
-    job_budget: Option<(usize, usize, usize)>,
+    /// In a child forked for one job: the heap it was forked with and the
+    /// growth over it allowed, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize)>,
     /// The payload the last collection kept, as allocation charges it
     /// (`data::payload_bytes`), measured only for a job's budget
     /// (`Vm::job_live`).
@@ -1612,6 +1615,10 @@ pub struct Vm {
     /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
     /// zero whenever no engine runs.
     aftermath_held: usize,
+    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
+    /// interrupt naming the job waits (`threaded::isolate_quit'), so
+    /// finalizers and `post-gc-hook' never take it.
+    aftermath_runs: usize,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1675,6 +1682,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     keymap_generation,
     environment_snapshot,
     trapped,
+    retrap,
     doc_file,
     terminal_bindings,
     pending_specials,
@@ -1760,6 +1768,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     doomed_finalizers,
     post_gc_due,
     aftermath_held,
+    aftermath_runs,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1896,6 +1905,7 @@ impl Vm {
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
+            retrap: Vec::new(),
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
@@ -1994,6 +2004,7 @@ impl Vm {
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             aftermath_held: 0,
+            aftermath_runs: 0,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),

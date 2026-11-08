@@ -95,11 +95,13 @@ fn isolate_parent_p(cx) {
     Ok(if cx.isolate_has_parent() { Value::TRUE } else { Value::NIL })
 }}
 
-// (romacs--isolate-running GENERATION): in a worker, the job of
-// GENERATION runs now; nil once it is done.
-defsubr! { name = "romacs--isolate-running", gnu = "romacs:isolate", effect = Global,
-fn isolate_running(cx, generation: Value) {
-    cx.isolate_set_running(generation.integer_value().and_then(|n| u64::try_from(n).ok()));
+// (romacs--isolate-claim GENERATION): in a worker, GENERATION's job runs
+// from here inside the handler around this call, until that handler's entry
+// goes (`Vm::isolate_claim_job'). Jobs do not nest.
+defsubr! { name = "romacs--isolate-claim", gnu = "romacs:isolate", effect = Global,
+fn isolate_claim(cx, generation: Value) {
+    let generation = generation.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or(Fault::Wrong("natnump", generation))?;
+    cx.isolate_claim_job(generation).map_err(Fault::Error)?;
     Ok(Value::NIL)
 }}
 

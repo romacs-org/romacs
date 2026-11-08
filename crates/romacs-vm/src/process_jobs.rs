@@ -181,16 +181,8 @@ fn run(_: Request, _: std::process::Command, _: Arc<AtomicBool>) -> Output {
 #[cfg(target_os = "linux")]
 fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicBool>) -> Output {
     use std::io::{Read, Write};
-    use std::os::fd::AsRawFd;
+    use std::os::fd::AsFd;
     use std::os::unix::process::CommandExt;
-
-    fn nonblocking(fd: i32) -> std::io::Result<()> {
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
-    }
 
     fn drain(reader: &mut impl Read, bytes: &mut Vec<u8>) -> Result<(), String> {
         let mut buffer = [0; 8192];
@@ -238,12 +230,13 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
         }
     };
     let pid = child.id() as libc::pid_t;
+    crate::isolate::child_spawned(pid);
     let mut stdin = child.stdin.take();
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
-    let setup = nonblocking(stdout.as_raw_fd())
-        .and_then(|()| nonblocking(stderr.as_raw_fd()))
-        .and_then(|()| nonblocking(stdin.as_ref().unwrap().as_raw_fd()));
+    let setup = crate::host::set_nonblocking(stdout.as_fd())
+        .and_then(|()| crate::host::set_nonblocking(stderr.as_fd()))
+        .and_then(|()| crate::host::set_nonblocking(stdin.as_ref().unwrap().as_fd()));
     let mut written = 0;
     if let Err(error) = &setup {
         output.error = Some(error.to_string());
@@ -279,25 +272,13 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
                 }
             }
         }
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        let result = unsafe {
-            libc::waitid(
-                libc::P_PID,
-                child.id(),
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        };
-        if result < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::Interrupted {
-                continue;
+        match crate::subprocess::child_exited(pid) {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(error) => {
+                output.error = Some(error.to_string());
+                break;
             }
-            output.error = Some(error.to_string());
-            break;
-        }
-        if unsafe { info.si_pid() } != 0 {
-            break;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -305,7 +286,9 @@ fn run(request: Request, mut command: std::process::Command, cancel: Arc<AtomicB
     let _ = crate::host::kill(-pid, libc::SIGKILL);
     let _ = crate::host::kill(pid, libc::SIGKILL);
     stdin.take();
-    match child.wait() {
+    let waited = child.wait();
+    crate::isolate::child_reaped(pid);
+    match waited {
         Ok(status) => output.status = status.code(),
         Err(error) => {
             output.error.get_or_insert_with(|| error.to_string());

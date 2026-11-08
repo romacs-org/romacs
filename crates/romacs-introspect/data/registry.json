@@ -8,10 +8,10 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "0fdf9a089182ef4c6a4d7da0b2de9b0736b39b2b8880a501012279c95e4b7a6e",
+    "input_hash": "e06571fc1829cce7665e30d13e8b4ed1eb56b9ebbaa9f90c32b6369fbbcd9e56",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8660
+    "vm2_universe": 8661
   },
   "schema": 2,
   "vm2": {
@@ -916,6 +916,7 @@
       "romacs--inspect-stop",
       "romacs--isolate-affinity",
       "romacs--isolate-children",
+      "romacs--isolate-claim",
       "romacs--isolate-close",
       "romacs--isolate-compact-next",
       "romacs--isolate-executable",
@@ -938,7 +939,6 @@
       "romacs--isolate-reap",
       "romacs--isolate-release",
       "romacs--isolate-reserve",
-      "romacs--isolate-running",
       "romacs--isolate-signal",
       "romacs--isolate-signal-children",
       "romacs--isolate-stamp",

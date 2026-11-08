@@ -16,9 +16,9 @@ fn collect_idle(_cx) -> Step {
 }}
 
 // A safe point for a collection's work (VM2-GC-FINALIZER): what an engine's
-// poll does, now: collect if due, a job's memory signal, the aftermath
-// collections left pending (finalizers, `post-gc-hook') where the gate allows,
-// a quit. Waits for input and a job's end call it.
+// poll does, now: collect if due (where a job past its memory budget ends),
+// the aftermath collections left pending (finalizers, `post-gc-hook') where
+// the gate allows, a quit. Waits for input and a job's end call it.
 defsubr! { name = "romacs--safepoint", gnu = "alloc.c:5806", effect = Global,
 fn safepoint(_cx) -> Step {
     Ok(Step::Safepoint)
