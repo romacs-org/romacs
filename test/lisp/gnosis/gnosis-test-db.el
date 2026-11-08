@@ -34,7 +34,8 @@
 (require 'gnosis)
 
 (defvar gnosis-test-import-file
-  (expand-file-name "../collections/demo.gnosis"))
+  (expand-file-name "collections/demo.gnosis"
+                    (file-name-directory (or load-file-name buffer-file-name))))
 
 (defun gnosis-test-random-items (list x)
   "Select X random items from LIST."

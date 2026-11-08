@@ -68,6 +68,31 @@ pub(crate) struct RestoredConfiguration {
 }
 
 impl WindowConfiguration {
+    /// The saved windows' tree as GNU's saved parent and prev compare it: by
+    /// place in this configuration, so a window recreated in the same place
+    /// counts as the same.  Display tables, scroll bars and focus redirection
+    /// are not saved here, so they do not compare.
+    fn tree(&self) -> Vec<(Option<usize>, Vec<usize>)> {
+        let place = |window: Value| self.windows.iter().position(|w| w.window == window);
+        self.windows.iter()
+            .map(|w| (place(w.parent), w.children.iter().filter_map(|c| place(*c)).collect()))
+            .collect()
+    }
+    fn same_layout(&self, other: &Self) -> bool {
+        self.selected_frame == other.selected_frame
+            && self.current_buffer == other.current_buffer
+            && self.windows.len() == other.windows.len()
+            && self.tree() == other.tree()
+            && self.windows.iter().zip(&other.windows).all(|(a, b)| {
+                (self.current_window == a.window) == (other.current_window == b.window)
+                    && a.buffer == b.buffer
+                    && (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
+                    && (a.left_margin, a.right_margin) == (b.left_margin, b.right_margin)
+                    && a.fringes == b.fringes
+                    && (a.fringes_outside_margins, a.fringes_persistent)
+                        == (b.fringes_outside_margins, b.fringes_persistent)
+            })
+    }
     pub(crate) fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         for v in [&mut self.frame, &mut self.selected_frame, &mut self.current_window, &mut self.current_buffer, &mut self.root] {
             f(v);
@@ -458,6 +483,15 @@ impl Windows<'_> {
     }
     pub(crate) fn window_configuration_p(&mut self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::WindowConfiguration(_))) { Value::TRUE } else { Value::NIL }
+    }
+    /// window.c compare_window_configurations: the same layout, whatever
+    /// the values of point and the scroll positions.
+    pub(crate) fn window_configuration_equal_p(&mut self, x: Value, y: Value) -> Out {
+        self.configuration(x)?;
+        self.configuration(y)?;
+        let (Some(Object::WindowConfiguration(a)), Some(Object::WindowConfiguration(b)))
+            = (self.vm.object_if(x), self.vm.object_if(y)) else { return Ok(Value::NIL) };
+        Ok(if a.same_layout(b) { Value::TRUE } else { Value::NIL })
     }
     pub(crate) fn window_configuration_frame(&mut self, config: Value) -> Out {
         self.configuration(config)?;

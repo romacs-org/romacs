@@ -519,14 +519,13 @@ Queue the annotation adding \"More.\" to #101."
 
 (defun gnosis-test-leech--batch (function dir &rest args)
   "Run batch FUNCTION with GNOSIS_DIR DIR and ARGS; return (EXIT . JSON)."
-  (let* ((root (file-name-directory (directory-file-name
-                                     (file-name-directory (locate-library "gnosis")))))
+  (let* ((lisp (file-name-directory (locate-library "gnosis")))
          (popup (file-name-directory (locate-library "keymap-popup")))
          (process-environment (cons (concat "GNOSIS_DIR=" (or dir "")) process-environment)))
     (with-temp-buffer
       (let ((exit (apply #'call-process (expand-file-name invocation-name invocation-directory)
                          nil (list t nil) nil
-                         "-Q" "--batch" "-L" (expand-file-name "lisp" root) "-L" popup
+                         "-Q" "--batch" "-L" lisp "-L" popup
                          "-l" "gnosis-leech" "-f" function args)))
         (cons exit (progn (goto-char (point-min)) (json-parse-buffer :object-type 'plist
                                                                     :array-type 'list)))))))

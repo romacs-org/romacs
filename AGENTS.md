@@ -131,6 +131,14 @@ the pinned oracle.
   for compute-heavy GNU loading and oracle tests, with the same focused selectors.
 - Editable Lisp checks on a prebuilt host: `python3 scripts/test-elisp`. Its
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
+- Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
+  `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
+  (`make check-list` names the modules: a package like `gnosis`, or one library),
+  with `SELECTOR=`, `TEST_FILES=`, `EMACS_TEST_TIMEOUT=` (seconds per file) and `JOBS=`.
+  Each file runs in a fresh process with a private HOME. Set `ROMACS_TEST_BINARY`
+  or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `scripts/test-ert` keeps
+  each file's output. Lisp edits take effect without a rebuild. `make check-runner`
+  checks the runner itself against pinned GNU.
 - ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
 - Real GNU ERT execution: `python3 gnu-tests/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
 - Scaling probes: `python3 crates/romacs-vm-gui/harness/scaling_live.py --binary BINARY --output OUTPUT`,

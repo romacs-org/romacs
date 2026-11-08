@@ -5741,9 +5741,6 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Optio
                         release_control(e, &control);
                     }
                 }
-                Op::DeclareSpecial(slot) => {
-                    e.vm.specials.insert(e.vm.symbol_names[slot].clone());
-                }
                 Op::Define(slot, reg) | Op::DefineMacro(slot, reg) => {
                     // A native `defun' is GNU's defalias (autoload queue record).
                     e.vm.autoload_note_defalias(slot);

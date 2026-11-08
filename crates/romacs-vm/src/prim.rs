@@ -1211,8 +1211,10 @@ mod leaf {
                 self.vm.specials.insert(name);
             } else {
                 let slot = self.symbol_slot(symbol)?;
-                self.vm.slots[slot].declared_special = true;
-                self.vm.special_changes += 1;
+                if !self.vm.slots[slot].declared_special {
+                    self.vm.slots[slot].declared_special = true;
+                    self.vm.special_changes += 1;
+                }
                 if self.vm.names.get(&name) == Some(&slot) {
                     self.vm.specials.insert(name);
                 }
@@ -1235,11 +1237,8 @@ mod leaf {
             Ok(())
         }
         /// GNU LOADHIST_ATTACH (lread.h), also outside an active load.
-        pub fn attach_variable_history(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
-            let slot = self.vm.slot("current-load-list");
-            let old = self.vm.variable_value(slot).map_err(Fault::Error)?;
-            let history = self.cons(symbol, old);
-            self.vm.assign_variable(slot, history).map_err(Fault::Error)
+        pub fn attach_load_history(&mut self, entry: Value) -> std::result::Result<(), Fault> {
+            self.vm.attach_load_history(entry).map_err(Fault::Error)
         }
         /// Declaration metadata only: GNU custom.el's custom-autoload/custom-add-load.
         pub fn custom_autoload_metadata(&mut self, symbol: Value, load: Value, noset: Value) -> super::Out {

@@ -38,8 +38,7 @@
   "The libraries with keymaps a session does not load by itself.")
 
 (defconst romacs-idioms-test--anywhere
-  '((romacs-agent-switch "Reaches a session from any buffer; a chat binds it too")
-    (romacs-agent-switch-chat "Reaches a chat from any buffer; a chat binds it too"))
+  '((romacs-agent-switch "Reaches a session from any buffer; a chat binds it too"))
   "Commands a Romacs keymap binds that apply anywhere, each (COMMAND REASON).")
 
 (defconst romacs-idioms-test--literal-keys

@@ -457,9 +457,10 @@ impl Vm {
     /// `mark_deactivated' where no watcher hears it.
     fn store_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        // Already t with no buffer-local binding: nothing changes.
-        if self.slots[deactivate].value == Value::TRUE && self.slots[deactivate].local == Value::NIL
-            && self.indirect_variable(deactivate) == deactivate {
+        // This buffer's own binding is t already: nothing changes. An inherited
+        // t is not its own, so the write still makes the binding.
+        let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
+        if local != deactivate && self.slots[local].value == Value::TRUE {
             return Ok(());
         }
         self.assign_variable(deactivate, Value::TRUE).map_err(Fault::Error)

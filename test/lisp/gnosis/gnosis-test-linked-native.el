@@ -4,7 +4,7 @@
 
 (require 'ert)
 (require 'gnosis-agent-review)
-(require 'gnosis-agent-review-hermes)
+(require 'gnosis-agent-romacs)
 (require 'gnosis-test-helpers)
 
 (defun gnosis-test-linked--question (id &optional type)
@@ -313,7 +313,7 @@
   (gnosis-test-linked--with (vector (gnosis-test-linked--question "q1" "agent-eval"))
     (gnosis-agent-review--present state)
     (let* ((request (gnosis-agent-review--request state "evaluate" "r1" "Greek α\n🧠"))
-           (prompt (gnosis-agent-review-hermes--prompt request))
+           (prompt (gnosis-agent-romacs--review-prompt request))
            (outer (json-parse-string (json-serialize (list :prompt prompt)) :object-type 'plist)))
       (should (string-match-p "Greek α" (plist-get outer :prompt)))
       (should (string-match-p "🧠" (plist-get outer :prompt)))

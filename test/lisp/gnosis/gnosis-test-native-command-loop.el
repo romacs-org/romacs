@@ -39,6 +39,9 @@ blocking calls (vfork, unlink, tty writes) are not that wait.  Without
 
 (defun gnosis-test-native--run (journey)
   "Run JOURNEY in a disposable terminal Emacs with a bounded watchdog."
+  ;; These journeys drive `-nw' through a pty; Romacs has no text terminal.
+  (when (string-prefix-p "romacs" invocation-name)
+    (ert-skip "Romacs has no text terminal"))
   (let* ((root (make-temp-file "gnosis-native-" t))
          (log (expand-file-name "receipt" root))
          (output (generate-new-buffer " *gnosis-native-terminal*"))

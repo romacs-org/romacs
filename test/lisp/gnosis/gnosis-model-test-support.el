@@ -12,9 +12,13 @@
 (require 'gnosis-review)
 (require 'gnosis-export-import)
 
-;; The optional renderer is loaded only when the canvas fixture is used.
-;; Declare optional renderer state for interpreted tests without loading it.
+;; Romacs does not ship canvas-3d for now.  These tests drive Gnosis's side of
+;; the boundary against a stand-in: renderer state declared here, and a
+;; configured directory that holds no renderer.
+(setq gnosis-model-renderer-directory "/nonexistent-canvas-3d/")
+(defvar canvas-3d-mode-map (make-sparse-keymap))
 (defvar canvas-3d--process nil)
+(defvar canvas-3d--image nil)
 (defvar canvas-3d--selection nil)
 (defvar canvas-3d--frame nil)
 (defvar canvas-3d--busy nil)
@@ -43,11 +47,17 @@
                             '("triangle") "Original geometry" '("test") 0 nil nil id)
     id))
 
+(defun gnosis-test-model--require-canvas ()
+  "Load canvas-3d, or skip the test: Romacs does not ship it for now."
+  (let ((directory (gnosis-model--renderer-directory)))
+    (unless (file-readable-p (expand-file-name "canvas-3d.el" directory))
+      (ert-skip "canvas-3d is off in Romacs"))
+    (let ((load-path (cons directory load-path)))
+      (require 'canvas-3d))))
+
 (defun gnosis-test-model--canvas (_path _view &optional _size inline _question-target _verified)
   "Create a deterministic stand-in for the optional canvas boundary.
 Use the current buffer for INLINE, otherwise a separate special buffer."
-  (let ((load-path (cons (gnosis-model--renderer-directory) load-path)))
-    (require 'canvas-3d))
   (let ((buffer (if inline (current-buffer) (generate-new-buffer " *Gnosis test canvas*"))))
     (with-current-buffer buffer
       (unless inline (special-mode))

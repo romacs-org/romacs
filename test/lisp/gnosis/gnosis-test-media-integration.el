@@ -5,6 +5,7 @@
 (require 'ert)
 (require 'gnosis-test-db-safety)
 (require 'gnosis-test-helpers)
+(require 'gnosis-model-test-support)
 (require 'gnosis-review)
 
 (defun gnosis-test-media--old-database (&optional archive)
@@ -345,6 +346,7 @@
       state)))
 
 (ert-deftest gnosis-media-name-recursive-owner-faults ()
+  (gnosis-test-model--require-canvas)
   (require 'gnosis-model-test-support)
   (dolist (mode '(scheduled practice))
     (dolist (fault '(aliases frame retired-session mode quit renderer-death successor))
@@ -408,6 +410,7 @@
                 (when (process-live-p process) (delete-process process))))))))))
 
 (ert-deftest gnosis-media-name-pending-rule-drift ()
+  (gnosis-test-model--require-canvas)
   (require 'gnosis-model-test-support)
   (dolist (mode '(scheduled practice))
     (gnosis-test-safety

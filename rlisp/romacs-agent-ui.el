@@ -36,6 +36,18 @@
 (require 'romacs-agent)
 (require 'romacs-key-hint)
 
+;;;###autoload
+(defvar romacs-agents-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "n" #'romacs-agent-start)
+    (define-key map "s" #'romacs-agent-switch-chat)
+    (define-key map "a" #'romacs-agents)
+    map)
+  "Global prefix map for starting and finding agent sessions.
+\\{romacs-agents-map}")
+
+;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
+
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
@@ -1593,6 +1605,8 @@ only sessions whose chat is open."
   (interactive (list (romacs-agent-ui--read-session
                       "Chat: " (romacs-agent-ui--open-sessions) "No other agent chats are open")))
   (romacs-agent-switch session))
+
+(defalias 'romacs-agent-chat-switch #'romacs-agent-switch-chat)
 
 (defun romacs-agent-chat-show-commands ()
   "List this chat's keys."

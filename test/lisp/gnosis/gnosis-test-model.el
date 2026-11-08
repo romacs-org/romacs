@@ -534,14 +534,15 @@
               (dolist (index '(0 1 2 5 6))
                 (should (equal (nth index (car original)) (nth index after)))))))))))
 
-(ert-deftest gnosis-model-backend-discovery-and-actionable-diagnostics ()
+(ert-deftest gnosis-model-backend-off-by-default-and-actionable-diagnostics ()
   (let ((gnosis-model-renderer-directory nil))
-    (cl-letf (((symbol-function 'locate-library) (lambda (&rest _) nil)))
-      (should (file-exists-p (expand-file-name "render.py" (gnosis-model--renderer-directory)))))
     (cl-letf (((symbol-function 'locate-library) (lambda (&rest _) "/standard/canvas-3d.el")))
-      (should (equal "/standard/" (gnosis-model--renderer-directory)))
-      (let ((gnosis-model-renderer-directory "/override/"))
-        (should (equal "/override/" (gnosis-model--renderer-directory)))))
+      (should-not (gnosis-model--renderer-directory))
+      (should (string-match-p "off in Romacs"
+                              (condition-case err (gnosis-model-open "/unused" '(0 0 1))
+                                (user-error (error-message-string err)))))))
+  (let ((gnosis-model-renderer-directory "/override/"))
+    (should (equal "/override/" (gnosis-model--renderer-directory)))
     (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
               ((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
       (should (string-match-p "GNU Emacs.*native canvas"
@@ -552,7 +553,7 @@
               ((symbol-function 'canvas-refresh) #'ignore)
               ((symbol-function 'image-type-available-p) (lambda (&rest _) t))
               ((symbol-function 'canvas-3d--python) (lambda () (user-error "Missing"))))
-      (should (string-match-p "uv sync --locked --project .*optional/canvas-3d"
+      (should (string-match-p "uv sync --locked --project .*override"
                               (condition-case err (gnosis-model-open "/unused" '(0 0 1))
                                 (user-error (error-message-string err))))))))
 
@@ -1093,6 +1094,7 @@
          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
 
 (ert-deftest gnosis-model-stopped-attachment-cancel-unwind-and-reentry ()
+  (gnosis-test-model--require-canvas)
   (let ((load-path (cons (gnosis-model--renderer-directory) load-path)))
     (require 'canvas-3d))
   (gnosis-test-with-db

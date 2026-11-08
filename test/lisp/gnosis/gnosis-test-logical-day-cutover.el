@@ -18,9 +18,9 @@
 (require 'gnosis-db)
 
 (defconst gnosis-test-logical-day-cutover--root
-  (expand-file-name ".." (file-name-directory
-                          (or load-file-name buffer-file-name)))
-  "Gnosis source root used by cutover inventory tests.")
+  (expand-file-name "../../.." (file-name-directory
+                                (or load-file-name buffer-file-name)))
+  "Repository root used by cutover inventory tests.")
 
 (ert-deftest gnosis-test-logical-day-cutover-option-alias ()
   "Keep the old day-boundary option as an alias to the neutral option."
@@ -33,7 +33,7 @@
   "Preserve an old option value set before the neutral module loads."
   (let ((emacs (expand-file-name invocation-name invocation-directory))
         (lisp (expand-file-name
-               "lisp" gnosis-test-logical-day-cutover--root)))
+               "rlisp/gnosis" gnosis-test-logical-day-cutover--root)))
     (with-temp-buffer
       (should
        (= 0
@@ -60,7 +60,7 @@
                     (or "date" "date-diff" "-date-later-p")
                     symbol-end)))
     (dolist (file (directory-files
-                   (expand-file-name "lisp" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (with-temp-buffer
         (insert-file-contents file)
@@ -75,7 +75,7 @@
                  (seq "INSERT" (optional " OR IGNORE") " INTO review"
                       (optional "_log") (any " ("))))))
     (dolist (file (directory-files
-                   (expand-file-name "lisp" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (with-temp-buffer
         (insert-file-contents file)
@@ -88,7 +88,7 @@
                  (seq "'" symbol-start
                       (or "review" "review-log" "activity-log") symbol-end)))))
     (dolist (file (directory-files
-                   (expand-file-name "lisp" gnosis-test-logical-day-cutover--root)
+                   (expand-file-name "rlisp/gnosis" gnosis-test-logical-day-cutover--root)
                    t "\\.el\\'"))
       (unless (string= (file-name-nondirectory file) "gnosis-db.el")
         (with-temp-buffer
@@ -100,7 +100,7 @@
   "Document the neutral day-boundary option without the old name."
   (with-temp-buffer
     (insert-file-contents
-     (expand-file-name "docs/gnosis.org"
+     (expand-file-name "doc/gnosis.org"
                        gnosis-test-logical-day-cutover--root))
     (should (search-forward "=gnosis-day-start-hour=" nil t))
     (goto-char (point-min))

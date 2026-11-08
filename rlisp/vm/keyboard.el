@@ -533,6 +533,20 @@ Nil when EVENT is neither shifted nor an upper-case character."
           (intern (concat (substring name 0 (- (match-end 0) 2))
                           (substring name (match-end 0))))))))))
 
+(defun romacs--lookup-event (event)
+  "EVENT as read_key_sequence looks it up: one with parameters by its head,
+unless it carries a position for `key-binding'.  (lookup-key would read
+\(NAME ARG) as a list of modifiers.)"
+  (if (and (consp event) (not (consp (car-safe (cdr event))))) (car event) event))
+
+(defun romacs--lookup-keys (keys n)
+  "The first N of KEYS, each by `romacs--lookup-event'."
+  (let ((i n) (out nil))
+    (while (> i 0)
+      (setq i (1- i))
+      (push (romacs--lookup-event (aref keys i)) out))
+    (vconcat out)))
+
 (defun romacs--subvector (keys from &optional to)
   "The events of KEYS from index FROM to TO (default its end), as a vector."
   (let ((i (or to (length keys))) (out nil))
@@ -571,7 +585,7 @@ a prefix of a longer translation keeps START, and anything else moves
 START on by one event, where the scan restarts."
   (let* ((start (aref remap 2)) (end (aref remap 3))
          (next (and (keymapp (aref remap 0))
-                    (lookup-key (aref remap 1) (vector (aref keys end)) t))))
+                    (lookup-key (aref remap 1) (vector (romacs--lookup-event (aref keys end))) t))))
     (aset remap 3 (1+ end))
     ;; access_keymap_keyremap: a symbol whose function is an array or keymap.
     (when (and next (symbolp next) (fboundp next)
@@ -733,7 +747,7 @@ and one takes it."
                     (setq keys (vconcat (romacs--subvector keys 0 n) (vector area key))
                           mock (+ n 2) fake-prefixed (cons key fake-prefixed) again t)))))
             (when (eq state 'read)
-              (setq binding (key-binding (romacs--subvector keys 0 (1+ n)) t t)
+              (setq binding (key-binding (romacs--lookup-keys keys (1+ n)) t t)
                     first-unbound (if binding (max (1+ n) first-unbound) (min n first-unbound))
                     n (1+ n)
                     last-nonmenu-event key

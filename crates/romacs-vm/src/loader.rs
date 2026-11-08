@@ -152,7 +152,9 @@ impl Vm {
             let key = self.intern("subfeatures");
             self.put_symbol_property(feature, key, subfeature).map_err(prim::Fault::Error)?;
         }
-        Ok(())
+        let provide = self.intern("provide");
+        let entry = self.alloc_cons(provide, feature);
+        self.attach_load_history(entry).map_err(prim::Fault::Error)
     }
     fn feature_present(&self, feature: Value) -> Result<bool> {
         if !matches!(feature.tag(), 7) && feature != Value::NIL && feature != Value::TRUE {
@@ -282,6 +284,9 @@ impl Vm {
                     let key = self.intern("subfeatures");
                     self.put_symbol_property(args[0], key, subfeature)?;
                 }
+                let provide = self.intern("provide");
+                let entry = self.alloc_cons(provide, args[0]);
+                self.attach_load_history(entry)?;
                 Ok(args[0])
             }
             Primitive::Load => {
@@ -315,6 +320,7 @@ impl Vm {
                     let noerror = args.get(2).is_some_and(|v| *v != Value::NIL);
                     self.note_init_load(crate::world::layer::Kind::Require, name, file, noerror);
                 }
+                if self.symbol_plist(feature).is_ok() { self.attach_require(feature)?; }
                 if self.feature_present(feature)? {
                     return Ok(feature);
                 }
@@ -823,6 +829,33 @@ impl Vm {
     /// lread.c build_load_history for an entire file: the file's entry,
     /// `current-load-list' in definition order, replaces any older entry
     /// for the same name at the front of `load-history'.
+    /// LOADHIST_ATTACH (lisp.h): cons ENTRY onto `current-load-list', a C
+    /// write that tells no watcher, so it runs no Lisp.
+    pub(crate) fn attach_load_history(&mut self, entry: Value) -> Result<()> {
+        let slot = self.slot("current-load-list");
+        let old = self.variable_value(slot)?;
+        let history = self.alloc_cons(entry, old);
+        self.assign_variable(slot, history)
+    }
+    /// fns.c Frequire: the file's dependency is recorded even when FEATURE
+    /// is present, once per file, and only while a file loads or reads.
+    fn attach_require(&mut self, feature: Value) -> Result<()> {
+        let require = self.intern("require");
+        let (progress, history) = (self.slot("load-in-progress"), self.slot("current-load-list"));
+        let mut from_file = self.variable_value(progress)? != Value::NIL;
+        let mut tail = self.variable_value(history)?;
+        for _ in 0..self.list_limit() {
+            let Ok((entry, rest)) = self.cons_pair(tail) else { break };
+            if matches!(self.cons_pair(entry), Ok(pair) if pair == (require, feature)) { return Ok(()); }
+            from_file |= rest == Value::NIL && self.source_string(entry).is_ok();
+            tail = rest;
+        }
+        if from_file {
+            let entry = self.alloc_cons(require, feature);
+            self.attach_load_history(entry)?;
+        }
+        Ok(())
+    }
     fn build_load_history(&mut self, history_slot: usize) -> Result<()> {
         let current = self.variable_value(history_slot)?;
         let mut entry = self.list_values(current)?;

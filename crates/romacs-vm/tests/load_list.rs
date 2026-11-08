@@ -1,7 +1,6 @@
 //! current-load-list while a file loads, against pinned GNU (lread.c
 //! loadhist_initialize): it starts as (FILE) and the file stays its last
-//! element, which macroexp-file-name reads. VM2 does not attach
-//! definitions to it (DIVERGENCES.md VM2-LOADHIST1).
+//! element, which macroexp-file-name reads.
 use romacs_vm::Vm;
 
 const FILE: &str = "\

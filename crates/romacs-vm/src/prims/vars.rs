@@ -64,6 +64,7 @@ fn defvaralias(cx, new_alias: Value, base_variable: Value; optional docstring: V
             "Don\u{2019}t know how to make a let-bound variable an alias: {}", cx.symbol_name(new_alias)?)));
     }
     cx.make_variable_alias(new_alias, base_variable)?;
+    cx.attach_load_history(new_alias)?;
     // Even if docstring is nil: remove old docstring (eval.c:722-723).
     cx.put_variable_documentation(new_alias, docstring)?;
     Ok(base_variable)
@@ -87,6 +88,10 @@ fn autoload(cx, function: Value, file: Value; optional docstring: Value, interac
     for value in [kind, interactive, docstring, file, tag] {
         descriptor = cx.cons(value, descriptor);
     }
+    // data.c defalias, which leaves these out of a dump only to save space.
+    let defun = cx.intern("defun");
+    let entry = cx.cons(defun, function);
+    cx.attach_load_history(entry)?;
     cx.defalias_function(function, descriptor)?;
     cx.note_init_declared(file);
     Ok(function)
