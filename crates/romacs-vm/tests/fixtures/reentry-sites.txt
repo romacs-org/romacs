@@ -141,6 +141,33 @@ source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open 
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
 tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; only the returned row is read after it, by reads that do not allocate
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
+threaded.rs bind_special_now bind_variable 1 clean  # only a variable no watcher hears gets here: it runs no Lisp
+threaded.rs execute execute_args 1 clean  # a tail call
+threaded.rs execute_args_inner force_lazy 1 clean  # before the engine exists; FUNCTION is an index and the ARGS are copied after
+threaded.rs execute_args_inner unwind 1 clean  # the run is over: its result is the driver's rooted VALUE
+threaded.rs primitive_target loader_primitive 1 held  # `Vm::defer''s hold: a legacy primitive's engine runs unsuspended
+threaded.rs reader_call execute_args 1 suspended  # the caller set its engine aside; ARGS become the callee's registers before it can collect
+threaded.rs resolve_entry force_lazy 1 held  # `lend::deferred''s hold, a safe call of the facade
+threaded.rs run_aftermath execute_args 1 clean  # the runner is an interned symbol and nothing else is held
+threaded.rs set_global_now set_variable_value 1 clean  # only a variable no watcher hears gets here: it runs no Lisp
+threaded.rs t2_enter_closure force_lazy 1 held  # `lend::deferred''s hold, a safe call of the facade
+threaded.rs unbind_lent unbind 1 suspended  # `lend::unbind', which takes the permission
+threaded.rs unbind_now unbind_one 1 clean  # only with no watchers at all: it runs no Lisp
+threaded.rs unwind_lent unwind 1 suspended  # `lend::unwind', which takes the permission
+threaded_lend.rs callback reader_call 1 suspended  # FUNCTION and OBJECT stay in the caller's frame; the reader boundary forwards the registers
+threaded_lend.rs collect collect_until_key 1 collector  # the facade's collection: the code is suspended, its roots traced
+threaded_lend.rs deferred_write perform_deferred 1 suspended  # the write is in the queue's frame, read back
+threaded_lend.rs run autoload_do_load 1 suspended  # FUNCTION and FUNDEF stay in the caller's frame
+threaded_lend.rs run compile 1 suspended  # FORM is Rust data whose objects are rooted
+threaded_lend.rs run execute_raw 1 suspended  # the function is an index; its value is the caller's to consume
+threaded_lend.rs run force_lazy 1 suspended  # the function is an index
+threaded_lend.rs run lambda_list_closure 1 suspended  # the list stays in the caller's frame
+threaded_lend.rs run loader_primitive 1 suspended  # the arguments stay in the caller's frame
+threaded_lend.rs run run_aftermath 1 suspended  # the runner is an `Imm`, which no collection frees
+threaded_lend.rs unbind unbind_one 1 suspended  # the binding stack is traced and the caller's Values are in its frame
+threaded_lend.rs unwind unwind 1 suspended  # the binding stack is traced and the caller's Values are in its frame
+threaded_lend.rs watched bind_variable 1 suspended  # the value is read from the frame just before; the caller's stay in registers
+threaded_lend.rs watched set_variable_value 1 suspended  # it roots the value it was given; the caller's stay in registers
 variable_runtime.rs bind_variable bind_variable 1 clean  # a fenced variable's binding, again through the fence: VALUE is passed on and nothing is used after
 variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding

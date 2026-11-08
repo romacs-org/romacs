@@ -3,11 +3,12 @@
 //! production call site of such a call is listed, with how its frame keeps
 //! that rule, in `fixtures/reentry-sites.txt`. A new site, a site whose call
 //! count changed, or a listed site that no longer exists fails here until the
-//! fixture classifies it again. Files converted to rooting as a type
-//! (`rust_tokens::CONVERTED`) are the compiler's; this skips them.
+//! fixture classifies it again. A function that takes the permission (`brand::Gc`)
+//! is the compiler's and is not an entry; every call of an entry that does not take
+//! it is a site, in a converted module too, whose suspended bodies can collect.
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
-use rust_tokens::{tokens, Token, CONVERTED};
+use rust_tokens::{tokens, Token};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -16,18 +17,16 @@ const ENTRIES: &[&str] = &[
     "execute_raw", "execute_rooted", "execute_args", "execute", "reader_call", "eval_form_raw",
     "eval_source_raw", "load_file_raw", "autoload_do_load", "invoke_prepared_raw",
     "call_macro_expander", "expand_macro", "notify_watchers", "notify_watchers_at",
-    "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one", "unwind", "unbind",
-    "unbind_after", "unbind_forwarded", "checked_unbind", "loader_primitive", "eval_primitive",
-    "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy", "autoload_then",
-    "lambda_list_then", "lambda_list_raise", "lambda_list_closure", "nested_then", "bind_special",
-    "reentrant_load", "reentrant_step", "signal_hook", "call_debugger", "call_in_signal", "handler_callback", "finish_collection", "nested_with_room", "load_with_autoload_queue",
-    "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
-    "finish_request", "poll_collect", "poll_collect_unless_key", "collect_garbage", "collect_garbage_until_key", "collect_compacting",
-    "collect_until_key", "watched_write", "call_suspended",
-    "load_source_named", "write_from_native", "perform_write", "perform_rooted", "perform_deferred", "prepared_function",
-    "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
-    "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
-    "run_aftermath",
+    "call_lisp_at_write", "safe_call", "set_variable_value", "bind_variable", "unbind_one",
+    "unwind", "unbind", "unbind_after", "unbind_forwarded", "checked_unbind", "loader_primitive",
+    "eval_primitive", "macroexpand_primitive", "macroexpand_value", "read_host_event", "force_lazy",
+    "lambda_list_closure", "reentrant_load", "reentrant_step", "load_with_autoload_queue",
+    "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request",
+    "cached_source_form", "finish_request", "collect_garbage", "collect_garbage_until_key",
+    "collect_compacting", "collect_until_key", "load_source_named", "write_from_native",
+    "perform_write", "perform_rooted", "perform_deferred", "prepared_function", "prepare_source",
+    "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
+    "load_file_kind", "load_artifact", "compile_walk", "compile_unit", "run_aftermath",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];
@@ -133,7 +132,7 @@ fn scan(dir: &Path, root: &Path, sites: &mut BTreeMap<Site, usize>) {
             }
             continue;
         }
-        if !relative.ends_with(".rs") || relative.ends_with("_tests.rs") || relative == "main.rs" || CONVERTED.contains(&relative.as_str()) {
+        if !relative.ends_with(".rs") || relative.ends_with("_tests.rs") || relative == "main.rs" {
             continue;
         }
         for (function, callee) in calls(&std::fs::read_to_string(&path).unwrap()) {
@@ -162,16 +161,19 @@ fn the_scanner_finds_calls_a_line_matcher_missed() {
             let _r = r#"vm.execute_raw(id) {"#;
             "done"
         }
-        fn generic(e: &mut Engine) { call_suspended::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
+        fn generic(e: &mut Engine) { reader_call::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
         fn reader_call(&mut self) {}
         defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.safe_call(a, b)?; } }
         fn collects(vm: &mut Vm) { let _: Vec<_> = it.collect(); vm.collect(&mut []); }
         #[cfg(test)]
         mod tests { fn t(vm: &mut Vm) { vm.reader_call(f, &[]); } }
         fn after(vm: &mut Vm) { vm.finish_request(o); }
+        fn in_a_leaf(m: &mut Mx) { m.leaf((), |vm, ()| vm.eval_form_raw(&form)); }
+        fn in_a_lend(e: &mut Engine) { e.code_suspended(|vm| vm.reader_call(f, &[])); }
     "##);
     let expect = [("helper", "reader_call"), ("spaced", "reader_call"), ("spaced", "execute_raw"),
-        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "call_suspended"), ("generic", "execute_args"), ("subr", "safe_call"), ("collects", "collect"), ("after", "finish_request")];
+        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "reader_call"), ("generic", "execute_args"), ("subr", "safe_call"), ("collects", "collect"), ("after", "finish_request"),
+        ("in_a_leaf", "eval_form_raw"), ("in_a_lend", "reader_call")];
     let expect: Vec<_> = expect.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect();
     assert_eq!(found, expect);
 }
