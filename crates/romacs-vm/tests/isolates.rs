@@ -77,8 +77,19 @@ fn an_interrupt_quits_cpu_bound_lisp_and_the_worker_serves_on() {
     assert_eq!(eval(&mut vm, "(let* ((iso (isolate-create)) (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (handler-bind-1 (lambda () (error \"trigger\")) '(error) (lambda (_) (let ((n 0)) (while t (setq n (1+ n))))))) :isolate iso)))) (romacs--isolate-wait 0.2) (isolate-interrupt iso) (list (condition-case e (isolate-await f 5) (quit 'interrupted)) (isolate-await (isolate-spawn '+ 1 1 :isolate iso))))"), "(interrupted 2)");
     // An interrupt arriving while a finalizer runs (masked, even with
     // inhibit-quit unbound there) waits: the finalizer finishes, the resumed
-    // job quits once, and the next job is not hit.
-    assert_eq!(eval(&mut vm, "(let* ((iso (isolate-create)) (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (eval '(progn (make-finalizer (lambda () (let ((inhibit-quit nil) (end (+ (float-time) 1.0))) (while (< (float-time) end))) (setq ia-done t))) nil) t) (garbage-collect) (let ((n 0)) (while (< n 3000000) (setq n (1+ n))) (list 'resumed n))) :isolate iso)))) (romacs--isolate-wait 0.3) (isolate-interrupt iso) (list (condition-case e (isolate-await f 10) (quit 'interrupted)) (isolate-await (isolate-spawn '(lambda () (and (boundp 'ia-done) ia-done)) :isolate iso)) (isolate-await (isolate-spawn '+ 1 1 :isolate iso))))"), "(interrupted t 2)");
+    // job quits once, and the next job is not hit. The finalizer says it has
+    // begun and waits to be released, so the interrupt falls inside it: its
+    // signal is posted before the release exists, and the polls of the loop
+    // the finalizer then runs, longer than a poll's period, are the ones that
+    // would take it.
+    let entered = std::env::temp_dir().join(format!("romacs-finalizer-entered-{}", std::process::id()));
+    let release = std::env::temp_dir().join(format!("romacs-finalizer-release-{}", std::process::id()));
+    let _ = std::fs::remove_file(&entered);
+    let _ = std::fs::remove_file(&release);
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn '(lambda () (eval '(progn (make-finalizer (lambda () (let ((inhibit-quit nil) (end (+ (float-time) 30.0))) (write-region \"\" nil {entered} nil 'no-message) (while (and (not (file-exists-p {release})) (< (float-time) end))) (let ((n 0)) (while (< n 100000) (setq n (1+ n))))) (setq ia-done t))) nil) t) (garbage-collect) (let ((n 0)) (while (< n 3000000) (setq n (1+ n))) (list 'resumed n))) :isolate iso)))) (let ((end (+ (float-time) 30.0))) (while (and (not (file-exists-p {entered})) (< (float-time) end)) (romacs--isolate-wait 0.01))) (isolate-interrupt iso) (write-region \"\" nil {release} nil 'no-message) (list (file-exists-p {entered}) (condition-case e (isolate-await f 30) (quit 'interrupted)) (isolate-await (isolate-spawn '(lambda () (and (boundp 'ia-done) ia-done)) :isolate iso)) (isolate-await (isolate-spawn '+ 1 1 :isolate iso))))", entered = serde_json::to_string(&entered).unwrap(), release = serde_json::to_string(&release).unwrap()));
+    assert_eq!(out, "(t interrupted t 2)");
+    let _ = std::fs::remove_file(&entered);
+    let _ = std::fs::remove_file(&release);
     // An interrupt for a job not yet started cancels it before it runs.
     assert_eq!(eval(&mut vm, "(let* ((iso (isolate-create)) (a (isolate-spawn '(lambda () (romacs--isolate-wait 0.5) 'slow) :isolate iso)) (b (isolate-spawn 'list 'second :isolate iso))) (isolate-future-cancel b) (list (isolate-await a 5) (condition-case e (isolate-await b 5) (quit 'cancelled)) (aref b 3)))"), "(slow cancelled cancelled)");
     eval(&mut vm, "(isolate-kill-all)");
