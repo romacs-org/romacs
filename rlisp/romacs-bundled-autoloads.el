@@ -32,6 +32,7 @@ PROVIDER (a name in `romacs-agent-providers', by default
 the harness, :role, :parent (the delegating session's id) and :request
 (its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
+Interactively, open the chat without sending an initial prompt.
 
 (fn CWD &optional PROMPT TITLE PROVIDER OPTIONS KNOWN)" t)
 (defvar romacs-agent-restored-hook nil
@@ -83,6 +84,10 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agent-switch-chat) (define-key map "a" #'romacs-agents) map)
+"Global prefix map for starting and finding agent sessions.
+\\{romacs-agents-map}")
+ (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 (autoload 'romacs-agent-switch "romacs-agent-ui"
 "Switch to agent SESSION, in this window, chosen by what each is doing:
 those that want you first, finished delegated tasks last, each with its
