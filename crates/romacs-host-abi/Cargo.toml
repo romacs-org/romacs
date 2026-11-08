@@ -8,3 +8,6 @@ repository.workspace = true
 description = "Host boundary contracts for Romacs"
 
 [dependencies]
+
+[lints]
+workspace = true

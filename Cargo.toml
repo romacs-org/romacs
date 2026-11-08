@@ -66,20 +66,15 @@ authors = ["Thanos Apollo <public@thanosapollo.org>"]
 license = "GPL-3.0-or-later"
 repository = "https://git.thanosapollo.org/romacs"
 
-# Lint baseline shared by the frontend crates that opt in with `[lints]
-# workspace = true` (display-protocol, layout-engine, renderer-wgpu,
-# display-runtime, romacs). Deliberately modest: Rust defaults plus an
-# explicit `unsafe_op_in_unsafe_fn` warn, with Clippy's default lints left at
-# warn. CI runs `clippy -- -D warnings`, which promotes them to hard errors.
-# The romacs-* crates do NOT opt in, so their lint behavior is unchanged.
+# Lints every package inherits with `[lints] workspace = true`. Every unsafe
+# operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
+# carries its own SAFETY justification. tools/unsafe_census.py (run by
+# scripts/check-derived) fails when a package neither denies this nor is
+# listed as pending in UNSAFE-FLOORS.json. Clippy's
+# undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
+# here: existing code would fail it.
 [workspace.lints.rust]
-unsafe_op_in_unsafe_fn = "warn"
-
-[workspace.lints.clippy]
-# Clippy default-group lints stay at their default level (warn). Bulk categories
-# that are impractical to resolve without restructuring (e.g. wide FFI /
-# scene-builder signatures) are handled with crate- or item-scoped `#[allow]`
-# at each site with a justification, rather than being escalated or muted here.
+unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.dependencies]
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
