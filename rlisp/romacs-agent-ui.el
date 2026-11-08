@@ -33,6 +33,18 @@
 (require 'cl-lib)
 (require 'romacs-agent)
 
+;;;###autoload
+(defvar romacs-agents-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "n" #'romacs-agent-start)
+    (define-key map "s" #'romacs-agent-switch-chat)
+    (define-key map "a" #'romacs-agents)
+    map)
+  "Global prefix map for starting and finding agent sessions.
+\\{romacs-agents-map}")
+
+;;;###autoload (define-key global-map (kbd "C-c C-;") romacs-agents-map)
+
 (declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
 (declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
 (declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
@@ -893,7 +905,8 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   (let ((default-directory (file-name-as-directory (romacs-agent-cwd romacs-agent-ui--session))))
     (call-interactively #'romacs-agent-start)))
 
-(defun romacs-agent-chat-switch (buffer)
+;;;###autoload
+(defun romacs-agent-switch-chat (buffer)
   "Switch to another session's chat BUFFER."
   (interactive
    (list (read-buffer "Chat: " nil t
@@ -902,6 +915,8 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
                           (and buffer (not (eq buffer (current-buffer)))
                                (eq (buffer-local-value 'major-mode buffer) 'romacs-agent-chat-mode)))))))
   (switch-to-buffer buffer))
+
+(defalias 'romacs-agent-chat-switch #'romacs-agent-switch-chat)
 
 (defun romacs-agent-chat-show-commands ()
   "List this chat's keys."

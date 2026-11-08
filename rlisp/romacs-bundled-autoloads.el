@@ -78,6 +78,14 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agent-switch-chat) (define-key map "a" #'romacs-agents) map)
+"Global prefix map for starting and finding agent sessions.
+\\{romacs-agents-map}")
+ (define-key global-map (kbd "C-c C-;") romacs-agents-map)
+(autoload 'romacs-agent-switch-chat "romacs-agent-ui"
+"Switch to another session's chat BUFFER.
+
+(fn BUFFER)" t)
 (autoload 'romacs-agents "romacs-agent-ui"
 "Show every agent session, by project." t)
 (register-definition-prefixes "romacs-agent-ui" '("romacs-agent"))
