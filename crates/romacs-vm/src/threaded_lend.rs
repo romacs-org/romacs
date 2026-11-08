@@ -256,12 +256,12 @@ pub(super) fn watched<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc:
 /// Write I of a queue's FRAME (`Vm::take_deferred`), this engine suspended, its
 /// watchers free to collect; then THEN on its outcome.
 pub(super) fn deferred_write<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>,
-    (frame, i, kind): (&RootFrame, usize, crate::watchers::WriteKind), b: B,
+    (frame, i): (&RootFrame, usize), b: B,
     then: impl FnOnce(&mut Engine<'a>, B, std::result::Result<(), prim::Fault>) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
     let outcome = e.code_suspended(|vm| {
         let rooted = std::mem::replace(&mut vm.rooted_write, true);
-        let outcome = vm.perform_deferred(frame, i, kind);
+        let outcome = vm.perform_deferred(frame, i);
         vm.rooted_write = rooted;
         outcome
     });

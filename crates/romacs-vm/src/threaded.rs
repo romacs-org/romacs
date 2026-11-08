@@ -3538,8 +3538,8 @@ fn drain_writes<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>) -> bool {
 #[cold]
 #[inline(never)]
 fn make_queued_writes<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>) -> bool {
-    let Some((frame, kinds)) = m.leaf((), |e, ()| e.vm.take_deferred()) else { return true };
-    let made = kinds.iter().enumerate().all(|(i, &kind)| lend::deferred_write(m, gc.by_ref(), (&frame, i, kind), (), write_made));
+    let Some((frame, writes)) = m.leaf((), |e, ()| e.vm.take_deferred()) else { return true };
+    let made = (0..writes).all(|i| lend::deferred_write(m, gc.by_ref(), (&frame, i), (), write_made));
     m.leaf(frame, |e, frame| e.vm.drop_frame(frame));
     made
 }
@@ -3555,18 +3555,11 @@ fn write_made(e: &mut Engine<'_>, (): (), outcome: std::result::Result<(), prim:
     }
     false
 }
-/// A native call's VALUE, then the next instruction, after any writes it queued.
-///
-/// # Safety
-/// R is the running engine's current frame (`Engine::regs`) and PC the call's
-/// instruction in the function running in it.
-#[inline(always)]
-unsafe fn native_done(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst, value: Value) -> Value {
-    // SAFETY: the function's contract.
-    unsafe {
-        *r.add((*pc).a) = value;
-        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { continue_lent(e, Continue::Drain(Pc::new(pc.add(1)))) }
-    }
+/// PC, after the writes the native call before it queued (`watchers.rs`).
+#[cold]
+#[inline(never)]
+fn drain_at(e: Eng<'_, '_>, pc: Pc<'_>) -> Value {
+    continue_lent(e, Continue::Drain(pc))
 }
 /// Call FUNCTION (the frame's first value) again from the instruction, as the
 /// call site or the continuation would have.
@@ -3965,7 +3958,8 @@ unsafe fn t2_dispatch(
                     return Value::UNBOUND;
                 };
                 leave_native(&mut e);
-                native_done(e, r, pc, value)
+                *r.add((*pc).a) = value;
+                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
             }
         }
     }
@@ -4323,7 +4317,8 @@ unsafe fn leaf_call(
         if en.vm.region_collect || (en.vm.collect_poll && en.vm.may_collect(1)) {
             en.budget = 0;
         }
-        native_done(e, r, pc, value)
+        *r.add((*pc).a) = value;
+        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 /// The call a failed leaf made, recorded now: its arguments are where they
@@ -4393,7 +4388,8 @@ unsafe fn cached_primitive(
             return Value::UNBOUND;
         };
         leave_native(&mut e);
-        native_done(e, r, pc, value)
+        *r.add((*pc).a) = value;
+        if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
     }
 }
 #[cold]
@@ -4426,7 +4422,8 @@ unsafe fn primitive(
         {
             Some(value) => {
                 leave_native(en);
-                native_done(e, r, pc, value)
+                *r.add((*pc).a) = value;
+                if e.vm.deferred_writes.is_empty() { advance(e, r, pc) } else { drain_at(e, Pc::new(pc.add(1))) }
             }
             None => {
                 if let Some((condition, data)) = signal {

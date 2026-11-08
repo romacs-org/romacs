@@ -9,7 +9,6 @@
 //! the call's outcome (`threaded::drained'). So those watchers run after the
 //! rest of the call, before the next instruction, and may collect and throw.
 use crate::*;
-use crate::brand::Plain;
 use crate::gc::RootFrame;
 use crate::prim::Fault;
 
@@ -40,8 +39,8 @@ romacs_snapshot::snapshot_enum!(WriteKind {
     WriteKind::ClearLocal => (),
     WriteKind::StoreLocal => (),
 });
-// SAFETY: a tag.
-unsafe impl Plain for WriteKind {}
+const WRITE_KINDS: [WriteKind; 7] = [WriteKind::Set, WriteKind::Bound, WriteKind::SetDefault, WriteKind::Alias,
+    WriteKind::Report, WriteKind::ClearLocal, WriteKind::StoreLocal];
 /// A write of the variable at SLOT that its watchers hear.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeWrite {
@@ -73,13 +72,15 @@ impl Vm {
         self.perform_write(write)
     }
     /// The queue, for a drain whose watchers may collect: a frame holding each
-    /// write's symbol, value and buffer, and their kinds.
-    pub(crate) fn take_deferred(&mut self) -> Option<(RootFrame, Vec<WriteKind>)> {
+    /// write's symbol, value, buffer and kind, and how many writes.
+    pub(crate) fn take_deferred(&mut self) -> Option<(RootFrame, usize)> {
         if self.deferred_writes.is_empty() { return None; }
         let writes = std::mem::take(&mut self.deferred_writes);
-        let values: Vec<Value> = writes.iter()
-            .flat_map(|(write, buffer)| [Value::reference(write.slot + 1, 7), write.value, *buffer]).collect();
-        Some((self.root_frame(&values), writes.iter().map(|(write, _)| write.kind).collect()))
+        let values: Vec<Value> = writes.iter().flat_map(|(write, buffer)| {
+            let kind = WRITE_KINDS.iter().position(|&kind| kind == write.kind).expect("every kind is listed");
+            [Value::reference(write.slot + 1, 7), write.value, *buffer, Value::integer(kind as i64).expect("a small index")]
+        }).collect();
+        Some((self.root_frame(&values), writes.len()))
     }
     /// Write number I of a frame `take_deferred' made, in the buffer it was
     /// made in: the buffer current now is current again after, or a watcher's
@@ -87,10 +88,11 @@ impl Vm {
     /// killed that buffer the write runs in the current one, as GNU's C goes on
     /// with `current_buffer', but what it meant for a binding of the killed
     /// buffer has nothing left to do.
-    pub(crate) fn perform_deferred(&mut self, frame: &RootFrame, i: usize, kind: WriteKind) -> std::result::Result<(), Fault> {
-        let slot = self.rooted(frame, 3 * i).payload() as usize - 1;
-        let write = NativeWrite { kind, slot, value: self.rooted(frame, 3 * i + 1) };
-        let buffer = self.rooted(frame, 3 * i + 2);
+    pub(crate) fn perform_deferred(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
+        let slot = self.rooted(frame, 4 * i).payload() as usize - 1;
+        let kind = WRITE_KINDS[self.rooted(frame, 4 * i + 3).integer_value().expect("a kind's index") as usize];
+        let write = NativeWrite { kind, slot, value: self.rooted(frame, 4 * i + 1) };
+        let buffer = self.rooted(frame, 4 * i + 2);
         if !self.live_buffer_value(buffer) {
             let kind = if matches!(kind, WriteKind::ClearLocal | WriteKind::StoreLocal) { WriteKind::Report } else { kind };
             return self.perform_write(NativeWrite { kind, ..write });
