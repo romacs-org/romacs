@@ -57,12 +57,19 @@ VALUE nil is valid after startup: the last package was deleted."
       (setq package-selected-packages
             (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))))
 
+(defun romacs-package--reload (old new)
+  "Load from directory NEW what this session loaded from directory OLD.
+GNU's own reload looks for the old files, which a worker has deleted by now."
+  (let ((old (file-name-as-directory (expand-file-name old))))
+    (dolist (entry (reverse load-history))
+      (when (and (stringp (car entry)) (string-prefix-p old (car entry)))
+        (load (expand-file-name (file-relative-name (car entry) old) new) t t t)))))
+
 (defun romacs-package--settled (&optional changes)
   "The session takes in what a worker left on disk: the descriptors and the
 archives' contents, and CHANGES to the selected packages, as (ADDED . REMOVED).
-A package with a new directory activates, reloading what the old one had loaded
-while that one is still on `load-path', as GNU's reload needs; then a directory
-gone leaves it."
+A package with a new directory activates and loads from it what the old one had
+loaded; a directory gone leaves `load-path'."
   (let ((before (cl-loop for (name desc) in package-alist
                          collect (cons name (package-desc-dir desc)))))
     (when changes
@@ -75,7 +82,8 @@ gone leaves it."
     (pcase-dolist (`(,name ,desc) package-alist)
       (let ((old (alist-get name before)))
         (unless (equal old (package-desc-dir desc))
-          (package-activate-1 desc (and old t) t))))
+          (package-activate-1 desc nil t)
+          (when old (romacs-package--reload old (package-desc-dir desc))))))
     (pcase-dolist (`(,name . ,dir) before)
       (unless (equal dir (let ((new (cadr (assq name package-alist))))
                            (and new (package-desc-dir new))))

@@ -113,7 +113,7 @@ A worker needs a world to adopt: harness/packages_live.py runs the session."
       (prin1 '(add-to-list 'load-path (directory-file-name (file-name-directory load-file-name)))
              (current-buffer)))
     (with-temp-file (expand-file-name (format "%s.el" name) dir)
-      (prin1 `(progn (defun ,name () ,result) (provide ',name)) (current-buffer)))
+      (prin1 `(progn (defun ,name () ',result) (provide ',name)) (current-buffer)))
     dir))
 
 (ert-deftest romacs-package-an-upgrade-reloads-what-the-old-one-loaded ()
