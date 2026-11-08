@@ -256,6 +256,7 @@ pub(crate) struct UnwindMark {
     holds: usize,
     aftermath_held: usize,
     rooted_write: bool,
+    deferred_writes: usize,
     stack_empty: bool,
     handlers: usize,
     backtrace: usize,
@@ -278,6 +279,7 @@ impl Drop for UnwindMark {
         vm.gc_holds = self.holds;
         vm.aftermath_held = self.aftermath_held;
         vm.rooted_write = self.rooted_write;
+        vm.deferred_writes.truncate(self.deferred_writes);
         vm.site_leaf = self.site_leaf;
         if self.stack_empty {
             vm.stack = Vec::new();
@@ -450,6 +452,7 @@ impl Vm {
             holds: self.gc_holds,
             aftermath_held: self.aftermath_held,
             rooted_write: self.rooted_write,
+            deferred_writes: self.deferred_writes.len(),
             stack_empty: self.stack.is_empty(),
             handlers: self.signal_handlers.len(),
             backtrace: self.backtrace.frames.len(),
@@ -509,7 +512,8 @@ impl Vm {
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
+        self.gc_holds == 0 && self.deferred_writes.is_empty()
+            && self.running_engines.saturating_sub(self.suspended_code.len()) == own
     }
     /// Set the suspended engine's register stack aside for a nested run,
     /// still traced, its allocation unmoved for the frames' raw pointers.

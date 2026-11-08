@@ -272,13 +272,16 @@ mod leaf {
         pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
             self.symbol_slot(v)
         }
-        /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
-        pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
-            if self.vm.trapped.is_empty() { return Ok(()); }
-            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| self.watcher_fault(text))
+        /// WRITE from this leaf (`Vm::write_from_native'). A failure comes back
+        /// only from a write made at once: with no engine to complete the
+        /// leaf, a watcher's signal stays pending as itself and a `throw',
+        /// which the leaf cannot carry out, is refused by name.
+        pub(crate) fn write(&mut self, write: crate::watchers::NativeWrite) -> std::result::Result<(), Fault> {
+            self.vm.write_from_native(write).map_err(|fault| match fault {
+                Fault::Error(text) => self.watcher_fault(text),
+                fault => fault,
+            })
         }
-        /// A write's failure as a fault: a watcher's signal stays pending as
-        /// itself. A leaf cannot carry a `throw' out, so one is refused by name.
         fn watcher_fault(&mut self, text: String) -> Fault {
             match self.vm.propagated_escape {
                 Some(crate::threaded::Escape::Signal(..) | crate::threaded::Escape::Error { .. }) => Fault::Escape,
@@ -1090,17 +1093,7 @@ mod leaf {
             {
                 return Err(Fault::SettingConstant(v));
             }
-            self.notify(slot, value, "set", Some(Value::NIL))?;
-            // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
-            if let Some(fwd) = self.vm.native_forwarding(slot) {
-                // A global variable's set_internal reports again.
-                if self.vm.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
-                    self.notify(slot, value, "set", Some(Value::NIL))?;
-                }
-                self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
-                return Ok(value);
-            }
-            self.vm.slots[slot].value = value;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::SetDefault, slot, value })?;
             Ok(value)
         }
         /// GNU `SYMBOL_CONSTANT_P` (lisp.h): nil, t, keywords and the
@@ -1163,12 +1156,17 @@ mod leaf {
             Ok((value != Value::UNBOUND).then_some(value))
         }
         /// GNU `set_internal (..., SET_INTERNAL_BIND)` of an unbound variable.
+        pub fn variable_bound(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(v)?;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Bound, slot, value })
+        }
+        /// GNU `Fset`.
         pub fn variable_set(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
             if v == Value::NIL || v == Value::TRUE {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(|text| self.watcher_fault(text))
+            self.write(crate::watchers::NativeWrite::set(slot, value))
         }
         /// GNU C's `Vname = value', which no watcher hears (`variable_set' is
         /// `Fset'): a variable C assigns directly, or Romacs's own state.
@@ -1180,9 +1178,11 @@ mod leaf {
         /// it. nil and t are immediates in VM2, so an alias of either targets
         /// the named slot, holding its own constant value.
         pub fn make_variable_alias(&mut self, new: Value, base: Value) -> std::result::Result<(), Fault> {
-            let new = self.symbol_slot(new)?;
-            // eval.c:713: NEW's watchers see the alias before it is made.
-            self.notify(new, base, "defvaralias", Some(Value::NIL))?;
+            let slot = self.symbol_slot(new)?;
+            self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Alias, slot, value: base })
+        }
+        /// `make_variable_alias' once NEW's watchers have been told.
+        pub(in crate::prim) fn alias_now(&mut self, new: usize, base: Value) -> std::result::Result<(), Fault> {
             let base = if base == Value::NIL || base == Value::TRUE {
                 let slot = self.vm.slot(if base == Value::NIL { "nil" } else { "t" });
                 self.vm.slots[slot].value = base;
@@ -2117,6 +2117,14 @@ pub(crate) fn native_watcher(vm: &Vm, mut watcher: Value) -> Option<&'static Pri
         watcher = vm.slots.get(slot)?.function;
     }
     None
+}
+/// `Leaf::alias_now', for a write the watchers have heard (`Vm::perform_write').
+pub(crate) fn alias_now(vm: &mut Vm, new: usize, base: Value) -> std::result::Result<(), Fault> {
+    Leaf::new(vm).alias_now(new, base)
+}
+/// `Leaf::clear_local_slot', likewise.
+pub(crate) fn clear_local_slot(vm: &mut Vm, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
+    Leaf::new(vm).clear_local_slot(slot, buffer)
 }
 pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -> crate::Result<()> {
     let Some(d) = native_watcher(vm, watcher) else { return Err("VM2 variable watcher is not a native subr".into()); };

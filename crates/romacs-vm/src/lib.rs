@@ -1542,6 +1542,10 @@ pub struct Vm {
     /// The writer notifying watchers is an engine write suspended for it,
     /// whose own Values the write roots (`threaded::watched_write`).
     rooted_write: bool,
+    /// A native call's writes its watchers will hear (`watchers.rs'), each with
+    /// the buffer current then, until the engine that called it completes it.
+    /// Never traced: no collection runs while it holds any (`may_collect').
+    deferred_writes: Vec<(watchers::NativeWrite, Value)>,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
     /// What the funnels have handed out (gc.rs).
@@ -1743,6 +1747,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     gc_holds,
     running_engines,
     rooted_write,
+    deferred_writes,
     gc_stress,
     allocation,
     suspended_stacks,
@@ -1975,6 +1980,7 @@ impl Vm {
             gc_holds: 0,
             running_engines: 0,
             rooted_write: false,
+            deferred_writes: Vec::new(),
             gc_stress: gc::Stress::from_env(),
             allocation: Default::default(),
             names: NameMap::default(),

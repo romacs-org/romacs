@@ -24,7 +24,7 @@ const ENTRIES: &[&str] = &[
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "poll_collect_unless_key", "collect_garbage", "collect_garbage_until_key", "collect_compacting",
     "collect_until_key", "watched_write", "call_suspended",
-    "load_source_named", "variable_set", "notify", "prepared_function",
+    "load_source_named", "write_from_native", "perform_write", "perform_rooted", "perform_deferred", "prepared_function",
     "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
     "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
     "run_aftermath",
@@ -164,14 +164,14 @@ fn the_scanner_finds_calls_a_line_matcher_missed() {
         }
         fn generic(e: &mut Engine) { call_suspended::<()>(e, r, |_vm| ()); vm.execute_args::<Vec<(u8, fn() -> u8)>>(x); }
         fn reader_call(&mut self) {}
-        defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.variable_set(a, b)?; } }
+        defsubr! { name = "x", fn subr(cx, a: Value; optional b: Value) { cx.safe_call(a, b)?; } }
         fn collects(vm: &mut Vm) { let _: Vec<_> = it.collect(); vm.collect(&mut []); }
         #[cfg(test)]
         mod tests { fn t(vm: &mut Vm) { vm.reader_call(f, &[]); } }
         fn after(vm: &mut Vm) { vm.finish_request(o); }
     "##);
     let expect = [("helper", "reader_call"), ("spaced", "reader_call"), ("spaced", "execute_raw"),
-        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "call_suspended"), ("generic", "execute_args"), ("subr", "variable_set"), ("collects", "collect"), ("after", "finish_request")];
+        ("inner", "eval_form_raw"), ("outer", "load_file_raw"), ("generic", "call_suspended"), ("generic", "execute_args"), ("subr", "safe_call"), ("collects", "collect"), ("after", "finish_request")];
     let expect: Vec<_> = expect.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect();
     assert_eq!(found, expect);
 }

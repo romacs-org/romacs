@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 impl Vm {
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 41] = [
+        let checks: [(&str, bool); 42] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -66,6 +66,7 @@ impl Vm {
             ("gc_holds", self.gc_holds == 0),
             ("aftermath_held", self.aftermath_held == 0),
             ("rooted_write", !self.rooted_write),
+            ("deferred_writes", self.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
@@ -156,6 +157,7 @@ mod tests {
         assert!(refusal(|vm| vm.running_engines = 1).contains("running_engines"));
         assert!(refusal(|vm| vm.gc_holds = 1).contains("gc_holds"));
         assert!(refusal(|vm| vm.rooted_write = true).contains("rooted_write"));
+        assert!(refusal(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(refusal(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
     }
