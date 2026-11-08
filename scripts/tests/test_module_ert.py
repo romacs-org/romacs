@@ -36,11 +36,10 @@ class ModuleERT(unittest.TestCase):
 
     def invoke(self, *args, binary=None, make=False):
         env = os.environ.copy()
-        env.update(MODULE='', SELECTOR='t', TEST_FILES='', TEST_TIMEOUT='10',
+        env.update(MODULE='', SELECTOR='t', TEST_FILES='', EMACS_TEST_TIMEOUT='10',
                    ROMACS_TEST_BINARY=str(binary or self.binary))
         if make:
-            command = ['make', '--no-print-directory', 'test-elisp',
-                       'MODULE=gnosis-agent-romacs', *args]
+            command = ['make', '--no-print-directory', 'check-gnosis-agent-romacs', *args]
         else:
             command = [sys.executable, str(ROOT / 'scripts/test-ert'),
                        '--file', str(self.fixture), *args]
@@ -97,30 +96,64 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('ERT complete:', result.stdout)
 
     def test_unknown_module_and_budget_refuse(self):
-        result = self.invoke(make=True, *['MODULE=unknown-module'])
-        self.assertNotEqual(result.returncode, 0)
-        for timeout in ['0', '60', 'nan', 'inf']:
+        select = runpy.run_path(str(ROOT / 'scripts/test-ert'))
+        self.assertEqual(select['module_suites']('unknown-module', select['directories'](ROOT)), [])
+        for timeout in ['0', 'nan', 'inf']:
             self.assertNotEqual(self.invoke('--timeout', timeout).returncode, 0)
 
+    def test_no_ceiling_on_a_file_timeout(self):
+        result = self.invoke('--timeout', '3600', '--selector', 'fixture-pass')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('timeout=3600s', result.stdout)
+
+    def test_default_selector_leaves_out_expensive_and_unstable(self):
+        self.fixture.write_text("""(require 'ert)
+(ert-deftest fixture-plain () (should t))
+(ert-deftest fixture-expensive () :tags '(:expensive-test) (should nil))
+(ert-deftest fixture-unstable () :tags '(:unstable) (should nil))
+""")
+        env = dict(os.environ, SELECTOR='', ROMACS_TEST_BINARY=str(self.binary))
+        command = [sys.executable, str(ROOT / 'scripts/test-ert'), '--file', str(self.fixture)]
+        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
+
+    def test_each_file_runs_in_its_own_process(self):
+        first = self.home / 'first.el'
+        first.write_text("""(require 'ert)
+(setq fixture-leak t)
+(ert-deftest fixture-first () (should t))
+""")
+        self.fixture.write_text("""(require 'ert)
+(ert-deftest fixture-second () (should-not (boundp 'fixture-leak)))
+""")
+        result = self.invoke('--file', str(first))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('files=2 selected=2 started=2 completed=2 passed=2', result.stdout)
+
+    def test_a_selector_that_empties_one_file_is_not_a_failure(self):
+        other = self.home / 'other.el'
+        other.write_text("""(require 'ert)
+(ert-deftest other-pass () (should t))
+""")
+        result = self.invoke('--file', str(other), '--selector', '"^other-pass$"')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('EMPTY', result.stdout)
+
     def test_package_selection_keeps_suites_and_leaves_support_to_require(self):
-        select = runpy.run_path(str(ROOT / 'scripts/test-ert'))['test_files']
-        names = {path.name for path in select('gnosis')}
+        select = runpy.run_path(str(ROOT / 'scripts/test-ert'))
+        names = {path.name for path in select['module_suites']('gnosis', select['directories'](ROOT))}
         self.assertIn('gnosis-test-agent-romacs.el', names)
         self.assertIn('gnosis-test-runner.el', names)
         self.assertFalse(names & {'gnosis-test-db.el', 'gnosis-test-helpers.el',
                                   'gnosis-test-schema-v8.el'})
 
-    def test_timeout_kills_owned_descendants(self):
-        for detached in [False, True]:
-            with self.subTest(detached=detached):
-                self.assert_timeout_cleanup(detached)
-
-    def assert_timeout_cleanup(self, detached):
+    def test_timeout_kills_the_process_group(self):
         fake = self.home / 'hanging-host'
         pidfile = self.home / 'child.pid'
         fake.write_text(f'''#!{sys.executable}
 import pathlib, subprocess, time
-child = subprocess.Popen(["sleep", "30"], start_new_session={detached!r})
+child = subprocess.Popen(["sleep", "30"])
 pathlib.Path({str(pidfile)!r}).write_text(str(child.pid))
 time.sleep(30)
 ''')
