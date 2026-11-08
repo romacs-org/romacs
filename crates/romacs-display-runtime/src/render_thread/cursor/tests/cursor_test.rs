@@ -11,15 +11,7 @@ fn t0() -> romacs_display_protocol::frame_time::EventTime {
 // Helper: create a CursorTarget with given position/size/style
 // ---------------------------------------------------------------
 fn make_target(x: f32, y: f32, w: f32, h: f32, style: CursorStyle) -> CursorTarget {
-    CursorTarget {
-        window_id: 1,
-        x,
-        y,
-        width: w,
-        height: h,
-        style,
-        frame_id: 0,
-    }
+    CursorTarget::new(1, (x, y, w, h), style, 0)
 }
 
 #[test]
@@ -393,11 +385,11 @@ fn default_state_velocities_zero() {
 }
 
 #[test]
-fn default_state_size_transition_disabled() {
+fn default_state_morphs_in_the_default_look_s_time() {
     let state = CursorState::new(t0());
-    assert!(!state.size_transition_enabled);
+    assert!(state.size_transition_enabled, "the `soft' look morphs");
     assert!(!state.size_animating);
-    assert_eq!(state.size_transition_duration, 0.15);
+    assert_eq!(state.size_transition_duration, 0.12);
 }
 
 #[test]
@@ -409,8 +401,7 @@ fn visual_config_updates_every_cursor_policy_as_one_snapshot() {
     config.cursor_motion.style = CursorAnimStyle::Linear;
     config.cursor_motion.duration = Duration::from_millis(225);
     config.cursor_motion.trail_size = 0.25;
-    config.cursor_size_transition.enabled = true;
-    config.cursor_size_transition.duration = Duration::from_millis(175);
+    config.cursor_look.morph = Duration::from_millis(175);
 
     state.apply_visual_config(&config);
 
@@ -421,6 +412,9 @@ fn visual_config_updates_every_cursor_policy_as_one_snapshot() {
     assert_eq!(state.trail_size, 0.25);
     assert!(state.size_transition_enabled);
     assert_eq!(state.size_transition_duration, 0.175);
+    config.cursor_look.style = romacs_display_protocol::CursorLookStyle::Plain;
+    state.apply_visual_config(&config);
+    assert!(!state.size_transition_enabled, "plain, GNU's, does not morph");
 }
 
 #[test]
@@ -1551,7 +1545,7 @@ fn cursor_target_clone() {
     let cloned = target.clone();
     assert_eq!(cloned.x, 10.0);
     assert_eq!(cloned.y, 20.0);
-    assert_eq!(cloned.width, 30.0);
+    assert_eq!((cloned.width, cloned.cell), (2.0, 30.0), "a bar shows its thickness on its cell");
     assert_eq!(cloned.height, 40.0);
     assert_eq!(cloned.style, CursorStyle::Bar(2.0));
     assert_eq!(cloned.window_id, 1);
@@ -1858,4 +1852,110 @@ fn tick_size_animation_reaches_its_target_at_exactly_its_duration() {
     assert_eq!(state.current_w, 60.0);
     assert_eq!(state.current_h, 100.0);
     assert!(!state.size_animating);
+}
+
+#[test]
+fn the_focus_light_fades_over_the_morph_and_settles() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.1;
+    assert!(!state.tick_light(at), "lit and focused: nothing to do");
+    state.set_focused(false, at);
+    assert!(state.is_animating(), "a fade keeps frames coming");
+    state.tick_light(at.plus(Duration::from_millis(50)));
+    assert!((state.light - 0.5).abs() < 1e-3, "{}", state.light);
+    // Focus back midway fades up from where it is.
+    state.set_focused(true, at.plus(Duration::from_millis(50)));
+    state.tick_light(at.plus(Duration::from_millis(100)));
+    assert!((state.light - 0.75).abs() < 1e-3, "{}", state.light);
+    state.tick_light(at.plus(Duration::from_millis(200)));
+    assert_eq!(state.light, 1.0);
+    assert!(!state.is_animating());
+    // Without a morph the light changes at once.
+    state.size_transition_enabled = false;
+    state.set_focused(false, at.plus(Duration::from_millis(300)));
+    state.tick_light(at.plus(Duration::from_millis(300)));
+    assert_eq!(state.light, 0.0);
+}
+
+#[test]
+fn a_bar_becoming_a_block_widens_through_the_morph() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.1;
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::Bar(2.0)), at);
+    assert_eq!(state.current_w, 2.0, "a bar shows at its thickness");
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    state.tick_size_animation(at.plus(Duration::from_millis(50)));
+    assert!(state.current_w > 2.0 && state.current_w < 10.0, "midway: {}", state.current_w);
+    state.tick_size_animation(at.plus(Duration::from_millis(100)));
+    assert_eq!(state.current_w, 10.0);
+}
+
+#[test]
+fn a_move_that_changes_kind_is_the_glide_s_alone() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.12;
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::Bar(2.0)), at);
+    // Into another window, as `C-x o' from text into dired: bar to block.
+    state.set_target(make_target(400.0, 300.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    assert!(state.animating && !state.size_animating, "one owner");
+    let mut widths = Vec::new();
+    for ms in (8..=400).step_by(8) {
+        let now = at.plus(Duration::from_millis(ms));
+        state.tick_animation(now);
+        state.tick_size_animation(now);
+        widths.push(state.current_w);
+    }
+    assert_eq!(*widths.last().unwrap(), 10.0);
+    assert!(!state.size_animating, "the size transition never ran");
+}
+
+#[test]
+fn a_morph_shows_with_the_glide_off() {
+    let at = t0();
+    let mut state = CursorState::new(at);
+    state.anim_enabled = false;
+    state.size_transition_enabled = true;
+    state.size_transition_duration = 0.1;
+    state.set_target(make_target(0.0, 0.0, 10.0, 20.0, CursorStyle::Bar(2.0)), at);
+    state.set_target(make_target(50.0, 0.0, 10.0, 20.0, CursorStyle::FilledBox), at);
+    assert_eq!(state.current_x, 50.0, "no glide: it is there at once");
+    state.tick_size_animation(at.plus(Duration::from_millis(50)));
+    let shown = state.animated_cursor().expect("the morph draws through the animated rect");
+    assert!(shown.width > 2.0 && shown.width < 10.0, "midway: {}", shown.width);
+}
+
+#[test]
+fn a_window_made_without_the_focus_starts_unlit() {
+    let mut state = CursorState::new(t0());
+    state.seed_focus(false);
+    assert_eq!(state.light, 0.0);
+    assert!(!state.is_animating(), "no fade from lit");
+}
+
+#[test]
+fn a_move_that_cuts_a_morph_short_glides_on_from_the_shape_shown() {
+    for (from, to) in [(CursorStyle::FilledBox, CursorStyle::Bar(2.0)), (CursorStyle::Bar(2.0), CursorStyle::FilledBox)] {
+        let at = t0();
+        let mut state = CursorState::new(at);
+        state.anim_enabled = true;
+        state.anim_style = CursorAnimStyle::Neovide;
+        state.size_transition_enabled = true;
+        state.size_transition_duration = 0.12;
+        state.set_target(make_target(0.0, 0.0, 10.0, 20.0, from), at);
+        state.set_target(make_target(0.0, 0.0, 10.0, 20.0, to), at);
+        let mid = at.plus(Duration::from_millis(40));
+        state.tick_size_animation(mid);
+        let shown = state.current_w;
+        assert!(shown > 2.5 && shown < 9.5, "midway through the morph: {shown}");
+        // A short move to the next cell, as a keypress makes.
+        state.set_target(make_target(10.0, 0.0, 10.0, 20.0, to), mid);
+        state.tick_animation(mid.plus(Duration::from_millis(1)));
+        assert!((state.current_w - shown).abs() < 1.0, "{from:?} to {to:?}: {shown} then {}", state.current_w);
+    }
 }

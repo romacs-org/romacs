@@ -80,35 +80,6 @@ pub fn window_frame_metrics_snapshot() -> Vec<WindowFrameSnapshot> {
     render_thread::frame_stats::window_snapshots()
 }
 
-/// Read GPU power preference from `ROMACS_GPU` environment variable.
-///
-/// - `"low"` or `"integrated"` → `LowPower` (prefer integrated GPU, e.g. Intel)
-/// - `"high"` or `"discrete"` → `HighPerformance` (prefer discrete GPU, e.g. NVIDIA)
-/// - unset or anything else → `HighPerformance` (default)
-pub fn gpu_power_preference() -> wgpu::PowerPreference {
-    match std::env::var("ROMACS_GPU").as_deref() {
-        Ok("low") | Ok("integrated") => {
-            tracing::info!(
-                "ROMACS_GPU={}: using LowPower (integrated GPU)",
-                std::env::var("ROMACS_GPU").unwrap()
-            );
-            wgpu::PowerPreference::LowPower
-        }
-        Ok("high") | Ok("discrete") => {
-            tracing::info!("ROMACS_GPU=high: using HighPerformance (discrete GPU)");
-            wgpu::PowerPreference::HighPerformance
-        }
-        Ok(val) => {
-            tracing::warn!(
-                "ROMACS_GPU={}: unrecognized value, defaulting to HighPerformance",
-                val
-            );
-            wgpu::PowerPreference::HighPerformance
-        }
-        Err(_) => wgpu::PowerPreference::HighPerformance,
-    }
-}
-
 pub(crate) fn wgpu_instance_descriptor_with_display(
     display: winit::event_loop::OwnedDisplayHandle,
 ) -> wgpu::InstanceDescriptor {

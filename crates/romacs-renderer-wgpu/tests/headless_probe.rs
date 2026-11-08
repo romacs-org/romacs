@@ -12,11 +12,8 @@
 
 #[test]
 fn offscreen_clear_readback() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let Ok(adapter) =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-    else {
+    use romacs_renderer_wgpu::gpu_policy::test_gpu;
+    let Some(adapter) = test_gpu::adapter() else {
         eprintln!("SKIP: no wgpu adapter available in this environment");
         return;
     };
@@ -25,14 +22,10 @@ fn offscreen_clear_readback() {
         adapter.get_info().name,
         adapter.get_info().backend
     );
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let (device, queue) = test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("probe"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: Default::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        trace: wgpu::Trace::Off,
-    }))
+        ..Default::default()
+    })
     .expect("device");
 
     let size = wgpu::Extent3d {

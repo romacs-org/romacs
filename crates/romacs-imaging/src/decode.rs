@@ -10,9 +10,10 @@ use romacs_display_protocol::{
     ImageRasterExtent, ImageRealization, ImageReportedExtent, ImageRotation, ImageSequenceId,
     ImageSequenceRetirement, ImageSizeSpec, ResolvedImageGeometry,
 };
+use std::ops::ControlFlow;
+use std::sync::atomic::Ordering;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use crate::image_bands::{
@@ -23,17 +24,10 @@ use crate::image_sequence::{ImageSequenceCache, ImageSequenceResolution};
 /// Maximum texture dimension (width or height)
 pub const MAX_TEXTURE_SIZE: u32 = 4096;
 
-/// For tests: abandon a banded attempt after this many bands have been
-/// published. Zero, as it always is outside tests, disables it.
-///
-/// The property this serves — a banded decode that stops part-way leaves the
-/// caller with a whole image rather than a truncated one — cannot be expressed
-/// with a fixture: both paths read the same bytes, so a source the row-wise
-/// reader rejects is one the whole-image decoder rejects too. Injecting the cut
-/// leaves the consequence under test exactly as it would be, and `nextest`
-/// gives each test its own process, so the hook cannot leak into another.
-#[doc(hidden)]
-pub static ABANDON_AFTER_BANDS: AtomicU32 = AtomicU32::new(0);
+/// Where a banded decode hands each band as it lands. Its answer decides
+/// whether the attempt goes on: `Break` abandons it, and the caller then gets
+/// the image decoded whole, never the prefix the bands reached.
+pub type BandSink<'a> = &'a mut dyn FnMut(DecodedBand) -> ControlFlow<()>;
 
 /// Clamp to the renderer's texture limit, preserving aspect ratio.
 ///
@@ -548,7 +542,7 @@ impl Decode {
         frame: ImageFrameIndex,
         sequence_cache: &ImageSequenceCache,
         sequence: ImageSequenceId,
-        sink: Option<&mut dyn FnMut(DecodedBand)>,
+        sink: Option<BandSink<'_>>,
     ) -> Option<DecodedPixels> {
         // The bytes the decode will read, owned here and handed to the decode
         // chain by handle: `std::fs::read` gives the buffer, `EncodedBytes`
@@ -659,7 +653,7 @@ impl Decode {
         resources: crate::svg::SvgResourceContext,
         sequence_cache: &ImageSequenceCache,
         sequence: ImageSequenceId,
-        sink: Option<&mut dyn FnMut(DecodedBand)>,
+        sink: Option<BandSink<'_>>,
     ) -> Option<DecodedPixels> {
         if let Some(pixels) = Self::decode_raster_data(
             data.clone(),
@@ -753,7 +747,7 @@ impl Decode {
         rotation: ImageRotation,
         realization: ImageRealization,
         mask_policy: ImageMaskPolicy,
-        sink: Option<&mut dyn FnMut(DecodedBand)>,
+        sink: Option<BandSink<'_>>,
     ) -> Option<DecodedPixels> {
         match sequence_cache.resolve(sequence, &data, frame) {
             ImageSequenceResolution::Frame(frame) => {
@@ -824,7 +818,7 @@ impl Decode {
         rotation: ImageRotation,
         realization: ImageRealization,
         mask_policy: ImageMaskPolicy,
-        sink: Option<&mut dyn FnMut(DecodedBand)>,
+        sink: Option<BandSink<'_>>,
     ) -> Option<DecodedPixels> {
         match Self::attempt_banded(
             data.clone(),
@@ -868,7 +862,7 @@ impl Decode {
         size: ImageSizeSpec,
         realization: ImageRealization,
         filling: BandFilling,
-        mut sink: Option<&mut dyn FnMut(DecodedBand)>,
+        mut sink: Option<BandSink<'_>>,
     ) -> BandedAttempt {
         // A band has a destination only where the texture can be built up from
         // the top: an unrotated realization whose mask policy leaves the pixels
@@ -886,21 +880,13 @@ impl Decode {
             BandSource::Banded(source) => source,
             BandSource::Whole => return BandedAttempt::NotBandable,
         };
-        let mut published = 0_u32;
         loop {
             match source.next_band() {
                 BandStep::Band(band) => {
-                    if let Some(sink) = sink.as_deref_mut() {
-                        sink(band);
-                    }
-                    // The test hook (ABANDON_AFTER_BANDS): one relaxed load
-                    // a band, which is many rows.
+                    if let Some(sink) = sink.as_deref_mut()
+                        && sink(band).is_break()
                     {
-                        published += 1;
-                        let abandon_after = ABANDON_AFTER_BANDS.load(Ordering::Relaxed);
-                        if abandon_after != 0 && published >= abandon_after {
-                            return BandedAttempt::Abandoned;
-                        }
+                        return BandedAttempt::Abandoned;
                     }
                 }
                 // A completed source is the only one that yields pixels, so a

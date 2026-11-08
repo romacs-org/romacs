@@ -635,6 +635,8 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path
         vm.eval_source(include_str!("../../../rlisp/romacs-chrome.el"))?;
         // The renderer's options: cursor motion, transitions, effects.
         vm.eval_source(include_str!("../../../rlisp/romacs-effects.el"))?;
+        // A bar where text goes in, a block where it does not.
+        vm.eval_source(include_str!("../../../rlisp/romacs-cursor.el"))?;
         vm.eval_source(include_str!("../../../rlisp/romacs-layer.el"))?;
         // Romacs's menus over layers: one look, motion and keyboard model.
         vm.eval_source(include_str!("../../../rlisp/romacs-popup.el"))?;

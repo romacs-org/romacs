@@ -28,6 +28,10 @@ pub(in crate::render_thread) struct RootKey {
     cursors: Vec<WindowCursor>,
     blinked_off: bool,
     cursor_visible: bool,
+    /// The look and focus light its cursors were drawn in
+    /// (`romacs-cursor-look').
+    look: romacs_display_protocol::CursorLookConfig,
+    light_bits: u32,
     size: SnapshotSize,
     scale_bits: u32,
 }
@@ -39,6 +43,7 @@ pub(in crate::render_thread) struct RootKey {
 pub(super) fn key(
     frame: &FrameGlyphBuffer,
     cursor_visible: bool,
+    (look, light): (&romacs_display_protocol::CursorLookConfig, f32),
     size: SnapshotSize,
     scale: f32,
     stable: bool,
@@ -64,6 +69,8 @@ pub(super) fn key(
         cursors: frame.window_cursors.clone(),
         blinked_off: frame.cursor_blinked_off,
         cursor_visible,
+        look: look.clone(),
+        light_bits: light.to_bits(),
         size,
         scale_bits: scale.to_bits(),
     })

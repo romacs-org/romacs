@@ -28,7 +28,7 @@ fn metrics_snapshot(face: &Face) -> WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, mode_line: None,
         mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
-        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, no_cursor: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
+        vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
     }
 }
 
@@ -128,9 +128,9 @@ fn hide_cursors_off(frame: &mut FrameGlyphBuffer, snapshot: &FrameSnapshot) {
     let ids = |hidden: fn(&WindowSnapshot) -> bool| -> Vec<i64> {
         snapshot.windows.iter().filter(|w| hidden(&w.snapshot)).map(|w| w.snapshot.id as i64).collect()
     };
-    let (blinked, none) = (ids(|w| w.cursor_off && !w.no_cursor), ids(|w| w.no_cursor));
+    let blinked = ids(|w| w.cursor_off);
     frame.cursor_blinked_off = frame.window_cursors.iter().any(|c| c.active && blinked.contains(&c.window_id.get()));
-    frame.window_cursors.retain(|c| !blinked.contains(&c.window_id.get()) && !none.contains(&c.window_id.get()));
+    frame.window_cursors.retain(|c| !blinked.contains(&c.window_id.get()));
 }
 
 /// SNAPSHOT laid out with every cursor its windows own, on or off.
@@ -1124,12 +1124,25 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         // area shows in the fringe (`overflow-newline-into-fringe').
         let right = snapshot.width as f32 + snapshot.chrome.right_fringe as f32;
         if x >= 0.0 && x < right && y >= 0.0 && y + height <= body_height {
-            frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
-                width.min(right - x), height,
-                if active { romacs_display_protocol::CursorStyle::FilledBox } else { romacs_display_protocol::CursorStyle::Hollow }, color);
-            let published = frame.window_cursors.last_mut().unwrap();
-            published.active = active;
-            published.ascent = ascent;
+            use romacs_display_protocol::CursorStyle;
+            use romacs_layout_input::CursorKind;
+            let width = width.min(right - x);
+            // A bar no wider than its glyph, an hbar no taller than its row
+            // (GNU's draw_bar_cursor clamps both).
+            let style = match if active { snapshot.cursor.selected } else { snapshot.cursor.unselected } {
+                CursorKind::Box => Some(CursorStyle::FilledBox),
+                CursorKind::Hollow => Some(CursorStyle::Hollow),
+                CursorKind::Bar(thick) => Some(CursorStyle::Bar((thick as f32).min(width))),
+                CursorKind::Hbar(thick) => Some(CursorStyle::Hbar((thick as f32).min(height))),
+                CursorKind::None => None,
+            };
+            if let Some(style) = style {
+                frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
+                    width, height, style, color);
+                let published = frame.window_cursors.last_mut().unwrap();
+                published.active = active;
+                published.ascent = ascent;
+            }
         }
     }
     // Each band's faces are the next table after the window's, so the

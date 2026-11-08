@@ -124,6 +124,10 @@ pub trait DisplayHost {
     /// Show CONFIG, the visual configuration Lisp asked for
     /// (`romacs--effect-set'): cursor motion, transitions, effects.
     fn set_visual_config(&mut self, _config: &romacs_display_protocol::VisualConfig) {}
+    /// Debug: make the display lose its GPU device as a driver reset would,
+    /// so its device-loss recovery runs (`romacs--debug-lose-device'). Whether
+    /// the request reached a display that has a device to lose.
+    fn lose_device(&mut self) -> bool { false }
     /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
     /// pixels under the facts' id until `release_image'.  An error is the
     /// loader's message; the image then shows as a placeholder.

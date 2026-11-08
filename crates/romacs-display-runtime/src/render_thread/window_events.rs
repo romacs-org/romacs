@@ -440,6 +440,7 @@ impl RenderApp {
                 self.handle_window_focus_models(emacs_fid, focused);
                 if let Some(window) = self.frame_windows.get_by_winit_mut(window_id) {
                     window.render.compositor.text_animations.focus(focused);
+                    window.render.cursor.set_focused(focused, romacs_display_protocol::frame_time::observe_platform_now());
                 }
                 if !focused {
                     // Focus left: any modifier-side observation is stale

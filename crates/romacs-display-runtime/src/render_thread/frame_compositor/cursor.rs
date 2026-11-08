@@ -55,7 +55,7 @@ impl GuiFrameRenderState {
         &mut self,
         at: romacs_display_protocol::frame_time::EventTime,
     ) -> bool {
-        let mut dirty = self.cursor.tick_size_animation(at);
+        let mut dirty = self.cursor.tick_size_animation(at) | self.cursor.tick_light(at);
         for cursor in self.compositor.visual_cursors.values_mut() {
             dirty |= cursor.tick_size_animation(at);
         }
@@ -87,15 +87,12 @@ impl GuiFrameRenderState {
                 .or_insert_with(|| CursorState::new(at));
             cursor_config(state);
             let (_, target_moved) = state.set_target(
-                CursorTarget {
-                    window_id: cursor.window_id.get(),
-                    x: cursor.x,
-                    y: cursor.y,
-                    width: cursor.width,
-                    height: cursor.height,
-                    style: cursor.style,
-                    frame_id: self.emacs_frame_id,
-                },
+                CursorTarget::new(
+                    cursor.window_id.get(),
+                    (cursor.x, cursor.y, cursor.width, cursor.height),
+                    cursor.style,
+                    self.emacs_frame_id,
+                ),
                 at,
             );
             if target_moved {

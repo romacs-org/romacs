@@ -391,6 +391,10 @@ pub struct ImageCache {
     decode_tx: mpsc::Sender<DecodeRequest>,
     /// CPU decoder/compositor state shared across all frames of an animation.
     sequence_cache: Arc<ImageSequenceCache>,
+    /// A test's hold on banded decodes (`band_hold`); elsewhere only the
+    /// decoder threads carry the (empty) handle.
+    #[cfg(any(test, feature = "test-gpu"))]
+    band_hold: BandHoldHandle,
     /// Bind group layout for image textures
     bind_group_layout: wgpu::BindGroupLayout,
     /// Sampler for image textures
@@ -478,7 +482,60 @@ enum ImageSource {
     },
 }
 
+/// A test's hold on banded decodes: having published a band of the held
+/// image that reaches the held fraction of its raster's rows, the decoder
+/// waits until the hold is released.  A test that needs a frame drawn at
+/// one point of a fill gets that point whatever the scheduler does, rather
+/// than racing a decoder that may finish before it looks.  Only test
+/// builds have it; elsewhere the handle is nothing and the hook does
+/// nothing.
+#[cfg(any(test, feature = "test-gpu"))]
+#[derive(Default)]
+pub struct BandHold {
+    held: Mutex<Option<(ImageId, f32)>>,
+    released: std::sync::Condvar,
+}
+
+#[cfg(any(test, feature = "test-gpu"))]
+impl BandHold {
+    /// Hold IMAGE's decode at its first band reaching FRACTION of its rows.
+    pub fn hold(&self, image: ImageId, fraction: f32) {
+        *self.held.lock().unwrap_or_else(|e| e.into_inner()) = Some((image, fraction));
+    }
+
+    /// Let a held decode go on, and every later band with it.
+    pub fn release(&self) {
+        *self.held.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.released.notify_all();
+    }
+
+    fn after_band(&self, image: ImageId, reached: f32) {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        while held.is_some_and(|(id, fraction)| id == image && reached >= fraction) {
+            held = self.released.wait(held).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-gpu"))]
+type BandHoldHandle = Arc<BandHold>;
+#[cfg(not(any(test, feature = "test-gpu")))]
+type BandHoldHandle = ();
+
+#[cfg(any(test, feature = "test-gpu"))]
+fn hold_after_band(hold: &BandHoldHandle, image: ImageId, reached: f32) {
+    hold.after_band(image, reached);
+}
+#[cfg(not(any(test, feature = "test-gpu")))]
+fn hold_after_band(_: &BandHoldHandle, _: ImageId, _: f32) {}
+
 impl ImageCache {
+    /// The hold tests put on this cache's banded decodes ([`BandHold`]).
+    #[cfg(any(test, feature = "test-gpu"))]
+    pub fn band_hold(&self) -> &Arc<BandHold> {
+        &self.band_hold
+    }
+
     /// Create a new image cache
     pub fn new(device: &wgpu::Device) -> Self {
         // Create bind group layout for image textures
@@ -520,6 +577,7 @@ impl ImageCache {
         let (decode_tx, decode_rx) = mpsc::channel::<DecodeRequest>();
         let (decoded_tx, decoded_rx) = mpsc::channel::<WorkerDecodeOutcome>();
         let sequence_cache = Arc::new(ImageSequenceCache::new());
+        let band_hold = BandHoldHandle::default();
 
         // Wrap receiver in Arc<Mutex> for sharing across threads
         let decode_rx = Arc::new(Mutex::new(decode_rx));
@@ -530,8 +588,9 @@ impl ImageCache {
             let rx = Arc::clone(&decode_rx);
             let tx = decoded_tx.clone();
             let sequence_cache = Arc::clone(&sequence_cache);
+            let band_hold = band_hold.clone();
             thread::spawn(move || {
-                Self::decoder_thread_pooled(i, rx, tx, sequence_cache);
+                Self::decoder_thread_pooled(i, rx, tx, sequence_cache, band_hold);
             });
         }
 
@@ -546,6 +605,8 @@ impl ImageCache {
             decoded_rx,
             decode_tx,
             sequence_cache,
+            #[cfg(any(test, feature = "test-gpu"))]
+            band_hold,
             bind_group_layout,
             accounting: Vec::new(),
             sampler,
@@ -597,6 +658,7 @@ impl ImageCache {
         rx: Arc<Mutex<mpsc::Receiver<DecodeRequest>>>,
         tx: mpsc::Sender<WorkerDecodeOutcome>,
         sequence_cache: Arc<ImageSequenceCache>,
+        band_hold: BandHoldHandle,
     ) {
         tracing::debug!("Decoder thread {} started", thread_id);
         loop {
@@ -635,9 +697,13 @@ impl ImageCache {
                     // wants the image decodes the same pixels without any of
                     // this.
                     let mut publish_band = |decoded: DecodedBand| {
+                        let placement = decoded.placed().placement();
+                        let reached = placement.rows().end() as f32 / placement.raster().dimensions().1.max(1) as f32;
                         let _ = tx.send(WorkerDecodeOutcome::Band { load, decoded });
+                        hold_after_band(&band_hold, load.image(), reached);
+                        std::ops::ControlFlow::Continue(())
                     };
-                    let sink: Option<&mut dyn FnMut(DecodedBand)> = Some(&mut publish_band);
+                    let sink: Option<romacs_imaging::decode::BandSink<'_>> = Some(&mut publish_band);
                     // The chain below answers `Option` and each arm collapses
                     // its own reason, so what the failure is worded *about* is
                     // captured before the bytes are handed over: the source

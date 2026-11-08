@@ -77,7 +77,7 @@ pub(super) fn install_pane_change(
 
 #[test]
 fn fractional_outgoing_panes_use_final_native_conversion_and_settle_direct() {
-    let mut renderer = WgpuRenderer::new(None, W, H).expect("real GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real GPU required");
     let size = SnapshotSize::new(W, H).unwrap();
     for kind in 0..3 {
         let origin = observe_platform_now();
@@ -221,7 +221,7 @@ fn pane_conversion_refuses_before_motion_and_recovers_under_held_pressure() {
         return;
     }
     for active in [false, true] {
-        let mut renderer = WgpuRenderer::new(None, W, H).expect("real GPU required");
+        let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real GPU required");
         let origin = observe_platform_now();
         let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
         let (before, after) = install_pane_change(&mut render, origin, 1);
@@ -375,7 +375,7 @@ fn wrong_size_required_native_owner_retires_before_child_under_same_pressure() {
     ) {
         return;
     }
-    let mut renderer = WgpuRenderer::new(None, W, H).expect("real GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real GPU required");
     let origin = observe_platform_now();
     let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
     let mut root = pane_frame();

@@ -76,6 +76,8 @@
     ;; A steady cursor: the renderer animates its motion, and a blink
     ;; would flash it away mid-glide.
     (blink-cursor-mode nil)
+    ;; A bar where text goes in, a block where it does not (romacs-cursor.el).
+    ,@(and (fboundp 'romacs-cursor-shape-mode) '((romacs-cursor-shape-mode t)))
     ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
     ;; counted from point, the current line by its own number.
     (display-line-numbers-type 'relative)
@@ -259,6 +261,10 @@ The per-user files of the libraries above follow this session's
 in the session.  Unless QUICK (-Q), `romacs-defaults-mode' is on, as the
 session's standard state."
   (mapc #'custom-reevaluate-setting romacs-defaults--session-options)
+  ;; Less motion when the desktop asks for it, once, when idle: an
+  ;; accessibility setting, so -Q follows it too.
+  (when (fboundp 'romacs-motion--follow-desktop)
+    (run-with-idle-timer 1 nil #'romacs-motion--follow-desktop))
   (unless quick
     (put 'romacs-defaults-mode 'standard-value '(t))
     (romacs-defaults-mode 1)))

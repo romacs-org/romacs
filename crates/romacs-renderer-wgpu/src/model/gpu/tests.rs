@@ -18,20 +18,11 @@ fn open_device() -> Option<(wgpu::Device, wgpu::Queue)> {
 }
 
 fn open_device_with(required_limits: wgpu::Limits) -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    crate::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("model-gpu-test"),
-        required_features: wgpu::Features::empty(),
         required_limits,
-        memory_hints: Default::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()
+        ..Default::default()
+    })
 }
 
 /// Test-only readback of the resolved texture as tightly packed RGBA8.

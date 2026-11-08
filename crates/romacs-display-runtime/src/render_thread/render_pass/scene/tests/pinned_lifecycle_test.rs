@@ -150,7 +150,7 @@ fn draw_tick(
 }
 #[test]
 fn native_resize_retires_incompatible_pinned_picture_not_interaction() {
-    let mut renderer = WgpuRenderer::new(None, 192, H).expect("real GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(192, H).expect("real GPU required");
     let (mut render, root, origin) = pinned(&mut renderer, 192);
     let interaction = format!("{:?}", render.compositor.interaction);
     // Equal geometry is not permission to discard a still-readable live pin.
@@ -224,7 +224,7 @@ fn native_resize_retires_incompatible_pinned_picture_not_interaction() {
 }
 #[test]
 fn recreated_device_has_no_old_pane_bindings_and_keeps_cpu_scene() {
-    let mut a = WgpuRenderer::new(None, W, H).expect("real device A required");
+    let mut a = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real device A required");
     let (render, root, origin) = pinned(&mut a, W);
     let interaction = format!("{:?}", render.compositor.interaction);
     let current = render.compositor.current_frame.clone();
@@ -246,7 +246,7 @@ fn recreated_device_has_no_old_pane_bindings_and_keeps_cpu_scene() {
     });
     drop(a);
     manager.clear_gpu_resident_state();
-    let mut b = WgpuRenderer::new(None, W, H).expect("real device B required");
+    let mut b = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real device B required");
     let render = &mut manager.primary_window_mut().unwrap().render;
     assert_eq!(render.compositor.current_frame, current);
     assert_eq!(format!("{:?}", render.compositor.interaction), interaction);

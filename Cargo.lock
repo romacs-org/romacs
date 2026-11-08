@@ -4418,6 +4418,7 @@ dependencies = [
  "libc",
  "pollster",
  "romacs-infra",
+ "romacs-renderer-wgpu",
  "rustix 1.1.5",
  "serde",
  "serde_json",
@@ -4514,29 +4515,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-mem"
-version = "0.1.0"
-dependencies = [
- "romacs-chars",
-]
-
-[[package]]
-name = "romacs-mem-replay"
-version = "0.1.0"
-dependencies = [
- "romacs-mem",
-]
-
-[[package]]
-name = "romacs-obj"
-version = "0.1.0"
-dependencies = [
- "romacs-chars",
- "romacs-gnudiff",
- "romacs-mem",
-]
-
-[[package]]
 name = "romacs-parity-reference"
 version = "0.0.20"
 dependencies = [
@@ -4621,6 +4599,7 @@ dependencies = [
  "romacs-font-materializer",
  "romacs-imaging",
  "romacs-infra",
+ "romacs-renderer-wgpu",
  "romacs-scene",
  "romacs-test-fonts",
  "romacs-video",

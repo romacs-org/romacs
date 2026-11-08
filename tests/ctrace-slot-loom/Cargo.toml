@@ -17,3 +17,6 @@ static_assertions = "=1.1.0"
 [[test]]
 name = "slot_publication"
 path = "tests/slot_publication.rs"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
