@@ -32,6 +32,7 @@ sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 (its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
+Interactively, open the chat without sending an initial prompt.
 
 (fn CWD &optional PROMPT TITLE PROVIDER OPTIONS KNOWN)" t)
 (defvar romacs-agent-restored-hook nil

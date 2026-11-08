@@ -1087,10 +1087,11 @@ harness as its whole stdin."
 sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 \(its client request id) for the record.  KNOWN, when given, is called
-with the session before its harness starts.  Return the session."
+with the session before its harness starts.  Return the session.
+Interactively, open the chat without sending an initial prompt."
   (interactive (let* ((cwd (read-directory-name "Agent directory: " default-directory))
                       (provider (romacs-agent--read-provider)))
-                 (list cwd (read-string "Prompt (empty for none): ") nil provider)))
+                 (list cwd nil nil provider)))
   (let* ((name (or provider (romacs-agent--default-provider)))
          (instance (or (romacs-agent--configured name)
                        (user-error "No agent provider %s in `romacs-agent-providers'" name)))
