@@ -103,5 +103,43 @@ A worker needs a world to adopt: harness/packages_live.py runs the session."
       (package-install 'simple-single)
       (should (package-installed-p 'simple-single)))))
 
+(defun romacs-package-tests--write (name version result)
+  "An installed package NAME at VERSION whose function NAME returns RESULT."
+  (let ((dir (expand-file-name (format "%s-%s" name version) package-user-dir)))
+    (make-directory dir t)
+    (with-temp-file (expand-file-name (format "%s-pkg.el" name) dir)
+      (prin1 `(define-package ,(symbol-name name) ,version "doc" nil) (current-buffer)))
+    (with-temp-file (expand-file-name (format "%s-autoloads.el" name) dir)
+      (prin1 '(add-to-list 'load-path (directory-file-name (file-name-directory load-file-name)))
+             (current-buffer)))
+    (with-temp-file (expand-file-name (format "%s.el" name) dir)
+      (prin1 `(progn (defun ,name () ,result) (provide ',name)) (current-buffer)))
+    dir))
+
+(ert-deftest romacs-package-an-upgrade-reloads-what-the-old-one-loaded ()
+  "The session runs the new code, with the old directory off `load-path'."
+  (romacs-package-tests--with-archive
+    (let ((name (intern (format "rp-up-%d" (random 1000000)))))
+      (let ((old (romacs-package-tests--write name "1.0" 'one)))
+        (romacs-package--settled)
+        (require name)
+        (should (eq (funcall name) 'one))
+        (romacs-package-tests--write name "2.0" 'two)
+        (delete-directory old t)
+        (romacs-package--settled)
+        (should (eq (funcall name) 'two))
+        (should-not (member old load-path))
+        (should-not (member (directory-file-name old) load-path))))))
+
+(ert-deftest romacs-package-a-job-changes-the-selection-it-changed ()
+  "A selection made while a job ran survives its result."
+  (romacs-package-tests--with-archive
+    (let ((after-init-time (current-time)))
+      (setq package-selected-packages '(made-meanwhile dropped))
+      (romacs-package--settled '((installed) . (dropped)))
+      (should (memq 'installed package-selected-packages))
+      (should (memq 'made-meanwhile package-selected-packages))
+      (should-not (memq 'dropped package-selected-packages)))))
+
 (provide 'romacs-package-tests)
 ;;; romacs-package-tests.el ends here

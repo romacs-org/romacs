@@ -28,15 +28,13 @@
 (declare-function isolate-on-done "isolate")
 (declare-function isolate-await "isolate")
 (declare-function isolate-main-p "isolate")
-(declare-function package-menu--post-refresh "package")
 (declare-function romacs-layer-notify "romacs-layer")
 
 (defconst romacs-package--settings
   '(package-archives package-archive-priorities package-pinned-packages package-user-dir
     package-gnupghome-dir package-directory-list package-load-list package-check-signature
     package-selected-packages package-vc-selected-packages package-install-upgrade-built-in
-    package-retention-policy
-    url-proxy-services current-prefix-arg)
+    package-retention-policy url-proxy-services)
   "The options a worker installs under, as the session has them.")
 
 (defun romacs-package--selected-file ()
@@ -46,9 +44,11 @@
   "`package--save-selected-packages', beside the packages.
 VALUE nil is valid after startup: the last package was deleted."
   (when (or value after-init-time) (setq package-selected-packages value))
-  (make-directory package-user-dir t)
-  (with-temp-file (romacs-package--selected-file)
-    (prin1 package-selected-packages (current-buffer))))
+  ;; A worker reports what it changed (`romacs-package--job'); the session saves.
+  (when (isolate-main-p)
+    (make-directory package-user-dir t)
+    (with-temp-file (romacs-package--selected-file)
+      (prin1 package-selected-packages (current-buffer)))))
 
 (defun romacs-package--read-selected ()
   "The selected packages saved beside the packages, unless the user set them."
@@ -57,24 +57,29 @@ VALUE nil is valid after startup: the last package was deleted."
       (setq package-selected-packages
             (with-temp-buffer (insert-file-contents file) (read (current-buffer)))))))
 
-(defun romacs-package--settled (&optional selected)
-  "The session takes in what a worker left on disk: SELECTED, the descriptors
-and the archives' contents.  A package with a new directory activates, reloading
-what the old one had loaded; a directory gone leaves `load-path'."
+(defun romacs-package--settled (&optional changes)
+  "The session takes in what a worker left on disk: the descriptors and the
+archives' contents, and CHANGES to the selected packages, as (ADDED . REMOVED).
+A package with a new directory activates, reloading what the old one had loaded
+while that one is still on `load-path', as GNU's reload needs; then a directory
+gone leaves it."
   (let ((before (cl-loop for (name desc) in package-alist
                          collect (cons name (package-desc-dir desc)))))
-    (when selected (setq package-selected-packages selected))
+    (when changes
+      (romacs-package--save-selected
+       (cl-set-difference (cl-union (car changes) package-selected-packages)
+                          (cdr changes))))
     (setq package-alist nil)
     (package-read-all-archive-contents)
     (package-load-all-descriptors)
-    (pcase-dolist (`(,name . ,dir) before)
-      (unless (equal dir (let ((new (cadr (assq name package-alist))))
-                           (and new (package-desc-dir new))))
-        (setq load-path (delete (directory-file-name dir) (delete dir load-path)))))
     (pcase-dolist (`(,name ,desc) package-alist)
       (let ((old (alist-get name before)))
         (unless (equal old (package-desc-dir desc))
           (package-activate-1 desc (and old t) t))))
+    (pcase-dolist (`(,name . ,dir) before)
+      (unless (equal dir (let ((new (cadr (assq name package-alist))))
+                           (and new (package-desc-dir new))))
+        (setq load-path (delete (directory-file-name dir) (delete dir load-path)))))
     (add-hook 'post-command-hook #'package-menu--post-refresh)))
 
 (defun romacs-package--crossing (argument)
@@ -96,14 +101,17 @@ in a list too."
         (t argument)))
 
 (defun romacs-package--job (command args)
-  "In a worker: run GNU's COMMAND on ARGS; the selected packages."
+  "In a worker: run GNU's COMMAND on ARGS; what it changed in the selected
+packages, as (ADDED . REMOVED): the session's list may have moved meanwhile."
   (package-initialize)
-  (apply command (mapcar #'romacs-package--crossed args))
-  package-selected-packages)
+  (let ((seed package-selected-packages))
+    (apply command (mapcar #'romacs-package--crossed args))
+    (cons (cl-set-difference package-selected-packages seed)
+          (cl-set-difference seed package-selected-packages))))
 
 (defconst romacs-package--done
   '((package-install . "installed") (package-vc-install . "installed")
-    (package-upgrade . "upgraded") (package-vc-upgrade . "upgraded"))
+    (package-upgrade . "upgraded"))
   "What a command says of the package it worked on.")
 
 (defun romacs-package--subject (argument)
@@ -125,17 +133,18 @@ toast that outlasts their typing."
   (let ((inhibit-message (fboundp 'romacs-layer-notify))) (message "%s" text))
   (when (fboundp 'romacs-layer-notify) (romacs-layer-notify text kind)))
 
-(defun romacs-package--spawn (command args)
-  "Run COMMAND on ARGS in a worker VM: its future."
+(defun romacs-package--spawn (command args &optional prefix)
+  "Run COMMAND on ARGS in a worker VM, with the prefix argument PREFIX: its future."
   (isolate-spawn 'romacs-package--job command (mapcar #'romacs-package--crossing args)
                  :name (symbol-name command)
                  :require '(romacs-package package-vc)
                  :allow-source-boot t
-                 :bindings (cl-loop for s in romacs-package--settings
-                                    when (boundp s) collect (cons s (symbol-value s)))))
+                 :bindings (cons (cons 'current-prefix-arg prefix)
+                                 (cl-loop for s in romacs-package--settings
+                                          when (boundp s) collect (cons s (symbol-value s))))))
 
 (defvar romacs-package--queue nil
-  "The (COMMAND . ARGS) waiting for a worker; one runs at a time, as they share
+  "The (COMMAND PREFIX . ARGS) waiting for a worker; one runs at a time, as they share
 the package directory and the selected list.")
 
 (defvar romacs-package--running nil
@@ -144,8 +153,8 @@ the package directory and the selected list.")
 (defun romacs-package--next ()
   "Start the next waiting job, unless one is running."
   (when (and romacs-package--queue (not romacs-package--running))
-    (pcase-let ((`(,command . ,args) (pop romacs-package--queue)))
-      (setq romacs-package--running (romacs-package--spawn command args))
+    (pcase-let ((`(,command ,prefix . ,args) (pop romacs-package--queue)))
+      (setq romacs-package--running (romacs-package--spawn command args prefix))
       (isolate-on-done romacs-package--running
                        (lambda (done) (romacs-package--finish done command args))))))
 
@@ -154,8 +163,8 @@ the package directory and the selected list.")
 left, and say how it went."
   (setq romacs-package--running nil)
   (condition-case err
-      (let ((selected (isolate-await done)))
-        (romacs-package--settled selected)
+      (let ((changes (isolate-await done)))
+        (romacs-package--settled changes)
         (romacs-package--notify (romacs-package--done-message command args)))
     (error
      (ignore-errors (romacs-package--settled))
@@ -180,7 +189,7 @@ left, and say how it went."
       (unless (or (null (car args)) (yes-or-no-p "Refresh the lists and upgrade all packages? "))
         (user-error "Nothing done"))
       (setq args nil))
-    (setq romacs-package--queue (append romacs-package--queue (list (cons command args))))
+    (setq romacs-package--queue (append romacs-package--queue (list (cons command (cons current-prefix-arg args)))))
     (romacs-package--next)
     nil))
 
@@ -195,7 +204,7 @@ worker, whose errors are the caller's, and goes on when it has them."
   (funcall original))
 
 (dolist (command '(package-install package-upgrade package-upgrade-all package-vc-install
-                   package-vc-upgrade package-menu--perform-transaction))
+                   package-menu--perform-transaction))
   (advice-add command :around (apply-partially #'romacs-package--dispatch command)))
 
 (advice-add 'package--archives-initialize :around #'romacs-package--archives-initialize)
