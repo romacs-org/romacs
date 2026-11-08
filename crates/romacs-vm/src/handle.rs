@@ -368,9 +368,7 @@ impl Vm {
             // What it freed goes back while nobody waits. Elsewhere the
             // next allocations want it, and would fault it in again.
             if until_key {
-                let mut lap = crate::gc::Lap::start();
-                crate::world::arena::trim();
-                lap.lap(&mut self.gc_times, crate::gc::Phase::Trim);
+                crate::gc_mark::trim_after_graves(self.gc_stress.threads);
             }
             let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
             self.count_collection(elapsed);
@@ -480,6 +478,8 @@ mod tests {
     #[test]
     fn a_long_vector_is_no_blind_stretch_for_a_key_press() {
         let mut vm = Vm::new();
+        // On one thread, which does all the work and so all the looking.
+        vm.set_gc_threads(1);
         vm.eval_source_raw("(defvar kept (make-vector 4000000 0))").unwrap();
         vm.set_host_input(Some(Box::new(KeyAfter(100))));
         assert!(!vm.collect_garbage_until_key(), "the hundredth look came before the end");
@@ -506,6 +506,7 @@ mod tests {
     /// or moved, and a later collection collects as ever.
     #[test]
     fn an_idle_collection_gives_way_to_a_key_press() {
+        let _alone = crate::gc_mark::test::alone();
         let abandoned = |vm: &mut Vm, looks| {
             vm.set_host_input(Some(Box::new(KeyAfter(looks))));
             let (objects, collections) = (vm.heap_objects(), vm.heap_stats().collections);
@@ -513,19 +514,22 @@ mod tests {
             assert_eq!((vm.heap_objects(), vm.heap_stats().collections), (objects, collections), "an abandoned collection changed the heap");
             vm.set_host_input(None);
         };
-        let mut vm = Vm::new();
-        vm.set_gc_stress(0);
-        vm.eval_source_raw("(dotimes (_ 2000) (cons 1 2))").unwrap();
-        abandoned(&mut vm, 1);
-        // Live values a collection must keep through an abandoned one.
-        let kept = vm.eval_source("(setq kept (make-list 100000 (list 1 2)))").unwrap().root();
-        vm.eval_source_raw("(dotimes (_ 20000) (cons 1 2))").unwrap();
-        abandoned(&mut vm, 1);
-        let objects = vm.heap_objects();
-        assert!(vm.collect_garbage_until_key(), "no key, no collection");
-        assert!(vm.heap_objects() < objects, "garbage stayed");
-        assert_eq!(kept.get(&vm).unwrap().display().unwrap().len(), "(".len() + 100_000 * "(1 2) ".len());
-        assert_eq!(vm.eval_source("(list (romacs--collect-idle) (length kept))").unwrap().display().unwrap(), "(t 100000)");
+        for threads in [1, 4] {
+            let mut vm = Vm::new();
+            vm.set_gc_stress(0);
+            vm.set_gc_threads(threads);
+            vm.eval_source_raw("(dotimes (_ 2000) (cons 1 2))").unwrap();
+            abandoned(&mut vm, 1);
+            // Live values a collection must keep through an abandoned one.
+            let kept = vm.eval_source("(setq kept (make-list 100000 (list 1 2)))").unwrap().root();
+            vm.eval_source_raw("(dotimes (_ 20000) (cons 1 2))").unwrap();
+            abandoned(&mut vm, 1);
+            let objects = vm.heap_objects();
+            assert!(vm.collect_garbage_until_key(), "no key, no collection");
+            assert!(vm.heap_objects() < objects, "garbage stayed");
+            assert_eq!(kept.get(&vm).unwrap().display().unwrap().len(), "(".len() + 100_000 * "(1 2) ".len());
+            assert_eq!(vm.eval_source("(list (romacs--collect-idle) (length kept))").unwrap().display().unwrap(), "(t 100000)");
+        }
     }
 
     /// Each collection leaves one record, and a full log only counts.
@@ -596,6 +600,8 @@ mod tests {
         let made = || {
             let mut vm = Vm::new();
             vm.set_gc_stress(0);
+            // On one thread, where the looks can be counted.
+            vm.set_gc_threads(1);
             vm.eval_source_raw("(progn (make-finalizer (lambda () nil)) nil)").unwrap();
             vm
         };
