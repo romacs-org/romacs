@@ -478,6 +478,8 @@ mod tests {
     #[test]
     fn a_long_vector_is_no_blind_stretch_for_a_key_press() {
         let mut vm = Vm::new();
+        // On one thread, which does all the work and so all the looking.
+        vm.set_gc_threads(1);
         vm.eval_source_raw("(defvar kept (make-vector 4000000 0))").unwrap();
         vm.set_host_input(Some(Box::new(KeyAfter(100))));
         assert!(!vm.collect_garbage_until_key(), "the hundredth look came before the end");
