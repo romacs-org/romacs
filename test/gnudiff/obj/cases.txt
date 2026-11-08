@@ -1,7 +1,0 @@
-empty
-ascii
-unicode
-raw
-same-text
-same-bytes
-growth

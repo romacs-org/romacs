@@ -64,6 +64,7 @@ test/lisp/gnus/mm-decode-resources/win1252-multipart.bin -diff
 *.png binary
 *.sig binary
 *.tiff binary
+*.ttf binary
 *.webp binary
 *.zip binary
 etc/e/eterm-color binary

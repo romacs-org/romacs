@@ -16,6 +16,14 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
+    /// `romacs--debug-lose-device': t when the open display took the request.
+    pub(crate) fn debug_lose_device(&mut self) -> Out {
+        let lost = self.vm.window_system_host().is_some_and(|host| host.lose_device());
+        Ok(if lost { Value::TRUE } else { Value::NIL })
+    }
+}
+
+impl Leaf<'_> {
     /// `romacs--native-window': ACTION `query', `show' or `hide' asked of
     /// the host; t when its window shows after the request, nil when it
     /// does not or the host has no native windows.

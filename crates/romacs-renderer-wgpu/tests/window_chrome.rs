@@ -5,18 +5,13 @@ use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 #[test]
 fn native_titlebar_background_preserves_content_pixels_and_alpha() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    use romacs_renderer_wgpu::gpu_policy::test_gpu;
+    let Some(adapter) = test_gpu::adapter() else {
         eprintln!("SKIP: no GPU adapter for native content-placement readback");
         return;
     };
     eprintln!("native-content test adapter: {:?}", adapter.get_info());
-    let (device, queue) = pollster::block_on(romacs_renderer_wgpu::request_renderer_device(
-        &adapter,
-        "native chrome test",
-    ))
-    .unwrap();
+    let (device, queue) = test_gpu::renderer_device("native chrome test").unwrap();
     let (device, queue) = (Arc::new(device), Arc::new(queue));
     let mut renderer = WgpuRenderer::with_device(
         device.clone(),

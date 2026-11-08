@@ -26,3 +26,6 @@ tree-sitter-rust = "=0.24.0"
 tree-sitter-toml-ng = "=0.7.0"
 tree-sitter-typescript = "=0.23.2"
 tree-sitter-yaml = "=0.7.0"
+
+[lints]
+workspace = true

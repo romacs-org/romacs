@@ -227,15 +227,18 @@ mod gpu {
         mark_size: Option<(u32, u32)>,
     }
 
+    /// The software rasterizer, or the real GPU the program would choose.
     fn adapter(software: bool) -> Option<wgpu::Adapter> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
-            .into_iter()
-            .find(|a| (a.get_info().device_type == wgpu::DeviceType::Cpu) == software)
+        use romacs_renderer_wgpu::gpu_policy::test_gpu;
+        if software {
+            test_gpu::software_adapter().cloned()
+        } else {
+            test_gpu::adapter().filter(|a| a.get_info().device_type != wgpu::DeviceType::Cpu).cloned()
+        }
     }
 
-    /// One device per adapter kind for the test binary: the Vulkan loader
-    /// crashes when test threads create instances concurrently.
+    /// One device per adapter kind for the test binary: its scene fixtures
+    /// are costly to build.
     type Device = (wgpu::Device, wgpu::Queue);
 
     fn device(software: bool) -> Option<Device> {

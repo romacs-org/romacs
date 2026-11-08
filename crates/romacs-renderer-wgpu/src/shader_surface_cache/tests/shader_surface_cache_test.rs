@@ -29,20 +29,10 @@ fn clamp_size_is_a_pure_function_of_logical_size_and_scale() {
 }
 
 fn try_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok()?;
-    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    crate::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("shader-surface-rescale-test"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: Default::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()
+        ..Default::default()
+    })
 }
 
 const TRIVIAL_WGSL: &str =

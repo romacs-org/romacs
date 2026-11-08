@@ -907,6 +907,7 @@ pub fn may_reserve() -> bool {
         return false;
     }
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit writes only the local it is given.
     unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) == 0 && limit.rlim_cur == libc::RLIM_INFINITY }
 }
 
@@ -918,6 +919,8 @@ pub(crate) unsafe fn release_spare(base: *mut u8, from: usize, to: usize) {
     let start = (base as usize + from).next_multiple_of(PAGE);
     let end = (base as usize + to) / PAGE * PAGE;
     if end > start {
+        // SAFETY: this function's contract: these whole pages lie in the
+        // caller's allocation, and nothing reads or holds them.
         unsafe { libc::madvise(start as *mut libc::c_void, end - start, libc::MADV_DONTNEED) };
     }
 }

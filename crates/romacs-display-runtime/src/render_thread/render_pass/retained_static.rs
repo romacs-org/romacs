@@ -164,6 +164,7 @@ pub(super) fn draw(
             ))
             .blit_retained(&rs.bind_group);
     }
+    renderer.cursor_light = render.cursor.light;
     renderer.render_cursor_only(
         composition_view,
         frame,

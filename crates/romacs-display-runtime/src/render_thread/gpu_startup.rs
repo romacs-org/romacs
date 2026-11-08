@@ -92,7 +92,7 @@ impl PendingGpu {
         }
         crate::paint_host::trace_gpu("adapters-start");
         let reply = spawn("gpu-adapters", proxy, move || {
-            let instance = wgpu::Instance::new(descriptor);
+            let instance = romacs_renderer_wgpu::new_instance(descriptor);
             crate::paint_host::trace_gpu("instance");
             let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
             crate::paint_host::trace_gpu("adapters");
@@ -126,20 +126,14 @@ impl PendingGpu {
                 let Self::Adapters { window, .. } = self else {
                     unreachable!()
                 };
-                let (instance, mut adapters) = result;
+                let (instance, adapters) = result;
                 // The pinned desktop HALs do not use enumeration's surface
-                // hint. Preserve wgpu-core's stable preference ranking, then
-                // apply its same surface-capability filter on the main thread.
-                let preference = crate::gpu_power_preference();
-                adapters.sort_by_key(|adapter| {
-                    adapter_rank(adapter.get_info().device_type, preference)
-                });
+                // hint, so the surface is made here on the main thread and
+                // the choice filters by it.
                 let surface = instance
                     .create_surface(window.clone())
                     .map_err(|error| error.to_string())?;
-                let adapter = adapters
-                    .into_iter()
-                    .find(|adapter| adapter.is_surface_supported(&surface))
+                let adapter = romacs_renderer_wgpu::choose_adapter(adapters, Some(&surface))
                     .ok_or_else(|| "no GPU adapter supports the native surface".to_owned())?;
                 let worker_adapter = adapter.clone();
                 crate::paint_host::trace_gpu("adapter-chosen");
@@ -197,18 +191,5 @@ impl PendingGpu {
         } else {
             GpuPoll::Ready(prepared)
         }
-    }
-}
-
-fn adapter_rank(kind: wgpu::DeviceType, preference: wgpu::PowerPreference) -> u8 {
-    use wgpu::{DeviceType, PowerPreference};
-    match (preference, kind) {
-        (PowerPreference::None, _) => 0,
-        (PowerPreference::LowPower, DeviceType::IntegratedGpu)
-        | (PowerPreference::HighPerformance, DeviceType::DiscreteGpu) => 0,
-        (_, DeviceType::IntegratedGpu | DeviceType::DiscreteGpu) => 1,
-        (_, DeviceType::Other) => 2,
-        (_, DeviceType::VirtualGpu) => 3,
-        (_, DeviceType::Cpu) => 4,
     }
 }

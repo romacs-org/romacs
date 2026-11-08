@@ -38,6 +38,46 @@ fn point_uses_text_geometry_and_selection_switches_cursor_kind() {
     }
 }
 
+/// The kind `cursor-type' names reaches the published cursor: a bar or
+/// hbar as thick as it says in the selected window, the unselected kind in
+/// the other, and none where the kind is none.
+#[test]
+fn cursor_type_kinds_are_the_published_cursor_styles() {
+    use romacs_layout_input::{CursorKind, CursorKinds};
+    let mut vm = Vm::new();
+    let face = vm.display_default_face().unwrap();
+    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(800, 600, line, col).unwrap();
+    vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"kinds\")) (insert \"abc\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer))").unwrap();
+    let mut snap = vm.frame_snapshot(800, 600).unwrap();
+    let (first, rum) = (snap.windows[0].snapshot.id, Color::from_pixel(0x9099d9));
+    let styles = |snap: &romacs_layout_input::FrameSnapshot| {
+        let (frame, _) = romacs_layout2::layout_frame_with_cursors(snap, 1, first, rum).unwrap();
+        frame.window_cursors.iter().map(|c| (c.window_id.get() == first as i64, c.style)).collect::<Vec<_>>()
+    };
+    for window in &mut snap.windows[..2] {
+        window.snapshot.cursor = CursorKinds { selected: CursorKind::Bar(3), unselected: CursorKind::Hbar(2) };
+    }
+    assert_eq!(styles(&snap), [(true, CursorStyle::Bar(3.0)), (false, CursorStyle::Hbar(2.0))]);
+    // Oversized: no wider than the glyph, no taller than the row.
+    for window in &mut snap.windows[..2] {
+        window.snapshot.cursor = CursorKinds { selected: CursorKind::Bar(100), unselected: CursorKind::Hbar(100) };
+    }
+    assert_eq!(styles(&snap), [(true, CursorStyle::Bar(col as f32)), (false, CursorStyle::Hbar(line as f32))]);
+    for window in &mut snap.windows[..2] {
+        window.snapshot.cursor = CursorKinds { selected: CursorKind::Box, unselected: CursorKind::None };
+    }
+    assert_eq!(styles(&snap), [(true, CursorStyle::FilledBox)]);
+    // The engine lays a kind change out again rather than showing the
+    // last layout's cursor.
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let (frame, _) = engine.layout_frame(&snap, 1, Some((first, rum))).unwrap();
+    assert_eq!(frame.active_cursor().unwrap().style, CursorStyle::FilledBox);
+    snap.windows[0].snapshot.cursor = CursorKinds { selected: CursorKind::Bar(2), unselected: CursorKind::Bar(1) };
+    let (frame, _) = engine.layout_frame(&snap, 2, Some((first, rum))).unwrap();
+    assert_eq!(frame.active_cursor().unwrap().style, CursorStyle::Bar(2.0));
+}
+
 #[test]
 fn unused_faces_do_not_multiply_unicode_bindings() {
     let mut vm = Vm::new();
@@ -45,7 +85,7 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
     let snapshot = romacs_layout_input::WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(),
         id: 1, width: 800, height: 400, start_byte: 0, point_byte: 0, buffer_version: 1,
         text: romacs_layout_input::TextSlice { extends: vec![], utf8: "Καλημέρα Жизнь".into(), face_runs: vec![], raw: vec![] },
-        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, no_cursor: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+        mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         faces: vec![face; 24],
     };
     let mut engine = romacs_layout2::LayoutEngine::new().unwrap();

@@ -2197,21 +2197,21 @@ unsafe fn poll_resume(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Val
         orchestrate(e, (Pc::new(pc), collect), polled, continue_at)
     }
 }
-/// `poll_resume`'s collection, a job's memory, a collection's aftermath and
+/// `poll_resume`'s collection, a collection's aftermath and
 /// the quit test, then the instruction it resumes.
 #[inline(never)]
 fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect): (Pc<'x>, bool)) -> Continue<'x> {
     if collect {
         lend::collect(&mut m, gc.by_ref(), false);
     }
-    // A job's memory, as a quit: at any ordinary poll after a collection
-    // measured it, a cleanup's included.
-    if m.leaf((), |e, ()| e.vm.take_job_exhaustion() && { job_memory_full(e); true }) {
-        return Continue::Stop;
-    }
     // GNU's garbage_collect ends with its finalizers and `post-gc-hook':
-    // here, whatever collection left them, where the gate allows.
-    let runner = m.leaf((), |e, ()| { let runner = e.vm.safe_runner(1); plain_runner(e.vm, runner) });
+    // here, whatever collection left them, where the gate allows. The cheap
+    // test first: most polls find neither, and a handler landing is one.
+    let runner = m.leaf((), |e, ()| {
+        if !e.vm.aftermath_flagged() { return None; }
+        let runner = e.vm.safe_runner(1);
+        plain_runner(e.vm, runner)
+    });
     if let Some(runner) = runner && !aftermath(&mut m, gc.by_ref(), runner) {
         return Continue::Stop;
     }
@@ -2223,9 +2223,9 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
 }
 /// Entering a cleanup, its exit kept in a resume record: a collection due
 /// runs here, Rust only, the exit traced, as at any wait point. Nothing that
-/// can raise runs (a quit, the debugger, a job's memory signal, a collection's
-/// aftermath): an escape now would meet that record on top (`route_escape')
-/// and drop the cleanup unrun. The next ordinary poll takes them.
+/// can raise runs (a quit, the debugger, a collection's aftermath): an escape
+/// now would meet that record on top (`route_escape') and drop the cleanup
+/// unrun. The next ordinary poll takes them.
 #[inline(never)]
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
@@ -2247,14 +2247,6 @@ unsafe fn cleanup_entry(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value
 fn cleanup_collected<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
     lend::collect(&mut m, gc.by_ref(), false);
     Continue::At(pc)
-}
-/// GNU memory_full (alloc.c), for a job over its budget: `memory-signal-data'
-/// is signalled, which `condition-case' catches.
-#[cold]
-#[inline(never)]
-fn job_memory_full(e: &mut Engine<'_>) -> Value {
-    let message = e.vm.make_lisp_string(crate::gc::MEMORY_FULL.as_bytes().to_vec(), true);
-    raise(e, "error", &[message])
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
 /// `quit` signal, else the host's C-g or `quit-flag' (`Vm::maybe_quit').
@@ -2282,6 +2274,9 @@ fn isolate_quit(e: &mut Engine<'_>) -> bool {
     if e.vm.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
         return false;
     }
+    // Held, not taken, while a run of aftermath masks the job: taken now it
+    // would find no job to quit and be lost.
+    if e.vm.aftermath_runs > 0 { return false; }
     crate::host::take_interrupt() && e.vm.isolate_interrupt_targets_running()
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
@@ -4809,9 +4804,11 @@ impl Vm {
     pub(super) fn run_aftermath(&mut self, runner: Value, propagate: bool) -> Result<Value> {
         let trampoline = self.reader_trampoline(0)?;
         self.aftermath_held += 1;
+        self.aftermath_runs += 1;
         self.propagate_next = propagate;
         let outcome = execute_args(self, trampoline, &[runner]);
         self.propagate_next = false;
+        self.aftermath_runs -= 1;
         self.aftermath_held -= 1;
         outcome
     }

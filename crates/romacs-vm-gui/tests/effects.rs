@@ -96,3 +96,41 @@ fn every_option_starts_at_the_renderers_default() {
     assert_eq!(differing, "nil");
     assert_eq!(printed(&mut vm, "(and (boundp 'romacs-effect-cursor-glow) (plist-member romacs-effect-cursor-glow :enabled) t)"), "t");
 }
+
+/// `romacs-cursor-shape-mode': a bar where text goes in, a block in a
+/// read-only or special buffer, set as a buffer's mode or read-only state
+/// changes; a cursor something else chose, or the user's own default, is
+/// left alone, and turning the mode off gives every buffer its default back.
+#[test]
+fn the_cursor_is_a_bar_where_text_goes_in_and_a_block_where_it_does_not() {
+    let (mut vm, _) = session();
+    let report = printed(&mut vm, "(progn (romacs-cursor-shape-mode 1)
+      (list (with-current-buffer (get-buffer-create \"edit\") (text-mode) cursor-type)
+            (with-current-buffer (get-buffer-create \"view\") (special-mode) cursor-type)
+            (with-current-buffer \"edit\" (read-only-mode 1) (prog1 cursor-type (read-only-mode -1)))
+            (with-current-buffer \"edit\" cursor-type)
+            (with-current-buffer (get-buffer-create \"mine\") (text-mode) (setq-local cursor-type 'hbar)
+              (read-only-mode 1) cursor-type)
+            (progn (romacs-cursor-shape-mode -1) (with-current-buffer \"edit\" cursor-type))
+            (progn (setq-default cursor-type 'hollow) (romacs-cursor-shape-mode 1)
+              (with-current-buffer (get-buffer-create \"other\") (text-mode) cursor-type))))");
+    assert_eq!(report, "((bar . 2) box box (bar . 2) hbar t hollow)");
+}
+
+/// The desktop's reduced motion turns `romacs-motion-reduced' on, unless the
+/// user chose it already.
+#[test]
+fn reduced_motion_follows_the_desktop_unless_the_user_chose() {
+    let (mut vm, sent) = session();
+    let follow = |vm: &mut Vm, desktop: &str, chosen: &str| printed(vm, &format!("(progn
+      (setq romacs-motion-reduced nil) (put 'romacs-motion-reduced 'customized-value {chosen})
+      (cl-letf (((symbol-function 'romacs-motion--desktop-reduced-p) (lambda () {desktop})))
+        (romacs-motion--follow-desktop))
+      romacs-motion-reduced)"));
+    assert_eq!(follow(&mut vm, "nil", "nil"), "nil");
+    assert_eq!(follow(&mut vm, "t", "nil"), "t");
+    assert!(sent.borrow().last().unwrap().motion.reduced, "it reaches the renderer");
+    assert_eq!(follow(&mut vm, "t", "'(nil)"), "nil", "the user's own choice stands");
+    printed(&mut vm, "(setq romacs-motion-follow-desktop nil)");
+    assert_eq!(follow(&mut vm, "t", "nil"), "nil", "an init file's nil stands with following off");
+}

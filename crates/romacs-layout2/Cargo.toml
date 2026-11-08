@@ -11,3 +11,6 @@ romacs-font.workspace = true
 
 [dev-dependencies]
 romacs-vm = { path = "../romacs-vm" }
+
+[lints]
+workspace = true

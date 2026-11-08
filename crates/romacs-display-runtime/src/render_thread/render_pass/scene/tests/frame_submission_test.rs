@@ -72,7 +72,7 @@ fn two_passes(
 #[test]
 fn frame_passes_share_one_submission_without_overwriting_earlier_uploads() {
     let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for frame submission regression");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for frame submission regression");
     let mut render =
         GuiFrameRenderState::new(42, renderer.device(), 1.0, false, observe_platform_now());
     let (first_alone, second_alone, standalone_submits) =
@@ -103,7 +103,7 @@ fn frame_passes_share_one_submission_without_overwriting_earlier_uploads() {
 #[test]
 fn empty_frame_makes_no_submission_and_flush_keeps_it_open() {
     let mut renderer =
-        WgpuRenderer::new(None, W, H).expect("GPU required for frame submission regression");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for frame submission regression");
     let mut render =
         GuiFrameRenderState::new(42, renderer.device(), 1.0, false, observe_platform_now());
     let before = renderer.queue_submit_count();

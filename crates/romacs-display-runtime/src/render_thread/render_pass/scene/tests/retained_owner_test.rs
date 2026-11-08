@@ -21,7 +21,7 @@ fn budget_one(name: &str) -> bool {
 
 fn setup() -> (WgpuRenderer, GuiFrameRenderState, FrameGlyphBuffer) {
     assert_eq!(std::env::var("ROMACS_GPU_BUDGET_MB").as_deref(), Ok("1"));
-    let renderer = WgpuRenderer::new(None, W, H).expect("real Vulkan GPU required");
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real Vulkan GPU required");
     let mut render =
         GuiFrameRenderState::new(42, renderer.device(), 1.0, false, observe_platform_now());
     let root = pane_frame();

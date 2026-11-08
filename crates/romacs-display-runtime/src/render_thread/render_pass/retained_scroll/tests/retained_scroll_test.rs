@@ -189,7 +189,7 @@ fn pixels(renderer: &WgpuRenderer, texture: &wgpu::Texture) -> Vec<u8> {
 
 #[test]
 fn retained_scroll_pixels_match_full_render_and_reuse_coverage_during_reversal() {
-    let Ok(mut renderer) = WgpuRenderer::new(None, 80, 40) else {
+    let Ok(mut renderer) = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(80, 40) else {
         assert!(std::env::var_os("ROMACS_REQUIRE_GPU_TESTS").is_none());
         return;
     };
@@ -475,7 +475,7 @@ fn every_enabled_effect_has_an_explicit_static_body_decision() {
 
 #[test]
 fn changed_coverage_pixels_and_font_catalog_rebuild_the_raster() {
-    let Ok(mut renderer) = WgpuRenderer::new(None, 80, 40) else {
+    let Ok(mut renderer) = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(80, 40) else {
         assert!(std::env::var_os("ROMACS_REQUIRE_GPU_TESTS").is_none());
         return;
     };
@@ -551,7 +551,7 @@ fn changed_coverage_pixels_and_font_catalog_rebuild_the_raster() {
 
 #[test]
 fn changing_coverage_defers_raster_work_until_paint_is_stable() {
-    let Ok(mut renderer) = WgpuRenderer::new(None, 80, 40) else {
+    let Ok(mut renderer) = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(80, 40) else {
         assert!(std::env::var_os("ROMACS_REQUIRE_GPU_TESTS").is_none());
         return;
     };
@@ -635,7 +635,7 @@ fn changing_coverage_defers_raster_work_until_paint_is_stable() {
 
 #[test]
 fn scrolling_hover_resolves_projected_slots_and_draws_live_pixels() {
-    let Ok(mut renderer) = WgpuRenderer::new(None, 80, 40) else {
+    let Ok(mut renderer) = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(80, 40) else {
         assert!(std::env::var_os("ROMACS_REQUIRE_GPU_TESTS").is_none());
         return;
     };

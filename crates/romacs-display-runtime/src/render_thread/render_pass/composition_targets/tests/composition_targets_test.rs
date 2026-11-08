@@ -7,7 +7,7 @@ fn mandatory_child_target_refuses_before_present_and_recovers() {
     ) {
         return;
     }
-    let mut renderer = WgpuRenderer::new(None, 96, 64).expect("real GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(96, 64).expect("real GPU required");
     let size = SnapshotSize::new(96, 64).unwrap();
     let admitted = mandatory_child_target(&mut renderer, true, size)
         .unwrap()

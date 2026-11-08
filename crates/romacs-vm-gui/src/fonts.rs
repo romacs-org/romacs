@@ -7,20 +7,27 @@ use romacs_font::{FontRequest, FontResolver, entity};
 use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
-/// Romacs's icon font (assets/fonts/RomacsIcons.ttf, DIVERGENCES.md
-/// VM2-MODE-LINE), in the runtime tree: an installation's share/romacs, or
-/// the checkout this binary was built from.
-pub fn icon_font() -> std::path::PathBuf {
-    romacs_vm::host::runtime_root().join("assets/fonts/RomacsIcons.ttf")
+/// The fonts Romacs ships (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED),
+/// in the runtime tree: an installation's share/romacs, or the checkout
+/// this binary was built from.
+fn bundled_fonts_dir() -> std::path::PathBuf {
+    romacs_vm::host::runtime_root().join("assets/fonts")
 }
 
-/// Make the icon font a Fontconfig application font, so a character only
-/// it has resolves to it as any font's fallback does. Run before a
-/// resolver is built, so none has cached its codepoints as missing. False
-/// when the file is absent or Fontconfig refused it.
-pub fn register_icon_font() -> bool {
-    let font = icon_font();
-    font.is_file() && romacs_font::register_font_file(&font)
+/// Make every font Romacs ships a Fontconfig application font, for this
+/// process only: the icon font, so a character only it has resolves to it
+/// as any font's fallback does, and Iosevka, the default face's family,
+/// which wins a tie with a system copy of the same face. Nothing is
+/// installed into a font directory. Run before a resolver is built, so
+/// none has cached a codepoint or family as missing. The files Fontconfig
+/// refused; none when the directory is absent.
+pub fn register_bundled_fonts() -> Vec<std::path::PathBuf> {
+    let mut fonts: Vec<_> = std::fs::read_dir(bundled_fonts_dir()).into_iter().flatten()
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext, "ttf" | "otf" | "ttc")))
+        .collect();
+    fonts.sort();
+    fonts.into_iter().filter(|font| !romacs_font::register_font_file(font)).collect()
 }
 
 /// The decoded pixels this display keeps for the renderer.
@@ -41,6 +48,7 @@ pub struct Display {
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
     visual_hook: Option<Box<dyn FnMut(&romacs_display_protocol::VisualConfig)>>,
+    lose_device_hook: Option<Box<dyn FnMut() -> bool>>,
     /// GNU's image loaders: the renderer's semantic decoder, and the pixels
     /// of each image the VM's cache holds, by id, for the renderer
     /// (residency.rs).
@@ -114,7 +122,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
-                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None, lose_device_hook: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None })
     }
@@ -198,6 +206,10 @@ impl Display {
     /// Call HOOK with each visual configuration Lisp asks for.
     pub fn with_visual_hook(self, hook: impl FnMut(&romacs_display_protocol::VisualConfig) + 'static) -> Self {
         Self { visual_hook: Some(Box::new(hook)), ..self }
+    }
+    /// Call HOOK for `romacs--debug-lose-device`: whether the request went.
+    pub fn with_lose_device_hook(self, hook: impl FnMut() -> bool + 'static) -> Self {
+        Self { lose_device_hook: Some(Box::new(hook)), ..self }
     }
     fn open_uncached(entity: &FontEntity, pixel_size: i64) -> Option<OpenedFont> {
         let metrics = romacs_font::probe::probe_font_px_metrics(&entity.file, entity.index, u32::try_from(pixel_size).ok()?.max(1), None)?;
@@ -311,6 +323,9 @@ impl romacs_vm::DisplayHost for Display {
     fn set_visual_config(&mut self, config: &romacs_display_protocol::VisualConfig) {
         if let Some(hook) = &mut self.visual_hook { hook(config); }
     }
+    fn lose_device(&mut self) -> bool {
+        self.lose_device_hook.as_mut().is_some_and(|hook| hook())
+    }
     fn decode_image(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
         let (id, request) = self.prepare(query)?;
         let decoded = self.images.decode_pixels(request).map_err(|diagnostic| {
@@ -420,11 +435,14 @@ mod tests {
         vm.eval_source(source).unwrap_or_else(|e| panic!("{source}: {e}")).display().unwrap()
     }
 
-    /// A character in the icons' range resolves to Romacs's icon font, for
-    /// a face of any family: it is the only font with it.
+    /// A character in the icons' range resolves to Romacs's icon font
+    /// (RomacsIcons.ttf, DIVERGENCES.md VM2-MODE-LINE), for a face of any
+    /// family: it is the only font with it.
     #[test]
     fn an_icon_resolves_to_the_icon_font() {
-        assert!(register_icon_font());
+        assert_eq!(register_bundled_fonts(), Vec::<std::path::PathBuf>::new());
+        let icon_font = || bundled_fonts_dir().join("RomacsIcons.ttf");
+        assert!(icon_font().is_file());
         let mut resolver = FontResolver::new().unwrap();
         for family in ["Liberation Mono", "PlemolJP Console NF"] {
             let resolved = resolver.resolve_char(&FontRequest::new(family, 15.0), '\u{FE001}').unwrap();
@@ -453,6 +471,26 @@ mod tests {
     /// each value is stored, then validated; painting gets the background
     /// opacity the last valid setter applied, and every valid `alpha' setter
     /// reaches the window, as GNU's set_frame_alpha_hook. Without a window
+    /// `romacs--debug-lose-device' asks the open display to lose its device:
+    /// t when the display took it, nil before the display opens or when it
+    /// has no device to lose.
+    #[test]
+    fn losing_the_device_is_asked_of_the_open_display() {
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = asked.clone();
+        let mut vm = displayed();
+        vm.set_display_host(Some(Box::new(Display::new().unwrap().with_lose_device_hook(move || {
+            seen.set(seen.get() + 1);
+            true
+        }))));
+        assert_eq!((printed(&mut vm, "(romacs--debug-lose-device)"), asked.get()), ("nil".into(), 0));
+        assert!(vm.open_display());
+        assert_eq!((printed(&mut vm, "(romacs--debug-lose-device)"), asked.get()), ("t".into(), 1));
+        vm.set_display_host(Some(Box::new(Display::new().unwrap())));
+        assert!(vm.open_display());
+        assert_eq!(printed(&mut vm, "(romacs--debug-lose-device)"), "nil");
+    }
+
     /// system they are only stored.
     #[test]
     fn opacity_parameters_validate_as_gnu_and_reach_the_window() {

@@ -33,7 +33,7 @@
      (let ((record (seq-find (lambda (line) (equal (plist-get line :kind) "collection"))
                              (romacs-usage-log-test--lines file))))
        (should (equal (plist-get record :collection) "explicit"))
-       (should (natnump (plist-get record :pause_ms)))
+       (should (floatp (plist-get record :pause_ms)))
        (should-not (plist-get record :met))))))
 
 (ert-deftest romacs-usage-log-server-keeps-its-own-session-record ()

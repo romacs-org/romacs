@@ -553,15 +553,12 @@ impl RenderApp {
                         cursor.ascent,
                         (cursor.x, cursor.y, cursor.width, cursor.height),
                     );
-                    active_cursor = Some(CursorTarget {
-                        window_id: cursor.window_id.get(),
-                        x,
-                        y,
-                        width,
-                        height,
-                        style: cursor.style,
-                        frame_id: entry.frame_id,
-                    });
+                    active_cursor = Some(CursorTarget::new(
+                        cursor.window_id.get(),
+                        (x, y, width, height),
+                        cursor.style,
+                        entry.frame_id,
+                    ));
                     break;
                 }
             }

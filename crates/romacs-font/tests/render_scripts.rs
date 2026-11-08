@@ -240,12 +240,7 @@ struct Rendered {
 }
 
 fn render(frame: &FrameGlyphBuffer) -> Rendered {
-    // Concurrent Vulkan instance creation crashes inside the NVIDIA ICD
-    // loader (SIGSEGV in vkEnumerateInstanceExtensionProperties under
-    // `cargo test`'s threads; nextest's process-per-test hides it).
-    static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _gpu = GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut renderer = WgpuRenderer::new(None, W, H)
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H)
         .expect("a wgpu adapter is required; this test does not skip without one");
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     atlas.set_current_frame_fonts(frame.font_bindings());
@@ -468,30 +463,19 @@ fn without_a_fontset_rule_emoji_still_reach_a_colour_font() {
 
 #[test]
 fn a_family_that_is_not_installed_falls_back_as_gnu_does() {
-    // Native-X11 GNU 32.0.50, -Q, Xvfb at 96dpi, gate's pinned fontconfig:
+    // Native-X11 GNU 32.0.50, -Q, Xvfb at 96dpi, and pinned GNU pgtk in a
+    // headless labwc, both with the gate's pinned fontconfig:
     // the genuinely absent family substitutes Liberation Sans for every
     // character of "Καλημέρα Жж A", with Greek width 71 at 16px.
-    // DejaVu is installed in this font set, so it is tested separately below.
-    // Transcript and reproducer: f0a/gnu/pinned-fonts.txt and pinned-fonts.el.
+    // A family that is installed, the bundled Iosevka, resolves to itself
+    // in bundled_font.rs, under a Fontconfig of its own.
+    // Transcript and reproducer: tests/gnu/pinned-fonts.txt (run 2) and
+    // pinned-fonts.el.
     fixtures();
     assert_gnu_family_and_width(
         FontRequest::new("No Such Family F0a", PX),
         "Liberation Sans",
         71.0,
-    );
-}
-
-#[test]
-fn an_installed_dejavu_family_resolves_to_itself_as_gnu_does() {
-    // Same oracle/environment as the missing-family case: normal width is
-    // 81px, condensed selects the semi-condensed face and measures 73px.
-    // Transcript: f0a/gnu/pinned-fonts.txt.
-    fixtures();
-    assert_gnu_family_and_width(FontRequest::new("DejaVu Sans", PX), "DejaVu Sans", 81.0);
-    assert_gnu_family_and_width(
-        FontRequest::new("DejaVu Sans", PX).with_width(3),
-        "DejaVu Sans",
-        73.0,
     );
 }
 

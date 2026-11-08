@@ -47,19 +47,37 @@ impl Default for CursorMotionConfig {
     }
 }
 
+/// How the cursor is drawn (`CursorLookStyle`), with its light: a glow
+/// GLOW_REACH pixels around the selected cursor at GLOW_OPACITY, an
+/// unselected or unfocused cursor at GHOST_OPACITY, and MORPH, how long a
+/// change of kind (a bar becoming a block) and a focus change take.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CursorSizeTransitionConfig {
-    pub enabled: bool,
-    pub duration: Duration,
+pub struct CursorLookConfig {
+    pub style: crate::CursorLookStyle,
+    pub glow_reach: f32,
+    pub glow_opacity: f32,
+    pub ghost_opacity: f32,
+    pub morph: Duration,
 }
 
-impl Default for CursorSizeTransitionConfig {
+impl Default for CursorLookConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            duration: Duration::from_millis(150),
+            style: crate::CursorLookStyle::Soft,
+            glow_reach: 6.0,
+            glow_opacity: 0.35,
+            ghost_opacity: 0.35,
+            morph: Duration::from_millis(120),
         }
     }
+}
+
+/// Motion as a whole: REDUCED turns every animation off, the cursor's,
+/// transitions', windows' and layers', for the user or the desktop that
+/// asks for less motion.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MotionConfig {
+    pub reduced: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -128,7 +146,10 @@ pub struct VisualConfig {
     #[serde(flatten)]
     pub effects: EffectsConfig,
     pub cursor_motion: CursorMotionConfig,
-    pub cursor_size_transition: CursorSizeTransitionConfig,
+    #[serde(default)]
+    pub cursor_look: CursorLookConfig,
+    #[serde(default)]
+    pub motion: MotionConfig,
     pub buffer_transition: BufferTransitionConfig,
     pub scroll_transition: ScrollTransitionConfig,
     /// Global controls over every window-animation slot below.
@@ -177,7 +198,8 @@ impl Default for VisualConfig {
         Self {
             effects: EffectsConfig::default(),
             cursor_motion: CursorMotionConfig::default(),
-            cursor_size_transition: CursorSizeTransitionConfig::default(),
+            cursor_look: CursorLookConfig::default(),
+            motion: MotionConfig::default(),
             buffer_transition: BufferTransitionConfig::default(),
             scroll_transition: ScrollTransitionConfig::default(),
             window_animations: WindowAnimationsConfig::default(),
@@ -207,10 +229,14 @@ crate::effect_schema!(CursorMotionConfig {
     trail_size: f32,
     distance_length_adjust: bool,
 });
-crate::effect_schema!(CursorSizeTransitionConfig {
-    enabled: bool,
-    duration: Duration
+crate::effect_schema!(CursorLookConfig {
+    style: crate::CursorLookStyle,
+    glow_reach: f32,
+    glow_opacity: f32,
+    ghost_opacity: f32,
+    morph: Duration,
 });
+crate::effect_schema!(MotionConfig { reduced: bool });
 crate::effect_schema!(BufferTransitionConfig {
     enabled: bool,
     duration: Duration,

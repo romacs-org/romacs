@@ -102,7 +102,8 @@ pub(crate) struct CollectionRecord {
     pub(crate) idle: bool,
     /// Asked for by `garbage-collect' or the host.
     pub(crate) explicit: bool,
-    pub(crate) ms: u32,
+    /// Its pause in microseconds: a 120 Hz frame is 8.3 ms.
+    pub(crate) us: u32,
     /// The command it ran in or at the end of, "anonymous" for a closure: a
     /// key ended the last idleness and nothing has begun another.
     pub(crate) command: Option<String>,
@@ -112,7 +113,7 @@ pub(crate) struct CollectionRecord {
     /// seen, and one pressed waits.
     pub(crate) redisplay: bool,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -241,11 +242,16 @@ pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
 /// The state nested Lisp runs push and pop on the VM: suspended engines and
 /// their register stacks, root frames, collection holds, the running-engine
-/// count, the hold on aftermath (`Vm::aftermath_held'), handler and backtrace
-/// marks. A panic unwinding a frame that took this mark restores it,
-/// so no entry outlives the engine or frame it describes (a suspended engine's
-/// code pointers would dangle) and the VM stays usable once the panic is
-/// caught. Dynamic bindings stay as the panic left them.
+/// count, the hold on aftermath and its runs (`Vm::aftermath_held'), dynamic bindings,
+/// handler and backtrace marks. A panic unwinding a frame that took this mark
+/// restores it, so no entry outlives the engine or frame it describes (a
+/// suspended engine's code pointers would dangle) and the VM stays usable
+/// once the panic is caught: the bindings and handlers made since are popped,
+/// without their watchers, and no cleanup runs; what they owned
+/// (`romacs--post-gc-owned', `inhibit-quit', a job's claim) ends with them,
+/// and a variable whose watchers were running is trapped again (`Vm::retrap').
+/// An unbind that panics again during recovery aborts the process: a second
+/// panic in a drop.
 #[must_use = "the mark restores on unwinding only while it lives"]
 pub(crate) struct UnwindMark {
     vm: *mut Vm,
@@ -255,6 +261,9 @@ pub(crate) struct UnwindMark {
     engines: usize,
     holds: usize,
     aftermath_held: usize,
+    aftermath_runs: usize,
+    dynamic: usize,
+    retrap: usize,
     rooted_write: bool,
     stack_empty: bool,
     handlers: usize,
@@ -271,12 +280,20 @@ impl Drop for UnwindMark {
         // SAFETY: the mark lives in a frame of the borrow it was taken from,
         // and an unwinding frame no longer uses that borrow.
         let vm = unsafe { &mut *self.vm };
+        // The bindings made since end as an error's teardown ends them
+        // (`Vm::unwind'), but no watcher runs: no Lisp runs while a panic
+        // unwinds. First, while the backtrace still names them.
+        let trapped = std::mem::take(&mut vm.trapped);
+        vm.unwind(vm.dynamic.len().saturating_sub(self.dynamic));
+        vm.trapped = trapped;
+        for base in vm.retrap.drain(self.retrap.min(vm.retrap.len())..) { vm.trapped.insert(base); }
         vm.suspended_code.truncate(self.code);
         vm.suspended_stacks.truncate(self.stacks);
         vm.external_roots.truncate(self.roots);
         vm.running_engines = self.engines;
         vm.gc_holds = self.holds;
         vm.aftermath_held = self.aftermath_held;
+        vm.aftermath_runs = self.aftermath_runs;
         vm.rooted_write = self.rooted_write;
         vm.site_leaf = self.site_leaf;
         if self.stack_empty {
@@ -449,6 +466,9 @@ impl Vm {
             engines: self.running_engines,
             holds: self.gc_holds,
             aftermath_held: self.aftermath_held,
+            aftermath_runs: self.aftermath_runs,
+            dynamic: self.dynamic.len(),
+            retrap: self.retrap.len(),
             rooted_write: self.rooted_write,
             stack_empty: self.stack.is_empty(),
             handlers: self.signal_handlers.len(),
@@ -577,7 +597,7 @@ impl Vm {
             + (self.gc_payload_bytes / CONS_BYTES as usize) as f64;
         // A job's growth over the heap it was forked with, not the live
         // heap's share: an ordinary job never collects.
-        if let Some((base, objects, _)) = self.job_budget {
+        if let Some((base, objects)) = self.job_budget {
             return (allocated, objects.saturating_sub(self.job_live().saturating_sub(base)).max(1) as f64);
         }
         // An embedder's floor overrides, as GNU's memory-full state does.
@@ -606,7 +626,7 @@ impl Vm {
     /// never run one; its garbage dies with the process.
     pub(crate) fn set_job_budget(&mut self, bytes: usize) {
         let objects = (bytes / CONS_BYTES as usize).max(1);
-        self.job_budget = Some((self.job_live(), objects, objects / 4 + 1));
+        self.job_budget = Some((self.job_live(), objects));
     }
     /// What the last collection kept, in objects at the collector's charge:
     /// the retained objects and the payload allocation charged for them.
@@ -619,16 +639,9 @@ impl Vm {
         self.gc_retained_payload = self.objects.iter().map(crate::data::payload_bytes).sum();
     }
     /// Whether what survived the last collection alone exceeds the job's
-    /// budget: its memory is exhausted. That is taken once: the limit
-    /// rises above the live growth by a grace, GNU's spare memory, so the
-    /// handlers and the job's reply can run; growth past it signals again.
-    /// Only a running job is signalled: outside one no handler stands.
-    pub(crate) fn take_job_exhaustion(&mut self) -> bool {
-        let Some((base, objects, grace)) = self.job_budget else { return false };
-        let grown = self.job_live().saturating_sub(base);
-        if grown <= objects || !self.isolate_job_running() { return false; }
-        self.job_budget = Some((base, grown + grace, grace));
-        true
+    /// budget: the child's memory is exhausted.
+    fn job_over_budget(&self) -> bool {
+        self.job_budget.is_some_and(|(base, objects)| self.job_live().saturating_sub(base) > objects)
     }
     /// How far the next automatic collection is along, 1 being due: the
     /// larger of the objects allocated over their trigger and the request
@@ -721,6 +734,13 @@ impl Vm {
         let &slot = self.names.get("romacs--run-finalizers")?;
         let function = self.slots[slot].function;
         (function != Value::NIL && function != Value::UNBOUND).then(|| Value::reference(slot + 1, 7))
+    }
+    /// The cheap test of a collection's aftermath: doomed finalizers, or a
+    /// collection whose `post-gc-hook' is not yet looked at. Most polls find
+    /// neither.
+    #[inline]
+    pub(crate) fn aftermath_flagged(&self) -> bool {
+        !self.doomed_finalizers.is_empty() || self.post_gc_due
     }
     /// A collection's aftermath waits: doomed finalizers (one may yet add to
     /// the hook), or a collection ended with a `post-gc-hook' to run. Cheap,
@@ -958,8 +978,8 @@ impl Vm {
         let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
         let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
         let key = command.is_none() && self.host_key_pending();
-        let ms = (elapsed_ns / 1_000_000).min(u32::MAX as u64) as u32;
-        self.collection_log.records.push(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+        let us = (elapsed_ns / 1_000).min(u32::MAX as u64) as u32;
+        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay });
     }
     /// The running command's name, or the last one's in the command loop's
     /// tail (`romacs--command-loop-top' has cleared the running one).
@@ -974,6 +994,7 @@ impl Vm {
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
     /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
+    /// MS a float, the pause in milliseconds to the microsecond,
     /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
@@ -988,7 +1009,7 @@ impl Vm {
             };
             let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
             let kind = self.intern(kind);
-            let ms = Value::integer(record.ms as i64).expect("milliseconds fit fixnum");
+            let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
             let mut row = self.keymap_cons(command, Value::NIL);
             row = self.keymap_cons(met, row);
             row = self.keymap_cons(ms, row);
@@ -1349,6 +1370,10 @@ impl Vm {
     fn settle_collection(&mut self, before: usize) {
         self.gc_retained = self.heap_objects();
         self.settle_payload();
+        // The one place a job child's growth is measured, whatever asked for
+        // the collection: past its budget it ends now, natively, and its
+        // spawner replies for the job (VM2-ISOLATE-MEMORY).
+        if self.job_over_budget() { crate::isolate::job_memory_exit(); }
         self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];

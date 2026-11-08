@@ -12,3 +12,6 @@ romacs-vm = { path = "../../crates/romacs-vm" }
 # left with no target makes the whole workspace fail to load there.
 [[test]]
 name = "session"
+
+[lints]
+workspace = true
