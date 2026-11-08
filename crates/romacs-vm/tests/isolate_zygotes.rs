@@ -43,6 +43,19 @@ fn comm(pid: i64) -> String {
     std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default().trim().to_owned()
 }
 
+/// A job's memory death as its awaiter catches it with `error' and prints
+/// (CONDITION DATA MESSAGE): the condition, the child's budget (16 MiB in
+/// these tests) as data, and the message.
+fn exhausted(out: &str) -> bool {
+    out.starts_with("(isolate-memory-exhausted (16777216) \"Memory exhausted: the job grew past its budget")
+}
+
+/// Lisp: wait up to 30 s, pumping, until the death of ISO (bound around it)
+/// has settled and it has left `romacs--isolates'; t if it has.
+const AWAIT_GONE: &str = "(let ((end (+ (float-time) 30)))
+                            (while (and (memq iso romacs--isolates) (< (float-time) end)) (romacs--isolate-pump 0.1))
+                            (not (memq iso romacs--isolates)))";
+
 fn settles(mut check: impl FnMut() -> bool) -> bool {
     for _ in 0..300 {
         if check() { return true; }
@@ -248,7 +261,7 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                               (let ((i 0) kept)
                                 (while (< i {count}) {action} (setq i (1+ i)))
                                 (list 'done gcs-done)))) 30)
-           (error (list 'error (nth 1 e))))",
+           (error (list (car e) (cdr e) (error-message-string e))))",
         action = if keep { "(setq kept (cons i kept))" } else { "(cons i i)" });
     // Garbage within the budget: no collection at all, where the default
     // pacing would run many on a heap this small.
@@ -259,7 +272,7 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
     assert!(out.starts_with("(done ") && (1..=4).contains(&collections), "{out}");
     // Growth that survives past the budget is memory exhaustion in the job.
     let out = eval(&mut vm, &job(3_000_000, true));
-    assert!(out.starts_with("(error \"Memory exhausted"), "{out}");
+    assert!(exhausted(&out), "{out}");
     // Payload counts as much as objects: strings and vectors that survive
     // collections exhaust the budget too, across several of them.
     for item in ["(make-string 1000000 ?x)", "(make-vector 100000 0)", "(make-bool-vector 8000000 nil)"] {
@@ -268,27 +281,92 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                                                                              (let ((i 0) kept)
                                                                                (while (< i 100) (setq kept (cons {item} kept)) (setq i (1+ i)))
                                                                                'survived))) 30)
-                                            (error (list 'error (nth 1 e))))"));
-        assert!(out.starts_with("(error \"Memory exhausted"), "{item}: {out}");
+                                            (error (list (car e) (cdr e) (error-message-string e))))"));
+        assert!(exhausted(&out), "{item}: {out}");
     }
-    // An argument past the budget is the job's error, not the child's death.
+    // The same inside protected bodies, whose normal end enters a cleanup:
+    // wherever the collection runs that finds the excess, the child ends.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (let ((i 0) (cleaned 0) kept)
+                                                                  (while (< i 100)
+                                                                    (unwind-protect (setq kept (cons (make-string 1000000 ?x) kept))
+                                                                      (setq cleaned (1+ cleaned)))
+                                                                    (setq i (1+ i)))
+                                                                  'survived))) 30)
+                               (error (list (car e) (cdr e) (error-message-string e))))");
+    assert!(exhausted(&out), "protected bodies: {out}");
+    // A finite job with no back-jump at all, its growth in one protected
+    // body: its cleanup's entry or its end collects, before it replies.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (unwind-protect (progn (setq jb-kept (make-string 40000000 ?x)) 'survived)
+                                                                  nil))) 30)
+                               (error (list (car e) (cdr e) (error-message-string e))))");
+    assert!(exhausted(&out), "one protected body: {out}");
+    // The job's own code never sees it: a handler, a cleanup, a handler-bind
+    // callback, a loop inside a cleanup, an explicit collection, a finalizer
+    // or `post-gc-hook' that grows past the budget ends the child there, and
+    // nothing after (each marker file the job would write stays absent). The
+    // reply is the spawner's, an ordinary error.
+    let marker = std::env::temp_dir().join(format!("romacs-memory-{}", std::process::id()));
+    let quoted = serde_json::to_string(&marker).unwrap();
+    let grow = "(let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))";
+    for (name, body) in [
+        ("handler and cleanup", format!("(condition-case nil (unwind-protect {grow} (write-region \"cleanup\" nil MARKER)) (error (write-region \"handler\" nil MARKER)))")),
+        ("a loop inside a cleanup", format!("(condition-case nil (unwind-protect nil {grow}) (error (write-region \"handler\" nil MARKER)))")),
+        ("handler-bind callback", format!("(condition-case nil (handler-bind-1 (lambda () (error \"trigger\")) '(error) (lambda (_) {grow})) (error (write-region \"handler\" nil MARKER)))")),
+        ("explicit collection", "(setq jb-kept (make-string 40000000 ?x)) (garbage-collect) (write-region \"after\" nil MARKER)".to_owned()),
+        ("finalizer", "(romacs--safepoint) (eval '(progn (make-finalizer (lambda () (setq jb-late (make-string 40000000 ?x)) (let ((i 0)) (while (< i 30000) (setq i (1+ i)))) (write-region \"finalizer\" nil MARKER))) nil) t) (eval '(progn (make-list 2000000 nil) nil) t)".to_owned()),
+        ("post-gc-hook", "(romacs--safepoint) (setq post-gc-hook (list (lambda () (setq post-gc-hook nil jb-late (make-string 40000000 ?x)) (let ((i 0)) (while (< i 30000) (setq i (1+ i)))) (write-region \"hook\" nil MARKER)))) (eval '(progn (make-list 2000000 nil) nil) t)".to_owned()),
+    ] {
+        let _ = std::fs::remove_file(&marker);
+        let body = body.replace("MARKER", &quoted);
+        let out = eval(&mut vm, &format!("(condition-case e
+                                            (isolate-await (isolate-spawn '(lambda () {body} 'finished)) 30)
+                                            (error (list (car e) (cdr e) (error-message-string e))))"));
+        assert!(exhausted(&out), "{name}: the spawner replies: {out}");
+        assert!(!marker.exists(), "{name}: nothing of the job ran after");
+    }
+    // A cleanup that signals after its entry: the entry's collection
+    // measured the excess, so the child ended before the cleanup's signal;
+    // likewise with an unlet watcher that would signal as that escape
+    // unwinds.
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (unwind-protect (setq jb-kept (make-string 40000000 ?x))
+                                                                  (signal 'error '(\"cleanup failed\"))))) 30)
+                               (error (list (car e) (cdr e) (error-message-string e))))");
+    assert!(exhausted(&out), "a cleanup's signal past the budget: {out}");
+    let out = eval(&mut vm, "(condition-case e
+                               (isolate-await (isolate-spawn '(lambda ()
+                                                                (eval '(progn (defvar jb-watched nil)
+                                                                              (add-variable-watcher 'jb-watched (lambda (_s _n operation _w)
+                                                                                                                 (when (eq operation 'unlet) (error \"unlet watcher\")))))
+                                                                      t)
+                                                                (eval '(let ((jb-watched 1))
+                                                                         (unwind-protect (setq jb-kept (make-string 40000000 ?x))
+                                                                           (signal 'error '(\"cleanup failed\"))))
+                                                                      t))) 30)
+                               (error (list (car e) (cdr e) (error-message-string e))))");
+    assert!(exhausted(&out), "an unlet watcher on the cleanup's way out: {out}");
+    // An argument past the budget ends the child too, replied as the job's error.
     let out = eval(&mut vm, "(condition-case e
                                (isolate-await (isolate-spawn '(lambda (text)
                                                                 (let ((i 0)) (while (< i 200000) (setq i (1+ i))))
                                                                 (length text))
                                                              (make-string (* 40 1024 1024) ?x)) 30)
-                               (error (list 'error (nth 1 e))))");
-    assert!(out.starts_with("(error \"Memory exhausted"), "{out}");
-    // A job that catches it can still reply, and growing on signals again.
-    let out = eval(&mut vm, "(isolate-await
-                              (isolate-spawn '(lambda ()
-                                                (let ((i 0) (caught 0) kept)
-                                                  (while (< i 4000000)
-                                                    (condition-case nil
-                                                        (while (< i 4000000) (setq kept (cons i kept)) (setq i (1+ i)))
-                                                      (error (setq caught (1+ caught)))))
-                                                  (> caught 1)))) 30)");
-    assert_eq!(out, "t");
+                               (error (list (car e) (cdr e) (error-message-string e))))");
+    assert!(exhausted(&out), "{out}");
+    // The reply is a condition with the budget the child ran under as its
+    // data, whatever the spawner's variable says when it is read; an
+    // `error' handler catches it.
+    let out = eval(&mut vm, "(let ((f (isolate-spawn '(lambda () (let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))))))
+                               (let ((isolate-job-memory-headroom 12345))
+                                 (condition-case e (isolate-await f 30)
+                                   (error (list (car e) (cdr e) (get (car e) 'error-conditions)
+                                                (equal (substring (error-message-string e) 0 16) \"Memory exhausted\"))))))");
+    assert_eq!(out, "(isolate-memory-exhausted (16777216) (isolate-memory-exhausted error) t)", "the child's budget, as data");
     // A long-lived worker keeps the default pacing.
     let out = eval(&mut vm, "(let ((iso (isolate-create)))
                                (prog1 (isolate-await (isolate-spawn '(lambda ()
@@ -297,6 +375,160 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                                                                     :isolate iso) 30)
                                  (isolate-kill iso)))");
     assert_eq!(out, "t");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+fn signal_process(pid: i64, signal: &str) {
+    assert!(std::process::Command::new("kill").arg(format!("-{signal}")).arg(pid.to_string()).status().unwrap().success());
+}
+
+/// A result accepted before a memory death stays the reply: the child grows
+/// past its budget after replying, and its end, once it has settled, is a
+/// retired child's (no `isolate-error-functions' report). The files and the
+/// events are judged only after that death (`AWAIT_GONE').
+#[test]
+fn a_result_accepted_before_a_memory_death_stays_the_reply() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
+    ready_zygote(&mut vm);
+    let replied = std::env::temp_dir().join(format!("romacs-replied-{}", std::process::id()));
+    let survived = std::env::temp_dir().join(format!("romacs-survived-{}", std::process::id()));
+    let _ = std::fs::remove_file(&replied);
+    let _ = std::fs::remove_file(&survived);
+    let out = eval(&mut vm, &format!("(let ((events nil))
+                                        (let* ((isolate-error-functions (list (lambda (_iso event _data) (push event events))))
+                                               (f (isolate-spawn '(lambda ()
+                                                                    (let ((reply (symbol-function 'romacs--isolate-reply)))
+                                                                      (fset 'romacs--isolate-reply
+                                                                            (lambda (&rest args)
+                                                                              (apply reply args)
+                                                                              (write-region \"replied\" nil {replied})
+                                                                              (let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))
+                                                                              (write-region \"survived\" nil {survived}))))
+                                                                    'finished)))
+                                               (value (isolate-await f 30))
+                                               (iso (isolate-future-isolate f)))
+                                          (list value {AWAIT_GONE} events)))",
+        replied = serde_json::to_string(&replied).unwrap(), survived = serde_json::to_string(&survived).unwrap()));
+    let files = (replied.exists(), survived.exists());
+    let _ = std::fs::remove_file(&replied);
+    let _ = std::fs::remove_file(&survived);
+    assert_eq!(out, "(finished t nil)", "the accepted result stays; the child's death settled within 30 s, and no news");
+    assert_eq!(files, (true, false), "the child replied, then ended for its memory");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A forked child's death settles at once, its zygote stopped: a memory
+/// death through the child's own `memory' frame (the job's Memory exhausted
+/// reply), a crash as `isolate-died' (its status unknown), each settled once
+/// and the child gone before the zygote runs again. Killing a reported child
+/// returns promptly too.
+#[test]
+fn a_childs_death_settles_at_once_with_its_zygote_stopped() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
+    let zygote = ready_zygote(&mut vm);
+    let reported = "(let ((end (+ (float-time) 10)) pid)
+                      (while (and (null (setq pid (romacs--isolate-pid (romacs--isolate-id (isolate-future-isolate od-f))))) (< (float-time) end))
+                        (romacs--isolate-pump 0.05))
+                      pid)";
+    for (name, body, expected) in [
+        ("memory", "(let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))", "isolate-memory-exhausted"),
+        ("crash", "(signal-process (emacs-pid) 9)", "isolate-died"),
+    ] {
+        eval(&mut vm, &format!("(progn (setq od-settled 0 od-f (isolate-spawn '(lambda () (sleep-for 0.6) {body} 'survived)))
+                                       (isolate-on-done od-f (lambda (_) (setq od-settled (1+ od-settled)))) t)"));
+        let pid: i64 = eval(&mut vm, reported).parse().expect("the child was reported");
+        signal_process(zygote, "STOP");
+        let out = eval(&mut vm, "(condition-case e (isolate-await od-f 10) (error (car e)))");
+        // Its frame can arrive a moment before its `_exit'.
+        let gone = settles(|| !process_exists(pid));
+        let settled = eval(&mut vm, "(progn (romacs--isolate-pump 0.3) od-settled)");
+        signal_process(zygote, "CONT");
+        assert_eq!(out, expected, "{name}");
+        assert!(gone, "{name}: the child is gone before its zygote runs again");
+        assert_eq!(settled, "1", "{name}: settled once");
+    }
+    // A reported child killed while its zygote is stopped.
+    eval(&mut vm, "(setq od-f (isolate-spawn '(lambda () (while t))))");
+    let _: i64 = eval(&mut vm, reported).parse().expect("the child was reported");
+    signal_process(zygote, "STOP");
+    let took = eval(&mut vm, "(let ((start (float-time))) (isolate-kill (isolate-future-isolate od-f)) (< (- (float-time) start) 3))");
+    signal_process(zygote, "CONT");
+    assert_eq!(took, "t", "isolate-kill returns promptly");
+}
+
+/// A job child's memory death ends the commands its job started: they are
+/// reported to the spawner as they start, which signals their groups as for
+/// any worker death.
+#[test]
+fn a_memory_death_ends_the_commands_its_job_started() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
+    ready_zygote(&mut vm);
+    let pidfile = std::env::temp_dir().join(format!("romacs-memory-command-{}", std::process::id()));
+    let _ = std::fs::remove_file(&pidfile);
+    let quoted = serde_json::to_string(&pidfile).unwrap();
+    let script = serde_json::to_string(&format!("echo $$ > {}; exec sleep 60", pidfile.display())).unwrap();
+    let out = eval(&mut vm, &format!("(let* ((f (isolate-spawn '(lambda ()
+                                                                         (romacs--process-start (list \"sh\" \"-c\" {script}) \"\" default-directory 120)
+                                                                         (let ((end (+ (float-time) 5)))
+                                                                           (while (and (not (file-exists-p {quoted})) (< (float-time) end)) (sleep-for 0.05)))
+                                                                         (let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i)))))))
+                                             (out (condition-case e (isolate-await f 30) (error (list (car e) (cdr e) (error-message-string e)))))
+                                             (iso (isolate-future-isolate f)))
+                                        (list {AWAIT_GONE} out))"));
+    // The reply comes with the child's `memory' frame; its death, which
+    // signals the groups, settles at a later wait.
+    assert!(out.starts_with("(t ") && exhausted(&out[3..]), "{out}");
+    let pid: i64 = std::fs::read_to_string(&pidfile).expect("the command started").trim().parse().unwrap();
+    let ended = settles(|| !process_exists(pid));
+    if !ended { let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status(); }
+    let _ = std::fs::remove_file(&pidfile);
+    assert!(ended, "the command's group ended with the job");
+}
+
+/// An interrupt the child never read makes its death reset the socket ahead
+/// of its last frames, and the memory reply still arrives: `inhibit-quit'
+/// holds the frame unread while the job, running by then, grows past its
+/// budget, and the spawner reads nothing until the child is gone, so it meets
+/// the reset first.
+#[test]
+fn an_interrupted_job_past_its_budget_gets_the_memory_reply() {
+    let mut vm = vm();
+    eval(&mut vm, "(setq isolate-job-memory-headroom (* 16 1024 1024))");
+    ready_zygote(&mut vm);
+    let name = |what: &str| std::env::temp_dir().join(format!("romacs-interrupted-{what}-{}", std::process::id()));
+    let (started, go) = (name("started"), name("go"));
+    let _ = std::fs::remove_file(&started);
+    let _ = std::fs::remove_file(&go);
+    let (started_name, go_name) = (serde_json::to_string(&started).unwrap(), serde_json::to_string(&go).unwrap());
+    let out = eval(&mut vm, &format!("(progn
+                                        (setq ij-f (isolate-spawn '(lambda ()
+                                                                     (let ((inhibit-quit t) (end (+ (float-time) 20)))
+                                                                       (write-region \"started\" nil {started_name})
+                                                                       (while (and (not (file-exists-p {go_name})) (< (float-time) end)) (sleep-for 0.02))
+                                                                       (let ((i 0) kept) (while (< i 100) (setq kept (cons (make-string 1000000 ?x) kept)) (setq i (1+ i))))
+                                                                       'survived))))
+                                        (let ((end (+ (float-time) 20)) pid)
+                                          (while (and (not (and (file-exists-p {started_name})
+                                                                (setq pid (romacs--isolate-pid (romacs--isolate-id (isolate-future-isolate ij-f))))))
+                                                      (< (float-time) end))
+                                            (romacs--isolate-pump 0.02))
+                                          (unless (isolate-interrupt (isolate-future-isolate ij-f)) (error \"no job to interrupt\"))
+                                          (write-region \"go\" nil {go_name})
+                                          pid))"));
+    let pid: i64 = out.parse().unwrap_or_else(|_| panic!("{out}"));
+    // The spawner's Lisp is not running, so nothing reads the socket meanwhile.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while process_exists(pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!process_exists(pid), "the child ended");
+    let out = eval(&mut vm, "(condition-case e (isolate-await ij-f 30) (error (car e)))");
+    let _ = std::fs::remove_file(&started);
+    let _ = std::fs::remove_file(&go);
+    assert_eq!(out, "isolate-memory-exhausted", "the reply behind the reset");
     eval(&mut vm, "(isolate-kill-all)");
 }
 

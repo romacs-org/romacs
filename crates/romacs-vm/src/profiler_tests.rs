@@ -145,7 +145,7 @@ fn a_memory_log_does_not_count_its_own_export() {
 
 /// Allocation into the entries a collection freed is allocation: after a
 /// sweep leaves a dead list's conses free below a live one, a function
-/// that conses into them is charged (gc.rs `FreeEntries::allocated').
+/// that conses into them is charged (gc.rs `Allocation::allocated').
 #[test]
 fn allocation_into_freed_entries_is_charged() {
     let mut vm = Vm::new();

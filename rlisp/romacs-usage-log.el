@@ -35,7 +35,8 @@
 ;;       together, written with the counts.  A redisplay is charged to its
 ;;       command at the next command's start, or at a write after it ran.
 ;;   {"kind":"collection","collection":K,"pause_ms":MS,"met":M,"command":C}
-;;       a garbage collection MS long, K `idle' (the idle pass's or a
+;;       a garbage collection MS long, a float read to the microsecond, K
+;;       `idle' (the idle pass's or a
 ;;       prompt's), `explicit' (`garbage-collect') or `automatic', written
 ;;       with the counts.  M, when there is one, says who waited at most
 ;;       MS: "command", C being the command it ran in or at the end of;

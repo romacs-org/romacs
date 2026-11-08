@@ -156,6 +156,8 @@ fn an_early_parse_is_used_only_for_the_text_it_read() {
 fn a_small_edit_shows_for_one_frame_before_its_parse() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let mut vm = bootstrapped(&root);
+    // It counts hook calls, and a collection between frames tells every window.
+    vm.set_gc_stress(0);
     vm.eval_source("(require 'treesit)").unwrap();
     let setup = format!("(progn {SYSTEM_SETUP} \
         (defvar romacs-treesit-show-before-parse 8) \

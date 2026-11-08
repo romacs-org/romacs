@@ -228,3 +228,31 @@ fn a_refreshed_prepared_call_keeps_its_arguments_across_collection() {
     assert!(vm.heap_stats().collections > before, "the refresh collected");
     assert_eq!(value, "((tail) (\"ppp\" tail))");
 }
+
+/// Finalizers and `post-gc-hook' at a safepoint, under forced moving
+/// collections: the loop's own Values must survive every collection, at back
+/// edges and at calls alike. (`threaded_reader_gc_tests' proves the widening.)
+#[test]
+fn finishing_a_collection_at_a_safepoint_keeps_the_frame() {
+    let source = "(progn
+      (defvar fs-runs 0)
+      (fset 'fs-hook (lambda () (setq fs-runs (1+ fs-runs))))
+      (fset 'fs-doom (lambda (tag) (make-finalizer (lambda () (setq fs-runs (+ fs-runs (length tag))))) nil))
+      (fset 'fs-step (lambda (kept i) (cons (car kept) (cons i nil))))
+      (setq post-gc-hook '(fs-hook))
+      (let ((kept (list (make-string 3 ?k) 'tail)) (i 0) (last nil))
+        (while (< i 100000)
+          (fs-doom (make-string 2 ?f))
+          (setq last (fs-step kept i))
+          (setq i (1+ i)))
+        (setq post-gc-hook nil)
+        (list (car kept) (car (cdr kept)) (car last) (car (cdr last)) (> fs-runs 0))))";
+    // Automatic collections in a heap this small, at the safepoints.
+    let mut plain = vm(false);
+    plain.set_collection_floor(1);
+    let expected = eval(&mut plain, source);
+    assert!(expected.contains("\"kkk\" tail \"kkk\" 99999 t"), "{expected}");
+    let mut stressed = vm(true);
+    stressed.set_collection_floor(1);
+    assert_eq!(eval(&mut stressed, source), expected);
+}

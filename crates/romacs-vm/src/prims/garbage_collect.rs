@@ -7,12 +7,21 @@ fn garbage_collect(_cx) -> Step {
 }}
 
 // The command loop's idle collection in a wait inside Lisp (a prompt's,
-// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics or
-// finalizers, and abandoned with nothing collected if a key press arrives
-// while it is still marking. t when it collected.
+// rlisp/vm/keyboard.el): as `garbage-collect', without its statistics, and
+// abandoned with nothing collected if a key press arrives while it is still
+// marking. t when it collected.
 defsubr! { name = "romacs--collect-idle", gnu = "keyboard.c:2880", effect = Global,
 fn collect_idle(_cx) -> Step {
     Ok(Step::CollectIdle)
+}}
+
+// A safe point for a collection's work (VM2-GC-FINALIZER): what an engine's
+// poll does, now: collect if due (where a job past its memory budget ends),
+// the aftermath collections left pending (finalizers, `post-gc-hook') where
+// the gate allows, a quit. Waits for input and a job's end call it.
+defsubr! { name = "romacs--safepoint", gnu = "alloc.c:5806", effect = Global,
+fn safepoint(_cx) -> Step {
+    Ok(Step::Safepoint)
 }}
 
 defsubr! { name = "garbage-collect-maybe", gnu = "alloc.c:6110", effect = Global,
@@ -50,10 +59,19 @@ fn collected(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
 }
 
 // The collections since the last call, for the usage log: (DROPPED RECORD...),
-// each RECORD (KIND MS MET COMMAND) (`Vm::take_collections').
+// each RECORD (KIND MS MET COMMAND), MS a float (`Vm::take_collections').
 defsubr! { name = "romacs--take-collections", gnu = "alloc.c:6004", effect = Global,
 fn take_collections(cx) {
     Ok(cx.take_collections())
+}}
+
+// Where the last completed collection's time went: ((PHASE . SECONDS)...), the
+// phases in order, then (marked CONSES CLOSURES CELLS OBJECTS) and (entries
+// ...), what it kept of what it found (`Vm::gc_phases'). `gc-elapsed' holds
+// the total.
+defsubr! { name = "romacs--gc-phases", gnu = "alloc.c:6004", effect = Global,
+fn gc_phases(cx) {
+    Ok(cx.gc_phases())
 }}
 
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,
@@ -62,33 +80,20 @@ fn make_finalizer(cx, function: Value) {
     Ok(cx.make_finalizer(function))
 }}
 
-// The functions of the finalizers the collections since the last call
-// found unreachable, for `romacs--run-finalizers' (rlisp/vm/prelude.el).
-defsubr! { name = "romacs--take-doomed-finalizers", gnu = "alloc.c:3960", effect = Global,
-fn take_doomed_finalizers(cx) {
-    Ok(cx.take_doomed_finalizers())
+// The function of the oldest finalizer a collection found unreachable, or
+// nil, for `romacs--run-finalizers' (rlisp/vm/prelude.el).
+defsubr! { name = "romacs--take-doomed-finalizer", gnu = "alloc.c:3960", effect = Global,
+fn take_doomed_finalizer(cx) {
+    Ok(cx.take_doomed_finalizer())
 }}
 
-// Whether `post-gc-hook' is due, for `romacs--run-finalizers'; asking
+// Whether a collection ended since the last ask, for
+// `romacs--run-finalizers', which then owns its `post-gc-hook'; asking
 // takes it.
 defsubr! { name = "romacs--take-post-gc", gnu = "alloc.c:6022", effect = Global,
 fn take_post_gc(cx) {
     Ok(if cx.take_post_gc() { Value::TRUE } else { Value::NIL })
 }}
-
-// alloc.c inhibit_garbage_collection, for the length of `post-gc-hook':
-// non-nil ON holds collection, nil lets it go.
-defsubr! { name = "romacs--hold-collection", gnu = "alloc.c:5458", effect = Global,
-fn hold_collection(cx, on: Value) {
-    cx.hold_collection(on != Value::NIL);
-    Ok(Value::NIL)
-}}
-
-/// The engine's continuation after `romacs--run-finalizers', which
-/// returns the collection's statistics it was given.
-pub(crate) fn finalizers_ran(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(value))
-}
 
 // Where the process's heap bytes are: a plist of the production
 // allocator's :platform-allocated and :platform-resident bytes

@@ -892,6 +892,39 @@ pub fn restore_outcome() -> Restore {
     }
 }
 
+/// Whether the heap is an arena whose used prefix will be an image: a
+/// builder's. What goes into it goes into the world, so nothing that depends
+/// on the moment belongs there.
+pub fn heap_is_image() -> bool {
+    started() && !ADOPTED.load(Ordering::Acquire)
+}
+
+/// Whether a heap table may take its one large reservation (`table.rs'): not
+/// where the heap is an image, nor under an address-space limit, which the
+/// reservation would eat into.
+pub fn may_reserve() -> bool {
+    if heap_is_image() {
+        return false;
+    }
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit writes only the local it is given.
+    unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) == 0 && limit.rlim_cur == libc::RLIM_INFINITY }
+}
+
+/// Give the system the whole pages between FROM and TO bytes past BASE, the
+/// spare capacity of a reserved table, whose contents are unused. SAFETY:
+/// those bytes are within one allocation the caller owns, and nothing reads
+/// or holds them: the pages come back zeroed.
+pub(crate) unsafe fn release_spare(base: *mut u8, from: usize, to: usize) {
+    let start = (base as usize + from).next_multiple_of(PAGE);
+    let end = (base as usize + to) / PAGE * PAGE;
+    if end > start {
+        // SAFETY: this function's contract: these whole pages lie in the
+        // caller's allocation, and nothing reads or holds them.
+        unsafe { libc::madvise(start as *mut libc::c_void, end - start, libc::MADV_DONTNEED) };
+    }
+}
+
 /// Whether this process's heap is the arena.
 pub fn active() -> bool {
     state() == ARENA

@@ -106,22 +106,22 @@ fn gc_cons_threshold_and_percentage_pace_collection() {
     // Only the request boundary after the binding ends may collect, where
     // the same churn collected ten times above.
     assert!(vm.heap_stats().collections <= before + 1, "a raised threshold defers collection");
-    // A proportional term above the threshold paces instead: 0.12, scaled
-    // to 1.8, waits 18 traced heaps.
-    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 20000 nil))").unwrap();
-    let proportional = churn(&mut vm, 200_000);
-    assert!(proportional * 3 <= plain, "a raised percentage defers collection: {proportional} vs {plain}");
-    // Larger settings (gcmh-style 0.2 to 1.0, or absurd ones) are held at
-    // that ceiling: they defer collection, and it still happens. 18 traced
-    // heaps against the default's 11.3 is about 0.63 of its collections.
+    // A proportional term above the threshold paces instead, in proportion:
+    // 0.12 waits 1.2 traced heaps of a live heap made big enough to matter.
+    vm.eval_source("(setq gc-cons-percentage 0.12 gr-live (make-list 40000 nil))").unwrap();
+    let proportional = churn(&mut vm, 2_000_000);
+    vm.eval_source("(setq gc-cons-percentage 0.5)").unwrap();
+    let raised = churn(&mut vm, 2_000_000);
+    assert!(raised * 3 <= proportional, "a raised percentage defers collection: {raised} vs {proportional}");
+    // Absurd settings are held at the ceiling: they defer, and it still
+    // happens, the same however large.
     let mut deferred = vec![];
-    for p in ["0.2", "1.0", "1e9"] {
+    for p in ["1.8", "2.0", "1e9"] {
         vm.eval_source(&format!("(setq gc-cons-percentage {p})")).unwrap();
         deferred.push(churn(&mut vm, 2_000_000));
     }
     vm.eval_source("(setq gc-cons-percentage 0.1)").unwrap();
-    let default = churn(&mut vm, 2_000_000);
-    assert!(deferred.iter().all(|&n| n >= 1 && n * 5 <= default * 4), "clamped deferral: {deferred:?} vs default {default}");
+    assert!(deferred.iter().all(|&n| n >= 1), "the ceiling still collects: {deferred:?}");
     // The same ceiling, give or take where each churn starts in a cycle.
     assert!(deferred.iter().max().unwrap() - deferred.iter().min().unwrap() <= 1, "the ceiling holds: {deferred:?}");
     // Non-integer thresholds are refused, as GNU's DEFVAR_INT is.
@@ -158,6 +158,598 @@ fn finalizers_run_once_after_the_collection_that_finds_them_unreachable() {
     assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
 }
 
+/// garbage_collect ends with its finalizers and `post-gc-hook' whatever
+/// asked for it: an automatic collection in a running loop too, the hook
+/// seeing `gc-elapsed' already counted, and a `throw' leaves through it.
+#[test]
+fn automatic_collections_run_finalizers_and_post_gc_hook() {
+    let setup = "(progn (defvar hook-runs 0) (defvar hook-elapsed nil) (defvar fin-ran nil) \
+        (fset 'hook-note (lambda () (setq hook-runs (1+ hook-runs) hook-elapsed gc-elapsed))) \
+        (fset 'fin-make (lambda () (make-finalizer (lambda () (setq fin-ran t))) nil)) \
+        (fset 'hook-churn (lambda (n) (let ((i 0)) (while (< i n) (cons i nil) (setq i (1+ i)))))) t)";
+    let check = "(let ((done gcs-done) (elapsed gc-elapsed)) \
+          (fin-make) \
+          (setq post-gc-hook '(hook-note)) \
+          (hook-churn 2000000) \
+          (setq post-gc-hook nil) \
+          (let ((ran hook-runs) (grown (- gcs-done done))) \
+            (list (> ran 0) (<= (- grown 1) ran) (<= ran grown) fin-ran (> hook-elapsed elapsed) \
+                  (catch 'out \
+                    (setq post-gc-hook (list (lambda () (throw 'out 'thrown)))) \
+                    (unwind-protect (while t (cons 1 nil)) \
+                      (setq post-gc-hook nil))))))";
+    let expected = "(t t t t t thrown)";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", setup, "--eval", &format!("(prin1 {check})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(setup).unwrap();
+    let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
+    assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
+}
+
+/// A run of finalizers belongs to the collection that doomed them: a poll
+/// that collected nothing, inside a long one, starts no other, whichever way
+/// the run began, so each ends before the next starts, and the hook comes
+/// last. (A collection inside one does run its own, as GNU's.) A `throw' out
+/// of one leaves the rest doomed for the next run, as GNU's list does.
+#[test]
+fn a_long_finalizer_keeps_its_run_in_order() {
+    let setup = "(progn (defvar fin-log nil) \
+        (fset 'fin-spin (lambda (n) (let ((i 0)) (while (< i n) (setq i (1+ i)))))) \
+        (fset 'fin-note (lambda (tag) (setq fin-log (cons tag fin-log)))) \
+        (fset 'fin-sort (lambda (log) (sort (mapcar 'symbol-name log) 'string-lessp))) \
+        (fset 'fin-whole (lambda () (eq (car (cdr (memq 'a-end fin-log))) 'a-begin))) t)";
+    // Each in a top-level form of its own: a register of the running one
+    // keeps what it held alive (VM2-GC-FINALIZER).
+    let long = "(progn \
+        (make-finalizer (lambda () (fin-note 'a-begin) (fin-spin 300000) (fin-note 'a-end))) \
+        (make-finalizer (lambda () (fin-note 'b))) nil)";
+    let automatic = "(progn (setq post-gc-hook '((lambda () (fin-note 'hook)))) \
+          (let ((i 0)) (while (and (< i 100000000) (not (memq 'hook fin-log))) (cons i nil) (setq i (1+ i)))) \
+          (setq post-gc-hook nil) \
+          (prog1 (list (eq (car fin-log) 'hook) (fin-sort fin-log) (fin-whole)) \
+            (setq fin-log nil)))";
+    let explicit = "(progn (setq post-gc-hook '((lambda () (fin-note 'hook)))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (prog1 (list (eq (car fin-log) 'hook) (fin-sort fin-log) (fin-whole)) \
+            (setq fin-log nil)))";
+    let throwing = "(progn \
+        (make-finalizer (lambda () (fin-note 'x))) \
+        (make-finalizer (lambda () (throw 'out 'left))) \
+        (make-finalizer (lambda () (fin-note 'y))) nil)";
+    let thrown = "(let ((caught (catch 'out (garbage-collect) 'none))) \
+          (garbage-collect) (list caught (fin-sort fin-log)))";
+    let ran = "(t (\"a-begin\" \"a-end\" \"b\" \"hook\") t)";
+    let expected = [ran, ran, "(left (\"x\" \"y\"))"];
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let printed = |form: &str| format!("(prin1 {form})");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", setup, "--eval", long, "--eval", &printed(automatic), "--eval", long,
+               "--eval", &printed(explicit), "--eval", throwing, "--eval", &printed(thrown)]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected.concat(), "pinned GNU");
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source(setup).unwrap();
+    let mut value = |vm: &mut Vm, form: &str| vm.eval_source(&format!("(prin1-to-string {form})")).unwrap().display().unwrap();
+    vm.eval_source(long).unwrap();
+    assert_eq!(value(&mut vm, automatic), serde_json::to_string(expected[0]).unwrap(), "automatic");
+    vm.eval_source(long).unwrap();
+    assert_eq!(value(&mut vm, explicit), serde_json::to_string(expected[1]).unwrap(), "explicit");
+    vm.eval_source(throwing).unwrap();
+    assert_eq!(value(&mut vm, thrown), serde_json::to_string(expected[2]).unwrap(), "thrown");
+}
+
+/// A collection that ends a level or two under `max-lisp-eval-depth' still
+/// finishes: the run borrows its room, the hook comes back, and the limit is
+/// restored.
+#[test]
+fn a_collection_finishes_near_the_depth_limit() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    let setup = "(progn (defvar deep-runs 0) (defvar deep-limit 0) \
+        (fset 'deep-note (lambda () (setq deep-runs (1+ deep-runs)))) \
+        (fset 'deep-probe (lambda (n) (setq deep-limit n) (1+ (deep-probe (1+ n))))) \
+        (fset 'deep-churn (lambda () (setq post-gc-hook '(deep-note)) \
+          (let ((i 0)) (while (and (= deep-runs 0) (< i 100000000)) (cons i nil) (setq i (1+ i)))) \
+          (setq post-gc-hook nil) t)) \
+        (fset 'deep-call (lambda (n) (if (> n 0) (progn (deep-call (1- n))) (deep-churn)))) \
+        (setq max-lisp-eval-depth 400) t)";
+    eval(&mut vm, setup);
+    assert_eq!(eval(&mut vm, "(condition-case nil (deep-probe 0) (excessive-lisp-nesting 'limit))"), "limit", "the calibration");
+    assert_eq!(eval(&mut vm, "(condition-case nil (deep-call deep-limit) (excessive-lisp-nesting 'limit))"), "limit", "one more would not fit");
+    assert_eq!(eval(&mut vm, "(setq deep-runs 0)"), "0");
+    let reserve = eval(&mut vm, "lisp-eval-depth-reserve");
+    assert_eq!(eval(&mut vm, "(deep-call (- deep-limit 2))"), "t", "the program below sees no error");
+    assert_eq!(eval(&mut vm, "(> deep-runs 0)"), "t", "the hook ran, there");
+    assert_eq!(eval(&mut vm, "post-gc-hook"), "nil", "and came back to be removed by the program, not for failing");
+    assert_eq!(eval(&mut vm, "max-lisp-eval-depth"), "400", "the limit is restored");
+    assert_eq!(eval(&mut vm, "lisp-eval-depth-reserve"), reserve, "and the reserve");
+}
+
+/// A collection finishes wherever it ran, a cleanup included: a `throw' from
+/// the hook leaves the cleanup there, as it does in GNU.
+#[test]
+fn a_throw_from_the_hook_leaves_a_cleanup() {
+    let form = "(progn (defvar cl-done nil) \
+        (list (catch 'out \
+                (setq post-gc-hook (list (lambda () (setq post-gc-hook nil) (throw 'out 'hook-threw)))) \
+                (unwind-protect (throw 'out 'payload) \
+                  (garbage-collect) \
+                  (setq cl-done t))) \
+              cl-done))";
+    let expected = "(hook-threw nil)";
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "pinned GNU");
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), expected, "candidate");
+}
+
+/// What pinned GNU and a fresh candidate print for CHECK after FORMS, each
+/// form at top level of its own.
+fn gnu_and_candidate(forms: &[&str], check: &str) -> (String, String) {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let printed = format!("(prin1 {check})");
+    let mut args = vec!["-Q", "--batch"];
+    for form in forms.iter().chain([&printed.as_str()]) {
+        args.extend(["--eval", form]);
+    }
+    let output = std::process::Command::new(oracle).args(args).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    for form in forms {
+        vm.eval_source(form).unwrap();
+    }
+    let candidate = vm.eval_source(check).unwrap().display().unwrap();
+    (String::from_utf8(output.stdout).unwrap(), candidate)
+}
+
+/// A collection inside `post-gc-hook' is an ordinary one (VM2-POST-GC):
+/// `garbage-collect' there collects and answers its rows, where GNU's
+/// inhibition answers nil; allocation there collects too; and the hook runs
+/// once for the collection that started it, the collections inside being
+/// its own. (GNU's runs again: what its first run allocated uncollected
+/// starts the next collection as the hook ends.)
+#[test]
+fn a_collection_inside_post_gc_hook_is_an_ordinary_one() {
+    let setup = "(progn (defvar hk-runs 0) (defvar hk-inner nil) (defvar hk-churned nil) \
+        (fset 'hk-churn (lambda () (let ((done gcs-done) (i 0)) \
+          (while (< i 3000000) (cons i nil) (setq i (1+ i))) (- gcs-done done)))) t)";
+    let check = "(let ((done gcs-done)) \
+          (setq post-gc-hook (list (lambda () (setq hk-runs (1+ hk-runs) \
+                                                    hk-inner (consp (garbage-collect)) \
+                                                    hk-churned (> (hk-churn) 0))))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (list hk-inner hk-churned hk-runs (> (- gcs-done done) 2)))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup], check);
+    assert!(gnu.starts_with("(nil nil "), "pinned GNU inhibits collection in the hook: {gnu}");
+    assert_eq!(candidate, "(t t 1 t)", "the candidate collects there, and runs the hook once");
+}
+
+/// A finalizer that a collection inside `post-gc-hook' dooms runs in that
+/// collection's own run, inside the hook, which still runs once; GNU's
+/// inhibited `garbage-collect' there dooms nothing, so it runs later.
+#[test]
+fn a_finalizer_doomed_inside_the_hook_runs_there() {
+    let setup = "(progn (defvar nh-log nil) (defvar nh-runs 0) (defvar nh-kept nil) t)";
+    // Made in a top-level form of its own, and kept only in NH-KEPT, which
+    // the hook drops: no register of the running evaluation holds it
+    // (VM2-GC-FINALIZER).
+    let made = "(progn (setq nh-kept (make-finalizer (lambda () (setq nh-log (cons (cons 'fin nh-runs) nh-log))))) nil)";
+    let check = "(progn \
+          (setq post-gc-hook (list (lambda () (setq nh-runs (1+ nh-runs)) \
+                                     (when (= nh-runs 1) \
+                                       (setq nh-kept nil) (garbage-collect) (setq nh-log (cons 'after-gc nh-log)))))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (list nh-runs (reverse nh-log)))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup, made], check);
+    // The finalizer logs the hook run it fell in: 1 is inside the first.
+    assert_eq!(gnu, "(1 (after-gc))", "pinned GNU runs no finalizer inside the hook");
+    assert_eq!(candidate, "(1 ((fin . 1) after-gc))", "candidate");
+}
+
+/// A collection due as a throw unwinds to a cleanup, whose finalizer throws
+/// again (to the same catch), must not come between the unwinder and the
+/// cleanup's first instruction: there its escape would drop the cleanup
+/// unrun. The entry only collects, and no aftermath runs while unwinding: the
+/// cleanup runs, the body's throw is caught, and the finalizer runs after it,
+/// its throw no longer caught (VM2-GC-FINALIZER).
+#[test]
+fn a_throw_from_a_collection_at_a_region_exit_still_runs_the_cleanup() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar ue-cleaned nil) (defvar ue-kept nil) (defvar ue-big nil) t)");
+    // A top-level form of its own, kept only in UE-KEPT (VM2-GC-FINALIZER).
+    eval(&mut vm, "(progn (setq ue-kept (make-finalizer (lambda () (throw 'ue-out 'finalizer)))) nil)");
+    // One primitive allocates enough to make a collection due and no poll
+    // comes before the throw: the region exit was where a poll used to
+    // collect, doom it and let its throw drop the cleanup.
+    let caught = eval(&mut vm, "(catch 'ue-out \
+        (unwind-protect (progn (setq ue-kept nil) (setq ue-big (make-list 400000 nil)) (throw 'ue-out 'body)) \
+          (setq ue-cleaned t)))");
+    let cleaned = eval(&mut vm, "ue-cleaned");
+    assert_eq!(cleaned, "t", "the cleanup ran");
+    assert_eq!(caught, "body", "the body's throw was caught");
+}
+
+/// The runner's own cleanup, restoring the interrupted code's match data,
+/// survives the same path: finalizer A changes the match data, makes a
+/// collection due and throws to the code's catch; no collection may run
+/// finalizer B before that cleanup begins, where B's throw would drop it and
+/// leave A's match data behind. B runs once the throw has landed, at the
+/// catch, its throw no longer caught there.
+#[test]
+fn a_finalizer_throwing_past_the_runner_leaves_the_match_data() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar mt-a nil) (defvar mt-b nil) (defvar mt-big nil) (defvar mt-ran nil) t)");
+    eval(&mut vm, "(progn \
+        (setq mt-a (make-finalizer (lambda () (setq mt-ran (cons 'a mt-ran)) (string-match \"z\" \"xz\") \
+                                     (setq mt-big (make-list 400000 nil)) (throw 'mt-out 'a)))) \
+        (setq mt-b (make-finalizer (lambda () (setq mt-ran (cons 'b mt-ran)) (throw 'mt-out 'b)))) nil)");
+    let value = eval(&mut vm, "(progn (set-buffer (get-buffer-create \"mt\")) (insert \"abc\") (goto-char 1) (re-search-forward \"b\") \
+        (let ((data (match-data))) \
+          (list (catch 'mt-out (setq mt-a nil mt-b nil) (garbage-collect) 'none) (equal data (match-data)) (reverse mt-ran))))");
+    assert_eq!(value, "(a t (a b))", "A's throw caught, the match data restored, B after the landing");
+}
+
+/// The hook is looked at after the finalizers, as GNU's `garbage_collect'
+/// does: a finalizer that installs the first hook function gets that
+/// collection's run of it, once.
+#[test]
+fn a_hook_a_finalizer_installs_runs_for_that_collection() {
+    let setup = "(progn (defvar fh-log nil) (defvar fh-kept nil) (setq post-gc-hook nil) t)";
+    // A top-level form of its own, kept only in FH-KEPT (VM2-GC-FINALIZER).
+    let made = "(progn (setq fh-kept (make-finalizer (lambda () \
+        (setq post-gc-hook (list (lambda () (setq fh-log (cons 'hook fh-log)))))))) nil)";
+    let check = "(progn (setq fh-kept nil) (garbage-collect) (prog1 fh-log (setq post-gc-hook nil)))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup, made], check);
+    assert_eq!(gnu, "(hook)", "pinned GNU");
+    assert_eq!(candidate, gnu, "candidate");
+}
+
+/// Collections made due inside protected bodies are finished, with their
+/// finalizers and `post-gc-hook', by the next ordinary poll: a loop that
+/// waits for its finalizer sees it run, and the hook too, with no explicit
+/// collection and no wait for input.
+#[test]
+fn collections_due_at_region_exits_are_finished_soon() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar rp-ran nil) (defvar rp-hooked nil) (defvar rp-kept nil) (defvar rp-big nil) t)");
+    // A top-level form of its own, kept only in RP-KEPT (VM2-GC-FINALIZER).
+    eval(&mut vm, "(progn (setq rp-kept (make-finalizer (lambda () (setq rp-ran t)))) nil)");
+    let value = eval(&mut vm, "(progn \
+        (setq post-gc-hook (list (lambda () (setq rp-hooked t))) rp-kept nil) \
+        (let ((i 0)) \
+          (while (and (not (and rp-ran rp-hooked)) (< i 50)) \
+            (unwind-protect (setq rp-big (make-list 300000 nil)) nil) \
+            (setq i (1+ i))) \
+          (setq post-gc-hook nil) \
+          (list rp-ran rp-hooked (< i 50))))");
+    assert_eq!(value, "(t t t)", "the finalizer and the hook ran within the loop");
+}
+
+/// The same with the protected body in a nested engine (`eval'), which has
+/// no back-jump or call of its own: it ends with the aftermath pending, and
+/// its caller polls soon.
+#[test]
+fn a_collection_due_in_a_nested_protected_body_is_finished_soon() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar np-ran nil) (defvar np-hooked nil) (defvar np-kept nil) (defvar np-big nil) t)");
+    eval(&mut vm, "(progn (setq np-kept (make-finalizer (lambda () (setq np-ran t)))) nil)");
+    let value = eval(&mut vm, "(progn \
+        (setq post-gc-hook (list (lambda () (setq np-hooked t))) np-kept nil) \
+        (let ((i 0)) \
+          (while (and (not (and np-ran np-hooked)) (< i 50)) \
+            (eval '(unwind-protect (setq np-big (make-list 300000 nil)) nil) t) \
+            (setq i (1+ i))) \
+          (setq post-gc-hook nil) \
+          (list np-ran np-hooked (< i 50))))");
+    assert_eq!(value, "(t t t)", "the finalizer and the hook ran within the loop");
+}
+
+/// A protected form run again and again from native code (`Vm::execute'),
+/// with no back-jump or call to poll at: the cleanup's entry collects,
+/// however the cleanup ends, and a doomed finalizer runs at the execution's
+/// end, a safe point.
+#[test]
+fn protected_forms_run_from_native_code_collect() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_collection_floor(1);
+    vm.eval_source("(progn (defvar nx-big nil) (defvar nx-ran nil) (defvar nx-kept nil))").unwrap();
+    vm.eval_source("(progn (setq nx-kept (make-finalizer (lambda () (setq nx-ran t)))) nil)").unwrap();
+    vm.eval_source("(setq nx-kept nil)").unwrap();
+    let completing = vm.compile_source("(unwind-protect (setq nx-big (make-list 300000 nil)) nil)").unwrap();
+    let failing = vm.compile_source("(unwind-protect (setq nx-big (make-list 300000 nil)) (error \"cleanup failed\"))").unwrap();
+    let before = vm.heap_stats().collections;
+    for _ in 0..20 {
+        vm.execute(completing).unwrap();
+    }
+    let completed = vm.heap_stats().collections;
+    assert!(completed > before, "the cleanups' entries collected");
+    assert_eq!(vm.eval_source("nx-ran").unwrap().display().unwrap(), "t", "and an execution's end ran the finalizer");
+    for _ in 0..20 {
+        let error = vm.execute(failing).map(|_| ()).unwrap_err();
+        assert!(format!("{error:?}").contains("cleanup failed"), "{error:?}");
+    }
+    assert!(vm.heap_stats().collections > completed, "a cleanup that fails still collected at its entry");
+}
+
+/// The long finalizer's run keeps its order when the collection that doomed
+/// it ran at a cleanup's entry, leaving its aftermath pending: an explicit
+/// `garbage-collect' in that cleanup runs it at once, and no poll inside the
+/// long finalizer starts another run. Nor when a wait for input
+/// (`romacs--timer-check-idle') starts the run, outside any cleanup.
+#[test]
+fn a_long_finalizer_run_from_a_cleanup_or_a_wait_keeps_its_order() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar lf-log nil) (defvar lf-big nil) \
+        (fset 'lf-spin (lambda (n) (let ((i 0)) (while (< i n) (setq i (1+ i)))))) \
+        (fset 'lf-note (lambda (tag) (setq lf-log (cons tag lf-log)))) t)");
+    // Each in a top-level form of its own: a register of the running one
+    // keeps what it held alive (VM2-GC-FINALIZER).
+    let long = "(progn \
+        (make-finalizer (lambda () (lf-note 'a-begin) (lf-spin 300000) (lf-note 'a-end))) \
+        (make-finalizer (lambda () (lf-note 'b))) nil)";
+    let report = "(prog1 (list (eq (car lf-log) 'hook) (sort (mapcar 'symbol-name lf-log) 'string-lessp) \
+                               (eq (car (cdr (memq 'a-end lf-log))) 'a-begin)) \
+                    (setq lf-log nil post-gc-hook nil lf-big nil))";
+    let ran = "(t (\"a-begin\" \"a-end\" \"b\" \"hook\") t)";
+    eval(&mut vm, long);
+    let cleanup = eval(&mut vm, &format!("(progn (setq post-gc-hook '((lambda () (lf-note 'hook)))) \
+        (unwind-protect (setq lf-big (make-list 400000 nil)) (garbage-collect)) {report})"));
+    assert_eq!(cleanup, ran, "an explicit collection in the cleanup");
+    eval(&mut vm, long);
+    // A collection with no engine leaves them pending for the wait.
+    vm.collect_garbage();
+    let idle = eval(&mut vm, &format!("(progn (setq post-gc-hook '((lambda () (lf-note 'hook)))) \
+        (romacs--timer-check-idle) {report})"));
+    assert_eq!(idle, ran, "a wait for input");
+}
+
+/// Sol's case against deferring the aftermath only to a cleanup's first poll:
+/// a big string's primitive return zeroes the budget, the body throws, and the
+/// cleanup's first form calls a Lisp function, whose entry polls. A doomed
+/// finalizer that throws to the surrounding catch must not run there, inside
+/// the cleanup: the cleanup sets its marker, the body's throw is caught, and
+/// the finalizer runs at the landing, its throw no longer caught.
+#[test]
+fn a_cleanup_whose_first_call_polls_runs_whole() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar sb-marker nil) (defvar sb-ran nil) (defvar sb-kept nil) (defvar sb-big nil) \
+        (fset 'sb-mark (lambda () (setq sb-marker t))) t)");
+    eval(&mut vm, "(progn (setq sb-kept (make-finalizer (lambda () (setq sb-ran t) (throw 'sb-out 'finalizer)))) nil)");
+    let value = eval(&mut vm, "(list (catch 'sb-out \
+          (unwind-protect (progn (setq sb-kept nil) (setq sb-big (make-string 16000000 ?x)) (throw 'sb-out 'body)) \
+            (sb-mark))) \
+        sb-marker sb-ran)");
+    assert_eq!(value, "(body t t)", "the cleanup ran whole, then the finalizer");
+}
+
+/// A wait for input reached inside a cleanup is no safe point: a prompt's
+/// idle collection (`romacs--collect-idle') and the idle pass's timer check
+/// (`romacs--timer-check-idle') run no finalizer there; after the cleanup the
+/// next poll does.
+#[test]
+fn a_wait_for_input_inside_a_cleanup_runs_no_aftermath() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar wi-ran nil) (defvar wi-kept nil) t)");
+    eval(&mut vm, "(progn (setq wi-kept (make-finalizer (lambda () (setq wi-ran t)))) nil)");
+    let value = eval(&mut vm, "(progn (setq wi-kept nil) \
+        (let (inside) \
+          (unwind-protect nil \
+            (setq inside (list (romacs--collect-idle) (progn (romacs--timer-check-idle) wi-ran)))) \
+          (list inside (progn (romacs--safepoint) wi-ran))))");
+    assert_eq!(value, "((t nil) t)", "collected inside the cleanup, finalized after it");
+}
+
+/// A watcher an escape's unbinding runs is unwinding too: a collection its
+/// allocation makes due there runs no finalizer inside it; the landing does.
+#[test]
+fn a_watcher_run_while_unwinding_starts_no_aftermath() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar wv-var nil) (defvar wv-in nil) (defvar wv-log nil) (defvar wv-kept nil) (defvar wv-big nil) \
+        (fset 'wv-spin (lambda () (let ((i 0)) (while (< i 30000) (setq i (1+ i)))))) \
+        (add-variable-watcher 'wv-var (lambda (_symbol _new operation _where) \
+          (when (eq operation 'unlet) \
+            (setq wv-in t wv-big (make-list 400000 nil)) (wv-spin) (setq wv-in nil)))) t)");
+    eval(&mut vm, "(progn (setq wv-kept (make-finalizer (lambda () (setq wv-log (cons wv-in wv-log))))) nil)");
+    let value = eval(&mut vm, "(list (catch 'wv-out (let ((wv-var 1)) (setq wv-kept nil) (throw 'wv-out 'body))) wv-log)");
+    assert_eq!(value, "(body (nil))", "the finalizer ran once, outside the watcher");
+}
+
+/// A public request's end is a safe point: the finalizer a collection at
+/// that boundary dooms runs before the result is handed back, not at some
+/// later engine's poll.
+#[test]
+fn a_request_finishes_what_its_boundary_collected() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar rb-ran nil) (defvar rb-kept nil) t)");
+    eval(&mut vm, "(progn (setq rb-kept (make-finalizer (lambda () (setq rb-ran t)))) nil)");
+    let before = vm.heap_stats().collections;
+    eval(&mut vm, "(progn (setq rb-kept nil) (make-list 2000000 nil) nil)");
+    assert!(vm.heap_stats().collections > before, "the request's boundary collected");
+    assert_eq!(eval(&mut vm, "rb-ran"), "t", "and finished");
+}
+
+/// A request's end keeps its outcome rooted across the aftermath it runs: a
+/// pending finalizer that makes a moving collection there leaves the fresh
+/// result whole, and an error comes back unchanged.
+#[test]
+fn a_request_end_keeps_its_outcome_across_its_aftermath() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_moving(true);
+    vm.eval_source("(progn (defvar ro-ran 0) (defvar ro-kept nil) t)").unwrap();
+    // Doomed by a collection with no engine, so pending at the next request's end.
+    let doom = |vm: &mut Vm| {
+        vm.eval_source("(progn (setq ro-kept (make-finalizer (lambda () (setq ro-ran (1+ ro-ran)) (garbage-collect)))) nil)").unwrap();
+        vm.eval_source("(setq ro-kept nil)").unwrap();
+        vm.collect_garbage();
+    };
+    doom(&mut vm);
+    let before = vm.heap_stats().collections;
+    let value = vm.eval_source("(list 1 2 (copy-sequence \"three\"))").unwrap().display().unwrap();
+    assert!(vm.heap_stats().collections > before, "the finalizer collected at the request's end");
+    assert_eq!(value, "(1 2 \"three\")", "the result was forwarded");
+    doom(&mut vm);
+    let error = vm.eval_source("(error \"kept %s\" 'outcome)").map(|_| ()).unwrap_err();
+    assert!(error.contains("kept outcome"), "{error}");
+    assert_eq!(vm.eval_source("ro-ran").unwrap().display().unwrap(), "2", "both finalizers ran");
+}
+
+/// A nested request whose end collects (a mode line's `:eval', inside
+/// Lisp) is no safe point of its own; what it doomed is its caller's next
+/// poll, soon: a loop of them sees its finalizer run.
+#[test]
+fn a_nested_request_end_collection_is_finished_soon() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_stress(0);
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar nr-ran nil) (defvar nr-kept nil) t)");
+    eval(&mut vm, "(progn (setq nr-kept (make-finalizer (lambda () (setq nr-ran t)))) nil)");
+    let value = eval(&mut vm, "(progn (setq nr-kept nil) \
+        (let ((i 0) (before gcs-done)) \
+          (while (and (not nr-ran) (< i 50)) \
+            (format-mode-line '(:eval (progn (make-list 400000 nil) \"x\"))) \
+            (setq i (1+ i))) \
+          (list nr-ran (< i 50) (> gcs-done before))))");
+    assert_eq!(value, "(t t t)", "collected inside the mode line, finalized within the loop");
+}
+
+/// A quit due as a protected body ends is not taken entering its cleanup,
+/// where its escape would drop the cleanup unrun, but at the next ordinary
+/// poll, as GNU's: the cleanup runs, then the quit.
+#[test]
+fn a_quit_due_entering_a_cleanup_waits_for_the_next_poll() {
+    let form = "(let ((cleaned nil)) \
+        (condition-case nil \
+            (progn (unwind-protect (setq quit-flag t) (setq cleaned t)) \
+                   (let ((i 0)) (while (< i 20000) (setq i (1+ i)))) 'no-quit) \
+          (quit (list 'quit cleaned))))";
+    let (gnu, candidate) = gnu_and_candidate(&[], form);
+    assert_eq!(gnu, "(quit t)", "pinned GNU");
+    assert_eq!(candidate, gnu, "candidate");
+}
+
+/// Signal-time callbacks (`signal-hook-function', `handler-bind', a
+/// debugger) run before any control is popped: an escape from them only
+/// replaces the signal, so they hold no aftermath back, and a finalizer
+/// doomed while one runs, here a long `signal-hook-function', runs inside
+/// it. `handler-bind' and the debugger are called from the same point
+/// before the hold, so this one case covers them by construction. (The allocation is a string: its payload brings the next poll
+/// forward, where conses alone would wait out the engine's budget.)
+#[test]
+fn a_signal_time_callback_holds_no_aftermath_back() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_collection_floor(1);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    eval(&mut vm, "(progn (defvar sh-ran nil) (defvar sh-in-hook nil) (defvar sh-kept nil) (defvar sh-big nil) t)");
+    // A top-level form of its own, kept only in SH-KEPT (VM2-GC-FINALIZER).
+    eval(&mut vm, "(progn (setq sh-kept (make-finalizer (lambda () (setq sh-ran (if sh-in-hook 'in-hook 'after))))) nil)");
+    let value = eval(&mut vm, "(let ((signal-hook-function \
+                                  (lambda (_symbol _data) \
+                                    (setq sh-in-hook t sh-kept nil) \
+                                    (let ((i 0)) \
+                                      (while (and (not sh-ran) (< i 50)) \
+                                        (setq sh-big (make-string 300000 ?x)) \
+                                        (setq i (1+ i)))) \
+                                    (setq sh-in-hook nil)))) \
+                             (list (condition-case nil (signal 'error nil) (error 'caught)) sh-ran))");
+    assert_eq!(value, "(caught in-hook)", "the finalizer ran inside the signal-time hook");
+}
+
+/// A collection inside a run of finalizers, here a finalizer's own
+/// `garbage-collect', runs as an ordinary one, but its `post-gc-hook' is the
+/// run's, which runs once after the finalizers; GNU runs it again inside the
+/// finalizer first.
+#[test]
+fn a_collection_in_a_finalizer_leaves_the_hook_to_its_run() {
+    let setup = "(progn (defvar nf-log nil) (fset 'nf-note (lambda (x) (setq nf-log (cons x nf-log)))) t)";
+    // A top-level form of its own: a register of the running one keeps what
+    // it held alive (VM2-GC-FINALIZER).
+    let doom = "(progn (make-finalizer (lambda () (nf-note (if (consp (garbage-collect)) 'fin-gc 'fin-nil)))) nil)";
+    let check = "(progn (setq post-gc-hook '((lambda () (nf-note 'hook)))) \
+          (garbage-collect) \
+          (setq post-gc-hook nil) \
+          (reverse nf-log))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup, doom], check);
+    assert_eq!(gnu, "(hook fin-gc hook)", "pinned GNU");
+    assert_eq!(candidate, "(fin-gc hook)", "candidate");
+}
+
+/// Finalizers and `post-gc-hook' end an automatic collection inside
+/// whatever code allocated, which keeps its match data and current buffer
+/// (VM2-POST-GC), as a process filter's caller does; GNU's hook overwrites
+/// both.
+#[test]
+fn post_gc_work_keeps_the_match_data_and_buffer_it_interrupted() {
+    let setup = "(progn (set-buffer (get-buffer-create \"md-subject\")) (insert \"abc\") (goto-char 1) \
+        (re-search-forward \"b\") \
+        (defvar md-finalized nil) \
+        (make-finalizer (lambda () (setq md-finalized t) (string-match \"z\" \"xz\") (set-buffer (get-buffer-create \" md-other\")))) \
+        (setq post-gc-hook (list (lambda () (string-match \"q\" \"aq\") (set-buffer (get-buffer-create \" md-other\"))))) \
+        nil)";
+    let automatic = "(let ((buffer (current-buffer)) (data (match-data)) (done gcs-done) (i 0)) \
+          (while (< i 3000000) (cons i nil) (setq i (1+ i))) \
+          (setq post-gc-hook nil) \
+          (list (> gcs-done done) md-finalized (eq buffer (current-buffer)) (equal data (match-data))))";
+    // And after an explicit `garbage-collect', whose caller GNU's hook
+    // leaves in its buffer with its match data.
+    let explicit = "(progn (set-buffer (get-buffer-create \"md-subject\")) (goto-char 1) (re-search-forward \"b\") \
+          (setq post-gc-hook (list (lambda () (string-match \"q\" \"aq\") (set-buffer (get-buffer-create \" md-other\"))))) \
+          (let ((buffer (current-buffer)) (data (match-data))) \
+            (garbage-collect) \
+            (setq post-gc-hook nil) \
+            (list (eq buffer (current-buffer)) (equal data (match-data)))))";
+    let (gnu, candidate) = gnu_and_candidate(&[setup], &format!("(list {automatic} {explicit})"));
+    assert_eq!(gnu, "((t t nil nil) (nil nil))", "pinned GNU");
+    assert_eq!(candidate, "((t t t t) (t t))", "candidate");
+}
+
 /// `gcs-done' and `gc-elapsed' count every collection, `garbage-collect'
 /// and automatic ones (alloc.c:6004); `garbage-collect-maybe' collects only
 /// past 1/FACTOR of the automatic trigger's allocation (alloc.c:6110).
@@ -184,4 +776,23 @@ fn collection_counters_and_garbage_collect_maybe() {
     vm.install_lisp_prelude().unwrap();
     let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
     assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
+}
+
+/// A collection's record reads its pause finer than a 120 Hz frame needs, in
+/// milliseconds, the same pause `gc-elapsed' counted.
+#[test]
+fn a_collections_record_reads_its_pause_to_the_microsecond() {
+    let mut vm = Vm::new();
+    // Under a stress run an automatic collection would come first.
+    vm.set_gc_stress(0);
+    let out = vm.eval_source("(progn
+                                (romacs--take-collections)
+                                (let ((before gc-elapsed))
+                                  (garbage-collect)
+                                  (let* ((record (car (cdr (romacs--take-collections))))
+                                         (ms (car (cdr record))))
+                                    (list (car record) (floatp ms) (> ms 0.0)
+                                          (< (abs (- ms (* 1000.0 (- gc-elapsed before)))) 0.01)))))")
+        .unwrap().display().unwrap();
+    assert_eq!(out, "(explicit t t t)");
 }

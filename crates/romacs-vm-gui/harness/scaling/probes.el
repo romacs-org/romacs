@@ -2776,6 +2776,46 @@ closures over a mutable variable (each a closure and a cell)."
           (garbage-collect)
           (scaling--churn n)))
 
+(defvar scaling--live nil
+  "What the `gc-mark' and `gc-long-vector' probes keep alive.")
+
+(scaling-probe gc-mark :n 100000
+  ;; Collections over N live items of every kind the collector's threads
+  ;; trace, kept by a list.  Mark and sweep are linear in the tables, on
+  ;; however many threads; the harness counts them on one (scaling_live.py).
+  :setup (let ((all nil))
+           (dotimes (i n)
+             (let ((x i)) (push (list x (vector x x) (make-string 8 ?x) (lambda () (setq x (1+ x)))) all)))
+           (setq scaling--live all)
+           nil)
+  :body (dotimes (_ 3) (garbage-collect)))
+
+(scaling-probe gc-long-vector :n 1000000
+  ;; One vector of N conses, too long for one thread's turn: it goes out in
+  ;; parts, and the parts cost what the slots do.
+  :setup (let ((v (make-vector n nil)))
+           (dotimes (i n) (aset v i (cons i nil)))
+           (setq scaling--live v)
+           nil)
+  :body (dotimes (_ 3) (garbage-collect)))
+
+(defvar scaling--finalized 0
+  "Finalizers the `gc-doomed-finalizers' collection has run.")
+
+(scaling-probe gc-doomed-finalizers :n 20000
+  ;; N finalizers made unreachable together, in the counted body, whose
+  ;; collection dooms them all and whose run drains them in order.  A queue
+  ;; shifted at each removal grows as the square of N.  The last one made may
+  ;; stay in a register.
+  :setup nil
+  :body (progn
+          (setq scaling--finalized 0)
+          (dotimes (_ n)
+            (make-finalizer (lambda () (setq scaling--finalized (1+ scaling--finalized)))))
+          (garbage-collect)
+          (unless (>= scaling--finalized (1- n))
+            (error "%d of %d finalizers ran" scaling--finalized n))))
+
 ;; Code retirement (request_code.rs, Program::retire_code): N functions
 ;; compiled, lowered by a call and dropped in each step, each with a site
 ;; on a primitive and one on a leaf; the host's idle

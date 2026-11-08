@@ -219,6 +219,12 @@ fn launch(store: &Path) {
     }
 }
 
+fn collector_threads() -> usize {
+    std::fs::read_dir("/proc/self/task").unwrap()
+        .filter(|task| std::fs::read_to_string(task.as_ref().unwrap().path().join("comm")).is_ok_and(|name| name.starts_with("romacs-gc")))
+        .count()
+}
+
 /// Adopt the file the parent named: what the arena made of it, and of a
 /// second adoption.
 fn probe() {
@@ -410,16 +416,20 @@ fn heap(store: &Path) {
 
 /// In a process whose heap is its first arena: a large block freed at the
 /// top gives its pages back, but for a bounded slack above the top; short
-/// free runs below the top keep theirs until a collection, even one that
-/// finds everything live, and the census then counts them released.
+/// free runs below the top keep theirs until an idle collection, even one
+/// that finds everything live, and the census then counts them released.
+/// Its collections use no threads, whose pool would land in the heap, which
+/// in a builder is the image.
 fn trim() {
     let block = vec![1u8; 64 << 20];
     let touched = resident();
     drop(block);
     let census = arena::census().unwrap();
     let (returned, slack) = (touched - resident() >= 48 << 20, census.above_top <= 4 << 20);
+    romacs_vm::set_gc_workers(4);
     let mut vm = Vm::new();
     vm.collect_garbage();
+    let alone = collector_threads() == 0;
     // 64 runs of 32 pages, each held apart by a live 10-page run.
     let (mut runs, mut apart) = (Vec::new(), Vec::new());
     for _ in 0..64 {
@@ -428,10 +438,10 @@ fn trim() {
     }
     drop(runs);
     let (kept, before) = (arena::census().unwrap(), resident());
-    vm.collect_garbage();
+    assert!(vm.collect_garbage_until_key());
     let after = arena::census().unwrap();
     let released = after.runs_released - kept.runs_released;
-    println!("WORLD-IMAGE {}", json!({"returned": returned, "slack": slack,
+    println!("WORLD-IMAGE {}", json!({"returned": returned, "slack": slack, "alone": alone,
                                        "collected": before - resident() >= 6 << 20 && released >= 6 << 20}));
     drop(apart);
 }
@@ -445,7 +455,7 @@ fn a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_pea
     let store = scratch.join("store");
     assert_eq!(outcome(&mut child_of(HEAP, "launch", &store)), restored());
     assert_eq!(outcome(&mut child_of(HEAP, "heap", &store)), json!({"outside": true, "used_kept": true}).to_string());
-    assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "collected": true}).to_string());
+    assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "alone": true, "collected": true}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

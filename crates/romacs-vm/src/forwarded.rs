@@ -426,7 +426,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "use-system-tooltips", gnu: "frame.c:7727", kind: Kind::Bool(true) },
     CVariable { name: "user-init-file", gnu: "lread.c:5684", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "values", gnu: "lread.c:5555", kind: Kind::Lisp(Init::Nil) },
-    // Run after a collection, at the next safe point (`romacs--run-finalizers').
+    // Run at the end of a collection (`romacs--run-finalizers').
     CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
     // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
     // the command loop's run it (rlisp/vm/keyboard.el, echo.rs).

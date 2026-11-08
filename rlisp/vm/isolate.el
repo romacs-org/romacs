@@ -88,7 +88,14 @@ computing it again.  An error in FUNCTION is ignored.")
 (defvar isolate-job-memory-headroom (* 64 1024 1024)
   "Bytes a job on a forked child may grow its heap by.
 Allocation below this runs no collection, whose garbage dies with the
-child; live growth past it signals memory exhaustion in the job.")
+child.  A child runs under the value its zygote was made with, from its
+fork for its whole life: a collection that finds live growth past it ends
+the child at once, and the job's reply is an `isolate-memory-exhausted'
+error whose data is (BUDGET), that budget in bytes.  The job's handlers,
+finalizers, `post-gc-hook' and cleanups never see it.  The commands it
+reported get SIGHUP to their groups at its death, as at any worker's; one
+it could not report or cannot reach, or one that ignores SIGHUP, outlives
+it, as after a crash.")
 
 (defvar isolate-pool-memory-limit (* 1024 1024 1024)
   "Bytes the pool may hold, sampled as proportional memory, with
@@ -164,6 +171,10 @@ spawner to run on a worker with the features they were queued for.")
 (define-error 'isolate-timeout "Isolate wait timed out" 'isolate-error)
 (define-error 'isolate-refused "Isolate refused" 'isolate-error)
 (define-error 'isolate-retired "Isolate retired" 'isolate-error)
+;; The job failed, not its isolate: an `error', which its awaiter's
+;; `error' handler catches.  Data: (BUDGET), in bytes.
+(define-error 'isolate-memory-exhausted
+  "Memory exhausted: the job grew past its budget, isolate-job-memory-headroom")
 
 ;;;; Records
 
@@ -775,6 +786,11 @@ have sent), its futures settle, the event is reported, and it is forgotten."
       (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
         (run-hook-with-args 'isolate-error-functions isolate event (list data children))))))
 
+(defun romacs--isolate-memory-error (budget)
+  "A job's reply when its child ended for growing past BUDGET bytes."
+  (list 'isolate-memory-exhausted (list budget) nil
+        (get 'isolate-memory-exhausted 'error-conditions)))
+
 (defun romacs--isolate-resubmit-or-fail (future)
   "Queue FUTURE's job again elsewhere, or settle it with the error that stops it."
   (condition-case err
@@ -811,6 +827,14 @@ have sent), its futures settle, the event is reported, and it is forgotten."
                   (romacs--isolate-resolve (cdr entry) (if (eq kind 'result) 'done 'error) (car value))))))
            ((eq kind 'message)
             (run-hook-with-args 'isolate-message-functions isolate value))
+           ((eq kind 'memory)
+            ;; A job child ending for growing past its budget, the one its
+            ;; zygote record holds, its death next: its job's reply,
+            ;; `isolate-memory-exhausted', and its end no news. Only a job's
+            ;; child sends it.
+            (when (eq (aref isolate 10) 'job)
+              (aset isolate 3 'retired)
+              (romacs--isolate-settle isolate 'error (romacs--isolate-memory-error (aref (aref isolate 11) 13)))))
            ((eq kind 'died)
             (romacs--isolate-dead isolate 'isolate-died value)))))))
   (romacs--isolate-drain-waiting))
@@ -1140,14 +1164,16 @@ gone gets nothing."
             (list 'error (list 'isolate-retired nil nil '(isolate-retired isolate-error error))))
            (t
             (condition-case err
-                (prog1
-                    (progn
-                      ;; The job runs under its generation, inside this
-                      ;; handler: an interrupt naming it quits here, once
-                      ;; (the safepoint clears the mark as it quits), and
-                      ;; its memory budget binds from here on, thawing its
-                      ;; arguments included.
-                      (romacs--isolate-running generation)
+                ;; The job runs under its claim, a marker above this
+                ;; handler's entry (`romacs--isolate-claim'): an interrupt
+                ;; naming it quits here, once (the safepoint clears the claim
+                ;; as it quits). The claim ends as that entry goes: at the
+                ;; job's end, as an escape lands here, or by a caught panic.
+                ;; Its memory budget is no claim's: a child's binds from its
+                ;; fork (`romacs--isolate-run-forks') for its whole life.
+                (progn
+                  (romacs--isolate-claim generation)
+                  (prog1
                       (let ((args (thaw (nth 1 job)))
                             (bindings (thaw (nth 2 job))))
                         (dolist (feature require) (require feature))
@@ -1155,12 +1181,13 @@ gone gets nothing."
                         (when directory (setq default-directory directory))
                         (list 'result
                               (apply (if (and (consp function) (eq (car function) 'lambda)) (eval function t) function)
-                                     args))))
-                  (romacs--isolate-running nil))
-              (quit (romacs--isolate-running nil)
-                    (list 'error (list 'quit nil nil '(quit))))
-              (error (romacs--isolate-running nil)
-                     (list 'error (list (car err) (romacs--isolate-transportable (cdr err)) nil
+                                     args)))
+                    ;; The job's end, inside its claim and handler: a
+                    ;; collection due, its memory (which replaces the
+                    ;; result), what collections left pending.
+                    (romacs--safepoint)))
+              (quit (list 'error (list 'quit nil nil '(quit))))
+              (error (list 'error (list (car err) (romacs--isolate-transportable (cdr err)) nil
                                         (get (car err) 'error-conditions)))))))))
     ;; The preparation loads the worker's baseline features; a later job
     ;; that loads more retires the worker: the spawner reuses it no more and

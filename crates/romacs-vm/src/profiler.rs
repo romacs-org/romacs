@@ -91,7 +91,7 @@ impl Log {
 }
 
 /// The allocation funnels' byte count where the memory meter last read it
-/// (gc.rs `FreeEntries::allocated').
+/// (gc.rs `Allocation::allocated').
 #[derive(Clone, Copy)]
 struct HeapMark(u64);
 
@@ -238,12 +238,12 @@ impl Vm {
         log.record(scratch, count, || trace().collect(), identity);
     }
     fn heap_mark(&self) -> HeapMark {
-        HeapMark(self.free.allocated)
+        HeapMark(self.allocation.allocated)
     }
     /// Bytes allocated since MARK: GNU's malloc_probe sizes, an entry and
     /// its payload as the allocation funnels count them (data.rs).
     fn allocated_since(&self, mark: HeapMark) -> i64 {
-        self.free.allocated.saturating_sub(mark.0).min(i64::MAX as u64) as i64
+        self.allocation.allocated.saturating_sub(mark.0).min(i64::MAX as u64) as i64
     }
     fn profiler_log(&self) -> Log {
         let depth = self.forwarded.integer("profiler-max-stack-depth").clamp(0, i32::MAX as i64) as usize;

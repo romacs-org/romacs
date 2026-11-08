@@ -708,9 +708,9 @@ impl Vm {
         let (conses, objects) = self.place(&decoded, place, &symbols).map_err(FreezeError::Failed)?;
         let tables: Vec<usize> = objects.iter().enumerate().filter(|(_, o)| matches!(o, Object::HashTable(_))).map(|(i, _)| i).collect();
         let profiled: usize = objects.iter().map(crate::data::profiled_bytes).sum();
-        self.free.allocated += (conses.len() * size_of::<(Value, Value)>() + profiled) as u64;
-        self.free.consed.conses += conses.len() as u64;
-        objects.iter().for_each(|object| self.free.consed.count(object));
+        self.allocation.allocated += (conses.len() * size_of::<(Value, Value)>() + profiled) as u64;
+        self.allocation.consed.conses += conses.len() as u64;
+        objects.iter().for_each(|object| self.allocation.consed.count(object));
         self.conses.extend(conses);
         self.charge_payload(objects.iter().map(crate::data::payload_bytes).sum());
         self.objects.extend(objects);
@@ -722,8 +722,8 @@ impl Vm {
             // Its placeholder was charged empty (above).
             let empty = match &self.objects[base + i] { Object::HashTable(t) => t.storage_bytes(false), _ => 0 };
             let filled = table.storage_bytes(false).saturating_sub(empty);
-            self.free.allocated += filled as u64;
-            self.free.consed.vector_cells += (filled / size_of::<Value>()) as u64;
+            self.allocation.allocated += filled as u64;
+            self.allocation.consed.vector_cells += (filled / size_of::<Value>()) as u64;
             self.objects[base + i] = Object::HashTable(Box::new(table));
         }
         Ok(place.value(decoded.root, &symbols))

@@ -166,6 +166,7 @@ impl Vm {
             self.slots[slot].value = Value::NIL;
         }
         self.environment_snapshot = None;
+        self.isolate_forget_claim();
     }
 
     /// A top-level FORM of a loaded file ends: a re-seed form's variable is

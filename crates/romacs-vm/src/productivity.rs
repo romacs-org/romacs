@@ -50,17 +50,30 @@ impl Vm {
         if n == 0 {
             return Err("wrong primitive arity".into());
         }
+        // Copied out: `format_values' takes the whole VM.
+        let mut short = [Value::NIL; 8];
+        if n <= short.len() {
+            short[..n].copy_from_slice(&self.stack[start..start + n]);
+            return self.format_values(&short[..n], None);
+        }
         let arguments = self.stack[start..start + n].to_vec();
         self.format_values(&arguments, None)
     }
 
     pub(crate) fn format_values(&mut self, arguments: &[Value], quoting_style: Option<&str>) -> Result<Value> {
         let format_value = arguments[0];
-        let format = self
-            .str_view(format_value)
-            .ok_or("string required")?
-            .to_owned();
+        let format = self.str_view(format_value).ok_or("string required")?;
         let byte_template = !format.is_multibyte();
+        // The template as codes: on the stack when short, as most are.
+        let (mut short, long): ([u32; 32], Vec<u32>);
+        let codes: &[u32] = if format.len() <= 32 {
+            short = [0; 32];
+            format.chars().zip(&mut short).for_each(|(code, slot)| *slot = code);
+            &short[..format.len()]
+        } else {
+            long = format.chars().collect();
+            &long
+        };
         let mut out = Vec::new();
         let mut raw_high = false;
         let mut raw_ranges = Vec::new();
@@ -68,15 +81,19 @@ impl Vm {
         let message_multibyte = !byte_template || arguments[1..].iter()
             .any(|&value| self.str_view(value).is_some_and(|s| s.is_multibyte()));
         let mut argument = 0usize;
-        let codes = format.chars().collect::<Vec<_>>();
         let mut chars = codes.iter().copied().peekable();
         // For styled_format's properties (editfns.c:4315): where each format
-        // character lands in OUT, and each field's span with its argument.
-        let mut landing = vec![0usize; codes.len() + 1];
+        // character lands in OUT, kept only for a template that has any, and
+        // each field's span with its argument.
+        let styled = self.string_properties(format_value).is_some_and(|p| !p.is_empty());
+        let mut landing = vec![0usize; if styled { codes.len() + 1 } else { 0 }];
+        let land = |landing: &mut [usize], range: std::ops::Range<usize>, at: usize| {
+            if styled { landing[range].fill(at); }
+        };
         let mut fields: Vec<(std::ops::Range<usize>, Value)> = Vec::new();
         while let Some(c) = chars.next() {
             let at = codes.len() - chars.len() - 1;
-            landing[at] = out.len();
+            land(&mut landing, at..at + 1, out.len());
             if c != b'%' as u32 {
                 // Only literal template characters are requoted (GNU editfns.c).
                 // Text produced by %s/%S is never passed through this branch.
@@ -105,7 +122,7 @@ impl Vm {
             if let Some(index) = spec.argument { argument = index; }
             if spec.conversion == '%' {
                 // The first `%' is discarded; the second is copied.
-                landing[at + 1..spec_end].fill(out.len());
+                land(&mut landing, at + 1..spec_end, out.len());
                 out.push(b'%');
                 continue;
             }
@@ -144,6 +161,8 @@ impl Vm {
                 let printed = crate::symkey::to_internal(&printed).unwrap_or_else(|| printed.into_bytes());
                 let rule = if spec.counts_columns() { Some(self.width_rule()?) } else { None };
                 spec.text(printed, true, rule.as_ref())
+            } else if let Some(number) = value.integer_value().filter(|_| !matches!(spec.conversion, 'e' | 'f' | 'g')) {
+                spec.fixnum(number).into_bytes()
             } else {
                 let numeric = if matches!(spec.conversion, 'e' | 'f' | 'g') {
                     if let Some(number) = self.bigint_value(value)
@@ -160,7 +179,7 @@ impl Vm {
                             let number = self.number(value).map_err(|_| "Format specifier doesn't match argument type")?;
                             if !number.is_finite() && matches!(spec.conversion, 'd' | 'i') {
                                 out.extend_from_slice(spec.float(number).as_bytes());
-                                landing[at + 1..spec_end].fill(out.len());
+                                land(&mut landing, at + 1..spec_end, out.len());
                                 continue;
                             }
                             number.to_bigint().ok_or("floating-point overflow")?
@@ -178,17 +197,16 @@ impl Vm {
                 unicode_high |= !piece.is_ascii();
             }
             out.extend_from_slice(&piece);
-            landing[at + 1..spec_end].fill(out.len());
+            land(&mut landing, at + 1..spec_end, out.len());
             if spec.conversion == 's' && self.string_properties(value).is_some_and(|p| !p.is_empty()) {
                 // styled_format (editfns.c:3786-3797): with a propertied
                 // format string the field's left padding takes the
                 // argument's properties too; without one it does not.
-                let fmt_props = self.string_properties(format_value).is_some_and(|p| !p.is_empty());
-                let start = if fmt_props { field_start } else { field_start + leading };
+                let start = if styled { field_start } else { field_start + leading };
                 fields.push((start..out.len(), value));
             }
         }
-        landing[codes.len()] = out.len();
+        land(&mut landing, codes.len()..codes.len() + 1, out.len());
         if unicode_high && raw_high {
             // GNU promotes each unibyte octet separately, never as UTF-8.
             // Preserve source spans so literal Unicode and byte8 characters

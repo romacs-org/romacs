@@ -27,6 +27,7 @@ mod interpreted_closure;
 mod oclosure;
 mod host_input;
 mod quit;
+pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
 mod bidi;
 mod layout_host;
@@ -70,8 +71,8 @@ type NameSet<K> = std::collections::HashSet<K, NameState>;
 /// foldhash's own `RandomState` reads a seed each process draws anew.
 #[derive(Clone)]
 pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
-// Its own seed is a number, and its shared seed the one `default` leaked
-// to the heap, never foldhash's global one in a writable static.
+// SAFETY: its own seed is a number, and its shared seed the one `default`
+// leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
 
 impl Default for NameState {
@@ -103,6 +104,9 @@ mod undo;
 mod insdel;
 mod indirect;
 mod gc;
+mod gc_check;
+mod gc_mark;
+mod table;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
@@ -1378,6 +1382,10 @@ pub struct Vm {
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
+    /// Variables whose watchers run now, each trapped again as its call ends
+    /// (`Vm::notify_watchers_at'), or as a panic unwinds past it
+    /// (`UnwindMark').
+    retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
@@ -1466,6 +1474,10 @@ pub struct Vm {
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
+    /// Where the last collection's time went (`romacs--gc-phases').
+    gc_times: gc::GcTimes,
+    /// What the last mark counted (`garbage-collect's statistics).
+    gc_census: gc::Census,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1474,8 +1486,9 @@ pub struct Vm {
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
     /// Payload since the last collection crossed another `POLL_PAYLOAD'
-    /// bytes: the engine polls, and collects if due, at its next jump or
-    /// call (`leave_native'), as GNU's maybe_gc runs at every call.
+    /// bytes, or an engine ended with a collection's aftermath pending: the
+    /// engine polls, and collects if due, at its next jump or call
+    /// (`leave_native'), as GNU's maybe_gc runs at every call.
     collect_poll: bool,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
@@ -1487,10 +1500,9 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
-    /// In a child forked for one job: the heap it was forked with, the
-    /// growth over it allowed now, and the grace added after each signal of
-    /// exhaustion, in objects (`Vm::set_job_budget`).
-    job_budget: Option<(usize, usize, usize)>,
+    /// In a child forked for one job: the heap it was forked with and the
+    /// growth over it allowed, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize)>,
     /// The payload the last collection kept, as allocation charges it
     /// (`data::payload_bytes`), measured only for a job's budget
     /// (`Vm::job_live`).
@@ -1507,8 +1519,8 @@ pub struct Vm {
     rooted_write: bool,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,
-    /// The tables' free entries and allocation meter (gc.rs).
-    free: gc::FreeEntries,
+    /// What the funnels have handed out (gc.rs).
+    allocation: gc::Allocation,
     names: NameMap<String, usize>,
     /// By slot, whether `names' maps the slot's name to it: membership of
     /// the initial obarray, answered without hashing the name.
@@ -1544,8 +1556,8 @@ pub struct Vm {
     /// By argument count, the permanent function through which native code
     /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
     reader_trampolines: Vec<Option<usize>>,
-    closures: Vec<Closure>,
-    cells: Vec<Value>,
+    closures: table::Table<Closure>,
+    cells: table::Table<Value>,
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
@@ -1566,8 +1578,8 @@ pub struct Vm {
     recent_keys: std::collections::VecDeque<RecentKey>,
     /// keyboard.c lossage_limit: how many RECENT_KEYS entries are kept.
     lossage_limit: usize,
-    conses: Vec<(Value, Value)>,
-    objects: Vec<data::Object>,
+    conses: table::Table<(Value, Value)>,
+    objects: table::Table<data::Object>,
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
@@ -1593,9 +1605,19 @@ pub struct Vm {
     finalizers: Vec<Value>,
     /// alloc.c's `doomed_finalizers': unreachable finalizers kept alive
     /// until `romacs--run-finalizers' calls their functions.
-    doomed_finalizers: Vec<Value>,
-    /// A collection ended since `post-gc-hook' last ran (`Vm::post_gc_runs').
+    doomed_finalizers: std::collections::VecDeque<Value>,
+    /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// What holds a collection's automatic aftermath back, over every engine:
+    /// each escape `threaded::route_escape' is unwinding, each live resume
+    /// record (a cleanup running) and each run of aftermath in progress
+    /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
+    /// zero whenever no engine runs.
+    aftermath_held: usize,
+    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
+    /// interrupt naming the job waits (`threaded::isolate_quit'), so
+    /// finalizers and `post-gc-hook' never take it.
+    aftermath_runs: usize,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1659,6 +1681,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     keymap_generation,
     environment_snapshot,
     trapped,
+    retrap,
     doc_file,
     terminal_bindings,
     pending_specials,
@@ -1690,6 +1713,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     local_binding_slots,
     free_local_binding_slots,
     gc_stats,
+    gc_times,
+    gc_census,
     collection_log,
     gc_retained,
     gc_payload_bytes,
@@ -1700,7 +1725,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     running_engines,
     rooted_write,
     gc_stress,
-    free,
+    allocation,
     suspended_stacks,
     gc_floor,
     job_budget,
@@ -1742,6 +1767,8 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
+    aftermath_held,
+    aftermath_runs,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1808,7 +1835,7 @@ impl Vm {
         self.private_objects() + self.region_weight()
     }
     pub(crate) fn private_objects(&self) -> usize {
-        self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len() - self.free.len()
+        self.conses.live() + self.cells.live() + self.closures.live() + self.objects.live()
     }
     pub fn new() -> Self {
         // emacs_wd is taken when Emacs starts, not when first used.
@@ -1878,6 +1905,7 @@ impl Vm {
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
+            retrap: Vec::new(),
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
@@ -1917,6 +1945,8 @@ impl Vm {
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
+            gc_times: Default::default(),
+            gc_census: Default::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
@@ -1930,7 +1960,7 @@ impl Vm {
             running_engines: 0,
             rooted_write: false,
             gc_stress: gc::Stress::from_env(),
-            free: gc::FreeEntries::default(),
+            allocation: Default::default(),
             names: NameMap::default(),
             initial_obarray: Vec::new(),
             symbol_names: vec![],
@@ -1951,8 +1981,8 @@ impl Vm {
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),
-            closures: vec![],
-            cells: vec![],
+            closures: Default::default(),
+            cells: Default::default(),
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             fence: None,
@@ -1962,8 +1992,8 @@ impl Vm {
             local_zone: LocalZone::Process,
             recent_keys: std::collections::VecDeque::new(),
             lossage_limit: RECENT_KEYS,
-            conses: vec![],
-            objects: vec![],
+            conses: Default::default(),
+            objects: Default::default(),
             referrers: None,
             local_owners: None,
             completion_walks: 0,
@@ -1972,8 +2002,10 @@ impl Vm {
             stack: vec![],
             external_roots: vec![],
             finalizers: vec![],
-            doomed_finalizers: vec![],
+            doomed_finalizers: Default::default(),
             post_gc_due: false,
+            aftermath_held: 0,
+            aftermath_runs: 0,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -4165,7 +4197,7 @@ mod capture_tests {
         let mut roots = [value];
         vm.collect(&mut roots);
         assert_eq!(
-            vm.conses.len() - vm.free.of(0),
+            vm.conses.live(),
             1,
             "closure must not retain the unused cons"
         );

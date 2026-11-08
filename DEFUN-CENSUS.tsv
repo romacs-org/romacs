@@ -390,7 +390,6 @@ w32notify-rm-watch	absent	platform: MS-Windows build only
 w32notify-valid-p	absent	platform: MS-Windows build only
 window-at	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-bump-use-time	needed	lane A (editing, windows, frames, minibuffer readers, display)
-window-configuration-equal-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-cursor-info	absent	no shipped Lisp calls it and it is no command
 window-cursor-type	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-lines-pixel-dimensions	needed	lane A (editing, windows, frames, minibuffer readers, display)

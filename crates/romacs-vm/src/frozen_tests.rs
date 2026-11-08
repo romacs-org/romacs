@@ -133,9 +133,9 @@ fn a_thawed_table_is_charged_its_entries() {
     let mut vm = vm();
     eval(&mut vm, "(setq pt-full (make-hash-table) pt-empty (make-hash-table)) (dotimes (i 1000) (puthash i i pt-full)) (setq pt-full (freeze pt-full) pt-empty (freeze pt-empty))");
     let mut charged = |name: &str| {
-        let before = vm.free.allocated;
+        let before = vm.allocation.allocated;
         assert_eq!(eval(&mut vm, &format!("(hash-table-p (thaw {name}))")), "t");
-        vm.free.allocated - before
+        vm.allocation.allocated - before
     };
     let (empty, full) = (charged("pt-empty"), charged("pt-full"));
     assert!(full >= empty + 1000 * 24, "1000 entries charged {full}, none {empty}");

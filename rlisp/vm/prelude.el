@@ -942,24 +942,49 @@ CONDITIONS or has a regexp matching ERROR's message."
 
 ;;; Finalizers
 
-(defun romacs--run-finalizers (&optional value)
+(defvar romacs--post-gc-owned nil
+  "Non-nil while a `romacs--run-finalizers' that took a collection's
+`post-gc-hook' is active: a run started by a collection inside it leaves
+the hook to it.  Never buffer-local: a hook that switches buffer must
+still see it.")
+
+(defun romacs--run-finalizers ()
   "alloc.c run_finalizers: call the function of each finalizer the
 collections since the last run found unreachable, once each, with quits
 inhibited; a signal is logged to *Messages*, as `add_to_log' does.  Then
-`post-gc-hook', if a collection ended since it last ran.
-Return VALUE, the statistics of the collection that ran it."
-  (dolist (function (romacs--take-doomed-finalizers))
-    (let ((inhibit-quit t))
-      (condition-case err
-          (funcall function)
-        (t (let ((inhibit-message t))
-             (message "finalizer failed: %S" err))))))
-  ;; garbage_collect's end, with collection inhibited.
-  (when (romacs--take-post-gc)
-    (romacs--hold-collection t)
-    (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
-      (romacs--hold-collection nil)))
-  value)
+`post-gc-hook', if a collection ended since it last ran and the hook has a
+function once the finalizers are done (one may have added it).  This run
+owns that collection's hook from the start, so it runs after the finalizers.
+
+Collection is not inhibited (VM2-POST-GC): a collection inside the run, in a
+finalizer or the hook, is an ordinary one that runs its own finalizers; its
+hook is this run's, which runs once.  The run takes its work before it
+allocates, and a run with nothing to do returns at once.  It runs at a safe
+point after the collection, inside whatever code runs there, and keeps that
+code's match data and current buffer, as for a process filter."
+  ;; Quits wait from before anything is taken: a finalizer taken is emptied.
+  (let* ((inhibit-quit t)
+         (collected (and (not romacs--post-gc-owned) (romacs--take-post-gc)))
+         (function (romacs--take-doomed-finalizer)))
+    (when (or function (and collected post-gc-hook))
+      (let* ((romacs--post-gc-owned (or romacs--post-gc-owned collected))
+             (match-data (match-data)))
+        (save-current-buffer
+          (unwind-protect
+              (progn
+                (while function
+                  (condition-case err
+                      (funcall function)
+                    (t (let ((inhibit-message t))
+                         (message "finalizer failed: %S" err))))
+                  (setq function (romacs--take-doomed-finalizer)))
+                ;; As garbage_collect, the hook is looked at after the
+                ;; finalizers: one may have added to it.
+                (when (and collected post-gc-hook)
+                  (unwind-protect (romacs--safe-run-hooks 'post-gc-hook)
+                    ;; The collections that ended while it ran were its own.
+                    (romacs--take-post-gc))))
+            (set-match-data match-data t)))))))
 
 ;;; Evaluating buffer text: lread.c readevalloop
 

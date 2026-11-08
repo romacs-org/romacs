@@ -9,28 +9,27 @@ impl Leaf<'_> {
         self.vm.finalizers.push(finalizer);
         finalizer
     }
-    /// run_finalizers' first half: the functions of the doomed finalizers,
-    /// oldest first, each finalizer emptied so that it never runs again.
-    /// Whether `post-gc-hook' is due; it is not after this.
+    /// Whether a collection ended since the last call: the caller, not a
+    /// later poll, now owns running `post-gc-hook' for it, which it looks
+    /// at after the finalizers, as GNU's `garbage_collect' does.
     pub(crate) fn take_post_gc(&mut self) -> bool {
-        let due = self.vm.post_gc_runs();
-        self.vm.post_gc_due = false;
-        due
+        std::mem::take(&mut self.vm.post_gc_due)
     }
-    /// alloc.c inhibit_garbage_collection, and its unwinding when not ON.
-    pub(crate) fn hold_collection(&mut self, on: bool) {
-        if on { self.vm.gc_holds += 1; } else { self.vm.gc_holds -= 1; }
-    }
-    pub(crate) fn take_doomed_finalizers(&mut self) -> Value {
-        let mut functions = vec![];
-        for finalizer in std::mem::take(&mut self.vm.doomed_finalizers) {
+    /// run_finalizers' step: the function of the oldest doomed finalizer
+    /// that has one, the finalizer emptied so that it never runs again, or
+    /// nil. One at a time, so a `throw' out of one leaves the rest doomed.
+    pub(crate) fn take_doomed_finalizer(&mut self) -> Value {
+        while let Some(finalizer) = self.vm.doomed_finalizers.pop_front() {
             if let data::Object::Finalizer(function) = &mut self.vm.objects[finalizer.payload() as usize - 1] {
-                functions.push(std::mem::replace(function, Value::NIL));
+                let function = std::mem::replace(function, Value::NIL);
+                if function != Value::NIL { return function; }
             }
         }
-        let mut list = Value::NIL;
-        for function in functions.into_iter().rev().filter(|f| *f != Value::NIL) { list = self.cons(function, list); }
-        list
+        Value::NIL
+    }
+    /// `Vm::gc_phases'.
+    pub(crate) fn gc_phases(&mut self) -> Value {
+        self.vm.gc_phases()
     }
     /// The usage log's read of the collections since its last.
     pub(crate) fn take_collections(&mut self) -> Value {

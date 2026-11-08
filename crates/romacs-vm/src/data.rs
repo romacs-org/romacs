@@ -14,14 +14,6 @@ const POLL_PAYLOAD: usize = 256 << 10;
 /// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
 /// next collection: a string's text, a vector's or record's slots, a bool
 /// vector's bits.
-/// The slots a collection traces in OBJECT beyond the object itself.
-pub(super) fn traced_slots(object: &Object) -> usize {
-    match object {
-        Object::Vector(slots) | Object::Record(slots) => slots.len(),
-        _ => 0,
-    }
-}
-
 /// What the memory profiler charges for OBJECT when it is made: the entry
 /// and the storage `heap_stats' counts as live (GNU's malloc_probe sizes).
 pub(super) fn profiled_bytes(object: &Object) -> usize {
@@ -94,7 +86,7 @@ pub(super) enum Object {
     ByteBuffer(Box<bytes::ByteBuffer>),
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
-    /// A free table entry (gc.rs `sweep_tables`): no Value names it but a
+    /// A free table entry (table.rs `sweep`): no Value names it but a
     /// stale one, which finds no object here.
     Free,
 }
@@ -474,21 +466,12 @@ impl Vm {
         self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
     }
     /// A new object: the lowest free entry of the table, else a new one
-    /// (gc.rs `FreeEntries'). Every object enters here.
+    /// (`table.rs'). Every object enters here.
     pub(super) fn allocate_object(&mut self, object: Object) -> Value {
         self.charge_payload(payload_bytes(&object));
-        self.free.allocated += profiled_bytes(&object) as u64;
-        self.free.consed.count(&object);
-        let index = match self.free.objects.pop() {
-            Some(index) => {
-                self.objects[index as usize] = object;
-                index as usize
-            }
-            None => {
-                self.objects.push(object);
-                self.objects.len() - 1
-            }
-        };
+        self.allocation.allocated += profiled_bytes(&object) as u64;
+        self.allocation.consed.count(&object);
+        let index = self.objects.alloc(object);
         if let Some(referrers) = &mut self.referrers { referrers.list(index, &self.objects[index]); }
         Value::reference(index + 1, 0)
     }
@@ -513,51 +496,22 @@ impl Vm {
     /// A new cons (CAR . CDR), as `allocate_object' makes an object.
     #[inline]
     pub(super) fn alloc_cons(&mut self, car: Value, cdr: Value) -> Value {
-        self.free.allocated += size_of::<(Value, Value)>() as u64;
-        self.free.consed.conses += 1;
-        let index = match self.free.conses.pop() {
-            Some(index) => {
-                self.conses[index as usize] = (car, cdr);
-                index as usize
-            }
-            None => {
-                self.conses.push((car, cdr));
-                self.conses.len() - 1
-            }
-        };
-        Value::reference(index, 3)
+        self.allocation.allocated += size_of::<(Value, Value)>() as u64;
+        self.allocation.consed.conses += 1;
+        Value::reference(self.conses.alloc((car, cdr)), 3)
     }
     /// A new cell holding VALUE: its index (a cell Value is tag 5).
     #[inline]
     pub(super) fn alloc_cell(&mut self, value: Value) -> usize {
-        self.free.allocated += size_of::<Value>() as u64;
-        match self.free.cells.pop() {
-            Some(index) => {
-                self.cells[index as usize] = value;
-                index as usize
-            }
-            None => {
-                self.cells.push(value);
-                self.cells.len() - 1
-            }
-        }
+        self.allocation.allocated += size_of::<Value>() as u64;
+        self.cells.alloc(value)
     }
     /// A new closure.
     #[inline]
     pub(super) fn alloc_closure(&mut self, closure: Closure) -> Value {
-        self.free.allocated += (size_of::<Closure>() + (closure.captures.len() + closure.metadata.len()) * size_of::<Value>()) as u64;
-        self.free.consed.vector_cells += (size_of::<Closure>() / size_of::<Value>() + closure.captures.len() + closure.metadata.len()) as u64;
-        let index = match self.free.closures.pop() {
-            Some(index) => {
-                self.closures[index as usize] = closure;
-                index as usize
-            }
-            None => {
-                self.closures.push(closure);
-                self.closures.len() - 1
-            }
-        };
-        Value::reference(index, 4)
+        self.allocation.allocated += (size_of::<Closure>() + (closure.captures.len() + closure.metadata.len()) * size_of::<Value>()) as u64;
+        self.allocation.consed.vector_cells += (size_of::<Closure>() / size_of::<Value>() + closure.captures.len() + closure.metadata.len()) as u64;
+        Value::reference(self.closures.alloc(closure), 4)
     }
     /// The object V names, private or frozen (`frozen.rs`); never an
     /// executable-image string, which `string_value` reads.

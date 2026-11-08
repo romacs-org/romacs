@@ -84,8 +84,9 @@ fn subword_mode_moves_as_pinned_gnu() {
 }
 
 /// `post-gc-hook' after a collection, against pinned GNU: once per
-/// collection, after the finalizers, with collection inhibited (`garbage-collect'
-/// in it answers nil), and a function that signals leaves the hook.
+/// collection, after the finalizers, and a function that signals leaves the
+/// hook. (A collection inside it differs on purpose: VM2-POST-GC,
+/// romacs-vm's `garbage_collect' tests.)
 #[test]
 fn post_gc_hook_runs_as_pinned_gnu() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
@@ -94,7 +95,7 @@ fn post_gc_hook_runs_as_pinned_gnu() {
     std::fs::create_dir_all(&dir).unwrap();
     let form = "(progn
       (setq post-gc-log nil)
-      (add-hook 'post-gc-hook (lambda () (push (list 'hook (garbage-collect)) post-gc-log)))
+      (add-hook 'post-gc-hook (lambda () (push 'hook post-gc-log)))
       (eval '(progn (make-finalizer (lambda () (push 'finalizer post-gc-log))) nil) t)
       (garbage-collect)
       (garbage-collect)

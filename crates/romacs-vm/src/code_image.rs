@@ -169,7 +169,7 @@ impl Vm {
             .closures
             .iter()
             .map(|c| {
-                // A free entry (gc.rs `sweep_tables') keeps its position as a
+                // A free entry (table.rs `sweep') keeps its position as a
                 // closure of the entry function, which captures nothing.
                 if c.function == usize::MAX {
                     return Ok(json!([entry, [], [], Value::NIL.0]));
@@ -741,7 +741,7 @@ mod image_alias_tests {
         source.eval_source("(setq image-junk (list \"aa\" \"bbb\" (let ((y 1)) (lambda () y)))) (setq image-kept (list \"kkkk\" 7)) (defalias 'image-f (let ((x 3)) (lambda () x))) (setq image-junk nil)").unwrap();
         source.clear_source_cache();
         source.collect_garbage();
-        assert!(!source.free.objects.is_empty() && !source.free.closures.is_empty(), "the sweep left free entries below live ones");
+        assert!(source.objects.unused() > 0 && source.closures.unused() > 0, "the sweep left free entries below live ones");
         let entry = source.compile(&Form::Sym("image-kept".into())).unwrap();
         let key = source.publish_code_image(&path, entry, [64; 32]).unwrap();
         let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();

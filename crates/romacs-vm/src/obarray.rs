@@ -156,7 +156,7 @@ impl Vm {
         let text = text.as_str();
         let symbol = if initial { self.intern(text) } else {
             let id = expand::generated_id();
-            let slot = if let Some(slot) = self.obarray_free_slots.pop() { self.free.consed.reused_symbols += 1; slot } else {
+            let slot = if let Some(slot) = self.obarray_free_slots.pop() { self.allocation.consed.reused_symbols += 1; slot } else {
                 let slot = self.slots.len();
                 self.slots.push(Slot::new()); self.symbol_names.push(String::new()); slot
             };
