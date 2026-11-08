@@ -28,10 +28,11 @@ def main():
     icons = subprocess.run([sys.executable, '-B', 'tools/icon_font.py', 'check', '--root', str(root)], cwd=root)
     fonts = subprocess.run([sys.executable, '-B', 'tools/bundled_fonts.py', 'check', '--root', str(root)], cwd=root)
     grammars = subprocess.run([sys.executable, '-B', 'tools/treesit_grammars.py', 'check', '--root', str(root)], cwd=root)
-    if layout.returncode or oracle.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode:
+    unsafe = subprocess.run([sys.executable, '-B', 'tools/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
+    if layout.returncode or oracle.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode:
         return 1
     print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
-          'lisp/ is the GNU pin; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts and the bundled grammars\' sources verified')
+          'lisp/ is the GNU pin; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources and the unsafe floors verified')
     return 0
 
 
