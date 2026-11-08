@@ -1,7 +1,7 @@
 <!-- perfbench-lead-begin -->
 # Romacs
 
-<a href="https://thanosapollo.org/romacs/romacs.mp4"><img src="https://thanosapollo.org/romacs/romacs.webp" alt="Romacs and GNU Emacs logging Emacs's whole history side by side"></a>
+<a href="https://thanosapollo.org/romacs/romacs.mp4"><img src="assets/readme/romacs.webp" alt="Romacs and GNU Emacs logging Emacs's whole history side by side"></a>
 
 Emacs Lisp on a new machine: a Rust runtime, a GPU-rendered display, and worker
 VMs that keep you typing while real work runs beside it.  Your packages, your
