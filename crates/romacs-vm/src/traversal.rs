@@ -267,7 +267,12 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
 /// else arrives leaves by tail call.
 macro_rules! half {
     ($name:ident, $general:ident, $field:tt) => {
-        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+        /// # Safety
+        /// R is the running engine's current frame (`Engine::regs`) and PC an
+        /// instruction of the function running in it: the registers and constants
+        /// its operands name lie in that frame and code, as lowering checked.
+        pub(super) unsafe fn $name(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+            // SAFETY: R and PC as the function's contract (`# Safety`).
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
@@ -289,7 +294,12 @@ macro_rules! half {
 macro_rules! handler {
     ($(#[$attribute:meta])* $name:ident, $p:ident) => {
         $(#[$attribute])*
-        pub(super) unsafe fn $name(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+        /// # Safety
+        /// R is the running engine's current frame (`Engine::regs`) and PC an
+        /// instruction of the function running in it: the registers and constants
+        /// its operands name lie in that frame and code, as lowering checked.
+        pub(super) unsafe fn $name(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+            // SAFETY: R and PC as the function's contract (`# Safety`).
             unsafe {
                 let i = &*pc;
                 let x = *r.add(i.d);
@@ -313,7 +323,12 @@ handler!(eq, Eq);
 handler!(memq, Memq);
 handler!(assq, Assq);
 // GNU plist_get, the eq walk of a two-argument `plist-get'.
-pub(super) unsafe fn plist_get(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
+/// # Safety
+/// R is the running engine's current frame (`Engine::regs`) and PC an
+/// instruction of the function running in it: the registers and constants
+/// its operands name lie in that frame and code, as lowering checked.
+pub(super) unsafe fn plist_get(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
+    // SAFETY: R and PC as the function's contract (`# Safety`).
     unsafe {
         let i = &*pc;
         let Some(value) = plist_get_eq(e.vm, *r.add(i.d), *r.add(i.d + 1)) else {

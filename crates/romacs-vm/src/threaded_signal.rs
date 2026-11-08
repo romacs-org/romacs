@@ -65,28 +65,29 @@ pub(super) fn release_control(e: &mut Engine<'_>, control: &Control) {
 
 /// A normalized error has already completed its non-unwinding search.  Carry
 /// its selected condition target through eval/load and cleanup unchanged.
-pub(super) fn prepare_signal(e: &mut Engine<'_>, hooked: bool, failed_depth: Option<usize>) -> bool {
-    let mut replaced = false;
-    if !hooked && let Some(&Escape::Signal(condition, data)) = e.escape.as_ref()
-        && let Some(replacement) = signal_hook(e, condition, data, failed_depth)
-    {
-        e.escape = Some(replacement);
-        replaced = true;
+/// The pending escape (`e.escape`) is engine state, traced, while the hook,
+/// the handlers and the debugger run Lisp. Whether one replaced it.
+pub(super) fn prepare_signal<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, hooked: bool, failed_depth: Option<usize>) -> bool {
+    // Only a signal is the hook's, and only one not yet normalized searched:
+    // a throw or a region's normal end routes with no Lisp at all.
+    let signal = m.leaf((), |e, ()| matches!(e.escape, Some(Escape::Signal(..))));
+    if !signal {
+        return false;
     }
-    if let Some(Escape::Signal(condition, data)) = e.escape.as_ref() {
-        let condition = *condition;
+    let mut replaced = !hooked && signal_hook(m, gc.by_ref(), failed_depth);
+    let signalled = m.leaf((), |e, ()| {
+        let Some(&Escape::Signal(condition, data)) = e.escape.as_ref() else { return false };
         let object = e.vm.list_value(&[condition]);
         let index = object.index(3).unwrap();
-        e.vm.conses[index].1 = *data;
+        e.vm.conses[index].1 = data;
         let conditions = e.vm.signal_conditions(condition);
         e.escape = Some(Escape::Error { condition, object, conditions, target: None });
-        replaced |= search(e);
-        if !replaced && debugger_wanted(e)
-            && let Some(Escape::Error { conditions, object, .. }) = e.escape.as_ref()
-            && let Some(replacement) = call_debugger(e, *conditions, *object, failed_depth)
-        {
-            e.escape = Some(replacement);
-            prepare_signal(e, false, None);
+        true
+    });
+    if signalled {
+        replaced |= search(m, gc.by_ref());
+        if !replaced && m.leaf((), |e, ()| debugger_wanted(e)) && call_debugger(m, gc.by_ref(), failed_depth) {
+            prepare_signal(m, gc, false, None);
             replaced = true;
         }
     }
@@ -146,68 +147,98 @@ fn debugger_wanted(e: &mut Engine<'_>) -> bool {
 /// The Lisp half of maybe_call_debugger's tests.
 pub(super) const DEBUGGER_HELPER: &str = "romacs--call-debugger-p";
 
-fn search(e: &mut Engine<'_>) -> bool {
-    let mut at = e.vm.signal_handlers.len();
+/// What a handler search finds at one handler.
+enum Found {
+    /// The search ends here (a boundary, or a condition case that takes it).
+    Stop,
+    /// A mask: resume below it.
+    Skip(usize),
+    /// Nothing here.
+    Next,
+    /// A `handler-bind' handler to call: its function and the error object
+    /// rooted in the frame, and its group.
+    Bind(RootFrame, usize),
+}
+// SAFETY: a root frame and indices.
+unsafe impl Plain for Found {}
+fn search<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>) -> bool {
+    let mut at = m.leaf((), |e, ()| e.vm.signal_handlers.len());
     while at != 0 {
         at -= 1;
-        let handler = e.vm.signal_handlers[at].clone();
-        let Some(Escape::Error { condition, object, conditions, .. }) = e.escape.as_ref() else { break; };
-        let (condition, conditions, object) = (*condition, *conditions, *object);
-        match handler {
-            SignalHandler::Mask(skip) => at = skip,
-            SignalHandler::Boundary => {
-                if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
-                break;
+        let found = m.leaf(at, |e, at| {
+            let handler = e.vm.signal_handlers[at].clone();
+            let Some(Escape::Error { condition, object, conditions, .. }) = e.escape.as_ref() else { return Found::Stop };
+            let (condition, conditions, object) = (*condition, *conditions, *object);
+            match handler {
+                SignalHandler::Mask(skip) => Found::Skip(skip),
+                SignalHandler::Boundary => {
+                    if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
+                    Found::Stop
+                }
+                SignalHandler::Condition(choices) if matches(e.vm, conditions, choices) => {
+                    if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
+                    Found::Stop
+                }
+                SignalHandler::Bind { conditions: choices, function, group } if matches(e.vm, conditions, choices) => {
+                    e.vm.publish_signal_conditions(condition, conditions);
+                    Found::Bind(e.vm.root_frame(&[function, object]), group)
+                }
+                _ => Found::Next,
             }
-            SignalHandler::Condition(choices) if matches(e.vm, conditions, choices) => {
-                if let Some(Escape::Error { target, .. }) = e.escape.as_mut() { *target = Some(at); }
-                break;
+        });
+        match found {
+            Found::Stop => break,
+            Found::Skip(skip) => at = skip,
+            Found::Next => {}
+            Found::Bind(frame, group) => {
+                if handler_callback(m, gc.by_ref(), frame, group) { return true; }
             }
-            SignalHandler::Bind { conditions: choices, function, group } if matches(e.vm, conditions, choices) => {
-                e.vm.publish_signal_conditions(condition, conditions);
-                if handler_callback(e, function, object, group) { return true; }
-            }
-            _ => {}
         }
     }
     false
 }
 
-/// Publish the suspended engine's copies before reader_call permits collection.
-/// The reader boundary owns register forwarding; this owner forwards controls
-/// and inline caches in place without moving their instruction allocations.
-fn handler_callback(e: &mut Engine<'_>, function: Value, object: Value, group: usize) -> bool {
-    let mask = e.vm.signal_handlers.len();
-    e.vm.signal_handlers.push(SignalHandler::Mask(group));
-    let roots = e.suspend_code();
-    let saved_depth = e.vm.eval_depth;
-    e.vm.eval_depth = e.depth_base + e.frames.len();
-    let token = e.vm.max_ensure_room(200);
-    let result = e.vm.reader_call(function, &[object]);
-    let replacement = e.vm.propagated_escape.take();
-    let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
-    let depth = e.vm.propagated_eval_depth.take();
-    e.resume_code(roots);
-    e.fatal_image_failure |= e.vm.execution_fatal;
-    e.code.resize_with(e.vm.functions.len(), Vec::new);
-    let r = e.regs;
-    if unsafe { widen_registers(e, r, e.vm.register_width) }.is_none() {
-        e.error = Some("register storage exhausted".into());
-        e.fatal_image_failure = true;
-    }
-    let escaped = match (result, replacement) {
-        (_, Some(escape)) => { e.escape = Some(escape); true }
-        (Err(error), None) => {
-            let message = e.vm.make_lisp_string(error.into_bytes(), true);
-            let data = e.vm.list_value(&[message]);
-            e.escape = Some(Escape::Signal(e.vm.intern("error"), data));
-            true
+/// A `handler-bind' handler's call: the engine suspended (its controls and
+/// inline caches forwarded in place, its instruction allocations unmoved),
+/// the reader boundary forwarding its registers; the handler's function and
+/// the error object rooted in FRAME.
+fn handler_callback<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, frame: RootFrame, group: usize) -> bool {
+    let (mask, saved_depth, token) = m.leaf(group, |e, group| {
+        let mask = e.vm.signal_handlers.len();
+        e.vm.signal_handlers.push(SignalHandler::Mask(group));
+        let saved_depth = std::mem::replace(&mut e.vm.eval_depth, e.depth_base + e.frames.len());
+        (mask, saved_depth, e.vm.max_ensure_room(200))
+    });
+    let (escaped, hooked, depth) = lend::callback(m, gc.by_ref(), &frame, (), |e, (), result| {
+        let replacement = e.vm.propagated_escape.take();
+        let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+        let depth = e.vm.propagated_eval_depth.take();
+        e.fatal_image_failure |= e.vm.execution_fatal;
+        e.code.resize_with(e.vm.functions.len(), Vec::new);
+        let (r, width) = (e.regs, e.vm.register_width);
+        // SAFETY: R is this engine's current frame, in the register stack.
+        if unsafe { widen_registers(e, r, width) }.is_none() {
+            e.error = Some("register storage exhausted".into());
+            e.fatal_image_failure = true;
         }
-        (Ok(_), None) => false,
-    };
-    if escaped { prepare_signal(e, hooked, depth); }
-    if let Some(old) = token { e.vm.restore_stack_limits(old); }
-    e.vm.eval_depth = saved_depth;
-    e.vm.signal_handlers.truncate(mask);
+        let escaped = match (result, replacement) {
+            (_, Some(escape)) => { e.escape = Some(escape); true }
+            (Err(error), None) => {
+                let message = e.vm.make_lisp_string(error.into_bytes(), true);
+                let data = e.vm.list_value(&[message]);
+                e.escape = Some(Escape::Signal(e.vm.intern("error"), data));
+                true
+            }
+            (Ok(_), None) => false,
+        };
+        (escaped, hooked, depth)
+    });
+    m.leaf(frame, |e, frame| e.vm.drop_frame(frame));
+    if escaped { prepare_signal(m, gc, hooked, depth); }
+    m.leaf((token, saved_depth, mask), |e, (token, saved_depth, mask)| {
+        if let Some(old) = token { e.vm.restore_stack_limits(old); }
+        e.vm.eval_depth = saved_depth;
+        e.vm.signal_handlers.truncate(mask);
+    });
     escaped
 }
