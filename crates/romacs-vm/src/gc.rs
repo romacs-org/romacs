@@ -1111,7 +1111,7 @@ impl Vm {
                     // Only a symbol interned in an obarray of its own can die.
                     let symbol = |slot: usize| in_obarray[slot].then(|| Value::reference(slot + 1, 7));
                     match op {
-                        Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _) | Op::DeclareSpecial(slot)
+                        Op::Global(_, slot) | Op::SetGlobal(slot, _) | Op::Bind(slot, _)
                         | Op::BindLate(slot, _) | Op::ReadLate(_, _, slot) | Op::WriteLate(_, _, slot)
                         | Op::Define(slot, _) | Op::DefineMacro(slot, _)
                         | Op::Sealed(_, slot, _, _) => pending.extend(symbol(slot)),

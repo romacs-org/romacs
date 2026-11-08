@@ -14,6 +14,8 @@ use romacs_vm::Vm;
 /// One expression per line. LOG is a watcher recording its arguments, with
 /// WHERE as a buffer name, and the value the variable had when it ran.
 const CASES: &str = r###"
+(let ((log nil) (w (lambda (&rest a) (setq log (cons (car a) log))))) (add-variable-watcher 'current-load-list w) (let ((current-load-list nil)) (setq log nil) (defvar wv-load 1) (defvaralias 'wv-load-alias 'wv-load) (defalias 'wv-load-f #'car) (provide 'wv-load-feature) (setq current-load-list nil)) (remove-variable-watcher 'current-load-list w) log)
+(mapcar (lambda (s) (list s (condition-case e (add-variable-watcher s #'ignore) (error e)) (condition-case e (remove-variable-watcher s #'ignore) (error e)) (get-variable-watchers s))) '(nil t :kw most-positive-fixnum))
 (progn (defvar wv-a 1) (setq log nil) (add-variable-watcher 'wv-a LOG) (setq wv-a 2) (let ((wv-a 3)) (setq wv-a 4)) (set 'wv-a 5) (makunbound 'wv-a) (list (nreverse log) (boundp 'wv-a) (length (get-variable-watchers 'wv-a))))
 (progn (defvar wv-b 1) (make-variable-buffer-local 'wv-b) (defvar wv-c 1) (setq log nil) (add-variable-watcher 'wv-b LOG) (add-variable-watcher 'wv-c LOG) (with-temp-buffer (setq wv-b 2) (set-default 'wv-b 3) (kill-local-variable 'wv-b) (make-local-variable 'wv-c) (setq wv-c 4) (set-default 'wv-c 5) (kill-local-variable 'wv-c) (setq wv-c 6)) (list (nreverse log) wv-b wv-c))
 (progn (defvar wv-d 1) (defvar wv-e 7) (setq log nil) (add-variable-watcher 'wv-d LOG) (defvaralias 'wv-d 'wv-e) (setq wv-e 8) (list (nreverse log) wv-d (indirect-variable 'wv-d)))

@@ -880,7 +880,6 @@ enum Op {
     Closure(usize, usize, usize),
     Define(usize, usize),
     DefineMacro(usize, usize),
-    DeclareSpecial(usize),
     Call(usize, usize, usize, usize),
     Direct(usize, usize, usize, usize, usize),
     /// A call GNU compiles to a byte code (sealed.rs): the primitive itself,
@@ -914,7 +913,6 @@ romacs_snapshot::snapshot_enum!(Op {
     Op::Closure(f0, f1, f2) => (f0, f1, f2),
     Op::Define(f0, f1) => (f0, f1),
     Op::DefineMacro(f0, f1) => (f0, f1),
-    Op::DeclareSpecial(f0) => (f0),
     Op::Call(f0, f1, f2, f3) => (f0, f1, f2, f3),
     Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
     Op::Sealed(f0, f1, f2, f3) => (f0, f1, f2, f3),
@@ -966,7 +964,6 @@ impl Op {
             }
             Self::Unbind(_)
             | Self::Jump(_)
-            | Self::DeclareSpecial(_)
             | Self::PopHandlers(_)
             | Self::ResumeExit => {}
         }
@@ -3008,19 +3005,18 @@ impl Vm {
                             return Err("cannot declare a constant".into());
                         }
                         let slot = self.slot(name);
-                        if let Some(doc) = rest.get(2) {
-                            if !matches!(doc, Form::Sym(s) if s == "nil") {
-                                let doc = Form::List(vec![Form::Sym("put".into()), Form::List(vec![Form::Sym("quote".into()), rest[0].clone()]), Form::List(vec![Form::Sym("quote".into()), Form::Sym("variable-documentation".into())]), Form::List(vec![Form::Sym("quote".into()), doc.clone()])]);
-                                self.expr(b, &doc)?;
-                            }
-                        }
                         if rest.len() > 1 {
                             self.pending_specials.insert(name.into());
-                            b.emit(Op::DeclareSpecial(slot));
+                            let quote = |form: &Form| Form::List(vec![Form::Sym("quote".into()), form.clone()]);
+                            let doc = quote(rest.get(2).unwrap_or(&Form::Sym("nil".into())));
                             if head == "defconst" {
-                                let r = self.expr(b, &rest[1])?;
-                                b.emit(Op::SetGlobal(slot, r));
+                                // eval.c Fdefconst: the value first, then Fdefconst_1.
+                                let define = Form::List(vec![Form::Sym("defconst-1".into()), quote(&rest[0]), rest[1].clone(), doc]);
+                                self.expr(b, &define)?;
                             } else {
+                                // eval.c defvar: declared before the value, for self-references.
+                                let declare = Form::List(vec![Form::Sym("internal--define-uninitialized-variable".into()), quote(&rest[0]), doc]);
+                                self.expr(b, &declare)?;
                                 let lowered = Form::List(vec![
                                     Form::Sym("if".into()),
                                     Form::List(vec![
@@ -3506,7 +3502,6 @@ impl Vm {
                     }
                     Op::Define(s, r) => format!("function s{s} = r{r}"),
                     Op::DefineMacro(s, r) => format!("macro s{s} = r{r}"),
-                    Op::DeclareSpecial(s) => format!("declare-special s{s}"),
                     Op::Call(d, t, start, n) => {
                         format!("r{d} = funcall r{t} args r{start} count {n}")
                     }
@@ -4043,7 +4038,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     targets.insert(end);
                 }
                 Op::LeaveProtect(r) => read(r),
-                Op::Unbind(_) | Op::PopHandlers(_) | Op::ResumeExit | Op::DeclareSpecial(_) => {}
+                Op::Unbind(_) | Op::PopHandlers(_) | Op::ResumeExit => {}
             }
         }
         let mut live: Vec<Option<Op>> = code.iter().copied().map(Some).collect();

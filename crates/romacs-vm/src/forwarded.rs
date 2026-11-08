@@ -154,6 +154,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // The signal path's debugger (threaded_signal.rs debugger_wanted, and
     // prims/prelude.el `romacs--maybe-call-debugger'); loadup.el sets
     // `debugger' to `debug' once the full debugger can load.
+    CVariable { name: "deactivate-mark", gnu: "keyboard.c:14030", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-ignored-errors", gnu: "eval.c:4497", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
     CVariable { name: "debug-on-quit", gnu: "eval.c:4510", kind: Kind::Bool(false) },
@@ -459,7 +460,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
 
 /// C variables GNU makes automatically buffer-local at startup
 /// (`Fmake_variable_buffer_local` in buffer.c, syntax.c, xdisp.c, ...).
-const AUTOMATICALLY_LOCAL: &[&str] = &["syntax-propertize--done", "case-symbols-as-words", "lexical-binding",
+const AUTOMATICALLY_LOCAL: &[&str] = &["syntax-propertize--done", "case-symbols-as-words", "deactivate-mark", "lexical-binding",
     "comment-end-can-be-escaped", "display-fill-column-indicator", "display-fill-column-indicator-character",
     "display-fill-column-indicator-column", "display-line-numbers", "display-line-numbers-offset",
     "display-line-numbers-widen", "display-line-numbers-width", "expose-hidden-buffer", "fontification-functions",
@@ -1785,8 +1786,8 @@ impl Vm {
 /// `file-coding-system-alist' and `set-auto-coding-function' from Lisp, VM2
 /// keeps nil). Declared special with GNU's C value so a `let' of one is
 /// dynamic and seen by the primitive, and buffer-local where packages make
-/// the change hooks and `deactivate-mark' local.
-const FILEIO_SPECIALS: [(&str, &str); 18] = [
+/// the change hooks local.
+const FILEIO_SPECIALS: [(&str, &str); 17] = [
     ("first-change-hook", "buffer.c:5738"),
     ("inhibit-read-only", "buffer.c:5897"),
     ("before-change-functions", "buffer.c:5704"),
@@ -1803,7 +1804,6 @@ const FILEIO_SPECIALS: [(&str, &str); 18] = [
     ("after-insert-file-functions", "fileio.c:6889"),
     ("write-region-annotate-functions", "fileio.c:6899"),
     ("write-region-post-annotation-function", "fileio.c:6925"),
-    ("deactivate-mark", "keyboard.c:14030"),
     // Initially nil; cus-start.el's delayed initializer chooses the default.
     ("temporary-file-directory", "filelock.c:814"),
 ];

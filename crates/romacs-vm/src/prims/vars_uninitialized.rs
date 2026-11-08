@@ -13,7 +13,7 @@ fn define_uninitialized_variable(cx, symbol: Value; optional doc: Value) {
     if doc != Value::NIL {
         cx.put_variable_documentation(symbol, doc)?;
     }
-    cx.attach_variable_history(symbol)?;
+    cx.attach_load_history(symbol)?;
     Ok(Value::NIL)
 }}
 
@@ -22,7 +22,7 @@ fn defvar_1(cx, symbol: Value, init: Value; optional doc: Value) {
     let bound = cx.default_cell(symbol);
     cx.declare_variable_special(symbol)?;
     if doc != Value::NIL { cx.put_variable_documentation(symbol, doc)?; }
-    cx.attach_variable_history(symbol)?;
+    cx.attach_load_history(symbol)?;
     match bound {
         Err(Fault::VoidVariable(_)) => { cx.default_cell_set(symbol, init)?; }
         Err(error) => return Err(error),

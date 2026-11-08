@@ -135,8 +135,7 @@ impl Vm {
         for f in &mut a.functions {
             for op in &mut f.code {
                 match op {
-                    Op::DeclareSpecial(s)
-                    | Op::Global(_, s)
+                    Op::Global(_, s)
                     | Op::SetGlobal(s, _)
                     | Op::Bind(s, _)
                     | Op::BindLate(s, _)
@@ -233,7 +232,6 @@ fn valid_artifact(a: &Artifact) -> bool {
                 Op::Protect(d, cleanup, end) => r(d) && jump(cleanup) && jump(end),
                 Op::LeaveProtect(d) => r(d),
                 Op::ResumeExit => true,
-                Op::DeclareSpecial(s) => s < a.symbols.len(),
                 Op::Jump(t) => jump(t),
                 Op::Unless(d, t) => r(d) && jump(t),
                 Op::Catch(d, x, t) => r(d) && r(x) && jump(t),

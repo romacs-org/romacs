@@ -598,7 +598,6 @@ impl Vm {
                     slot(s) && reg(r)
                 }
                 Op::Unbind(_) | Op::PopHandlers(_) | Op::ResumeExit => true,
-                Op::DeclareSpecial(s) => slot(s),
                 Op::LeaveProtect(r) => reg(r),
                 Op::Protect(d, cleanup, end) => reg(d) && target(cleanup) && target(end),
                 Op::Jump(t) => target(t),
@@ -660,7 +659,6 @@ pub(crate) fn encode_op(op: Op) -> Json {
         Catch(a, b, c) => json!([16, a, b, c]),
         Condition(a, v, c) => json!([17, a, v.0, c]),
         PopHandlers(a) => json!([18, a]),
-        DeclareSpecial(a) => json!([20, a]),
         DefineMacro(a, b) => json!([19, a, b]),
         Protect(a, b, c) => json!([21, a, b, c]),
         LeaveProtect(a) => json!([22, a]),
@@ -691,7 +689,6 @@ pub(crate) fn decode_op(v: &Json) -> Result<Op> {
         [16, a, b, c] => Catch(*a, *b, *c),
         [17, a, v, c] => Condition(*a, Value(*v as u64), *c),
         [18, a] => PopHandlers(*a),
-        [20, a] => DeclareSpecial(*a),
         [19, a, b] => DefineMacro(*a, *b),
         [21, a, b, c] => Protect(*a, *b, *c),
         [22, a] => LeaveProtect(*a),
