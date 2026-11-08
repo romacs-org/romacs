@@ -1889,14 +1889,17 @@ mod tests {
     }
 
     /// A burst swept while its last entry survives, then released: tables
-    /// shrink back whatever the burst's size.
+    /// shrink back whatever the burst's size. Each burst is past what a table
+    /// that took its reservation keeps for the next collection's allocations
+    /// (`Table::shrink'), which is the path of a process with no address-space
+    /// limit, a session's; one with a limit takes the other.
     #[test]
     fn a_collapsed_burst_leaves_no_capacity_behind() {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         vm.set_gc_verify(false);
         let mut after = vec![];
-        for n in [40_000, 80_000, 160_000] {
+        for n in [160_000, 320_000, 640_000] {
             let list = conses(&mut vm, n);
             let mut roots = [list[n as usize - 1]];
             vm.collect(&mut roots);

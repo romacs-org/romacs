@@ -13,7 +13,9 @@ test-threads = 24
 # Bound surviving tests without the retired legacy oracle's package overrides.
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
 
+# The collector's own unit tests run without the limit: a table takes its
+# reservation only with no address-space limit, as a session has.
 [[profile.default.scripts]]
-filter = 'all()'
+filter = 'not (package(romacs-vm) & kind(lib) & test(/^(gc|gc_mark|table)::/))'
 platform = { host = "cfg(target_os = \"linux\")" }
 run-wrapper = 'memory-limit'
