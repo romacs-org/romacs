@@ -99,7 +99,8 @@ pub(crate) struct CollectionRecord {
     pub(crate) idle: bool,
     /// Asked for by `garbage-collect' or the host.
     pub(crate) explicit: bool,
-    pub(crate) ms: u32,
+    /// Its pause in microseconds: a 120 Hz frame is 8.3 ms.
+    pub(crate) us: u32,
     /// The command it ran in or at the end of, "anonymous" for a closure: a
     /// key ended the last idleness and nothing has begun another.
     pub(crate) command: Option<String>,
@@ -109,7 +110,7 @@ pub(crate) struct CollectionRecord {
     /// seen, and one pressed waits.
     pub(crate) redisplay: bool,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -956,8 +957,8 @@ impl Vm {
         let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
         let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
         let key = command.is_none() && self.host_key_pending();
-        let ms = (elapsed_ns / 1_000_000).min(u32::MAX as u64) as u32;
-        self.collection_log.records.push(CollectionRecord { idle, explicit, ms, command, key, redisplay });
+        let us = (elapsed_ns / 1_000).min(u32::MAX as u64) as u32;
+        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay });
     }
     /// The running command's name, or the last one's in the command loop's
     /// tail (`romacs--command-loop-top' has cleared the running one).
@@ -972,6 +973,7 @@ impl Vm {
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
     /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
+    /// MS a float, the pause in milliseconds to the microsecond,
     /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
@@ -986,7 +988,7 @@ impl Vm {
             };
             let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
             let kind = self.intern(kind);
-            let ms = Value::integer(record.ms as i64).expect("milliseconds fit fixnum");
+            let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
             let mut row = self.keymap_cons(command, Value::NIL);
             row = self.keymap_cons(met, row);
             row = self.keymap_cons(ms, row);

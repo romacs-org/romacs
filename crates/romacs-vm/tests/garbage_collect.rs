@@ -777,3 +777,20 @@ fn collection_counters_and_garbage_collect_maybe() {
     let printed = vm.eval_source(&format!("(prin1-to-string {check})")).unwrap().display().unwrap();
     assert_eq!(printed, serde_json::to_string(expected).unwrap(), "candidate");
 }
+
+/// A collection's record reads its pause finer than a 120 Hz frame needs, in
+/// milliseconds, the same pause `gc-elapsed' counted.
+#[test]
+fn a_collections_record_reads_its_pause_to_the_microsecond() {
+    let mut vm = Vm::new();
+    let out = vm.eval_source("(progn
+                                (romacs--take-collections)
+                                (let ((before gc-elapsed))
+                                  (garbage-collect)
+                                  (let* ((record (car (cdr (romacs--take-collections))))
+                                         (ms (car (cdr record))))
+                                    (list (car record) (floatp ms) (> ms 0.0)
+                                          (< (abs (- ms (* 1000.0 (- gc-elapsed before)))) 0.01)))))")
+        .unwrap().display().unwrap();
+    assert_eq!(out, "(explicit t t t)");
+}
