@@ -328,6 +328,9 @@ otherwise (an eval chip, romacs-eval-chip.el), and no toast shows.")
   "The tab stops of a toast's text: its buffer's `tab-width', and its
 shaping's, whatever the buffer the message came from.")
 
+(defvar romacs-layer--toast-lasting nil
+  "The buffers of toasts the echo area's clearing leaves (`romacs-layer-notify').")
+
 (defvar romacs-layer--toasts nil
   "The toasts shown, newest first: each (BUFFER SHOWN TIMER TEXT COLUMNS),
 SHOWN the text as it fits (`romacs-layer--toast-text'), TEXT the
@@ -596,6 +599,7 @@ downward, newest on top; a toast that would pass its bottom waits hidden."
 
 (defun romacs-layer--toast-expire (buffer)
   "Hide the toast showing BUFFER and close up the stack."
+  (setq romacs-layer--toast-lasting (delq buffer romacs-layer--toast-lasting))
   (setq romacs-layer--toasts (seq-remove (lambda (toast) (eq (car toast) buffer)) romacs-layer--toasts))
   (romacs-layer-hide buffer)
   (romacs-layer--toast-stack))
@@ -604,12 +608,21 @@ downward, newest on top; a toast that would pass its bottom waits hidden."
   "Hide every toast, which fades, as the echo area clears.  Nothing to do
 when none shows: the echo area clears as every command starts."
   (when romacs-layer--toasts
-    (let ((toasts romacs-layer--toasts))
-      (setq romacs-layer--toasts nil romacs-layer--toast-placed nil)
-      (romacs-layer--toast-hooks nil)
+    (let ((toasts (seq-remove (lambda (toast) (memq (car toast) romacs-layer--toast-lasting))
+                              romacs-layer--toasts)))
+      (setq romacs-layer--toasts (seq-difference romacs-layer--toasts toasts #'eq)
+            romacs-layer--toast-placed nil)
+      (romacs-layer--toast-hooks romacs-layer--toasts)
       (dolist (toast toasts)
         (cancel-timer (nth 2 toast))
         (romacs-layer-hide (car toast))))))
+
+(defun romacs-layer-notify (text &optional kind)
+  "Show TEXT as a toast that lasts its time whatever the next command is:
+news from elsewhere, which the echo area's clearing says nothing about.
+KIND is as for `romacs-layer-toast'."
+  (romacs-layer-toast text kind)
+  (cl-pushnew (caar romacs-layer--toasts) romacs-layer--toast-lasting))
 
 (defun romacs-layer-toast (text &optional kind)
   "Show TEXT as a toast for `romacs-layer-toast-timeout' seconds.
@@ -626,7 +639,8 @@ toasts shown, the oldest's layer shows TEXT in its place."
           (setq romacs-layer--toasts (butlast romacs-layer--toasts))
           (if (or reused (> (length romacs-layer--toasts) (1- (max 1 romacs-layer-toast-max))))
               (romacs-layer-hide (car oldest))
-            (setq reused (car oldest)))))
+            (setq reused (car oldest)
+                  romacs-layer--toast-lasting (delq reused romacs-layer--toast-lasting)))))
       (let* ((buffer (or reused (romacs-layer--toast-buffer)))
              (glyph (and (eq kind 'error) (fboundp 'romacs-icon) (romacs-icon 'error 'romacs-layer-toast-error)))
              (glyph (and glyph (not (string-empty-p glyph)) (concat glyph " ")))

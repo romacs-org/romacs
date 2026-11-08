@@ -1280,7 +1280,12 @@ fn evaluate(
                 if let Err(error) = user_init::start_saved_settings(&mut vm, &path) {
                     eprintln!("romacs: saved settings: {error}");
                 }
-                // What the init loads is its layer's plan (world.rs).
+                // GNU's step before the init (startup.el:1560): installed
+                // packages activate.
+                if let Err(error) = vm.eval_source("(romacs--activate-packages)") {
+                    eprintln!("romacs: packages: {error}");
+                }
+                                // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
                 // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
                 if worlds.is_some() {

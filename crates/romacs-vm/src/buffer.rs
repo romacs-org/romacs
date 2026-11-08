@@ -1037,9 +1037,7 @@ impl Vm {
         if p == BufferString {
             let o = match &self.objects[index] {
                 Object::Buffer(t) => data::string_object(t.lisp_string(t.accessible())?),
-                Object::ByteBuffer(b) => {
-                    data::unibyte_object(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
-                }
+                Object::ByteBuffer(b) => b.text_object(b.restriction.clone()),
                 _ => unreachable!(),
             };
             return Ok(self.allocate_object(o));

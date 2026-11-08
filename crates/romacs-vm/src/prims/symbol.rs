@@ -43,6 +43,14 @@ fn native_comp_function_p(_cx, _object: Value) {
     Ok(Value::NIL)
 }}
 
+// Romacs loads no native modules (DEFUN-CENSUS.tsv `module-load'), so nothing
+// is a module function; help.el and packages asking about a function's kind
+// get GNU's answer for every other object.
+defsubr! { name = "module-function-p", gnu = "data.c:551", effect = Pure,
+fn module_function_p(_cx, _object: Value) {
+    Ok(Value::NIL)
+}}
+
 // GNU requires a closure whose CLOSURE_CODE is a string (data.c:536).
 // VM2 closures contain its own register-code representation, not GNU bytecode;
 // neither the GNU #[...] reader nor make-byte-code is implemented. Thus no

@@ -99,3 +99,11 @@ fn named_call_reads_the_cell_after_its_arguments() {
         "mine"
     );
 }
+
+/// GNU's `funcall_lambda` knows only `&optional` and `&rest`: any other `&'
+/// name is an ordinary parameter, as a `defun` with `&key` finds.
+#[test]
+fn other_ampersand_names_are_ordinary_parameters() {
+    assert_eq!(eval("(progn (defun ch-key (a &key b) (list a &key b)) (ch-key 1 2 3))"), "(1 2 3)");
+    assert_eq!(eval("((lambda (&key) &key) 7)"), "7");
+}

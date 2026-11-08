@@ -1135,8 +1135,9 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
             rest = true;
             continue;
         }
-        // GNU binds a repeated name again; the last binding wins.
-        if name.source().is_some_and(|n| n.starts_with('&')) {
+        // GNU binds a repeated name again; the last binding wins. Any other
+        // `&' name is an ordinary parameter to it (funcall_lambda).
+        if matches!(name.source(), Some("&optional" | "&rest")) {
             return Err("invalid lambda argument list".into());
         }
         if matches!(name.source(), Some("nil" | "t")) {
@@ -2326,7 +2327,7 @@ impl Vm {
                 rest = true;
                 continue;
             }
-            if name.source().is_some_and(|n| n.starts_with('&')) {
+            if matches!(name.source(), Some("&optional" | "&rest")) {
                 return Err("invalid lambda argument list".into());
             }
             if !optional && !rest {
