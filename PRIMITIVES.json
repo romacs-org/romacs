@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e7cb449971a5c995375d2bc0b22e1d62c029ec563bed25c22fe21063a81fa3da",
+  "source_fingerprint": "71df9692825265054a51faa8c6a25589dd1f5630bb83fd48d506491859637d2c",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1437,
-  "parsed_vm2_only": 1437
+  "parsed_total": 1438,
+  "parsed_vm2_only": 1438
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -7103,10 +7103,15 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:78"
   },
+  "window-configuration-equal-p": {
+   "name": "window-configuration-equal-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:56"
+  },
   "window-configuration-frame": {
    "name": "window-configuration-frame",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:56"
+   "registered_at": "crates/romacs-vm/src/prims/window_config.rs:61"
   },
   "window-configuration-p": {
    "name": "window-configuration-p",
