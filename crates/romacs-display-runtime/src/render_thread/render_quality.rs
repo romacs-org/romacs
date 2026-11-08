@@ -137,10 +137,11 @@ impl RenderQualityPolicy {
         } else {
             QualityMode::Full
         };
-        let effective_visual_config = match mode {
+        let chosen = match mode {
             QualityMode::Full => requested.clone(),
             QualityMode::SoftwareCompatibility => software_compat_visual_config(requested),
         };
+        let effective_visual_config = with_motion(chosen);
         Self {
             profile,
             mode,
@@ -405,35 +406,49 @@ fn layer_animation_forced() -> Option<f32> {
     std::env::var("ROMACS_LAYER_ANIMATION").ok()?.parse().ok().filter(|slowdown: &f32| *slowdown >= 1.0)
 }
 
-fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {
-    let mut effective = requested.clone();
-    effective.cursor_motion.enabled = false;
-    effective.cursor_size_transition.enabled = false;
-    effective.buffer_transition.enabled = false;
-    effective.scroll_transition.enabled = false;
-    // A software adapter redraws the whole surface for every frame of a morph.
-    // Disabling it there is the honest setting, and it also costs nothing: the
-    // compositor builds no motion at all for a disabled spec.
-    effective.window_animations.off = true;
+/// CONFIG as the renderer runs it: under reduced motion
+/// (`romacs-motion-reduced', or the desktop's), motionless.
+pub(super) fn with_motion(config: VisualConfig) -> VisualConfig {
+    if config.motion.reduced { motionless(config) } else { config }
+}
 
-    let disable_effects = effective
+/// CONFIG with nothing moving: no glide, no morph, no transition, no window
+/// or layer animation, no animated effect.  Every animation's switch is here,
+/// so reduced motion and a software adapter cannot drift apart.
+fn motionless(mut config: VisualConfig) -> VisualConfig {
+    config.cursor_motion.enabled = false;
+    config.cursor_look.morph = std::time::Duration::ZERO;
+    config.buffer_transition.enabled = false;
+    config.scroll_transition.enabled = false;
+    config.window_animations.off = true;
+    config.child_frame_animations.off = true;
+    let disable_effects = config
         .effects
         .effect_names()
         .into_iter()
         .filter(|name| {
-            effective
+            config
                 .effects
                 .effect_values(name)
-                .is_ok_and(|properties| {
-                    properties.iter().any(|(property, _)| property == "enabled")
-                })
+                .is_ok_and(|properties| properties.iter().any(|(property, _)| property == "enabled"))
         })
         .map(|name| EffectOperation::set(name, [("enabled", EffectValue::Bool(false))]))
         .collect::<Vec<_>>();
-    effective.effects = effective
+    config.effects = config
         .effects
         .apply_effects(&disable_effects)
         .expect("effect registry must be able to disable every enabled effect");
+    config
+}
+
+fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {
+    // A software adapter redraws the whole surface for every frame of a morph.
+    // Disabling it there is the honest setting, and it also costs nothing: the
+    // compositor builds no motion at all for a disabled spec.  Layers keep
+    // their own opt-in (`ROMACS_LAYER_ANIMATION').
+    let layers = requested.child_frame_animations.off;
+    let mut effective = motionless(requested.clone());
+    effective.child_frame_animations.off = layers;
     effective.effects.bg_pattern.style = 0;
     effective.effects.mode_line_separator.style = 0;
     effective.effects.scroll_bar.width = 0;

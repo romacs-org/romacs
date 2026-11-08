@@ -997,22 +997,59 @@ fn overlay_calls_that_change_nothing_keep_the_window() {
 /// redisplay comes: a full one, or one that reuses the window's rows.
 #[test]
 fn a_buffers_nil_cursor_type_shows_no_cursor() {
+    use romacs_layout_input::CursorKind;
     let mut vm = Vm::new();
     vm.set_gc_stress(0);
     vm.install_lisp_prelude().unwrap();
     vm.set_frame_geometry(800, 600, 24, 12).unwrap();
     run(&mut vm, r#"(progn (set-buffer (get-buffer-create "landing")) (insert "one\ntwo\n")
                           (set-window-buffer nil (current-buffer)) (goto-char 1))"#);
-    let snapshot = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.clone();
-    assert!(!snapshot(&mut vm).no_cursor);
+    let none = |vm: &mut Vm| vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.cursor.selected == CursorKind::None;
+    assert!(!none(&mut vm));
     run(&mut vm, "(setq cursor-type nil)");
-    assert!(snapshot(&mut vm).no_cursor, "the full redisplay");
-    assert!(snapshot(&mut vm).no_cursor, "the reused rows");
+    assert!(none(&mut vm), "the full redisplay");
+    assert!(none(&mut vm), "the reused rows");
     run(&mut vm, "(forward-line 1)");
-    assert!(snapshot(&mut vm).no_cursor, "point moved");
+    assert!(none(&mut vm), "point moved");
     // A blink's end does not bring it back.
     run(&mut vm, "(internal-show-cursor nil t)");
-    assert!(snapshot(&mut vm).no_cursor);
+    assert!(none(&mut vm));
     run(&mut vm, "(setq cursor-type t)");
-    assert!(!snapshot(&mut vm).no_cursor, "back to the default");
+    assert!(!none(&mut vm), "back to the default");
+}
+
+/// Each `cursor-type' form names its kind as GNU's
+/// get_specified_cursor_type does, `t' taking the frame's `cursor-type'
+/// parameter, and `cursor-in-non-selected-windows' decides the kind a
+/// window shows unselected (get_window_cursor_type).
+#[test]
+fn cursor_type_names_the_cursor_as_gnu_does() {
+    use romacs_layout_input::{CursorKind, CursorKinds};
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.install_lisp_prelude().unwrap();
+    vm.set_frame_geometry(800, 600, 24, 12).unwrap();
+    run(&mut vm, r#"(progn (set-buffer (get-buffer-create "kinds")) (insert "one\ntwo\n")
+                          (set-window-buffer nil (current-buffer)) (goto-char 1))"#);
+    let kinds = |vm: &mut Vm, form: &str| {
+        run(vm, form);
+        vm.frame_snapshot(800, 576).unwrap().windows[0].snapshot.cursor
+    };
+    let both = |selected, unselected| CursorKinds { selected, unselected };
+    assert_eq!(kinds(&mut vm, "(setq cursor-type t)"), both(CursorKind::Box, CursorKind::Hollow));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type 'bar)"), both(CursorKind::Bar(2), CursorKind::Bar(1)));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type '(bar . 4))"), both(CursorKind::Bar(4), CursorKind::Bar(3)));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type 'hbar)"), both(CursorKind::Hbar(2), CursorKind::Hbar(2)));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type '(hbar . 5))"), both(CursorKind::Hbar(5), CursorKind::Hbar(5)));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type 'hollow)"), both(CursorKind::Hollow, CursorKind::Hollow));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type '(box . 9))"), both(CursorKind::Box, CursorKind::Hollow));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type 'unknown)"), both(CursorKind::Hollow, CursorKind::Hollow));
+    assert_eq!(kinds(&mut vm, "(setq cursor-type '(bar . -1))"), both(CursorKind::Hollow, CursorKind::Hollow));
+    // `t' is the frame's, through the reused rows too.
+    assert_eq!(kinds(&mut vm, "(setq cursor-type t)"), both(CursorKind::Box, CursorKind::Hollow));
+    assert_eq!(kinds(&mut vm, "(modify-frame-parameters nil '((cursor-type . (bar . 3))))"),
+               both(CursorKind::Bar(3), CursorKind::Bar(2)));
+    assert_eq!(kinds(&mut vm, "nil"), both(CursorKind::Bar(3), CursorKind::Bar(2)), "reused");
+    assert_eq!(kinds(&mut vm, "(setq cursor-in-non-selected-windows nil)"), both(CursorKind::Bar(3), CursorKind::None));
+    assert_eq!(kinds(&mut vm, "(setq cursor-in-non-selected-windows 'hbar)"), both(CursorKind::Bar(3), CursorKind::Hbar(2)));
 }

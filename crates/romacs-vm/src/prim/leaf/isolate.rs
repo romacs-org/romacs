@@ -81,8 +81,8 @@ impl Leaf<'_> {
         self.vm.isolate_parent_closed()
     }
 
-    pub(crate) fn isolate_set_running(&mut self, generation: Option<u64>) {
-        self.vm.isolate_set_running(generation);
+    pub(crate) fn isolate_claim_job(&mut self, generation: u64) -> crate::Result<()> {
+        self.vm.isolate_claim_job(generation)
     }
 
     pub(crate) fn isolate_hello_ok(&mut self, text: Value, program: Value) -> std::result::Result<bool, Fault> {

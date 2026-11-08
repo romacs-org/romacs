@@ -22,7 +22,7 @@ fn lay_out(text: &str, point_byte: usize) -> FrameGlyphBuffer {
 fn lay_out_in(text: TextSlice, point_byte: usize, width: u32, faces: Vec<Face>) -> FrameGlyphBuffer {
     let window = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id: 1, width, height: 100, start_byte: 0, point_byte, buffer_version: 1,
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0), vscroll_px: 0, hscroll: Default::default(),
-        tab_width: 8, wrap: Default::default(), cursor_off: false, no_cursor: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
+        tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         text, faces };
     let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), width: 400, height: 100,
         windows: vec![PlacedWindowSnapshot { x: 0, y: 0, snapshot: window }], background_alpha: 1.0, children: vec![], tab_bar: None,

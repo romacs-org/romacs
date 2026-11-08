@@ -5,7 +5,7 @@
 // structs is a separate refactor, so this bulk category is allowed crate-wide.
 #![allow(clippy::too_many_arguments)]
 
-pub mod device_request;
+pub mod gpu_policy;
 pub mod diagnostics;
 pub mod external_buffer;
 pub mod frame_post;
@@ -46,7 +46,7 @@ mod submission_retirement;
 ))]
 pub mod vulkan_dmabuf;
 
-pub use device_request::request_renderer_device;
+pub use gpu_policy::{choose_adapter, new_instance, power_preference, request_renderer_device};
 #[cfg(target_os = "linux")]
 pub use external_buffer::DmaBufBuffer;
 pub use external_buffer::{BufferFormat, ExternalBuffer, PlatformBuffer, SharedMemoryBuffer};
@@ -112,11 +112,3 @@ pub mod effect_config {
     pub use romacs_display_protocol::effect_config::*;
 }
 
-/// Read GPU power preference from `ROMACS_GPU`.
-pub fn gpu_power_preference() -> wgpu::PowerPreference {
-    match std::env::var("ROMACS_GPU").as_deref() {
-        Ok("low") | Ok("integrated") => wgpu::PowerPreference::LowPower,
-        Ok("high") | Ok("discrete") => wgpu::PowerPreference::HighPerformance,
-        _ => wgpu::PowerPreference::HighPerformance,
-    }
-}

@@ -1,12 +1,8 @@
 // The positive control: a value rooted in traced storage across a collection, read back by a later leaf.
 use romacs_vm::brand::*;
-/// A heap value of the stand-in engine: a word a collection may free or move.
-pub struct Word(pub u64);
-pub struct Engine { pub stack: Vec<Word>, pub collections: u32 }
-struct K;
-unsafe impl Key for K {}
-/// The stand-in's collecting operation: the key holder's, taking the permission.
-fn collect<'b>(m: &mut Mx<'_, 'b, Engine>, _gc: Gc<'_, 'b>) { m.raw(&K).collections += 1 }
+#[path = "../standin.rs"]
+mod standin;
+use standin::*;
 fn body<'x, 'b>(mut m: Mx<'x, 'b, Engine>, mut gc: Gc<'_, 'b>, at: usize) -> u64 {
     // Root: the value goes to traced storage (the stand-in's stack), its index is plain.
     let rooted = m.leaf(at, |e, at| { let w = Word(e.stack[at].0 + 1); e.stack.push(w); e.stack.len() - 1 });

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "6ee07372d51758d3dd6f8b8a044d9a8473e497e1c8316ba8c9d991f090faec70",
+    "input_hash": "7b628ce334ef8b8e78160eb9e700f5ddd0f6e43fdf68f375567a2cd540ad8d1e",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8662
+    "vm2_universe": 8669
   },
   "schema": 2,
   "vm2": {
-    "count": 1445,
+    "count": 1446,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -875,6 +875,7 @@
       "romacs--concat-list",
       "romacs--create-frame",
       "romacs--custom-theme-recalc-face",
+      "romacs--debug-lose-device",
       "romacs--decode-output",
       "romacs--decompress-change",
       "romacs--decompress-prepare",
@@ -916,6 +917,7 @@
       "romacs--inspect-stop",
       "romacs--isolate-affinity",
       "romacs--isolate-children",
+      "romacs--isolate-claim",
       "romacs--isolate-close",
       "romacs--isolate-compact-next",
       "romacs--isolate-executable",
@@ -938,7 +940,6 @@
       "romacs--isolate-reap",
       "romacs--isolate-release",
       "romacs--isolate-reserve",
-      "romacs--isolate-running",
       "romacs--isolate-signal",
       "romacs--isolate-signal-children",
       "romacs--isolate-stamp",

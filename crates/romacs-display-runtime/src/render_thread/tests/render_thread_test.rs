@@ -344,7 +344,10 @@ fn backend_recovery_rederives_quality_from_the_unchanged_request() {
     let requested = app.requested_visual_config.clone();
 
     app.install_backend_profile(RenderBackendProfile::hardware());
-    assert_eq!(app.render_policy.effective_visual_config(), &requested);
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_motion(requested.clone())
+    );
     assert_eq!(
         app.comms.capabilities.frame_shader_availability(),
         FrameShaderAvailability::Available
@@ -364,7 +367,10 @@ fn backend_recovery_rederives_quality_from_the_unchanged_request() {
     );
 
     app.install_backend_profile(RenderBackendProfile::hardware());
-    assert_eq!(app.render_policy.effective_visual_config(), &requested);
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_motion(requested.clone())
+    );
     assert_eq!(
         app.comms.capabilities.frame_shader_availability(),
         FrameShaderAvailability::Available
@@ -925,22 +931,11 @@ fn presentation_state(frame_id: u64, parent_id: u64, presentation: u64) -> Seale
 }
 
 fn make_test_device() -> Option<wgpu::Device> {
-    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    instance_descriptor.backends = wgpu::Backends::all();
-    let instance = wgpu::Instance::new(instance_descriptor);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-        apply_limit_buckets: false,
-    }))
-    .ok()?;
-    let (device, _queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    romacs_renderer_wgpu::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("render-thread test device"),
         ..Default::default()
-    }))
-    .ok()?;
-    Some(device)
+    })
+    .map(|(device, _queue)| device)
 }
 
 #[test]
@@ -2093,4 +2088,99 @@ fn asynchronous_preparation_stops_with_a_full_result_queue() {
         Err(crossbeam_channel::RecvTimeoutError::Disconnected)
     ));
     drop(incoming);
+}
+
+#[test]
+fn reduced_motion_ends_the_layer_animations_already_running() {
+    use romacs_display_protocol::motion_spec::{MotionDuration, MotionSpec, TweenSpec};
+    let mut app = make_test_app();
+    app.install_backend_profile(RenderBackendProfile::hardware());
+    let origin = romacs_display_protocol::frame_time::observe_platform_now();
+    let spec = MotionSpec::Tween(TweenSpec {
+        duration: MotionDuration::new(std::time::Duration::from_millis(100)).expect("positive duration"),
+        easing: romacs_display_protocol::scroll_animation::TransitionEasing::EaseOutQuad,
+        bezier: None,
+    });
+    fn manager(app: &mut RenderApp) -> &mut super::child_frames::ChildFrameManager {
+        &mut app.frame_windows.primary_window_mut().expect("test app has a primary window").render.compositor.child_frames
+    }
+    for (id, parent, z) in [(u64::MAX, 0, i32::MIN), (7, u64::MAX, 0)] {
+        let mut frame = FrameGlyphBuffer::with_size(100.0, 100.0);
+        frame.set_frame_identity(
+            romacs_display_protocol::DisplayFrameId::new(id),
+            romacs_display_protocol::DisplayFrameId::new(parent),
+            0.0, 0.0, z, false, 0.0, romacs_display_protocol::Color::BLACK, false, 1.0,
+        );
+        manager(&mut app).update_frame(frame);
+    }
+    manager(&mut app).begin_open_animation(7, spec, origin, 8.0, 1.0);
+    assert!(manager(&mut app).has_animation_activity(), "a layer opening");
+
+    app.requested_visual_config.motion.reduced = true;
+    app.apply_requested_visual_config();
+    assert!(!manager(&mut app).has_animation_activity(), "reduced motion ends it where Lisp put it");
+}
+
+#[test]
+fn reduced_motion_settles_a_pane_resize_already_running() {
+    use super::frame_compositor::layout_driver::{LayoutDelta, LayoutDriver};
+    use romacs_display_protocol::frame_glyphs::WindowInfo;
+    use romacs_display_protocol::motion_spec::{MotionDuration, MotionSpec, TweenSpec};
+    use romacs_display_protocol::types::Rect;
+    let mut app = make_test_app();
+    app.install_backend_profile(RenderBackendProfile::hardware());
+    let window = |id: i64, bounds: Rect| WindowInfo {
+        window_id: DisplayWindowId::new(id),
+        buffer_id: id as u64 + 100,
+        window_start: 1,
+        window_end: 100,
+        buffer_size: 1000,
+        buffer_modiff: romacs_display_protocol::presentation_origin::BufferModiff::new(1),
+        bounds,
+        geometry: romacs_display_protocol::PresentedWindowGeometry::default(),
+        line_number_field: None,
+        mode_line_height: 20.0,
+        header_line_height: 0.0,
+        tab_line_height: 0.0,
+        selected: false,
+        is_minibuffer: false,
+        char_height: 16.0,
+        buffer_name: String::from("scratch"),
+        buffer_file_name: String::new(),
+        modified: false,
+    };
+    let tween = MotionSpec::Tween(TweenSpec {
+        duration: MotionDuration::new(std::time::Duration::from_millis(100)).expect("positive duration"),
+        easing: romacs_display_protocol::scroll_animation::TransitionEasing::Linear,
+        bezier: None,
+    });
+    let specs = super::render_quality::WindowAnimationSpecs { resize: tween, movement: tween, open: tween, close: tween };
+    let one = vec![window(1, Rect::new(0.0, 0.0, 800.0, 600.0))];
+    let two = vec![window(1, Rect::new(0.0, 0.0, 400.0, 600.0)), window(2, Rect::new(400.0, 0.0, 400.0, 600.0))];
+    let driver = LayoutDriver::default().on_commit(
+        LayoutDelta { previous: &one, next: &two },
+        specs,
+        romacs_display_protocol::frame_time::observe_platform_now(),
+    );
+    assert!(driver.wants_frames(), "a split resizing the panes");
+    // A frame drawn mid-morph publishes where its panes were.
+    let presentation = romacs_display_protocol::PresentationId::new(1);
+    let sample = romacs_display_protocol::frame_time::FrameSample::new(
+        romacs_display_protocol::frame_time::observe_platform_now().plus(std::time::Duration::from_millis(50)),
+        std::time::Duration::ZERO,
+    );
+    let grid = super::frame_compositor::continuity::pane_layout::PixelGrid::new(1.0);
+    let (driver, composition) = driver.on_frame(presentation, sample, grid);
+    assert!(composition.projection.is_some(), "a mid-morph projection");
+    let render = &mut app.frame_windows.primary_window_mut().expect("test app has a primary window").render;
+    render.compositor.layout = driver;
+    render.publish_submitted_projection(composition.projection);
+
+    app.requested_visual_config.motion.reduced = true;
+    app.apply_requested_visual_config();
+    let render = &mut app.frame_windows.primary_window_mut().expect("primary").render;
+    assert!(!render.compositor.layout.wants_frames(), "reduced motion lands the panes where the presentation puts them");
+    // The next submitted frame is settled: clicks map by identity again.
+    render.publish_submitted_projection(None);
+    assert!(render.compositor.interaction.is_none(), "no mid-morph mapping left");
 }

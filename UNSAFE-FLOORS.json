@@ -1,0 +1,27 @@
+{
+  "rule": "See tools/unsafe_census.py: what counts as a site and as documented. check fails when a crate is above or below its floor; lower records a drop; raising a floor is a deliberate hand edit.",
+  "crates": {
+    "romacs-allocator": {"sites": 3, "undocumented": 3},
+    "romacs-attach": {"sites": 2, "undocumented": 0},
+    "romacs-display-protocol": {"sites": 7, "undocumented": 4},
+    "romacs-display-runtime": {"sites": 28, "undocumented": 12},
+    "romacs-font": {"sites": 60, "undocumented": 49},
+    "romacs-font-materializer": {"sites": 5, "undocumented": 5},
+    "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
+    "romacs-gui-tests": {"sites": 4, "undocumented": 1},
+    "romacs-infra": {"sites": 1, "undocumented": 0},
+    "romacs-regex-engine": {"sites": 24, "undocumented": 17},
+    "romacs-renderer-wgpu": {"sites": 33, "undocumented": 18},
+    "romacs-snapshot": {"sites": 35, "undocumented": 34},
+    "romacs-terminfo": {"sites": 18, "undocumented": 4},
+    "romacs-tui-tests": {"sites": 10, "undocumented": 6},
+    "romacs-video": {"sites": 172, "undocumented": 168},
+    "romacs-vm": {"sites": 883, "undocumented": 493},
+    "romacs-vm-gui": {"sites": 11, "undocumented": 2},
+    "romacs-webview": {"sites": 219, "undocumented": 197}
+  },
+  "unsafe_op_in_unsafe_fn_pending": {
+    "romacs-renderer-wgpu": "src/vulkan_dmabuf.rs hal_import allows it: 29 unsafe calls in nine unsafe fn bodies need their own SAFETY review, proven on the dma-buf import path on a real GPU.",
+    "romacs-webview": "src/platform/linux allows it for its WPE FFI. That module builds only with the webview feature against wpe-webkit-2.0, which neither the gate nor the build host provides, so a fix cannot be compiled here yet."
+  }
+}

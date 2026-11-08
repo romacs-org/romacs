@@ -17,6 +17,7 @@ serde_json = "1"
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+romacs-renderer-wgpu.workspace = true
 winit.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
@@ -32,3 +33,6 @@ libc.workspace = true
 rustix.workspace = true
 wayland-client.workspace = true
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+
+[lints]
+workspace = true

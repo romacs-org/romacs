@@ -754,6 +754,47 @@ impl Vm {
         let key = self.intern(name);
         Ok(self.frame(frame)?.parameters.iter().find(|(k, _)| *k == key).map(|&(_, v)| v))
     }
+    /// WINDOW's cursor in BUFFER, selected and not (xdisp.c
+    /// get_window_cursor_type): the buffer's `cursor-type', `t' meaning
+    /// the frame's `cursor-type' parameter (a box without one), and for an
+    /// unselected window `cursor-in-non-selected-windows', `t' meaning the
+    /// selected kind modified.  A nil `cursor-type' shows none either way.
+    fn window_cursor_kinds(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::CursorKinds> {
+        use romacs_layout_input::{CursorKind, CursorKinds};
+        let own = self.buffer_variable(buffer, "cursor-type")?;
+        if own == Value::NIL {
+            return Ok(CursorKinds { selected: CursorKind::None, unselected: CursorKind::None });
+        }
+        let selected = if own == Value::TRUE {
+            let frame = self.window(window)?.frame;
+            match self.frame_parameter_of(frame, "cursor-type")? {
+                Some(value) => self.specified_cursor(value),
+                None => CursorKind::Box,
+            }
+        } else {
+            self.specified_cursor(own)
+        };
+        let other = self.buffer_variable(buffer, "cursor-in-non-selected-windows")?;
+        Ok(if other == Value::TRUE {
+            CursorKinds::modified(selected)
+        } else {
+            CursorKinds { selected, unselected: self.specified_cursor(other) }
+        })
+    }
+    /// The cursor kind VALUE, a `cursor-type' setting, names.
+    fn specified_cursor(&mut self, value: Value) -> romacs_layout_input::CursorKind {
+        use romacs_layout_input::CursorKind;
+        let name = |vm: &mut Self, v: Value| {
+            ["nil", "box", "hollow", "bar", "hbar"].into_iter().find(|name| vm.intern(name) == v)
+        };
+        match self.cons_pair(value) {
+            Ok((car, cdr)) => match cdr.as_integer().ok().and_then(|n| u32::try_from(n).ok()) {
+                Some(size) => CursorKind::specified(name(self, car), Some(size)),
+                None => CursorKind::Hollow,
+            },
+            Err(_) => CursorKind::specified(name(self, value), None),
+        }
+    }
     /// FRAME's material (`romacs-style'), a vector of its numbers
     /// (`romacs-style--wire'), else the `flat' style.
     fn frame_style(&mut self, frame: Value) -> Result<romacs_layout_input::Style> {
@@ -1446,10 +1487,7 @@ impl Vm {
             tab_width: self.buffer_tab_width(buffer)?,
             wrap: self.window_line_wrap(window, buffer)?,
             cursor_off: self.window(window)?.cursor_off,
-            // xdisp.c get_window_cursor_type, selected or not; its other
-            // values are not drawn yet: a box.  `cursor-type' is in the
-            // window's key, so rows reused keep this.
-            no_cursor: self.buffer_variable(buffer, "cursor-type")? == Value::NIL,
+            cursor: self.window_cursor_kinds(window, buffer)?,
             stretches,
             images,
             wrap_flips,
@@ -1560,7 +1598,7 @@ impl Vm {
         let band_stretches = BandStretches { header_line: header_stretches, mode_line: mode_stretches };
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
-            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, no_cursor: false,
+            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, cursor: Default::default(),
             stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         Ok(Some((self.lay_out_alone(snapshot)?, shown)))
     }
@@ -1717,7 +1755,7 @@ impl Vm {
         let chrome = self.window_chrome(window, &table, false)?;
         let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches: Default::default(), id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
             text: shown.text.clone(), mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
-            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, no_cursor: false, stretches: shown.stretches.clone(), images: shown.images.clone(),
+            vscroll_px: 0, hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, cursor: Default::default(), stretches: shown.stretches.clone(), images: shown.images.clone(),
             wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
         let end = self.lay_out_alone(snapshot)?;
         Ok(Some((end, shown)))
@@ -2078,8 +2116,7 @@ impl Vm {
         let id = snapshot.id;
         if let Some(previous) = self.display_state.previous.get(&id) {
             // A table grows as other windows show faces: that changes nothing here.
-            let changed = !previous.lays_out_like(&snapshot) || previous.cursor_off != snapshot.cursor_off
-                || previous.no_cursor != snapshot.no_cursor;
+            let changed = !previous.lays_out_like(&snapshot) || previous.cursor_off != snapshot.cursor_off;
             if changed {
                 self.display_state.version += 1;
             }
@@ -2173,6 +2210,9 @@ impl Vm {
         let point = self.window_point_value(window)?.as_integer()?;
         let mut snapshot = self.display_state.previous[&id].clone();
         snapshot.cursor_off = cursor_off;
+        // The frame's `cursor-type' is no part of the key.
+        let buffer = self.window(window)?.buffer;
+        snapshot.cursor = self.window_cursor_kinds(window, buffer)?;
         if mini {
             // No mode line: a mini-window with point unmoved is as it was.
             return Ok((point == shown_point).then_some(snapshot));

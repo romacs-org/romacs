@@ -173,7 +173,7 @@ use romacs_renderer_wgpu::{
 fn native_inset_clear_matches_completed_content_opacity() {
     use romacs_display_protocol::ContentInsets;
     use romacs_renderer_wgpu::renderer::{NativeContentPlacement, RenderTarget};
-    let seed = WgpuRenderer::new(None, W, H).expect("GPU required for native inset regression");
+    let seed = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required for native inset regression");
     for format in [
         wgpu::TextureFormat::Bgra8UnormSrgb,
         wgpu::TextureFormat::Bgra8Unorm,

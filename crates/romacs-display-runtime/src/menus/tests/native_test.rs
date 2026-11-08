@@ -180,13 +180,10 @@ impl ApplicationHandler for Smoke {
         let mut descriptor =
             crate::wgpu_instance_descriptor_with_display(event_loop.owned_display_handle());
         descriptor.backends = wgpu::Backends::VULKAN;
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = romacs_renderer_wgpu::new_instance(descriptor);
         let surface = instance.create_surface(parent.clone()).unwrap();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .unwrap();
+        let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN));
+        let adapter = romacs_renderer_wgpu::choose_adapter(adapters, Some(&surface)).unwrap();
         let (device, queue) = pollster::block_on(romacs_renderer_wgpu::request_renderer_device(
             &adapter,
             "native menu smoke",

@@ -10,7 +10,7 @@ const HEIGHT: u32 = 112;
 
 fn harness() -> Harness {
     let renderer =
-        WgpuRenderer::new(None, W, HEIGHT).expect("GPU required for FadeEdges regression");
+        romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, HEIGHT).expect("GPU required for FadeEdges regression");
     let atlas = WgpuGlyphAtlas::new(renderer.device());
     let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("fade-edges-target"),

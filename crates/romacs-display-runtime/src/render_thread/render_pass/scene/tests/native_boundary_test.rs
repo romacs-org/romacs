@@ -24,7 +24,7 @@ fn obsolete_native_owner_retires_before_required_child_under_same_pressure() {
     ) {
         return;
     }
-    let mut renderer = WgpuRenderer::new(None, W, H).expect("GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("GPU required");
     let origin = observe_platform_now();
     let mut render = GuiFrameRenderState::new(42, renderer.device(), 1.0, false, origin);
     let mut root = picture(42, 0, W as f32);
@@ -189,7 +189,7 @@ fn obsolete_native_owner_retires_before_required_child_under_same_pressure() {
 
 #[test]
 fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls() {
-    let mut renderer = WgpuRenderer::new(None, W, H).expect("real GPU required");
+    let mut renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).expect("real GPU required");
     let size = SnapshotSize::new(W, H).unwrap();
     for (background_alpha, whole_alpha) in [(1.0, 1.0), (0.5, 0.5)] {
         let origin = observe_platform_now();

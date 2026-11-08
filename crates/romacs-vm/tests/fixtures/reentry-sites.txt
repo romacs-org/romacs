@@ -35,6 +35,7 @@ eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environ
 forwarded.rs notify_unbind_forwarded notify_watchers 1 rooted  # OLD and OWNER are read from the caller's frame before each call
 forwarded.rs notify_unbind_forwarded notify_watchers_at 2 rooted  # OLD and OWNER are read from the caller's frame before each call
 gc.rs assert_no_retention_growth collect 1 collector  # a test helper collecting with no engine running
+gc.rs drop unwind 1 clean  # a panic's UnwindMark: watchers are set aside, so the restores run no Lisp; no heap Value is used after
 handle.rs collect collect_until_key 1 collector  # every collection: the caller's roots are traced and forwarded
 handle.rs collect_compacting collect 1 collector  # embedder API: no engine runs and handles are rooted
 handle.rs collect_garbage collect 1 collector  # embedder API: no engine runs and handles are rooted

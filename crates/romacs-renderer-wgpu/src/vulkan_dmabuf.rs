@@ -263,7 +263,7 @@ mod hal_import {
             let Some(hal) = device.as_hal::<Vulkan>() else {
                 return Default::default();
             };
-            if !crate::device_request::LINUX_DMA_BUF_EXTENSIONS
+            if !crate::gpu_policy::LINUX_DMA_BUF_EXTENSIONS
                 .iter()
                 .all(|extension| hal.enabled_device_extensions().contains(extension))
             {

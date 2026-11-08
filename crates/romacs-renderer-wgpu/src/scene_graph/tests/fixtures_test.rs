@@ -68,15 +68,11 @@ struct Gpu {
 }
 
 fn software_adapter() -> Option<wgpu::Adapter> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
-        .into_iter()
-        .find(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+    crate::gpu_policy::test_gpu::software_adapter().cloned()
 }
 
-/// One software device for the whole test binary: the Vulkan loader crashes
-/// when test threads create instances concurrently.
+/// One software device for the whole test binary: its fixtures are costly
+/// to build and the tests only read through them.
 fn software_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     static DEVICE: std::sync::OnceLock<Option<(wgpu::Device, wgpu::Queue)>> =
         std::sync::OnceLock::new();
@@ -97,15 +93,11 @@ fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
     .expect("scene fixture device")
 }
 
+/// The adapter the program would render with, when it is a real GPU.
 fn hardware_adapter() -> Option<wgpu::Adapter> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .ok()
-    .filter(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+    crate::gpu_policy::test_gpu::adapter()
+        .filter(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+        .cloned()
 }
 
 fn gpu((device, queue): (wgpu::Device, wgpu::Queue), software: bool) -> Gpu {

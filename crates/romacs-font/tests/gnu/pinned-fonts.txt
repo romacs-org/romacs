@@ -1,0 +1,150 @@
+GNU's answers for crates/romacs-font/tests/bundled_font.rs (run 1) and
+render_scripts.rs (run 2), from
+pinned-fonts.el beside this file.
+
+GNU: the pinned oracle, 32.0.50 at 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea, pgtk,
+in a private headless labwc (WLR_BACKENDS=headless, one 1280x720 output),
+private HOME and XDG directories, LANG=C.UTF-8:
+
+  FONTCONFIG_FILE=CONF ORACLE_OUTPUT=OUT ORACLE_FACES=FACES \
+    emacs -Q --no-splash -l pinned-fonts.el
+
+Run 1, the bundled Iosevka: CONF lists one <dir> holding only the four
+files of assets/fonts/sources.json (Iosevka 34.9.1, hinted), so no host
+font takes part. Bundled faces are normal width only, so an expanded or
+condensed request takes the normal face. Pinned GNU X11 under Xvfb at
+96 dpi answers the same for every character.
+
+Run 2, a missing family: CONF is the gate's pinned fonts.conf
+(ROMACS_GATE_FONTCONFIG), which substitutes Liberation Sans, as the
+earlier X11 transcript did.
+
+== Run 1 ==
+emacs-version: 32.0.50
+emacs-repository-version: 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea
+window-system: pgtk
+pgtk: t
+FONTCONFIG_FILE: <the four bundled Iosevka files only>
+display-mm: (0 . 0)
+display-pixels: (1280 . 720)
+
+face: (:family "Iosevka") (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BB λ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B7 η family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BC μ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03AD έ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03C1 ρ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0416 Ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0436 ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0041 A family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+string-pixel-width Καλημέρα: 64
+
+face: (:family "Iosevka" :weight bold) (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03B1 α family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03BB λ family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03B7 η family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03BC μ family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03AD έ family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03C1 ρ family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+03B1 α family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+0020   family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+0416 Ж family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+0436 ж family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+0020   family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+U+0041 A family=Iosevka size=16 weight=bold slant=normal width=normal file=Iosevka-Bold.ttf
+string-pixel-width Καλημέρα: 64
+
+face: (:family "Iosevka" :slant italic) (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03BB λ family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03B7 η family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03BC μ family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03AD έ family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03C1 ρ family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+0416 Ж family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+0436 ж family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+U+0041 A family=Iosevka size=16 weight=regular slant=italic width=normal file=Iosevka-Italic.ttf
+string-pixel-width Καλημέρα: 64
+
+face: (:family "Iosevka" :weight bold :slant italic) (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03B1 α family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03BB λ family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03B7 η family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03BC μ family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03AD έ family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03C1 ρ family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+03B1 α family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+0020   family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+0416 Ж family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+0436 ж family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+0020   family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+U+0041 A family=Iosevka size=16 weight=bold slant=italic width=normal file=Iosevka-BoldItalic.ttf
+string-pixel-width Καλημέρα: 64
+
+face: (:family "Iosevka" :width expanded) (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BB λ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B7 η family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BC μ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03AD έ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03C1 ρ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0416 Ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0436 ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0041 A family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+string-pixel-width Καλημέρα: 64
+
+face: (:family "Iosevka" :width condensed) (default Liberation Mono :height 120)
+U+039A Κ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BB λ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B7 η family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03BC μ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03AD έ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03C1 ρ family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+03B1 α family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0416 Ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0436 ж family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0020   family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+U+0041 A family=Iosevka size=16 weight=regular slant=normal width=normal file=Iosevka-Regular.ttf
+string-pixel-width Καλημέρα: 64
+
+== Run 2 ==
+emacs-version: 32.0.50
+emacs-repository-version: 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea
+window-system: pgtk
+pgtk: t
+FONTCONFIG_FILE: <the gate's pinned fonts.conf>
+display-mm: (0 . 0)
+display-pixels: (1280 . 720)
+
+face: (:family "No Such Family F0a") (default Liberation Mono :height 120)
+U+039A Κ family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03B1 α family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03BB λ family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03B7 η family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03BC μ family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03AD έ family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03C1 ρ family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+03B1 α family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+0020   family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+0416 Ж family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+0436 ж family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+0020   family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+U+0041 A family=Liberation\ Sans size=16 weight=regular slant=normal width=normal file=LiberationSans-Regular.ttf
+string-pixel-width Καλημέρα: 71

@@ -189,12 +189,14 @@ impl Vm {
         };
         let newval = if newval == Value::UNBOUND { Value::NIL } else { newval };
         let operation = self.intern(operation);
-        // GNU untraps the variable while its watchers run (no recursion).
-        self.trapped.remove(&base);
         // A watcher may collect only for a writer that rooted its own frame
         // (an engine write, `threaded::watched_write'); any other native
         // writer may keep Values in locals, so it holds collection.
         let _unwind = self.unwind_mark();
+        // GNU untraps the variable while its watchers run (no recursion),
+        // and traps it again as they end; a panic out of them, at the mark.
+        self.trapped.remove(&base);
+        self.retrap.push(base);
         let held = usize::from(!self.rooted_write);
         self.gc_holds += held;
         // The list, the value and the place are rooted and read back after
@@ -215,6 +217,8 @@ impl Vm {
         }
         self.drop_frame(frame);
         self.gc_holds -= held;
+        let owed = self.retrap.pop();
+        debug_assert_eq!(owed, Some(base), "the re-trap owed by this call");
         self.trapped.insert(base);
         result
     }

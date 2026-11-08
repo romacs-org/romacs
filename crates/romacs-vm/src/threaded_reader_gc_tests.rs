@@ -212,6 +212,22 @@ fn a_panic_out_of_a_site_leaf_forgets_the_site() {
     assert_eq!(vm.reader_call(poll, &[]).unwrap(), Value::NIL);
 }
 
+/// Jobs do not nest, and a world holds no job claim: a record whose marker
+/// is gone is refused at rest until normalizing forgets it.
+#[test]
+fn a_job_claim_is_one_at_a_time_and_never_in_a_world() {
+    let mut vm = Vm::new();
+    let refused = vm.eval_source_raw("(condition-case e (progn (romacs--isolate-claim 1) (romacs--isolate-claim 2)) (error (error-message-string e)))").unwrap();
+    assert_eq!(vm.display(refused).unwrap(), "\"Job 1 already runs here\"");
+    assert!(vm.signal_handlers.is_empty(), "the request's end took the marker");
+    assert_eq!(vm.isolate_claim(), None, "and with it the claim");
+    vm.world_normalize();
+    assert_eq!(vm.world_quiescent(), Ok(()), "normalizing forgot the stale record");
+    vm.isolate_claim_job(3).unwrap();
+    vm.signal_handlers.clear();
+    assert!(vm.world_quiescent().unwrap_err().contains("isolates"), "a stale record is refused");
+}
+
 /// A world cannot hold the address of a leaf in flight.
 #[test]
 fn a_world_refuses_a_site_leaf_in_flight() {
@@ -266,7 +282,7 @@ fn a_panic_inside_a_cleanup_or_a_run_leaves_aftermath_idle() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude_raw().unwrap();
         vm.set_frame_geometry(800, 600, 20, 10).unwrap();
-        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) t)").unwrap();
+        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) (defvar pr-hooked 0) t)").unwrap();
         if !setup.is_empty() { vm.eval_source_raw(&setup).unwrap(); }
         vm.set_host_input(Some(Box::new(PanickingHost)));
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw(&form)));
@@ -278,15 +294,20 @@ fn a_panic_inside_a_cleanup_or_a_run_leaves_aftermath_idle() {
     }
 }
 
-/// A finalizer doomed by a collection with no engine runs at the next
-/// request's end: the gate is open.
+/// After a caught panic the gate is open and what it relies on is back: no
+/// binding made since the mark outlives the panic (`romacs--post-gc-owned',
+/// which a run binds to own the hook, and `inhibit-quit'), a finalizer a
+/// collection with no engine dooms runs at the next request's end, and that
+/// collection's `post-gc-hook' runs exactly once.
 fn assert_finalizers_run(vm: &mut Vm, name: &str) {
-    vm.eval_source_raw("(progn (setq pr-ran nil pr-kept (make-finalizer (lambda () (setq pr-ran t)))) nil)").unwrap();
+    let shown = |vm: &mut Vm, source: &str| { let value = vm.eval_source_raw(source).unwrap(); vm.display(value).unwrap() };
+    assert_eq!(shown(vm, "(list inhibit-quit romacs--post-gc-owned)"), "(nil nil)", "{name}: no binding outlives the panic");
+    vm.eval_source_raw("(progn (setq pr-ran nil pr-hooked 0 pr-kept (make-finalizer (lambda () (setq pr-ran t)))) \
+        (setq post-gc-hook (list (lambda () (setq pr-hooked (1+ pr-hooked))))) nil)").unwrap();
     vm.eval_source_raw("(setq pr-kept nil)").unwrap();
     vm.collect(&mut []);
     vm.eval_source_raw("nil").unwrap();
-    let ran = vm.eval_source_raw("pr-ran").unwrap();
-    assert_eq!(vm.display(ran).unwrap(), "t", "{name}: the gate opens again");
+    assert_eq!(shown(vm, "(prog1 (list pr-ran pr-hooked) (setq post-gc-hook nil))"), "(t 1)", "{name}: the gate opens, the hook runs once");
 }
 
 /// A panic in a run with no engine below it, a request's end or public
@@ -298,7 +319,7 @@ fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude_raw().unwrap();
         vm.set_frame_geometry(800, 600, 20, 10).unwrap();
-        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) t)").unwrap();
+        vm.eval_source_raw("(progn (defvar pr-kept nil) (defvar pr-ran nil) (defvar pr-hooked 0) t)").unwrap();
         vm.eval_source_raw("(progn (setq pr-kept (make-finalizer (lambda () (read-from-minibuffer \"P: \")))) nil)").unwrap();
         vm.eval_source_raw("(setq pr-kept nil)").unwrap();
         let nil = vm.compile_source("nil").unwrap();
@@ -317,6 +338,25 @@ fn a_panic_in_a_run_at_a_request_end_leaves_aftermath_idle() {
         vm.set_host_input(None);
         assert_finalizers_run(&mut vm, name);
     }
+}
+
+/// A watcher is untrapped only while it runs: one that panics leaves its
+/// variable watched once the panic is caught, and the watcher fires again.
+#[test]
+fn a_panicking_watcher_leaves_its_variable_watched() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude_raw().unwrap();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    vm.eval_source_raw("(progn (defvar pw-var 0) (defvar pw-calls 0) (defvar pw-panic t) \
+        (add-variable-watcher 'pw-var (lambda (&rest _) (setq pw-calls (1+ pw-calls)) \
+                                        (when pw-panic (read-from-minibuffer \"P: \")))) t)").unwrap();
+    vm.set_host_input(Some(Box::new(PanickingHost)));
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| vm.eval_source_raw("(setq pw-var 1)")));
+    assert!(caught.is_err(), "the watcher's host panic propagates");
+    vm.set_host_input(None);
+    vm.eval_source_raw("(setq pw-panic nil pw-var 2)").unwrap();
+    let calls = vm.eval_source_raw("pw-calls").unwrap();
+    assert_eq!(vm.display(calls).unwrap(), "2", "the watcher fires again");
 }
 
 /// The hold on aftermath is exact across engines: escapes through nested

@@ -34,6 +34,11 @@ possible; say so where you do.
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
+- Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
+  the keyword. `tools/unsafe_census.py` (run by `scripts/check-derived`) holds
+  each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
+  deleting unsafe, run `python3 tools/unsafe_census.py lower` and commit the
+  lowered floors with the change. Raising a floor is a deliberate commit.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

@@ -23,7 +23,7 @@ const H: u32 = 64;
 const MODEL: u32 = 5;
 
 fn try_renderer() -> Option<WgpuRenderer> {
-    let renderer = WgpuRenderer::new(None, W, H).ok();
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok();
     assert!(
         renderer.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
         "GPU evidence required but no headless wgpu adapter"

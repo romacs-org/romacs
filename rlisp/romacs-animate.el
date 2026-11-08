@@ -108,10 +108,20 @@ answer stands."
          (unless (eq animates 'unknown) (setq romacs-animate--display animates))
          (eq romacs-animate--display t))))
 
+(defun romacs-animate--motion-changed (_symbol _value operation where)
+  "Look again at every animation once `romacs-motion-reduced' changed:
+the desktop's setting arrives on a timer, not a command."
+  (when (and (eq operation 'set) (null where))
+    (run-at-time 0 nil #'romacs-animate--wake)))
+
+(add-variable-watcher 'romacs-motion-reduced #'romacs-animate--motion-changed)
+
 (defun romacs-animate-motion-p ()
-  "Whether animations move here: `romacs-animation' is t and the display
-draws animation (`romacs-animate--display-p')."
-  (and (eq romacs-animation t) (romacs-animate--display-p)))
+  "Whether animations move here: `romacs-animation' is t, motion is not
+reduced (`romacs-motion-reduced', or the desktop's) and the display draws
+animation (`romacs-animate--display-p')."
+  (and (eq romacs-animation t) (not (bound-and-true-p romacs-motion-reduced))
+       (romacs-animate--display-p)))
 
 (defun romacs-animate--get (id)
   (let ((found nil))
