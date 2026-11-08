@@ -81,8 +81,8 @@ crates/romacs-vm/src/world/arena.rs:505 libc::file a builder backs its arena wit
 crates/romacs-vm/src/world/arena.rs:592 libc::file the world allocator checks an image is whole before it adopts it; the launcher checked that image
 crates/romacs-vm/src/world/arena.rs:593 libc::file the world allocator checks an image is whole before it adopts it; the launcher checked that image
 crates/romacs-vm/src/world/arena.rs:717 libc::file the world allocator maps its own executable read-only where an image expects it; no Lisp value depends on it
-crates/romacs-vm/src/world/arena.rs:1136 libc::file copies the builder arena's backing file into the image file the builder opened through host
-crates/romacs-vm/src/world/arena.rs:1149 libc::file copies the builder arena's backing file into the image file the builder opened through host
+crates/romacs-vm/src/world/arena.rs:1139 libc::file copies the builder arena's backing file into the image file the builder opened through host
+crates/romacs-vm/src/world/arena.rs:1152 libc::file copies the builder arena's backing file into the image file the builder opened through host
 crates/romacs-vm/src/world/image.rs:85 slot:process-environment rebuilds the environment lists from this process environment after restore, as Vm::new builds them
 crates/romacs-vm/src/world/mod.rs:124 slot:initial-environment fences the environment lists by name; reads no slot
 crates/romacs-vm/src/world/mod.rs:124 slot:process-environment fences the environment lists by name; reads no slot

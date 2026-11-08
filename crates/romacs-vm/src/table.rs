@@ -91,12 +91,13 @@ impl<T> RawTable<T> {
     /// every mark gone. The entries freed, and the end of the last still in
     /// use. SAFETY: RANGE is this caller's alone, and starts on a multiple of 8.
     pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(&mut T)) -> (usize, usize) {
-        debug_assert!(range.start % 8 == 0 && range.end <= self.len);
+        assert!(range.end <= self.len, "a range past its table");
+        debug_assert!(range.start % 8 == 0);
         let dead = if quarantine { QUARANTINED } else { FREE };
         // Only this range: other threads hold the ones beside it.
         let base = range.start;
-        // SAFETY: RANGE lies in the colours and is this caller's alone (this
-        // function's contract), and AtomicU8 has the layout of u8.
+        // SAFETY: RANGE lies in the colours (asserted) and is this caller's
+        // alone (this function's contract), and AtomicU8 has the layout of u8.
         let colors = unsafe { std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()) };
         let (mut freed, mut last) = (0, 0);
         let mut at = 0;
@@ -141,22 +142,10 @@ impl<T> RawTable<T> {
     /// The dead entries of RANGE that WANTED, given each index, accepts.
     pub(crate) fn dead_in(&self, range: std::ops::Range<usize>, wanted: impl Fn(usize) -> bool, found: &mut Vec<u32>) {
         assert!(range.end <= self.len, "a range past its table");
-        // SAFETY: the table's colours, and AtomicU8 has the layout of u8. This
-        // runs after a mark and before its sweep, when no thread writes one.
-        let colors = unsafe { std::slice::from_raw_parts(self.colors as *const u8, self.len) };
-        let mut at = range.start;
-        while at < range.end {
-            let end = (at + 8).min(range.end);
-            if let Ok(bytes) = <[u8; 8]>::try_from(&colors[at..end]) && !has_zero_byte(u64::from_le_bytes(bytes) ^ LOW_BITS) {
-                at = end;
-                continue;
+        for i in range {
+            if self.color(i).load(Ordering::Relaxed) == ALLOCATED && wanted(i) {
+                found.push(i as u32);
             }
-            for i in at..end {
-                if colors[i] == ALLOCATED && wanted(i) {
-                    found.push(i as u32);
-                }
-            }
-            at = end;
         }
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
