@@ -783,6 +783,8 @@ fn collection_counters_and_garbage_collect_maybe() {
 #[test]
 fn a_collections_record_reads_its_pause_to_the_microsecond() {
     let mut vm = Vm::new();
+    // Under a stress run an automatic collection would come first.
+    vm.set_gc_stress(0);
     let out = vm.eval_source("(progn
                                 (romacs--take-collections)
                                 (let ((before gc-elapsed))
