@@ -1,0 +1,2367 @@
+#+title: Gnosis User Manual
+#+author: Thanos Apollo
+#+language: en
+#+options: ':t toc:t author:t email:t num:t
+#+texinfo_filename: gnosis.info
+#+texinfo_dir_category: Emacs misc features
+#+texinfo_dir_title: Gnosis: (gnosis)
+#+texinfo_dir_desc: Unified knowledge management and spaced repetition
+
+* Table of Contents :noexport:
+:PROPERTIES:
+:TOC: this
+:END:
+
+- [[#introduction][Introduction]]
+- [[#installation][Installation and Setup]]
+- [[#nodes][Nodes]]
+- [[#journal][Journal]]
+- [[#themata][Themata]]
+- [[#review][Review System]]
+- [[#logical-review-day][Logical Review Day]]
+- [[#dashboard][Dashboard]]
+- [[#export-import][Export and Import]]
+- [[#link-health][Link Health and Maintenance]]
+
+* Introduction
+:PROPERTIES:
+:CUSTOM_ID: introduction
+:DESCRIPTION: What gnosis is and how it is organized
+:END:
+
+Gnosis is a personal knowledge management and spaced repetition system
+for Emacs.  It integrates two complementary subsystems in a single
+package: a Zettelkasten-style note system called *nodes*, and a
+flashcard-based self-testing system built around *themata*.  Both
+subsystems share a single SQLite database, and their contents are
+designed to be linked together so that flashcard questions can refer
+directly to the notes they are drawn from.
+
+The name gnosis (Greek: /γνῶσις/, knowledge) reflects the package's
+philosophical orientation: the goal is not mere memorization but the
+deliberate construction of knowledge over time.
+
+** Why Gnosis
+
+Most spaced repetition tools treat flashcards as isolated units.
+You create a card, review it, and the system schedules the next
+review.  The cards have no relationship to each other or to anything
+outside the review loop.
+
+Most note-taking tools do the opposite: they help you build a web of
+interconnected ideas, but they offer no mechanism for systematically
+testing and reinforcing what you have written.
+
+Gnosis bridges these two approaches.  Your notes and your review
+material live in the same system, linked together.  When you write a
+node about a topic, you can create themata whose questions reference
+that node.  When you review, you can review all the questions linked to
+a given note, or follow the link graph to review related topics.  The
+goal is a single system where understanding and recall reinforce each
+other.
+
+** The Two Subsystems
+
+*** Nodes
+
+Nodes are Zettelkasten-style notes stored as plain org-mode files.
+Each node is a file, or a heading within a file, identified by a
+unique UUID stored as an =:ID:= Org property.  Nodes are indexed in
+the database so that they can be searched, browsed by tag, and linked
+together.  Links between nodes use standard org-mode =[[id:UUID]]= syntax,
+which means they remain compatible with any tool that understands
+org-id links.
+
+*** Themata
+
+A /thema/ (Greek: /θέμα/, a subject set before one; plural /themata/)
+is a review card.  Each thema consists of a /keimenon/ (Greek: /κείμενον/,
+the text that underlies something; the question or prompt), an
+/answer/ (the expected response), and an optional /parathema/ (Greek:
+/παράθεμα/, a side-text; supplementary context shown after the answer).
+Themata are reviewed using a spaced repetition algorithm that adapts
+the interval between reviews based on performance.
+
+Themata support the following text question types:
+
+- *Basic*: A direct question with typed matching or reveal-and-self-grade.
+- *Agent-eval*: A free-text explanation assessed against a reference and rubric.
+- *Double*: Two prompts, each with its own answer, presented in sequence.
+- *MCQ* (Multiple Choice Question): The user selects one correct option
+  from a list.
+- *Cloze*: A sentence with one or more words obscured; the user types the
+  missing text.
+- *MC-Cloze* (Multiple Choice Cloze): A cloze question where the missing
+  text is chosen from a list of options.
+
+Image-region and image-occlusion questions add image-based review.
+Model Find and Model Name questions use the separately installed optional
+3D backend; see the model installation requirements below.
+
+*** The Link Between Nodes and Themata
+
+Themata and nodes are not siloed.  When you write a node about a topic,
+you can create themata whose keimenon or parathema contains an
+=[[id:NODE-UUID]]= org-id link to that node.  Gnosis records these
+relationships so that you can later run ~gnosis-review-due-topic~ for
+scheduled review or ~gnosis-practice-topic~ for practice without
+rescheduling.  The legacy ~gnosis-review-topic~ reviews ahead with FSRS.
+The intended workflow is to write a note, create questions about it, link
+the questions to the note, then review by topic.
+
+** Greek Terminology Reference
+
+The following terms appear throughout this manual and in user-facing
+prompts:
+
+- *Gnosis* (/γνῶσις/, knowledge): the name of the package.
+- *Thema* (/θέμα/, topic or subject; plural /themata/): a single review
+  card.
+- *Keimenon* (/κείμενον/, underlying text): the question or prompt shown
+  during review.
+- *Parathema* (/παράθεμα/, side-text): supplementary text shown after
+  answering, used to add context or a longer explanation.
+
+Scheduling uses FSRS-6 with binary review outcomes.  A failed review maps
+to FSRS /Again/ and a successful review maps to FSRS /Good/.
+
+** Data Storage
+
+Themata, indexes, schedules and study history live in the SQLite database
+at =GNOSIS-DIR/gnosis.db=.  Org files own note contents, and managed
+images/models live in =assets/= beside the database.  External media
+remains at its referenced paths.  A new database is created on first use;
+back up existing data before an upgrade (see [[#database-upgrades][Database Upgrades and Rollback]]).
+Gnosis requires Emacs 29.1 or later with built-in SQLite support, the
+=compat= library, and =keymap-popup=.
+
+* Installation and Setup
+:PROPERTIES:
+:CUSTOM_ID: installation
+:DESCRIPTION: How to install gnosis and configure it for first use
+:END:
+
+** Requirements
+
+Gnosis requires:
+
+- GNU Emacs 29.1 or later, compiled with SQLite support.  Verify this
+  with ~(sqlite-available-p)~; it should return =t=.
+- The =compat= library, available from GNU ELPA.
+- The =keymap-popup= library.
+
+Core note and review workflows require no external programs.  Git is
+optional for version-control integration, and Anki package import has
+its own optional tools described below.
+
+** Installing from GNU ELPA
+
+Gnosis is available from GNU ELPA.  To install it:
+
+#+begin_src emacs-lisp
+M-x package-install RET gnosis RET
+#+end_src
+
+Or with ~use-package~:
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :ensure t)
+#+end_src
+
+** Basic Configuration
+
+The minimal configuration requires only specifying where gnosis should
+store its files.  All directories are created automatically on first
+use.
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :ensure t
+  :custom
+  ;; Directory for the gnosis database and related files.
+  ;; Defaults to ~/.emacs.d/gnosis/
+  (gnosis-dir "~/gnosis/")
+
+  ;; Directory where node (note) files are stored.
+  ;; Defaults to ~/Notes/
+  (gnosis-nodes-dir "~/Notes/")
+
+  ;; Directory for journal files. Defaults to GNOSIS-NODES-DIR/journal/
+  (gnosis-journal-dir "~/Notes/journal/"))
+#+end_src
+
+** Key Directories
+
+*** ~gnosis-dir~
+
+The gnosis data directory.  This is where =gnosis.db= is stored.  It is
+also the root used for version control when ~gnosis-vc-auto-push~ is
+enabled.  Defaults to ={user-emacs-directory}/gnosis/=.
+
+#+begin_src emacs-lisp
+(setopt gnosis-dir (expand-file-name "gnosis/" user-emacs-directory))
+#+end_src
+
+*** ~gnosis-nodes-dir~
+
+The directory containing your note files.  All =.org= and =.org.gpg=
+files in this directory and its subdirectories are indexed by gnosis,
+excluding the separately indexed journal.  Defaults to =~/Notes/=.
+Node filenames in the index are relative to this directory, so files
+in different subdirectories can share a basename.  Older saves could
+index subdirectory files using only their basenames.  If those rows
+cannot be identified as a root file's snapshot, save indexing, sync,
+navigation and deletion refuse with an instruction to run
+~gnosis-nodes-db-force-sync~.  This explicit rebuild changes only the
+index, not Org contents or IDs.  A save-hook refusal occurs after your
+edited file has been saved; it preserves the previous index.  Replacing
+all IDs in an old root snapshot can also require this rebuild because
+no surviving ID identifies that snapshot.
+
+#+begin_src emacs-lisp
+(setopt gnosis-nodes-dir "~/Notes/")
+#+end_src
+
+*** ~gnosis-journal-dir~
+
+The directory for journal entry files.  Defaults to a =journal/=
+subdirectory inside ~gnosis-nodes-dir~.  Journal files are indexed
+separately from regular nodes but use the same underlying mechanism.
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-dir (expand-file-name "journal/" gnosis-nodes-dir))
+#+end_src
+
+
+** Database Upgrade Compatibility
+
+Released Gnosis 0.12.0 databases upgrade from schema 10 to 11;
+0.11.0 and 0.10.6 databases upgrade through the preserved 9-to-10 and
+8-to-9 steps respectively.  Separate
+org-gnosis databases and older Gnosis schemas are not automatically
+imported.  Preserve their data and use matching older source or a
+separately verified conversion.  Follow the pre-first-open backup
+procedure in [[#database-upgrades][Database Upgrades and Rollback]] before opening an existing
+database with 0.13.0.
+
+** Version Control
+
+Gnosis can automatically push your database to a remote Git repository
+after each review session.  This is controlled by ~gnosis-vc-auto-push~.
+
+#+begin_src emacs-lisp
+(setopt gnosis-vc-auto-push t)
+#+end_src
+
+When this is =t=, gnosis pushes ~gnosis-dir~ at the end of every review
+session.  To use this, initialize =gnosis-dir= as a Git repository and
+configure a remote before enabling this option.
+
+** Completing Read Integration
+
+Gnosis respects your preferred completion framework.  The
+~gnosis-completing-read-function~ variable defaults to
+~completing-read~ when Vertico, Ivy, Helm, or fido-mode is detected,
+and to ~ido-completing-read~ otherwise.
+
+#+begin_src emacs-lisp
+;; Explicitly set if auto-detection does not work for your setup:
+(setopt gnosis-completing-read-function #'completing-read)
+#+end_src
+
+** Full Example Configuration
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :ensure t
+  :custom
+  (gnosis-dir "~/gnosis/")
+  (gnosis-nodes-dir "~/Notes/")
+  (gnosis-journal-dir "~/Notes/journal/")
+  (gnosis-vc-auto-push nil)
+  (gnosis-center-content-during-review t)
+  (gnosis-review-new-first t)
+  (gnosis-new-themata-limit nil))
+#+end_src
+
+* Nodes
+:PROPERTIES:
+:CUSTOM_ID: nodes
+:DESCRIPTION: Zettelkasten-style notes stored as org-mode files
+:END:
+
+Nodes are gnosis's note-taking system.  A node is an org-mode heading
+(or an entire org file) that has been assigned an org ID.  Gnosis
+indexes all nodes in its database, enabling fast search, tag-based
+browsing, backlink navigation, and linking from themata.
+
+The node system is deliberately minimal.  Files live on disk as plain
+org-mode files, readable and editable without gnosis.  The database is
+a derived index that can be rebuilt at any time from the files
+themselves.
+
+** What Makes an Org Heading a Node
+
+Any org-mode heading that has an =:ID:= property becomes a node.  The
+file-level title (expressed with =#+title:=) paired with a file-level
+ID also constitutes a node.  Gnosis assigns UUIDs using ~org-id-get-create~
+when it creates a new file.
+
+A file may contain multiple nodes if multiple headings carry IDs.  In
+that case, gnosis tracks the hierarchy: a heading's title is stored as
+=ParentTitle:ChildTitle= to reflect its position in the outline.
+
+** Creating and Finding Nodes
+
+*** ~gnosis-nodes-find~
+
+The primary command for opening a node is ~gnosis-nodes-find~.  It
+presents a completing-read prompt listing all known node titles.
+Select an existing title to open that node's file, positioned at the
+correct heading.
+
+If you type a title that does not match any existing node, gnosis
+creates a new file for it in ~gnosis-nodes-dir~, prompts you to choose
+a template, and opens the file in a new buffer.
+
+*** ~gnosis-nodes-find-by-tag~
+
+To browse nodes by tag, use ~gnosis-nodes-find-by-tag~.  It prompts
+for a tag name drawn from existing tags, then presents all nodes
+carrying that tag for selection.
+
+** File Naming
+
+When gnosis creates a new node file, the filename is derived from the
+node title.  By default, filenames are prefixed with a timestamp to
+ensure uniqueness and to prevent collisions when two nodes share
+similar titles.
+
+*** ~gnosis-nodes-timestring~
+
+This variable controls the timestamp prefix format.  It is a
+~format-time-string~ format string.  The default is
+~"%Y%m%d%H%M%S"~, producing filenames like
+=20240315143022--My_Topic.org=.
+
+Set it to =nil= to use the title alone as the filename, with no
+timestamp prefix:
+
+#+begin_src emacs-lisp
+;; Use timestamp prefix (default):
+(setopt gnosis-nodes-timestring "%Y%m%d%H%M%S")
+
+;; Use title only, no timestamp:
+(setopt gnosis-nodes-timestring nil)
+#+end_src
+
+When ~gnosis-nodes-timestring~ is =nil= and a file with the same title
+already exists, gnosis will ask whether you want to visit the existing
+file or abort.
+
+*** GPG Encryption
+
+Setting ~gnosis-nodes-create-as-gpg~ to =t= causes all new node files to
+be created with a =.gpg= suffix, triggering Emacs's built-in EasyPG
+encryption on save.
+
+#+begin_src emacs-lisp
+(setopt gnosis-nodes-create-as-gpg nil)  ; default
+#+end_src
+
+This setting affects only newly created files; existing =.org= files are
+not retroactively encrypted.
+
+** Displaying Tags in Completion
+
+By default, the completing-read prompt for nodes displays only titles.
+Set ~gnosis-nodes-show-tags~ to =t= to display each node's tags
+alongside its title, rendered with the ~gnosis-nodes-face-tags~ face.
+
+#+begin_src emacs-lisp
+(setopt gnosis-nodes-show-tags t)
+#+end_src
+
+Tags are displayed in the format =Title  #tag1#tag2= and are stripped
+from the string before the title is used for lookup.
+
+** Templates
+
+When gnosis creates a new node, it optionally inserts template content
+into the file.  Templates are configured via ~gnosis-nodes-templates~.
+
+*** ~gnosis-nodes-templates~
+
+This variable is an alist of =(NAME . FUNCTION)= cons cells.  Each
+function takes no arguments and returns a string that is inserted into
+the new file after the initial =#+title:= and =#+filetags:= lines.
+
+You can use named functions or inline lambdas.  When using inline
+lambdas, build the list with ~list~ and ~cons~ so the lambdas are
+compiled under lexical-binding (a quoted ='(...)= form leaves lambdas
+as inert data):
+
+#+begin_src emacs-lisp
+;; Using named functions (recommended):
+(defun my/annotated-template ()
+  (concat "{*} Summary\n\n"
+          "{*} Notes\n\n"
+          "{*} References\n"))
+
+(setopt gnosis-nodes-templates
+        '(("Empty" . ignore)
+          ("Annotated" . my/annotated-template)))
+
+;; Using inline lambdas (note `list' / `cons'):
+(setopt gnosis-nodes-templates
+        (list (cons "Empty" (lambda () ""))
+              (cons "Annotated"
+                    (lambda ()
+                      (concat "{*} Summary\n\n"
+                              "{*} Notes\n\n"
+                              "{*} References\n")))))
+#+end_src
+
+*** The ={*}= Heading Marker
+
+Template strings use ={*}= as a placeholder for an org heading.  When
+gnosis inserts a template, it expands each ={*}= to the appropriate
+number of asterisks for the context in which the template is being
+inserted.  If you are inserting into a new top-level file, ={*}= becomes
+=*=.  If you are inserting under an existing level-2 heading, ={*}=
+becomes =***=.
+
+Use ={**}= for a heading one level deeper than the base, ={***}= for two
+levels deeper, and so on.
+
+For example, the template string:
+
+#+begin_src
+{*} Key Ideas
+
+{**} Subpoint
+#+end_src
+
+Inserted at the top level of a new file produces:
+
+#+begin_src org
+  ,* Key Ideas
+
+  ,** Subpoint
+#+end_src
+
+
+Inserted under an existing =**= heading produces:
+
+#+begin_src org
+  ,*** Key Ideas
+
+  ,**** Subpoint
+#+end_src
+
+*** Inserting a Template Manually
+
+Use ~gnosis-nodes-insert-template~ to insert a template at point in an
+existing buffer.  It detects whether the buffer is a journal file and
+selects the appropriate template list automatically.
+
+** Automatic Sync
+
+~gnosis-nodes-mode~ is a minor mode that is automatically activated for
+any org file located in ~gnosis-nodes-dir~ or ~gnosis-journal-dir~.  When
+this mode is active, saving the buffer updates that file's entries in
+the database.
+
+*** Manual Sync
+
+To sync all files without waiting for saves, use ~gnosis-nodes-db-sync~.
+Called interactively without a prefix argument, it updates only files
+that have changed since the last sync.  Called with a prefix argument
+(~C-u M-x gnosis-nodes-db-sync~), it purges all node entries and
+rebuilds the database from scratch.
+
+#+begin_src emacs-lisp
+;; Sync only changed files:
+M-x gnosis-nodes-db-sync
+
+;; Force full rebuild:
+C-u M-x gnosis-nodes-db-sync
+#+end_src
+
+*** Force Rebuild
+
+~gnosis-nodes-db-force-sync~ provides a dedicated command for the full
+rebuild case, with a confirmation prompt before proceeding.
+
+** Deleting a Node File
+
+Use =M-x gnosis-nodes-delete-file= in the file to remove it and its node
+index after confirmation.  Lisp callers may supply an explicit file; that
+file, not the current buffer's file, is the deletion target.
+
+Filesystem deletion and index cleanup are separate effects.  If deletion
+fails before the file is removed, its index remains intact.  If the file is
+gone but index cleanup fails, the command reports the unfinished cleanup.
+Retry ~gnosis-nodes-delete-file~ from the retained buffer, or supply the
+same filename explicitly, to confirm index-only reconciliation.  A retained
+buffer is detached from the deleted filename so an ordinary save cannot
+silently recreate it.  This recovery does not restore deleted file bytes.
+If you save the recovery buffer under another name, it belongs to that new
+file.  To retry cleanup for the original, use =M-:= with
+=(gnosis-nodes-delete-file "/path/to/original.org")=.  When retained
+basename ownership is unresolved, rebuild the index as instructed before
+retrying deletion; no file bytes are removed by that refusal or rebuild.
+
+** Links Between Nodes
+
+Gnosis uses standard org-mode =[[id:UUID][description]]= link syntax for
+linking between nodes.  When a file is synced, gnosis parses all id
+links in the file and stores them as directed edges from source to
+destination.
+
+To insert an id link to another node, use ~gnosis-nodes-insert~.  It
+prompts for a node title, looks up its UUID, and inserts an org-id link
+at point.  If the named node does not yet exist, it is created.
+
+#+begin_src emacs-lisp
+;; Insert a node link at point:
+M-x gnosis-nodes-insert
+
+;; With prefix arg, prompts for a custom link description:
+C-u M-x gnosis-nodes-insert
+#+end_src
+
+If a region is active when ~gnosis-nodes-insert~ is called, the selected
+text is used as the link description.
+
+** Backlinks
+
+~gnosis-nodes-visit-backlinks~ shows all nodes that link to the current
+node.  It presents the source node titles in a completing-read prompt
+and visits the selected node.
+
+If no backlinks exist, it reports this with a message.
+
+** Tags
+
+Tags in gnosis nodes come from two sources:
+
+1. *File-level tags*: The =#+filetags:= keyword at the top of the org
+   file.  These apply to the file-level node.
+2. *Heading-level tags*: Tags applied to individual org headings using
+   standard org syntax (=:tag:= at the end of the heading line).  These
+   are inherited downward through the outline.
+
+*** Adding Tags
+
+Use ~gnosis-nodes-insert-tags~ to add tags to the current node
+interactively.  It presents a completing-read prompt supporting multiple
+selections (separated by commas).  If the cursor is on a heading, the
+tags are added to that heading; otherwise they are inserted as filetags.
+
+To add a single existing tag to the =#+filetags:= line, use
+~gnosis-nodes-insert-filetag~.  The command completes against tags that
+already exist in the database, which helps maintain consistent tag
+names across notes.
+
+* Journal
+:PROPERTIES:
+:CUSTOM_ID: journal
+:DESCRIPTION: Date-based journal entries with optional task and study views
+:END:
+
+The journal is a dated Org node for recording and reflecting on the
+day.  Org owns the prose and IDs; saving a journal never completes
+external tasks.  SQLite indexes titles and owns study history.
+
+** Creating Entries
+
+*** ~gnosis-journal~
+
+The quickest way to open today's journal entry is ~gnosis-journal~.
+
+*** ~gnosis-journal-find~
+
+~gnosis-journal-find~ accepts an optional title argument.  Called
+interactively without arguments, it prompts for an existing or new
+journal entry title via completing-read.  If the entry already exists,
+gnosis opens it; if it does not, gnosis creates a new file (or heading,
+in single-file mode) for it.
+
+** File vs Single-File Mode
+
+Gnosis supports two modes for journal storage:
+
+*** Single Journal File (Default)
+
+By default ~gnosis-journal-file~ is =t=: entries live as level-1
+headings in =journal.org= under ~gnosis-journal-dir~, or
+=journal.org.gpg= when ~gnosis-journal-as-gpg~ is non-nil.  Relative
+strings resolve against ~gnosis-journal-dir~.  Absolute paths keep
+their suffix.  =nil= restores one file per entry.  Existing files are
+never renamed or converted.  These values are mutually exclusive;
+choose one:
+
+#+begin_src emacs-lisp
+;; Automatic single file (journal.org or journal.org.gpg):
+(setopt gnosis-journal-file t)
+;; Explicit path (suffix is authoritative):
+;; (setopt gnosis-journal-file "~/Notes/journal/journal.org.gpg")
+;; One file per entry:
+;; (setopt gnosis-journal-file nil)
+#+end_src
+
+Retained files with native filenames (including timestamp prefixes and
+=.gpg= suffixes) are checked when opening their title, before creating a
+new entry.  Run ~gnosis-journal-db-sync~ to discover renamed files or
+refresh the complete history; ordinary commands do not read every archive.
+
+** GPG Encryption
+
+Like nodes, journal files can be created with a =.gpg= suffix.  The
+option ~gnosis-journal-as-gpg~ controls this independently from
+~gnosis-nodes-create-as-gpg~.
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-as-gpg nil)  ; default
+#+end_src
+
+** Templates
+
+Journal templates follow the same mechanism as node templates.  They are
+configured via ~gnosis-journal-templates~.
+
+*** ~gnosis-journal-templates~
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-templates
+        (list (cons "Default"
+                    (lambda ()
+                      (concat "{*} Daily Notes\n\n"
+                              "{*} Goals\n"
+                              (gnosis-journal-todos))))
+              (cons "Empty" (lambda () ""))))
+#+end_src
+
+The default template calls ~gnosis-journal-todos~, which produces a
+checkbox list of any TODO items from ~gnosis-journal-todo-files~ that
+are due today (or have no scheduled date).  The ={*}= heading marker
+works exactly as in node templates.
+
+** "TODO" Integration
+
+The journal module can pull TODO items from your org agenda files into
+each journal entry as checkboxes.  This provides a daily task list
+drawn automatically from your existing TODO state.
+
+*** ~gnosis-journal-todo-files~
+
+The list of org files from which TODOs are pulled.  Defaults to
+~org-agenda-files~.
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-todo-files org-agenda-files)
+#+end_src
+
+*** ~gnosis-journal-todo-keywords~
+
+A flat list of TODO keyword strings to collect when scanning files.
+Defaults to =("TODO")=.  Include only the active states you want to
+collect; unlike ~org-todo-keywords~, this option does not accept
+sequences or a vertical-bar separator.  The states must also be defined
+in Org, for example with =#+todo: TODO NEXT | DONE= in the source file.
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-todo-keywords '("TODO" "NEXT"))
+#+end_src
+
+*** Bullet Point Character
+
+The character used to introduce each TODO checkbox in the journal
+template output is configured via ~gnosis-journal-bullet-point-char~.
+It defaults to =+=, which org-mode renders as a plain-list item.
+
+#+begin_src emacs-lisp
+(setopt gnosis-journal-bullet-point-char "+")
+#+end_src
+
+*** How Task Collection Works
+
+When a journal entry's template is applied, ~gnosis-journal-todos~
+scans ~gnosis-journal-todo-files~ for headings whose TODO keyword
+matches an active keyword from ~gnosis-journal-todo-keywords~.  It
+includes items that either have no scheduled date or are scheduled for
+today.  Each included item is rendered as a checkbox line:
+
+#+begin_src org
++ [ ] Write documentation
++ [ ] Review pull requests
+#+end_src
+
+** Completing source tasks
+
+Saving a journal does not mark external TODOs done.  A plain checkbox
+is journal prose.  ~gnosis-journal-insert-task~ inserts an ID-linked
+checkbox; ~gnosis-journal-complete-task~ completes the linked source
+with ~org-todo~ after confirmation and does not save the source
+buffer.  Recurrence stays with Org.
+
+** Dated navigation
+
+~gnosis-journal-date~ prompts with ~org-read-date~ and opens that
+calendar day.  ~gnosis-journal-previous~ and ~gnosis-journal-next~
+visit existing dated entries, skip gaps, and never create a missing
+day.  ~gnosis-journal-capture~ appends a timestamped note to the
+current dated entry, or today's.  ~gnosis-journal-study~ opens the
+optional read-only study view for the entry date without rewriting
+journal prose.
+
+** Command map
+
+~gnosis-journal-prefix-map~ groups these commands.  Gnosis does not
+bind it globally:
+
+| Key | Command |
+| j | ~gnosis-journal~ (today) |
+| d | ~gnosis-journal-date~ |
+| f | ~gnosis-journal-find~ |
+| n | ~gnosis-journal-next~ |
+| p | ~gnosis-journal-previous~ |
+| c | ~gnosis-journal-capture~ |
+| t | ~gnosis-journal-insert-task~ |
+| k | ~gnosis-journal-complete-task~ |
+| s | ~gnosis-journal-study~ |
+| l | ~gnosis-journal-insert~ |
+
+#+begin_src emacs-lisp
+(keymap-global-set "C-c j" gnosis-journal-prefix-map)
+#+end_src
+
+** Inserting Journal Links
+
+From within any gnosis buffer, you can insert an org-id link to a
+journal entry using ~gnosis-journal-insert~.  It works identically to
+~gnosis-nodes-insert~ but queries journal entries instead of nodes.
+
+** Full Journal Configuration Example
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :ensure t
+  :custom
+  ;; Default single file (journal.org or journal.org.gpg):
+  (gnosis-journal-file t)
+  (gnosis-journal-dir "~/Notes/journal/")
+  (gnosis-journal-as-gpg nil)
+  (gnosis-journal-bullet-point-char "+")
+  (gnosis-journal-todo-files org-agenda-files)
+  (gnosis-journal-todo-keywords '("TODO" "NEXT"))
+  (gnosis-journal-templates
+   (list (cons "Default"
+               (lambda ()
+                 (concat "{*} Daily Notes\n\n"
+                         "{*} Goals\n"
+                         (gnosis-journal-todos))))
+         (cons "Empty" (lambda () "")))))
+#+end_src
+
+* Themata (Spaced Repetition Cards)
+:PROPERTIES:
+:CUSTOM_ID: themata
+:END:
+
+Gnosis organises all review material into units called /themata/ (singular:
+/thema/).  The word is Greek for "that which is placed" or "a topic set
+before you," and a thema in gnosis is precisely that: a question or
+prompt placed before you for recall.  Each thema has immutable review
+events and a current scheduler state.  FSRS model parameters are pinned
+by the package; desired retention is a versioned user-wide setting.
+
+** Fields of a Thema
+
+Every thema shares a common set of fields:
+
+- *keimenon* (/κείμενον/, "underlying text"): The question, prompt, or
+  sentence context.  This is what the user sees first during review.
+- *hypothesis* (/ὑπόθεσης/, "assumption"): Supporting material.
+  Its role differs by type: for MCQ it holds the list of answer choices,
+  for basic it holds an optional hint, and for cloze and mc-cloze it
+  holds hints corresponding to each gap.
+- *answer*: The correct answer or list of cloze gaps.  For agent-eval, one
+  multiline reference answer.
+- *rubric*: Agent-eval grading guidance, separate from the reference answer
+  and teaching text.  State essential points and consequential errors.
+- *parathema* (/παράθεμα/, side-text): supplementary text shown after
+  answering, used to add context or a longer explanation.
+- *tags*: A list of strings for organising, filtering, and selecting
+  themata for focused review sessions.
+- *links*: Node IDs extracted from =[[id:...]]= org-links present in the
+  keimenon or parathema.  Used for topic-based review.
+
+** Thema Types
+
+Gnosis provides the following thema types:
+
+*** Basic
+
+A straightforward question and answer.  The keimenon is the question;
+the answer is a single string.  An optional hypothesis serves as a hint
+displayed before the user types their response.  The comparison is
+case-insensitive and allows for a small Levenshtein distance, controlled
+by =gnosis-string-difference=.
+
+*** Agent-eval
+
+Choose =Agent-eval= in ~gnosis-add-thema~ for questions that need an explanation
+rather than a typed spelling.  Keimenon is the question.  Answer is one
+nonempty reference answer, even when it spans paragraphs or bullet lists.
+Rubric is a separate required, nonempty free-text field: explain which points
+are essential and which omissions or consequential errors make a response
+incorrect.  Hypothesis holds optional hints; Parathema holds teaching material
+and descriptive source links shown after answering.  Accepted aliases are not
+supported.
+
+For example, the native draft can contain:
+
+#+begin_example
+,** Keimenon
+Why does removing the cause reverse the effect in this example?
+,** Hypothesis
+- Explain the mechanism, not just the association.
+,** Answer
+The cause activates the intermediate mechanism.
+Removing it stops that mechanism, so the effect subsides.
+,** Rubric
+Essential: identify the intermediate mechanism and its direction.
+Consequential error: claiming the effect causes the original trigger.
+,** Parathema
+Review the causal chain and compare it with an association alone.
+- [[id:source-node-id][Source explanation]]
+#+end_example
+
+Save with =C-c C-c=; reopen normally to edit the reference and rubric.  These
+bodies are literal multiline text, not the list of independent accepted
+answers used by other types.  Hyphens, checkbox-looking text and spaces are
+preserved.  Lines starting with stars or =#+= are comma-escaped in the draft
+using Org's literal-code convention and unescaped on save.  The editor places
+two separator newlines after each body; they are not part of its value.
+Removing or blanking Rubric prevents an agent-eval save; it never reuses a
+hidden rubric from an older draft.
+
+The default ~gnosis-agent-eval-function~ is ~gnosis-agent-eval-hermes~.
+Install =emacs-hermes= with =hermes-request= support to use it.  Gnosis loads
+that optional integration only when evaluation is requested; ordinary authoring
+and other thema types do not require Hermes.  Customize
+~gnosis-agent-eval-hermes-profile~ to select the evaluator profile (default
+="default"=).  The profile owns its model, credentials and instructions.
+~gnosis-agent-eval-hermes-backend-url~ optionally selects a dedicated backend;
+its default nil uses Hermes's configured transport.  This selection does not
+change your default backend or current chat.  The chosen backend must provide
+the selected profile.
+Requests contain the question, reference answer, rubric and your response;
+choose a profile/provider suitable for that content.
+
+During review the question and hints stay in the review buffer.  Write your
+response in the separate native text-mode response buffer, then press
+=C-c C-c= to submit it for asynchronous evaluation.  Feedback appears inline
+after the response.  Press =C-c C-c= again to continue to the ordinary review
+actions.  =C-c C-k= cancels a pending evaluation while preserving your response
+for retry; =C-g= aborts without recording a grade.  Evaluator feedback is not a
+substitute for checking the source or deciding whether a rubric tests what you
+intend.
+
+*** Double
+
+A convenience type that creates *two* basic themata from a single
+definition: one in the forward direction (keimenon -> answer) and one in
+reverse (answer -> keimenon).  Both cards are stored independently and
+scheduled separately.
+
+*** MCQ (Multiple Choice Question)
+
+The keimenon is the question.  The hypothesis holds a list of answer
+options (at least two) shuffled on each review.  The answer is a single
+string that must be one of the hypothesis options.  The user selects from
+the completion interface rather than typing freely.
+
+*** Cloze
+
+A fill-in-the-blank type.  The keimenon is a sentence with one or more
+gaps to fill.  Gnosis supports standard Anki-style cloze notation:
+
+#+begin_example
+The capital of {{c1::Greece}} is one of the oldest cities in the world.
+{{c1::Athens}} was named after {{c2::Athena}}.
+#+end_example
+
+Each =c1=, =c2=, etc. group is extracted into a separate thema.  The user
+must supply each gap in turn; a wrong answer on any gap fails the whole
+thema.  Hints can be embedded after a double colon: ={{c1::Athens::city}}=.
+
+*** MC-cloze (Multiple Choice Cloze)
+
+Like cloze, but the user selects the correct word from a list of
+candidates (the hypothesis) rather than typing it.  Only a single gap is
+supported per thema.  The answer must appear verbatim in the sentence.
+
+*** Accepted aliases
+
+Basic typed answers, Image-occlusion and Model-name can accept explicitly
+authored alternative spellings. Keep one canonical Answer and add a separate
+second-level heading in the native draft, for example:
+
+#+begin_example
+** Accepted aliases
+- ATFL
+- Anterior talofibular lig.
+#+end_example
+
+Use one nonempty, single-line list item per alias. Spelling and order are
+preserved; aliases are not inferred synonyms. Canonical text and each alias
+use the same quote trimming, whitespace removal, case folding and configured
+~gnosis-string-difference~ tolerance, including the existing short-string
+exact-match rule. Reveal text and input-method selection still use the
+canonical Answer. Basic self-grading does not perform typed matching.
+Aliases are not supported on Agent-eval, MCQ, cloze, MC-cloze, Image-region
+or Model Find.
+Double creates two basic themata; supplied aliases belong only to the forward
+question, not its reverse.
+
+Save with =C-c C-c= and reopen through the normal edit command to inspect the
+retained field. Removing or emptying the Accepted aliases section in a full
+draft clears the aliases. Duplicate or unknown field headings are rejected;
+do not put aliases in Answer as additional required answers. Unrelated alias
+changes during input or before acceptance require answering again. An alias
+edit saved through review's =e= action applies to future presentations without
+regrading the answer already given.
+
+*** Images, regions and occlusion
+
+In an ordinary thema draft, put point in the question, hint, answer or
+explanation and press =C-c C-a= (~gnosis-image-attach~). Choose a local PNG
+or JPEG and optionally supply its source and attribution. Save with
+=C-c C-c= as usual. Managed links reopen with the thema and display inline
+during study. An answer containing an image uses binary self-grading rather
+than asking you to type a file reference. Existing =file:= links keep their
+previous behavior.
+
+For a region question, run ~gnosis-add-image-thema~ or choose Image-region
+in ~gnosis-add-thema~. Choose an image, drag with the left mouse button to
+draw a rectangle, and enter its label. Click a rectangle to select it.
+Each target can own several rectangles, for example repeated printed labels:
+
+- =S-drag-mouse-1= adds a rectangle to the selected target; ordinary dragging
+  creates a new target instead.
+- =n= / =p= selects the next/previous rectangle, including obscured overlaps.
+- =r= reassigns the selected rectangle to an existing or new target.
+- =l= renames the target without changing its ID or merging equal labels.
+- =d= removes one rectangle; =D= removes its whole target. Removing a target's
+  last rectangle requires confirmation, including when reassigning it.
+
+=RET= accepts the regions;
+=q= or =C-g= cancels. Choose the expected region, then write the question,
+explanation and tags in the normal draft. No JSON or coordinates are needed.
+=C-c C-a= in an image thema draft lets you reuse or replace the image and
+edit its regions. Published revisions are immutable: editing does not change
+other themata that use the old revision. Reattachment preserves the authored
+occlusion answer, aliases and policy; changing its target asks whether to keep
+the answer and aliases. Check that they still describe the intended target.
+Single-rectangle version 1 manifests remain readable unchanged; grouped
+rectangles use version 2. Both are limited to 255 targets and 255 total
+rectangles within a 128-KiB manifest.
+
+During Image-region review, click the intended region. Selection is neutral
+and does not grade; =RET= submits it. Every sibling rectangle identifies
+the same stable target. Feedback shows the expected label and,
+for an incorrect selection, the selected label rather than its stored ID.
+Image-occlusion uses the same authoring flow, with an editable text Answer
+initially taken from the region label. The Image resource field holds the
+managed reference, stable target and visibility policy as three list items;
+Answer is separate human-readable text. Choose the policy at attachment:
+=hide-target= covers every rectangle of the tested target; =hide-all= covers
+all annotated rectangles. Older one/two-field cards default to =hide-target=.
+Both policies mark the tested masks with a neutral outline and =?=, without
+generated answer labels, IDs or aliases. Annotate every answer-bearing printed
+label yourself: masking does not perform OCR or hide unannotated text.
+During review the image appears inline below the keimenon in the ordinary
+Gnosis buffer.
+Type its answer in the minibuffer and press =RET=. Normal Gnosis text matching
+checks the answer, then removes the mask to show the original image without
+region labels or outlines. The expected answer and any incorrect input appear
+as separate text feedback; there is no yes/no recall prompt.
+Historical target-only themata use their pinned region label
+as the expected text, and opening their draft exposes the separate fields.
+Cancelling input produces no grade. Both types participate
+in normal scheduled review and non-rescheduling practice, including outcome
+overrides, retries and scheduled undo.
+
+Display requires a graphical Emacs with native SVG and PNG/JPEG decoding.
+The image view fits its window; inline review displays refresh on window
+configuration changes. Lines containing images retain their layout rather than
+being trimmed, filled or padded by text centering. Standard PNG color types
+and bit depths, including grayscale, palette and 16-bit PNG, and 8-bit
+grayscale/RGB JPEG are accepted when the native decoder supports them.
+Files are limited to 32 MiB, 16384
+pixels per axis and 40 million pixels. Header acceptance alone is not proof
+of valid compressed pixels: unavailable or corrupt images stop study before
+a grade, including images in hidden answers or explanations.
+
+Gnosis copies images into =assets/<revision>/= beside the connected database;
+the portable Org link uses the =gnosis-image:= scheme. Keep that directory
+with database backups. SQLite content export/import bundles ordinary inline
+managed images. Region and occlusion thema types remain unsupported by content
+exchange; use database-plus-assets backups for those. TIFF and DICOM are not
+supported. Ordinary raster attachments need no external converter.
+
+*** Lecture illustrations in Parathema
+
+Use =C-c C-l= (~gnosis-lecture-attach~) in a single thema draft to attach
+an existing PNG/JPEG or one physical page of a local PDF.  The command
+always appends to *Parathema*, regardless of point.  PDF page numbers are
+1-based physical pages, not printed slide numbers or PDF page labels.
+
+PDF extraction requires Poppler's =pdftoppm=.  It runs asynchronously,
+fitting the page within 1800 pixels, with a 60-second deadline.  Cancel
+with =C-c C-x= (~gnosis-lecture-cancel~).  Changing the draft while rendering
+refuses the late insertion; save or cancellation never inserts into a
+successor draft.  Missing files, unsupported rasters, invalid pages and
+conversion errors leave the draft unchanged.  Sources must be local and
+at most 100 MiB; managed rasters retain the ordinary image limits.
+
+Save with =C-c C-c=, then review normally.  The illustration is hidden
+until the answer, in both scheduled review and practice, and fits the
+review window.  Ordinary question images keep their existing behavior.
+Unavailable managed pixels stop the encounter rather than recording an
+incorrect answer.
+
+The attachment includes an actionable =gnosis-lecture:= citation to the
+original path and physical page.  In practice or scheduled review, *View source*
+in the normal post-answer actions (=v=) is optional: a sole source opens
+directly, and multiple linked nodes or lectures use completion.  Return with
+=C-c C-c= to the same pending answer; cancelling the source picker likewise
+returns without accepting or changing that answer.  There is no mandatory
+source introduction or separate learning mode.  PDFs open through native DocView or configured
+pdf-tools; =pdfinfo= (also from Poppler) verifies the physical page before
+navigation.  The citation is a local external reference, not an archived
+lecture: moving or replacing the original can make it unavailable or
+change its contents.  Keep originals separately.  Missing originals do
+not prevent review of the managed extracted image.
+
+SQLite content export includes the managed illustration, its immutable
+manifest and citation.  Import validates the bundled bytes before applying
+content.  It never copies the full PDF, follows external file links, or
+fetches network sources.  Export files therefore remain usable after
+moving to another machine even when the original PDF is absent; source
+navigation still requires that external original at the retained path.
+
+*** Models: Find and Name
+
+Model Find asks you to pick a whole object, surface point or surface region
+in a local 3D scene. Model-name highlights a target and asks for its name.
+Both support scheduled review and non-rescheduling practice. During scene
+preparation, the review buffer shows /Loading model/ and remains responsive;
+=q= or =C-g= cancels without recording an answer. Geometry validation runs in
+a child Emacs process, and the encounter retains only the verified scene and
+picking data it needs. Submission and acceptance recheck asset bytes without
+reparsing topology. Changed or unavailable assets cannot be graded.
+
+While you answer, Gnosis prepares at most the next queued model in the
+background, without displaying it or recording an attempt. Advancing to
+that same unchanged card reuses ready or pending preparation. A changed
+queue, card or session discards the speculative work; quitting cancels it.
+Advancing before preparation finishes still uses the responsive loading view.
+
+Due selection, the daily new-item limit, topic summaries and overdue counts
+treat models like
+ordinary themata; suspension excludes them from both kinds of study.
+
+Run ~gnosis-add-model-thema~ for Find or ~gnosis-add-model-name-thema~ for
+Name; both types are also available in ~gnosis-add-thema~.
+Choose a local OBJ file, add more objects through the file chooser if
+needed, and give each object a readable label.  Supply the actual
+license/attribution (including required notices) and source/provenance;
+Gnosis does not infer them.  The objects must already share coordinates.
+Files may come from different directories, even with identical basenames.
+Gnosis generates safe distinct managed filenames and stable target IDs.
+Reimporting the same source paths retains IDs when geometry changes;
+moving the source files produces different IDs.  The managed scene itself
+does not depend on the source paths after import.
+
+In the canvas, click the expected object, then drag or use arrow keys to
+frame the starting view.  The wheel or =+= / =-= zooms; =r= resets.  The
+heading shows the selected label and renderer status.  *Clicks only
+select.*  Press =RET= when the view is ready to accept the target and
+camera, or =q= / =C-g= to cancel.  No thema is created on cancellation.
+The temporary viewer fits the current window and restores the previous
+window arrangement when it closes.
+
+To author landmarks on the imported mesh, click a surface and wait for the
+renderer, then use these authoring controls:
+
+- =p= creates a point with a label and an explicit tolerance in original mesh
+  units; =m= moves the selected point to the clicked surface, retaining its ID
+  and tolerance.
+- =g= creates a region from the clicked triangle; =a= toggles the clicked
+  triangle in the selected region on the same mesh. Its last triangle cannot
+  be removed this way: delete the target instead.
+- =t= selects an existing target by completion; =e= edits its label and, for
+  points, tolerance; =d= removes the target after confirmation.
+
+These changes publish a new scene revision when accepted, not edits to shared
+published bytes. Use =t= to return to an existing object or landmark before
+accepting the target and camera with =RET=.
+
+Fill in the question, explanation and tags in the normal Org authoring
+buffer and save with =C-c C-c=.  In a single Model draft, =C-c C-a= offers
+to reframe its existing scene or attach another one.  Cancellation leaves
+the draft unchanged.  Edit persisted model themata with the ordinary edit
+command; close/reopen preserves the target and starting view.
+
+For advanced import, choose a scene JSON instead of an OBJ in the first
+file chooser.  Blank license/source answers preserve manifest metadata.
+A prefix argument to ~gnosis-add-model-thema~ or =C-c C-a= uses explicit
+target completion and numeric camera input instead of the visual canvas.
+~gnosis-model-import~ remains a non-graphical manifest import API.
+
+To make many cards from one scene, run ~gnosis-model-author-scene~.  Choose
+a scene already used by model themata (or import one) and the tags every
+card gets.  Then orbit, click a structure and press =F= to save a Find
+card or =N= to save a Name card at the current camera.  The minibuffer
+offers the question (Find) or answer (Name) prefilled from the structure
+label; =RET= saves it.  Click the next structure and repeat; =p= and =g=
+first make a point or region target.  =q= finishes.
+
+Each review of a model starts from a camera varied around the authored
+one, so learners recognise structures rather than one picture.
+~gnosis-model-camera-variation~ bounds the change in yaw, pitch and zoom,
+=(25 15 0.1)= by default; nil always starts at the authored camera.
+Gnosis keeps only varied cameras under which the target remains about as
+visible and framed as at the authored camera, checked against every
+triangle that could lie in front of it when the card is prepared; when
+too many triangles could hide the target to check, the authored camera
+is used.  A card prepared before the bounds changed starts at the
+authored camera.  The choice depends only on the thema and how often it
+was reviewed or practised, so it is reproducible.  Authoring and
+feedback never vary the camera.
+
+For Find, /Resource and starting view/ holds four list items: the managed
+resource reference, yaw, pitch and zoom. Answer holds one stable target ID,
+not a display label. For Name, the resource section instead holds five items:
+resource, target ID, yaw, pitch and zoom; Answer holds one editable canonical
+name, initially taken from the target label. Add Accepted aliases separately.
+Reattachment preserves authored name and aliases even when the target changes;
+check that they still describe the new target. Save, close and reopen using
+the ordinary edit flow; both modes retain their resource, target and starting
+view. Every save
+validates these fields against the pinned scene.  Camera values are
+finite numbers; zoom is between 0.25 and 4.  Resource data never occupies
+the review-image field.
+
+A scene contains 1--255 objects with unique stable IDs, labels and simple
+relative OBJ filenames, plus an initial view and nonempty license and
+source strings.  Geometry files must share coordinates; the renderer
+normalizes the whole scene jointly.  For example:
+
+#+begin_src json
+{
+  "objects": [
+    {"id": "triangle", "label": "Triangle", "path": "triangle.obj"}
+  ],
+  "initial_view": [0, -90, 1],
+  "license": "CC0; original geometry by its author",
+  "source": "Author-provided local example"
+}
+#+end_src
+
+This unversioned scene remains supported with whole-object targets and no
+resource rewrite. Version 2 scenes add ="version": 2= and a =targets= array,
+separate from =objects=. Each target has a unique =id=, =label=, =mesh= object
+ID and =kind= (="object"=, ="point"= or ="region"=). Points add a zero-based
+=face=, three =barycentric= weights summing to one and a positive =tolerance=;
+regions add a nonempty list of distinct =faces=. Faces are file-order OBJ
+fan triangles: a polygon becomes =(v0, vi, vi+1)=. Points use original mesh
+coordinates, not normalized display coordinates. Point matching uses Euclidean
+distance within the authored tolerance on the same mesh; it is not a geodesic
+surface-distance test. Regions match their listed triangle identities.
+Among overlapping eligible targets of the requested kind, the nearest point
+wins; equal distances and overlapping regions resolve by stable ID order.
+Avoid overlapping targets if that tie-breaking would make a question ambiguous.
+
+Scenes allow up to 4096 targets and two million triangles, within a 64-KiB
+manifest and 100-MB limit per OBJ. Native authoring edits targets, not mesh
+topology. Only local OBJ geometry is supported; textures and materials are not
+loaded. Invalid indices, nonfinite vertices and degenerate triangles are
+rejected. Do not transfer face indices to changed topology: reimport and
+explicitly reattach a newly validated revision.
+
+The license string must include the required attribution and license
+notice/URL, not just a guessed identifier.  Source records provenance.
+For source bundles with separate license or provenance files, copy their
+contents into these manifest strings (or supply them to
+~gnosis-model-import~ as LICENSE and SOURCE).  Gnosis does not infer rights
+or silently copy arbitrary neighbouring files.  Preserve any additional
+upstream notices when preparing the scene.
+
+Import stages all listed OBJ files and the manifest before publishing an
+immutable revision under =assets/<sha256>/scene.json= beside =gnosis.db=.
+The manifest owns target IDs, geometry references and licensing.  Its
+bytes and every referenced OBJ define the resource revision.  Identical
+imports share one revision across themata.  Target/camera prompts operate
+on the imported revision, not on a mutable original file.  Cancelling
+those prompts may leave a harmless unreferenced resource; Gnosis does not
+automatically delete shared assets.  Missing, corrupt or altered resources
+are unavailable, never incorrect answers.  Re-import changed geometry as
+a new revision and explicitly attach it to a thema.
+
+**** Optional canvas backend
+
+Ordinary Gnosis and advanced numeric model authoring do not require a
+renderer.  Visual authoring and 3D review require graphical GNU Emacs built
+with native canvas image support (=canvas-refresh= and the =canvas= image
+type, currently Emacs 32 development builds), plus an OpenGL/EGL-capable
+environment.  Stock Emacs without canvas
+support cannot display 3D; ordinary Gnosis remains usable.
+
+GNU ELPA ships core Gnosis without the renderer.  Obtain the whole
+=optional/canvas-3d= directory from a source checkout matching the
+installed Gnosis version.  Keep using the ELPA core; do not add the
+checkout's =lisp/= directory to =load-path=.  Prepare the backend's
+locked, project-local Python environment explicitly:
+
+#+begin_src sh
+uv sync --locked --project /path/to/gnosis/optional/canvas-3d
+/path/to/gnosis/optional/canvas-3d/preflight.py --emacs /path/to/emacs
+#+end_src
+
+The backend supports Python 3.12--3.14 and Linux EGL/OpenGL 3.3; other platforms
+are not verified. The lockfile selects the Python packages, not the system
+GPU driver or Emacs canvas capability. Preflight tests compiled Emacs support,
+Python imports and real EGL frames; it does not prove display in a particular
+graphical session. Install the whole optional directory and recreate its local
+environment rather than copying a virtual environment.
+
+Keep =canvas-3d.el= and =render.py= from the same backend version; there
+is no protocol negotiation with older renderer installations.  Geometry
+and picking belong to the backend; Gnosis owns target interpretation and
+grading.
+
+Point the installed core at that absolute directory:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'gnosis
+  (setq gnosis-model-renderer-directory
+        "/path/to/gnosis/optional/canvas-3d/"))
+#+end_src
+
+Gnosis loads the backend only when opening a model.  Romacs does not ship
+=canvas-3d= for now: with ~gnosis-model-renderer-directory~ nil, the 3D display
+is off and the rest of Gnosis works without it.  The renderer uses
+=.venv/bin/python= beside its library; a separately prepared interpreter
+can be selected with ~canvas-3d-python-command~.  Opening or authoring never
+installs dependencies or accesses the network.  Missing capabilities show
+setup diagnostics.  No anatomy atlas is bundled or downloaded.
+
+Visual authoring and review size their canvas to the available window.
+Review reserves space for the question in the same buffer.
+
+**** Reviewing or practising a model
+
+Start an ordinary due review or practice batch containing the model (for
+example, a linked-topic session). The interactive canvas appears inline
+below the keimenon, in the ordinary Gnosis review buffer. For Find, drag to
+rotate, use the wheel or =+= / =-= to zoom, and click to select.  The highlight and neutral selection status do not
+reveal anatomical labels.  *Clicks and drags never grade.*  Press =RET=
+when the view is ready to explicitly submit.  The renderer stops, leaving
+its last image beside the question, and feedback reveals the expected target label (and your selection on an
+incorrect answer).  This is a pending result, not an accepted grade.
+For Name, the question target stays highlighted through rotation, zoom and
+reset, without its label. Occluded surfaces remain occluded; rotate to inspect
+them. Exploratory clicks cannot change the question target. Press =RET= to
+enter the name in the minibuffer, then =RET= to submit the typed answer.
+Canonical text or an explicit alias is matched using ordinary text rules;
+feedback reveals the canonical answer. Cancelling typing produces no grade.
+
+The ordinary Gnosis result actions (=n= to accept, =o= to correct the binary
+outcome) apply: correct answers use Good, incorrect answers use Again.
+Scheduled acceptance commits the event and FSRS state together; its preview
+shows the next review date.  Accepted practice attempts use the existing
+session policy without changing FSRS.
+Press =q= or =C-g= to cancel with no answer.  An unavailable renderer shows
+its status in the heading; =e= opens diagnostics.  Cancel and resume after
+repairing the backend or restoring the exact resource.
+
+Pending input belongs to its original database, session, encounter, thema
+and renderer. Find validates selection against the displayed frame; in-flight
+views cannot submit.  Encounter ownership and resource/content validation run
+again at acceptance, including after an outcome override.  A changed thema,
+database or resource requires cancelling and answering again.  A failed validation leaves no
+new practice or scheduled-review evidence.
+
+**** Exchange and backup limits
+
+SQLite content export/import explicitly refuses model resource content
+in this slice; it cannot silently produce references without their assets.
+Filtered exports containing only ordinary themata still work.  Org thema
+editing retains model references, but sharing the text alone does not
+transfer resources and saving fails when its pinned asset is absent.
+~gnosis-backup-db~ retains the database, including model references, but
+*does not include the assets directory*.  Use ~gnosis-backup-data~ for a
+database snapshot with all managed =assets/= bytes.  Back up the Org vault
+and external media separately; automatic database Git commits do not add
+those assets.
+
+** Creating Themata
+
+Use =M-x gnosis-add-thema= to create a new thema interactively.  The
+command first prompts for the type, then opens a dedicated edit buffer
+(=*Gnosis NEW*=) pre-populated with a template for the selected type.
+
+Inside the edit buffer, use =C-c C-c= to save, =C-c C-q= to add tags,
+=C-c C-o= to follow an org-id link, or =C-c C-k= to quit without
+saving.
+
+From an Org note, use =M-x gnosis-add-thema-from-node= to compose a basic
+question beside the source.  The nearest enclosing heading with an =ID=
+(or the file-level =ID=) is the source node; headings without IDs belong
+to their nearest enclosing node.  An active region prefills the Answer,
+not the question.  Without a region, the Answer starts empty.
+
+Copied passages must survive the existing Org thema format as one Answer
+with the source link unchanged.  Outer answer whitespace is trimmed;
+Unicode and multiline plain paragraphs are supported.  Lossy selections
+are rejected before opening or changing a draft.  For example, answer
+separator lines (newline followed by =- =), Org headings, and leading
+list markers can split or change the answer.  Negative numbers and literal
+hyphens without a following space are preserved.  Select a plain passage instead,
+or open the ordinary editor and author structured content manually in
+its supported fields.  This command does not escape arbitrary Org text.
+
+Write a focused recall question in Keimenon and check the Answer before
+saving.  The source =id:= link goes in Parathema, visible after answering,
+so it does not give away the answer.  Saving uses the ordinary thema
+editor and links the saved thema to that exact source node.  Saving or
+canceling returns to the source through the editor's window restoration.
+
+This command does not create IDs, change or save the source note, or
+generate questions automatically.  It requires an existing source ID.
+Finish or cancel any open =*Gnosis NEW*= draft before starting another;
+creation commands will not overwrite it.
+
+** Editing Themata
+
+To edit an existing thema, use =M-x gnosis-edit-thema= or press =e=
+during a review session.  The same edit buffer is used, this time
+populated with the existing values.  Saving updates the record in
+place, re-synchronising both tags and node links.
+
+After answering, =e= followed by save or cancel returns to the same review
+actions. Edits apply to future presentations; the pending correct/incorrect
+result still describes the question you answered. =n= (Next) or =q= (Quit)
+accepts that result once, without asking again. Use =o= to override the result
+explicitly. Deletion, unrelated content changes and a replaced database or
+encounter still prevent stale acceptance.
+
+A native creation or edit draft belongs to the database connection that
+opened it.  Saving refuses a replaced or reopened connection, and an edit
+also refuses changes to the original content made while the draft was open.
+The refused draft remains available; copy any work you want to keep, cancel
+the stale draft, then reopen the current thema and reconcile your changes.
+Do not change database connections to redirect an existing draft.
+
+** Tags on Themata
+
+Tags are free-form strings used to organise themata.  During review,
+you can include or exclude tags to select a focused session (see
+[[#review][Review System]]).
+
+During thema creation or editing, press =C-c C-q= in the edit buffer to
+add tags interactively using completion against existing tags.
+
+** The Link Between Themata and Nodes
+
+When a keimenon or parathema contains an org-mode id link of the form
+=[[id:NODE-UUID][description]]=, gnosis extracts the UUID and records
+the association.
+
+This linking means:
+
+- Reviewing by topic (~gnosis-review-topic~) fetches all themata linked
+  to a given node.
+- Viewing a linked node during review navigates directly to the
+  relevant note.
+- The dashboard can show which themata are associated with which nodes.
+
+Links are re-synchronised on every edit: the old links are cleared and
+the current links are re-inserted from the saved content.
+
+** Suspending Themata
+
+A suspended thema is excluded from all regular review sessions.
+Suspended themata remain in the database and can be unsuspended at any
+time, either through the review interface or the dashboard.
+
+* Review System
+:PROPERTIES:
+:CUSTOM_ID: review
+:END:
+
+The review system is the mechanism through which themata are presented to
+the user, evaluated, and then fed back into the spaced repetition
+algorithm.  All review activity is recorded and optionally committed to
+a Git repository for version control.
+
+** Starting a Review Session
+
+Call =M-x gnosis-review= to open the review transient menu.  The menu
+presents several review modes:
+
+- *Due themata*: A finite batch of eligible due and new themata.
+- *Due themata of tag(s)*: Due themata filtered by +include/-exclude tags.
+- *Overdue themata*: Only themata whose scheduled date has passed
+  (excludes never-reviewed themata).
+- *Due without overdue*: Today's due themata, excluding overdue ones.
+- *All themata of tag(s)*: All themata for selected tags, ignoring due
+  status.
+- *Review due topic*: Due themata linked to selected source nodes, with
+  normal FSRS updates.
+- *Practise topic (no rescheduling)*: Linked themata, including new and
+  not-due items, with separate practice evidence.
+- *Review ahead topic (FSRS)*: The legacy ~gnosis-review-topic~ command;
+  it changes schedules even for not-due items.
+
+The all-tags command also changes schedules; it is not practice mode.
+For ordinary due selection, new themata appear first by default; set
+=gnosis-review-new-first= to =nil= to show them last.  The collector's
+new-item cap is =gnosis-new-themata-limit=.  Explicit topic due and
+practice batches ignore this cap and shuffle their first pass.
+
+** Finite Batches and Summaries
+
+A session collects its thema IDs once, removes duplicates and freezes
+membership.  It does not refill itself when the queue empties.  Newly
+created themata wait for another batch.  Before each presentation, Gnosis
+checks that the thema still exists and is not suspended; otherwise it
+skips that presentation.  Each failed thema can return once at the tail,
+with any remaining questions in between.  A second failure does not
+extend the batch again.
+
+The summary distinguishes selected items, unique items attempted and
+accepted attempts.  It reports first-attempt and retry outcomes
+separately.  "Still needing work" counts items whose latest accepted
+attempt failed; this does not automatically add a tag.  Unattempted
+items have no accepted answer in this batch.  Deleted/suspended
+exclusions count unique skipped items, which may include a skipped retry
+of an already attempted item.  The remaining due backlog is independent
+of the completed batch and is shown without the new-item cap.
+
+Session performance is not topic mastery.  Retrying a failure does not
+increase unique topic coverage, and a successful practice session is
+not a prediction of exam performance.
+
+** Tag Filtering
+
+When reviewing by tag, gnosis prompts for tags using
+=completing-read-multiple=.  Each entry is prefixed with =+= to include
+or =-= to exclude:
+
+#+begin_example
+Filter tags (+include -exclude): +biology -advanced
+#+end_example
+
+This selects all themata tagged =biology= that are not also tagged
+=advanced=.
+
+** The Review Flow
+
+For each thema in the session, gnosis proceeds through the following
+stages:
+
+1. *Display*: The keimenon is rendered in the =*gnosis*= buffer.
+   If the keimenon contains a =[[file:...]]= image link, the image is
+   opened in a secondary window.  Content is centred by default
+   (controlled by =gnosis-center-content-during-review=). Short text lines
+   are centred separately in each window. Prose is filled to =fill-column=
+   when first displayed; narrower windows wrap those lines natively.
+   Splitting or resizing updates the presentation without rewriting the text,
+   resetting the answer or moving the reading position. Disabling centring
+   skips the initial filling and keeps native wrapping.
+
+2. *Input*: The user provides an answer.  The exact mechanism depends on
+   the thema type.
+
+3. *Feedback*: The answer is evaluated and the result is displayed
+   alongside the correct answer, the user's input (when wrong), and the
+   parathema if one is present.
+
+4. *Preview*: Scheduled review shows the proposed next review date.
+   Practice instead shows "Practice: schedule unchanged".
+
+5. *Action prompt*: =n= accepts the grade and advances; =q= accepts the
+   grade and quits.  =o= flips the pending binary result, for example
+   when typed matching rejected a valid answer.  =e= edits the thema,
+   =v= visits an identity-selected linked source, =f= adds =needs_work=,
+   and =s= toggles suspension.  Editing or visiting a source is not
+   successful recall.  Saving or cancelling the native edit returns to
+   the same pending result and actions.  Edits affect future presentations,
+   not the captured answer; only =o= changes its binary result.  =n= or
+   =q= accepts that result once.  Unrelated writes or stale owners still
+   refuse acceptance rather than silently refreshing the encounter.
+   =d= deletes the thema without accepting its pending grade.
+
+6. *Acceptance*: Scheduled review records an immutable review event and
+   updates FSRS.  Practice records a separate encounter.  Acceptance and
+   saved queue progress commit together.  If a write fails, the retry
+   prompt reuses the same pending grade identity rather than recording
+   another attempt.
+
+=C-g= before acceptance cancels the pending answer or reveal without
+writing a grade.  It does not undo an explicit edit, flag, suspension or
+any earlier accepted grade.  Unlike =C-g=, =q= at the action prompt
+accepts the current result.  Source windows are hidden for the next
+question, and the previous window layout is restored on leaving review.
+
+During a session, =Reviewed: N/Total= counts accepted attempts, including
+retries; use the summary for unique-item counts.
+
+** Resume, Continue, Discard and Undo
+
+Gnosis retains one batch in the database, including remaining stable
+IDs, accepted outcomes, retry state and its basic input style.  Use
+~gnosis-review-resume~ after interruption, buffer loss or an Emacs
+restart.  It presents the unaccepted question again using current thema
+content; it does not restore a typed answer or an unaccepted reveal.
+Existence and suspension are checked again.  Starting a new nonempty
+scheduled or practice batch automatically ends any unfinished batch early.
+Accepted grades, practice evidence and schedules are preserved; the old
+remaining queue is no longer active or resumable.  Its history retains
+that membership and marks the batch cancelled (ended early), not completed.
+An empty selection, selection error or cancelled prompt leaves the old
+batch available to resume.  Quit active native input before starting a new
+batch; replacement never interrupts an answer in progress.
+
+The study summary provides =r= to resume, =c= to continue, =d= to discard
+progress and =u= to undo.  ~gnosis-review-continue~ opens the review menu
+to select another batch; it does not silently repeat the previous scope.
+No separate resume or discard step is required.  ~gnosis-review-discard~
+remains an optional command: it asks for confirmation and removes saved
+progress and its undo slot, but keeps accepted evidence and schedules.
+Starting a new nonempty batch replaces the previous batch's active saved
+progress and undo slot.  Merely opening or cancelling Continue changes
+nothing.  Agent-launched practice follows the same replacement rule; an
+empty agent selection returns a completed shortfall report without
+replacing the current batch or invalidating its pending launch.
+
+~gnosis-review-undo~ is a single last-grade correction, available only
+outside active review.  Quit review first, taking care that =q= accepts
+the pending grade whereas =C-g= does not.  Undo retains the original
+event and appends a void record.  For scheduled review it reconstructs
+the thema's schedule from the baseline and effective review events,
+using their historical configuration versions and preserving current
+suspension.  For practice it voids the grade without touching FSRS;
+the exposure remains in the history audit.
+
+After undo, resume to answer the restored question with a fresh attempt
+identity.  There is no multi-step undo history.  Deleted events, stale
+slots and grades superseded by a later effective event of the same kind
+for that thema cannot be undone.  Undo does not restore deleted content,
+reverse edits, remove flags or undo explicit suspension.  Older summaries
+are snapshots: Resume, Discard and Undo refuse a changed checkpoint or
+database rather than acting on a newer batch.  Continue selects a new
+batch; it does not resume the summary's historical scope.
+
+** Scheduling and Retention
+
+Gnosis uses the FSRS-6 default parameters pinned from fsrs-rs 6.6.1,
+with desired retention initially set to 90%.  Successful recall maps to
+/Good/; forgotten information maps to /Again/.  Grade what you recalled
+before feedback, not what you recognise after revealing the answer.
+
+Gnosis rounds raw FSRS intervals to the nearest whole number of days,
+with exact half-day ties going to the even integer, then applies a
+one-day minimum.  Thus 2.5 days becomes 2 and 3.5 days becomes 4.
+This calendar policy does not promise identical due dates to Anki or
+the fsrs-rs scheduling example.  Accepted reviews retain their original
+scheduling evidence for replay.
+
+Use =M-x gnosis-scheduler-set-retention= to set a user-wide target strictly
+between 0 and 1, for example =0.9=.  Each changed value creates an
+immutable configuration version and selects it for future accepted
+scheduled reviews and newly initialised themata.  Selecting the already
+active value creates no new version.  This command does not recalculate
+existing due dates or rewrite old events; those retain their original
+configuration.  It is a database setting, not a per-card option or a
+parameter optimizer.
+
+The next-date display is a preview, not an accepted grade.  If retention
+changes after the preview, fresh acceptance is rejected.  Cancel that
+pending answer and resume to obtain a new preview; repeatedly retrying
+the stale preview cannot accept it under a different configuration.
+
+FSRS updates stability and difficulty after scheduled review.  A higher
+retention target generally means shorter intervals and more work.  The
+target is a model prediction, not measured topic mastery or an exam
+performance guarantee.  Gnosis does not fit model parameters to your
+history.
+
+~gnosis-study-history-audit~ shows aggregate-only baseline reviews,
+effective scheduled events, delayed scheduled events, practice exposures
+(including voided grades), void counts and configuration versions.  Old
+aggregates lack individual review times and outcomes, and content edits
+are not versioned.  Practice exposures are retained but excluded from
+FSRS replay and fitting.  Before evaluating a fitted model, account for
+these gaps, same-day policy and changed questions; evaluate future
+held-out events and workload at matched retention.  The audit performs
+no fitting and promotes no candidate parameters.
+
+A failed thema returns once at the end of the current session unless it
+was suspended or deleted.  Further failure does not keep extending that
+session.  Calendar intervals are at least one day; same-day repetitions
+use the FSRS short-term update rather than counting as delayed recall.
+
+For useful feedback, review due material consistently and distinguish
+recall from recognition after seeing the answer.  Rewrite ambiguous or
+repeatedly failed questions instead of rehearsing them indefinitely.
+Assess long-term recall on delayed reviews separately from initial
+learning and same-day repetitions.  Parameter fitting and workload
+comparisons need substantially more history than a few delayed reviews.
+
+** Type-Specific Review Behaviour
+
+*** Basic
+
+The keimenon and optional hint are displayed.  The user types a free-form
+answer into the minibuffer.  The comparison is case-insensitive and
+accounts for a small edit distance (=gnosis-string-difference=).  If the
+answer uses a non-Latin script, gnosis activates the appropriate input
+method from =gnosis-script-input-method-alist=.
+
+For explanations, comparisons or application questions, you can instead
+recall aloud, sketch or write an answer before revealing a checklist:
+
+#+begin_src emacs-lisp
+(setopt gnosis-review-basic-input 'self-grade)
+;; Restore typed matching:
+;; (setopt gnosis-review-basic-input 'typed)
+#+end_src
+
+In self-grade mode, =SPC= reveals the Answer and Parathema, then =y= or
+=n= records your pending judgment of recall.  The ordinary action prompt
+still follows: use =o= to correct the judgment before accepting with
+=n= or =q=.  Revealing alone never accepts a grade.  =C-g= cancels before
+acceptance.  Write a short answer checklist that makes the binary
+judgment meaningful; Gnosis does not infer it from time or confidence.
+
+This option affects basic themata (including independent basic cards
+created by Double) in both due and practice sessions.  Its value is
+frozen when a batch starts and retained for resume.  MCQ, cloze and
+MC-cloze keep their existing input methods.  Self-grade failures do not
+start the monkeytype copying exercise.
+
+*** MCQ
+
+The keimenon is displayed.  The user selects one of the shuffled
+hypothesis options via completion.  Both the correct answer and the
+user's choice are shown side by side.
+
+*** Cloze
+
+The keimenon is displayed with each gap replaced by the placeholder
+=(...)=.  The user types each answer in turn.  On a correct guess, that
+gap is revealed and the next is presented.  On a wrong answer, all
+remaining gaps are highlighted and the card is marked as failed.
+
+*** MC-cloze
+
+The keimenon is displayed with the single gap replaced.  The user selects
+the correct word from a shuffled list via completion.
+
+** Topic and Subtree Study
+
+~gnosis-practice-topic~ selects one or more topics for practice, including
+new and not-due themata.  ~gnosis-review-due-topic~ selects only due
+linked themata and accepts normal FSRS reviews.  Completion shows topic
+titles, adding source filenames only for duplicate titles and an occurrence
+number when the source is also the same.  Org IDs remain internal.
+Direct links are the default.  With =C-u=, either command asks for
+nonnegative forward and
+backlink depths; graph links do not imply a syllabus or prerequisites.
+
+Before starting, the confirmation prompt shows the mode, topic titles,
+eligible thema count, new and not-due counts, and the once-per-failure
+retry policy.  Link depths appear only when expanding beyond direct links.
+Both explicit topic batches have no new-item cap.  Multiple links and
+graph paths do not duplicate a thema.
+Deleted and suspended items are excluded; practice never unsuspends
+anything.  Canceling this preview starts no batch and records no grade.
+
+Practice grading writes timestamped binary encounters with session and
+attempt identities.  It does not change FSRS state, due dates, scheduled
+review counts, lapse counts, suspension or whether an item is new.
+Explicit edit, delete and suspension actions still have their normal
+side effects.  Practice can affect memory even though its exposures are
+excluded from scheduler replay and fitting; an unchanged schedule does
+not mean that no learning occurred.
+
+In an Org buffer, ~gnosis-study-subtree~ practises the enclosing source
+node and IDs structurally inside the current subtree.  With =C-u= it
+reviews only due themata instead.  Before the first heading it includes
+IDs in the accessible buffer.  It requires an existing enclosing source
+ID and uses Org structure, not graph traversal.  An ID-less heading
+belongs to its enclosing node, so questions linked to that owner are
+included even if their source passage lies outside that heading.
+
+*** Ordered Related Groups
+
+The optional =gnosis-agent= library can reserve a native batch in a chosen
+group order, without answering for the learner:
+
+#+begin_src emacs-lisp
+(require 'gnosis-agent)
+(gnosis-agent-start-practice-groups
+ :tags '("amino_acids" "proteins") :limit 30
+ :policy '(:successes-required 1 :successes-after-failure 1
+           :max-attempts-per-thema nil))
+;; A separate scheduled batch, restricted to currently due items:
+(gnosis-agent-start-review-groups
+ :tags '("amino_acids" "proteins") :limit 30)
+;; Alternatively, retain explicit within-group order (use actual thema IDs):
+(gnosis-agent-start-practice-groups
+ :thema-groups '((103 101) (102 105)) :limit 4)
+#+end_src
+
+Supply either an ordered list of tags or an ordered list of ID lists, not
+both.  Each tag is a group, with its members in ascending ID order.
+Explicit ID lists retain their order.  First membership wins overlaps;
+no thema receives a duplicate initial presentation.  Missing and suspended
+items are excluded; scheduled review also excludes not-yet-due items.
+Like explicitly selected topic review, this scheduled API ignores the
+global new-item cap, but never forces future-due cards into review.
+The required positive =:limit= caps unique eligible items across all groups.
+
+The returned API v1 status includes =:session-id=, =:selected-ids=,
+=:remaining-ids= and =:selection=.  Selection contains a =:groups= vector
+with each group's =:tag= (nil for explicit IDs), =:requested-ids=,
+=:overlap-ids=, =:excluded-ids=, =:omitted-ids= (by the limit), and
+=:selected-ids=.  Unmatched tags and empty groups remain visible with no
+selected members.  Entirely empty selections return a history-only report
+without replacing an unfinished batch.  Invalid input changes no batch.
+
+Initial presentations follow group order.  Failed retries retain the
+existing spacing rule, and successful practice continuations retain their
+frozen policy; either can cross group boundaries.  Groups are not mastery
+barriers, and grouping does not alter retry distance.  Membership, original
+groups and the actual remaining queue persist across restart.  Resume does
+not re-resolve changed tags or reorder retained retries.
+
+Native ~gnosis-review-resume~ and ~gnosis-agent-resume~ resume the same
+batch.  Use ~gnosis-agent-status~ with its exact session ID for either mode;
+~gnosis-agent-cancel~ ends an interrupted batch without deleting evidence.
+~gnosis-agent-results~ supplies detailed practice evidence only.
+Practice never updates FSRS.  Scheduled acceptance uses the normal FSRS
+path; merely reserving a batch or opening a source records no grade.
+
+*** Scheduled Review After Practice
+
+A completed, nonempty practice summary offers a *Scheduled review* button
+and the =s= binding (~gnosis-review-summary-scheduled~).  This is an
+explicit new session, not conversion of practice results: only newly
+accepted scheduled answers affect FSRS.  Nothing starts automatically.
+
+The command resolves the original selected IDs against current questions,
+so repairs made after practice are used.  Its confirmation shows counts of
+deleted, suspended, otherwise ineligible and not-yet-due exclusions.
+Selection is due-only, including eligible new cards.  Like explicit topic
+review, it does not apply =gnosis-new-themata-limit=; unrelated due cards
+cannot displace this selection.  It never unsuspends cards.
+
+Declining, =C-g=, an empty selection or setup failure leaves the completed
+checkpoint intact.  Starting review preserves the practice history and
+encounters and installs a separate scheduled checkpoint.  The old summary
+then becomes stale: activating it again cannot launch a duplicate batch.
+A summary from another database connection or a changed checkpoint is also
+refused.  Current eligibility is checked again after confirmation and setup;
+if it changes, request the action again to inspect the new counts.
+
+*** Practice Completion Notifications
+
+=gnosis-practice-completed-hook= is an optional, agent-neutral hook.  Each
+function receives one fresh plist after a nonempty native practice batch
+with accepted evidence completes.  The evidence and final checkpoint have
+committed, native input has unwound, and the summary has been presented.
+Native resume and ~gnosis-agent-resume~ use the same completion path.
+Cancelled, interrupted, still-unfinished, empty and wholly unattempted
+batches do not notify.  Completion means the finite queue ended, not mastery
+or attainment of every practice target.
+
+The API v1 event has these fields; it contains no answers or question text:
+
+- =:api-version=: =1=.
+- =:mode=: ="practice"=.
+- =:session-id=: the retained batch identity.
+- =:database=: the originating main SQLite filename, not =gnosis-dir=.
+- =:connection=: the originating open SQLite connection (an Emacs object,
+  not JSON data).  A consumer must check/use this origin rather than assume
+  that the current connection still owns the notification.
+
+Subscribers should be quick and read-only.  For example, an integration
+can explicitly query detailed results, which can include answers:
+
+#+begin_src emacs-lisp
+(require 'gnosis-agent)
+(defun my-practice-completed (event)
+  (let* ((gnosis-db (plist-get event :connection))
+         (result (gnosis-agent-results (plist-get event :session-id))))
+    (message "Practice completed: %d accepted attempts"
+             (plist-get (plist-get result :summary) :attempts))))
+(add-hook 'gnosis-practice-completed-hook #'my-practice-completed)
+#+end_src
+
+The read-only status/results API also supports native practice without a
+frozen target policy.  For these legacy one-retry batches, =:policy= and
+=:targets= are nil.  Per-item =:target= is nil, =:successes= counts effective
+accepted successes, and =:reason= is ="completed"=, ="unfinished"= or
+="excluded"=.  Existing frozen-policy results retain their target semantics.
+
+Delivery is synchronous and best-effort, not a persistent message queue.
+An error or quit from one subscriber is reported without preventing other
+subscribers or rolling back accepted evidence.  Reentrant callbacks have
+no subsequent core summary rendering, input or checkpoint write to redirect;
+this is not a sandbox for extensions.  No integration dependency is loaded
+by the hook itself.
+
+Reopening a summary never emits another completion transition.  There is
+no automatic replay on restart: a crash between commit and notification
+can lose delivery.  Consumers can recover by querying retained results.
+Use the pair =(:database :session-id)= as the stable batch deduplication
+identity while retaining the database at that path.  Moving or replacing a
+database requires the consumer to manage that identity explicitly; the path
+is not a database UUID.  Undo followed by completion can notify again for
+the same batch.  Consumers tracking corrections should requery its results
+rather than treating notification as immutable answer evidence.
+
+*** Legacy Review Ahead
+
+~gnosis-review-topic~ retains its schedule-affecting semantics.  It
+selects one node and all its eligible linked themata, including those not
+yet due.  A prefix argument asks for forward and backlink depths.  Use
+this command only when you intend to reschedule; use
+~gnosis-practice-topic~ for cram without rescheduling.  The review menu
+labels the legacy command "Review ahead topic (FSRS)".
+
+There is no automatic sibling burying.  Double and cloze variants do not
+have a retained family relationship, and sharing a source node does not
+make unrelated questions siblings.
+
+** Activity Logging
+
+Daily activity is a read-only projection over preserved legacy totals and
+effective (non-voided) immutable review events.  It records total and new
+themata reviewed per day and drives the dashboard's streak display.
+Practice encounters are separate and do not contribute to these totals.
+
+** Monkeytype
+
+After a failed review, gnosis can present the correct answer as a typing
+exercise.  The user types character by character; correct characters are
+highlighted in green, and backspace is disabled.  Upon completion, the
+words-per-minute figure is displayed.
+
+Controlled by =gnosis-monkeytype-enable= (default: =t=).  Restrict to
+specific types via =gnosis-monkeytype-themata=:
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :config
+  ;; Disable monkeytype entirely.
+  (setq gnosis-monkeytype-enable nil)
+
+  ;; Or restrict to cloze cards only.
+  (setq gnosis-monkeytype-themata '("cloze")))
+#+end_src
+
+** Sample Configuration
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :config
+  (setq gnosis-review-new-first nil)
+  (setq gnosis-new-themata-limit 20)
+  (setq gnosis-center-content-during-review nil)
+  (setq gnosis-vc-auto-push t))
+#+end_src
+
+* Logical Review Day
+:PROPERTIES:
+:CUSTOM_ID: logical-review-day
+:END:
+
+** Day Boundary
+
+By default, a new review day begins at 03:00.
+=gnosis-day-start-hour= shifts that boundary so that reviews
+done in the small hours count as part of the previous calendar day:
+
+#+begin_src emacs-lisp
+;; Default: 3.  Set to e.g. 6 to treat 00:00--05:59 as the
+;; previous day.
+(setq gnosis-day-start-hour 6)
+#+end_src
+
+The variable accepts any integer from 0 to 23.
+When set to 0, review days begin at midnight.  A later boundary is
+useful for reviewers who work late at night and want reviews completed
+after midnight to be counted against the same day as the rest of their
+evening session.
+
+/The setting affects all date-dependent logic/
+
+* Dashboard
+:PROPERTIES:
+:CUSTOM_ID: dashboard
+:END:
+
+The dashboard is the central interface for browsing and managing
+everything stored in gnosis.  It presents themata, nodes, and tags in
+tabulated views with contextual transient menus.
+
+** Opening the Dashboard
+
+#+begin_src emacs-lisp
+M-x gnosis-dashboard
+#+end_src
+
+This opens the =*Gnosis Dashboard*= buffer with a header showing your
+review streak and today's statistics.  A transient menu opens
+automatically, providing access to nodes, themata, review sessions,
+export/import (=e= to export, =i= to import), and database
+synchronisation.
+
+** Study Activity and History
+
+=Studied today= counts accepted attempts, including incorrect answers and
+retries, across scheduled reviews and non-rescheduling practice.  The
+breakdown separates scheduled attempts (and new scheduled reviews) from
+practice.  Topic, custom and agent-launched practice use the same retained
+practice evidence.  Pending answers, cancelled input and evaluation failures
+without an accepted result do not count.  Voided grades are excluded.
+These are effort counts, not unique themata or a measure of mastery.  The
+review average and review streak remain scheduled-review statistics.
+
+Open =History= from the dashboard with =H=.  =Scheduled day= rows retain
+the existing daily aggregates, including migrated review totals.  =Practice
+session= rows show accepted attempts, distinct themata and voided events for
+one stable session, with its completed, unfinished or ended-early status.
+A resumed session remains one row; replacing a batch retains its evidence
+without claiming completion.  Empty reservations are not study activity.
+The =New= column applies only to scheduled reviews.
+
+Practice rows use the logical date of their first recorded event; their
+counts cover the whole session, which may span several days.  Press =RET=
+on a practice row to see its session identity and recorded attempts, including
+timestamps, thema IDs, event IDs and undo corrections.  Details are a read-only
+snapshot: =q= closes it, and =g= in History refreshes the retained evidence
+while preserving the selected session.  Sessions with retained events but no
+session snapshot are labelled =Recorded=.  Hard thema deletion removes that
+thema's events, so a session with no remaining events disappears from this
+activity view; its retained batch summary is not used to invent grades.
+
+Scheduled logical dates remain as originally recorded.  Practice timestamps
+are projected using the current local timezone and =gnosis-day-start-hour=,
+the same rules used by native encounters.  Original timezone and day-cutoff
+settings were not retained for historical practice: changing these settings
+can change its date grouping.  Reading History never backfills or rewrites
+study evidence, and practice never updates FSRS scheduling.
+
+** The Themata View
+
+Lists all review items in a tabulated format, with columns for the
+keimenon, hypothesis, answer, tags, type, and suspension status.
+
+From this view you can edit or delete individual themata, suspend them,
+search or filter the list by content, filter by review count, and use
+bulk operations on marked entries (bulk link replacement, suspend,
+delete).  All actions are available through a transient menu.
+
+** The Nodes View
+
+Lists org-mode knowledge nodes with connectivity metrics: forward link
+count, backlink count, and the number of themata that reference each
+node.
+
+From this view you can navigate the knowledge graph by following
+forward links or backlinks from any node, see which themata reference a
+node, find isolated nodes with no connections, open a node's org file,
+or start a review of all themata linked to a node (optionally specifying
+link depth to include related nodes).
+
+Content search returns the nearest enclosing ID-bearing node for each
+match.  A match inside a child node therefore does not return the file's
+root node.
+
+Each navigation action pushes the current view onto a history stack, so
+you can step back through your browsing path.
+
+#+begin_src emacs-lisp
+(use-package gnosis
+  :config
+  (setopt gnosis-dashboard-nodes-default-sort-column "Backlinks")
+  (setopt gnosis-dashboard-nodes-default-sort-ascending nil))
+#+end_src
+
+** Topic Study and Repair Views
+
+Use ~gnosis-study-topic~ to open a topic's linked questions with their
+flags, due/new/suspended status and delayed failures/sample counts.
+Due and new counts overlap: a never-reviewed active item can also be
+due.  A source with no linked questions is an authoring gap candidate,
+not proof that it needs a card.
+
+In this view, =d= reviews due questions, =p= practises without
+rescheduling, =c= opens source-linked basic capture, =RET= opens the
+selected thema editor alongside its source, and =v= visits the source.
+Creation follows the same existing-ID and draft-preservation rules as
+~gnosis-add-thema-from-node~.  =g= refreshes the collection after edits.
+Use =?= for the full command menu, including resume, undo, retention and
+history evidence.
+
+~gnosis-study-repair~ lists themata with the ordinary =needs_work= tag or
+more than one effective delayed scheduled failure.  The evidence column
+shows failures against the number of scheduled events with positive
+elapsed days.  New encounters, same-day retries, practice and voided
+scheduled grades are excluded.  This is a repair filter, not an
+automatic suspension threshold or a calibrated weakness score.
+
+=f= toggles =needs_work= in the topic or repair collection; the review
+action =f= only adds it.  The tag survives ordinary editing and content
+export/import.  Clearing it does not remove delayed failure evidence,
+so an item may remain in the repair list.  =s= explicitly toggles
+suspension.  In the repair view, =v= selects among indexed linked source
+IDs when needed; topic-only create/due/practice actions require opening
+a topic first.
+
+Correcting wording preserves scheduling and does not count as recall.
+If a rewrite tests a different fact, create a new thema rather than
+assuming the old review history describes it.  Gnosis does not retain
+content versions or infer whether two questions test the same fact.
+
+From the dashboard's Nodes view, =S= opens the topic at point; =r= and
+=p= review due or practise marked nodes (or the node at point if none
+are marked).  The separate review-ahead actions =a= and =R= reschedule
+the node at point, with =R= prompting for graph depth.
+
+** The Tags View
+
+Lists every tag with a count of associated themata.  From this view
+you can open the themata view filtered to a specific tag, rename tags,
+suspend all themata carrying a tag, or delete a tag from all themata.
+
+* Export and Import
+:PROPERTIES:
+:CUSTOM_ID: export-import
+:END:
+
+Gnosis exports and imports themata using SQLite database files (=.gnosis=
+extension).  This is faster and more reliable than text-based formats,
+especially for large collections.
+
+** Database Upgrades and Rollback
+:PROPERTIES:
+:CUSTOM_ID: database-upgrades
+:END:
+
+This version uses database schema 11.  On first open, it upgrades released
+0.12.0 databases from schema 10 to 11.  Released 0.11.0 and 0.10.6 databases
+upgrade from schemas 9 and 8 through the same preserved steps in one open;
+installing intermediate releases first is not necessary.  Unknown or private
+development layouts are refused;
+preserve a backup and use matching source or a separately verified
+conversion rather than changing the version number.
+
+The 8-to-9 step creates the FSRS and study storage:
+scheduler baselines and state, scheduled events, separate practice events,
+a retained study session, session snapshots by identity in =study_history=,
+active configuration selection and scheduled/practice void records. It
+initially selects configuration 1. Known legacy due dates, repetition/lapse
+counts, suspension and aggregate activity are retained. Legacy algorithm
+values do not become FSRS memory or invented event-level history.
+
+Schema 9 also adds nullable =themata.accepted_aliases= without rewriting
+existing answers; old rows have no aliases.
+
+The 9-to-10 step adds =practice_encounters= and its integrity guards to
+retain accepted practice answers and context.  Existing content, schedules
+and study history are preserved; missing historical answers are not invented.
+The 10-to-11 step adds nullable =themata.rubric= for agent-eval themata;
+existing rows retain their original answers and have no rubric.  All upgrade
+steps run in one transaction: schema, data and version changes roll back
+together on error or quit.
+
+Database schema versions are separate from portable content format 5,
+which carries aliases, the separate rubric and bundled inline managed images.
+Content formats 1–4 remain readable without media: formats 1/2 supply no
+aliases, and formats 1–3 supply no rubric.  Alias and rubric changes appear
+in import preview and participate in source and destination drift checks.
+Format 5 bundles only referenced image manifests and raster bytes, not
+external originals, model resources, schedules or study history.  Region
+and occlusion thema types remain unsupported.  Failed or cancelled import
+can leave unreferenced immutable images, but never commits content before
+its images are available.  Sharing an Org draft alone does not bundle media.
+
+Before the *first database open* with schema-11 code:
+
+1. Stop other Gnosis database and filesystem writers and close existing
+   Gnosis connections.  Keep the package/source matching the old database
+   available for recovery: 0.12.0 for schema 10, 0.11.0 for schema 9,
+   or 0.10.6 for schema 8.
+2. Load the upgraded code without opening a dashboard or starting review, and set
+   ~gnosis-dir~ to the existing data directory.  Run
+   =M-x gnosis-backup-db= and choose a new backup filename.  With no
+   Gnosis connection open, this version of the command reads the existing
+   =gnosis.db= independently: it does not initialize or migrate it.  Do not
+   substitute an older backup implementation without checking that property.
+3. Back up Org source files and all managed/external media separately,
+   including the =assets/= directory beside the database.
+   A database-only backup contains their references, not their bytes.
+4. Preserve those backups, then open Gnosis to perform the upgrade.
+   On initialization failure, stop; do not relabel the database version.
+
+For rollback, close every database owner before restoring the pre-upgrade
+database, its matching release source and the separately backed-up Org/media
+files.  Use a schema-10 backup with 0.12.0, a schema-9 backup with 0.11.0,
+or a schema-8 backup with 0.10.6.  Never open a newer schema with source
+that supports only an older schema; there is no reverse migration.  Keep the
+upgraded
+data separately if needed: restoring the old backup does not retain work
+done since that backup.  A portable content export cannot restore schedules
+or session progress.  ~gnosis-backup-data~ requires an open connection,
+so it is not the pre-first-open backup step.
+
+** Full Backups Versus Content Exports
+
+=M-x gnosis-backup-data= snapshots the *currently connected* database and
+the entire managed =assets/= directory beside it, including unreferenced
+revisions.  Connect Gnosis first, then choose a new local directory whose
+parent already exists.  The command uses SQLite =VACUUM INTO=, so retained
+schedules, review/practice evidence and saved progress stay in the snapshot.
+It does not use a possibly changed ~gnosis-dir~ to locate the source.
+
+The versioned directory contains =database.sqlite=, =assets/= and
+=manifest.json=.  =M-x gnosis-backup-verify= checks it offline: exact
+directory/file inventory, literal byte lengths and SHA256 hashes, SQLite
+integrity and foreign keys.  Missing or extra files, damaged bytes,
+symlinks and unsafe paths are errors.  Verification proves byte completeness,
+not authenticity, application schema compatibility or media semantics.
+Keep the matching Gnosis version available for recovery.
+
+=M-x gnosis-backup-restore= verifies a snapshot and copies it to another
+*new* directory.  It never merges, overwrites, switches connections or
+activates the restored database.  Both commands build and verify a private
+sibling stage before renaming it into place.  Failure or =C-g= removes only
+the unpublished stage; existing destinations and the active database are
+untouched.  Source/destination overlap is refused before staging.  Keep
+filesystem writers quiescent during backup and restore: repeated inventories
+detect observed changes, but do not provide a cross-process lock.  Paths
+must have no symlink ancestry; files must use managed asset basenames.
+The format bounds inventory to 100,000 entries and the manifest to 16 MiB.
+
+Inspect the restored copy before any manual cutover.  Its database is named
+=database.sqlite=, not =gnosis.db=.  For ordinary Gnosis startup, with all
+owners of the restored copy disconnected, rename that file to =gnosis.db=
+in the restored directory and explicitly configure Gnosis to use that new
+directory.  Keep =assets/= beside it and preserve the original snapshot:
+renaming or using the copy changes it, so the old manifest no longer verifies.
+Do not rename or replace an active database or its SQLite companion files.
+
+*The Org notes vault is not included.*  Back up and restore the original
+Org files separately; indexed node content does not replace those files.
+External media outside managed =assets/= also needs a separate backup,
+including legacy =[[file:...]]= links and ~extras.review-image~ files.
+Their stored paths are preserved in the database, but their bytes are not copied.
+
+=M-x gnosis-backup-db= writes a consistent full SQLite backup using
+=VACUUM INTO=.  Choose a new path; the command refuses to overwrite an
+existing file.  The backup contains thema content, indexes, scheduler
+state and baselines, configuration versions and active selection,
+review/practice evidence and voids, and retained batch/undo progress.
+It does not contain the Org source files or external media.
+
+To restore a full backup, disconnect Gnosis in every Emacs instance
+(close the database, or exit those instances), then replace the closed
+=gnosis.db= with the backup.  Do not replace an open SQLite database or
+use ~gnosis-import-db~ as a full-backup restore command.  Preserve the
+current database before replacement and restore source files separately
+when needed.  Replacing the database replaces its entire history and
+saved progress, rather than merging them.
+
+~gnosis-export-db~ is for portable content.  Its =.gnosis= files omit
+schedules, review/practice events, void records, session progress and
+scheduler configuration history.  Importing new content starts fresh
+scheduling; updating existing content leaves its local history in
+place.  The ordinary =needs_work= tag is content and does transfer.
+Practice evidence has no automatic expiry; hard deletion of its thema
+removes that evidence and associated corrections, as it does scheduled
+review evidence.  Discarding a batch is not history deletion.
+
+** Exporting
+
+#+begin_src emacs-lisp
+M-x gnosis-export-db
+#+end_src
+
+When called interactively, you are asked for:
+
+1. Tag filters using +/- notation.
+2. The output file path (defaults to =gnosis-export.gnosis=).
+3. Whether to include suspended themata.
+
+The export uses =ATTACH DATABASE= to write directly from your main
+database to the export file, making it efficient even for large
+collections.
+
+*** Tag Filter Notation
+
+Each candidate is prefixed with =+= (include) or =-= (exclude):
+
+#+begin_example
+Filter tags (+include -exclude): +greek -draft
+#+end_example
+
+When no =+= entries are chosen, the export starts from all themata and
+applies only exclusions.
+
+*** Programmatic Use
+
+#+begin_src emacs-lisp
+(gnosis-export-db "~/backups/greek.gnosis"
+                  '("greek") '("draft"))
+#+end_src
+
+** Importing
+
+#+begin_src emacs-lisp
+M-x gnosis-import-db
+#+end_src
+
+Opens a diff review buffer showing NEW and CHANGED entries before
+applying any changes.  From this buffer:
+
+- =RET=: View detailed field-by-field comparison for the entry at point.
+- =a=: Apply all changes (inserts new themata, updates changed ones).
+- =q=: Quit without applying.
+- =?= / =h=: Open the transient help menu.
+
+New themata receive initialised review state (due immediately).  Changed
+themata have their content and tags updated without affecting review
+history.  After applying, the database is committed to Git.
+
+** The Export Format
+
+The =.gnosis= file is a plain SQLite database with four tables:
+=themata=, =thema_tag=, =extras=, and =gnosis_meta=.  Values use
+emacsql encoding (Lisp values serialized with =prin1-to-string=).
+
+** Editing Themata (Org Format)
+
+The org-based format is still used for the =*Gnosis Edit*= buffer when
+editing individual themata (=M-x gnosis-edit-thema= or =e= during
+review).  The =:GNOSIS_TYPE:= property is editable; the type is
+validated on save against =gnosis-thema-types=.
+
+** Importing from Anki
+
+Gnosis can import Anki collections and decks directly:
+
+#+begin_src emacs-lisp
+M-x gnosis-import-anki
+#+end_src
+
+The command auto-detects the file format by extension:
+
+- =.apkg=: Anki deck package (extracted via =7z=, including modern
+  zstd-compressed =.anki21b= format)
+- =.anki2= / =.anki21=: Anki collection database (opened directly)
+
+Supported note types:
+
+- *Basic* (and reversed): Imported as gnosis basic themata.
+- *Cloze*: Anki ={{c1::answer::hint}}= syntax is converted to gnosis
+  cloze themata.  Each cloze group becomes a separate thema.
+
+Image occlusion notes are skipped.
+
+*** What Gets Imported
+
+- Question and answer fields (HTML converted to org-mode markup)
+- Tags (Anki hierarchical tags like =anatomy::upper_limb= are split
+  into individual tags: =anatomy=, =upper_limb=)
+- Parathema from extra fields (if the note model has more than 2 fields)
+
+*** What Does Not Transfer
+
+Review history, scheduling data, and deck organisation are not imported.
+All imported themata start with fresh FSRS state and are due immediately.
+
+*** Requirements
+
+- =7z= (p7zip) for =.apkg= extraction
+- =zstd= (optional, for modern =.anki21b= format; =7z= can also handle it)
+
+The import runs asynchronously in chunks of 200, keeping Emacs
+responsive during large imports.
+
+* Link Health and Maintenance
+:PROPERTIES:
+:CUSTOM_ID: link-health
+:END:
+
+Over time, links between themata and nodes can fall out of sync:
+
+- *Orphaned links*: destination node no longer exists.
+- *Stale links*: link recorded but no longer present in the thema text.
+- *Missing links*: link present in thema text but not recorded.
+
+** Checking Link Health
+
+#+begin_src emacs-lisp
+M-x gnosis-links-check
+#+end_src
+
+Reports a summary without modifying anything.
+
+** Full Synchronisation
+
+#+begin_src emacs-lisp
+M-x gnosis-links-sync
+#+end_src
+
+Removes orphaned and stale links, inserts missing ones.  Prompts for
+confirmation with counts before making changes.
+
+** Syncing the Node Database
+
+#+begin_src emacs-lisp
+M-x gnosis-nodes-db-sync
+#+end_src
+
+Walks all org files in =gnosis-nodes-dir= and updates the database.
+Changed files are re-parsed; unchanged files are skipped.  For a
+complete rebuild:
+
+#+begin_src emacs-lisp
+C-u M-x gnosis-nodes-db-sync
+#+end_src
+
+** Version Control
+
+When Git is available, Gnosis automatically commits =gnosis.db= inside
+=gnosis-dir= after review sessions, link updates, and imports.  SQLite
+content imports commit only when that repository already exists.  Without
+Git these operations still complete; accepted reviews and imported data
+are stored in SQLite independently of version control.  Automatic Git
+failures are reported separately and do not undo completed database changes.
+Enable =gnosis-vc-auto-push= to push after successful automatic commits:
+
+#+begin_src emacs-lisp
+(setq gnosis-vc-auto-push t)
+#+end_src

@@ -129,7 +129,7 @@
   (let ((examples
          (with-temp-buffer
            (insert-file-contents
-            (expand-file-name "../docs/gnosis.org"
+            (expand-file-name "../../../doc/gnosis.org"
                               (file-name-directory
                                (locate-library "gnosis-test-journal"))))
            (cl-loop while (re-search-forward

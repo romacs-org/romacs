@@ -41,10 +41,10 @@
   "Ownership and tentative fields for the active visual authoring session.")
 
 (defcustom gnosis-model-renderer-directory nil
-  "Optional directory containing canvas-3d.el, render.py and .venv.
-The external canvas-3d package must implement scene opening and the
-selection hook protocol.  Nil discovers it on `load-path' or in the
-installed checkout's optional/canvas-3d directory."
+  "Directory containing canvas-3d.el, render.py and .venv.
+Romacs does not ship canvas-3d for now, so nil leaves the 3D model display
+off; the rest of Gnosis works without it.  A checkout named here must
+implement scene opening and the selection hook protocol."
   :type '(choice (const nil) directory)
   :group 'gnosis)
 
@@ -761,13 +761,9 @@ With a prefix argument, use advanced numeric input instead of the canvas."
             (goto-char (point-min))))))))
 
 (defun gnosis-model--renderer-directory ()
-  "Find the optional backend without loading it or installing dependencies."
-  (or (and gnosis-model-renderer-directory
-           (expand-file-name gnosis-model-renderer-directory))
-      (when-let* ((library (locate-library "canvas-3d")))
-        (file-name-directory library))
-      (let ((bundled (expand-file-name "../optional/canvas-3d" gnosis-model--directory)))
-        (when (file-readable-p (expand-file-name "canvas-3d.el" bundled)) bundled))))
+  "The configured backend directory, or nil while the 3D display is off."
+  (and gnosis-model-renderer-directory
+       (expand-file-name gnosis-model-renderer-directory)))
 
 (defun gnosis-model-open (path view &optional size inline question-target verified)
   "Open validated scene PATH at VIEW through the selected model backend.

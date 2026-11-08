@@ -10,13 +10,8 @@
 
 (require 'gnosis-model-test-support)
 
-(defun gnosis-test-media-lifecycle--require-canvas ()
-  "Load the shipped optional renderer only for lifecycle execution."
-  (let ((load-path (cons (gnosis-model--renderer-directory) load-path)))
-    (require 'canvas-3d)))
-
 (ert-deftest gnosis-media-lifecycle-model-native-successors ()
-  (gnosis-test-media-lifecycle--require-canvas)
+  (gnosis-test-model--require-canvas)
   (dolist (transition '(mode mode-roundtrip file file-roundtrip))
     (gnosis-test-with-db
      (save-window-excursion
@@ -97,7 +92,7 @@
              (kill-buffer viewer))))))))
 
 (ert-deftest gnosis-media-lifecycle-attachment-missing-canvas ()
-  (gnosis-test-media-lifecycle--require-canvas)
+  (gnosis-test-model--require-canvas)
   (with-temp-buffer
     (insert "Retained host")
     (let ((path (make-temp-file "canvas-capability-" nil ".obj")))
@@ -115,7 +110,7 @@
         (delete-file path)))))
 
 (ert-deftest gnosis-media-lifecycle-attachment-insertion-failure ()
-  (gnosis-test-media-lifecycle--require-canvas)
+  (gnosis-test-model--require-canvas)
   (dolist (condition '(error quit))
     (with-temp-buffer
       (text-mode)
@@ -163,7 +158,7 @@
           (delete-file path))))))
 
 (ert-deftest gnosis-media-lifecycle-graphical-retry-and-authoring ()
-  (gnosis-test-media-lifecycle--require-canvas)
+  (gnosis-test-model--require-canvas)
   (skip-unless (and (display-graphic-p) (image-type-available-p 'canvas)))
   (gnosis-test-with-db
    (save-window-excursion

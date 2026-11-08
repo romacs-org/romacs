@@ -11,7 +11,7 @@
 ;;; Code:
 
 (require 'ert)
-(require 'gnosis-autoloads)
+(load "romacs-bundled-autoloads" nil t)
 
 (ert-deftest gnosis-test-history-clear-is-not-autoloaded ()
   "Do not expose destructive clearing for derived review history."

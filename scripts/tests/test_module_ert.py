@@ -144,7 +144,7 @@ class ModuleERT(unittest.TestCase):
         select = runpy.run_path(str(ROOT / 'scripts/test-ert'))
         names = {path.name for path in select['module_suites']('gnosis', select['directories'](ROOT))}
         self.assertIn('gnosis-test-agent-romacs.el', names)
-        self.assertIn('gnosis-test-runner.el', names)
+        self.assertIn('gnosis-test-demo.el', names)
         self.assertFalse(names & {'gnosis-test-db.el', 'gnosis-test-helpers.el',
                                   'gnosis-test-schema-v8.el'})
 
