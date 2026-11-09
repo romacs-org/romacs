@@ -115,3 +115,32 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     assert!(child.glyphs.iter().any(|g| matches!(g, FrameGlyph::Char { char: 'o', face_id, .. }
         if child.resolved_face(*face_id).bg == glass)), "text shows the frame's background");
 }
+
+/// Every frame layout hands the renderer, root (laid out afresh or reused
+/// at a later presentation) and child, answers a pointer query at its own
+/// presentation without a staleness error: the renderer drops pointer input
+/// over a frame that refuses its own presentation.
+#[test]
+fn laid_out_frames_answer_pointer_queries_at_their_presentation() {
+    use romacs_display_protocol::{GeometryPoint, InteractionProjection, LogicalPixels, PresentedHitQuery, RootSurfaceSpace};
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let face = vm.display_default_face().unwrap();
+    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    vm.set_frame_geometry(400, 300, line, column).unwrap();
+    vm.eval_source("(progn (insert \"ROOT\") (set-buffer (get-buffer-create \"popup\")) (insert \"POPUP\") (setq mode-line-format nil))").unwrap();
+    vm.eval_source("(let ((c (romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 2) (left . 30) (top . 5))))) \
+                      (set-window-buffer (frame-root-window c) \"popup\"))").unwrap();
+    let snapshot = vm.frame_snapshot(400, 300).unwrap();
+    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let query = |frame: &romacs_display_protocol::FrameGlyphBuffer| {
+        let point = GeometryPoint::<RootSurfaceSpace, LogicalPixels>::from_px(5.0, 5.0).unwrap();
+        PresentedHitQuery::new(InteractionProjection::settled(frame.presentation_id).map(point).unwrap())
+    };
+    let (fresh, _) = engine.layout_frame(&snapshot, 7, None).unwrap();
+    let (reused, _) = engine.layout_frame(&snapshot, 8, None).unwrap();
+    let (children, _) = engine.layout_children(&snapshot, 8, None).unwrap();
+    for frame in [&fresh, &reused, &children[0]] {
+        assert!(frame.resolve_presented_hit(query(frame)).is_ok(), "presentation {:?}", frame.presentation_id);
+    }
+}
