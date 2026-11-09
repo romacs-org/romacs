@@ -16,7 +16,8 @@
 (defmacro romacs-agent-children-tests--with (&rest body)
   "BODY with `parent', a session of no children, and `child', which makes one."
   (declare (indent 0))
-  `(let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+  `(let* ((romacs-agent-glyphs nil)
+          (romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent--children (make-hash-table :test #'equal))
           (romacs-agent-ui--children-changed (make-hash-table :test #'eq))
           (romacs-agent-ui--children-timer nil)
@@ -354,6 +355,44 @@
         (should (<= (string-width label) keymap-popup--max-description-width))
         (should (string-suffix-p "romacs_eval now" (substring-no-properties label)))))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
+
+;; Past nine workers, and glyphs for states.
+
+(ert-deftest romacs-agent-children-past-nine-workers ()
+  (romacs-agent-children-tests--with
+    (dotimes (_ 12) (child 'running))
+    (romacs-agent-ui--summarize-children parent)
+    (with-temp-buffer
+      (let ((romacs-agent-ui--session parent) (opened nil))
+        (should (string-suffix-p "+3 more" (substring-no-properties (romacs-agent-ui--children-title))))
+        ;; Every one is reached through the list of all.
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_prompt table &rest _)
+                     (should (= (length (all-completions "" table)) 12))
+                     (car (last (all-completions "" table)))))
+                  ((symbol-function 'romacs-agent-switch) (lambda (session) (setq opened session))))
+          (romacs-agent-chat-workers)
+          (should (eq opened (plist-get (car (last (romacs-agent-children-rows parent))) :session))))))))
+
+(ert-deftest romacs-agent-children-glyphs ()
+  (romacs-agent-children-tests--with
+    (child 'running) (child 'waiting-approval)
+    (let ((romacs-agent-glyphs t))
+      (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
+        (should (equal (romacs-agent-children-tests--summary parent) "🤖1 ✋1"))
+        (should (equal (get-text-property 0 'help-echo (romacs-agent-children-summary parent)) "1 running"))
+        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "🤖")))
+      ;; Turned off, a summary made before says words at once.
+      (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
+                ((symbol-function 'romacs-agent-sessions) (lambda () (list parent))))
+        (romacs-agent-ui--summarize-children parent)
+        (customize-set-variable 'romacs-agent-glyphs nil)
+        (should (equal (substring-no-properties (romacs-agent-children-summary parent)) "1 running · 1 waiting"))
+        (customize-set-variable 'romacs-agent-glyphs t))
+      ;; A frame that cannot draw them gets the words.
+      (cl-letf (((symbol-function 'char-displayable-p) #'ignore))
+        (should (equal (romacs-agent-children-tests--summary parent) "1 running 1 waiting"))
+        (should (equal (substring-no-properties (romacs-agent-ui--state-label parent)) "Running"))))))
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here

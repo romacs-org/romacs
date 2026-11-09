@@ -786,12 +786,12 @@ new turn starts, and last turn's failures have been seen."
                          (if (= x y) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0)) (< x y)))))
           (romacs-agent-children-summary session)
           (let ((parts (delq nil (list (and (> (aref counts 0) 0)
-                                            (propertize (format "%d running" (aref counts 0)) 'face 'romacs-agent-running))
+                                            (romacs-agent-ui--count "🤖" "running" (aref counts 0) 'romacs-agent-running))
                                        (and (> (aref counts 1) 0)
-                                            (propertize (format "%d waiting" (aref counts 1)) 'face 'warning))
+                                            (romacs-agent-ui--count "✋" "waiting" (aref counts 1) 'warning))
                                        (and (> (aref counts 2) 0)
-                                            (propertize (format "%d failed" (aref counts 2)) 'face 'romacs-agent-error))))))
-            (and parts (mapconcat #'identity parts (propertize " · " 'face 'romacs-agent-dim)))))))
+                                            (romacs-agent-ui--count "❗" "failed" (aref counts 2) 'romacs-agent-error))))))
+            (and parts (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))))))
 
 ;;; The header (hermes-chat--header-line's shape)
 
@@ -799,15 +799,39 @@ new turn starts, and last turn's failures have been seen."
   (let ((icon (or (plist-get (cdr (gethash harness romacs-agent--driver-table)) :icon) "●")))
     (if (char-displayable-p (aref icon 0)) icon (symbol-name harness))))
 
+(defcustom romacs-agent-glyphs t
+  "Whether chats say a state by a glyph (🤖 working, ✋ waiting for you, ❗
+failed...) where the frame can draw it: the word shows on hover."
+  :type 'boolean :group 'romacs-agent
+  ;; Sessions' worker summaries are made ahead: made again.
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (when (fboundp 'romacs-agent-ui--summarize-children)
+           (mapc #'romacs-agent-ui--summarize-children (romacs-agent-sessions))
+           (force-mode-line-update t))))
+
+(defun romacs-agent-ui--glyph (glyph word face)
+  "GLYPH, or WORD where glyphs are off or GLYPH cannot be drawn, in FACE,
+WORD its help."
+  (propertize (if (and romacs-agent-glyphs (char-displayable-p (aref glyph 0))) glyph word)
+              'face face 'help-echo word))
+
 (defun romacs-agent-ui--state-label (session)
   "SESSION's state, when the header should name it."
   (pcase (romacs-agent-state session)
-    ('waiting-approval (propertize "Approval" 'face 'warning))
-    ((or 'starting 'running) (propertize "Running" 'face 'romacs-agent-running))
-    ('detached (propertize "Detached" 'face 'warning))
-    ('ended (propertize "Ended" 'face 'romacs-agent-dim))
-    ('history (propertize "History" 'face 'romacs-agent-dim))
-    (_ (and (romacs-agent-failed session) (propertize "Failed" 'face 'romacs-agent-error)))))
+    ('waiting-approval (romacs-agent-ui--glyph "✋" "Approval" 'warning))
+    ((or 'starting 'running) (romacs-agent-ui--glyph "🤖" "Running" 'romacs-agent-running))
+    ('detached (romacs-agent-ui--glyph "🔌" "Detached" 'warning))
+    ('ended (romacs-agent-ui--glyph "⏹" "Ended" 'romacs-agent-dim))
+    ('history (romacs-agent-ui--glyph "📜" "History" 'romacs-agent-dim))
+    (_ (and (romacs-agent-failed session) (romacs-agent-ui--glyph "❗" "Failed" 'romacs-agent-error)))))
+
+(defun romacs-agent-ui--count (glyph word count face)
+  "COUNT of what WORD names: GLYPH and the count, else the count and WORD."
+  (let ((shown (romacs-agent-ui--glyph glyph word face)))
+    (propertize (if (equal (substring-no-properties shown) word) (format "%d %s" count word)
+                  (format "%s%d" glyph count))
+                'face face 'help-echo (format "%d %s" count word))))
 
 (defun romacs-agent-ui--effort (effort)
   "EFFORT for a person, in its level's face: one Romacs does not know in
@@ -1832,41 +1856,67 @@ however they ended."
   (and romacs-agent-ui--session (romacs-agent-ui--workers (romacs-agent-children-rows romacs-agent-ui--session))))
 
 (defun romacs-agent-ui--children-title ()
-  (let ((summary (and romacs-agent-ui--session (romacs-agent-children-summary romacs-agent-ui--session))))
+  "The Workers heading: its summary, and how many the digits do not reach."
+  (let* ((session romacs-agent-ui--session)
+         (summary (and session (romacs-agent-children-summary session)))
+         (more (- (length (romacs-agent-ui--children-here)) 9)))
     ;; A menu heading fits 40 columns.
-    (if summary (concat "Workers " summary) "Workers")))
+    (concat "Workers" (if summary (concat " " summary) "")
+            (if (> more 0) (propertize (format " +%d more" more) 'face 'romacs-agent-dim) ""))))
 
 (defun romacs-agent-ui--child-label (index)
-  "The menu's row of the child at INDEX, or nil to show none: its state,
-what it is doing and when it last did something, its title in the room a
-menu entry leaves (`keymap-popup--max-description-width')."
+  "The menu's row of the child at INDEX, or nil to show none."
   (when-let* ((row (nth index (romacs-agent-ui--children-here))))
-    (let* ((state (plist-get row :state))
-           (activity (and (equal state "running") (plist-get row :activity)
-                          (truncate-string-to-width
-                           (replace-regexp-in-string "\\`mcp__[^_]+\\(?:_[^_]+\\)*__" "" (plist-get row :activity))
-                           14 nil nil "…")))
-           (ago (romacs-agent-ui--ago (plist-get row :time)))
-           (tail (mapconcat #'identity
-                            (delq nil (list (romacs-agent-ui--chip state)
-                                            (and activity (propertize activity 'face 'romacs-agent-running))
-                                            (and (not (string-empty-p ago)) (propertize ago 'face 'romacs-agent-dim))))
-                            " ")))
-      (concat (truncate-string-to-width (or (plist-get row :title) "task")
-                                        (max 8 (- keymap-popup--max-description-width (string-width tail) 1))
-                                        nil nil "…")
-              " " tail))))
+    (romacs-agent-ui--worker-label row)))
+
+(defun romacs-agent-ui--worker-label (row)
+  "Worker ROW in a line: its state, what it is doing and when it last did
+something, its title in the room a menu entry leaves
+\(`keymap-popup--max-description-width')."
+  (let* ((state (plist-get row :state))
+         (activity (and (equal state "running") (plist-get row :activity)
+                        (truncate-string-to-width
+                         (replace-regexp-in-string "\\`mcp__[^_]+\\(?:_[^_]+\\)*__" "" (plist-get row :activity))
+                         14 nil nil "…")))
+         (ago (romacs-agent-ui--ago (plist-get row :time)))
+         (tail (mapconcat #'identity
+                          (delq nil (list (romacs-agent-ui--chip state)
+                                          (and activity (propertize activity 'face 'romacs-agent-running))
+                                          (and (not (string-empty-p ago)) (propertize ago 'face 'romacs-agent-dim))))
+                          " ")))
+    (concat (truncate-string-to-width (or (plist-get row :title) "task")
+                                      (max 8 (- keymap-popup--max-description-width (string-width tail) 1))
+                                      nil nil "…")
+            " " tail)))
+
+(defun romacs-agent-ui--open-worker (row)
+  "Open worker ROW: a delegated task's chat, or the card in this chat of a
+harness's own subagent or command."
+  (if (plist-get row :session) (romacs-agent-switch (plist-get row :session))
+    (goto-char (or (gethash (plist-get row :tool) romacs-agent-ui--tool-lines)
+                   (user-error "Its card is not in this chat")))
+    (recenter)))
 
 (defun romacs-agent-chat-open-child ()
-  "Open the child on the menu row of the digit just pressed: a delegated
-task's chat, or a harness's own subagent's card in this one."
+  "Open the worker on the menu row of the digit just pressed."
   (interactive nil romacs-agent-chat-mode)
-  (let ((row (nth (- last-command-event ?1) (romacs-agent-ui--children-here))))
-    (cond ((null row) (user-error "No such subagent"))
-          ((plist-get row :session) (romacs-agent-switch (plist-get row :session)))
-          (t (goto-char (or (gethash (plist-get row :tool) romacs-agent-ui--tool-lines)
-                            (user-error "Its card is not in this chat")))
-             (recenter)))))
+  (romacs-agent-ui--open-worker (or (nth (- last-command-event ?1) (romacs-agent-ui--children-here))
+                                    (user-error "No such worker"))))
+
+(defun romacs-agent-chat-workers ()
+  "Open one of every worker of this session, chosen by its line: the
+delegated tasks, and the subagents and commands its harness runs, those
+wanting you first."
+  (interactive nil romacs-agent-chat-mode)
+  (let* ((rows (or (romacs-agent-children-rows romacs-agent-ui--session) (user-error "No workers")))
+         (labels (let ((seen (make-hash-table :test #'equal)))
+                   (mapcar (lambda (row)
+                             (let* ((label (substring-no-properties (romacs-agent-ui--worker-label row)))
+                                    (n (cl-incf (gethash label seen 0))))
+                               (cons (if (= n 1) label (format "%s <%d>" label n)) row)))
+                           rows))))
+    (romacs-agent-ui--open-worker
+     (cdr (assoc (completing-read "Worker: " (romacs-agent--ordered-table (mapcar #'car labels)) nil t) labels)))))
 
 (defun romacs-agent-chat-children (session)
   "Switch to SESSION, chosen among those this one delegated."
@@ -1915,8 +1965,8 @@ view."
   "7" ((lambda () (romacs-agent-ui--child-label 6)) romacs-agent-chat-open-child)
   "8" ((lambda () (romacs-agent-ui--child-label 7)) romacs-agent-chat-open-child)
   "9" ((lambda () (romacs-agent-ui--child-label 8)) romacs-agent-chat-open-child)
-  "o" ("All delegated tasks" romacs-agent-chat-children
-       :if (lambda () (romacs-agent-children romacs-agent-ui--session)))
+  "o" ((lambda () (format "All workers (%d)" (length (romacs-agent-children-rows romacs-agent-ui--session))))
+       romacs-agent-chat-workers)
   :row
   :group "Compose"
   "A" ("Attach image" romacs-agent-chat-attach)
