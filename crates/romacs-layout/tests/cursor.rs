@@ -5,14 +5,14 @@ use romacs_vm::Vm;
 fn point_uses_text_geometry_and_selection_switches_cursor_kind() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"cursor\")) (insert \"abc\\nλz\\n\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer)) (setq mode-line-format '(\"%b\")) (select-window a) (goto-char 2)").unwrap();
     let mut snap = vm.frame_snapshot(800, 600).unwrap();
     let first = snap.windows[0].snapshot.id;
     let second = snap.windows[1].snapshot.id;
     let rum = Color::from_pixel(0x9099d9);
-    let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, first, rum).unwrap();
+    let (frame, _) = romacs_layout::layout_frame_with_cursors(&snap, 1, first, rum).unwrap();
     assert_eq!(frame.window_cursors.len(), 2, "minibuffer has no cursor");
     let cursor = frame.active_cursor().unwrap();
     assert_eq!(cursor.window_id.get(), first as i64);
@@ -21,14 +21,14 @@ fn point_uses_text_geometry_and_selection_switches_cursor_kind() {
     assert_eq!(cursor.x, col as f32);
     assert_eq!(frame.window_cursors[1].style, CursorStyle::Hollow);
     snap.windows[0].snapshot.point_byte = snap.windows[0].snapshot.text.utf8.len();
-    let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 2, second, rum).unwrap();
+    let (frame, _) = romacs_layout::layout_frame_with_cursors(&snap, 2, second, rum).unwrap();
     assert_eq!(frame.active_cursor().unwrap().window_id.get(), second as i64);
     assert_eq!(frame.window_cursors[0].y, 2.0 * line as f32, "EOF after newline owns a cursor slot");
     assert_eq!(frame.window_cursors[0].x, 0.0);
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     for revision in 3..8 {
         let (cached, cached_ends) = engine.layout_frame(&snap, revision, Some((second, rum))).unwrap();
-        let (fresh, fresh_ends) = romacs_layout2::layout_frame_with_cursors(&snap, revision, second, rum).unwrap();
+        let (fresh, fresh_ends) = romacs_layout::layout_frame_with_cursors(&snap, revision, second, rum).unwrap();
         assert_eq!(cached.glyphs, fresh.glyphs);
         assert_eq!(cached_ends, fresh_ends);
         assert_eq!(cached.fonts.len(), fresh.fonts.len());
@@ -46,13 +46,13 @@ fn cursor_type_kinds_are_the_published_cursor_styles() {
     use romacs_layout_input::{CursorKind, CursorKinds};
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"kinds\")) (insert \"abc\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer))").unwrap();
     let mut snap = vm.frame_snapshot(800, 600).unwrap();
     let (first, rum) = (snap.windows[0].snapshot.id, Color::from_pixel(0x9099d9));
     let styles = |snap: &romacs_layout_input::FrameSnapshot| {
-        let (frame, _) = romacs_layout2::layout_frame_with_cursors(snap, 1, first, rum).unwrap();
+        let (frame, _) = romacs_layout::layout_frame_with_cursors(snap, 1, first, rum).unwrap();
         frame.window_cursors.iter().map(|c| (c.window_id.get() == first as i64, c.style)).collect::<Vec<_>>()
     };
     for window in &mut snap.windows[..2] {
@@ -70,7 +70,7 @@ fn cursor_type_kinds_are_the_published_cursor_styles() {
     assert_eq!(styles(&snap), [(true, CursorStyle::FilledBox)]);
     // The engine lays a kind change out again rather than showing the
     // last layout's cursor.
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let (frame, _) = engine.layout_frame(&snap, 1, Some((first, rum))).unwrap();
     assert_eq!(frame.active_cursor().unwrap().style, CursorStyle::FilledBox);
     snap.windows[0].snapshot.cursor = CursorKinds { selected: CursorKind::Bar(2), unselected: CursorKind::Bar(1) };
@@ -88,7 +88,7 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
         mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(),
         faces: vec![face; 24],
     };
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let frame = engine.layout(&snapshot, 1).unwrap();
     assert_eq!(frame.char_fonts.len(), 1, "only the face that uses Unicode needs bindings");
     assert!(frame.char_fonts[&romacs_display_protocol::FaceId::new(0)].contains_key(&'Ж'));
@@ -103,14 +103,14 @@ fn unused_faces_do_not_multiply_unicode_bindings() {
 fn selected_minibuffer_shows_the_active_cursor_at_point() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(setq mode-line-format '(\"%b\")) (set-buffer (get-buffer-create \" *Minibuf-1*\")) (insert \"Name: abc\") (set-window-buffer (minibuffer-window) (current-buffer)) (select-window (minibuffer-window))").unwrap();
     let snap = vm.frame_snapshot(800, 600).unwrap();
     let mini = snap.windows.last().unwrap().snapshot.id;
     let main = snap.windows[0].snapshot.id;
     let rum = Color::from_pixel(0x9099d9);
-    let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, mini, rum).unwrap();
+    let (frame, _) = romacs_layout::layout_frame_with_cursors(&snap, 1, mini, rum).unwrap();
     let cursor = frame.active_cursor().expect("the active minibuffer has a cursor");
     assert_eq!(cursor.window_id.get(), mini as i64);
     assert_eq!(cursor.style, CursorStyle::FilledBox);
@@ -126,14 +126,14 @@ fn selected_minibuffer_shows_the_active_cursor_at_point() {
 fn a_cursor_shown_off_is_not_published() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(setq a (selected-window)) (set-window-new-pixel a 400) (setq b (split-window-internal a 400 t 0.5)) (set-buffer (get-buffer-create \"blink\")) (insert \"abc\") (set-window-buffer a (current-buffer)) (set-window-buffer b (current-buffer)) (setq mode-line-format '(\"%b\")) (select-window a)").unwrap();
     let rum = Color::from_pixel(0x9099d9);
     let cursors = |vm: &mut Vm| {
         let snap = vm.frame_snapshot(800, 600).unwrap();
         let (selected, other) = (snap.windows[0].snapshot.id, snap.windows[1].snapshot.id);
-        let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, selected, rum).unwrap();
+        let (frame, _) = romacs_layout::layout_frame_with_cursors(&snap, 1, selected, rum).unwrap();
         let ids: Vec<i64> = frame.window_cursors.iter().map(|c| c.window_id.get()).collect();
         (ids, selected as i64, other as i64)
     };
@@ -153,13 +153,13 @@ fn a_cursor_shown_off_is_not_published() {
 fn a_buffer_without_a_cursor_is_not_a_blink() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(progn (set-buffer (get-buffer-create \"none\")) (set-window-buffer nil (current-buffer)) (insert \"text\"))").unwrap();
     let cursor = |vm: &mut Vm| {
         let snap = vm.frame_snapshot(800, 600).unwrap();
         let selected = snap.windows[0].snapshot.id;
-        let (frame, _) = romacs_layout2::layout_frame_with_cursors(&snap, 1, selected, Color::from_pixel(0x9099d9)).unwrap();
+        let (frame, _) = romacs_layout::layout_frame_with_cursors(&snap, 1, selected, Color::from_pixel(0x9099d9)).unwrap();
         (frame.window_cursors.len(), frame.cursor_blinked_off)
     };
     assert_eq!(cursor(&mut vm), (1, false));
@@ -179,13 +179,13 @@ fn a_buffer_without_a_cursor_is_not_a_blink() {
 fn a_cursor_only_change_reuses_the_last_layout() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, col) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, col) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(800, 600, line, col).unwrap();
     vm.eval_source("(set-buffer (get-buffer-create \"reuse\")) (insert \"abc\\ndef\") (set-window-buffer nil (current-buffer)) (setq mode-line-format '(\"%b\")) (goto-char 2)").unwrap();
     let rum = Color::from_pixel(0x9099d9);
     let mut snap = vm.frame_snapshot(800, 600).unwrap();
     let id = snap.windows[0].snapshot.id;
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let (on, ends) = engine.layout_frame(&snap, 1, Some((id, rum))).unwrap();
     snap.windows[0].snapshot.cursor_off = true;
     snap.windows[0].snapshot.buffer_version += 1;

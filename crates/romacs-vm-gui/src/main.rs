@@ -439,7 +439,7 @@ mod frame_tests {
         vm.eval_source("(erase-buffer) (let ((i 0)) (while (< i 300) (insert \"a long line of text\\n\") (setq i (1+ i)))) (goto-char 1)").unwrap();
         let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
         let cursor = painted.selected.map(|id| (id, super::cursor_colour(&painted.snapshot)));
-        let (_, ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&painted.snapshot, 1, cursor).unwrap();
+        let (_, ends) = romacs_layout::LayoutEngine::new().unwrap().layout_frame(&painted.snapshot, 1, cursor).unwrap();
         vm.display_apply_layout(&ends).unwrap();
         let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
         assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
@@ -935,7 +935,7 @@ enum Wait {
 }
 
 fn paint(
-    engine: &mut romacs_layout2::LayoutEngine,
+    engine: &mut romacs_layout::LayoutEngine,
     vm: &mut Vm,
     sender: &PaintSender,
     images: &residency::Shared,
@@ -1005,8 +1005,8 @@ fn paint(
         })
     }).collect();
     let diagnostics_prepare_ns = diagnostic_start.elapsed().as_nanos();
-    let tab_bar = romacs_layout2::tab_bar_extents(&frame);
-    let status_bar = shown.snapshot.status_bar.as_ref().map(|bar| romacs_layout2::status_bar_extents(&frame, bar)).unwrap_or_default();
+    let tab_bar = romacs_layout::tab_bar_extents(&frame);
+    let status_bar = shown.snapshot.status_bar.as_ref().map(|bar| romacs_layout::status_bar_extents(&frame, bar)).unwrap_or_default();
     let submit_start = Instant::now();
     images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
     sender.submit_scene(frame, children, shown.animations.clone())?;
@@ -1122,7 +1122,7 @@ fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_displa
 }
 
 fn paint_prompt(
-    engine: &mut romacs_layout2::LayoutEngine,
+    engine: &mut romacs_layout::LayoutEngine,
     sender: &PaintSender,
     images: &residency::Shared,
     presentation: u64,
@@ -1173,7 +1173,7 @@ fn evaluate(
     serve_landing: bool,
     early_window: Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
-    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
+    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
     startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
         Some((vm, carry)) => {
@@ -1234,7 +1234,7 @@ fn evaluate(
     // A restored VM holds the geometry and what follows, up to the chain's
     // end: its world's recipe fixed them.
     if carry.is_none() {
-        let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+        let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
         vm.set_frame_geometry(width, height, line_height, column_width)?;
     }
     if live {
@@ -1324,7 +1324,7 @@ fn evaluate(
         } else {
             eprintln!("romacs: font family={} pixels={}", face.family, face.pixel_size);
         }
-        let (lh, cw) = romacs_layout2::frame_metrics(&face)?;
+        let (lh, cw) = romacs_layout::frame_metrics(&face)?;
         vm.set_frame_geometry(width, height, lh, cw)?;
     } else {
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
@@ -1440,7 +1440,7 @@ fn evaluate(
                     if w > 0 && h > 0 && (width, height) != (w, h) {
                         width = w; height = h;
                         if let Some(server) = host.borrow_mut().server.as_mut() { server.size = (w, h); }
-                        let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+                        let (lh, cw) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
                         vm.set_frame_geometry(width, height, lh, cw)?;
                         // The repaint's redisplay runs `window-size-change-functions'
                         // (`frame_snapshot'), as GNU's does.

@@ -1,5 +1,5 @@
 //! A text animation (romacs_display_protocol::text_animation) drawn over a
-//! frame layout2 laid out: every cell of its block shows the animation's
+//! frame romacs-layout laid out: every cell of its block shows the animation's
 //! character in its colour, wherever the window sits in the frame.
 use romacs_display_protocol::text_animation::{paint, TextAnimation, TextAnimationKind};
 use romacs_display_protocol::{Color, FrameGlyph, FrameGlyphBuffer};
@@ -53,7 +53,7 @@ fn foreground(frame: &FrameGlyphBuffer, row: u32, col: u16) -> Color {
 #[test]
 fn the_block_shows_the_animation_cells_in_their_colours() {
     // Row 1 is shorter than the block; the text below stays.
-    let mut frame = romacs_layout2::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
+    let mut frame = romacs_layout::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
     let plain = glyph(&frame, 0, 0, face);
     paint(&mut frame, &logo(0, 4, 2), &cells("\u{2847}\u{28ff} ab  c"));
     assert_eq!(shown(&frame, 0), "\u{2847}\u{28ff} a");
@@ -68,7 +68,7 @@ fn the_block_shows_the_animation_cells_in_their_colours() {
 
 #[test]
 fn a_block_scrolled_above_the_window_shows_its_lower_rows() {
-    let mut frame = romacs_layout2::layout(&window("xxxx\nyyyy", vec![]), 1).unwrap();
+    let mut frame = romacs_layout::layout(&window("xxxx\nyyyy", vec![]), 1).unwrap();
     paint(&mut frame, &logo(-1, 4, 2), &cells("1234@@@@"));
     assert_eq!(shown(&frame, 0), "@@@@");
     assert_eq!(shown(&frame, 1), "yyyy");
@@ -85,7 +85,7 @@ fn a_window_below_and_right_of_the_frame_corner_shows_its_block() {
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None,
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 300, y: 400, snapshot }],
     };
-    let (mut frame, _) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame_snapshot, 1, None).unwrap();
+    let (mut frame, _) = romacs_layout::LayoutEngine::new().unwrap().layout_frame(&frame_snapshot, 1, None).unwrap();
     let mut animation = logo(0, 4, 2);
     animation.window = 9;
     paint(&mut frame, &animation, &cells("@@@@::::"));
@@ -105,7 +105,7 @@ fn a_window_below_and_right_of_the_frame_corner_shows_its_block() {
 fn a_character_keeps_the_font_layout_resolved_for_it() {
     // Layout resolved U+2847 through a fallback font under the evaluator's
     // face; drawn in a new colour, the character keeps that font and glyph.
-    let mut frame = romacs_layout2::layout(&window("ab", vec![]), 1).unwrap();
+    let mut frame = romacs_layout::layout(&window("ab", vec![]), 1).unwrap();
     let base = glyph(&frame, 0, 0, face);
     let fallback = romacs_display_protocol::font::ResolvedCharGlyph {
         resolved_font_id: romacs_display_protocol::font::ResolvedFontId(77),

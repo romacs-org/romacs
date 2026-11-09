@@ -2,7 +2,7 @@
 //! glyph for the frame's `no-font' method, measured as it is painted,
 //! and never stops layout.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
-use romacs_layout2::LayoutEngine;
+use romacs_layout::LayoutEngine;
 use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, FrameSnapshot, MeasureInput, NoFont, PlacedWindowSnapshot, Segment, StatusBarSnapshot, TabBarSnapshot, TextSlice, WindowSnapshot};
 
 /// An unassigned code point: no font has a glyph for it.
@@ -111,7 +111,7 @@ fn a_face_without_a_usable_family_falls_back_to_the_default_face() {
     faces[1].pixel_size = f32::NAN;
     let mut snapshot = window("ab", faces);
     snapshot.text.face_runs = vec![FaceRun { bytes: 1..2, face: FaceHandle(1) }];
-    let frame = romacs_layout2::layout(&snapshot, 1).expect("an unusable face falls back");
+    let frame = romacs_layout::layout(&snapshot, 1).expect("an unusable face falls back");
     assert_eq!(chars(&frame).iter().map(|c| c.0).collect::<String>(), "ab");
 }
 
@@ -125,10 +125,10 @@ fn the_bars_clicks_find_one_glyph_per_character() {
         faces: vec![face("Liberation Mono")], window: 1, focused: true, marks };
     snapshot.status_bar = Some(bar.clone());
     let painted = LayoutEngine::new().unwrap().layout_frame(&snapshot, 1, None).unwrap().0;
-    let tabs = romacs_layout2::tab_bar_extents(&painted);
+    let tabs = romacs_layout::tab_bar_extents(&painted);
     assert_eq!(tabs.len(), text.chars().count(), "{tabs:?}");
     assert!(tabs[1].1 > tabs[0].1 && tabs[2].0 >= tabs[1].0 + tabs[1].1, "the box's extent lies between its neighbours': {tabs:?}");
-    let (extents, marker) = romacs_layout2::status_bar_extents(&painted, &bar);
+    let (extents, marker) = romacs_layout::status_bar_extents(&painted, &bar);
     assert_eq!((extents.len(), marker), (text.chars().count(), vec![3]));
     assert!(extents.iter().all(Option::is_some), "{extents:?}");
 }
@@ -153,7 +153,7 @@ fn a_glyphless_character_ending_a_box_run_closes_it() {
     let mut snapshot = window(&text, vec![face("Liberation Mono"), boxed]);
     snapshot.mode_line = None;
     snapshot.text.face_runs = vec![FaceRun { bytes: 0..text.len(), face: FaceHandle(1) }];
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let run: Vec<_> = frame.glyphs.iter()
         .filter(|g| g.face_id() == Some(FaceId::new(1)) && g.row_role() == Some(GlyphRowRole::Text))
         .map(|g| (matches!(g, FrameGlyph::Stretch { .. }), g.box_vertical_edges())).collect();

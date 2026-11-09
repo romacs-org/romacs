@@ -7,7 +7,7 @@
     "romacs-face": {"allows": 1, "todos": 0, "long_files": 0},
     "romacs-font-materializer": {"allows": 0, "todos": 0, "long_files": 1},
     "romacs-introspect": {"allows": 1, "todos": 0, "long_files": 0},
-    "romacs-layout2": {"allows": 0, "todos": 0, "long_files": 1},
+    "romacs-layout": {"allows": 0, "todos": 0, "long_files": 1},
     "romacs-regex-engine": {"allows": 4, "todos": 0, "long_files": 0},
     "romacs-renderer-wgpu": {"allows": 0, "todos": 12, "long_files": 12},
     "romacs-snapshot": {"allows": 8, "todos": 0, "long_files": 0},

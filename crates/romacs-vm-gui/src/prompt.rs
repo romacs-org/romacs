@@ -66,7 +66,7 @@ impl Shared {
 pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
-    pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub engine: Rc<RefCell<romacs_layout::LayoutEngine>>,
     pub images: crate::fonts::residency::Shared,
     pub terminal_ready: crossbeam_channel::Receiver<()>,
     /// The process descriptors the next wait also watches.

@@ -1,7 +1,7 @@
 # VM2 GUI
 
 `scene.el` is evaluated as source in VM2. VM2 publishes owned Seam L snapshots;
-`romacs-layout2` produces Seam P paints and resolved font bindings. `PaintHost`
+`romacs-layout` produces Seam P paints and resolved font bindings. `PaintHost`
 owns the native loop and renderer. External stdin JSON-line requests go through
 `Vm::submit`. Changes, including changes preceding an evaluation error, trigger
 a new snapshot and paint; unchanged state retains its presentation. Native
@@ -13,7 +13,7 @@ presentation activation.
 Run from the repository root:
 
 ```sh
-cargo test -p romacs-layout2 --test layout
+cargo test -p romacs-layout --test layout
 cargo test -p romacs-vm-gui --test font_diagnostic -- --nocapture
 cargo build -p romacs-vm-gui -p romacs-gui-oracle
 G1A_ORACLE="$PWD/target/debug/romacs-gui-oracle" \

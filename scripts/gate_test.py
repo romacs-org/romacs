@@ -24,7 +24,7 @@ def pinned_fixture(test, repo):
     return binary
 
 
-FIXTURE_SUITES = {'vm2': ['romacs-vm'], 'display': ['romacs-layout2']}
+FIXTURE_SUITES = {'vm2': ['romacs-vm'], 'display': ['romacs-layout']}
 
 
 def metadata_command(*cmd, **kw):

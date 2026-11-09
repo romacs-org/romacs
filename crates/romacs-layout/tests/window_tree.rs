@@ -5,7 +5,7 @@ use romacs_vm::Vm;
 fn frame_layout_consumes_real_vm_window_tree() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     assert!(line > 0 && column > 0);
     vm.set_frame_geometry(400, 300, line, column).unwrap();
     let lower = (300 - line) / 2;
@@ -17,7 +17,7 @@ fn frame_layout_consumes_real_vm_window_tree() {
       (set-buffer (get-buffer-create "lower")) (insert "LOWER") (set-window-buffer b (current-buffer))
       (setq mode-line-format '("%b")))"#)).unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
-    let (frame, ends) = romacs_layout2::layout_frame(&snapshot, 7).unwrap();
+    let (frame, ends) = romacs_layout::layout_frame(&snapshot, 7).unwrap();
     assert_eq!((frame.width, frame.height), (400.0, 300.0), "frame cannot be first leaf only");
     let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, y, clip_rect, face_id, .. } => Some((*char, *x, *y, *clip_rect, *face_id)),
@@ -34,7 +34,7 @@ fn frame_layout_consumes_real_vm_window_tree() {
     let end = vm.eval_source("(window-end b)").unwrap();
     assert_eq!(end.display().unwrap(), "6");
     let tiny = romacs_layout_input::Face { pixel_size: 10.0, ..face.clone() };
-    let (tiny_line, _) = romacs_layout2::frame_metrics(&tiny).unwrap();
+    let (tiny_line, _) = romacs_layout::frame_metrics(&tiny).unwrap();
     assert!(tiny_line < line, "metrics must come from resolved font, not constants");
 }
 
@@ -69,7 +69,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(7, 400, 150, &face) },
         ],
     };
-    assert!(romacs_layout2::layout_frame(&duplicate, 1).is_err(),
+    assert!(romacs_layout::layout_frame(&duplicate, 1).is_err(),
             "duplicate window id must be rejected");
 
     // A window taller than the frame: its glyphs would be placed outside the
@@ -80,7 +80,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
         background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, windows: vec![romacs_layout_input::PlacedWindowSnapshot {
             x: 0, y: 200, snapshot: snap(1, 400, 200, &face) }],
     };
-    assert!(romacs_layout2::layout_frame(&overflow, 1).is_err(),
+    assert!(romacs_layout::layout_frame(&overflow, 1).is_err(),
             "placement extending past the frame must be rejected");
 
     // The honest control: the same windows, placed legally, do lay out.
@@ -92,7 +92,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 150, snapshot: snap(2, 400, 150, &face) },
         ],
     };
-    assert!(romacs_layout2::layout_frame(&valid, 1).is_ok(),
+    assert!(romacs_layout::layout_frame(&valid, 1).is_ok(),
             "legal placement must still lay out");
 }
 
@@ -114,7 +114,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
 fn margins_consuming_the_body_still_render_the_frame() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     // The geometry has to satisfy both halves of GNU's behaviour: 60 columns of
     // margin must FIT the window they are assigned to (or GNU and VM2 both
     // rightly refuse them, src/window.c:8477), yet must EXCEED a half-width
@@ -141,7 +141,7 @@ fn margins_consuming_the_body_still_render_the_frame() {
             snapshot.windows.iter().map(|w| w.snapshot.width).collect::<Vec<_>>());
 
     // The MUST: laying this out must succeed and keep the frame renderable.
-    let (frame, ends) = romacs_layout2::layout_frame(&snapshot, 11)
+    let (frame, ends) = romacs_layout::layout_frame(&snapshot, 11)
         .expect("a body consumed by margins must not fail layout");
     assert_eq!((frame.width, frame.height), (width as f32, 300.0));
     assert_eq!(ends.len(), snapshot.windows.len(),
@@ -183,7 +183,7 @@ fn margins_consuming_the_body_still_render_the_frame() {
 fn an_empty_body_positioned_outside_the_frame_still_renders() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     let width = column * 80;
     vm.set_frame_geometry(width, 300, line, column).unwrap();
     let half = width / 2;
@@ -207,7 +207,7 @@ fn an_empty_body_positioned_outside_the_frame_still_renders() {
         snapshot.windows.iter().map(|w| (w.x, w.snapshot.width)).collect::<Vec<_>>());
 
     // The MUST: this must lay out, not abort the frame.
-    let (frame, ends) = romacs_layout2::layout_frame(&snapshot, 11)
+    let (frame, ends) = romacs_layout::layout_frame(&snapshot, 11)
         .expect("an empty body outside the frame must not fail layout");
     assert_eq!((frame.width, frame.height), (width as f32, 300.0));
     assert_eq!(ends.len(), snapshot.windows.len());
@@ -226,9 +226,9 @@ fn an_empty_body_positioned_outside_the_frame_still_renders() {
 fn background_opacity_reaches_every_paint() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(400, 300, line, column).unwrap();
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let mut snapshot = vm.frame_snapshot(400, 300).unwrap();
     assert_eq!(engine.layout_frame(&snapshot, 1, None).unwrap().0.background_alpha, 1.0);
     snapshot.background_alpha = 0.8;

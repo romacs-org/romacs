@@ -217,13 +217,13 @@ const SHARED_STARTS: &str = r###"
 fn displayed_window_refuses_after_a_host_layout() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(column * 80, line * 24, line, column).unwrap();
     vm.eval_source(r#"(progn (set-buffer (get-buffer-create "shown")) (insert "abc") (set-window-buffer nil (current-buffer)))"#).unwrap();
     let before = vm.eval_source("(list (window-text-pixel-size) (posn-at-point 1))").unwrap().display().unwrap();
     assert_eq!(before, format!("(({} . {}) nil)", 3 * column, line));
     let snapshot = vm.frame_snapshot(column * 80, line * 24).unwrap();
-    let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
+    let (_, ends) = romacs_layout::layout_frame(&snapshot, 1).unwrap();
     vm.display_apply_layout(&ends).unwrap();
     for (call, name) in [("(window-text-pixel-size)", "window-text-pixel-size"), ("(buffer-text-pixel-size)", "buffer-text-pixel-size"), ("(posn-at-point 1)", "posn-at-point")] {
         let refused = vm.eval_source(&format!("(condition-case e {call} (error (car (cdr e))))")).unwrap().display().unwrap();

@@ -16,7 +16,7 @@ fn a_child_frame_is_laid_out_apart_over_an_unchanged_root() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(400, 300, line, column).unwrap();
     vm.eval_source("(progn (insert \"ROOT TEXT UNDER THE LAYER\") (set-buffer (get-buffer-create \"popup\")) (insert \"POPUP\") (setq mode-line-format nil))").unwrap();
     let before = vm.frame_snapshot(400, 300).unwrap();
@@ -25,7 +25,7 @@ fn a_child_frame_is_laid_out_apart_over_an_unchanged_root() {
                       (set-window-buffer (frame-root-window c) \"popup\"))").unwrap();
     let after = vm.frame_snapshot(400, 300).unwrap();
     assert_eq!(after.children.len(), 1);
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let (root_before, _) = engine.layout_frame(&before, 7, None).unwrap();
     let (root_after, _) = engine.layout_frame(&after, 8, None).unwrap();
     assert_eq!(chars(&root_before), chars(&root_after), "a child frame moved the root frame's glyphs");
@@ -55,13 +55,13 @@ fn a_layer_publishes_how_it_animates_and_its_selection_band() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(400, 300, line, column).unwrap();
     vm.eval_source("(progn (set-buffer (get-buffer-create \"popup\")) (insert \"one\\ntwo\\nthree\") (setq mode-line-format nil) \
                       (put-text-property 5 8 'face '(:background \"#ff0000\")))").unwrap();
     vm.eval_source("(setq c (romacs--create-frame `((parent-frame . ,(selected-frame)) (width . 10) (height . 3) (left . 0) (top . 5)))) \
                     (set-window-buffer (frame-root-window c) \"popup\")").unwrap();
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let snapshot = vm.frame_snapshot(400, 300).unwrap();
     let (root, _) = engine.layout_frame(&snapshot, 2, None).unwrap();
     let child = &snapshot.children[0];

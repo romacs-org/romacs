@@ -10,7 +10,7 @@ fn face() -> Face {
     Face { decor: Default::default(), foreground: [255; 3], background: [0; 3], family: "Liberation Mono".into(), pixel_size: 16.0, weight: 400, italic: false, width: 5 }
 }
 
-fn cell() -> f32 { romacs_layout2::frame_metrics(&face()).unwrap().1 as f32 }
+fn cell() -> f32 { romacs_layout::frame_metrics(&face()).unwrap().1 as f32 }
 
 /// A window ten cells wide showing TEXT with point at byte POINT, scrolled
 /// HSCROLL cells (on point's row POINT_ROW cells), with 8-pixel fringes
@@ -41,7 +41,7 @@ fn lay_out(snapshot: WindowSnapshot) -> LaidOut {
     let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width, height: 200,
         windows: vec![PlacedWindowSnapshot { x, y: 0, snapshot }], background_alpha: 1.0, children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None };
     let color = romacs_display_protocol::Color::from_pixel(0xffffff);
-    let (painted, mut ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&frame, 1, Some((1, color))).unwrap();
+    let (painted, mut ends) = romacs_layout::LayoutEngine::new().unwrap().layout_frame(&frame, 1, Some((1, color))).unwrap();
     let mut rows: Vec<(i64, Vec<(i64, char)>)> = vec![];
     for g in &painted.glyphs {
         if let FrameGlyph::Char { char, x, y, row_role: GlyphRowRole::Text, .. } = g {

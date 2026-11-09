@@ -1,5 +1,5 @@
 [package]
-name = "romacs-layout2"
+name = "romacs-layout"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

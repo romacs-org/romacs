@@ -70,7 +70,7 @@ DISPLAY_PACKAGES = {
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
     'romacs-font-materializer', 'romacs-test-fonts', 'romacs-video',
     'romacs-video-model', 'romacs-layout-input',
-    'romacs-layout2', 'romacs-vm-gui',
+    'romacs-layout', 'romacs-vm-gui',
 }
 GATE_PROFILE = ['--config', 'profile.gate.inherits="release"', '--config', 'profile.gate.lto="off"',
                 '--config', 'profile.gate.codegen-units=256', '--config', 'profile.gate.incremental=true']

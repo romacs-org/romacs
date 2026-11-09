@@ -7,7 +7,7 @@
 //! hscroll, start, point and body width are pinned GNU X11's
 //! (point_visibility.gnu, child_frames_oracle.py --probe). Romacs runs
 //! GNU's Lisp on a window-system frame 100 columns by 24 lines of its
-//! real font, laid out by romacs-layout2 as the GUI lays it out.
+//! real font, laid out by romacs-layout as the GUI lays it out.
 use romacs_vm::Vm;
 use std::{cell::RefCell, path::Path, rc::Rc};
 #[path = "support/gnu_ert_vm.rs"]
@@ -15,7 +15,7 @@ mod gnu_ert_vm;
 #[path = "support/gui_probe.rs"]
 mod gui_probe;
 
-struct Engine(Rc<RefCell<romacs_layout2::LayoutEngine>>);
+struct Engine(Rc<RefCell<romacs_layout::LayoutEngine>>);
 impl romacs_vm::LayoutHost for Engine {
     fn measure(&mut self, input: &romacs_layout_input::MeasureInput) -> Result<romacs_layout_input::Measured, String> {
         self.0.borrow_mut().measure(input)
@@ -25,20 +25,20 @@ impl romacs_vm::LayoutHost for Engine {
     }
 }
 
-struct Session { vm: Vm, engine: Rc<RefCell<romacs_layout2::LayoutEngine>>, width: u32, height: u32, presentation: u64 }
+struct Session { vm: Vm, engine: Rc<RefCell<romacs_layout::LayoutEngine>>, width: u32, height: u32, presentation: u64 }
 
 fn session() -> Session {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
     vm.eval_source("(setq noninteractive nil)").unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
     // 100 columns of text between fringes a column wide (the probe sets
     // them), 24 lines with the mini-window's.
     let (width, height) = (102 * column, 24 * line);
     vm.set_frame_geometry(width, height, line, column).unwrap();
     vm.set_display_host(Some(Box::new(gui_probe::Pgtk)));
     assert!(vm.open_display());
-    let engine = Rc::new(RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+    let engine = Rc::new(RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
     vm.set_layout_host(Some(Box::new(Engine(engine.clone()))));
     vm.eval_source("(set-buffer \"*scratch*\")").unwrap();
     Session { vm, engine, width, height, presentation: 0 }

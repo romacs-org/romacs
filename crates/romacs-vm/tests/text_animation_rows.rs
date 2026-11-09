@@ -24,7 +24,7 @@ fn row(vm: &mut Vm, width: u32, height: u32) -> (i32, bool) {
 fn the_block_s_row_follows_the_start_redisplay_chooses() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     let (width, height) = (column * 80, line * 24);
     vm.set_frame_geometry(width, height, line, column).unwrap();
     // A 10-row block starting the buffer, then 200 lines below it.

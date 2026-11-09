@@ -3637,20 +3637,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-layout-input"
-version = "0.0.20"
-dependencies = [
- "romacs-snapshot",
-]
-
-[[package]]
-name = "romacs-layout2"
+name = "romacs-layout"
 version = "0.0.20"
 dependencies = [
  "romacs-display-protocol",
  "romacs-font",
  "romacs-layout-input",
  "romacs-vm",
+]
+
+[[package]]
+name = "romacs-layout-input"
+version = "0.0.20"
+dependencies = [
+ "romacs-snapshot",
 ]
 
 [[package]]
@@ -3816,8 +3816,8 @@ dependencies = [
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",
+ "romacs-layout",
  "romacs-layout-input",
- "romacs-layout2",
  "romacs-logo",
  "romacs-regex-engine",
  "romacs-snapshot",
@@ -3851,8 +3851,8 @@ dependencies = [
  "romacs-font",
  "romacs-grammars",
  "romacs-imaging",
+ "romacs-layout",
  "romacs-layout-input",
- "romacs-layout2",
  "romacs-logo",
  "romacs-renderer-wgpu",
  "romacs-snapshot",

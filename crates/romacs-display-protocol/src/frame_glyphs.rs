@@ -1212,7 +1212,7 @@ pub struct FrameGlyphBuffer {
     /// Where the painter put each character of the status bar's text, in
     /// its order: its left edge in the frame and its width, or None where
     /// the bar clipped it; a marker's characters span its room. A click
-    /// reads it (`romacs_layout2::status_bar_extents`).
+    /// reads it (`romacs_layout::status_bar_extents`).
     pub status_bar_places: Vec<Option<(f32, f32)>>,
 
     /// Rounded backgrounds behind chrome rows' text (`RoundedFill`).

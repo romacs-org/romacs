@@ -3,7 +3,7 @@ members = [
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-layout-input",
-    "crates/romacs-layout2",
+    "crates/romacs-layout",
     "crates/romacs-vm-gui",
     "crates/romacs-grammars",
     "tests/coordinate-contract",

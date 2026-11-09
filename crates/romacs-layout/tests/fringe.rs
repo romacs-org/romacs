@@ -39,7 +39,7 @@ fn frame(snapshot: WindowSnapshot, tab_bar: Option<TabBarSnapshot>) -> FrameSnap
 }
 
 fn lay_out(snapshot: FrameSnapshot) -> romacs_display_protocol::FrameGlyphBuffer {
-    romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&snapshot, 1, None).unwrap().0
+    romacs_layout::LayoutEngine::new().unwrap().layout_frame(&snapshot, 1, None).unwrap().0
 }
 
 fn bitmaps(frame: &romacs_display_protocol::FrameGlyphBuffer) -> Vec<(u16, FringeSide, f32, f32)> {
@@ -69,7 +69,7 @@ fn fringes_paint_beside_the_text_area_in_the_fringe_face() {
 #[test]
 fn a_right_fringe_takes_the_continuation_glyph_and_shows_curly_arrows() {
     let text = "0123456789abcdef";
-    let cell = romacs_layout2::frame_metrics(&face([255; 3], [0; 3])).unwrap().1 as usize;
+    let cell = romacs_layout::frame_metrics(&face([255; 3], [0; 3])).unwrap().1 as usize;
     let fits = 100 / cell;
     let painted = lay_out(frame(window(text, LineWrap::Window), None));
     // Every column holds text: no `\\' glyph is drawn.
@@ -137,7 +137,7 @@ fn the_tab_bar_paints_its_row_above_the_windows() {
     };
     let painted = lay_out(frame(window("x", LineWrap::Window), Some(tab_bar)));
     assert_eq!(chars(&painted, GlyphRowRole::TabBar), " a  b ");
-    let extents = romacs_layout2::tab_bar_extents(&painted);
+    let extents = romacs_layout::tab_bar_extents(&painted);
     assert_eq!(extents.len(), 6);
     assert_eq!(extents[0].0, 0.0);
     assert!(extents.windows(2).all(|w| w[0].0 + w[0].1 == w[1].0));
@@ -156,7 +156,7 @@ fn the_status_bar_paints_its_band_and_clips_its_text() {
         marks: Default::default(),
     });
     let painted = lay_out(snapshot.clone());
-    let (extents, marker) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    let (extents, marker) = romacs_layout::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     let shown = chars(&painted, GlyphRowRole::StatusBar);
     assert!(shown.len() < 16 && "abcdefghijklmnop".starts_with(&shown), "{shown}");
     assert_eq!((extents.len(), marker), (16, vec![]));
@@ -242,7 +242,7 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     // 4 + marker + 3 characters fit: the right side flush right.
     snapshot.status_bar = Some(bar("abcd xyz", BandMarks { segments: vec![marker(4)], icons: vec![] }));
     let painted = lay_out(snapshot.clone());
-    let (extents, index) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    let (extents, index) = romacs_layout::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     assert_eq!(chars(&painted, GlyphRowRole::StatusBar), "abcdxyz");
     assert_eq!(index, vec![4]);
     let (right_x, right_w) = extents[7].unwrap();
@@ -254,7 +254,7 @@ fn the_status_bar_splits_at_its_marker_and_draws_pills_and_icons() {
     let long = format!("{} xyz", "l".repeat(40));
     snapshot.status_bar = Some(bar(&long, BandMarks { segments: vec![marker(40)], icons: vec![] }));
     let painted = lay_out(snapshot.clone());
-    let (extents, _) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    let (extents, _) = romacs_layout::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     assert!(chars(&painted, GlyphRowRole::StatusBar).ends_with("xyz"));
     assert!(extents[39].is_none() && extents[41..].iter().all(Option::is_some));
     assert!(extents[..40].iter().flatten().all(|(x, w)| x + w <= extents[41].unwrap().0 + 0.01));
@@ -300,7 +300,7 @@ fn the_status_bar_centres_its_middle_zone() {
         marks: BandMarks { segments: vec![marker(1, "centre-align"), marker(3, "right-align")], icons: vec![] },
     });
     let painted = lay_out(snapshot.clone());
-    let (extents, markers) = romacs_layout2::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
+    let (extents, markers) = romacs_layout::status_bar_extents(&painted, snapshot.status_bar.as_ref().unwrap());
     assert_eq!(chars(&painted, GlyphRowRole::StatusBar), "amz");
     assert_eq!(markers, vec![1, 3]);
     let (mx, mw) = extents[2].unwrap();
@@ -327,7 +327,7 @@ fn an_icon_in_text_paints_and_measures_one_column() {
     }).collect();
     assert_eq!(widths.iter().map(|w| w.0).collect::<String>(), text);
     assert_eq!(widths[1].1, widths[0].1, "an icon is one column: {widths:?}");
-    let measured = romacs_layout2::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
+    let measured = romacs_layout::LayoutEngine::new().unwrap().measure(&romacs_layout_input::MeasureInput {
         font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(),
         faces: snapshot.faces.clone(), text: snapshot.text.clone(),
     }).unwrap();

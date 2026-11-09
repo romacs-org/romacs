@@ -49,7 +49,7 @@ fn scene() -> WindowSnapshot {
 
 #[test]
 fn band_is_bottom_anchored_font_measured_and_body_clipped() {
-    let frame = romacs_layout2::layout(&scene(), 1).unwrap();
+    let frame = romacs_layout::layout(&scene(), 1).unwrap();
     let (bounds, color) = frame
         .glyphs
         .iter()
@@ -112,7 +112,7 @@ fn band_is_bottom_anchored_font_measured_and_body_clipped() {
 fn band_only_characters_are_published_for_every_used_face() {
     let mut s = scene();
     s.text.utf8.clear();
-    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let frame = romacs_layout::layout(&s, 1).unwrap();
     assert!(frame.glyphs.iter().any(|g| matches!(g, FrameGlyph::Char { char: 'Ω', face_id, row_role: GlyphRowRole::ModeLine, .. } if frame.char_fonts.get(face_id).is_some_and(|m| m.contains_key(&'Ω')))));
 }
 
@@ -151,22 +151,22 @@ fn malformed_band_runs_and_handle_are_errors_not_panics() {
         let mut s = scene();
         s.mode_line.as_mut().unwrap().face_runs = runs;
         assert!(
-            romacs_layout2::layout(&s, 1).is_err(),
+            romacs_layout::layout(&s, 1).is_err(),
             "malformed band accepted"
         );
     }
     let mut s = scene();
     s.mode_line_face = FaceHandle(99);
-    assert!(romacs_layout2::layout(&s, 1).is_err());
+    assert!(romacs_layout::layout(&s, 1).is_err());
 }
 
 #[test]
 fn vscroll_moves_body_not_band_and_tiny_windows_are_clipped() {
     let s = scene();
-    let first = romacs_layout2::layout(&s, 1).unwrap();
+    let first = romacs_layout::layout(&s, 1).unwrap();
     let mut scrolled = s.clone();
     scrolled.vscroll_px = 7;
-    let next = romacs_layout2::layout(&scrolled, 2).unwrap();
+    let next = romacs_layout::layout(&scrolled, 2).unwrap();
     let positions = |frame: &romacs_display_protocol::FrameGlyphBuffer, role| {
         frame
             .glyphs
@@ -186,7 +186,7 @@ fn vscroll_moves_body_not_band_and_tiny_windows_are_clipped() {
         positions(&first, GlyphRowRole::ModeLine)
     );
     scrolled.height = 1;
-    let tiny = romacs_layout2::layout(&scrolled, 3).unwrap();
+    let tiny = romacs_layout::layout(&scrolled, 3).unwrap();
     assert!(positions(&tiny, GlyphRowRole::Text).is_empty());
     assert!(tiny.glyphs.iter().any(|g| matches!(g, FrameGlyph::Background { bounds, .. } if bounds.y == 0.0 && bounds.height == 1.0)));
 }
@@ -196,14 +196,14 @@ fn empty_band_still_reserves_height_and_none_preserves_body() {
     let mut s = scene();
     s.mode_line.as_mut().unwrap().utf8.clear();
     s.mode_line.as_mut().unwrap().face_runs.clear();
-    let band = romacs_layout2::layout(&s, 1).unwrap();
+    let band = romacs_layout::layout(&s, 1).unwrap();
     assert!(
         band.glyphs
             .iter()
             .any(|g| matches!(g, FrameGlyph::Background { .. }))
     );
     s.mode_line = None;
-    let body = romacs_layout2::layout(&s, 2).unwrap();
+    let body = romacs_layout::layout(&s, 2).unwrap();
     assert!(
         !body
             .glyphs
@@ -241,7 +241,7 @@ fn header_line_is_top_anchored_and_its_faces_stay_the_windows() {
             romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 60, snapshot: below },
         ],
     };
-    let (frame, _) = romacs_layout2::layout_frame(&frame_snapshot, 1).unwrap();
+    let (frame, _) = romacs_layout::layout_frame(&frame_snapshot, 1).unwrap();
     let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, row_role, y, window_id, face_id, .. } => Some((*char, *row_role, *y, window_id.get(), *face_id)),
         _ => None,
@@ -270,7 +270,7 @@ fn a_band_stretch_aligns_from_the_text_area_and_keeps_its_lines() {
     s.mode_line = Some(TextSlice { extends: vec![], utf8: "a b".into(), face_runs: vec![], raw: vec![] });
     s.band_stretches = BandStretches { header_line: vec![], mode_line: vec![Stretch { byte: 1, width: StretchWidth::AlignTo(100) }] };
     s.faces[1].decor = Decor { underline: Some(Line { style: 1, color: None, position: None }), overline: None, strike: None, boxed: None };
-    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let frame = romacs_layout::layout(&s, 1).unwrap();
     let band: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, row_role: GlyphRowRole::ModeLine, x, .. } => Some((*char, *x)),
         _ => None,

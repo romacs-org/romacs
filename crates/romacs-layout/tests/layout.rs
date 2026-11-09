@@ -37,7 +37,7 @@ fn scene() -> WindowSnapshot {
 }
 #[test]
 fn owned_scene_projects_text_faces_fonts_and_logical_lines() {
-    let frame = romacs_layout2::layout(&scene(), 1).unwrap();
+    let frame = romacs_layout::layout(&scene(), 1).unwrap();
     let chars: Vec<_> = frame
         .glyphs
         .iter()
@@ -72,7 +72,7 @@ fn owned_scene_projects_text_faces_fonts_and_logical_lines() {
 fn malformed_snapshot_is_rejected() {
     let mut s = scene();
     s.text.face_runs[0].bytes = 1..4;
-    assert!(romacs_layout2::layout(&s, 1).is_err());
+    assert!(romacs_layout::layout(&s, 1).is_err());
 }
 /// A TAB is a stretch to the next tab stop, a control character GNU's
 /// escape: `^L` and, beyond ASCII, octal.
@@ -81,7 +81,7 @@ fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
     let mut s = scene();
     s.tab_width = 4;
     s.text = TextSlice { extends: vec![], utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![], raw: vec![] };
-    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let frame = romacs_layout::layout(&s, 1).unwrap();
     let shown: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
         FrameGlyph::Stretch { x, y, width, .. } => Some(('\t', *x, *y + *width * 1000.0)),
@@ -99,7 +99,7 @@ fn rows_continue_and_truncate_as_gnu_without_fringes() {
     s.width = 120; // ten 12px columns
     s.text = TextSlice { extends: vec![], utf8: "abcdefghijkl\nxy".into(), face_runs: vec![], raw: vec![] };
     let shown = |s: &WindowSnapshot| -> Vec<(char, f32, f32)> {
-        romacs_layout2::layout(s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
+        romacs_layout::layout(s, 1).unwrap().glyphs.iter().filter_map(|g| match g {
             FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
             _ => None,
         }).collect()
@@ -120,7 +120,7 @@ fn a_row_that_fits_exactly_is_not_truncated() {
     s.wrap = romacs_layout_input::LineWrap::Truncate;
     s.text = TextSlice { extends: vec![], utf8: "abcdefghi\nabcdefghij\nabcdefghi".into(), face_runs: vec![], raw: vec![] };
     let rows: Vec<String> = {
-        let glyphs = romacs_layout2::layout(&s, 1).unwrap().glyphs;
+        let glyphs = romacs_layout::layout(&s, 1).unwrap().glyphs;
         let mut rows = vec![String::new(); 3];
         for g in &glyphs { if let FrameGlyph::Char { char, y, .. } = g { rows[(*y / 23.0) as usize].push(*char); } }
         rows
@@ -129,7 +129,7 @@ fn a_row_that_fits_exactly_is_not_truncated() {
     // A display table's glyph in place of `$' reserves the same column.
     s.chrome.line_glyphs = [Some('…'), Some(' ')];
     let rows: Vec<String> = {
-        let glyphs = romacs_layout2::layout(&s, 1).unwrap().glyphs;
+        let glyphs = romacs_layout::layout(&s, 1).unwrap().glyphs;
         let mut rows = vec![String::new(); 3];
         for g in &glyphs { if let FrameGlyph::Char { char, y, .. } = g { rows[(*y / 23.0) as usize].push(*char); } }
         rows
@@ -143,7 +143,7 @@ fn a_window_start_on_a_continuation_row_keeps_the_rows_above() {
     let mut s = scene();
     s.width = 120; // ten 12px columns: a row holds nine before its `\'
     s.text = TextSlice { extends: vec![], utf8: "abcdefghijkl\tz".into(), face_runs: vec![], raw: vec![] };
-    let z = |s: &WindowSnapshot| romacs_layout2::layout(s, 1).unwrap().glyphs.iter().find_map(|g| match g {
+    let z = |s: &WindowSnapshot| romacs_layout::layout(s, 1).unwrap().glyphs.iter().find_map(|g| match g {
         FrameGlyph::Char { char: 'z', x, y, .. } => Some((*x, *y)),
         _ => None,
     }).unwrap();
@@ -167,7 +167,7 @@ fn stretches_paint_as_gnus_window_system_stretches() {
         Stretch { byte: 5, width: StretchWidth::AlignTo(200) },
         Stretch { byte: 8, width: StretchWidth::AlignTo(10_000) },
     ];
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let stretches: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Stretch { x, y, width, .. } => Some((*x, *y, *width)),
         _ => None,
@@ -188,7 +188,7 @@ fn stretches_paint_as_gnus_window_system_stretches() {
     assert_eq!(chars.len(), 5, "no continuation glyph: {chars:?}");
     // Not on its placeholder, or out of order: refused.
     snapshot.stretches = vec![Stretch { byte: 0, width: StretchWidth::AlignTo(10) }];
-    assert!(romacs_layout2::layout(&snapshot, 1).is_err());
+    assert!(romacs_layout::layout(&snapshot, 1).is_err());
 }
 
 /// A face's `:weight' and `:slant' choose the font: bold text is set in
@@ -200,7 +200,7 @@ fn a_bold_or_italic_face_is_set_in_that_font() {
     s.text.face_runs = vec![FaceRun { bytes: 11..16, face: FaceHandle(1) }, FaceRun { bytes: 17..19, face: FaceHandle(2) }];
     s.faces[1] = Face { weight: 700, ..s.faces[0].clone() };
     s.faces.push(Face { italic: true, ..s.faces[0].clone() });
-    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let frame = romacs_layout::layout(&s, 1).unwrap();
     let font_of = |ch: char| {
         let face = frame.glyphs.iter().find_map(|g| match g {
             FrameGlyph::Char { char, face_id, .. } if *char == ch => Some(*face_id),
@@ -228,7 +228,7 @@ fn a_row_s_extend_face_paints_to_the_text_area_s_edge() {
     snapshot.faces.push(Face { background: [0x20, 0x30, 0x40], ..snapshot.faces[0].clone() });
     snapshot.text = TextSlice { utf8: "ab\ncd\nef".into(), face_runs: vec![], raw: vec![],
                                 extends: vec![Extend { byte: 2, face: FaceHandle(2) }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let stretches: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Stretch { x, y, width, bg, .. } => Some((*x, *y, *width, *bg)),
         _ => None,
@@ -257,7 +257,7 @@ fn underlines_go_where_gnu_puts_them_and_a_band_s_face_fills_it() {
     snapshot.underline_rules = UnderlineRules { minimum_offset: 7, at_descent_line: false, use_position: false };
     snapshot.mode_line = Some(TextSlice { utf8: "x".into(), face_runs: vec![], raw: vec![], extends: vec![] });
     snapshot.mode_line_face = FaceHandle(3);
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let face = |index: u32| frame.faces.get(&romacs_display_protocol::FaceId::new(index)).unwrap();
     assert_eq!(face(1).underline_placement, UnderlinePosition::DescentLine { pixels_above: 2 });
     // Half the descent would be above the minimum offset of 7.
@@ -283,8 +283,8 @@ fn a_box_run_owns_its_edges_and_widens_its_row() {
     snapshot.text = TextSlice { utf8: "xabcy\nxdey".into(), raw: vec![], extends: vec![],
                                 face_runs: vec![FaceRun { bytes: 1..4, face: FaceHandle(1) }, FaceRun { bytes: 7..9, face: FaceHandle(2) }] };
     let plain = { let mut s = snapshot.clone(); s.faces[1].decor = Default::default(); s.faces[2].decor = Default::default();
-                  romacs_layout2::layout(&s, 1).unwrap() };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+                  romacs_layout::layout(&s, 1).unwrap() };
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let chars = |frame: &romacs_display_protocol::FrameGlyphBuffer| frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, y, height, box_vertical_edges, .. } => Some((*char, *x, *y, *height, *box_vertical_edges)), _ => None }).collect::<Vec<_>>();
     let (with, without) = (chars(&frame), chars(&plain));
@@ -317,7 +317,7 @@ fn measuring_counts_a_box_run_s_edges() {
     let plain = snapshot.faces.clone();
     snapshot.faces[1].decor = Decor { boxed: Some(BoxLine { vertical: 3, horizontal: 2, color: None, style: 1 }), ..Default::default() };
     let text = TextSlice { utf8: "xaby".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
-    let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
+    let mut engine = romacs_layout::LayoutEngine::new().unwrap();
     let mut measure = |faces: Vec<Face>| engine.measure(&MeasureInput {
         font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), faces, text: text.clone(), no_font: Default::default() }).unwrap();
     let (boxed, unboxed) = (measure(snapshot.faces.clone()), measure(plain));
@@ -339,7 +339,7 @@ fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
     let mut snapshot = scene();
     snapshot.faces[1].decor = Decor { boxed: Some(BoxLine { vertical: 4, horizontal: 2, color: None, style: 1 }), ..Default::default() };
     snapshot.text = TextSlice { utf8: "xab".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 1..3, face: FaceHandle(1) }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let chars: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char, x, baseline, width, box_vertical_edges, .. } => Some((*char, *x, *baseline, *width, *box_vertical_edges)), _ => None }).collect();
     assert_eq!(chars[0].2, chars[1].2, "one baseline: {chars:?}");
@@ -350,14 +350,14 @@ fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
         windows: vec![romacs_layout_input::PlacedWindowSnapshot { x: 0, y: 0, snapshot: snapshot.clone() }], background_alpha: 1.0,
         children: vec![], tab_bar: None, chrome: Default::default(), status_bar: None, no_font: Default::default(),
     };
-    let (frame, _) = romacs_layout2::layout_frame_with_cursors(&placed, 1, snapshot.id, Color::from_pixel(0xffffff)).unwrap();
+    let (frame, _) = romacs_layout::layout_frame_with_cursors(&placed, 1, snapshot.id, Color::from_pixel(0xffffff)).unwrap();
     let cursor = frame.active_cursor().unwrap();
     assert_eq!((cursor.x, cursor.width), (chars[1].1 - 4.0, chars[1].3 + 4.0));
     // A run wider than the row: its continued part opens no left edge.
     let cells = (400.0 / frame.char_width) as usize;
     let long = "b".repeat(cells + 4);
     snapshot.text = TextSlice { utf8: long.clone(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..long.len(), face: FaceHandle(1) }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let lefts = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { box_vertical_edges: BoxVerticalEdges::Left, .. })).count();
     assert_eq!(lefts, 1);
     // Word wrap: a boxed word that fits only without its sides goes whole
@@ -365,7 +365,7 @@ fn a_boxed_run_shares_its_row_s_baseline_and_carries_over_rows() {
     let word = "c".repeat(cells - 2);
     snapshot.wrap = LineWrap::Word;
     snapshot.text = TextSlice { utf8: format!("a {word}"), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 2..2 + word.len(), face: FaceHandle(1) }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let rows: std::collections::BTreeSet<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char: 'c', y, .. } => Some(*y as i64), _ => None }).collect();
     assert_eq!(rows.len(), 1, "the word stays on one row: {rows:?}");
@@ -383,7 +383,7 @@ fn a_boxed_mode_line_is_one_run_to_its_band_s_end() {
     snapshot.faces.push(Face { decor: Decor { boxed: Some(BoxLine { vertical: -1, horizontal: -1, color: None, style: 1 }), ..Default::default() }, ..snapshot.faces[0].clone() });
     snapshot.mode_line = Some(TextSlice { utf8: "abc".into(), face_runs: vec![], raw: vec![], extends: vec![] });
     snapshot.mode_line_face = FaceHandle(2);
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine))
         .filter_map(|g| g.box_vertical_edges()).collect();
     assert_eq!(band, [BoxVerticalEdges::Left, BoxVerticalEdges::Neither, BoxVerticalEdges::Neither, BoxVerticalEdges::Right]);
@@ -401,7 +401,7 @@ fn a_band_stretch_in_a_boxed_mode_line_stays_in_its_run() {
     snapshot.mode_line = Some(TextSlice { utf8: "a b".into(), face_runs: vec![], raw: vec![], extends: vec![] });
     snapshot.mode_line_face = FaceHandle(2);
     snapshot.band_stretches = BandStretches { header_line: vec![], mode_line: vec![Stretch { byte: 1, width: StretchWidth::Width { width: 30, zero_ok: false } }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine))
         .filter_map(|g| Some((g.box_vertical_edges()?, matches!(g, FrameGlyph::Stretch { .. })))).collect();
     assert_eq!(band, [(BoxVerticalEdges::Left, false), (BoxVerticalEdges::Neither, true), (BoxVerticalEdges::Neither, false), (BoxVerticalEdges::Right, true)]);
@@ -414,7 +414,7 @@ fn a_band_stretch_in_a_boxed_mode_line_stays_in_its_run() {
     snapshot.faces[2].decor.boxed = Some(BoxLine { vertical: 2, horizontal: -1, color: None, style: 1 });
     snapshot.mode_line = Some(TextSlice { utf8: " b".into(), face_runs: vec![], raw: vec![], extends: vec![] });
     snapshot.band_stretches.mode_line = vec![Stretch { byte: 0, width: StretchWidth::Width { width: 30, zero_ok: false } }];
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let mode_line = Some(romacs_display_protocol::frame_glyphs::GlyphRowRole::ModeLine);
     let (x, width, edge) = frame.glyphs.iter().filter(|g| g.row_role() == mode_line).find_map(|g| match g {
         FrameGlyph::Stretch { x, width, box_vertical_edges, .. } => Some((*x, *width, *box_vertical_edges)),
@@ -437,16 +437,16 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
     let boxed = |vertical, horizontal| Decor { boxed: Some(BoxLine { vertical, horizontal, color: None, style: 1 }), ..Default::default() };
     snapshot.faces[1].decor = boxed(2, -1);
     snapshot.text = TextSlice { utf8: "a\tb".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let lefts = frame.glyphs.iter().filter(|g| matches!(g.box_vertical_edges(), Some(BoxVerticalEdges::Left | BoxVerticalEdges::Both))).count();
     assert_eq!(lefts, 1, "one run: {:?}", frame.glyphs.iter().filter_map(|g| g.box_vertical_edges()).collect::<Vec<_>>());
     let tab = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Stretch { box_vertical_edges, .. } if *box_vertical_edges == BoxVerticalEdges::Neither => Some(()), _ => None });
     assert!(tab.is_some(), "the TAB is inside the run");
     // A TAB alone in a box keeps GNU's stop: no sides join its advance.
-    let unboxed = { let mut s = snapshot.clone(); s.faces[1].decor = Decor::default(); romacs_layout2::layout(&s, 1).unwrap() };
+    let unboxed = { let mut s = snapshot.clone(); s.faces[1].decor = Decor::default(); romacs_layout::layout(&s, 1).unwrap() };
     let x_of = |frame: &romacs_display_protocol::FrameGlyphBuffer, c| frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char, x, .. } if *char == c => Some(*x), _ => None }).unwrap();
     snapshot.text.face_runs = vec![FaceRun { bytes: 1..2, face: FaceHandle(1) }];
-    let lone = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let lone = romacs_layout::layout(&snapshot, 1).unwrap();
     assert_eq!(x_of(&lone, 'b'), x_of(&unboxed, 'b'));
     let tab = lone.glyphs.iter().find_map(|g| match g { FrameGlyph::Stretch { box_vertical_edges, .. } => Some(*box_vertical_edges), _ => None });
     assert_eq!(tab, Some(BoxVerticalEdges::Both));
@@ -456,7 +456,7 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
         let mut zero = snapshot.clone();
         zero.text = TextSlice { utf8: "a b".into(), raw: vec![], extends: vec![], face_runs: vec![FaceRun { bytes: 0..3, face: FaceHandle(1) }] };
         zero.stretches = vec![Stretch { byte: 1, width: StretchWidth::Width { width: 0, zero_ok: true } }];
-        let frame = romacs_layout2::layout(&zero, 1).unwrap();
+        let frame = romacs_layout::layout(&zero, 1).unwrap();
         assert!(!frame.glyphs.iter().any(|g| matches!(g, FrameGlyph::Stretch { width, .. } if *width > 0.0 && *width < 2.0)));
         let a = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'a', x, width, .. } => Some(*x + *width), _ => None }).unwrap();
         let b = frame.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { char: 'b', x, .. } => Some(*x), _ => None }).unwrap();
@@ -466,7 +466,7 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
     snapshot.faces.push(Face { decor: boxed(-1, -1), ..snapshot.faces[0].clone() });
     snapshot.mode_line = Some(TextSlice { utf8: "m".repeat(200), face_runs: vec![], raw: vec![], extends: vec![] });
     snapshot.mode_line_face = FaceHandle(2);
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).filter_map(|g| g.box_vertical_edges()).collect();
     assert_eq!((band.first(), band.last()), (Some(&BoxVerticalEdges::Left), Some(&BoxVerticalEdges::Right)));
     // The closing glyph's cell ends at the band's edge, where its border shows.
@@ -477,7 +477,7 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
     snapshot.faces[2].decor = Decor::default();
     snapshot.faces[1].decor = boxed(2, 3);
     snapshot.mode_line = Some(TextSlice { utf8: "xyz".into(), face_runs: vec![FaceRun { bytes: 1..2, face: FaceHandle(1) }], raw: vec![], extends: vec![] });
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let baselines: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).filter_map(|g| match g {
         FrameGlyph::Char { baseline, .. } => Some(*baseline), _ => None }).collect();
     assert_eq!(baselines.len(), 3);
@@ -497,7 +497,7 @@ fn images_take_their_slots_on_the_rows_baseline() {
         source: (10, 0, 40, 40), full: (80, 40), relief: 2, relief_background: None };
     snapshot.images = vec![image, InlineImage { byte: 5, image: 0, width: 30, ascent: 15, descent: 15, body_x: 0, body_y: 0,
         source: (0, 0, 30, 30), full: (30, 30), relief: 0, relief_background: None }];
-    let frame = romacs_layout2::layout(&snapshot, 1).unwrap();
+    let frame = romacs_layout::layout(&snapshot, 1).unwrap();
     let images: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Image { image_id, x, y, width, height, slot_rect, source_rect, .. } =>
             Some((image_id.get(), *x, *y, *width, *height, (slot_rect.x, slot_rect.y, slot_rect.width, slot_rect.height), *source_rect)),
@@ -537,13 +537,13 @@ fn images_take_their_slots_on_the_rows_baseline() {
 #[test]
 fn a_fallback_character_at_a_wrap_shares_its_rows_baseline() {
     let mut s = scene();
-    let probe = romacs_layout2::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
+    let probe = romacs_layout::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
     let cell = probe.glyphs.iter().find_map(|g| match g { FrameGlyph::Char { width, .. } => Some(*width), _ => None }).unwrap();
     let text = "xxxx\u{6f22}x";
     s.width = (cell * 5.0) as u32;
     s.text.utf8 = text.into();
     s.text.face_runs = vec![FaceRun { bytes: 0..text.len(), face: FaceHandle(0) }];
-    let frame = romacs_layout2::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
+    let frame = romacs_layout::LayoutEngine::new().unwrap().layout(&s, 1).unwrap();
     let baseline = |wanted: char, skip: usize| frame.glyphs.iter().filter_map(|g| match g {
         FrameGlyph::Char { char: c, baseline, .. } if *c == wanted => Some(*baseline),
         _ => None,

@@ -1,7 +1,7 @@
 //! An emoji or variation sequence is one composed glyph, measured as
 //! painted, with point inside it on that glyph (GNU's composition).
 use romacs_display_protocol::{Color, FrameGlyph, FrameGlyphBuffer};
-use romacs_layout2::LayoutEngine;
+use romacs_layout::LayoutEngine;
 use romacs_layout_input::{Face, FaceHandle, FaceRun, FrameSnapshot, MeasureInput, PlacedWindowSnapshot, TextSlice, WindowSnapshot};
 
 const FAMILY: &str = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
