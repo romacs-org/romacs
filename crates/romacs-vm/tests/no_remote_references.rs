@@ -346,10 +346,17 @@ fn a_name_past_the_barrier_is_refused() {
 //   Hidden`);
 // - a cell inside another crate's type, or behind `dyn` or `impl`: the mark's
 //   graves ride in a rayon job;
-// - a type a macro declares;
-// - statics, which the global-state rule in `rooting_brand_rules.rs` owns;
+// - a type a macro declares, or a cell held in a local or a closure's capture;
+// - statics. The global-state rule in `rooting_brand_rules.rs` sees one whose
+//   type spells `Value`, and any cell in a converted module; a static holding
+//   a crate type that holds Values, as `gc_mark.rs`'s `GRAVES` does, is seen
+//   by neither;
 // - a public field of a type an entry holds or derefs to: `AnnotatedBuffer`
-//   derefs to `Text`, whose syntax and category tables are `pub(crate)`.
+//   derefs to `Text`, whose syntax and category tables are `pub(crate)`;
+// - which type a name means, beyond this: a name two crate types share must
+//   be spelled in its own file or after its own module (`frame::Frame`), and
+//   a name only one crate type has is taken to mean it, even spelled through
+//   a re-export or from another crate.
 // Atomics are not cells here: a root handle keeps Value bits in one, and the
 // root lists cover it. Raw-pointer writes are the unsafe census's. What these
 // lists miss is the collector verifier's to catch (`ROMACS_GC_VERIFY`).
@@ -373,8 +380,8 @@ enum Behind {
 }
 use Behind::{Collector, Dead, Generic, Held, Passing, Plain, Rooted};
 
-/// Cells and locks, from the standard library and the crates the VM uses, each
-/// counted followed by its argument.
+/// Cells and locks, from the standard library and the crates the VM uses,
+/// counted only when followed by `<`.
 const CELL_TYPES: &[&str] = &["Cell", "RefCell", "Mutex", "RwLock", "UnsafeCell", "OnceCell", "OnceLock", "LazyCell", "LazyLock", "Injector"];
 
 /// Every declaration behind a cell, as `FILE:TYPE.FIELD`, or `FILE:NAME` for an
@@ -683,9 +690,52 @@ fn split_key(key: &str) -> (&str, &str) {
     key.split_once(':').unwrap_or(("", key))
 }
 
-/// TY's words that name a type of the crate's other than `Value`.
-fn crate_words(ty: &[String], crate_types: &BTreeSet<&str>) -> Vec<String> {
-    ty.iter().filter(|w| crate_types.contains(w.as_str()) && *w != "Value").cloned().collect()
+/// A crate type a type names: its name, the module word spelled before it
+/// (`frame` in `frame::Frame`), and the file it is spelled in.
+struct Named { name: String, path: Option<String>, file: String }
+
+/// The module a file is.
+fn module(file: &str) -> &str {
+    let file = file.strip_suffix("/mod.rs").unwrap_or(file);
+    let stem = file.rsplit('/').next().unwrap_or(file);
+    stem.strip_suffix(".rs").unwrap_or(stem)
+}
+
+/// The crate types other than `Value` that TY, spelled in FILE, names, an
+/// alias standing for what it names.
+fn named_types(ty: &[String], file: &str, shapes: &[Shape], crate_types: &BTreeSet<&str>) -> Vec<Named> {
+    let direct = |ty: &[String], file: &str| -> Vec<Named> {
+        ty.iter().enumerate().filter(|(_, w)| crate_types.contains(w.as_str()) && *w != "Value").map(|(k, w)| {
+            let path = (k >= 3 && ty[k - 1] == ":" && ty[k - 2] == ":").then(|| ty[k - 3].clone());
+            Named { name: w.clone(), path, file: file.to_owned() }
+        }).collect()
+    };
+    let mut out = direct(ty, file);
+    for alias in ty.iter().filter_map(|w| shapes.iter().find(|s| s.kind == Kind::Alias && &s.name == w)) {
+        out.extend(direct(&alias.fields[0].2, &alias.file));
+    }
+    out
+}
+
+/// WHERE's problems with NAMED against the LISTED types: one named and not
+/// listed, one listed and not named, or a name two crate types share spelled
+/// so that it may mean the other.
+fn match_named(at: &str, named: &[Named], listed: &[&str], shapes: &[Shape]) -> Vec<String> {
+    let mut out = vec![];
+    for n in named {
+        if !listed.iter().any(|ty| split_key(ty).1 == n.name) { out.push(format!("{at}: holds {}, not listed", n.name)); }
+    }
+    for ty in listed {
+        let (file, name) = split_key(ty);
+        let spellings: Vec<&Named> = named.iter().filter(|n| n.name == name).collect();
+        if spellings.is_empty() { out.push(format!("{at}: lists {ty}, which it doesn't hold")); }
+        let files: BTreeSet<&str> = shapes.iter().filter(|s| s.name == name && s.kind != Kind::Alias).map(|s| s.file.as_str()).collect();
+        let means = |n: &Named| n.path.as_deref().map_or(n.file == file, |path| path == module(file));
+        if files.len() > 1 && !spellings.iter().all(|&n| means(n)) {
+            out.push(format!("{at}: {name} names more than one type, and this spelling may not be {ty}"));
+        }
+    }
+    out
 }
 
 /// The tables' and entry enums' problems, and the entry structs they name.
@@ -705,12 +755,12 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
         }
     };
     // Each table's entry type, read from the VM's own `Table<...>` fields.
-    let tables: Vec<(String, Vec<String>)> = shapes.iter()
+    let tables: Vec<(String, Vec<Named>)> = shapes.iter()
         .filter(|s| s.file == "lib.rs" && s.name == "Vm" && s.kind == Kind::Struct)
         .flat_map(|s| &s.fields)
         .filter_map(|(field, _, ty)| {
             let at = ty.iter().position(|w| w == "Table").filter(|&k| ty.get(k + 1).is_some_and(|w| w == "<"))?;
-            Some((field.clone(), crate_words(&ty[at + 2..], &crate_types)))
+            Some((field.clone(), named_types(&ty[at + 2..], "lib.rs", shapes, &crate_types)))
         })
         .collect();
     let declared: BTreeSet<String> = tables.iter().map(|(field, _)| field.clone()).collect();
@@ -718,11 +768,11 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
     let (new, gone) = diff(&declared, &listed);
     problems.extend(new.into_iter().map(|f| format!("Vm.{f}: a table TABLES doesn't name")));
     problems.extend(gone.into_iter().map(|f| format!("Vm.{f}: listed, not a table")));
-    for (field, holds) in &tables {
-        let Some((_, ty)) = census.tables.iter().find(|(f, _)| f == field) else { continue };
-        let named: Vec<String> = Some(split_key(ty).1).filter(|n| !n.is_empty()).map(str::to_owned).into_iter().collect();
-        if *holds != named { problems.push(format!("Vm.{field}: holds {holds:?}, TABLES names {ty:?}")); }
-        if !ty.is_empty() { entry(ty, &mut problems); }
+    for (field, named) in &tables {
+        let Some(&(_, ty)) = census.tables.iter().find(|(f, _)| f == field) else { continue };
+        let listed: Vec<&str> = [ty].into_iter().filter(|ty| !ty.is_empty()).collect();
+        problems.extend(match_named(&format!("Vm.{field}"), named, &listed, shapes));
+        for ty in listed { entry(ty, &mut problems); }
     }
     for (enum_key, variants) in census.entries {
         let (file, name) = split_key(enum_key);
@@ -740,19 +790,9 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
         problems.extend(gone.into_iter().map(|v| format!("{enum_key}::{v}: listed, not declared")));
         for (variant, types) in *variants {
             let Some((_, payload)) = body.iter().find(|(v, _)| v == variant) else { continue };
-            // An alias the payload names counts as what it stands for.
-            let payload: Vec<String> = payload.iter().flat_map(|w| {
-                let alias = shapes.iter().find(|s| s.kind == Kind::Alias && &s.name == w);
-                std::iter::once(w.clone()).chain(alias.into_iter().flat_map(|s| s.fields[0].2.clone()))
-            }).collect();
-            let named: BTreeSet<&str> = types.iter().map(|t| split_key(t).1).collect();
-            for word in crate_words(&payload, &crate_types) {
-                if !named.contains(word.as_str()) { problems.push(format!("{enum_key}::{variant}: holds {word}, not listed")); }
-            }
-            for ty in *types {
-                if !payload.iter().any(|w| w == split_key(ty).1) { problems.push(format!("{enum_key}::{variant}: lists {ty}, not in its payload")); }
-                entry(ty, &mut problems);
-            }
+            let named = named_types(payload, file, shapes, &crate_types);
+            problems.extend(match_named(&format!("{enum_key}::{variant}"), &named, types, shapes));
+            for ty in *types { entry(ty, &mut problems); }
         }
     }
     (problems, structs)
@@ -794,14 +834,17 @@ fn each_rule_of_the_census_fires() {
     let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
     let sources = [
         file("lib.rs", "pub(crate) struct Vm { closures: table::Table<Closure>, conses: Table<(Value, Value)>,
-                                              objects: Table<data::Object>, extra: Table<Value>, renamed: Table<Closure2> }
-                        pub(crate) struct Closure { captures: Vec<Value> } pub(crate) struct Closure2 { v: Value }
-                        pub(crate) struct Value(u64);"),
+                                              objects: Table<data::Object>, extra: Table<Value>, renamed: Table<Closure2>,
+                                              strays: Table<other::Object>, aliased: Table<Slot> }
+                        pub(crate) struct Closure { pub captures: Vec<Value> } pub(crate) struct Closure2 { v: Value }
+                        pub(crate) struct Value(u64); type Slot = Box<entry::Thing>;"),
         file("data.rs", "pub(super) enum Object { A(Box<entry::Open>), B(Value), C(Box<entry::Closed>), D(Box<entry::Gone>),
-                                                  F(Value), H(Hid), N(Box<Nested>) }
+                                                  F(Value), G(Box<Object>), H(Hid), N(Box<Nested>) }
                          pub(super) enum Nested { P(Box<entry::Inner>) } type Hid = Box<entry::Hidden>;"),
+        file("other.rs", "pub(crate) struct Object { x: Value }"),
         file("entry.rs", "pub(crate) struct Open { pub v: Value, s: Shared<u8> } pub(crate) struct Closed { v: Value, h: Handle }
                           pub(crate) struct Inner { pub w: Value } pub(crate) struct Hidden { v: Value }
+                          pub(crate) struct Thing { pub t: Value }
                           pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>); type Handle = Arc<Mutex<Closed>>;
                           type S<T> = RefCell<T>; struct UsesS { x: S<Value>, plain: Cell<usize>, bare: Cell, q: Injector<Value> }"),
     ];
@@ -809,10 +852,11 @@ fn each_rule_of_the_census_fires() {
         cells: &[("entry.rs:Shared.0", Generic), ("entry.rs:Handle", Held), ("entry.rs:Open.s", Plain), ("entry.rs:Closed.h", Held),
                  ("entry.rs:S", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:Stale", Plain)],
         held: 1,
-        tables: &[("closures", "lib.rs:Closure"), ("conses", ""), ("objects", "data.rs:Object"), ("renamed", "lib.rs:Closure"), ("gone", "")],
+        tables: &[("closures", "lib.rs:Closure"), ("conses", ""), ("objects", "data.rs:Object"), ("renamed", "lib.rs:Closure"),
+                  ("strays", "data.rs:Object"), ("aliased", "entry.rs:Thing"), ("gone", "")],
         entries: &[
             ("data.rs:Object", &[("A", &["entry.rs:Open"]), ("B", &["entry.rs:Open"]), ("C", &[]), ("D", &["entry.rs:Gone"]), ("E", &[]),
-                                 ("H", &[]), ("N", &["data.rs:Nested"])]),
+                                 ("G", &["other.rs:Object"]), ("H", &[]), ("N", &["data.rs:Nested"])]),
             ("data.rs:Nested", &[("P", &["entry.rs:Inner"])]),
             ("data.rs:Missing", &[]),
         ],
@@ -828,8 +872,14 @@ fn each_rule_of_the_census_fires() {
         "2 Held rows against HELD = 1: it only falls",
         "Vm.extra: a table TABLES doesn't name",
         "Vm.gone: listed, not a table",
-        "Vm.renamed: holds [\"Closure2\"], TABLES names \"lib.rs:Closure\"",
-        "data.rs:Object::B: lists entry.rs:Open, not in its payload",
+        "Vm.renamed: holds Closure2, not listed",
+        "Vm.renamed: lists lib.rs:Closure, which it doesn't hold",
+        "Vm.strays: Object names more than one type, and this spelling may not be data.rs:Object",
+        "data.rs:Object::G: Object names more than one type, and this spelling may not be other.rs:Object",
+        "lib.rs:Closure: a table entry type with a field that isn't private",
+        "entry.rs:Thing: a table entry type with a field that isn't private",
+        "data.rs:Object::B: lists entry.rs:Open, which it doesn't hold",
+        "data.rs:Object::D: lists entry.rs:Gone, which it doesn't hold",
         "data.rs:Object::C: holds Closed, not listed",
         "data.rs:Object::E: listed, not declared",
         "data.rs:Object::F: a variant ENTRIES doesn't name",
