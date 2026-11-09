@@ -30,7 +30,15 @@ class DivergenceIndexTests(unittest.TestCase):
         (self.dir / 'H9.md').write_text((self.dir / 'H9.md').read_text() + LEDGER.split('\n', 1)[1])
         result = self.run_index('--names')
         self.assertEqual(result.returncode, 1)
-        self.assertIn('H1: also held by ledger/divergences/H9.md', result.stderr)
+        self.assertIn('H1: held by ledger/divergences/H1.md, ledger/divergences/H9.md', result.stderr)
+
+    def test_an_id_without_its_own_file_has_one_file_too(self):
+        row = '| C3 | `gamma` | GNU | romacs | deliberate |\n'
+        for name in ('H1.md', 'H9.md'):
+            (self.dir / name).write_text((self.dir / name).read_text() + row)
+        result = self.run_index('--names')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('C3: held by ledger/divergences/H1.md, ledger/divergences/H9.md', result.stderr)
 
     def test_conflict_markers_are_refused(self):
         (self.dir / 'H1.md').write_text('<<<<<<< branch\n' + LEDGER + '=======\n>>>>>>> trunk\n')

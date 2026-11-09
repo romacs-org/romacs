@@ -116,36 +116,36 @@ def rows(root: pathlib.Path = ROOT) -> list[dict]:
             for row in parse(path, (DIR / path.name).as_posix())]
 
 
-def owned_ids(text: str) -> set[str]:
-    """The IDs TEXT gives: each row's first cell and each `## ID` heading's first word."""
-    rows = {m[1].strip() for m in re.finditer(r'^\| ([^|]+?) \|', text, re.M)}
-    heads = {m[1] for m in re.finditer(r'^## (\S+)', text, re.M)}
+ID_SHAPED = re.compile(r'^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$')
+# Row labels of comparison tables (`| GNU | ... |`, `| VM2 | ... |`), not IDs.
+LABELS = {'GNU', 'VM2', 'Romacs'}
+
+
+def owned_ids(path: pathlib.Path) -> set[str]:
+    """The IDs PATH gives: each divergence row's ID-shaped first cell, and
+    each heading that is an ID (`## ID`, `## ID — title`, `## ID / ...`)."""
+    rows = {r['id'] for r in parse(path, '') if r['id'] and ID_SHAPED.match(r['id']) and r['id'] not in LABELS}
+    heads = {m[1] for m in re.finditer(r'^## ([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)(?=\s*(?:—|/|$))', path.read_text(), re.M)}
     return rows | heads
 
 
 def misnamed(root: pathlib.Path = ROOT) -> list[str]:
-    """Why the files break the rule of one file per divergence: a file named
-    by an ID that does not hold it (as a row's first cell or a `## ID`
-    heading), an ID that another file holds too, or conflict markers. A `U-`
-    file holds an entry that never had an ID."""
+    """Why the files break the rule of one file per divergence: an ID held
+    by two files, a file named by an ID that does not hold it, or conflict
+    markers. A `U-` file holds an entry that never had an ID."""
     found, owners = [], {}
     paths = [p for p in sorted((root / DIR).glob('*.md')) if p.name != 'README.md']
     for path in paths:
-        text = path.read_text()
-        if re.search(r'^(<{7}|={7}|>{7})( |$)', text, re.M):
+        if re.search(r'^(<{7}|={7}|>{7})( |$)', path.read_text(), re.M):
             found.append(f'{DIR / path.name}: unresolved conflict markers')
-        for ident in owned_ids(text):
-            owners.setdefault(ident, []).append(path.stem)
+        for ident in owned_ids(path):
+            owners.setdefault(ident, []).append(path.name)
+    for ident, holders in sorted(owners.items()):
+        if len(holders) > 1:
+            found.append(f'{ident}: held by ' + ', '.join(f'{DIR / h}' for h in holders))
     for path in paths:
-        ident = path.stem
-        if ident.startswith('U-'):
-            continue
-        holders = owners.get(ident, [])
-        if ident not in holders:
-            found.append(f'{DIR / path.name}: holds no row or section named {ident}')
-        others = [h for h in holders if h != ident]
-        if others:
-            found.append(f'{ident}: also held by ' + ', '.join(f'{DIR / h}.md' for h in others))
+        if not path.stem.startswith('U-') and path.name not in owners.get(path.stem, []):
+            found.append(f'{DIR / path.name}: holds no row or section named {path.stem}')
     return found
 
 
