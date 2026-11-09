@@ -191,8 +191,8 @@ impl GuiFrameRenderState {
             // popup produces while typing, so the fade cannot restart
             // mid-flight: a payload update carries the previous animation
             // forward instead.
-            if is_fresh_install {
-                if !motion.open.is_instant() {
+            if is_fresh_install
+                && !motion.open.is_instant() {
                     tracing::debug!(
                         frame_id,
                         spec = ?motion.open,
@@ -208,7 +208,6 @@ impl GuiFrameRenderState {
                     );
                     self.compositor.dirty = true;
                 }
-            }
             if let Some((from, reshaping, from_y)) = previous_drawn {
                 self.retarget_layer_motion(frame_id, motion, from, reshaping, from_y, previous_placement, previous_target, now);
             }

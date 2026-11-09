@@ -558,7 +558,7 @@ mod gpu {
         assert_eq!(g.placement.size(), placed.size());
         let mut gpu = gpu(true).expect("the software adapter");
         let drawn = frame(&mut gpu, &g, &scene_at(&g, Policy::Reduced, 0.0), true).expect("a picture");
-        let under = page_px.map(|c| f64::from(c));
+        let under = page_px.map(f64::from);
         let (mut off, mut solid) = (0, 0);
         for y in 0..drawn.height {
             for x in 0..drawn.width {

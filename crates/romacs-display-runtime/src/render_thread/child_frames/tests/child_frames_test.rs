@@ -1314,7 +1314,7 @@ fn finished_drifts_clear_so_the_retained_path_returns() {
     assert!(mgr.has_animation_activity());
 
     // Mid-drift the drift pins full renders.
-    assert!(mgr.clear_finished_drifts(sample_at(origin, 10)) == false);
+    assert!(!mgr.clear_finished_drifts(sample_at(origin, 10)));
     assert!(mgr.has_animation_activity());
 
     // Past the tween the drift clears, releasing the retained path.

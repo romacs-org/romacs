@@ -384,8 +384,8 @@ impl RenderApp {
         // Secondary top-level windows: their surfaces belong to the dropped
         // instance and can never be configured against the new device;
         // recreate them on the new instance and rebuild their glyph atlases.
-        if let Some(gpu) = self.gpu.as_ref() {
-            if !self.frame_windows.recreate_secondary_native_surfaces(
+        if let Some(gpu) = self.gpu.as_ref()
+            && !self.frame_windows.recreate_secondary_native_surfaces(
                 &gpu.instance,
                 &gpu.device,
                 &gpu.adapter,
@@ -393,7 +393,6 @@ impl RenderApp {
                 self.device_lost.mark_lost_now();
                 return false;
             }
-        }
 
         // Everything re-renders from the kept CPU frames on the next pass.
         self.frame_windows.mark_top_level_dirty();

@@ -1,6 +1,4 @@
 //! Drive the real startup handler up to a refusing native constructor, never a GPU.
-#[path = "staging.rs"]
-mod staging;
 use std::cell::Cell;
 
 #[test]

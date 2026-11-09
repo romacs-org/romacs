@@ -92,15 +92,12 @@ impl RenderApp {
         {
             match cmd {
                 RenderCommand::Paint(scene) => self.ingest_paint(*scene),
-                RenderCommand::Lifecycle(c) => {
-                    if let LifecycleCommand::Shutdown = c {
-                        tracing::info!("Render thread received shutdown command");
-                        self.lifecycle_flags.request_shutdown(
-                            super::state::RenderShutdownReason::EvaluatorShutdown,
-                        );
-                        should_exit = true;
-                        continue;
-                    }
+                RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
+                    tracing::info!("Render thread received shutdown command");
+                    self.lifecycle_flags
+                        .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+                    should_exit = true;
+                    continue;
                 }
                 RenderCommand::Window(c) => self.handle_window(c),
                 RenderCommand::Asset(c) => self.handle_asset(c),

@@ -55,7 +55,6 @@ mod texture_discipline_test;
 
 mod geometry_hints;
 mod surface_resize;
-mod thread_handle;
 #[cfg(test)]
 #[path = "tests/time_discipline_test.rs"]
 mod time_discipline_test;

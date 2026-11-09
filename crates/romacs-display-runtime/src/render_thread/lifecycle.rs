@@ -265,13 +265,12 @@ impl RenderApp {
             event_loop.exit();
             return;
         }
-        if self.gpu.is_none() {
-            if self.process_startup_commands() {
+        if self.gpu.is_none()
+            && self.process_startup_commands() {
                 self.handle_exiting();
                 event_loop.exit();
                 return;
             }
-        }
         if let Some(pending) = self.gpu_startup.take() {
             match pending.poll(&event_loop.create_proxy()) {
                 Ok(super::gpu_startup::GpuPoll::Pending(pending)) => {
