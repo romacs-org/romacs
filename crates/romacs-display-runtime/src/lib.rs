@@ -18,13 +18,10 @@ pub(crate) mod clipboard;
 pub mod core;
 pub mod display_identity;
 pub mod display_scale;
-#[cfg(feature = "gui-test-hooks")]
-pub mod gui_test_controls;
 pub mod host_types;
 pub mod macos_bundle_runtime;
 mod menus;
 pub mod native_window_wait;
-#[cfg(feature = "core-free")]
 pub mod paint_host;
 mod presentation;
 mod presentation_feedback;
@@ -51,11 +48,6 @@ pub mod shader_surface {
 pub mod model {
     pub use romacs_renderer_wgpu::model::ModelView;
 }
-
-/// Library version
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-pub const CORE_BACKEND: &str = "core-free";
 
 pub use render_thread::frame_stats::{
     DEMAND_REASON_NAMES, FRAME_TIME_BUCKET_UPPER_US, FrameSchedSnapshot, WindowFrameSnapshot,
@@ -84,18 +76,6 @@ pub(crate) fn wgpu_instance_descriptor_with_display(
     display: winit::event_loop::OwnedDisplayHandle,
 ) -> wgpu::InstanceDescriptor {
     wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display))
-}
-
-/// Initialize the display engine.
-///
-/// Logging is initialized separately by the binary entry point via
-/// the application and is assumed to already be set up when this function runs.
-pub fn init() -> Result<(), DisplayError> {
-    tracing::info!(
-        "Romacs display engine v{} initializing (wgpu backend)",
-        VERSION
-    );
-    Ok(())
 }
 
 #[cfg(test)]

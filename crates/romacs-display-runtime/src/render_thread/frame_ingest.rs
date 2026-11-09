@@ -155,7 +155,6 @@ struct FrameIngestOutcome {
 }
 
 impl RenderApp {
-    #[cfg(feature = "core-free")]
     pub(super) fn ingest_paint(&mut self, scene: crate::thread_comm::PaintScene) {
         let crate::thread_comm::PaintScene { root: mut frame, children, text_animations } = scene;
         if self.frame_windows.primary_window().and_then(|window| window.lifecycle.native())

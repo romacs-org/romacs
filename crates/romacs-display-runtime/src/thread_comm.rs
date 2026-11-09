@@ -758,7 +758,6 @@ impl ClipboardCommand {
 /// One paint: the primary frame, the child frames shown over it, lowest
 /// first, and the text animations drawn over the primary frame, each by
 /// its key. A child or an animation absent from the next paint is removed.
-#[cfg(feature = "core-free")]
 #[derive(Debug)]
 pub struct PaintScene {
     pub root: romacs_display_protocol::FrameGlyphBuffer,
@@ -766,7 +765,6 @@ pub struct PaintScene {
     pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
 }
 
-#[cfg(feature = "core-free")]
 impl From<romacs_display_protocol::FrameGlyphBuffer> for PaintScene {
     fn from(root: romacs_display_protocol::FrameGlyphBuffer) -> Self {
         Self { root, children: Vec::new(), text_animations: Vec::new() }
@@ -779,7 +777,6 @@ impl From<romacs_display_protocol::FrameGlyphBuffer> for PaintScene {
 // Boxing `Config` would move the same downstream break one level outward.
 #[allow(clippy::large_enum_variant)]
 pub enum RenderCommand {
-    #[cfg(feature = "core-free")]
     Paint(Box<PaintScene>),
     Lifecycle(LifecycleCommand),
     Window(WindowCommand),
@@ -1100,7 +1097,6 @@ impl ThreadComms {
             input_interrupt: None,
             keep_alive_without_frames: false,
             native_window_waits: None,
-            #[cfg(feature = "core-free")]
             paint_diagnostics: None,
             input_stream: Default::default(),
             tooltip_context: self.tooltip_context,
@@ -1152,7 +1148,6 @@ pub struct RenderComms {
     pub pointer: Arc<PointerCell>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
-    #[cfg(feature = "core-free")]
     pub(crate) paint_diagnostics: Option<Arc<crate::paint_host::PaintDiagnostics>>,
     /// Daemon root, rather than the primary native frame, owns display lifetime.
     pub keep_alive_without_frames: bool,
@@ -1362,7 +1357,6 @@ impl RenderComms {
         Option<romacs_display_protocol::input_progress::InputReceipt>,
         Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
-        #[cfg(feature = "core-free")]
         crate::paint_host::trace_key_enqueue(&event, read.as_ref());
         let receipt = if matches!(
             &event,

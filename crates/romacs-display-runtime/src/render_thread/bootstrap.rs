@@ -18,10 +18,6 @@ use x11_dl::xlib;
 
 impl RenderApp {
     pub(super) fn init_wgpu(&mut self, event_loop: &dyn ActiveEventLoop, window: Arc<dyn Window>) {
-        #[cfg(all(feature = "gui-test-hooks", target_os = "linux"))]
-        if super::native_image_probe::fail_init_once() {
-            return;
-        }
         tracing::info!("Initializing wgpu for render thread");
 
         let instance_descriptor =
@@ -91,7 +87,6 @@ impl RenderApp {
         }
         let backend_profile =
             super::render_quality::RenderBackendProfile::from_device_type(adapter_info.device_type);
-        #[cfg(feature = "core-free")]
         if let Some(diagnostics) = &self.comms.paint_diagnostics {
             diagnostics.publish_adapter(adapter_info.device_type == wgpu::DeviceType::Cpu);
         }

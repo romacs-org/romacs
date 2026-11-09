@@ -38,8 +38,6 @@ mod page_scenes;
 #[path = "tests/modifier_policy_cooking_test.rs"]
 mod modifier_policy_cooking_test;
 mod modifier_sides;
-#[cfg(all(feature = "gui-test-hooks", target_os = "linux"))]
-pub mod native_image_probe;
 mod pointer_events;
 pub(in crate::render_thread) mod render_pass;
 mod render_quality;

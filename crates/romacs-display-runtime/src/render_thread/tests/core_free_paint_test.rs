@@ -18,7 +18,6 @@ pub(super) fn make_test_app() -> RenderApp {
     )
 }
 
-#[cfg(feature = "core-free")]
 fn paint(revision: u64, background: Color) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(800.0, 600.0);
     frame.presentation_id = PresentationId::new(revision);
@@ -37,7 +36,6 @@ fn paint(revision: u64, background: Color) -> FrameGlyphBuffer {
 }
 
 #[test]
-#[cfg(feature = "core-free")]
 fn core_free_paint_rejects_incoherent_and_stale_presentations() {
     let (producer, render) = ThreadComms::new().split();
     let mut app = make_test_app();
@@ -98,7 +96,6 @@ fn core_free_paint_rejects_incoherent_and_stale_presentations() {
 }
 
 #[test]
-#[cfg(feature = "core-free")]
 fn core_free_paint_command_installs_and_replaces_scene() {
     let (producer, render) = ThreadComms::new().split();
     let mut app = make_test_app();
@@ -158,7 +155,6 @@ fn core_free_paint_command_installs_and_replaces_scene() {
     }
 }
 
-#[cfg(feature = "core-free")]
 fn child(id: u64, revision: u64, x: f32) -> FrameGlyphBuffer {
     let mut frame = FrameGlyphBuffer::with_size(120.0, 40.0);
     frame.presentation_id = PresentationId::new(revision);
@@ -176,7 +172,6 @@ fn child(id: u64, revision: u64, x: f32) -> FrameGlyphBuffer {
 /// with the next scene, and go when a scene leaves them out; a child that
 /// is not the primary presentation's is refused with its scene.
 #[test]
-#[cfg(feature = "core-free")]
 fn core_free_paint_scene_installs_moves_and_removes_child_frames() {
     let (producer, render) = ThreadComms::new().split();
     let mut app = make_test_app();

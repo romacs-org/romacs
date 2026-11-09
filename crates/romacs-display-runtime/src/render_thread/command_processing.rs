@@ -91,7 +91,6 @@ impl RenderApp {
             .or_else(|| self.comms.cmd_rx.try_recv().ok())
         {
             match cmd {
-                #[cfg(feature = "core-free")]
                 RenderCommand::Paint(scene) => self.ingest_paint(*scene),
                 RenderCommand::Lifecycle(c) => {
                     if let LifecycleCommand::Shutdown = c {

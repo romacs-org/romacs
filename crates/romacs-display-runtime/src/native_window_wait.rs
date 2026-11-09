@@ -60,8 +60,6 @@ impl NativeWindowWaits {
             }
             state.active = Some(frame);
         }
-        #[cfg(feature = "gui-test-hooks")]
-        crate::gui_test_controls::mark("window-constructor");
         let result = work();
         let mut state = self.0.lock().unwrap();
         state.active = None;

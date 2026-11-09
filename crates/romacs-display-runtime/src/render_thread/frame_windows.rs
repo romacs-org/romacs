@@ -2899,11 +2899,6 @@ impl GuiFrameWindowManager {
             let FrameLifecycle::Active { native, .. } = &mut window_state.lifecycle else {
                 continue;
             };
-            #[cfg(all(feature = "gui-test-hooks", target_os = "linux"))]
-            if super::native_image_probe::fail_secondary_once() {
-                complete = false;
-                continue;
-            }
             let surface = match instance.create_surface(native.window.clone()) {
                 Ok(surface) => surface,
                 Err(error) => {

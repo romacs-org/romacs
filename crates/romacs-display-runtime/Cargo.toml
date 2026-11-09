@@ -66,9 +66,6 @@ romacs-infra.workspace = true
 png.workspace = true
 
 [features]
-gui-test-hooks = []
-default = ["core-free"]
-core-free = []
 # Cross-platform native GPU-resident video
 video = [
     "dep:romacs-video",
@@ -98,10 +95,6 @@ rustix.workspace = true
 wayland-backend.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
-
-[[example]]
-name = "core_free_paint"
-required-features = ["core-free"]
 
 [lints]
 workspace = true
