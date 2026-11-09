@@ -378,7 +378,10 @@ const CELLS: &[(&str, Behind)] = &[
     ("annotations.rs:AnnotatedBuffer.anchors", Plain), ("annotations.rs:AnnotatedBuffer.reversed_pairs", Plain),
     ("bytes.rs:BufferState.modification", Plain),
     // Char table nodes, shared between tables, sub-char-tables, views and
-    // keymap cursors: written through their lock (the char-table write funnel).
+    // keymap cursors: written through their lock. Every write goes through
+    // char_table.rs's funnel (`wrote`), and only the collector's own visits
+    // write past it (PAST_THE_BARRIER); every field of `CharTable` and
+    // `CharTableNode` is private to that file.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
     ("char_table.rs:CharTableView.root", Held), ("char_table.rs:CharTable.root", Held),
     ("data.rs:Object", Held), ("map_keymap.rs:Frame.node", Held), ("lib.rs:Vm.native_case_roots", Held),
@@ -445,8 +448,6 @@ const PUBLIC_ALLOWED: &[(&str, &str)] = &[
     ("annotations.rs:AnnotatedBuffer", "buffer accessors"), ("annotations.rs:Marker", "marker accessors"),
     ("annotations.rs:Overlay", "overlay accessors"), ("bool_vector.rs:BoolVector", "bool-vector accessors"),
     ("bytes.rs:ByteBuffer", "buffer accessors"),
-    ("char_table.rs:CharTable", "the char-table write funnel (perf/gc-chartable)"),
-    ("char_table.rs:CharTableNode", "the char-table write funnel (perf/gc-chartable)"),
     ("data.rs:LispString", "string accessors"), ("frame.rs:Frame", "frame accessors"), ("frame.rs:Terminal", "terminal accessors"),
     ("hash.rs:HashTable", "hash table accessors"), ("obarray.rs:Obarray", "obarray accessors"),
     ("sqlite.rs:Handle", "sqlite handle accessors"), ("subprocess.rs:Process", "process accessors"),

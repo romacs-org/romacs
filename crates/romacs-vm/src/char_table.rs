@@ -461,8 +461,8 @@ romacs_snapshot::snapshot_enum!(CharTableSlot {
 });
 
 pub(super) struct CharTableNode {
-    pub(super) depth: usize,
-    pub(super) min_char: usize,
+    depth: usize,
+    min_char: usize,
     slots: Vec<CharTableSlot>,
 }
 romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots });
@@ -479,6 +479,12 @@ impl CharTableNode {
         }))
     }
 
+    pub(super) fn depth(&self) -> usize {
+        self.depth
+    }
+    pub(super) fn min_char(&self) -> usize {
+        self.min_char
+    }
     /// This node's slots, to read.
     pub(super) fn slots(&self) -> &[CharTableSlot] {
         &self.slots
@@ -752,7 +758,7 @@ pub(super) struct CharTable {
     parent: Value,
     extras: Vec<Value>,
     /// Counts the writes to its characters, for what is derived from them.
-    pub(crate) edits: u64,
+    edits: u64,
 }
 romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits });
 

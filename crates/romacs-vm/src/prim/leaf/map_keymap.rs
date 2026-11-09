@@ -71,7 +71,7 @@ impl Leaf<'_> {
         let Some(codes) = self.vm.uniprop_compressed(value) else {
             return Ok(slot);
         };
-        if node.lock().unwrap().depth != 2 {
+        if node.lock().unwrap().depth() != 2 {
             return Err(Fault::Error(
                 "compressed Unicode property requires a 128-character block".into(),
             ));
@@ -90,7 +90,7 @@ impl Leaf<'_> {
         loop {
             let (depth, at) = {
                 let current = node.lock().unwrap();
-                (current.depth, (c - current.min_char) / char_table::CharTableNode::WIDTHS[current.depth])
+                (current.depth(), (c - current.min_char()) / char_table::CharTableNode::WIDTHS[current.depth()])
             };
             if depth == 2 {
                 return self.map_table_slot(table, &node, at).map(|_| ());
@@ -180,7 +180,7 @@ impl Leaf<'_> {
         loop {
             let at = {
                 let current = node.lock().unwrap();
-                (index - current.min_char) / char_table::CharTableNode::WIDTHS[current.depth]
+                (index - current.min_char()) / char_table::CharTableNode::WIDTHS[current.depth()]
             };
             match self.map_table_slot(table, &node, at)? {
                 char_table::CharTableSlot::Value(value) => return Ok(value),

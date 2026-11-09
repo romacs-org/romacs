@@ -233,9 +233,9 @@ impl Leaf<'_> {
     fn case_ranges(&self, table: Value) -> std::result::Result<Vec<(usize, usize, Value)>, Fault> {
         fn boundaries(node: &CharTableNodeHandle, out: &mut Vec<usize>) {
             let node = node.lock().unwrap();
-            let width = CharTableNode::WIDTHS[node.depth];
+            let width = CharTableNode::WIDTHS[node.depth()];
             for (i, slot) in node.slots().iter().enumerate() {
-                out.push(node.min_char + i * width);
+                out.push(node.min_char() + i * width);
                 if let CharTableSlot::Node(child) = slot {
                     boundaries(child, out);
                 }

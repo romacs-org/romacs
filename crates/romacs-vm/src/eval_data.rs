@@ -326,8 +326,8 @@ impl Vm {
     fn print_sub_char_table_body(&self, node: &char_table::CharTableNodeHandle, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
         let slots = {
             let node = node.lock().unwrap();
-            let mut slots = vec![char_table::CharTableSlot::Value(Value::integer(node.depth as i64)?),
-                char_table::CharTableSlot::Value(Value::integer(node.min_char as i64)?)];
+            let mut slots = vec![char_table::CharTableSlot::Value(Value::integer(node.depth() as i64)?),
+                char_table::CharTableSlot::Value(Value::integer(node.min_char() as i64)?)];
             slots.extend(node.slots().iter().cloned());
             slots
         };

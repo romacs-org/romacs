@@ -36,7 +36,7 @@ romacs_snapshot::snapshot_struct!(Frame { node, top, from, to, index, phase, dec
 impl Frame {
     fn new(node: CharTableNodeHandle, top: Value, from: usize, to: i64) -> Self {
         let n = node.lock().unwrap();
-        let index = from.saturating_sub(n.min_char) / CharTableNode::WIDTHS[n.depth];
+        let index = from.saturating_sub(n.min_char()) / CharTableNode::WIDTHS[n.depth()];
         drop(n);
         Self {
             node,
@@ -106,7 +106,7 @@ impl Chartab {
         // the slot counts the index arithmetic relies on are rechecked.
         for frame in &self.frames {
             let n = frame.node.lock().unwrap();
-            if n.depth > 3 || n.slots().len() != CharTableNode::SIZES[n.depth] {
+            if n.depth() > 3 || n.slots().len() != CharTableNode::SIZES[n.depth()] {
                 return Err(Fault::Error("invalid sub-char-table geometry".into()));
             }
         }
@@ -132,8 +132,8 @@ impl Chartab {
             let f = &self.frames[n];
             let (c, width, len) = {
                 let node = f.node.lock().unwrap();
-                let width = CharTableNode::WIDTHS[node.depth];
-                (node.min_char + f.index * width, width, node.slots().len())
+                let width = CharTableNode::WIDTHS[node.depth()];
+                (node.min_char() + f.index * width, width, node.slots().len())
             };
             if f.index >= len || c as i64 > f.to {
                 self.frames.pop();
@@ -168,7 +168,7 @@ impl Chartab {
                     )?;
                     match slot {
                         CharTableSlot::Node(node) => {
-                            let depth = self.frames[n].node.lock().unwrap().depth + 1;
+                            let depth = self.frames[n].node.lock().unwrap().depth() + 1;
                             CharTableNode::validate_node(&node, depth, c).map_err(Fault::Error)?;
                             if self.frames[n].to >= (c + width) as i64 {
                                 self.to = (c + width) as i64 - 1;
