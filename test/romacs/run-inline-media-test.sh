@@ -105,8 +105,8 @@ fi
 
 echo ""
 echo "=== Summary ==="
-if grep -q "Result: 3/3" "$LOG_FILE" 2>/dev/null; then
-    echo -e "${GREEN}All 3 media types loaded successfully!${NC}"
+if grep -q "Result: 2/2" "$LOG_FILE" 2>/dev/null; then
+    echo -e "${GREEN}Both media types loaded successfully!${NC}"
 else
     RESULT=$(grep "Result:" "$LOG_FILE" 2>/dev/null | tail -1 || echo "Result unknown")
     echo "$RESULT"
