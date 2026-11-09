@@ -220,6 +220,8 @@ runs is that subagent's: no event."
            (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
            (list (list :type 'approval :request-id (gethash "request_id" line)
                        :tool (gethash "tool_name" request) :input (gethash "input" request)
+                       :questions (and (equal (gethash "tool_name" request) "AskUserQuestion")
+                                       (romacs-agent--claude-questions (gethash "input" request)))
                        :description (gethash "description" request))))))
       ("control_response"
        (let* ((response (gethash "response" line)) (id (gethash "request_id" response)))
@@ -293,19 +295,55 @@ an approval answered."
                       "request_id" (format "romacs-interrupt-%d" (romacs-agent-request-id session))
                       "request" (romacs-mcp--object "subtype" "interrupt")))
 
+(defun romacs-agent--claude-questions (input)
+  "AskUserQuestion's INPUT as an `approval' event's :questions: each
+\(QUESTION :header HEADER :options LABELS :notes ((LABEL . DESCRIPTION) ...)
+:multi MULTI)."
+  (let ((questions (and (hash-table-p input) (gethash "questions" input))))
+    (cl-loop for q across (if (vectorp questions) questions [])
+             for options = (cl-loop for o across (let ((o (gethash "options" q))) (if (vectorp o) o []))
+                                    collect (cons (gethash "label" o) (romacs-agent--value (gethash "description" o))))
+             when (stringp (gethash "question" q))
+             collect (list (gethash "question" q)
+                           :header (romacs-agent--value (gethash "header" q))
+                           :options (mapcar #'car options)
+                           :notes (cl-remove-if-not #'cdr options)
+                           :multi (eq (gethash "multiSelect" q) t)))))
+
+(defun romacs-agent--claude-session-rules (request)
+  "The permission updates allowing REQUEST's tool for the rest of the
+session: what Claude Code suggests, kept to the session, else its tool."
+  (let ((suggestions (gethash "permission_suggestions" request)))
+    (if (and (vectorp suggestions) (> (length suggestions) 0))
+        (vconcat (mapcar (lambda (suggestion)
+                           (let ((update (copy-hash-table suggestion)))
+                             (puthash "destination" "session" update)
+                             update))
+                         suggestions))
+      (vector (romacs-mcp--object "type" "addRules" "behavior" "allow" "destination" "session"
+                                  "rules" (vector (romacs-mcp--object "toolName" (gethash "tool_name" request))))))))
+
 (defun romacs-agent--claude-respond (session request-id allow message)
-  "The control_response answering approval REQUEST-ID: the tool as asked
-when ALLOW, else denied with MESSAGE."
-  (let ((request (gethash request-id (romacs-agent-approvals session))))
+  "The control_response answering approval REQUEST-ID: denied with MESSAGE
+when ALLOW is nil, else allowed (`romacs-agent-respond'): with the user's
+answers in its input, and for the session when asked."
+  (let* ((request (gethash request-id (romacs-agent-approvals session)))
+         (input (copy-hash-table (or (gethash "input" request) (romacs-mcp--object))))
+         (answers (and (consp allow) (plist-get allow :answers))))
+    (when answers
+      (puthash "answers" (let ((object (romacs-mcp--object)))
+                           (dolist (answer answers object) (puthash (car answer) (cdr answer) object)))
+               input))
     (romacs-mcp--object
      "type" "control_response"
      "response" (romacs-mcp--object
                  "subtype" "success" "request_id" request-id
-                 "response" (if allow
-                                (romacs-mcp--object "behavior" "allow"
-                                                    "updatedInput" (or (gethash "input" request) (romacs-mcp--object)))
-                              (romacs-mcp--object "behavior" "deny"
-                                                  "message" (or message "Denied by the user")))))))
+                 "response" (cond ((null allow)
+                                   (romacs-mcp--object "behavior" "deny" "message" (or message "Denied by the user")))
+                                  ((and (consp allow) (plist-get allow :always))
+                                   (romacs-mcp--object "behavior" "allow" "updatedInput" input
+                                                       "updatedPermissions" (romacs-agent--claude-session-rules request)))
+                                  (t (romacs-mcp--object "behavior" "allow" "updatedInput" input)))))))
 
 (romacs-agent-define-harness 'claude
   :display "Claude Code" :icon "✳" :t3-driver "claudeAgent"

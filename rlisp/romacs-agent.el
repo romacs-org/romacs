@@ -441,7 +441,10 @@ instances) is derived again when it changes.")
   :interrupt (SESSION)   the object interrupting its turn, or `signal'
       (the run ends by SIGTERM);
   :respond (SESSION REQUEST-ID ALLOW MESSAGE)   the object answering an
-      approval it asked for;
+      approval it asked for: ALLOW nil denies with MESSAGE, t allows as
+      asked, a plist allows with :answers ((QUESTION . ANSWER) ...) to
+      the questions its `approval' event's :questions asked, or with
+      :always for the rest of the session;
   :events (SESSION OBJECT), :input-events (SESSION OBJECT)
       the events of an object it wrote, and of one written to it;
       `handshake' events (:state PLIST) fold into its startup state;
@@ -1799,8 +1802,9 @@ its thread."
       (romacs-agent--line session how))))
 
 (defun romacs-agent-respond (session request-id allow &optional message)
-  "Answer SESSION's approval REQUEST-ID: ALLOW non-nil allows the tool as
-asked, else it is denied with MESSAGE."
+  "Answer SESSION's approval REQUEST-ID: ALLOW, as a driver's :respond
+takes it, allows (t, or a plist of :answers or :always), else it is denied
+with MESSAGE."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
   (romacs-agent--line session (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
 

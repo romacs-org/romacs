@@ -98,6 +98,12 @@
   "A session whose last turn ended since its chat was shown.")
 
 (defvar-local romacs-agent-ui--session nil)
+(defvar-local romacs-agent-ui--asks nil
+  "The chat's approval events by request id: what each asked.")
+
+(defun romacs-agent-ui--asks ()
+  "This chat's `romacs-agent-ui--asks', made when first wanted."
+  (or romacs-agent-ui--asks (setq romacs-agent-ui--asks (make-hash-table :test #'equal))))
 (defvar-local romacs-agent-ui--end nil
   "Marker at the transcript's end; the composer follows it.")
 (defvar-local romacs-agent-ui--tool-lines nil
@@ -586,10 +592,14 @@ or a repeat."
                                 'keymap romacs-agent-ui--compaction-map 'help-echo "Show what the session kept"
                                 'romacs-agent-compaction (plist-get event :text)))
         ('approval
+         (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
-                                (format "◆ %s asks: %s  %s   [y] allow  [N] deny"
-                                        (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
-                                        (or (plist-get event :description) ""))
+                                (if-let* ((questions (plist-get event :questions)))
+                                    (format "◆ %s   [y] answer  [N] dismiss"
+                                            (mapconcat #'car questions "  "))
+                                  (format "◆ %s asks: %s  %s   [y] allow  [!] for this session  [N] deny"
+                                          (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
+                                          (or (plist-get event :description) "")))
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
         ('answered
          (romacs-agent-ui--line session event (format "  %s" (pcase (plist-get event :behavior)
@@ -960,6 +970,7 @@ new turn starts, and last turn's failures have been seen."
     (define-key map "r" (romacs-agent-ui--transcript-key #'romacs-agent-chat-quote-region))
     (define-key map "y" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow))
     (define-key map "N" (romacs-agent-ui--transcript-key #'romacs-agent-chat-deny))
+    (define-key map "!" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow-always))
     (define-key map " " (romacs-agent-ui--transcript-key #'scroll-up-command))
     (define-key map (kbd "S-SPC") (romacs-agent-ui--transcript-key #'scroll-down-command))
     map)
@@ -1231,12 +1242,40 @@ PROPERTY: the previous one is the run point is in, past its start."
       (let ((ids (hash-table-keys (romacs-agent-approvals romacs-agent-ui--session))))
         (and (= (length ids) 1) (car ids)))))
 
+(defun romacs-agent-ui--read-answers (questions)
+  "The user's answers to QUESTIONS (an `approval' event's), as ((QUESTION
+. ANSWER) ...): one of each question's options, or words of their own;
+several, comma-separated, where it takes several."
+  (mapcar (lambda (question)
+            (let* ((prompt (format-prompt (car question) nil))
+                   (notes (plist-get (cdr question) :notes))
+                   (table (romacs-agent--ordered-table
+                           (plist-get (cdr question) :options)
+                           (cons 'annotation-function
+                                 (lambda (label)
+                                   (when-let* ((note (cdr (assoc label notes))))
+                                     (propertize (concat "  " note) 'face 'completions-annotations)))))))
+              (cons (car question)
+                    (if (plist-get (cdr question) :multi)
+                        (mapconcat #'identity (completing-read-multiple prompt table) ", ")
+                      (completing-read prompt table)))))
+          questions))
+
 (defun romacs-agent-chat-allow ()
-  "Allow the tool call the harness asks about."
+  "Allow the tool call the harness asks about; answer the questions it asks."
   (interactive nil romacs-agent-chat-mode)
-  (let ((id (romacs-agent-ui--approval-here)))
-    (unless id (user-error "No approval here"))
-    (romacs-agent-respond romacs-agent-ui--session id t)))
+  (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
+         (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
+    (romacs-agent-respond romacs-agent-ui--session id
+                          (if questions (list :answers (romacs-agent-ui--read-answers questions)) t))))
+
+(defun romacs-agent-chat-allow-always ()
+  "Allow the tool call the harness asks about, and its like for the rest
+of the session; a question is answered instead."
+  (interactive nil romacs-agent-chat-mode)
+  (if (romacs-agent-ui--asking-p) (romacs-agent-chat-allow)
+    (let ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here"))))
+      (romacs-agent-respond romacs-agent-ui--session id (list :always t)))))
 
 (defun romacs-agent-chat-deny ()
   "Deny the tool call the harness asks about."
@@ -1755,6 +1794,14 @@ only sessions whose chat is open."
 
 (defun romacs-agent-chat-home () "The agents home page." (interactive nil romacs-agent-chat-mode) (romacs-agents))
 
+(defun romacs-agent-ui--asking-p ()
+  "Whether the approval here asks questions."
+  (when-let* ((id (and romacs-agent-ui--session (romacs-agent-ui--approval-here))))
+    (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
+
+(defun romacs-agent-ui--allow-label ()
+  (if (romacs-agent-ui--asking-p) "Answer" "Allow"))
+
 (defun romacs-agent-ui--queue-label ()
   (let ((waiting (and romacs-agent-ui--session (romacs-agent-queue-length romacs-agent-ui--session))))
     (if (and waiting (> waiting 0)) (format "Queue (%d waiting)" waiting) "Queue")))
@@ -1837,7 +1884,9 @@ view."
   :exit-key "C-g"
   :group ("Approval" :if (lambda () (and romacs-agent-ui--session
                                          (> (hash-table-count (romacs-agent-approvals romacs-agent-ui--session)) 0))))
-  "a" ("Allow" romacs-agent-chat-allow)
+  "a" (#'romacs-agent-ui--allow-label romacs-agent-chat-allow)
+  "!" ("Allow for this session" romacs-agent-chat-allow-always
+       :if (lambda () (not (romacs-agent-ui--asking-p))))
   "d" ("Deny" romacs-agent-chat-deny)
   :row
   :group "Turn"
