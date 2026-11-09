@@ -222,7 +222,7 @@ impl ImageSourceRect {
     /// where the remaining extent rounds to zero width in the `u16` encoding,
     /// which is also how GNU reaches `slice.width == 0`.
     #[must_use]
-    pub fn crop_right_to_fraction(self, fraction: f32) -> Option<Self> {
+    pub(crate) fn crop_right_to_fraction(self, fraction: f32) -> Option<Self> {
         if !fraction.is_finite() || fraction <= 0.0 {
             return None;
         }
@@ -243,7 +243,7 @@ impl ImageSourceRect {
 /// is the other half of the same edit.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ImageLayoutAdvance(crate::types::Px);
+pub(crate) struct ImageLayoutAdvance(crate::types::Px);
 
 impl ImageLayoutAdvance {
     /// A finite, strictly positive glyph advance.  A crop that leaves nothing
@@ -280,7 +280,7 @@ impl ImageMargins {
     }
 
     #[must_use]
-    pub fn asymmetric(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+    pub(crate) fn asymmetric(left: f32, right: f32, top: f32, bottom: f32) -> Self {
         let encode = |value: f32| {
             if value.is_finite() {
                 value.round().clamp(0.0, f32::from(u16::MAX)) as u16
@@ -1070,7 +1070,7 @@ impl ImageSizeLimit {
     /// [`Self::permits`] for a source extent that has not been rounded to
     /// pixels yet; see [`ImageIntrinsicExtent::native_ceiling`].
     #[must_use]
-    pub fn permits_intrinsic(self, intrinsic: ImageIntrinsicExtent) -> bool {
+    pub(crate) fn permits_intrinsic(self, intrinsic: ImageIntrinsicExtent) -> bool {
         self.permits(intrinsic.native_ceiling())
     }
 }
@@ -1284,7 +1284,7 @@ impl ImageRealization {
 
     /// Convert an integer logical extent to physical texture pixels.
     #[must_use]
-    pub fn raster_dimension(self, layout_dimension: u32) -> u32 {
+    pub(crate) fn raster_dimension(self, layout_dimension: u32) -> u32 {
         ((f64::from(layout_dimension) * f64::from(self.device_scale()))
             .ceil()
             .max(1.0)) as u32
@@ -1295,7 +1295,7 @@ impl ImageRealization {
     /// Prefer re-running `ImageSizeSpec::desired` at [`Self::image_pixel_scale`]
     /// when the native size is still known — `ceil` is not invertible.
     #[must_use]
-    pub fn image_pixel_dimension(self, layout_dimension: u32) -> u32 {
+    pub(crate) fn image_pixel_dimension(self, layout_dimension: u32) -> u32 {
         ((f64::from(layout_dimension) * f64::from(self.report_scale()))
             .ceil()
             .max(1.0)) as u32
@@ -1307,7 +1307,7 @@ impl ImageRealization {
     /// `1/1.25 × 1.25` does not become `1.0000001` and ceil native extents
     /// by an extra pixel.
     #[must_use]
-    pub fn image_pixel_scale(self) -> f64 {
+    pub(crate) fn image_pixel_scale(self) -> f64 {
         if (self.report_scale() - 1.0).abs() <= f32::EPSILON {
             return f64::from(self.layout_scale());
         }
@@ -1448,7 +1448,7 @@ impl ImageRotation {
 
     /// Swap width/height for 90° and 270° turns (GNU after sizing).
     #[must_use]
-    pub fn orient(self, width: u32, height: u32) -> (u32, u32) {
+    pub(crate) fn orient(self, width: u32, height: u32) -> (u32, u32) {
         match self {
             Self::None | Self::Half => (width, height),
             Self::Quarter | Self::ThreeQuarter => (height, width),
@@ -1457,7 +1457,7 @@ impl ImageRotation {
 
     /// Apply the turn without erasing the extent's coordinate-space marker.
     #[must_use]
-    pub fn orient_extent<Space>(self, extent: ImageExtent<Space>) -> ImageExtent<Space> {
+    pub(crate) fn orient_extent<Space>(self, extent: ImageExtent<Space>) -> ImageExtent<Space> {
         let (width, height) = self.orient(extent.width(), extent.height());
         ImageExtent::new(width, height)
     }
@@ -1482,22 +1482,6 @@ impl ImageSizeSpec {
         Self { width, height }
     }
 
-    /// Size to reserve for an image that has not been decoded yet.
-    ///
-    /// `None` when neither axis is pinned: the native size is the answer then,
-    /// and it is not known until decoding finishes.
-    #[must_use]
-    pub fn placeholder_extent(self) -> Option<(u32, u32)> {
-        match (self.width.pinned(), self.height.pinned()) {
-            (Some(width), Some(height)) => Some((width, height)),
-            // One axis pinned: the other follows the native aspect ratio, which
-            // is still unknown, so fall back to a square of the known extent.
-            (Some(width), None) => Some((width, width)),
-            (None, Some(height)) => Some((height, height)),
-            (None, None) => None,
-        }
-    }
-
     /// The size a `native_width` x `native_height` image should be drawn at.
     ///
     /// Mirrors GNU `compute_image_size` (src/image.c:2750) step for step.
@@ -1511,7 +1495,7 @@ impl ImageSizeSpec {
 
     /// Resolve source dimensions without prematurely rounding vector geometry.
     #[must_use]
-    pub fn desired_intrinsic(self, native: ImageIntrinsicExtent, scale: f64) -> (u32, u32) {
+    pub(crate) fn desired_intrinsic(self, native: ImageIntrinsicExtent, scale: f64) -> (u32, u32) {
         let (native_width, native_height) = native.dimensions();
 
         let (mut width, mut height) = match (self.width.target(scale), self.height.target(scale)) {

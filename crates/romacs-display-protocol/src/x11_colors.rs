@@ -30,7 +30,7 @@ include!(concat!(env!("OUT_DIR"), "/x11_colors.rs"));
 /// most significant 8 bits, which is what GNU does to the same 16-bit value
 /// when it makes the pixel (`lookup_rgb_color`, `src/image.c:6884-6892`).
 #[must_use]
-pub fn x11_hex_color(spec: &str) -> Option<(u8, u8, u8)> {
+pub(crate) fn x11_hex_color(spec: &str) -> Option<(u8, u8, u8)> {
     if !spec.starts_with('#') {
         return None;
     }

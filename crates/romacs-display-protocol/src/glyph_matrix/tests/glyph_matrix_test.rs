@@ -2923,7 +2923,8 @@ fn resolved_fonts_survive_materialize_and_round_trip() {
     state.faces.insert(FaceId::new(0), face);
     state.fonts.insert(
         font_id,
-        ResolvedFont { underline: Default::default(),
+        ResolvedFont {
+            underline: Default::default(),
             id: font_id,
             identity: ResolvedFontIdentity::from_file("/fonts/mono.ttf", 0, None),
             replay: FontReplay::Swash {

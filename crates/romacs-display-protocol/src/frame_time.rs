@@ -77,7 +77,7 @@ impl EventTime {
 
     /// As [`EventTime::plus`], but `None` rather than panicking on overflow.
     #[must_use]
-    pub fn checked_plus(self, after: Duration) -> Option<EventTime> {
+    pub(crate) fn checked_plus(self, after: Duration) -> Option<EventTime> {
         self.0.checked_add(after).map(EventTime)
     }
 

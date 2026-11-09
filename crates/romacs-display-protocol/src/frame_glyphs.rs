@@ -17,7 +17,8 @@ use crate::xwidget_extent::XwidgetPresentationGeometry;
 use crate::{ContentTransitionIntent, FrameSpace, GeometryRect, LogicalPixels};
 use rustc_hash::FxHashMap as HashMap;
 
-pub use crate::cursor::{CursorBarWidth, CursorKind, CursorSpec, CursorStyle};
+pub(crate) use crate::cursor::CursorBarWidth;
+pub use crate::cursor::{CursorKind, CursorSpec, CursorStyle};
 
 /// Semantic role of a glyph row emitted by layout.
 ///
@@ -393,7 +394,7 @@ pub enum FrameGlyph {
 impl FrameGlyph {
     /// Returns true if this glyph belongs to a chrome row
     /// that should be rendered above regular text rows.
-    pub fn is_chrome_row(&self) -> bool {
+    pub(crate) fn is_chrome_row(&self) -> bool {
         match self {
             FrameGlyph::Char { row_role, .. } => row_role.is_chrome(),
             FrameGlyph::Stretch { row_role, .. } => row_role.is_chrome(),
@@ -408,7 +409,7 @@ impl FrameGlyph {
     }
 
     /// Backward-compatible alias for callers not yet renamed.
-    pub fn is_overlay(&self) -> bool {
+    pub(crate) fn is_overlay(&self) -> bool {
         self.is_chrome_row()
     }
 
@@ -550,7 +551,7 @@ impl FrameGlyph {
     }
 
     /// Left edge of this glyph's cell; see [`FrameGlyph::cell_rect`].
-    pub fn cell_x(&self) -> Option<f32> {
+    pub(crate) fn cell_x(&self) -> Option<f32> {
         self.cell_rect().map(|(x, ..)| x)
     }
 
@@ -862,7 +863,7 @@ impl StipplePattern {
     /// Byte tokens may be hex (`0x01`), C char escapes (`'\x01'`, as GNU's own
     /// sources emit), or decimal. Returns `None` on a malformed file or when
     /// fewer than `(width+7)/8 * height` bytes are present.
-    pub fn from_xbm_source(text: &str) -> Option<Self> {
+    pub(crate) fn from_xbm_source(text: &str) -> Option<Self> {
         fn dimension(text: &str, suffix: &str) -> Option<u32> {
             text.lines().find_map(|line| {
                 let rest = line[line.find(suffix)? + suffix.len()..].trim_start();
@@ -1352,7 +1353,7 @@ const CHAR_HEIGHT_STABILITY_EPSILON_PX: f32 = 1.0;
 /// Returns `None` when the window's geometry moved, because retained pixels from
 /// a different presentation extent are not compatible transition inputs.
 #[must_use]
-pub fn derive_buffer_replacement_hint(
+pub(crate) fn derive_buffer_replacement_hint(
     prev: &WindowInfo,
     curr: &WindowInfo,
 ) -> Option<ContentTransitionHint> {
@@ -1402,7 +1403,7 @@ impl FrameGlyphBuffer {
     /// the face-id/table join and accidentally treating a stale font id as a
     /// usable partial binding.
     #[must_use]
-    pub fn default_resolved_font(&self) -> Option<&crate::font::ResolvedFont> {
+    pub(crate) fn default_resolved_font(&self) -> Option<&crate::font::ResolvedFont> {
         self.faces
             .get(&BasicFaceId::Default.into())
             .and_then(|face| face.default_resolved_font_id)
@@ -1489,7 +1490,7 @@ impl FrameGlyphBuffer {
     ///
     /// Deserialization establishes intrinsic map validity only; this operation
     /// atomically establishes renderer-safe contextual validity before storing.
-    pub fn install_presented_pointer_map(
+    pub(crate) fn install_presented_pointer_map(
         &mut self,
         mut map: crate::presented_pointer::PresentedPointerMap,
     ) -> Result<(), crate::presented_pointer::PresentedPointerMapError> {
@@ -1508,7 +1509,7 @@ impl FrameGlyphBuffer {
     }
 
     /// Resolve source slots against this canonical primitive table and install.
-    pub fn install_presented_pointer_source_map(
+    pub(crate) fn install_presented_pointer_source_map(
         &mut self,
         source: &crate::presented_pointer::PresentedPointerSourceMap,
     ) -> Result<(), crate::presented_pointer::PresentedPointerMapError> {
@@ -1676,7 +1677,7 @@ impl FrameGlyphBuffer {
 
     /// Clear all glyphs for a fresh full-frame rebuild.
     /// Called at the start of each frame by the matrix walker.
-    pub fn clear_all(&mut self) {
+    pub(crate) fn clear_all(&mut self) {
         self.glyphs.clear();
         self.frame_chrome = crate::frame_chrome::FrameChrome::default();
         self.presented_pointer = crate::presented_pointer::PresentedPointerMap::empty();
@@ -1855,7 +1856,7 @@ impl FrameGlyphBuffer {
     }
 
     /// Get font family for a face_id
-    pub fn get_face_font(&self, face_id: FaceId) -> &str {
+    pub(crate) fn get_face_font(&self, face_id: FaceId) -> &str {
         self.faces
             .get(&face_id)
             .map(|f| f.font_family.as_str())
@@ -1866,7 +1867,7 @@ impl FrameGlyphBuffer {
     ///
     /// Face ids are scoped to the owning frame buffer. Parent and child frames
     /// may legally reuse the same numeric id for different face data.
-    pub fn render_face(&self, face_id: FaceId) -> Option<&Face> {
+    pub(crate) fn render_face(&self, face_id: FaceId) -> Option<&Face> {
         self.faces.get(&face_id)
     }
 
@@ -1916,24 +1917,13 @@ impl FrameGlyphBuffer {
     }
 
     /// Get current font family
-    pub fn get_current_font_family(&self) -> &str {
+    pub(crate) fn get_current_font_family(&self) -> &str {
         &self.current_font_family
     }
 
-    /// Get current foreground color
-    pub fn get_current_fg(&self) -> Color {
-        self.current_fg
-    }
-
     /// Get current face background color (for stretch glyphs)
-    pub fn get_current_bg(&self) -> Option<Color> {
+    pub(crate) fn get_current_bg(&self) -> Option<Color> {
         self.current_bg
-    }
-
-    /// Temporarily set fg/bg colors for margin rendering.
-    pub fn set_colors(&mut self, fg: Color, bg: Option<Color>) {
-        self.current_fg = fg;
-        self.current_bg = bg;
     }
 
     /// Add a window background rectangle.
@@ -2013,7 +2003,7 @@ impl FrameGlyphBuffer {
     }
 
     /// Set current font size (for display property height scaling)
-    pub fn set_font_size(&mut self, size: f32) {
+    pub(crate) fn set_font_size(&mut self, size: f32) {
         self.current_font_size = size;
     }
 
@@ -2422,7 +2412,7 @@ impl FrameGlyphBuffer {
     /// grid-derived `PhysCursor`/`CursorItem` geometry is only an approximation
     /// that diverges from the glyph under scaled fonts). Style- and bidi-aware
     /// shaping (bar width, RTL alignment) is layered on top by the renderer.
-    pub fn cursor_cell_rect(
+    pub(crate) fn cursor_cell_rect(
         &self,
         slot_id: DisplaySlotId,
         fallback: (f32, f32, f32, f32),
@@ -2598,7 +2588,14 @@ impl FrameGlyphBuffer {
 
     /// Add terminal glyph (inline or window mode)
     #[cfg(feature = "romacs-term")]
-    pub fn add_terminal(&mut self, terminal_id: u32, x: f32, y: f32, width: f32, height: f32) {
+    pub(crate) fn add_terminal(
+        &mut self,
+        terminal_id: u32,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) {
         self.glyphs.push(FrameGlyph::Terminal {
             terminal_id,
             x,

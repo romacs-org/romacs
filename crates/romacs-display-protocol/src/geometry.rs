@@ -17,16 +17,16 @@ use serde::ser::SerializeStruct;
 use crate::types::LayoutUnit;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum RowSpace {}
+pub(crate) enum RowSpace {}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum WindowSpace {}
+pub(crate) enum WindowSpace {}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FrameSpace {}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum BandSpace {}
+pub(crate) enum BandSpace {}
 
 /// A child-frame origin measured in its immediate parent's content space.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -102,7 +102,7 @@ pub struct GeometryPoint<Space, Unit> {
 }
 
 impl<Space, Unit: GeometryUnit> GeometryPoint<Space, Unit> {
-    pub fn try_from_units(x: Unit, y: Unit) -> Result<Self, GeometryError> {
+    pub(crate) fn try_from_units(x: Unit, y: Unit) -> Result<Self, GeometryError> {
         if !x.valid_coordinate() || !y.valid_coordinate() {
             return Err(GeometryError::InvalidGeometry);
         }
@@ -444,9 +444,8 @@ where
     }
 }
 
-pub type LayoutPoint<Space> = GeometryPoint<Space, LayoutUnit>;
-pub type LayoutSize = GeometrySize<LayoutUnit>;
-pub type LayoutRect<Space> = GeometryRect<Space, LayoutUnit>;
+pub(crate) type LayoutPoint<Space> = GeometryPoint<Space, LayoutUnit>;
+pub(crate) type LayoutRect<Space> = GeometryRect<Space, LayoutUnit>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GeometryError {
@@ -545,7 +544,7 @@ impl<From, To> SpaceTranslation<From, To, LogicalPixels> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DeviceRect {
+pub(crate) struct DeviceRect {
     x: f32,
     y: f32,
     width: f32,
@@ -598,7 +597,7 @@ impl DeviceScale {
     }
 
     #[must_use]
-    pub fn map_frame_rect(self, rect: LayoutRect<FrameSpace>) -> DeviceRect {
+    pub(crate) fn map_frame_rect(self, rect: LayoutRect<FrameSpace>) -> DeviceRect {
         DeviceRect {
             x: rect.x().to_px() * self.0,
             y: rect.y().to_px() * self.0,

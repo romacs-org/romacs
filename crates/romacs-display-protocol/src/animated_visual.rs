@@ -148,7 +148,7 @@ impl SampleGrid {
     /// period belongs to the final sample rather than wrapping to slot zero,
     /// which would alias the loop's end onto its start.
     #[must_use]
-    pub fn slot_for(&self, wrapped: Duration) -> u32 {
+    pub(crate) fn slot_for(&self, wrapped: Duration) -> u32 {
         if wrapped >= self.period {
             return self.slot_count.saturating_sub(1);
         }

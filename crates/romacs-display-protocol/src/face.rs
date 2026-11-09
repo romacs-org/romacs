@@ -455,7 +455,7 @@ impl BoxBorderStyle {
     TryFromPrimitive,
 )]
 #[strum(serialize_all = "kebab-case")]
-pub enum BasicFaceId {
+pub(crate) enum BasicFaceId {
     Default = 0,
     ModeLineActive = 1,
     ModeLineInactive = 2,
@@ -480,10 +480,10 @@ pub enum BasicFaceId {
 
 impl BasicFaceId {
     /// One past the last basic face.  Dynamic face IDs start here.
-    pub const SENTINEL: u32 = 20;
+    pub(crate) const SENTINEL: u32 = 20;
 
     /// Look up a basic face by its canonical name.
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         name.parse().ok()
     }
 
@@ -717,12 +717,12 @@ impl Face {
     }
 
     /// Check if face is bold
-    pub fn is_bold(&self) -> bool {
+    pub(crate) fn is_bold(&self) -> bool {
         self.attributes.contains(FaceAttributes::BOLD) || self.font_weight >= 700
     }
 
     /// Check if face is italic
-    pub fn is_italic(&self) -> bool {
+    pub(crate) fn is_italic(&self) -> bool {
         self.attributes.contains(FaceAttributes::ITALIC)
     }
 
@@ -732,12 +732,12 @@ impl Face {
     }
 
     /// Get the underline color (foreground if not explicitly set)
-    pub fn get_underline_color(&self) -> Color {
+    pub(crate) fn get_underline_color(&self) -> Color {
         self.underline_color.unwrap_or(self.foreground)
     }
 
     /// Create a Pango font description string
-    pub fn to_pango_font_description(&self) -> String {
+    pub(crate) fn to_pango_font_description(&self) -> String {
         let mut desc = self.font_family.clone();
 
         if self.is_italic() {
@@ -759,7 +759,7 @@ impl Face {
 /// Layout must match the C `struct FaceDataFFI` in `romacsterm.c`.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
-pub struct FaceDataFFI {
+pub(crate) struct FaceDataFFI {
     /// Face ID
     pub face_id: u32,
     /// Foreground color (sRGB pixel: 0x00RRGGBB)
@@ -840,7 +840,7 @@ impl FaceDataFFI {
     /// # Safety
     /// Caller must ensure `font_family` and `font_file_path` pointers
     /// (if non-null) point to valid, null-terminated C strings.
-    pub unsafe fn to_face(&self) -> Face {
+    pub(crate) unsafe fn to_face(&self) -> Face {
         let font_family = if !self.font_family.is_null() {
             unsafe { CStr::from_ptr(self.font_family) }
                 .to_str()
@@ -957,7 +957,7 @@ impl FaceCache {
     }
 
     /// Get or create a face by ID
-    pub fn get_or_create(&mut self, id: FaceId) -> &Face {
+    pub(crate) fn get_or_create(&mut self, id: FaceId) -> &Face {
         // Check if exists
         if self.get(id).is_some() {
             return self.get(id).unwrap();
@@ -980,7 +980,7 @@ impl FaceCache {
     }
 
     /// Get default face (ID 0)
-    pub fn default_face(&self) -> Option<&Face> {
+    pub(crate) fn default_face(&self) -> Option<&Face> {
         self.get(FaceId::new(0))
     }
 }

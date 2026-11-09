@@ -3,7 +3,8 @@
 mod item;
 mod text;
 pub use item::{MenuAvailability, MenuItemKind};
-pub use text::{MeasuredMenu, MenuItemText, MenuPanelRole, MenuTextLayout, MenuTextRun};
+pub use text::{MeasuredMenu, MenuPanelRole};
+pub(crate) use text::{MenuItemText, MenuTextLayout, MenuTextRun};
 
 /// Correlates a native heading intent with the evaluator's menu response.
 /// Distinct from MenuToken: one intent can produce multiple menu revisions.
@@ -31,13 +32,6 @@ impl MenuToken {
             session: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             revision: 0,
         }
-    }
-
-    pub fn next_revision(&mut self) {
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .expect("menu revision exhausted");
     }
 }
 

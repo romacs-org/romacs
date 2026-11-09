@@ -303,7 +303,7 @@ impl CommandInputs {
     }
     /// Trace command execution with the first and last consumed input sequences.
     /// The returned scope owns its metadata and can outlive `complete(self, ...)`.
-    pub fn trace_span(&self, frame: u64) -> crate::present_trace::Span {
+    pub(crate) fn trace_span(&self, frame: u64) -> crate::present_trace::Span {
         crate::present_trace::Span::command(
             frame,
             self.tokens.first().map(|token| token.0),

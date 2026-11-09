@@ -228,7 +228,7 @@ pub struct ResolvedFontIdentity {
 /// This is intentionally not interchangeable with a collection face index:
 /// Fontconfig/FreeType also encode a named variable-font instance in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BackendFontSelector(u32);
+pub(crate) struct BackendFontSelector(u32);
 
 impl BackendFontSelector {
     const fn from_raw(raw: u32) -> Self {
@@ -280,7 +280,7 @@ impl ResolvedFontIdentity {
     /// the stable key records only the collection face and exact variations.
     /// This makes an instance discovered through CoreText or DirectWrite
     /// identical to the same instance discovered through another catalog.
-    pub fn from_platform_file_with_variations(
+    pub(crate) fn from_platform_file_with_variations(
         backend: FontBackendKind,
         file_path: &str,
         face_selector: u32,
@@ -348,7 +348,7 @@ impl ResolvedFontIdentity {
     }
 
     /// The opaque selector value for diagnostics and platform-native APIs.
-    pub fn backend_selector(&self) -> u32 {
+    pub(crate) fn backend_selector(&self) -> u32 {
         self.face_selector.raw()
     }
 
@@ -372,7 +372,7 @@ impl ResolvedFontIdentity {
     }
 
     /// FreeType named-instance index carried by a Fontconfig selector.
-    pub fn named_instance_index(&self) -> Option<u32> {
+    pub(crate) fn named_instance_index(&self) -> Option<u32> {
         match self.backend {
             FontBackendKind::Fontconfig => {
                 let index = (self.face_selector.raw() >> 16) & 0x7fff;
@@ -759,7 +759,7 @@ pub enum ResolvedFontAdvance {
 
 impl ResolvedFontAdvance {
     #[must_use]
-    pub fn fixed_cell(advance_px: f32) -> Self {
+    pub(crate) fn fixed_cell(advance_px: f32) -> Self {
         FontAdvancePx::new(advance_px)
             .map(Self::FixedCell)
             .unwrap_or(Self::PerGlyph)
@@ -842,7 +842,12 @@ pub struct FontUnderline {
 }
 
 impl Default for FontUnderline {
-    fn default() -> Self { Self { position: -1, thickness: 0 } }
+    fn default() -> Self {
+        Self {
+            position: -1,
+            thickness: 0,
+        }
+    }
 }
 
 impl FontUnderline {
@@ -850,7 +855,14 @@ impl FontUnderline {
     /// ftcrfont_open raises a line thicker than 2 pixels by half its
     /// thickness.
     pub fn scaled(position: i32, thickness: i32) -> Self {
-        Self { position: if thickness > 2 { position - thickness / 2 } else { position }, thickness }
+        Self {
+            position: if thickness > 2 {
+                position - thickness / 2
+            } else {
+                position
+            },
+            thickness,
+        }
     }
 }
 

@@ -150,7 +150,7 @@ impl PhysicalModifierKey {
 /// Construction is struct-literal only, so adding a family is a compile
 /// error at every construction site rather than a silently-dropped slot.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct ModifierPolicyParts {
+pub(crate) struct ModifierPolicyParts {
     pub command_left: ModifierAssignment,
     pub command_right: SideAssignment,
     pub option_left: ModifierAssignment,
@@ -187,7 +187,7 @@ impl From<ModifierPolicyParts> for ModifierPolicy {
 /// being resolved away: [`ModifierPolicy::assignment`] resolves it at read
 /// time against the live left value.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub enum SideAssignment {
+pub(crate) enum SideAssignment {
     /// GNU's `left' marker: use the family's left assignment.
     #[default]
     InheritLeft,
@@ -348,7 +348,7 @@ impl ModifierPolicy {
     /// values when re-deriving a character with `UCKeyTranslate'; the
     /// function-kind slot matters for function-key chords because the same
     /// resolution is consulted with the event's kind.
-    pub fn option_is_command_like(&self, kind: ModifierEventKind) -> bool {
+    pub(crate) fn option_is_command_like(&self, kind: ModifierEventKind) -> bool {
         self.family_bits_for_option(Some(ModifierSideState::LeftOnly), kind) != 0
             || self.family_bits_for_option(Some(ModifierSideState::RightOnly), kind) != 0
     }
@@ -435,11 +435,7 @@ impl ModifierPolicy {
         self.with_command_assignment(Some(value))
     }
 
-    pub fn with_command_none(self) -> Self {
-        self.with_command_assignment(None)
-    }
-
-    pub fn with_command_assignment(self, value: Option<EmacsModifierKey>) -> Self {
+    pub(crate) fn with_command_assignment(self, value: Option<EmacsModifierKey>) -> Self {
         Self {
             command: ModifierFamily {
                 left: ModifierAssignment::uniform(value),
@@ -484,16 +480,6 @@ impl ModifierPolicy {
                     mouse,
                 },
                 right: self.option.right,
-            },
-            ..self
-        }
-    }
-
-    pub fn with_right_option(self, value: EmacsModifierKey) -> Self {
-        Self {
-            option: ModifierFamily {
-                right: SideAssignment::Explicit(ModifierAssignment::uniform(Some(value))),
-                ..self.option
             },
             ..self
         }

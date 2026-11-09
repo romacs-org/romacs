@@ -174,7 +174,7 @@ pub struct DampingRatio(f32);
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, serde::Serialize)]
 #[serde(transparent)]
-pub struct DevicePixels(f32);
+pub(crate) struct DevicePixels(f32);
 
 const fn validate_positive_motion_parameter(value: &f32) -> Result<(), MotionSpecError> {
     if !value.is_finite() {

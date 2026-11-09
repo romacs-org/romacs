@@ -31,7 +31,8 @@ fn frame_default_resolved_font_is_one_coherent_binding_lookup() {
     frame.faces.insert(default_face.id, default_face);
     frame.fonts.insert(
         font_id,
-        ResolvedFont { underline: Default::default(),
+        ResolvedFont {
+            underline: Default::default(),
             id: font_id,
             identity: ResolvedFontIdentity::from_file("/test-fixtures/default-font.ttf", 0, None),
             replay: FontReplay::Swash {

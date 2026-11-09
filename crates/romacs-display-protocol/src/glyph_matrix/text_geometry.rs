@@ -9,7 +9,7 @@ use crate::types::Rect;
 
 /// Index in the visually ordered TEXT_AREA array, including padding entries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct VisualTextGlyphIndex(u16);
+pub(crate) struct VisualTextGlyphIndex(u16);
 
 impl VisualTextGlyphIndex {
     pub const fn new(index: u16) -> Self {
@@ -19,7 +19,7 @@ impl VisualTextGlyphIndex {
 
 /// Materialized column relative to TEXT_AREA, excluding structural margins.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TextSlotColumn(u16);
+pub(crate) struct TextSlotColumn(u16);
 
 impl TextSlotColumn {
     pub const fn new(column: u16) -> Self {
@@ -29,7 +29,7 @@ impl TextSlotColumn {
 
 /// A borrowed geometry view: the row cannot change while its mappings are
 /// being consumed. Construct after bidi/decorations for final placement.
-pub struct TextRowGeometry<'row> {
+pub(crate) struct TextRowGeometry<'row> {
     row: &'row GlyphRow,
     char_width: f32,
     origin_x: f32,
@@ -59,7 +59,7 @@ impl<'row> TextRowGeometry<'row> {
         self.origin_x
     }
 
-    pub fn x_at_glyph(&self, index: VisualTextGlyphIndex) -> Option<f32> {
+    pub(crate) fn x_at_glyph(&self, index: VisualTextGlyphIndex) -> Option<f32> {
         let preceding = self.row.glyphs[GlyphArea::Text.index()].get(..usize::from(index.0))?;
         Some(
             self.origin_x
@@ -71,7 +71,7 @@ impl<'row> TextRowGeometry<'row> {
         )
     }
 
-    pub fn x_at_slot(&self, target: TextSlotColumn) -> Option<f32> {
+    pub(crate) fn x_at_slot(&self, target: TextSlotColumn) -> Option<f32> {
         let mut x = self.origin_x;
         let mut col = 0_u16;
         for glyph in &self.row.glyphs[GlyphArea::Text.index()] {

@@ -352,26 +352,6 @@ pub fn record_draw(stage: Stage, frame: u64, presentation: PresentationId, draw_
     }
 }
 
-pub fn detail_span(
-    start: Stage,
-    end: Stage,
-    frame: u64,
-    presentation: Option<PresentationId>,
-    detail: &str,
-) -> Span {
-    let span = Span {
-        end: enabled().then_some(end),
-        frame,
-        presentation: presentation.unwrap_or_else(|| PresentationId::new(0)),
-        inputs: (None, None),
-        detail: enabled().then(|| detail.to_owned()),
-    };
-    if span.end.is_some() {
-        span.record(start);
-    }
-    span
-}
-
 pub fn record_detail(stage: Stage, frame: u64, presentation: PresentationId, detail: &str) {
     if let Some(recorder) = recorder()
         && let Some(mut record) = stamp_with(recorder, stage, frame, presentation, sample)

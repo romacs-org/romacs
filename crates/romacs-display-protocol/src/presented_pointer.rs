@@ -123,7 +123,7 @@ impl PresentedResizeAxis {
 /// A leading horizontal handle is used when vertical scroll bars are on the
 /// left; GNU then asks Lisp to resize the window on the handle's left.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum PresentedResizeEdge {
+pub(crate) enum PresentedResizeEdge {
     Leading,
     Trailing,
 }
@@ -133,7 +133,7 @@ pub enum PresentedResizeEdge {
 /// Unlike structural hit regions, a handle is allowed to overlap fringes,
 /// margins, or text. Resolution gives handles precedence over those regions.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct PresentedResizeHandle {
+pub(crate) struct PresentedResizeHandle {
     window: DisplayWindowId,
     axis: PresentedResizeAxis,
     edge: PresentedResizeEdge,
@@ -617,7 +617,7 @@ impl std::error::Error for PresentedHitError {}
 /// are immutable and may be queried concurrently by rendering and input
 /// threads; they must contain no mutator-local Lisp state. The index publishes
 /// materialized positions through a `OnceLock`, at most once per index.
-pub trait PresentedTextPositionSource: Send + Sync + std::fmt::Debug {
+pub(crate) trait PresentedTextPositionSource: Send + Sync + std::fmt::Debug {
     fn text_positions(&self) -> Result<Vec<PresentedTextPosition>, PresentedHitError>;
 
     /// Resolve within one window without flattening the frame, if supported.
@@ -647,7 +647,7 @@ pub trait PresentedTextPositionSource: Send + Sync + std::fmt::Debug {
 
 /// A direct immutable-source lookup, distinct from an unsupported lookup.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PresentedTextPositionHit {
+pub(crate) enum PresentedTextPositionHit {
     Unsupported,
     Resolved(Result<Option<PresentedTextPosition>, PresentedHitError>),
 }
@@ -862,7 +862,7 @@ impl PresentedHitIndex {
         Self::from_parts_with_strings(presentation, regions, text_positions, Vec::new())
     }
 
-    pub fn from_parts_with_strings(
+    pub(crate) fn from_parts_with_strings(
         presentation: PresentationId,
         regions: Vec<PresentedHitRegion>,
         text_positions: Vec<PresentedTextPosition>,
@@ -922,7 +922,7 @@ impl PresentedHitIndex {
 
     /// Attach typed interaction overlays without weakening the structural
     /// window-region partition.
-    pub fn with_resize_handles(
+    pub(crate) fn with_resize_handles(
         mut self,
         resize_handles: Vec<PresentedResizeHandle>,
     ) -> Result<Self, PresentedHitError> {
@@ -1162,7 +1162,7 @@ impl PresentedHitIndex {
     }
 
     #[must_use]
-    pub fn resize_handles(&self) -> &[PresentedResizeHandle] {
+    pub(crate) fn resize_handles(&self) -> &[PresentedResizeHandle] {
         &self.resize_handles
     }
 
@@ -1182,7 +1182,7 @@ impl PresentedHitIndex {
     /// the eager positions. Invalid geometry is logged and yields no text
     /// position, where the eager index refused the frame.
     #[must_use]
-    pub fn with_deferred_text(
+    pub(crate) fn with_deferred_text(
         mut self,
         source: std::sync::Arc<dyn PresentedTextPositionSource>,
     ) -> Self {
@@ -1192,12 +1192,12 @@ impl PresentedHitIndex {
 
     /// Whether the text positions are still to be built.
     #[must_use]
-    pub fn text_deferred(&self) -> bool {
+    pub(crate) fn text_deferred(&self) -> bool {
         self.text.built.get().is_none()
     }
 
     #[must_use]
-    pub fn string_positions(&self) -> &[PresentedStringPosition] {
+    pub(crate) fn string_positions(&self) -> &[PresentedStringPosition] {
         &self.string_positions
     }
 

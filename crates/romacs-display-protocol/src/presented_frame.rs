@@ -18,8 +18,6 @@ pub type ParentFrameRect = GeometryRect<ParentFrameSpace, LogicalPixels>;
 /// A derived frame rectangle in root-surface coordinates.
 pub type RootSurfaceRect = GeometryRect<RootSurfaceSpace, LogicalPixels>;
 
-pub type FramePlacementError = GeometryError;
-
 /// Explicit placement of one presented frame in its immediate parent's content
 /// coordinate space. Root placement is always `(0, 0)` and never includes
 /// desktop/window-manager offsets or frame chrome adjustments.

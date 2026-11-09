@@ -64,12 +64,24 @@ fn a_disabled_slot_and_the_master_switch_both_resolve_to_instant() {
 #[test]
 fn the_layer_slots_ship_the_design_note_s_durations() {
     let millis = |slot: ChildFrameAnimation| match slot.motion(globals()) {
-        MotionSpec::Tween(tween) => ((tween.duration.get().as_secs_f64() * 1000.0).round() as u64, tween.easing),
+        MotionSpec::Tween(tween) => (
+            (tween.duration.get().as_secs_f64() * 1000.0).round() as u64,
+            tween.easing,
+        ),
         other => panic!("{other:?} is not a tween"),
     };
-    assert_eq!(millis(default_child_frame_close()), (90, TransitionEasing::EaseOutCubic));
-    assert_eq!(millis(default_child_frame_resize()), (80, TransitionEasing::EaseOutCubic));
-    assert_eq!(millis(default_child_frame_selection()), (60, TransitionEasing::EaseOutCubic));
+    assert_eq!(
+        millis(default_child_frame_close()),
+        (90, TransitionEasing::EaseOutCubic)
+    );
+    assert_eq!(
+        millis(default_child_frame_resize()),
+        (80, TransitionEasing::EaseOutCubic)
+    );
+    assert_eq!(
+        millis(default_child_frame_selection()),
+        (60, TransitionEasing::EaseOutCubic)
+    );
 }
 
 #[test]

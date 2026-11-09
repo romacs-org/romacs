@@ -34,7 +34,7 @@ impl PosnPointRole {
 /// count, and a disabled/missing row. Never infer this from physical width.
 /// Independent mutators may copy this immutable numeric observation without sharing Lisp state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PosnObjectExtent {
+pub(crate) enum PosnObjectExtent {
     Undrawn,
     Glyph { width: i64, height: i64 },
     RowFallback { height: i64 },
@@ -57,7 +57,7 @@ impl PosnObjectExtent {
 /// One exclusive producer initializes each owned row; readers share it only through
 /// an immutable retained snapshot, with no Lisp state or shared mutable row cache.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PosnMatrixRow {
+pub(crate) struct PosnMatrixRow {
     pub enabled: bool,
     pub y: i64,
     pub height: i64,
@@ -70,7 +70,7 @@ pub struct PosnMatrixRow {
 /// query's matrix. All fields are numbers; independent mutators/readers may
 /// share a fully initialized snapshot through Arc.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PosnMatrixSnapshot {
+pub(crate) struct PosnMatrixSnapshot {
     pub rows: Vec<PosnMatrixRow>,
 }
 
@@ -81,7 +81,7 @@ impl PosnMatrixSnapshot {
     /// zero-width characters and contextual/automatic-composition padding
     /// have different ownership in the TTY adapter. The caller supplies its
     /// immutable GNU character-width table; no Lisp state is retained.
-    pub fn from_terminal_matrix(
+    pub(crate) fn from_terminal_matrix(
         matrix: &GlyphMatrix,
         character_width: impl Fn(char) -> usize + Copy,
     ) -> Self {
@@ -99,56 +99,6 @@ impl PosnMatrixSnapshot {
                 })
                 .collect(),
         }
-    }
-
-    /// Final matrix plus the terminal adapter's structural area partition.
-    /// GNU stores default-face tail spaces as used TEXT glyphs. Neo leaves
-    /// those cells implicit until TTY rasterization, so retain that same fill
-    /// boundary here rather than undercounting an old short row after an edit.
-    /// Physical clipping still follows the exact TTY adapter row/index rule.
-    pub fn from_terminal_window(
-        state: &FrameDisplayState,
-        entry: &WindowMatrixEntry,
-        character_width: impl Fn(char) -> usize + Copy,
-    ) -> Self {
-        let mut retained = Self::from_terminal_matrix(&entry.matrix, character_width);
-        let char_width = state.char_width.max(1.0);
-        let char_height = state.char_height.max(1.0);
-        for (index, (raw, row)) in entry.matrix.rows.iter().zip(&mut retained.rows).enumerate() {
-            let bounds = entry.row_pixel_bounds(raw.role);
-            let area_layout = state.glyph_row_area_layout(entry, raw.role);
-            let grid_y = ((bounds.y / char_height).round().max(0.0) as i64)
-                .saturating_add(i64::try_from(index).unwrap_or(i64::MAX));
-            let frame_rows = i64::try_from(state.frame_rows).unwrap_or(i64::MAX);
-            if grid_y < 0 || grid_y >= frame_rows {
-                row.enabled = false;
-            }
-            if let GlyphAreaPlacement::Structural(geometry) = area_layout.placement(GlyphArea::Text)
-            {
-                let top = (geometry.clip().y / char_height).round() as i64;
-                let height = (geometry.clip().height / char_height).ceil().max(0.0) as i64;
-                if grid_y < top || grid_y >= top.saturating_add(height) {
-                    row.enabled = false;
-                }
-                if row.enabled {
-                    let left = (geometry.bounds().x / char_width).round() as i64;
-                    let end = tty_text_fill_right_edge(
-                        area_layout,
-                        !raw.glyphs[GlyphArea::RightMargin.index()].is_empty(),
-                        char_width,
-                        0,
-                        i64::try_from(state.frame_cols).unwrap_or(i64::MAX),
-                    );
-                    // The emitted cells and terminal default tail own this
-                    // area. Frame-wide clears never enter this calculation.
-                    let slots =
-                        usize::try_from(end.saturating_sub(left).max(0)).unwrap_or(usize::MAX);
-                    row.areas[GlyphArea::Text.index()] =
-                        row.areas[GlyphArea::Text.index()].max(slots);
-                }
-            }
-        }
-        retained
     }
 
     pub fn at(&self, row: i64, column: i64, area: GlyphArea) -> PosnObjectExtent {
@@ -171,7 +121,7 @@ impl PosnMatrixSnapshot {
         }
     }
 
-    pub fn at_y(&self, y: i64, column: i64, area: GlyphArea) -> PosnObjectExtent {
+    pub(crate) fn at_y(&self, y: i64, column: i64, area: GlyphArea) -> PosnObjectExtent {
         // GNU marginal_area_string stops at the first disabled current row;
         // it does not skip holes to reach a later enabled mode-line slot.
         let Some((index, _)) = self
@@ -242,40 +192,6 @@ pub(crate) fn terminal_area_used_cells(
         index += 1 + consumed;
     }
     used
-}
-
-/// Exact local-column boundary of the TTY text-tail writer. This pure numeric
-/// helper is shared with TtyRif; captured posns cannot reconstruct its ownership
-/// by looking at physical point widths. Unpartitioned frame chrome preserves
-/// its existing fallback boundary and has no window current-matrix authority.
-pub fn tty_text_fill_right_edge(
-    area_layout: GlyphRowAreaLayout,
-    has_right_glyphs: bool,
-    char_width: f32,
-    frame_origin_col: i64,
-    screen_width: i64,
-) -> i64 {
-    if !has_right_glyphs {
-        match area_layout.placement(GlyphArea::Text) {
-            GlyphAreaPlacement::Structural(geometry) => frame_origin_col
-                .saturating_add((geometry.bounds().right() / char_width).round() as i64),
-            GlyphAreaPlacement::FollowingPreviousArea => screen_width,
-        }
-    } else {
-        match area_layout.placement(GlyphArea::RightMargin) {
-            GlyphAreaPlacement::Structural(geometry) => {
-                frame_origin_col.saturating_add((geometry.bounds().x / char_width).round() as i64)
-            }
-            GlyphAreaPlacement::FollowingPreviousArea => frame_origin_col.saturating_add(
-                (area_layout
-                    .structural_coverage()
-                    .map(|coverage| coverage.right())
-                    .unwrap_or(screen_width as f32)
-                    / char_width)
-                    .round() as i64,
-            ),
-        }
-    }
 }
 
 #[cfg(test)]

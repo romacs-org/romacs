@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Exact row completed by its exclusive frame mutator before publication.
 /// Readers share immutable Arcs; cells contain no Lisp state or mutation lock.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PosnFramePoolRow {
+pub(crate) struct PosnFramePoolRow {
     pub enabled: bool,
     pub height: i64,
     /// Accepted FRAME used[TEXT_AREA], including zero-metric space-glyph fill.
@@ -27,7 +27,7 @@ pub struct PosnFramePoolRow {
 /// An independent mutator may read this immutable record; IDs and integer
 /// geometry authorize a typed row-copy operation, never cache Lisp values.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PosnFramePoolPartition {
+pub(crate) struct PosnFramePoolPartition {
     pub window: i64,
     pub first_row: i64,
     pub row_count: usize,
@@ -39,7 +39,7 @@ pub struct PosnFramePoolPartition {
 /// Replacement occurs at accepted publication; readers retain immutable Arcs.
 /// There is no production TLS, shared mutable row or pointer-identity admission.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PosnFramePool {
+pub(crate) struct PosnFramePool {
     pub columns: usize,
     pub lines: usize,
     pub rows: Vec<PosnFramePoolRow>,
@@ -59,7 +59,7 @@ impl PosnFramePool {
     /// Observe final producer row provenance after the accepted layout seals.
     /// New full-width partitions record appends and explicit zero-space fill;
     /// copies require the preceding same-window allocation and typed shift.
-    pub fn from_terminal_frame(
+    pub(crate) fn from_terminal_frame(
         state: &FrameDisplayState,
         previous: Option<&Self>,
         character_width: impl Fn(char) -> usize + Copy,
@@ -283,7 +283,7 @@ impl PosnFramePool {
     }
 
     /// Owner reuse is allowed only after all new accepted observations agree.
-    pub fn retains_same_observations(&self, old: &Self) -> bool {
+    pub(crate) fn retains_same_observations(&self, old: &Self) -> bool {
         self.columns == old.columns
             && self.lines == old.lines
             && self.partitions == old.partitions
@@ -298,7 +298,7 @@ impl PosnFramePool {
 
     /// Borrowed fake-current-matrix partition read. The live leaf supplies
     /// area used counts; exact numeric values and enabled metadata stay accepted.
-    pub fn at_partition(
+    pub(crate) fn at_partition(
         &self,
         first_row: i64,
         row_count: usize,
@@ -341,7 +341,7 @@ impl PosnFramePool {
 
 /// Independently owned query view sharing immutable accepted numeric cells.
 #[derive(Clone, Debug)]
-pub struct PosnFramePoolSlice {
+pub(crate) struct PosnFramePoolSlice {
     pub pool: Arc<PosnFramePool>,
     pub first_row: i64,
     pub row_count: usize,
