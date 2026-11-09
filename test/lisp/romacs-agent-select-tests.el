@@ -12,6 +12,11 @@
   (require 'romacs-agent)
   (require 'romacs-agent-ui))
 
+;; Codex's app-server driver is persistent: a per-turn harness is a test
+;; harness's.
+(romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"
+                             :config-default "~/.perturn")
+
 (defmacro romacs-agent-select-tests--with (fields &rest body)
   "BODY with `session', of FIELDS, recorded in a private directory."
   (declare (indent 1))
@@ -239,7 +244,7 @@
 (ert-deftest romacs-agent-select-free-harness ()
   (cl-flet ((free (state &optional per-turn live)
               (romacs-agent-select-tests--with (:state state :caught-up t
-                                                       :harness (if per-turn 'codex 'claude))
+                                                       :harness (if per-turn 'perturn 'claude))
                 (cl-letf (((symbol-function 'process-live-p) (lambda (_process) live)))
                   (romacs-agent--harness-free-p session)))))
     (should-not (free 'running nil t))
