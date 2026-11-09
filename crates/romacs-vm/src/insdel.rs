@@ -455,17 +455,20 @@ impl Vm {
     }
 
     /// Run a storage kernel on ARGS outside the engine's registers, which
-    /// point into its own stack: the kernel gets the reused kernel stack.
+    /// point into its own stack: the kernel gets the reused kernel stack, and
+    /// the engine's stay traced beneath it, whatever the kernel comes to do.
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
         let mut kernel = std::mem::take(&mut self.kernel_stack);
         kernel.clear();
         kernel.extend_from_slice(args);
-        let saved = std::mem::replace(&mut self.stack, kernel);
+        self.suspend_stack();
+        self.stack = kernel;
         self.change_prepared = true;
         let result = run(self, args.len());
         self.change_prepared = false;
-        self.kernel_stack = std::mem::replace(&mut self.stack, saved);
+        self.kernel_stack = std::mem::take(&mut self.stack);
+        self.resume_stack();
         result.map_err(Fault::Error)
     }
 
@@ -648,5 +651,23 @@ impl Vm {
         }
         found.sort_unstable_by_key(|&(birth, ..)| std::cmp::Reverse(birth));
         Ok(found.into_iter().map(|(_, marker, position, insertion)| (marker, position, insertion)).collect())
+    }
+}
+
+#[cfg(test)]
+mod kernel_tests {
+    use crate::{Value, Vm};
+
+    /// A kernel runs outside the engine's registers, which stay traced beneath
+    /// it: what only they hold outlives a collection there.
+    #[test]
+    fn an_engines_registers_are_traced_under_a_kernel() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        let held = vm.alloc_cons(Value::NIL, Value::NIL);
+        vm.stack.push(held);
+        assert!(vm.edit_kernel(&[], |vm, _| { vm.collect(&mut []); Ok(Value::NIL) }).is_ok());
+        assert_eq!(vm.stack.pop(), Some(held));
+        assert!(!vm.conses.is_free(held.index(3).unwrap()), "the engine's register lost what it held");
     }
 }
