@@ -202,5 +202,4 @@ impl Default for MediaBudget {
 }
 
 #[cfg(test)]
-#[path = "media_budget/tests/media_budget_test.rs"]
 mod tests;

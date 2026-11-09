@@ -562,5 +562,4 @@ impl DeviceScale {
 }
 
 #[cfg(test)]
-#[path = "geometry/tests/geometry_test.rs"]
 mod tests;

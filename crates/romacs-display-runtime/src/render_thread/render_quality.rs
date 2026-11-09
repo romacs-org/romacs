@@ -457,5 +457,4 @@ fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {
 }
 
 #[cfg(test)]
-#[path = "render_quality/tests/render_quality_test.rs"]
 mod tests;

@@ -223,5 +223,4 @@ impl Drop for ModelLoader {
 }
 
 #[cfg(test)]
-#[path = "loader/tests.rs"]
 mod tests;

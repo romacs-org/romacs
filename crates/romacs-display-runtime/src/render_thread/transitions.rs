@@ -608,5 +608,4 @@ pub(super) fn render_frame_transitions(
 // ==========================================================================
 
 #[cfg(test)]
-#[path = "transitions/tests/transitions_test.rs"]
 mod tests;

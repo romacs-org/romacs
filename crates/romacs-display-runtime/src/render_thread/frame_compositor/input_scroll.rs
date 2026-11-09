@@ -261,5 +261,4 @@ impl InputScroll {
 }
 
 #[cfg(test)]
-#[path = "input_scroll/tests/input_scroll_test.rs"]
 mod tests;

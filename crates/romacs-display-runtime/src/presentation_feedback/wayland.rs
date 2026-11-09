@@ -387,5 +387,4 @@ impl Drop for PresentationObserver {
 }
 
 #[cfg(test)]
-#[path = "tests/wayland_test.rs"]
 mod tests;

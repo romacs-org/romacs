@@ -897,5 +897,4 @@ fn glide_frame(frame: &FrameGlyphBuffer, from_y: f32) -> Option<FrameGlyphBuffer
 }
 
 #[cfg(test)]
-#[path = "child_frames/tests/child_frames_test.rs"]
 mod tests;
