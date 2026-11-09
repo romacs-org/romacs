@@ -738,7 +738,7 @@ impl Decode {
     /// drops both frame selection and animation metadata. Route animated
     /// formats through `AnimationDecoder` first, then use the still-image path
     /// only for frame zero.
-    pub fn decode_raster_data(
+    fn decode_raster_data(
         data: EncodedBytes,
         frame: ImageFrameIndex,
         sequence_cache: &ImageSequenceCache,
@@ -773,7 +773,7 @@ impl Decode {
     /// policy does not materialize (disabled policy, no plan, no loop), so
     /// this arm falling through is the ordinary static path, and the
     /// fallback ladder still ends at GNU's single-frame behavior.
-    pub fn decode_computed_sequence_data(
+    fn decode_computed_sequence_data(
         data: EncodedBytes,
         frame: ImageFrameIndex,
         sequence_cache: &ImageSequenceCache,
