@@ -55,18 +55,6 @@ fn finite_loop_permission_is_consumed_without_an_untyped_counter_sentinel() {
 }
 
 #[test]
-fn import_policy_orders_direct_gpu_copy_and_cpu_fallback_explicitly() {
-    assert!(
-        FrameImportPolicy::RequireDirectSurface
-            .permits(VideoCompositorImport::BorrowedNativeSurface)
-    );
-    assert!(!FrameImportPolicy::RequireDirectSurface.permits(VideoCompositorImport::GpuBlit));
-    assert!(FrameImportPolicy::AllowGpuBlit.permits(VideoCompositorImport::GpuBlit));
-    assert!(!FrameImportPolicy::AllowGpuBlit.permits(VideoCompositorImport::CpuUpload));
-    assert!(FrameImportPolicy::AllowCpuUpload.permits(VideoCompositorImport::CpuUpload));
-}
-
-#[test]
 fn renderer_recovery_advances_a_nonzero_gpu_generation() {
     assert_eq!(GpuGeneration::INITIAL.get(), 1);
     assert_eq!(GpuGeneration::INITIAL.next().get(), 2);
@@ -470,9 +458,7 @@ fn service_preserves_the_next_future_frame_then_imports_the_latest_due_frame() {
             output_reconfigurations: 0,
             import_counts: super::VideoImportCounts {
                 borrowed_native_frames: 1,
-                gpu_blit_frames: 0,
                 cpu_upload_frames: 0,
-                reported_gpu_blit_bytes: 0,
                 cpu_upload_bytes: 0,
             },
             presentation_counts: super::VideoPresentationCounts::default(),
@@ -1350,7 +1336,7 @@ impl DecoderBackend for TimingDecoder {
 struct TimingPlatform;
 
 impl Platform for TimingPlatform {
-    const BACKEND: super::VideoDecodeBackend = super::VideoDecodeBackend::AvFoundation;
+    const BACKEND: super::VideoDecodeBackend = super::VideoDecodeBackend::GStreamer;
     type Frame = u64;
     type Sampled = u64;
     type Decoder = TimingDecoder;

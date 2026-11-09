@@ -763,7 +763,6 @@ pub enum VideoDecodeResidency {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VideoCompositorImport {
     BorrowedNativeSurface,
-    GpuBlit,
     CpuUpload,
 }
 
@@ -771,14 +770,12 @@ pub enum VideoCompositorImport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoPresentationPath {
     WgpuComposited,
-    NativeOverlay,
 }
 
 /// Independently observable evidence for one compositor-visible frame.
 ///
 /// Keeping the axes separate makes it impossible to use a direct GPU import
-/// as proof of hardware decoding, or to confuse native overlay promotion with
-/// a sampleable texture.
+/// as proof of hardware decoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VideoFramePath {
     decode_residency: VideoDecodeResidency,
@@ -817,22 +814,19 @@ impl VideoFramePath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameImportPolicy {
     RequireDirectSurface,
-    AllowGpuBlit,
     AllowCpuUpload,
 }
 
 impl FrameImportPolicy {
-    /// Romacs's product default: preserve GPU residency while allowing one
-    /// observable native GPU blit for platforms and drivers that cannot lend
-    /// decoder/player surfaces directly. CPU upload remains explicit opt-in.
-    pub const PERFORMANCE_DEFAULT: Self = Self::AllowGpuBlit;
+    /// Romacs's product default: frames stay GPU-resident. CPU upload is an
+    /// explicit opt-in.
+    pub const PERFORMANCE_DEFAULT: Self = Self::RequireDirectSurface;
 
     pub const fn permits(self, import: VideoCompositorImport) -> bool {
         match self {
             Self::RequireDirectSurface => {
                 matches!(import, VideoCompositorImport::BorrowedNativeSurface)
             }
-            Self::AllowGpuBlit => !matches!(import, VideoCompositorImport::CpuUpload),
             Self::AllowCpuUpload => true,
         }
     }
@@ -841,9 +835,6 @@ impl FrameImportPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoDecodeBackend {
     GStreamer,
-    AvFoundation,
-    MediaFoundation,
-    Unsupported,
 }
 
 /// Evidence reported by the native playback backend about the selected codec
@@ -895,9 +886,7 @@ pub struct VideoRendererIdentity {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct VideoImportCounts {
     pub borrowed_native_frames: u64,
-    pub gpu_blit_frames: u64,
     pub cpu_upload_frames: u64,
-    pub reported_gpu_blit_bytes: u64,
     pub cpu_upload_bytes: u64,
 }
 
@@ -1046,8 +1035,6 @@ impl VideoDiagnostics {
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum VideoInitError {
-    #[error("video playback is unsupported on this platform")]
-    UnsupportedPlatform,
     #[error("{backend:?} requires compositor import {path:?}, forbidden by {policy:?}")]
     ImportForbidden {
         backend: VideoDecodeBackend,
