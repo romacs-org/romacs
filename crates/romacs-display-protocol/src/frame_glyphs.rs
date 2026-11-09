@@ -7,7 +7,7 @@
 use crate::effect_config::EffectsConfig;
 use crate::face::FrameFaceMap;
 use crate::face::{
-    BasicFaceId, BoxBorderStyle, BoxType, BoxVerticalEdges, Face, FaceAttributes, UnderlineStyle,
+    BoxBorderStyle, BoxType, BoxVerticalEdges, Face, FaceAttributes, UnderlineStyle,
 };
 use crate::types::{
     Color, DisplayFrameId, DisplayWindowId, FaceId, ImageId, Px, Rect, SurfaceId, VideoId,
@@ -17,7 +17,6 @@ use crate::xwidget_extent::XwidgetPresentationGeometry;
 use crate::{ContentTransitionIntent, FrameSpace, GeometryRect, LogicalPixels};
 use rustc_hash::FxHashMap as HashMap;
 
-pub(crate) use crate::cursor::CursorBarWidth;
 pub use crate::cursor::{CursorKind, CursorSpec, CursorStyle};
 
 /// Semantic role of a glyph row emitted by layout.
@@ -392,6 +391,7 @@ pub enum FrameGlyph {
 }
 
 impl FrameGlyph {
+    #[cfg(test)]
     /// Returns true if this glyph belongs to a chrome row
     /// that should be rendered above regular text rows.
     pub(crate) fn is_chrome_row(&self) -> bool {
@@ -408,6 +408,7 @@ impl FrameGlyph {
         }
     }
 
+    #[cfg(test)]
     /// Backward-compatible alias for callers not yet renamed.
     pub(crate) fn is_overlay(&self) -> bool {
         self.is_chrome_row()
@@ -550,6 +551,7 @@ impl FrameGlyph {
         matches!(self, FrameGlyph::Image { .. })
     }
 
+    #[cfg(test)]
     /// Left edge of this glyph's cell; see [`FrameGlyph::cell_rect`].
     pub(crate) fn cell_x(&self) -> Option<f32> {
         self.cell_rect().map(|(x, ..)| x)
@@ -848,60 +850,6 @@ impl StipplePattern {
             width,
             height,
             bits: bits.to_vec(),
-        })
-    }
-
-    /// Parse an X BitMap (XBM) source file into a stipple pattern, mirroring
-    /// GNU's `image_create_bitmap_from_file`. Handles the standard form:
-    ///
-    /// ```text
-    /// #define name_width  W
-    /// #define name_height H
-    /// static char name_bits[] = { 0x01, 0x00, ... };
-    /// ```
-    ///
-    /// Byte tokens may be hex (`0x01`), C char escapes (`'\x01'`, as GNU's own
-    /// sources emit), or decimal. Returns `None` on a malformed file or when
-    /// fewer than `(width+7)/8 * height` bytes are present.
-    pub(crate) fn from_xbm_source(text: &str) -> Option<Self> {
-        fn dimension(text: &str, suffix: &str) -> Option<u32> {
-            text.lines().find_map(|line| {
-                let rest = line[line.find(suffix)? + suffix.len()..].trim_start();
-                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-                digits.parse().ok()
-            })
-        }
-        let width = dimension(text, "_width")?;
-        let height = dimension(text, "_height")?;
-        if width == 0 || height == 0 {
-            return None;
-        }
-        let open = text.find('{')?;
-        let close = text[open..].find('}')? + open;
-        let mut bits = Vec::new();
-        for tok in text[open + 1..close].split(',') {
-            let t = tok.trim().trim_matches('\'').trim();
-            if t.is_empty() {
-                continue;
-            }
-            let byte = if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-                u8::from_str_radix(hex, 16).ok()?
-            } else if let Some(hex) = t.strip_prefix("\\x") {
-                u8::from_str_radix(hex, 16).ok()?
-            } else {
-                t.parse::<u8>().ok()?
-            };
-            bits.push(byte);
-        }
-        let expected = width.div_ceil(8) as usize * height as usize;
-        if bits.len() < expected {
-            return None;
-        }
-        bits.truncate(expected);
-        Some(Self {
-            width,
-            height,
-            bits,
         })
     }
 }
@@ -1332,70 +1280,8 @@ pub struct FrameGlyphBuffer {
     pub fringe_bitmaps: HashMap<u16, FringeBitmapData>,
 }
 
-/// A window's geometry is treated as unchanged within this many pixels.
-///
-/// Sub-pixel jitter between presentations is not a layout change; animating on
-/// it would fire a transition on every rounding difference.
-const GEOMETRY_STABILITY_EPSILON_PX: f32 = 2.0;
-
-/// Text metrics are treated as unchanged within this many pixels.
-const CHAR_HEIGHT_STABILITY_EPSILON_PX: f32 = 1.0;
-
-/// Whether this window's *content identity* changed, warranting a replacement
-/// transition.
-///
-/// This is deliberately narrow. It answers only the question the pixels cannot:
-/// that the thing being shown became a different thing, so the outgoing image
-/// should be replaced rather than moved. How far a viewport scrolled is a
-/// measurement the compositor makes by comparing presentations, not something a
-/// producer declares.
-///
-/// Returns `None` when the window's geometry moved, because retained pixels from
-/// a different presentation extent are not compatible transition inputs.
-#[must_use]
-pub(crate) fn derive_buffer_replacement_hint(
-    prev: &WindowInfo,
-    curr: &WindowInfo,
-) -> Option<ContentTransitionHint> {
-    if curr.is_minibuffer {
-        return None;
-    }
-
-    // The retained snapshot and new presentation must describe the same
-    // buffer-owned pixels. A current-only clip can otherwise sample old chrome
-    // after tab/header/mode-line or split geometry changes.
-    let previous_region = prev.geometry.buffer_viewport()?;
-    let current_region = curr.geometry.buffer_viewport()?;
-    if previous_region != current_region {
-        return None;
-    }
-
-    let bounds_moved = (prev.bounds.x - curr.bounds.x).abs() > GEOMETRY_STABILITY_EPSILON_PX
-        || (prev.bounds.y - curr.bounds.y).abs() > GEOMETRY_STABILITY_EPSILON_PX
-        || (prev.bounds.width - curr.bounds.width).abs() > GEOMETRY_STABILITY_EPSILON_PX
-        || (prev.bounds.height - curr.bounds.height).abs() > GEOMETRY_STABILITY_EPSILON_PX;
-    if bounds_moved {
-        return None;
-    }
-
-    let buffer_changed =
-        prev.buffer_id != 0 && curr.buffer_id != 0 && prev.buffer_id != curr.buffer_id;
-    let metrics_changed =
-        (prev.char_height - curr.char_height).abs() > CHAR_HEIGHT_STABILITY_EPSILON_PX;
-    if !buffer_changed && !metrics_changed {
-        return None;
-    }
-
-    Some(ContentTransitionHint::BufferReplaced {
-        target: BufferTransitionTarget::Window {
-            window_id: curr.window_id,
-            region: current_region,
-        },
-        intent: ContentTransitionIntent::Replace,
-    })
-}
-
 impl FrameGlyphBuffer {
+    #[cfg(test)]
     /// Resolve the default face's concrete font from this frame's matching
     /// font table.
     ///
@@ -1405,7 +1291,7 @@ impl FrameGlyphBuffer {
     #[must_use]
     pub(crate) fn default_resolved_font(&self) -> Option<&crate::font::ResolvedFont> {
         self.faces
-            .get(&BasicFaceId::Default.into())
+            .get(&crate::face::BasicFaceId::Default.into())
             .and_then(|face| face.default_resolved_font_id)
             .and_then(|font_id| self.fonts.get(&font_id))
     }
@@ -1675,6 +1561,7 @@ impl FrameGlyphBuffer {
         }
     }
 
+    #[cfg(test)]
     /// Clear all glyphs for a fresh full-frame rebuild.
     /// Called at the start of each frame by the matrix walker.
     pub(crate) fn clear_all(&mut self) {
@@ -1855,6 +1742,7 @@ impl FrameGlyphBuffer {
         self.current_clip_rect = clip_rect;
     }
 
+    #[cfg(test)]
     /// Get font family for a face_id
     pub(crate) fn get_face_font(&self, face_id: FaceId) -> &str {
         self.faces
@@ -1863,6 +1751,7 @@ impl FrameGlyphBuffer {
             .unwrap_or("monospace")
     }
 
+    #[cfg(test)]
     /// Return the frame-local face entry used to render `face_id`.
     ///
     /// Face ids are scoped to the owning frame buffer. Parent and child frames
@@ -1916,11 +1805,13 @@ impl FrameGlyphBuffer {
         }
     }
 
+    #[cfg(test)]
     /// Get current font family
     pub(crate) fn get_current_font_family(&self) -> &str {
         &self.current_font_family
     }
 
+    #[cfg(test)]
     /// Get current face background color (for stretch glyphs)
     pub(crate) fn get_current_bg(&self) -> Option<Color> {
         self.current_bg
@@ -2002,6 +1893,7 @@ impl FrameGlyphBuffer {
         self.current_font_size
     }
 
+    #[cfg(test)]
     /// Set current font size (for display property height scaling)
     pub(crate) fn set_font_size(&mut self, size: f32) {
         self.current_font_size = size;
@@ -2403,6 +2295,7 @@ impl FrameGlyphBuffer {
             .map(|(_, right_edge)| right_edge)
     }
 
+    #[cfg(test)]
     /// THE single source of truth for where a cursor is drawn: the pixel cell
     /// rect `(x, y, width, height)` of the glyph occupying `slot_id`. When no
     /// glyph occupies the slot (e.g. an empty line) the layout-supplied

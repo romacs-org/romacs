@@ -199,6 +199,7 @@ impl TransitionEffect {
         (*self).into()
     }
 
+    #[cfg(test)]
     /// Whether this effect needs a post-processing shader pipeline.
     pub(crate) fn needs_post_process(&self) -> bool {
         matches!(
@@ -212,6 +213,7 @@ impl TransitionEffect {
         )
     }
 
+    #[cfg(test)]
     /// Whether this effect needs tessellated (multi-strip) quads.
     pub(crate) fn needs_tessellation(&self) -> bool {
         matches!(
@@ -227,6 +229,7 @@ impl TransitionEffect {
         )
     }
 
+    #[cfg(test)]
     /// Whether this effect uses 3D perspective projection.
     pub(crate) fn needs_3d(&self) -> bool {
         matches!(

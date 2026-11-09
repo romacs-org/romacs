@@ -75,6 +75,7 @@ impl EventTime {
         EventTime(self.0 + after)
     }
 
+    #[cfg(test)]
     /// As [`EventTime::plus`], but `None` rather than panicking on overflow.
     #[must_use]
     pub(crate) fn checked_plus(self, after: Duration) -> Option<EventTime> {

@@ -37,8 +37,6 @@ fn gnu_frame_alpha_survives_display_snapshot_materialization() {
 }
 use crate::DisplayFrameId;
 
-#[path = "row_appearance_test.rs"]
-mod row_appearance_test;
 use crate::face::Face;
 use crate::frame_chrome::PresentationId;
 use crate::frame_glyphs::{DisplaySlotId, PhysCursor};

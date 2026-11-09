@@ -3,7 +3,7 @@
   "crates": {
     "romacs-allocator": {"sites": 3, "undocumented": 3},
     "romacs-attach": {"sites": 2, "undocumented": 0},
-    "romacs-display-protocol": {"sites": 7, "undocumented": 4},
+    "romacs-display-protocol": {"sites": 1, "undocumented": 0},
     "romacs-display-runtime": {"sites": 23, "undocumented": 7},
     "romacs-font": {"sites": 60, "undocumented": 49},
     "romacs-font-materializer": {"sites": 5, "undocumented": 5},

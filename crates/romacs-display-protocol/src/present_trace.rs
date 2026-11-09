@@ -378,6 +378,7 @@ impl Span {
         Self::with_inputs(start, end, frame, presentation, (None, None))
     }
 
+    #[cfg(test)]
     pub(crate) fn command(frame: u64, first: Option<u64>, last: Option<u64>) -> Self {
         Self::with_inputs(
             Stage::CommandStart,

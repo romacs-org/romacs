@@ -17,12 +17,6 @@ use serde::ser::SerializeStruct;
 use crate::types::LayoutUnit;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum RowSpace {}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum WindowSpace {}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FrameSpace {}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -543,36 +537,6 @@ impl<From, To> SpaceTranslation<From, To, LogicalPixels> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct DeviceRect {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-}
-
-impl DeviceRect {
-    #[must_use]
-    pub const fn x(self) -> f32 {
-        self.x
-    }
-
-    #[must_use]
-    pub const fn y(self) -> f32 {
-        self.y
-    }
-
-    #[must_use]
-    pub const fn width(self) -> f32 {
-        self.width
-    }
-
-    #[must_use]
-    pub const fn height(self) -> f32 {
-        self.height
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InvalidDeviceScale;
 
@@ -594,16 +558,6 @@ impl DeviceScale {
     #[must_use]
     pub const fn get(self) -> f32 {
         self.0
-    }
-
-    #[must_use]
-    pub(crate) fn map_frame_rect(self, rect: LayoutRect<FrameSpace>) -> DeviceRect {
-        DeviceRect {
-            x: rect.x().to_px() * self.0,
-            y: rect.y().to_px() * self.0,
-            width: rect.width().to_px() * self.0,
-            height: rect.height().to_px() * self.0,
-        }
     }
 }
 

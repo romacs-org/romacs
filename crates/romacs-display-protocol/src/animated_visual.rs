@@ -10,8 +10,7 @@
 //! sampling, and a source that interpolates smoothly never steps.
 //!
 //! This module owns no clocks and no pixels: document time goes in, scheduling
-//! facts come out. [`crate::media_clock`] is the type that produced the
-//! document time in the first place.
+//! facts come out.
 
 use crate::image::ImageFrameDelay;
 use std::time::Duration;
@@ -142,6 +141,7 @@ impl SampleGrid {
         grid_duration(nanos(doc_time) % nanos(self.period))
     }
 
+    #[cfg(test)]
     /// The slot a wrapped document time falls in.
     ///
     /// The last slot includes its endpoint: a wrapped time exactly at the

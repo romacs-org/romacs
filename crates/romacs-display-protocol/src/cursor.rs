@@ -65,6 +65,7 @@ impl CursorBarWidth {
         Self(width)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_lisp_fixnum(width: i64) -> Option<Self> {
         if (0..=i64::from(i32::MAX)).contains(&width) {
             Some(Self(width as u32))
@@ -77,11 +78,13 @@ impl CursorBarWidth {
         self.0
     }
 
+    #[cfg(test)]
     /// Pixel dimension used by renderers for bar/hbar drawing.
     pub(crate) fn render_px(self) -> f32 {
         self.0.max(1) as f32
     }
 
+    #[cfg(test)]
     /// GNU narrows bar cursors in non-selected windows by one pixel when the
     /// alternate cursor is `t`.
     pub(crate) fn narrowed_for_non_selected_bar(self) -> Self {

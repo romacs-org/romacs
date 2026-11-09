@@ -656,6 +656,7 @@ impl Rect {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn from_point_size(point: Point, size: Size) -> Self {
         Self::new(point.x, point.y, size.width, size.height)
@@ -762,6 +763,7 @@ pub enum CursorAnimStyle {
 }
 
 impl CursorAnimStyle {
+    #[cfg(test)]
     /// Decode a numeric style, using exponential decay for unknown values.
     pub(crate) fn from_u8(v: u8) -> Self {
         Self::from(v)

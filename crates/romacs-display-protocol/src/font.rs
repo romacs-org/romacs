@@ -274,41 +274,6 @@ impl ResolvedFontIdentity {
         }
     }
 
-    /// Exact file-backed identity selected by a native platform backend.
-    ///
-    /// The native adapter remains available as diagnostic provenance while
-    /// the stable key records only the collection face and exact variations.
-    /// This makes an instance discovered through CoreText or DirectWrite
-    /// identical to the same instance discovered through another catalog.
-    pub(crate) fn from_platform_file_with_variations(
-        backend: FontBackendKind,
-        file_path: &str,
-        face_selector: u32,
-        postscript_name: Option<String>,
-        variation_coords: Vec<FontVariationCoord>,
-    ) -> Self {
-        if backend == FontBackendKind::Fontconfig {
-            return Self::from_file_with_variations(
-                file_path,
-                face_selector,
-                postscript_name,
-                variation_coords,
-            );
-        }
-        let variation_coords = FontVariationSet::new(variation_coords);
-        let mut stable_key = format!("{file_path}#{face_selector}");
-        append_variation_key(&mut stable_key, variation_coords.as_slice());
-
-        Self {
-            backend,
-            stable_key,
-            file_path: Some(file_path.to_string()),
-            face_selector: BackendFontSelector::from_raw(face_selector),
-            postscript_name,
-            variation_coords,
-        }
-    }
-
     /// Identity for a font already resident in the layout font database.
     pub fn from_memory(
         backend: FontBackendKind,
@@ -347,6 +312,7 @@ impl ResolvedFontIdentity {
         }
     }
 
+    #[cfg(test)]
     /// The opaque selector value for diagnostics and platform-native APIs.
     pub(crate) fn backend_selector(&self) -> u32 {
         self.face_selector.raw()
@@ -371,6 +337,7 @@ impl ResolvedFontIdentity {
         }
     }
 
+    #[cfg(test)]
     /// FreeType named-instance index carried by a Fontconfig selector.
     pub(crate) fn named_instance_index(&self) -> Option<u32> {
         match self.backend {
@@ -758,6 +725,7 @@ pub enum ResolvedFontAdvance {
 }
 
 impl ResolvedFontAdvance {
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn fixed_cell(advance_px: f32) -> Self {
         FontAdvancePx::new(advance_px)

@@ -208,6 +208,7 @@ impl ImageSourceRect {
         (self.x() + u * self.width(), self.y() + v * self.height())
     }
 
+    #[cfg(test)]
     /// The sub-rect left when the right `1 - fraction` of this rect's x extent
     /// is cropped away.
     ///
@@ -230,33 +231,6 @@ impl ImageSourceRect {
             return Some(self);
         }
         Self::new(self.x(), self.y(), self.width() * fraction, self.height())
-    }
-}
-
-/// The horizontal row advance an inline image glyph keeps after GNU's
-/// right-edge crop.
-///
-/// The cropped advance is deliberately not an `ImageSourceRect` or a raw
-/// pixel count: it is the one number `produce_image_glyph` subtracts the crop
-/// from, and pairing it with the *uncropped* source slice would stretch the
-/// whole image into the narrower box.  [`ImageSourceRect::crop_right_to_fraction`]
-/// is the other half of the same edit.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ImageLayoutAdvance(crate::types::Px);
-
-impl ImageLayoutAdvance {
-    /// A finite, strictly positive glyph advance.  A crop that leaves nothing
-    /// produces no glyph in this port, matching the row writer's rule for
-    /// ordinary glyphs.
-    #[must_use]
-    pub fn new(px: crate::types::Px) -> Option<Self> {
-        (px.get().is_finite() && px.get() > 0.0).then_some(Self(px))
-    }
-
-    #[must_use]
-    pub const fn px(self) -> crate::types::Px {
-        self.0
     }
 }
 
@@ -1067,6 +1041,7 @@ impl ImageSizeLimit {
         native.width() <= self.maximum.width() && native.height() <= self.maximum.height()
     }
 
+    #[cfg(test)]
     /// [`Self::permits`] for a source extent that has not been rounded to
     /// pixels yet; see [`ImageIntrinsicExtent::native_ceiling`].
     #[must_use]
@@ -1290,6 +1265,7 @@ impl ImageRealization {
             .max(1.0)) as u32
     }
 
+    #[cfg(test)]
     /// Convert a logical layout extent to GNU `Fimage_size` pixel extent.
     ///
     /// Prefer re-running `ImageSizeSpec::desired` at [`Self::image_pixel_scale`]

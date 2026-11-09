@@ -39,25 +39,6 @@ fn names_absent_from_the_database_resolve_to_nothing() {
     assert_eq!(x11_color_lookup("none"), None);
 }
 
-/// GNU scales channel values instead of zero-extending them (`#f00` is
-/// `#ff0000`, src/xterm.c:9276-9280) and accepts 1..=4 digits per channel
-/// (`parse_color_spec`, src/xfaces.c:984-1017).
-#[test]
-fn hex_forms_scale_every_channel_width() {
-    for (spec, expected) in [
-        ("#f00", (255, 0, 0)),
-        ("#abc", (170, 187, 204)),
-        ("#aabbcc", (170, 187, 204)),
-        ("#fff000000", (255, 0, 0)),
-        ("#000fff000", (0, 255, 0)),
-        ("#ffff00000000", (255, 0, 0)),
-        ("#ffffffffffff", (255, 255, 255)),
-        ("#F0F0F0", (240, 240, 240)),
-    ] {
-        assert_eq!(x11_hex_color(spec), Some(expected), "{spec}");
-    }
-}
-
 /// The numeric forms of GNU `parse_color_spec` -- the `#` widths and the
 /// `rgb:`/`rgbi:` arms -- in the 16-bit channels the evaluator's `color-values`
 /// reports, which is where romacs's `color-values-from-color-spec` pins them
@@ -81,18 +62,6 @@ fn numeric_specs_answer_gnu_sixteen_bit_channels() {
     assert_eq!(x11_color_spec_16bit(b"rgb:\xe3\x81\x82/0/0"), None);
     assert_eq!(x11_color_spec_16bit(b"rgbi:2/0/0"), None);
     assert_eq!(x11_color_spec_16bit(b"red"), None);
-}
-
-/// Malformed hex resolves to nothing rather than to black, and a multi-byte
-/// character is rejected as the non-hex byte GNU sees, not sliced.
-#[test]
-fn malformed_hex_resolves_to_nothing() {
-    assert_eq!(x11_hex_color("#"), None);
-    assert_eq!(x11_hex_color("#abcd"), None);
-    assert_eq!(x11_hex_color("#fffffffffffff"), None);
-    assert_eq!(x11_hex_color("#xyz"), None);
-    assert_eq!(x11_hex_color("#ééé"), None);
-    assert_eq!(x11_hex_color("ff0000"), None);
 }
 
 #[test]

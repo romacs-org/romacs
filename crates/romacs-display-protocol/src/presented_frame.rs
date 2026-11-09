@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    DisplayFrameId, GeometryError, GeometryRect, LogicalPixels, ParentFrameSpace, PresentationId,
+    DisplayFrameId, GeometryRect, LogicalPixels, ParentFrameSpace, PresentationId,
     RootSurfaceSpace, SpaceTranslation,
 };
 

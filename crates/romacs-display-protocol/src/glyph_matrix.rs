@@ -35,7 +35,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rustc_hash::FxHashMap as HashMap;
 
 mod text_geometry;
-pub(crate) use text_geometry::{TextRowGeometry, TextSlotColumn, VisualTextGlyphIndex};
+pub(crate) use text_geometry::text_origin_x;
 
 /// One terminal cell produced by GNU's `compose-gstring-for-terminal`.
 ///
@@ -160,18 +160,21 @@ pub(crate) enum GlyphTypeKind {
 }
 
 impl GlyphTypeKind {
+    #[cfg(test)]
     pub fn from_gnu_code(code: u8) -> Option<Self> {
         (code <= Self::Xwidget as u8)
             .then(|| Self::try_from(code).ok())
             .flatten()
     }
 
+    #[cfg(test)]
     pub fn gnu_code(self) -> u8 {
         self.into()
     }
 }
 
 impl GlyphType {
+    #[cfg(test)]
     pub(crate) fn gnu_kind(&self) -> GlyphTypeKind {
         match self {
             GlyphType::Char { .. } => GlyphTypeKind::Char,
@@ -374,6 +377,7 @@ pub(crate) struct GlyphStringBufferRange {
 }
 
 impl GlyphStringBufferRange {
+    #[cfg(test)]
     pub const fn new(start: usize, end: usize) -> Self {
         Self {
             start,
@@ -381,10 +385,12 @@ impl GlyphStringBufferRange {
         }
     }
 
+    #[cfg(test)]
     pub const fn contains(self, charpos: usize) -> bool {
         self.start <= charpos && charpos < self.end
     }
 
+    #[cfg(test)]
     fn shifted(self, from: usize, delta: i64) -> Self {
         Self::new(
             shifted_buffer_position(self.start, from, delta),
@@ -407,6 +413,7 @@ pub(crate) struct GlyphStringSource {
 }
 
 impl GlyphStringSource {
+    #[cfg(test)]
     pub const fn replacement(
         string: GlyphStringId,
         covered_buffer: GlyphStringBufferRange,
@@ -417,14 +424,17 @@ impl GlyphStringSource {
         }
     }
 
+    #[cfg(test)]
     pub const fn string(self) -> GlyphStringId {
         self.string
     }
 
+    #[cfg(test)]
     pub const fn covered_buffer_range(self) -> Option<GlyphStringBufferRange> {
         self.covered_buffer
     }
 
+    #[cfg(test)]
     pub const fn covers_buffer_charpos(self, charpos: usize) -> bool {
         match self.covered_buffer {
             Some(range) => range.contains(charpos),
@@ -432,6 +442,7 @@ impl GlyphStringSource {
         }
     }
 
+    #[cfg(test)]
     fn shift_buffer_positions(&mut self, from: usize, delta: i64) {
         if let Some(range) = self.covered_buffer {
             self.covered_buffer = Some(range.shifted(from, delta));
@@ -613,6 +624,7 @@ impl GlyphProvenance {
     }
 }
 
+#[cfg(test)]
 fn shifted_buffer_position(value: usize, from: usize, delta: i64) -> usize {
     if value < from {
         return value;
@@ -704,6 +716,7 @@ impl GlyphPointerAppearanceId {
 pub struct GlyphImageMarginsId(std::num::NonZeroU16);
 
 impl GlyphImageMarginsId {
+    #[cfg(test)]
     fn from_index(index: usize) -> Option<Self> {
         let value = u16::try_from(index.checked_add(1)?).ok()?;
         std::num::NonZeroU16::new(value).map(Self)
@@ -804,11 +817,13 @@ impl Glyph {
         }
     }
 
+    #[cfg(test)]
     /// Create a padding glyph (second cell of a wide character).
     pub(crate) fn padding_for(face_id: FaceId, charpos: usize) -> Self {
         Self::padding_with_provenance(face_id, GlyphProvenance::buffer(charpos))
     }
 
+    #[cfg(test)]
     /// Create a padding glyph with typed source provenance.
     pub(crate) fn padding_with_provenance(face_id: FaceId, provenance: GlyphProvenance) -> Self {
         Self {
@@ -827,6 +842,7 @@ impl Glyph {
         }
     }
 
+    #[cfg(test)]
     /// Return a copy with explicit GUI pixel advance.
     pub(crate) fn with_pixel_width(mut self, pixel_width: f32) -> Self {
         self.pixel_width = if pixel_width.is_finite() && pixel_width > 0.0 {
@@ -844,6 +860,7 @@ impl Glyph {
         self
     }
 
+    #[cfg(test)]
     /// Return a copy with explicit GUI stretch geometry.
     pub(crate) fn with_pixel_geometry(
         mut self,
@@ -869,6 +886,7 @@ impl Glyph {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_vertical_offset(mut self, vertical_offset_px: f32) -> Self {
         self.vertical_offset_px = if vertical_offset_px.is_finite() {
             vertical_offset_px
@@ -1059,57 +1077,6 @@ pub struct GlyphRow {
     /// `if (left_p && row->overlay_arrow_bitmap != NO_FRINGE_BITMAP)`), and
     /// `fringe-bitmaps-at-pos` reports the two independently.
     pub overlay_arrow_bitmap: Option<FringeBitmapInfo>,
-    /// What the row draws, as an identity (see [`RowAppearance`]). Not part
-    /// of the row's content: rows compare and serialize without it.
-    #[serde(skip)]
-    appearance: RowAppearance,
-}
-
-/// The identity of what a [`GlyphRow`] DRAWS: its glyphs and every other
-/// field a renderer reads. Two rows with the same appearance draw the same
-/// thing wherever they are placed.
-///
-/// Each new row, and each copy of a row, gets a fresh appearance, so a copy
-/// that is then changed can never be mistaken for its original. Only code
-/// that changes nothing a renderer draws -- the row's placement (`pixel_y`),
-/// its buffer positions (row and glyph charpos, string-source and pointer
-/// ranges) or the layout-only cursor decoration (`cursor_col`,
-/// `cursor_type`) -- may declare the copy the same appearance, with
-/// [`GlyphRow::keep_appearance_of`]. Ids are never reused.
-///
-/// This is what lets a renderer key a row by content identity across the
-/// copies incremental layout makes: the rows below an edit are copied to
-/// shift their buffer positions, and the rows of a scroll to move them, yet
-/// they draw exactly what they drew.
-#[derive(Debug)]
-pub(crate) struct RowAppearance(u64);
-
-impl RowAppearance {
-    fn fresh() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-}
-
-impl Default for RowAppearance {
-    fn default() -> Self {
-        Self::fresh()
-    }
-}
-
-impl Clone for RowAppearance {
-    /// A copy is a new appearance until declared otherwise.
-    fn clone(&self) -> Self {
-        Self::fresh()
-    }
-}
-
-impl PartialEq for RowAppearance {
-    /// An identity, not content: two rows with equal fields are equal rows
-    /// whatever their appearance ids.
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
 }
 
 /// Per-row fringe-bitmap reference: the resolved registry index and the face id
@@ -1131,6 +1098,7 @@ pub enum RowFringeProducer {
 }
 
 impl RowFringeProducer {
+    #[cfg(test)]
     pub(crate) fn certifies(self, bitmap: FringeBitmapInfo) -> bool {
         match self {
             Self::SourceDisplay(value) | Self::RowIndicator(value) => value == bitmap,
@@ -1139,6 +1107,7 @@ impl RowFringeProducer {
 }
 
 impl GlyphRow {
+    #[cfg(test)]
     /// Both occupied sides must come from known row-local producers. Recheck
     /// the certified value so an untracked slot overwrite cannot retain proof.
     pub(crate) fn fringes_are_row_local(&self) -> bool {
@@ -1194,27 +1163,10 @@ impl GlyphRow {
             left_fringe_producer: None,
             right_fringe_producer: None,
             overlay_arrow_bitmap: None,
-            appearance: RowAppearance::fresh(),
         }
     }
 
-    /// The row's appearance id (see [`RowAppearance`]).
-    #[inline]
-    pub(crate) fn appearance_id(&self) -> u64 {
-        self.appearance.0
-    }
-
-    /// Declare that this row draws exactly what SOURCE draws.
-    ///
-    /// Only for a copy of SOURCE whose changes since are confined to its
-    /// placement (`pixel_y`), its buffer positions and the layout-only cursor
-    /// decoration; anything else makes a renderer keyed on the appearance
-    /// show a stale row.
-    #[inline]
-    pub(crate) fn keep_appearance_of(&mut self, source: &GlyphRow) {
-        self.appearance = RowAppearance(source.appearance.0);
-    }
-
+    #[cfg(test)]
     /// Compute FNV-1a hash over all glyph areas.
     /// Returns 0 for empty rows (sentinel meaning "not computed").
     pub(crate) fn compute_hash(&self) -> u64 {
@@ -1338,6 +1290,7 @@ impl GlyphRow {
         hash
     }
 
+    #[cfg(test)]
     pub(crate) fn row_equal(&self, other: &GlyphRow) -> bool {
         if self.hash != 0 && other.hash != 0 && self.hash != other.hash {
             return false;
@@ -1380,10 +1333,12 @@ impl GlyphRow {
         self.glyphs[area.index()].len()
     }
 
+    #[cfg(test)]
     pub(crate) fn total_glyphs(&self) -> usize {
         self.glyphs.iter().map(Vec::len).sum()
     }
 
+    #[cfg(test)]
     pub(crate) fn intern_pointer_appearance(
         &mut self,
         appearance: GlyphPointerAppearance,
@@ -1407,10 +1362,12 @@ impl GlyphRow {
         self.pointer_appearances.get(id.index())
     }
 
+    #[cfg(test)]
     pub(crate) fn pointer_appearances(&self) -> &[GlyphPointerAppearance] {
         &self.pointer_appearances
     }
 
+    #[cfg(test)]
     /// Intern one image's asymmetric margins in this row.
     ///
     /// The returned token cannot outlive or be interpreted without this row.
@@ -1436,10 +1393,12 @@ impl GlyphRow {
         self.image_margins.get(id.index())
     }
 
+    #[cfg(test)]
     pub(crate) fn image_margins_table(&self) -> &[ImageMargins] {
         &self.image_margins
     }
 
+    #[cfg(test)]
     /// Register one displayed string occurrence in this row.
     ///
     /// Entries are intentionally not interned: the same Lisp string object may
@@ -1454,20 +1413,24 @@ impl GlyphRow {
         Some(id)
     }
 
+    #[cfg(test)]
     pub(crate) fn string_source(&self, id: GlyphStringSourceId) -> Option<&GlyphStringSource> {
         self.string_sources.get(id.index())
     }
 
+    #[cfg(test)]
     pub(crate) fn string_sources(&self) -> &[GlyphStringSource] {
         &self.string_sources
     }
 
+    #[cfg(test)]
     pub(crate) fn shift_string_source_buffer_positions(&mut self, from: usize, delta: i64) {
         for source in &mut self.string_sources {
             source.shift_buffer_positions(from, delta);
         }
     }
 
+    #[cfg(test)]
     /// Every face definition required to replay this row faithfully.
     ///
     /// Pointer appearances are render dependencies even when none of the row's
@@ -1497,7 +1460,6 @@ impl GlyphRow {
     }
 
     pub fn clear(&mut self) {
-        self.appearance = RowAppearance::fresh();
         for area in &mut self.glyphs {
             area.clear();
         }
@@ -1925,11 +1887,13 @@ thread_local! {
     static MATERIALIZE_CALL_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
 #[cfg(debug_assertions)]
 pub(crate) fn reset_materialize_call_count_for_current_thread() {
     MATERIALIZE_CALL_COUNT.with(|count| count.set(0));
 }
 
+#[cfg(test)]
 #[cfg(debug_assertions)]
 pub(crate) fn materialize_call_count_for_current_thread() -> u32 {
     MATERIALIZE_CALL_COUNT.with(std::cell::Cell::get)
@@ -2442,6 +2406,7 @@ impl FrameDisplayState {
         }
     }
 
+    #[cfg(test)]
     /// Return one window's exact accepted cursor presentation, independent of
     /// whether that window is active or inactive.
     ///
@@ -3090,7 +3055,7 @@ impl FrameDisplayState {
                 if area == GlyphArea::Text {
                     // GNU's `reversed_p` applies only to TEXT_AREA. Marginal
                     // glyphs keep their own left-to-right structural origins.
-                    x_cursor = TextRowGeometry::new(glyph_row, bounds, char_w).origin_x();
+                    x_cursor = text_origin_x(glyph_row, bounds, char_w);
                 }
             }
             let area_bounds = current_geometry.bounds();

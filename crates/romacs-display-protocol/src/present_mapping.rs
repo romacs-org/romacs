@@ -311,6 +311,7 @@ impl PresentMapping {
         )
     }
 
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn frame_from_device(
         self,

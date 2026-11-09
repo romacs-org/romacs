@@ -341,6 +341,7 @@ impl ModifierPolicy {
         }
     }
 
+    #[cfg(test)]
     /// Whether Option acts as a command (control-like) modifier for KIND,
     /// considering both sides.
     ///

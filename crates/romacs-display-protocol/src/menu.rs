@@ -4,7 +4,6 @@ mod item;
 mod text;
 pub use item::{MenuAvailability, MenuItemKind};
 pub use text::{MeasuredMenu, MenuPanelRole};
-pub(crate) use text::{MenuItemText, MenuTextLayout, MenuTextRun};
 
 /// Correlates a native heading intent with the evaluator's menu response.
 /// Distinct from MenuToken: one intent can produce multiple menu revisions.

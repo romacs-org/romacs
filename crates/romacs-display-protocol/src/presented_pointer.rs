@@ -141,6 +141,7 @@ pub(crate) struct PresentedResizeHandle {
 }
 
 impl PresentedResizeHandle {
+    #[cfg(test)]
     #[must_use]
     pub const fn new(
         window: DisplayWindowId,
@@ -272,11 +273,8 @@ pub struct PresentedTextPosition {
     buffer_position: i64,
     row: i64,
     column: i64,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::posn_object_extent::PosnPointRole::is_default"
-    )]
-    point_role: crate::posn_object_extent::PosnPointRole,
+    #[serde(default, skip_serializing_if = "PosnPointRole::is_default")]
+    point_role: PosnPointRole,
 }
 
 /// Exact position in a displayed Lisp string occupying one chrome rectangle.
@@ -376,7 +374,7 @@ impl PresentedTextPosition {
             buffer_position,
             row,
             column,
-            point_role: crate::posn_object_extent::PosnPointRole::Glyph,
+            point_role: PosnPointRole::Glyph,
         }
     }
 
@@ -404,12 +402,12 @@ impl PresentedTextPosition {
     pub const fn column(self) -> i64 {
         self.column
     }
-    pub const fn with_point_role(mut self, role: crate::posn_object_extent::PosnPointRole) -> Self {
+    pub const fn with_point_role(mut self, role: PosnPointRole) -> Self {
         self.point_role = role;
         self
     }
 
-    pub const fn point_role(self) -> crate::posn_object_extent::PosnPointRole {
+    pub const fn point_role(self) -> PosnPointRole {
         self.point_role
     }
 }
@@ -610,55 +608,9 @@ impl std::fmt::Display for PresentedHitError {
 
 impl std::error::Error for PresentedHitError {}
 
-/// Where a deferred hit index finds its text positions
-/// ([`PresentedHitIndex::with_deferred_text`]).
-///
-/// The positions are what an eager index would have been built with. Sources
-/// are immutable and may be queried concurrently by rendering and input
-/// threads; they must contain no mutator-local Lisp state. The index publishes
-/// materialized positions through a `OnceLock`, at most once per index.
-pub(crate) trait PresentedTextPositionSource: Send + Sync + std::fmt::Debug {
-    fn text_positions(&self) -> Result<Vec<PresentedTextPosition>, PresentedHitError>;
-
-    /// Resolve within one window without flattening the frame, if supported.
-    ///
-    /// A supported source must validate all of its geometry before resolving,
-    /// and return the same first position in original vector order that
-    /// `text_positions` would yield for this window and half-open cell bounds.
-    /// `Resolved(Ok(None))` is a completed miss and never requests flattening.
-    /// Existing sources retain the materialized lookup through `Unsupported`.
-    fn hit_text_position(
-        &self,
-        _window: DisplayWindowId,
-        _x: f32,
-        _y: f32,
-    ) -> PresentedTextPositionHit {
-        PresentedTextPositionHit::Unsupported
-    }
-
-    /// Whether the validated source contains no positions, when cheaply known.
-    ///
-    /// Returning `None` retains the materialized emptiness check. This does
-    /// not authorize skipping geometry validation for a supported source.
-    fn is_empty(&self) -> Option<bool> {
-        None
-    }
-}
-
-/// A direct immutable-source lookup, distinct from an unsupported lookup.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum PresentedTextPositionHit {
-    Unsupported,
-    Resolved(Result<Option<PresentedTextPosition>, PresentedHitError>),
-}
-
-/// The text positions of a hit index and their buckets, built at
-/// construction or on first use.
-#[derive(Clone)]
-struct PresentedTextIndex {
-    source: Option<std::sync::Arc<dyn PresentedTextPositionSource>>,
-    built: std::sync::OnceLock<PresentedTextParts>,
-}
+/// The text positions of a hit index and their buckets.
+#[derive(Clone, PartialEq)]
+struct PresentedTextIndex(PresentedTextParts);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct PresentedTextParts {
@@ -680,84 +632,23 @@ impl PresentedTextParts {
 
 impl PresentedTextIndex {
     fn built(positions: Vec<PresentedTextPosition>) -> Self {
-        let built = std::sync::OnceLock::new();
-        let _ = built.set(PresentedTextParts::new(positions));
-        Self {
-            source: None,
-            built,
-        }
-    }
-
-    fn deferred(source: std::sync::Arc<dyn PresentedTextPositionSource>) -> Self {
-        Self {
-            source: Some(source),
-            built: std::sync::OnceLock::new(),
-        }
+        Self(PresentedTextParts::new(positions))
     }
 
     fn is_empty(&self) -> bool {
-        if let Some(parts) = self.built.get() {
-            return parts.positions.is_empty();
-        }
-        if let Some(empty) = self.source.as_ref().and_then(|source| source.is_empty()) {
-            return empty;
-        }
-        self.parts().positions.is_empty()
-    }
-
-    fn fail_direct_lookup(&self, error: PresentedHitError) {
-        tracing::error!(?error, "deferred hit index: no text positions");
-        let _ = self.built.set(PresentedTextParts::default());
+        self.0.positions.is_empty()
     }
 
     fn parts(&self) -> &PresentedTextParts {
-        self.built.get_or_init(|| {
-            let Some(source) = self.source.as_ref() else {
-                return PresentedTextParts::default();
-            };
-            match source.text_positions() {
-                Ok(positions)
-                    if positions
-                        .iter()
-                        .all(|position| rect_has_valid_geometry(position.bounds)) =>
-                {
-                    PresentedTextParts::new(positions)
-                }
-                Ok(_) => {
-                    tracing::error!(
-                        "deferred hit index: {:?}",
-                        PresentedHitError::InvalidTextPositionGeometry
-                    );
-                    PresentedTextParts::default()
-                }
-                Err(error) => {
-                    tracing::error!(?error, "deferred hit index: no text positions");
-                    PresentedTextParts::default()
-                }
-            }
-        })
+        &self.0
     }
 }
 
 impl std::fmt::Debug for PresentedTextIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (self.built.get(), &self.source) {
-            (Some(parts), _) => f
-                .debug_struct("PresentedTextIndex")
-                .field("positions", &parts.positions.len())
-                .finish(),
-            (None, Some(source)) => f
-                .debug_struct("PresentedTextIndex")
-                .field("deferred", source)
-                .finish(),
-            (None, None) => f.write_str("PresentedTextIndex(empty)"),
-        }
-    }
-}
-
-impl PartialEq for PresentedTextIndex {
-    fn eq(&self, other: &Self) -> bool {
-        self.parts() == other.parts()
+        f.debug_struct("PresentedTextIndex")
+            .field("positions", &self.0.positions.len())
+            .finish()
     }
 }
 
@@ -841,10 +732,10 @@ impl PresentedHitIndex {
             presentation,
             regions: Vec::new(),
             resize_handles: Vec::new(),
-            text: PresentedTextIndex {
-                source: None,
-                built: std::sync::OnceLock::new(),
-            },
+            text: PresentedTextIndex(PresentedTextParts {
+                positions: Vec::new(),
+                buckets: Vec::new(),
+            }),
             string_positions: Vec::new(),
             region_buckets: Vec::new(),
             resize_handle_buckets: Vec::new(),
@@ -1030,34 +921,6 @@ impl PresentedHitIndex {
         if region.kind != PresentedRegionKind::TextBody {
             return None;
         }
-        if self.text.built.get().is_none()
-            && let (Some(source), Some(window)) = (&self.text.source, region.window)
-        {
-            match source.hit_text_position(window, x, y) {
-                PresentedTextPositionHit::Unsupported => {}
-                PresentedTextPositionHit::Resolved(Ok(None)) => return None,
-                PresentedTextPositionHit::Resolved(Ok(Some(position))) => {
-                    if !rect_has_valid_geometry(position.bounds) {
-                        self.text
-                            .fail_direct_lookup(PresentedHitError::InvalidTextPositionGeometry);
-                        return None;
-                    }
-                    if position.window != window {
-                        self.text
-                            .fail_direct_lookup(PresentedHitError::WindowGeometryMismatch {
-                                window,
-                                region: PresentedRegionKind::TextBody,
-                            });
-                        return None;
-                    }
-                    return contains(position.bounds, x, y).then_some(position);
-                }
-                PresentedTextPositionHit::Resolved(Err(error)) => {
-                    self.text.fail_direct_lookup(error);
-                    return None;
-                }
-            }
-        }
         let text = self.text.parts();
         let mut selected = None;
         for_each_presented_hit_candidate(
@@ -1169,31 +1032,6 @@ impl PresentedHitIndex {
     #[must_use]
     pub fn text_positions(&self) -> &[PresentedTextPosition] {
         &self.text.parts().positions
-    }
-
-    /// Replace the text positions with ones SOURCE supplies on demand.
-    ///
-    /// Every frame's index used to carry one position per visible character,
-    /// built and sorted into buckets as the frame was composed, although only
-    /// a pointer query ever reads them (GNU hit-tests its current matrix on
-    /// demand). The source is expected to produce exactly what the eager
-    /// index would have been built with. Sources may answer window-local hits
-    /// without materializing positions; serialization and equality still build
-    /// the eager positions. Invalid geometry is logged and yields no text
-    /// position, where the eager index refused the frame.
-    #[must_use]
-    pub(crate) fn with_deferred_text(
-        mut self,
-        source: std::sync::Arc<dyn PresentedTextPositionSource>,
-    ) -> Self {
-        self.text = PresentedTextIndex::deferred(source);
-        self
-    }
-
-    /// Whether the text positions are still to be built.
-    #[must_use]
-    pub(crate) fn text_deferred(&self) -> bool {
-        self.text.built.get().is_none()
     }
 
     #[must_use]
@@ -2616,10 +2454,29 @@ fn rect_has_valid_geometry(rect: FrameRect) -> bool {
 
 mod scroll;
 
+/// Source role of one point rectangle. This byte-sized numeric role survives
+/// compact row storage and transport; it carries no Lisp identity or cache.
+/// Copied roles are immutable numeric data and may be read by independent mutators.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PosnPointRole {
+    #[default]
+    Glyph,
+    OverlaidMarker,
+    InsertionBoundary,
+    SyntheticBoundary,
+}
+
+impl PosnPointRole {
+    pub const fn is_position(self) -> bool {
+        !matches!(self, Self::OverlaidMarker)
+    }
+
+    pub const fn is_default(&self) -> bool {
+        matches!(self, Self::Glyph)
+    }
+}
+
 #[cfg(test)]
 #[path = "presented_pointer/tests/presented_pointer_test.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "presented_pointer/tests/row_hit_test.rs"]
-mod row_hit_test;

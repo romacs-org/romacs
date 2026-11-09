@@ -78,24 +78,6 @@ fn font_asset_deserialization_preserves_constructor_invariants() {
 }
 
 #[test]
-fn identity_from_file_builds_stable_key() {
-    let identity = ResolvedFontIdentity::from_file("/fonts/a.ttc", 3, None);
-    assert_eq!(identity.stable_key, "/fonts/a.ttc#3");
-    assert_eq!(identity.file_path.as_deref(), Some("/fonts/a.ttc"));
-    assert_eq!(identity.backend_selector(), 3);
-    assert_eq!(identity.backend, FontBackendKind::Fontconfig);
-}
-
-#[test]
-fn file_asset_normalizes_a_fontconfig_named_instance_selector() {
-    let identity = ResolvedFontIdentity::from_file("/fonts/variable.ttc", 0x0007_0003, None);
-    let asset = FontFileAsset::from_identity(&identity).expect("file-backed identity");
-
-    assert_eq!(identity.backend_selector(), 0x0007_0003);
-    assert_eq!(asset.face_index(), 3);
-}
-
-#[test]
 fn identity_equality_and_hash_follow_the_durable_stable_key() {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -191,112 +173,6 @@ fn identity_stable_key_canonicalizes_variation_coordinates() {
 }
 
 #[test]
-fn fontconfig_identity_distinguishes_backend_and_file_face_indices() {
-    // FreeType/Fontconfig encode named instance 7 of collection face 3 as
-    // 0x0007_0003. fontdb/ttf-parser, however, can only open collection face
-    // 3 and apply the requested variation attributes separately.
-    let identity = ResolvedFontIdentity::from_file("/fonts/variable.ttc", 0x0007_0003, None);
-
-    assert_eq!(identity.backend_selector(), 0x0007_0003);
-    assert_eq!(identity.file_face_index(), 3);
-    assert_eq!(identity.named_instance_index(), Some(7));
-
-    let ordinary_collection_face = ResolvedFontIdentity::from_file("/fonts/ordinary.ttc", 12, None);
-    assert_eq!(ordinary_collection_face.file_face_index(), 12);
-    assert_eq!(ordinary_collection_face.named_instance_index(), None);
-}
-
-#[test]
-fn native_file_identity_preserves_platform_and_exact_instance() {
-    let weight = FontVariationCoord::try_new(u32::from_be_bytes(*b"wght"), 650.0).unwrap();
-    let width = FontVariationCoord::try_new(u32::from_be_bytes(*b"wdth"), 90.0).unwrap();
-    let core_text = ResolvedFontIdentity::from_platform_file_with_variations(
-        FontBackendKind::CoreText,
-        "/System/Library/Fonts/SFNSMono.ttf",
-        2,
-        Some("SFMono-Semibold".to_string()),
-        vec![weight, width],
-    );
-    let direct_write = ResolvedFontIdentity::from_platform_file_with_variations(
-        FontBackendKind::DirectWrite,
-        "C:\\Windows\\Fonts\\CascadiaCode.ttf",
-        3,
-        Some("CascadiaCode-SemiBold".to_string()),
-        vec![width, weight],
-    );
-
-    assert_eq!(core_text.backend, FontBackendKind::CoreText);
-    assert_eq!(core_text.file_face_index(), 2);
-    assert_eq!(core_text.backend_selector(), 2);
-    assert_eq!(core_text.freetype_selector(), None);
-    assert_eq!(core_text.named_instance_index(), None);
-    assert!(core_text.stable_key.starts_with("/System/Library/Fonts/"));
-    assert!(core_text.stable_key.contains("wght=44228000"));
-    assert!(core_text.stable_key.contains("wdth=42b40000"));
-
-    assert_eq!(direct_write.backend, FontBackendKind::DirectWrite);
-    assert_eq!(direct_write.file_face_index(), 3);
-    assert!(direct_write.stable_key.starts_with("C:\\Windows\\Fonts\\"));
-    assert_ne!(core_text, direct_write);
-}
-
-#[test]
-fn generic_platform_constructor_keeps_one_canonical_fontconfig_identity() {
-    let coords = vec![FontVariationCoord::try_new(u32::from_be_bytes(*b"wght"), 650.0).unwrap()];
-    let canonical = ResolvedFontIdentity::from_file_with_variations(
-        "/fonts/variable.ttf",
-        0x0007_0000,
-        Some("Fixture-Semibold".to_string()),
-        coords.clone(),
-    );
-    let through_platform = ResolvedFontIdentity::from_platform_file_with_variations(
-        FontBackendKind::Fontconfig,
-        "/fonts/variable.ttf",
-        0x0007_0000,
-        Some("Fixture-Semibold".to_string()),
-        coords,
-    );
-
-    assert_eq!(through_platform, canonical);
-}
-
-#[test]
-fn exact_file_identity_is_independent_of_discovery_backend() {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let coords = vec![FontVariationCoord::try_new(u32::from_be_bytes(*b"wght"), 650.0).unwrap()];
-    let fontconfig = ResolvedFontIdentity::from_file_with_variations(
-        "/fonts/shared-variable.ttf",
-        0x0007_0002,
-        Some("Shared-Semibold".to_string()),
-        coords.clone(),
-    );
-    let core_text = ResolvedFontIdentity::from_platform_file_with_variations(
-        FontBackendKind::CoreText,
-        "/fonts/shared-variable.ttf",
-        2,
-        Some("Localized Shared Semibold".to_string()),
-        coords,
-    );
-
-    let hash = |value: &ResolvedFontIdentity| {
-        let mut hasher = DefaultHasher::new();
-        value.hash(&mut hasher);
-        hasher.finish()
-    };
-
-    assert_eq!(fontconfig, core_text);
-    assert_eq!(hash(&fontconfig), hash(&core_text));
-    assert_eq!(
-        fontconfig.stable_key,
-        "/fonts/shared-variable.ttf#2@wght=44228000"
-    );
-    assert_eq!(fontconfig.stable_key, core_text.stable_key);
-    assert_ne!(fontconfig.backend, core_text.backend);
-}
-
-#[test]
 fn resolved_font_serde_round_trip() {
     let font = sample_font(7);
     let json = serde_json::to_string(&font).unwrap();
@@ -374,4 +250,38 @@ fn monospace_glyphs_preserve_wide_ligature_and_zero_width_advances() {
         serde_json::from_str::<ResolvedFontAdvance>(&encoded).unwrap(),
         policy
     );
+}
+
+#[test]
+fn identity_from_file_builds_stable_key() {
+    let identity = ResolvedFontIdentity::from_file("/fonts/a.ttc", 3, None);
+    assert_eq!(identity.stable_key, "/fonts/a.ttc#3");
+    assert_eq!(identity.file_path.as_deref(), Some("/fonts/a.ttc"));
+    assert_eq!(identity.backend_selector(), 3);
+    assert_eq!(identity.backend, FontBackendKind::Fontconfig);
+}
+
+#[test]
+fn file_asset_normalizes_a_fontconfig_named_instance_selector() {
+    let identity = ResolvedFontIdentity::from_file("/fonts/variable.ttc", 0x0007_0003, None);
+    let asset = FontFileAsset::from_identity(&identity).expect("file-backed identity");
+
+    assert_eq!(identity.backend_selector(), 0x0007_0003);
+    assert_eq!(asset.face_index(), 3);
+}
+
+#[test]
+fn fontconfig_identity_distinguishes_backend_and_file_face_indices() {
+    // FreeType/Fontconfig encode named instance 7 of collection face 3 as
+    // 0x0007_0003. fontdb/ttf-parser, however, can only open collection face
+    // 3 and apply the requested variation attributes separately.
+    let identity = ResolvedFontIdentity::from_file("/fonts/variable.ttc", 0x0007_0003, None);
+
+    assert_eq!(identity.backend_selector(), 0x0007_0003);
+    assert_eq!(identity.file_face_index(), 3);
+    assert_eq!(identity.named_instance_index(), Some(7));
+
+    let ordinary_collection_face = ResolvedFontIdentity::from_file("/fonts/ordinary.ttc", 12, None);
+    assert_eq!(ordinary_collection_face.file_face_index(), 12);
+    assert_eq!(ordinary_collection_face.named_instance_index(), None);
 }
