@@ -4548,14 +4548,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-regex"
-version = "0.0.20"
-dependencies = [
- "memchr",
- "romacs-chars",
-]
-
-[[package]]
 name = "romacs-regex-engine"
 version = "0.0.20"
 dependencies = [

@@ -12,7 +12,6 @@ members = [
     "crates/romacs-logo",
     "crates/romacs-text",
     "crates/romacs-props",
-    "crates/romacs-regex",
     "crates/romacs-regex-engine",
     "crates/romacs-mcp",
     "crates/romacs-terminfo",
