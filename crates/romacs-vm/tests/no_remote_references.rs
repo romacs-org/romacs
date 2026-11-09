@@ -360,7 +360,7 @@ fn a_name_past_the_barrier_is_refused() {
 //   file's name, which can repeat across directories. A name only one crate
 //   type has is taken to mean it, even spelled through a re-export or from
 //   another crate. An alias is expanded one level, by the first alias of its
-//   name.
+//   name in path order, an impl's associated type (`type Target`) among them.
 // Atomics are not cells here: a root handle keeps Value bits in one, and the
 // root lists cover it. Raw-pointer writes are the unsafe census's. What these
 // lists miss is the collector verifier's to catch (`ROMACS_GC_VERIFY`).
@@ -645,6 +645,7 @@ fn sources() -> Vec<(String, String)> {
             }
         }
     }
+    out.sort();
     out
 }
 
@@ -698,8 +699,9 @@ fn split_key(key: &str) -> (&str, &str) {
 /// (`frame` in `frame::Frame`), and the file it is spelled in.
 struct Named { name: String, path: Option<String>, file: String }
 
-/// The module a file is.
+/// The module a file is: `crate` for `lib.rs`.
 fn module(file: &str) -> &str {
+    if file == "lib.rs" { return "crate"; }
     let file = file.strip_suffix("/mod.rs").unwrap_or(file);
     let stem = file.rsplit('/').next().unwrap_or(file);
     stem.strip_suffix(".rs").unwrap_or(stem)
@@ -734,7 +736,7 @@ fn match_named(at: &str, named: &[Named], listed: &[&str], shapes: &[Shape]) -> 
         let spellings: Vec<&Named> = named.iter().filter(|n| n.name == name).collect();
         if spellings.is_empty() { out.push(format!("{at}: lists {ty}, which it doesn't hold")); }
         let files: BTreeSet<&str> = shapes.iter().filter(|s| s.name == name && s.kind != Kind::Alias).map(|s| s.file.as_str()).collect();
-        let means = |n: &Named| n.path.as_deref().map_or(n.file == file, |path| path == module(file) || (path == "crate" && file == "lib.rs"));
+        let means = |n: &Named| n.path.as_deref().map_or(n.file == file, |path| path == module(file));
         if files.len() > 1 && !spellings.iter().all(|&n| means(n)) {
             out.push(format!("{at}: {name} names more than one type, and this spelling may not be {ty}"));
         }
