@@ -242,7 +242,9 @@ impl LispString {
     pub fn as_str(&self) -> &str {
         assert!(self.is_utf8(), "String slot must contain UTF-8");
         // SAFETY: checked just above, and construction and every byte mutation
-        // keep is_utf8 true only of valid UTF-8.
+        // keep is_utf8 true only of valid UTF-8. Irreducible: the checked
+        // conversion would scan the whole string on every call of this hot
+        // accessor, where the flag answers in one read.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
     }
     pub fn bytes(&self) -> &[u8] {

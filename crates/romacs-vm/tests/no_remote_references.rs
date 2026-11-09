@@ -13,7 +13,7 @@ mod rust_tokens;
 use rust_tokens::{Token, tokens};
 // The shared lexer's own list, which this test has no use for.
 const _: &[&str] = rust_tokens::CONVERTED;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug)]
@@ -299,21 +299,7 @@ fn names_past_the_barrier(sources: &[(String, String)]) -> Vec<String> {
 
 #[test]
 fn only_the_collector_and_the_hash_setters_write_past_the_barrier() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut stack = vec![src.clone()];
-    let mut sources = vec![];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                let relative = path.strip_prefix(&src).unwrap().to_string_lossy().into_owned();
-                sources.push((relative, std::fs::read_to_string(&path).unwrap()));
-            }
-        }
-    }
-    let problems = names_past_the_barrier(&sources);
+    let problems = names_past_the_barrier(&sources());
     assert!(problems.is_empty(), "past the barrier: {}", problems.join(", "));
 }
 
@@ -337,5 +323,460 @@ fn a_name_past_the_barrier_is_refused() {
         "gc.rs: hash_mut",
         "frame.rs: hash_mut",
         "gcov.rs: collector_entries_mut",
+    ]);
+}
+
+// The two ratchets. A store must reach the barrier, so nothing reachable from
+// the VM may hold a Value behind a lock or cell, where a shared borrow writes
+// it, and a table entry's Value fields may not be public, where code writes
+// them without the entry's own methods. Today's offenders are listed, each with
+// what will remove it; a new one fails at once, and a listed one that has gone
+// fails until its line is dropped, so the lists only shrink.
+//
+// The check reads source, not types: a name resolves to the type declared in
+// the same file, else to the one a `use` or a path names, else to every type of
+// that name, and a type is taken to hold a Value if any of its fields could.
+// It sees no `dyn` contents and no Value kept as bare bits.
+
+/// Today's Values behind a lock or cell, reachable from the VM, as
+/// `FILE:TYPE.FIELD` (an enum's whole body as `FILE:TYPE`). A line names the
+/// one writer such a Value may have, or what removes the cell. A shared node or
+/// body stays behind its lock; what matters is that only its owner's write
+/// funnel writes it, which privacy, not this check, holds.
+const INTERIOR_ALLOWED: &[(&str, &str)] = &[
+    ("char_table.rs:CharTable.root", "a char table node: to be written only through char_table.rs's funnel (perf/gc-chartable)"),
+    ("char_table.rs:CharTableSlot", "a char table node: the same funnel"),
+    ("char_table.rs:CharTableView.root", "a char table node, which a view only reads"),
+    ("data.rs:Object", "`SubCharTable`'s char table node: the same funnel"),
+    ("lib.rs:Vm.native_case_roots", "weak references to case tables' char table nodes: the same funnel"),
+    ("map_keymap.rs:Frame.node", "a keymap cursor's char table node: the same funnel"),
+    ("properties.rs:KeyReader.run", "a reader borrowed for one call, holding the last run it read"),
+    ("text.rs:Text.body", "text shared by indirect buffers: to be written only through `TextBody`'s own methods"),
+    ("treesit/mod.rs:Parser.native", "read as holding a Value through a shared name; holds a tree-sitter parser"),
+    ("treesit/mod.rs:Task.state", "a tree-sitter query's state between predicate calls: to settle with C1"),
+];
+
+/// Today's table entry types with a public Value field, as `FILE:TYPE`, each
+/// with what removes it. A `&mut` to an entry comes only from `entry_mut`,
+/// which runs the barrier, so these write past no barrier; the list is the
+/// funnel each type still lacks.
+const PUBLIC_ALLOWED: &[(&str, &str)] = &[
+    ("annotations.rs:AnnotatedBuffer", "buffer accessors"),
+    ("annotations.rs:Marker", "marker accessors"),
+    ("annotations.rs:Overlay", "overlay accessors"),
+    ("bytes.rs:ByteBuffer", "buffer accessors"),
+    ("char_table.rs:CharTable", "the char-table write funnel (perf/gc-chartable)"),
+    ("char_table.rs:CharTableNode", "the char-table write funnel (perf/gc-chartable)"),
+    ("data.rs:LispString", "string property accessors"),
+    ("frame.rs:Frame", "frame accessors"),
+    ("frame.rs:Terminal", "terminal accessors"),
+    ("hash.rs:HashTable", "hash table accessors"),
+    ("subprocess.rs:Process", "process accessors"),
+    ("window.rs:Window", "window accessors"),
+];
+
+const PLAIN: &[&str] = &[
+    "Vec", "Box", "Option", "Rc", "Arc", "HashMap", "BTreeMap", "FxHashMap", "HashSet", "BTreeSet", "FxHashSet", "Weak",
+    "String", "Result", "VecDeque", "Range", "PhantomData", "NonNull", "Self", "Some", "None",
+];
+/// What lets a shared borrow write what it holds.
+const INTERIOR: &[&str] = &["Cell", "RefCell", "Mutex", "RwLock", "UnsafeCell", "OnceCell", "OnceLock", "LazyCell"];
+/// Associated types, which a `type` inside an `impl` declares.
+const ASSOCIATED: &[&str] = &["Output", "Target", "Item", "IntoIter", "Error", "Err", "Owned"];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Kind { Struct, Enum, Alias }
+
+/// A type's declaration: a struct's fields, an enum's body as one field, an
+/// alias's right side as one field.
+struct Shape {
+    file: String,
+    name: String,
+    kind: Kind,
+    generic: bool,
+    fields: Vec<(String, bool, Vec<String>)>,
+}
+
+fn is_type_name(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_uppercase()) && word.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+fn words(text: &str) -> Vec<String> {
+    tokens(text).into_iter().map(|t| match t { Token::Ident(name) => name, Token::Punct(c) => c.to_string() }).collect()
+}
+
+/// The index of the bracket closing the one at I; a `->` closes nothing.
+fn close(t: &[String], i: usize) -> usize {
+    let mut depth = 0;
+    let mut k = i;
+    while k < t.len() {
+        if t[k] == "-" && t.get(k + 1).is_some_and(|w| w == ">") {
+            k += 2;
+            continue;
+        }
+        match t[k].as_str() {
+            "(" | "[" | "{" | "<" => depth += 1,
+            ")" | "]" | "}" | ">" => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 { return k; }
+        k += 1;
+    }
+    t.len() - 1
+}
+
+/// T split at its top-level commas.
+fn split_top(t: &[String]) -> Vec<Vec<String>> {
+    let mut parts = vec![];
+    let mut part = vec![];
+    let mut depth = 0;
+    let mut k = 0;
+    while k < t.len() {
+        if t[k] == "-" && t.get(k + 1).is_some_and(|w| w == ">") {
+            part.extend_from_slice(&t[k..k + 2]);
+            k += 2;
+            continue;
+        }
+        match t[k].as_str() {
+            "(" | "[" | "{" | "<" => depth += 1,
+            ")" | "]" | "}" | ">" => depth -= 1,
+            _ => {}
+        }
+        if t[k] == "," && depth == 0 { parts.push(std::mem::take(&mut part)); } else { part.push(t[k].clone()); }
+        k += 1;
+    }
+    if !part.is_empty() { parts.push(part); }
+    parts
+}
+
+/// A member past its attributes, and whether it is public.
+fn member(mut p: &[String]) -> (bool, &[String]) {
+    while p.first().is_some_and(|w| w == "#") {
+        let open = if p.get(1).is_some_and(|w| w == "!") { 2 } else { 1 };
+        p = &p[close(p, open) + 1..];
+    }
+    if p.first().is_some_and(|w| w == "pub") {
+        p = &p[1..];
+        if p.first().is_some_and(|w| w == "(") { p = &p[close(p, 0) + 1..]; }
+        return (true, p);
+    }
+    (false, p)
+}
+
+/// The module a type named NAME comes from, by the `use`s of a file's words.
+fn imports(t: &[String]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut i = 0;
+    while i < t.len() {
+        if t[i] != "use" { i += 1; continue; }
+        let end = (i..t.len()).find(|&k| t[k] == ";").unwrap_or(t.len());
+        let path = &t[i + 1..end];
+        for (j, name) in path.iter().enumerate() {
+            if !is_type_name(name) { continue; }
+            let module = if j >= 3 && path[j - 1] == ":" && path[j - 2] == ":" {
+                Some(path[j - 3].clone())
+            } else {
+                // Inside braces: the segment before the `::{` that opens them.
+                let mut depth = 0;
+                let mut found = None;
+                for q in (0..j).rev() {
+                    match path[q].as_str() {
+                        "}" => depth += 1,
+                        "{" if depth == 0 => {
+                            if q >= 3 && path[q - 1] == ":" && path[q - 2] == ":" { found = Some(path[q - 3].clone()); }
+                            break;
+                        }
+                        "{" => depth -= 1,
+                        _ => {}
+                    }
+                }
+                found
+            };
+            if let Some(module) = module { out.insert(name.clone(), module); }
+        }
+        i = end;
+    }
+    out
+}
+
+/// The types a file declares.
+fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
+    let mut out = vec![];
+    let mut i = 0;
+    while i + 2 < t.len() {
+        let kind = match t[i].as_str() {
+            "struct" | "union" => Some(Kind::Struct),
+            "enum" => Some(Kind::Enum),
+            "type" if !ASSOCIATED.contains(&t[i + 1].as_str()) => Some(Kind::Alias),
+            _ => None,
+        };
+        let Some(kind) = kind.filter(|_| is_type_name(&t[i + 1])) else { i += 1; continue };
+        let mut shape = Shape { file: file.to_owned(), name: t[i + 1].clone(), kind, generic: false, fields: vec![] };
+        let mut j = i + 2;
+        if t[j] == "<" {
+            let end = close(t, j);
+            // A lifetime reads as a lower-case word, a type parameter does not.
+            shape.generic = t[j + 1..end].iter().any(|w| is_type_name(w));
+            j = end + 1;
+        }
+        if kind == Kind::Alias {
+            if t.get(j).is_some_and(|w| w == "=") {
+                let end = (j..t.len()).find(|&k| t[k] == ";").unwrap_or(t.len());
+                shape.fields.push(("=".to_owned(), false, t[j + 1..end].to_vec()));
+                out.push(shape);
+                i = end;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        while j < t.len() && !["{", "(", ";"].contains(&t[j].as_str()) { j += 1; }
+        if j < t.len() && t[j] != ";" {
+            let end = close(t, j);
+            let body = &t[j + 1..end];
+            if kind == Kind::Enum {
+                shape.fields.push((String::new(), false, body.to_vec()));
+            } else if t[j] == "{" {
+                for part in split_top(body) {
+                    let (public, p) = member(&part);
+                    if p.len() >= 2 && p[1] == ":" { shape.fields.push((p[0].clone(), public, p[2..].to_vec())); }
+                }
+            } else {
+                for (n, part) in split_top(body).iter().enumerate() {
+                    let (public, p) = member(part);
+                    shape.fields.push((n.to_string(), public, p.to_vec()));
+                }
+            }
+            j = end;
+        }
+        out.push(shape);
+        i = j + 1;
+    }
+    out
+}
+
+fn module_of(file: &str) -> &str {
+    let stem = file.trim_end_matches(".rs");
+    let mut parts = stem.rsplit('/');
+    let last = parts.next().unwrap_or(stem);
+    if last == "mod" { parts.next().unwrap_or(last) } else { last }
+}
+
+/// Every type under `src`, and what each holds.
+struct Types {
+    shapes: Vec<Shape>,
+    by_name: BTreeMap<String, Vec<usize>>,
+    imports: BTreeMap<String, BTreeMap<String, String>>,
+    holds: Vec<bool>,
+    wrappers: BTreeSet<String>,
+}
+
+impl Types {
+    fn new(sources: &[(String, String)]) -> Types {
+        let mut shapes = vec![];
+        let mut imported = BTreeMap::new();
+        for (file, text) in sources {
+            let t = words(text);
+            imported.insert(file.clone(), imports(&t));
+            shapes.extend(declarations(file, &t));
+        }
+        let mut by_name: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, shape) in shapes.iter().enumerate() { by_name.entry(shape.name.clone()).or_default().push(i); }
+        let n = shapes.len();
+        let mut types = Types { shapes, by_name, imports: imported, holds: vec![false; n], wrappers: INTERIOR.iter().map(|w| (*w).to_owned()).collect() };
+        // A generic struct that keeps its parameter behind a cell is a cell.
+        loop {
+            let found: Vec<String> = types.shapes.iter()
+                .filter(|s| s.kind == Kind::Struct && s.generic && !types.wrappers.contains(&s.name))
+                .filter(|s| s.fields.iter().any(|(_, _, ty)| ty.iter().any(|w| types.wrappers.contains(w))))
+                .map(|s| s.name.clone()).collect();
+            if found.is_empty() { break; }
+            types.wrappers.extend(found);
+        }
+        loop {
+            let found: Vec<usize> = (0..n).filter(|&i| !types.holds[i]).filter(|&i| {
+                let s = &types.shapes[i];
+                s.fields.iter().any(|(_, _, ty)| types.holds_value_except(&s.file, ty, Some(i)))
+            }).collect();
+            if found.is_empty() { break; }
+            for i in found { types.holds[i] = true; }
+        }
+        types
+    }
+
+    /// The types NAME may be in FILE: declared there, else in the module a
+    /// path or `use` names (none, if that module is another crate's), else
+    /// every type of that name.
+    fn resolve(&self, file: &str, name: &str, hint: Option<&str>) -> Vec<usize> {
+        let Some(all) = self.by_name.get(name) else { return vec![] };
+        let here: Vec<usize> = all.iter().copied().filter(|&i| self.shapes[i].file == file).collect();
+        if !here.is_empty() { return here; }
+        let module = hint.filter(|m| !["crate", "super", "self"].contains(m))
+            .or_else(|| self.imports.get(file).and_then(|u| u.get(name)).map(String::as_str));
+        match module {
+            Some(m) => all.iter().copied().filter(|&i| {
+                let f = &self.shapes[i].file;
+                module_of(f) == m || f.starts_with(&format!("{m}/")) || f.contains(&format!("/{m}/"))
+            }).collect(),
+            None => all.clone(),
+        }
+    }
+
+    /// Each type name in TY, with the module a path names it by.
+    fn refs<'t>(&self, ty: &'t [String]) -> Vec<(&'t str, Option<&'t str>)> {
+        ty.iter().enumerate()
+            .filter(|(_, w)| is_type_name(w) && !PLAIN.contains(&w.as_str()) && !self.wrappers.contains(*w))
+            .map(|(k, w)| (w.as_str(), (k >= 3 && ty[k - 1] == ":" && ty[k - 2] == ":").then(|| ty[k - 3].as_str())))
+            .collect()
+    }
+
+    fn holds_value_except(&self, file: &str, ty: &[String], skip: Option<usize>) -> bool {
+        ty.iter().any(|w| w == "Value")
+            || self.refs(ty).iter().any(|(name, hint)| self.resolve(file, name, *hint).into_iter().any(|i| Some(i) != skip && self.holds[i]))
+    }
+
+    fn holds_value(&self, file: &str, ty: &[String]) -> bool {
+        self.holds_value_except(file, ty, None)
+    }
+
+    /// TY with its aliases written out.
+    fn expand(&self, file: &str, ty: &[String], depth: usize) -> Vec<String> {
+        let mut out = vec![];
+        for w in ty {
+            let alias = if is_type_name(w) && depth < 8 {
+                self.resolve(file, w, None).into_iter().find(|&i| self.shapes[i].kind == Kind::Alias)
+            } else { None };
+            match alias {
+                Some(i) => out.extend(self.expand(&self.shapes[i].file, &self.shapes[i].fields[0].2, depth + 1)),
+                None => out.push(w.clone()),
+            }
+        }
+        out
+    }
+
+    /// Whether TY keeps a Value behind a cell or lock.
+    fn wraps_value(&self, file: &str, ty: &[String]) -> bool {
+        let t = self.expand(file, ty, 0);
+        (0..t.len()).any(|k| {
+            self.wrappers.contains(&t[k]) && t.get(k + 1).is_some_and(|w| w == "<") && self.holds_value(file, &t[k + 2..close(&t, k + 1)])
+        })
+    }
+
+    fn named(&self, file: &str, name: &str, kind: Kind) -> Vec<usize> {
+        self.by_name.get(name).into_iter().flatten().copied()
+            .filter(|&i| self.shapes[i].file == file && self.shapes[i].kind == kind).collect()
+    }
+
+    /// The structs the heap tables hold: each `Object` variant's payload, and closures.
+    fn entries(&self) -> BTreeSet<usize> {
+        let mut out = BTreeSet::new();
+        for i in self.named("data.rs", "Object", Kind::Enum) {
+            for part in split_top(&self.shapes[i].fields[0].2) {
+                let (_, p) = member(&part);
+                if p.len() > 2 && p[1] == "(" {
+                    let payload = self.expand("data.rs", &p[2..close(p, 1)], 0);
+                    let found = self.refs(&payload).into_iter().rev().filter(|(name, _)| *name != "Value").find_map(|(name, hint)| {
+                        let structs: Vec<usize> = self.resolve("data.rs", name, hint).into_iter().filter(|&k| self.shapes[k].kind == Kind::Struct).collect();
+                        (!structs.is_empty()).then_some(structs)
+                    });
+                    out.extend(found.into_iter().flatten());
+                }
+            }
+        }
+        out.extend(self.named("lib.rs", "Closure", Kind::Struct));
+        out
+    }
+
+    /// Every type reachable from the VM and the tables' entries.
+    fn reachable(&self) -> BTreeSet<usize> {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<usize> = self.named("lib.rs", "Vm", Kind::Struct);
+        stack.extend(self.entries());
+        while let Some(i) = stack.pop() {
+            if !seen.insert(i) { continue; }
+            let s = &self.shapes[i];
+            for (_, _, ty) in &s.fields {
+                let t = self.expand(&s.file, ty, 0);
+                for (name, hint) in self.refs(&t) { stack.extend(self.resolve(&s.file, name, hint)); }
+            }
+        }
+        seen
+    }
+
+    fn interior_holders(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for i in self.reachable() {
+            let s = &self.shapes[i];
+            for (field, _, ty) in &s.fields {
+                if self.wraps_value(&s.file, ty) {
+                    out.insert(if field.is_empty() || field == "=" { format!("{}:{}", s.file, s.name) } else { format!("{}:{}.{field}", s.file, s.name) });
+                }
+            }
+        }
+        out
+    }
+
+    fn public_holders(&self) -> BTreeSet<String> {
+        self.entries().into_iter().map(|i| &self.shapes[i])
+            .filter(|s| s.fields.iter().any(|(_, public, ty)| *public && self.holds_value(&s.file, &self.expand(&s.file, ty, 0))))
+            .map(|s| format!("{}:{}", s.file, s.name)).collect()
+    }
+}
+
+/// What FOUND and an ALLOWED list differ by: a new offender, or a listed one gone.
+fn ratchet(what: &str, found: &BTreeSet<String>, allowed: &[(&str, &str)]) -> Vec<String> {
+    let listed: BTreeSet<String> = allowed.iter().map(|(name, _)| (*name).to_owned()).collect();
+    let mut out: Vec<String> = found.difference(&listed).map(|name| format!("{name}: {what}")).collect();
+    out.extend(listed.difference(found).map(|name| format!("{name}: no longer {what}; drop its line, the list only shrinks")));
+    out
+}
+
+fn sources() -> Vec<(String, String)> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut stack = vec![src.clone()];
+    let mut out = vec![];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push((path.strip_prefix(&src).unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn values_behind_a_cell_or_a_public_field_only_shrink() {
+    let types = Types::new(&sources());
+    let mut problems = ratchet("holds a Value behind a cell or lock, reachable from the VM", &types.interior_holders(), INTERIOR_ALLOWED);
+    problems.extend(ratchet("a table entry with a public Value field", &types.public_holders(), PUBLIC_ALLOWED));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The check can fire: a Value behind a cell, a custom lock and an alias, a
+/// public Value field in an entry, and a listed name that has gone; a cell of
+/// plain data and a private field do not count.
+#[test]
+fn a_new_value_behind_a_cell_or_a_public_field_is_refused() {
+    let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
+    let types = Types::new(&[
+        file("lib.rs", "pub(crate) struct Vm { things: Thing } pub(crate) struct Closure { captures: Vec<Value> } pub(crate) struct Value(u64);"),
+        file("data.rs", "pub(super) enum Object { A(Box<entry::Entry>), B(Value), C(Vec<Value>) }"),
+        file("entry.rs", "pub(crate) struct Entry { pub v: Value, w: std::cell::RefCell<Value>, x: Shared<Inner>, quiet: Value }
+                          pub(crate) struct Inner { v: Value }"),
+        file("indirect.rs", "pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>);"),
+        file("thing.rs", "use crate::entry::Inner; type Handle = Arc<Mutex<Inner>>; pub(crate) struct Thing { h: Handle, plain: Cell<usize> }"),
+    ]);
+    let interior: Vec<String> = types.interior_holders().into_iter().collect();
+    assert_eq!(interior, ["entry.rs:Entry.w", "entry.rs:Entry.x", "thing.rs:Thing.h"]);
+    let public: Vec<String> = types.public_holders().into_iter().collect();
+    assert_eq!(public, ["entry.rs:Entry"]);
+    let found: BTreeSet<String> = ["new.rs:A".to_owned()].into();
+    assert_eq!(ratchet("held", &found, &[("gone.rs:B", "why")]), [
+        "new.rs:A: held".to_owned(),
+        "gone.rs:B: no longer held; drop its line, the list only shrinks".to_owned(),
     ]);
 }
