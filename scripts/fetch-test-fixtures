@@ -101,11 +101,21 @@ def member(data, name):
         return tf.extractfile(name).read()
 
 
+def gzip_holds(path, digest):
+    """Whether PATH is a gzip of bytes whose hash is DIGEST."""
+    try:
+        return path.is_file() and sha256(gzip.decompress(path.read_bytes())) == digest
+    except (OSError, EOFError, gzip.BadGzipFile):
+        return False
+
+
 def wanted(root, fixtures):
-    """The fixtures absent or not their pin; a gzip copy, when absent."""
+    """The fixtures absent or not their pin; a gzip copy, unless it expands
+    to its source's pin."""
+    pins = {f['file']: f.get('sha256') for f in fixtures}
     return [f for f in fixtures
             if not (holds(root / f['file'], f['sha256']) if 'sha256' in f
-                    else (root / f['file']).is_file())]
+                    else gzip_holds(root / f['file'], pins[f['gzip_of']]))]
 
 
 def fetch(root, manifest, fixture):
