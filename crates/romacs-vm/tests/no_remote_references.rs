@@ -85,8 +85,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("keep_captures", Free), ("lambda_depth", Free), ("window_change_seen", Free), ("expanded_macros", Free), ("expanded_symbols", Free),
     ("image", Free),
     // A frozen region's symbols, read once it is marked. Written when it is
-    // placed and when its hash tables are put in, both before any Value names
-    // the region (frozen.rs), so no store.
+    // placed and when its hash tables are put in, both before it is returned
+    // and before any heap Value names it, with no collection between
+    // (frozen.rs), so no store.
     ("regions", Rescanned),
     ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("inotify", Free),
     ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
@@ -265,7 +266,9 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
 /// The `Table` methods that write past the barrier, and who may name them:
 /// the collector's own rewrites, and the hash table's setters, whose `Stores`
 /// handle tells each store but whose `&mut HashTable` would let a caller write
-/// around it. Each name is the method's alone, so any use of it counts.
+/// around it. Each name is the method's alone, so any use of it counts. The
+/// rule covers names only: a wrapper in an allowed file that hands a method out
+/// is that file's to answer for.
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
     ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
     ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
@@ -275,13 +278,13 @@ const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
 type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
-    file == "table.rs" || (file.starts_with("gc") && !file.contains('/'))
+    ["table.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
 }
 
 /// Each file under `src` that names a method of PAST_THE_BARRIER it may not,
 /// as `FILE: METHOD`: a call, a path to it, a reference to it or a macro's
 /// argument, any use of the identifier. A comment or a string never counts.
-fn calls_past_the_barrier(sources: &[(String, String)]) -> Vec<String> {
+fn names_past_the_barrier(sources: &[(String, String)]) -> Vec<String> {
     let mut problems = vec![];
     for (file, text) in sources {
         let toks = tokens(text);
@@ -310,14 +313,14 @@ fn only_the_collector_and_the_hash_setters_write_past_the_barrier() {
             }
         }
     }
-    let problems = calls_past_the_barrier(&sources);
+    let problems = names_past_the_barrier(&sources);
     assert!(problems.is_empty(), "past the barrier: {}", problems.join(", "));
 }
 
 /// The check can fire: each method, named from a file that may not, by a
 /// call, a path, a reference and a macro's argument.
 #[test]
-fn a_call_past_the_barrier_is_refused() {
+fn a_name_past_the_barrier_is_refused() {
     let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
     let sources = [
         file("window.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); vm.conses.collector_compact(|_| {}); }"),
@@ -325,12 +328,14 @@ fn a_call_past_the_barrier_is_refused() {
         file("gc.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); let g = Table::hash_mut; g(&mut vm.objects, 2); }"),
         file("frame.rs", "fn f(vm: &mut Vm) { through!(vm.objects, hash_mut, 3); }"),
         file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // collector_compact in a comment"),
-        file("handle.rs", "fn f(vm: &mut Vm) { vm.allocation.compact = true; let s = \"collector_prepend\"; }"),
+        file("handle.rs", "fn f(vm: &mut Vm) { let collector_compact_count = 0; vm.hash_mut_ish(); let s = \"collector_prepend\"; }"),
+        file("gcov.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); }"),
     ];
-    assert_eq!(calls_past_the_barrier(&sources), [
+    assert_eq!(names_past_the_barrier(&sources), [
         "window.rs: collector_compact", "window.rs: hash_mut",
         "prim/gc_leaf.rs: collector_entries_mut", "prim/gc_leaf.rs: collector_prepend",
         "gc.rs: hash_mut",
         "frame.rs: hash_mut",
+        "gcov.rs: collector_entries_mut",
     ]);
 }
