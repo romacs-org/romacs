@@ -13,8 +13,10 @@
     "romacs-renderer-wgpu": {"sites": 18, "undocumented": 0},
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
     "romacs-video": {"sites": 28, "undocumented": 0},
-    "romacs-vm": {"sites": 882, "undocumented": 493},
+    "romacs-vm": {"sites": 880, "undocumented": 489},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2}
   },
-  "unsafe_op_in_unsafe_fn_pending": {}
+  "unsafe_op_in_unsafe_fn_pending": {
+
+  }
 }

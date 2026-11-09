@@ -569,6 +569,51 @@ fn wrote(path: &Path) {
     }
 }
 
+/// An effect on PATH succeeded: while a flight runs, PATH's times are the
+/// kernel's clock's, and so are its directory's when ENTRIES says the
+/// effect added, removed or renamed an entry there (`crate::flight::stat`).
+/// A failed effect changes nothing and marks nothing.
+fn changed<T>(result: &io::Result<T>, path: &Path, entries: bool) {
+    if result.is_err() {
+        return;
+    }
+    if let Some(path) = flight_path(path) {
+        if entries && let Some(parent) = path.parent() { crate::flight::wrote(parent.to_owned()); }
+        crate::flight::wrote(path);
+    }
+}
+
+/// Whether PATH names nothing yet, asked only while a flight runs: an
+/// effect that creates it changes its directory's entries.
+fn absent(path: &Path) -> bool {
+    crate::flight::active() && std::fs::symlink_metadata(path).is_err()
+}
+
+/// PATH made absolute against the working directory, while a flight runs:
+/// the form `wrote` keeps, for `crate::flight::stat`.
+fn flight_path(path: &Path) -> Option<PathBuf> {
+    crate::flight::active().then(|| if path.is_relative() { std::env::current_dir().map(|d| d.join(path)).unwrap_or_else(|_| path.to_owned()) } else { path.to_owned() })
+}
+
+/// PATH's modification and access times set to SECONDS and NANOS, a
+/// symlink's own when not FOLLOW: a flight replay's retime of a file it
+/// wrote (`crate::flight::stat`).
+fn retime(path: &Path, seconds: i64, nanos: i64, follow: bool) -> io::Result<()> {
+    let name = path_c_string(path)?;
+    let stamp = libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: nanos as _ };
+    let flags = if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW };
+    // SAFETY: NAME is a NUL-terminated path and the two timespecs a live
+    // local array, which utimensat only reads.
+    status(unsafe { libc::utimensat(libc::AT_FDCWD, name.as_ptr(), [stamp, stamp].as_ptr(), flags) })
+}
+
+/// FILE's modification time set to SECONDS and NANOS, as `retime` does.
+fn retime_file(file: &File, seconds: i64, nanos: i64) -> io::Result<()> {
+    let at = SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::new(seconds.max(0) as u64, nanos.clamp(0, 999_999_999) as u32))
+        .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+    file.set_modified(at)
+}
+
 /// An effect WHAT: refused, failing with EPERM; Ok outside build mode.
 fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
     if !refusing() {
@@ -652,7 +697,7 @@ fn stat_json(meta: &io::Result<Metadata>) -> Json {
 // Environment.
 
 pub fn getenv(name: &str) -> Option<OsString> {
-    let value = std::env::var_os(name);
+    let value = crate::flight::checked("getenv", || name.to_owned(), || std::env::var_os(name), |v| v.as_ref().map_or(u64::MAX, |v| crate::flight::digest(v.as_bytes())));
     if building() {
         env_read("host", name.as_bytes(), value.as_ref());
     }
@@ -720,7 +765,9 @@ pub fn env_snapshot() -> Vec<(OsString, OsString)> {
     if building() {
         p_read(Fact::Environment, "environment".into());
     }
-    std::env::vars_os().collect()
+    crate::flight::checked("environment", String::new, || std::env::vars_os().collect(), |vars: &Vec<(OsString, OsString)>| {
+        vars.iter().fold(0, |h, (k, v)| h.rotate_left(7) ^ crate::flight::digest(k.as_bytes()) ^ crate::flight::digest(v.as_bytes()).rotate_left(1))
+    })
 }
 
 /// Which Lisp list a Rust environment lookup walks.
@@ -747,7 +794,7 @@ pub fn lisp_env(list: EnvList, name: &[u8]) {
 // Files.
 
 pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let result = std::fs::read(&path);
+    let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b)));
     if building() {
         file_read(path.as_ref(), &result);
     }
@@ -755,7 +802,7 @@ pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 }
 
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-    let result = std::fs::read_to_string(&path);
+    let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read_to_string(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b.as_bytes())));
     if building() {
         file_read(path.as_ref(), &result);
     }
@@ -772,11 +819,11 @@ pub enum Probe {
 
 pub fn probe(kind: Probe, path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
-    let observed = match kind {
+    let observed = crate::flight::checked("probe", || bytes(path), || match kind {
         Probe::Exists => path.exists(),
         Probe::IsFile => path.is_file(),
         Probe::IsDir => path.is_dir(),
-    };
+    }, |&b| u64::from(b));
     if building() {
         probed(&format!("{kind:?}"), path, json!(observed));
     }
@@ -784,7 +831,9 @@ pub fn probe(kind: Probe, path: impl AsRef<Path>) -> bool {
 }
 
 pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
-    let result = std::fs::metadata(&path);
+    let absolute = flight_path(path.as_ref());
+    let result = crate::flight::stat("stat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::metadata(&path),
+                                     |s, ns| retime(path.as_ref(), s, ns, true));
     if building() {
         probed("stat", path.as_ref(), stat_json(&result));
     }
@@ -792,7 +841,9 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 }
 
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
-    let result = std::fs::symlink_metadata(&path);
+    let absolute = flight_path(path.as_ref());
+    let result = crate::flight::stat("lstat", || bytes(path.as_ref()), absolute.as_deref(), false, || std::fs::symlink_metadata(&path),
+                                     |s, ns| retime(path.as_ref(), s, ns, false));
     if building() {
         probed("lstat", path.as_ref(), stat_json(&result));
     }
@@ -801,7 +852,7 @@ pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
 
 /// fstat on an output file this module opened.
 pub fn file_metadata(file: &File) -> io::Result<Metadata> {
-    file.metadata()
+    crate::flight::stat("fstat", String::new, None, true, || file.metadata(), |s, ns| retime_file(file, s, ns))
 }
 
 /// A file opened for reading. Its reads and queries go through this module,
@@ -809,7 +860,30 @@ pub fn file_metadata(file: &File) -> io::Result<Metadata> {
 /// descriptor never leaves it. In build mode it keeps its path, and opening
 /// a regular file reads its whole content from the descriptor once: that is
 /// what the trace records and what every later read is served from.
-pub struct Input(File, Option<PathBuf>, Option<Captured>);
+pub struct Input(File, Option<PathBuf>, Option<Captured>, Source);
+
+/// Where an input's bytes come from: a file, which a replay reads again,
+/// or entropy, which a replay takes from its log (`crate::flight`). A
+/// file's path is kept while a flight runs, to name it in a divergence.
+#[derive(PartialEq, Eq)]
+enum Source {
+    File(Option<PathBuf>),
+    Entropy,
+}
+
+impl Source {
+    fn file(path: &Path) -> Source {
+        Source::File(flight_path(path))
+    }
+
+    /// What a flight's divergence names this input by.
+    fn what(&self) -> String {
+        match self {
+            Source::File(path) => path.as_deref().map(bytes).unwrap_or_default(),
+            Source::Entropy => "entropy".into(),
+        }
+    }
+}
 
 /// A regular file's content as opening read it, or the errno that read
 /// failed with, and the read position.
@@ -831,23 +905,23 @@ impl Captured {
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
-    let result = OpenOptions::new().read(true).custom_flags(flags).open(&path);
+    let result = crate::flight::checked("open", || bytes(path.as_ref()), || OpenOptions::new().read(true).custom_flags(flags).open(&path), |r| crate::flight::outcome(r, |_| 0));
     if !building() {
-        return result.map(|file| Input(file, None, None));
+        return result.map(|file| Input(file, None, None, Source::file(path.as_ref())));
     }
     let path = path.as_ref();
     match result {
         // Only a regular file's content is a fact; a FIFO's read would block.
         Ok(file) if file.metadata().is_ok_and(|m| !m.is_file()) => {
             probed("open", path, json!("special"));
-            Ok(Input(file, Some(path.to_owned()), None))
+            Ok(Input(file, Some(path.to_owned()), None, Source::file(path)))
         }
         Ok(file) => {
             let mut content = Vec::new();
             let read = io::Read::read_to_end(&mut &file, &mut content).map(|_| content);
             file_read(path, &read);
             let content = read.map_err(|e| e.raw_os_error().unwrap_or(libc::EIO));
-            Ok(Input(file, Some(path.to_owned()), Some(Captured { content, at: 0 })))
+            Ok(Input(file, Some(path.to_owned()), Some(Captured { content, at: 0 }), Source::file(path)))
         }
         Err(e) => {
             if reseed_reads("user-file") {
@@ -867,13 +941,15 @@ pub fn random_source() -> io::Result<Input> {
     if building() {
         p_read(Fact::Seed, "random source".into());
     }
-    File::open("/dev/urandom").map(|file| Input(file, None, None))
+    File::open("/dev/urandom").map(|file| Input(file, None, None, Source::Entropy))
 }
 
 impl Input {
     /// fstat.
     pub fn stat(&self) -> io::Result<Metadata> {
-        let result = self.0.metadata();
+        let path = match &self.3 { Source::File(path) => path.as_deref(), Source::Entropy => None };
+        let result = crate::flight::stat("fstat", || self.3.what(), path, false, || self.0.metadata(),
+                                         |s, ns| path.map_or(Err(io::Error::from_raw_os_error(libc::EBADF)), |path| retime(path, s, ns, true)));
         if let Some(path) = &self.1 {
             probed("fstat", path, stat_json(&result));
         }
@@ -883,6 +959,12 @@ impl Input {
     /// At most LIMIT bytes from OFFSET: a seek, then reads until LIMIT or the
     /// end. An error from either discards what was read.
     pub fn read_range(&mut self, offset: u64, limit: u64) -> io::Result<Vec<u8>> {
+        let read = self.live_read_range(offset, limit);
+        crate::flight::checked("read-range", || self.3.what(), || (), |()| crate::flight::outcome(&read, |b| crate::flight::digest(b)));
+        read
+    }
+
+    fn live_read_range(&mut self, offset: u64, limit: u64) -> io::Result<Vec<u8>> {
         use std::io::{Read, Seek, SeekFrom};
         if let Some(captured) = &mut self.2 {
             captured.at = usize::try_from(offset).unwrap_or(usize::MAX);
@@ -899,6 +981,21 @@ impl Input {
 
     /// One read into BUFFER: the count, 0 at the end.
     pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.3 == Source::Entropy && crate::flight::active() {
+            let bytes = crate::flight::value("entropy", || {
+                let mut bytes = vec![0u8; buffer.len()];
+                io::Read::read(&mut self.0, &mut bytes).map(|n| { bytes.truncate(n); crate::flight::Bytes(bytes) })
+            })?;
+            let n = bytes.0.len().min(buffer.len());
+            buffer[..n].copy_from_slice(&bytes.0[..n]);
+            return Ok(n);
+        }
+        let read = self.live_read(buffer);
+        crate::flight::checked("read", || self.3.what(), || (), |()| crate::flight::outcome(&read, |&n| crate::flight::digest(&buffer[..n])));
+        read
+    }
+
+    fn live_read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let Some(captured) = &mut self.2 else { return io::Read::read(&mut self.0, buffer) };
         let bytes = captured.take(buffer.len())?;
         buffer[..bytes.len()].copy_from_slice(bytes);
@@ -906,6 +1003,21 @@ impl Input {
     }
 
     pub fn read_exact(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+        if self.3 == Source::Entropy && crate::flight::active() {
+            let bytes = crate::flight::value("entropy", || {
+                let mut bytes = vec![0u8; buffer.len()];
+                io::Read::read_exact(&mut self.0, &mut bytes).map(|()| crate::flight::Bytes(bytes))
+            })?;
+            if bytes.0.len() != buffer.len() { return Err(io::ErrorKind::UnexpectedEof.into()); }
+            buffer.copy_from_slice(&bytes.0);
+            return Ok(());
+        }
+        let read = self.live_read_exact(buffer);
+        crate::flight::checked("read-exact", || self.3.what(), || (), |()| crate::flight::outcome(&read, |()| crate::flight::digest(buffer)));
+        read
+    }
+
+    fn live_read_exact(&mut self, buffer: &mut [u8]) -> io::Result<()> {
         let Some(captured) = &mut self.2 else { return io::Read::read_exact(&mut self.0, buffer) };
         let bytes = captured.take(buffer.len())?;
         if bytes.len() < buffer.len() {
@@ -918,10 +1030,10 @@ impl Input {
     /// Whether the file carries an extended (POSIX or NFSv4) ACL.
     pub fn has_acl(&self) -> bool {
         use std::os::fd::AsRawFd;
-        [c"system.posix_acl_access", c"system.nfs4_acl"].iter().any(|attribute| {
+        crate::flight::checked("has-acl", || self.3.what(), || [c"system.posix_acl_access", c"system.nfs4_acl"].iter().any(|attribute| {
             let size = unsafe { libc::fgetxattr(self.0.as_raw_fd(), attribute.as_ptr(), std::ptr::null_mut(), 0) };
             size >= 0
-        })
+        }), |&b| u64::from(b))
     }
 
     /// close(2), with its error.
@@ -942,7 +1054,7 @@ pub fn open_child_input(path: impl AsRef<Path>) -> io::Result<OwnedFd> {
 }
 
 pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    let result = std::fs::read_link(&path);
+    let result = crate::flight::checked("readlink", || bytes(path.as_ref()), || std::fs::read_link(&path), |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
         let observed = match &result { Ok(target) => path_json(target), Err(e) => errno(e) };
         probed("readlink", path.as_ref(), observed);
@@ -953,14 +1065,15 @@ pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
 /// The entries of PATH, as the host yields them. In build mode the listing
 /// records the names in enumeration order and how it ended (§6.3 DirList).
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
-    let result = std::fs::read_dir(&path);
+    let result = crate::flight::checked("opendir", || bytes(path.as_ref()), || std::fs::read_dir(&path), |r| crate::flight::outcome(r, |_| 0));
+    let named = flight_path(path.as_ref());
     if !building() {
-        return result.map(|entries| ReadDir(entries, None));
+        return result.map(|entries| ReadDir(entries, None, named));
     }
     let path = path.as_ref();
     match result {
-        Ok(entries) if keyed_path(path, "listing") => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }))),
-        Ok(entries) => Ok(ReadDir(entries, None)),
+        Ok(entries) if keyed_path(path, "listing") => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }), named)),
+        Ok(entries) => Ok(ReadDir(entries, None, named)),
         Err(e) => {
             confined(path, &e);
             if keyed_path(path, "listing") {
@@ -972,7 +1085,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
 }
 
 /// A directory listing whose entries answer their queries here.
-pub struct ReadDir(std::fs::ReadDir, Option<Listing>);
+pub struct ReadDir(std::fs::ReadDir, Option<Listing>, Option<PathBuf>);
 
 /// A listing as far as it was read: `end` is None while it may continue.
 struct Listing {
@@ -984,7 +1097,12 @@ struct Listing {
 impl Iterator for ReadDir {
     type Item = io::Result<DirEntry>;
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.0.next();
+        let listing = &self.2;
+        let next = crate::flight::checked("readdir", || listing.as_deref().map(bytes).unwrap_or_default(), || self.0.next(), |next| match next {
+            Some(Ok(entry)) => crate::flight::digest(entry.file_name().as_bytes()),
+            Some(Err(e)) => 0xe000_0000_0000_0000 | e.raw_os_error().unwrap_or(-1) as u32 as u64,
+            None => u64::MAX,
+        });
         if let Some(listing) = self.1.as_mut().filter(|l| l.end.is_none()) {
             match &next {
                 Some(Ok(entry)) => listing.names.push(encoded(entry.file_name().as_bytes())),
@@ -1019,7 +1137,7 @@ impl DirEntry {
 
     /// The type the listing gave, else an lstat's.
     pub fn file_type(&self) -> io::Result<FileType> {
-        let result = self.0.file_type();
+        let result = crate::flight::checked("entry-type", || bytes(&self.0.path()), || self.0.file_type(), |r| crate::flight::outcome(r, file_type_witness));
         if self.1 {
             probed("entry-type", &self.0.path(), entry_type_json(&result));
         }
@@ -1031,11 +1149,16 @@ impl DirEntry {
 /// whose record is only the type, so the entry's times and size are not
 /// keyed facts.
 pub fn entry_type(path: &Path) -> io::Result<FileType> {
-    let result = std::fs::symlink_metadata(path).map(|m| m.file_type());
+    let result = crate::flight::checked("entry-type", || bytes(path), || std::fs::symlink_metadata(path).map(|m| m.file_type()), |r| crate::flight::outcome(r, file_type_witness));
     if building() {
         probed("entry-type", path, entry_type_json(&result));
     }
     result
+}
+
+/// A file type, for a flight log.
+fn file_type_witness(t: &FileType) -> u64 {
+    if t.is_dir() { 1 } else if t.is_file() { 2 } else if t.is_symlink() { 3 } else { 4 }
 }
 
 fn entry_type_json(result: &io::Result<FileType>) -> Json {
@@ -1046,7 +1169,7 @@ fn entry_type_json(result: &io::Result<FileType>) -> Json {
 }
 
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    let result = std::fs::canonicalize(&path);
+    let result = crate::flight::checked("canonicalize", || bytes(path.as_ref()), || std::fs::canonicalize(&path), |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
         let observed = match &result { Ok(p) => path_json(p), Err(e) => errno(e) };
         if keyed_path(path.as_ref(), "canonicalize") {
@@ -1062,7 +1185,7 @@ pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     if building() && path.as_ref().is_relative() {
         p_read(Fact::CurrentDir, format!("working directory, for {}", bytes(path.as_ref())));
     }
-    std::path::absolute(path)
+    crate::flight::checked("absolute", || bytes(path.as_ref()), || std::path::absolute(&path), |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())))
 }
 
 /// Whose ids an access check uses.
@@ -1075,7 +1198,7 @@ pub enum Ids {
 /// faccessat: whether IDS may access PATH in MODE.
 pub fn access(path: &CStr, mode: i32, ids: Ids) -> io::Result<()> {
     let flags = match ids { Ids::Effective => libc::AT_EACCESS, Ids::Real => 0 };
-    let result = status(unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, flags) });
+    let result = crate::flight::checked("access", || String::from_utf8_lossy(path.to_bytes()).into_owned(), || status(unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, flags) }), |r| crate::flight::outcome(r, |()| 0));
     if building() {
         let observed = match &result { Ok(()) => json!("ok"), Err(e) => errno(e) };
         probed(&format!("access {mode} {ids:?}"), Path::new(OsStr::from_bytes(path.to_bytes())), observed);
@@ -1088,15 +1211,33 @@ fn status(result: libc::c_int) -> io::Result<()> {
     if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
-pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
-    let mut usage = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    let result = match unsafe { libc::statvfs(path.as_ptr(), usage.as_mut_ptr()) } {
-        0 => Ok(unsafe { usage.assume_init() }),
-        _ => Err(io::Error::last_os_error()),
-    };
+/// A filesystem's size and free space (statvfs(3)), in fragments of
+/// `fragment` bytes. `available` is the kernel's word as is: GNU reads it
+/// signed, so a filesystem reporting a negative count reports one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FsUsage {
+    pub block: u64,
+    pub fragment: u64,
+    pub blocks: u64,
+    pub free: u64,
+    pub available: u64,
+}
+
+pub fn statvfs(path: &CStr) -> io::Result<FsUsage> {
+    let result = crate::flight::value("statvfs", || {
+        let mut usage = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        match unsafe { libc::statvfs(path.as_ptr(), usage.as_mut_ptr()) } {
+            0 => {
+                // SAFETY: statvfs filled the struct, as its 0 says.
+                let u = unsafe { usage.assume_init() };
+                Ok(FsUsage { block: u.f_bsize, fragment: u.f_frsize, blocks: u.f_blocks, free: u.f_bfree, available: u.f_bavail })
+            }
+            _ => Err(io::Error::last_os_error()),
+        }
+    });
     if building() {
         let observed = match &result {
-            Ok(u) => json!([u.f_bsize, u.f_blocks, u.f_bfree, u.f_bavail]),
+            Ok(u) => json!([u.block, u.blocks, u.free, u.available]),
             Err(e) => errno(e),
         };
         probed("statvfs", Path::new(OsStr::from_bytes(path.to_bytes())), observed);
@@ -1107,14 +1248,14 @@ pub fn statvfs(path: &CStr) -> io::Result<libc::statvfs> {
 /// The type of the filesystem holding PATH: statfs's `f_type`, a magic
 /// number of linux/magic.h. A keyed probe.
 pub fn filesystem_type(path: &Path) -> io::Result<u32> {
-    let result = path_c_string(path).and_then(|name| {
+    let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| {
         let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
         match unsafe { libc::statfs(name.as_ptr(), buf.as_mut_ptr()) } {
             // f_type is a signed word; the magic numbers are 32 bits.
             0 => Ok(unsafe { buf.assume_init() }.f_type as u32),
             _ => Err(io::Error::last_os_error()),
         }
-    });
+    }), |r| crate::flight::outcome(r, |&t| u64::from(t)));
     if building() {
         if let Err(e) = &result { confined(path, e); }
         probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
@@ -1137,6 +1278,7 @@ pub fn directory_flags(directory: &Path) -> io::Result<u32> {
         }
         None => read_directory_flags(directory),
     };
+    let result = crate::flight::checked("dir-flags", || bytes(directory), || result, |r| crate::flight::outcome(r, |&f| u64::from(f)));
     if building() {
         probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
     }
@@ -1168,7 +1310,7 @@ pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
         let observed = match &result { Ok(Some(value)) => encoded(value), Ok(None) => json!(null), Err(e) => errno(e) };
         probed("acl", path, observed);
     }
-    result
+    crate::flight::checked("acl", || bytes(path), || result, |r| crate::flight::outcome(r, |acl| acl.as_deref().map_or(u64::MAX, crate::flight::digest)))
 }
 
 fn read_directory_flags(directory: &Path) -> io::Result<u32> {
@@ -1210,7 +1352,11 @@ pub(crate) fn keep_flags_reader() -> io::Result<()> {
 pub fn set_posix_acl(path: &Path, value: &[u8]) -> io::Result<()> {
     effect(|| format!("set ACL of {}", bytes(path)))?;
     let name = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
-    status(unsafe { libc::setxattr(name.as_ptr(), c"system.posix_acl_access".as_ptr(), value.as_ptr().cast(), value.len(), 0) })
+    let result = crate::flight::checked("set-acl", || bytes(path),
+                                     || status(unsafe { libc::setxattr(name.as_ptr(), c"system.posix_acl_access".as_ptr(), value.as_ptr().cast(), value.len(), 0) }),
+                                     |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path, false);
+    result
 }
 
 /// sync(2): every pending disk update, the whole system's.
@@ -1340,7 +1486,7 @@ pub fn current_dir() -> io::Result<PathBuf> {
     if building() {
         p_read(Fact::CurrentDir, "working directory".into());
     }
-    std::env::current_dir()
+    crate::flight::checked("cwd", String::new, std::env::current_dir, |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())))
 }
 
 /// A machine or user fact, recorded with its value.
@@ -1349,7 +1495,7 @@ fn host_fact(fact: &str, value: Json) {
 }
 
 pub fn current_exe() -> io::Result<PathBuf> {
-    let result = std::env::current_exe();
+    let result = crate::flight::checked("exe", String::new, std::env::current_exe, |r| crate::flight::outcome(r, |p| crate::flight::digest(p.as_os_str().as_bytes())));
     if building() {
         host_fact("exe", match &result { Ok(p) => path_json(p), Err(e) => errno(e) });
     }
@@ -1361,7 +1507,7 @@ pub fn pid() -> u32 {
         p_read(Fact::Pid, "pid".into());
         return with_build(|b| b.pinned.pid).unwrap_or_default();
     }
-    std::process::id()
+    crate::flight::value("pid", std::process::id)
 }
 
 pub fn uid() -> u32 {
@@ -1377,7 +1523,7 @@ pub fn uid() -> u32 {
 /// thread then never outlives the session.
 pub fn die_with_parent(parent: u32) {
     unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
-    if unsafe { libc::getppid() } as u32 != parent {
+    if std::os::unix::process::parent_id() != parent {
         std::process::exit(1);
     }
 }
@@ -1575,7 +1721,7 @@ pub enum Processors {
 /// A per-process fact (`Fact::Processors`): no world is keyed on it.
 pub fn processors(set: Processors) -> u64 {
     p_read(Fact::Processors, "processors".into());
-    count_processors(set)
+    crate::flight::value("processors", || count_processors(set))
 }
 
 fn count_processors(set: Processors) -> u64 {
@@ -1603,10 +1749,10 @@ fn count_processors(set: Processors) -> u64 {
 /// counters (perf_event_paranoid above 2, no PMU) or cannot keep this one
 /// counting all the time: a number is always a whole count.
 pub(crate) fn thread_instructions() -> Option<u64> {
-    INSTRUCTION_COUNTER.with(|counter| {
+    crate::flight::value("instructions", || INSTRUCTION_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();
         counter.get_or_insert_with(open_instruction_counter).as_ref().and_then(read_counter)
-    })
+    }))
 }
 
 thread_local! {
@@ -1656,27 +1802,33 @@ pub fn clock_ticks_per_second() -> u64 {
 /// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
 /// GNU's get_host_uptime reads it; None where the clock is missing.
 pub fn boot_clock() -> Option<std::time::Duration> {
-    let mut t: libc::timespec = unsafe { std::mem::zeroed() };
-    let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
-    ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+    crate::flight::value("boot-clock", || {
+        let mut t: libc::timespec = unsafe { std::mem::zeroed() };
+        let ok = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } == 0;
+        ok.then(|| std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32))
+    })
 }
 
 /// sysinfo(2)'s RAM and swap totals and free amounts, in bytes:
 /// (total RAM, free RAM, total swap, free swap).
 pub fn memory_info() -> Option<[u64; 4]> {
     p_read(Fact::Machine, "memory-info".into());
-    let mut si: libc::sysinfo = unsafe { std::mem::zeroed() };
-    if unsafe { libc::sysinfo(&mut si) } != 0 { return None; }
-    let unit = u64::from(si.mem_unit);
-    Some([si.totalram as u64 * unit, si.freeram as u64 * unit, si.totalswap as u64 * unit, si.freeswap as u64 * unit])
+    crate::flight::value("memory-info", || {
+        let mut si: libc::sysinfo = unsafe { std::mem::zeroed() };
+        if unsafe { libc::sysinfo(&mut si) } != 0 { return None; }
+        let unit = u64::from(si.mem_unit);
+        Some([si.totalram as u64 * unit, si.freeram as u64 * unit, si.totalswap as u64 * unit, si.freeswap as u64 * unit])
+    })
 }
 
 /// getloadavg(3): the 1, 5 and 15 minute averages it has, None on failure.
 pub fn load_average() -> Option<Vec<f64>> {
     p_read(Fact::Machine, "load-average".into());
-    let mut loads = [0f64; 3];
-    let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
-    (n >= 0).then(|| loads[..n as usize].to_vec())
+    crate::flight::value("load-average", || {
+        let mut loads = [0f64; 3];
+        let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
+        (n >= 0).then(|| loads[..n as usize].to_vec())
+    })
 }
 
 /// The memory page size in bytes (`getpagesize`).
@@ -1695,7 +1847,7 @@ pub fn clock() -> SystemTime {
         p_read(Fact::Clock, "clock".into());
         return with_build(|b| b.pinned.clock).unwrap_or(SystemTime::UNIX_EPOCH);
     }
-    SystemTime::now()
+    crate::flight::value("clock", SystemTime::now)
 }
 
 /// The processor time this process has used, user and system, as
@@ -1706,6 +1858,10 @@ pub fn run_time() -> io::Result<std::time::Duration> {
         p_read(Fact::Monotonic, "run time".into());
         return Ok(std::time::Duration::ZERO);
     }
+    crate::flight::value("run-time", live_run_time)
+}
+
+fn live_run_time() -> io::Result<std::time::Duration> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage writes the whole struct it is given.
     if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
@@ -1722,6 +1878,12 @@ pub fn monotonic() -> Instant {
     if building() {
         p_read(Fact::Monotonic, "monotonic clock".into());
     }
+    crate::flight::value("monotonic", Instant::now)
+}
+
+/// The instant a flight recording or replay counts its times from: never
+/// logged itself.
+pub(crate) fn flight_base() -> Instant {
     Instant::now()
 }
 
@@ -1753,7 +1915,7 @@ pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
 /// a builder whose recording has ended (its capture collects), so a world's
 /// heap never depends on how long its collections took.
 pub fn collection_clock() -> Option<Instant> {
-    (!building() && !crate::world::arena::heap_is_image()).then(Instant::now)
+    crate::flight::value("collection-clock", || (!building() && !crate::world::arena::heap_is_image()).then(Instant::now))
 }
 
 // Effects.
@@ -1773,7 +1935,10 @@ pub fn random_seed() -> io::Result<[u8; 4]> {
 pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
     wrote(path.as_ref());
     effect(|| format!("write {}", bytes(path.as_ref())))?;
-    options.clone().read(false).write(true).open(path)
+    let created = absent(path.as_ref());
+    let result = crate::flight::checked("open-output", || bytes(path.as_ref()), || options.clone().read(false).write(true).open(&path), |r| crate::flight::outcome(r, |_| 0));
+    changed(&result, path.as_ref(), created);
+    result
 }
 
 /// GNU copy-file's fast paths: share SOURCE's extents with DEST, else
@@ -1791,14 +1956,20 @@ pub fn clone_file(dest: &File, source: &Input) -> bool {
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("write {}", self::bytes(path.as_ref())))?;
-    std::fs::write(path, bytes)
+    let created = absent(path.as_ref());
+    let result = crate::flight::checked("write", || self::bytes(path.as_ref()), || std::fs::write(&path, &bytes), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path.as_ref(), created);
+    result
 }
 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     wrote(from.as_ref());
     wrote(to.as_ref());
     effect(|| format!("rename {} {}", bytes(from.as_ref()), bytes(to.as_ref())))?;
-    std::fs::rename(from, to)
+    let result = crate::flight::checked("rename", || bytes(to.as_ref()), || std::fs::rename(&from, &to), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, from.as_ref(), true);
+    changed(&result, to.as_ref(), true);
+    result
 }
 
 /// fsync the directory DIR, so a rename into it survives a host crash.
@@ -1810,13 +1981,17 @@ pub fn sync_dir(dir: impl AsRef<Path>) -> io::Result<()> {
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("delete {}", bytes(path.as_ref())))?;
-    std::fs::remove_file(path)
+    let result = crate::flight::checked("remove-file", || bytes(path.as_ref()), || std::fs::remove_file(&path), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path.as_ref(), true);
+    result
 }
 
 pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("delete directory {}", bytes(path.as_ref())))?;
-    std::fs::remove_dir(path)
+    let result = crate::flight::checked("remove-dir", || bytes(path.as_ref()), || std::fs::remove_dir(&path), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path.as_ref(), true);
+    result
 }
 
 /// mkdir with MODE before the umask.
@@ -1824,29 +1999,39 @@ pub fn create_dir(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().mode(mode).create(path)
+    let result = crate::flight::checked("mkdir", || bytes(path.as_ref()), || std::fs::DirBuilder::new().mode(mode).create(&path), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path.as_ref(), true);
+    result
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     wrote(path.as_ref());
     effect(|| format!("make directory {}", bytes(path.as_ref())))?;
-    std::fs::create_dir_all(path)
+    let created = absent(path.as_ref());
+    let result = crate::flight::checked("mkdir-all", || bytes(path.as_ref()), || std::fs::create_dir_all(&path), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, path.as_ref(), created);
+    result
 }
 
 pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
     wrote(link.as_ref());
     effect(|| format!("link {}", bytes(link.as_ref())))?;
-    std::fs::hard_link(original, link)
+    let result = crate::flight::checked("link", || bytes(link.as_ref()), || std::fs::hard_link(&original, &link), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, link.as_ref(), true);
+    changed(&result, original.as_ref(), false);
+    result
 }
 
 pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
     wrote(link.as_ref());
     effect(|| format!("symlink {}", bytes(link.as_ref())))?;
-    std::os::unix::fs::symlink(target, link)
+    let result = crate::flight::checked("symlink", || bytes(link.as_ref()), || std::os::unix::fs::symlink(&target, &link), |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, link.as_ref(), true);
+    result
 }
 
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {
-    std::os::unix::fs::fchown(file, uid, gid)
+    crate::flight::checked("fchown", String::new, || std::os::unix::fs::fchown(file, uid, gid), |r| crate::flight::outcome(r, |()| 0))
 }
 
 /// fchmodat: PATH's mode bits, a symlink's own under NOFOLLOW.
@@ -1854,14 +2039,24 @@ pub fn chmod(path: &CStr, mode: u32, nofollow: bool) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(path.to_bytes())));
     effect(|| format!("chmod {}", String::from_utf8_lossy(path.to_bytes())))?;
     let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
-    status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) })
+    let name = Path::new(OsStr::from_bytes(path.to_bytes()));
+    let result = crate::flight::checked("chmod", || bytes(name), || status(unsafe { libc::fchmodat(libc::AT_FDCWD, path.as_ptr(), mode as libc::mode_t, flags) }),
+                                     |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, name, false);
+    result
 }
 
 /// renameat2 with RENAME_NOREPLACE: EEXIST rather than replace TO.
 pub fn rename_noreplace(from: &CStr, to: &CStr) -> io::Result<()> {
     wrote(Path::new(OsStr::from_bytes(to.to_bytes())));
     effect(|| format!("rename {}", String::from_utf8_lossy(to.to_bytes())))?;
-    status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) })
+    let (from_name, to_name) = (Path::new(OsStr::from_bytes(from.to_bytes())), Path::new(OsStr::from_bytes(to.to_bytes())));
+    let result = crate::flight::checked("rename", || bytes(to_name),
+                                     || status(unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) }),
+                                     |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, from_name, true);
+    changed(&result, to_name, true);
+    result
 }
 
 /// utimensat: both of PATH's times set to TIME (seconds, nanoseconds), or
@@ -1874,7 +2069,11 @@ pub fn set_times(path: &CStr, time: Option<(i64, i64)>, nofollow: bool) -> io::R
         None => libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_NOW },
     };
     let flags = if nofollow { libc::AT_SYMLINK_NOFOLLOW } else { 0 };
-    status(unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), [stamp, stamp].as_ptr(), flags) })
+    let name = Path::new(OsStr::from_bytes(path.to_bytes()));
+    let result = crate::flight::checked("set-times", || bytes(name), || status(unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), [stamp, stamp].as_ptr(), flags) }),
+                                     |r| crate::flight::outcome(r, |()| 0));
+    changed(&result, name, false);
+    result
 }
 
 /// mkostemp: a new close-on-exec file named TEMPLATE with its trailing
@@ -2371,7 +2570,7 @@ pub fn parent_pid() -> i32 {
         p_read(Fact::Pid, "ppid".into());
         return 0;
     }
-    unsafe { libc::getppid() }
+    crate::flight::value("ppid", || std::os::unix::process::parent_id() as i32)
 }
 
 /// The worker's end of an isolate's signals: SIGUSR1 notes an interrupt for
@@ -2557,7 +2756,7 @@ static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// The threads of this process other than its main thread and the
 /// caller (/proc/self/task): those a fork from the caller would lose.
 pub fn other_threads() -> io::Result<Vec<i32>> {
-    let (main, caller) = (unsafe { libc::getpid() }, unsafe { libc::gettid() });
+    let (main, caller) = (std::process::id() as i32, unsafe { libc::gettid() });
     let mut others = Vec::new();
     for entry in std::fs::read_dir("/proc/self/task")? {
         let tid = entry?.file_name().to_string_lossy().parse::<i32>().map_err(io::Error::other)?;
@@ -2608,7 +2807,7 @@ pub fn forked_child_reset(zygote: i32) -> io::Result<()> {
 
 /// The calling thread's id.
 pub fn thread_id() -> i32 {
-    unsafe { libc::gettid() }
+    crate::flight::value("tid", || unsafe { libc::gettid() })
 }
 
 /// The processors thread TID may run on: how many, and a digest of which;
@@ -2653,6 +2852,22 @@ pub fn open_gate(gate: OwnedFd) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     effect(|| "gate".into())?;
     status((unsafe { libc::write(gate.as_raw_fd(), [1u8].as_ptr().cast(), 1) } as libc::c_int).min(0))
+}
+
+/// The process umask, from /proc/self/status (GNU reads it once at
+/// startup, fileio.c realmask). Checked by a flight as the mask alone:
+/// the rest of the file (the pid, memory counters) is this process's.
+pub fn umask() -> io::Result<u32> {
+    let status = crate::flight::without(|| read_to_string("/proc/self/status"))?;
+    let mask = status.lines().find_map(|line| line.strip_prefix("Umask:")).and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
+        .ok_or_else(|| io::Error::other("no Umask in /proc/self/status"));
+    crate::flight::checked("umask", String::new, || mask, |r| crate::flight::outcome(r, |&m| u64::from(m)))
+}
+
+/// How long since START, a collection's (`collection_clock`): logged by a
+/// flight, as `gc-elapsed' and the collection records read it.
+pub(crate) fn collection_elapsed(start: Instant) -> std::time::Duration {
+    crate::flight::value("collection-elapsed", || start.elapsed())
 }
 
 /// Name this process NAME (the kernel keeps 15 bytes): its thread-group
