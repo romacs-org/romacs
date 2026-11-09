@@ -342,12 +342,24 @@ pub trait BandedDecoder: Sized {
 pub enum BandedSource {
     /// PNG, whose reader yields one transformed row at a time
     /// (`png-0.18.1` `src/decoder/mod.rs:513` `next_row`).
-    Png(PngRows),
+    Png(Box<PngRows>),
     /// Baseline JPEG, whose decoder yields one MCU row at a time
     /// (`zune-jpeg` `McuRowReader::next_row` — the fork `Cargo.toml`'s
     /// `[patch.crates-io]` block pins, since `zune-jpeg` 0.5.15's public
     /// surface is `decode`/`decode_into` and nothing else).
-    Jpeg(JpegRows),
+    Jpeg(Box<JpegRows>),
+}
+
+/// Decoder state is large (30 KB for JPEG), so each variant holds it boxed
+/// and a source moves as a pointer.
+impl<T: BandedDecoder> BandedDecoder for Box<T> {
+    fn next_band(&mut self) -> BandStep {
+        (**self).next_band()
+    }
+
+    fn into_raster(self) -> Option<RasterPixels> {
+        (*self).into_raster()
+    }
 }
 
 /// A completed banded decode: the source's extent, and the raster it became.
@@ -489,11 +501,11 @@ impl BandSource {
         match image::guess_format(&data) {
             Ok(image::ImageFormat::Png) => {
                 PngRows::open(data, BandPlan::new(size, realization), min_pixels)
-                    .map_or(Self::Whole, |rows| Self::Banded(BandedSource::Png(rows)))
+                    .map_or(Self::Whole, |rows| Self::Banded(BandedSource::Png(Box::new(rows))))
             }
             Ok(image::ImageFormat::Jpeg) => {
                 JpegRows::open(data, BandPlan::new(size, realization), min_pixels)
-                    .map_or(Self::Whole, |rows| Self::Banded(BandedSource::Jpeg(rows)))
+                    .map_or(Self::Whole, |rows| Self::Banded(BandedSource::Jpeg(Box::new(rows))))
             }
             // Every other format `image` reports, named so the route per format
             // is a line of code rather than a default. None of them can band.

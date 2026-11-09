@@ -143,7 +143,6 @@ fn input_event_field_mutation() {
         width: 1920,
         height: 1080,
         target_frame_id: 0xDEAD_BEEF,
-        ..Default::default()
     };
 
     assert_eq!(evt.kind, 1);
@@ -208,11 +207,11 @@ fn input_event_clone() {
 
 #[test]
 fn input_event_struct_size_is_reasonable() {
-    // The struct has 18 fields of various sizes. Ensure it's at least
+    // The struct has 15 fields of various sizes. Ensure it's at least
     // as large as the sum of field sizes and not absurdly large.
     let size = std::mem::size_of::<RomacsInputEvent>();
-    // Minimum: 4+4+8+4+4+4+4+4+4+4+4+4+4+4+8+4+4+4 = 80 bytes
-    assert!(size >= 80, "struct too small: {}", size);
+    // Minimum: 4+4+8+4+4+4+4+4+4+4+4+4+4+4+8 = 68 bytes
+    assert!(size >= 68, "struct too small: {}", size);
     // Should not exceed a generous upper bound (padding included)
     assert!(size <= 136, "struct unexpectedly large: {}", size);
 }

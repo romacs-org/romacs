@@ -512,35 +512,6 @@ impl RenderApp {
                 if state == ElementState::Pressed {
                     self.frame_windows.finish_top_level_child_frame_animations();
                 }
-                #[cfg(feature = "webview")]
-                if let Some(target) = self.focused_webview {
-                    use winit::platform::scancode::PhysicalKeyExtScancode;
-
-                    // The external WebView API has its own numeric key-value
-                    // contract. Keep this conversion at that boundary; the
-                    // editor transport retains the typed identity below.
-                    let key_value = match Self::translate_key_input(&logical_key) {
-                        Some(FrontendKey::Character(character)) => character as u32,
-                        Some(FrontendKey::Keysym(keysym)) => keysym,
-                        None => 0,
-                    };
-                    if key_value != 0
-                        && let Some(system) = self.webview_system.as_mut()
-                    {
-                        let input = romacs_webview::WebViewInput::Keyboard {
-                            key_value,
-                            hardware_key_code: physical_key.to_scancode().unwrap_or(0),
-                            state: match state {
-                                ElementState::Pressed => romacs_webview::ButtonState::Pressed,
-                                ElementState::Released => romacs_webview::ButtonState::Released,
-                            },
-                            modifiers: Self::webview_modifiers(self.modifiers),
-                        };
-                        if let Err(error) = system.input(target, input) {
-                            tracing::warn!(view = %target.view(), %error, "dropping WebView keyboard input");
-                        }
-                    }
-                }
                 if state == ElementState::Pressed
                     && !self.key_repeats.admit(window_id, physical_key, repeat)
                 {

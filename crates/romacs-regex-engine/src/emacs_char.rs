@@ -2,11 +2,8 @@
 //!
 //! Moved verbatim from romacs-core's `emacs_char` module (which re-exports
 //! everything here), so the engine and its host decode text with ONE
-//! implementation.  Note: `romacs-chars` has functions of the same names whose
-//! behaviour differs (its `string_char` is a strict decoder; this one decodes
-//! a raw-byte lead leniently, and this `char_string` resolves modifier bits);
-//! they are deliberately not substituted here, because the extraction must not
-//! change what the matcher decodes.
+//! implementation.  `string_char` decodes a raw-byte lead leniently and
+//! `char_string` resolves modifier bits, as the matcher needs.
 //!
 //! GNU reference: `src/character.h`, `src/character.c`.
 

@@ -15,9 +15,6 @@ let
       pkgs.romacs == package
     ) "packages.${system}.default must be built through overlays.default";
     assert lib.assertMsg (
-      !pkgs.stdenv.hostPlatform.isLinux || pkgs ? romacs-wpewebkit
-    ) "overlays.default must expose its pinned WPE package under a Romacs-specific name";
-    assert lib.assertMsg (
       package.type or null == "derivation"
     ) "packages.${system}.default must be a derivation";
     assert lib.assertMsg (app.type or null == "app") "apps.${system}.default must be an app";

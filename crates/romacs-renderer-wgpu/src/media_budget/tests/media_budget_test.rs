@@ -40,17 +40,17 @@ fn test_zero_budget_limit() {
 
 #[test]
 fn test_media_type_ordering() {
-    // Image < Video < WebKit (lowest priority evicted first)
+    // Image < Video < Surface (lowest priority evicted first)
     assert!(MediaType::Image < MediaType::Video);
-    assert!(MediaType::Video < MediaType::WebKit);
-    assert!(MediaType::Image < MediaType::WebKit);
+    assert!(MediaType::Video < MediaType::Surface);
+    assert!(MediaType::Image < MediaType::Surface);
 }
 
 #[test]
 fn test_media_type_equality() {
     assert_eq!(MediaType::Image, MediaType::Image);
     assert_eq!(MediaType::Video, MediaType::Video);
-    assert_eq!(MediaType::WebKit, MediaType::WebKit);
+    assert_eq!(MediaType::Surface, MediaType::Surface);
     assert_ne!(MediaType::Image, MediaType::Video);
 }
 
@@ -88,7 +88,7 @@ fn test_register_multiple_items_different_types() {
     let mut budget = MediaBudget::with_max_bytes(10000);
     budget.register(MediaType::Image, 1, 100);
     budget.register(MediaType::Video, 2, 200);
-    budget.register(MediaType::WebKit, 3, 300);
+    budget.register(MediaType::Surface, 3, 300);
     assert_eq!(budget.current_usage(), 600);
 }
 
@@ -179,7 +179,7 @@ fn test_unregister_partial() {
     let mut budget = MediaBudget::with_max_bytes(10000);
     budget.register(MediaType::Image, 1, 100);
     budget.register(MediaType::Video, 2, 200);
-    budget.register(MediaType::WebKit, 3, 300);
+    budget.register(MediaType::Surface, 3, 300);
     assert_eq!(budget.current_usage(), 600);
 
     budget.unregister(MediaType::Video, 2);
@@ -189,7 +189,7 @@ fn test_unregister_partial() {
     budget.unregister(MediaType::Image, 1);
     assert_eq!(budget.current_usage(), 300);
 
-    budget.unregister(MediaType::WebKit, 3);
+    budget.unregister(MediaType::Surface, 3);
     assert_eq!(budget.current_usage(), 0);
 }
 
@@ -295,14 +295,14 @@ fn test_touch_increments_access_counter() {
 fn test_budget_eviction_order() {
     let mut budget = MediaBudget::with_max_bytes(100);
 
-    budget.register(MediaType::WebKit, 1, 30);
+    budget.register(MediaType::Surface, 1, 30);
     budget.register(MediaType::Image, 2, 20);
     budget.register(MediaType::Video, 3, 25);
     budget.register(MediaType::Image, 4, 15);
 
     // Total = 90 bytes, need 50 more, target = 140
     // Need to free: 140 - 100 = 40 bytes
-    // BTreeMap order: Image(2)=20, Image(4)=15, Video(3)=25, WebKit(1)=30
+    // BTreeMap order: Image(2)=20, Image(4)=15, Video(3)=25, Surface(1)=30
     // Need 3 items to free >= 40 bytes: 20 + 15 + 25 = 60
     let candidates = budget.get_eviction_candidates(50);
 
@@ -367,13 +367,13 @@ fn test_eviction_priority_image_before_video() {
 }
 
 #[test]
-fn test_eviction_priority_video_before_webkit() {
+fn test_eviction_priority_video_before_surface() {
     let mut budget = MediaBudget::with_max_bytes(100);
-    budget.register(MediaType::WebKit, 1, 60);
+    budget.register(MediaType::Surface, 1, 60);
     budget.register(MediaType::Video, 2, 30);
 
     // current=90, new=20, target=110, need to free 10
-    // BTreeMap order: Video(2) before WebKit(1)
+    // BTreeMap order: Video(2) before Surface(1)
     let candidates = budget.get_eviction_candidates(20);
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0], (MediaType::Video, 2));
@@ -398,7 +398,7 @@ fn test_eviction_needs_all_entries() {
     let mut budget = MediaBudget::with_max_bytes(50);
     budget.register(MediaType::Image, 1, 20);
     budget.register(MediaType::Video, 2, 20);
-    budget.register(MediaType::WebKit, 3, 20);
+    budget.register(MediaType::Surface, 3, 20);
 
     // current=60, new=100, target=160, need to free=110
     // All entries sum to 60 bytes, which is less than 110
@@ -407,7 +407,7 @@ fn test_eviction_needs_all_entries() {
     assert_eq!(candidates.len(), 3);
     assert_eq!(candidates[0], (MediaType::Image, 1));
     assert_eq!(candidates[1], (MediaType::Video, 2));
-    assert_eq!(candidates[2], (MediaType::WebKit, 3));
+    assert_eq!(candidates[2], (MediaType::Surface, 3));
 }
 
 #[test]
@@ -575,17 +575,17 @@ fn test_max_limit_unchanged_by_operations() {
 fn test_large_memory_values() {
     let one_gb = 1024 * 1024 * 1024;
     let mut budget = MediaBudget::with_max_bytes(4 * one_gb);
-    budget.register(MediaType::WebKit, 1, one_gb);
-    budget.register(MediaType::WebKit, 2, one_gb);
-    budget.register(MediaType::WebKit, 3, one_gb);
+    budget.register(MediaType::Surface, 1, one_gb);
+    budget.register(MediaType::Surface, 2, one_gb);
+    budget.register(MediaType::Surface, 3, one_gb);
     assert_eq!(budget.current_usage(), 3 * one_gb);
     assert!(!budget.is_over_budget());
 
-    budget.register(MediaType::WebKit, 4, one_gb);
+    budget.register(MediaType::Surface, 4, one_gb);
     assert_eq!(budget.current_usage(), 4 * one_gb);
     assert!(!budget.is_over_budget());
 
-    budget.register(MediaType::WebKit, 5, 1);
+    budget.register(MediaType::Surface, 5, 1);
     assert!(budget.is_over_budget());
 }
 
@@ -616,7 +616,7 @@ fn test_same_id_different_media_types() {
     let mut budget = MediaBudget::with_max_bytes(10000);
     budget.register(MediaType::Image, 1, 100);
     budget.register(MediaType::Video, 1, 200);
-    budget.register(MediaType::WebKit, 1, 300);
+    budget.register(MediaType::Surface, 1, 300);
     assert_eq!(budget.current_usage(), 600);
 
     // Unregister only the Image with id=1
@@ -627,8 +627,8 @@ fn test_same_id_different_media_types() {
     budget.unregister(MediaType::Video, 1);
     assert_eq!(budget.current_usage(), 300);
 
-    // Unregister only the WebKit with id=1
-    budget.unregister(MediaType::WebKit, 1);
+    // Unregister only the Surface with id=1
+    budget.unregister(MediaType::Surface, 1);
     assert_eq!(budget.current_usage(), 0);
 }
 
@@ -644,7 +644,7 @@ fn test_register_touch_evict_unregister_workflow() {
     budget.register(MediaType::Image, 1, 50); // access=1
     budget.register(MediaType::Image, 2, 50); // access=2
     budget.register(MediaType::Video, 3, 50); // access=3
-    budget.register(MediaType::WebKit, 4, 50); // access=4
+    budget.register(MediaType::Surface, 4, 50); // access=4
     assert_eq!(budget.current_usage(), 200);
     assert!(!budget.is_over_budget());
 
@@ -652,7 +652,7 @@ fn test_register_touch_evict_unregister_workflow() {
     budget.touch(MediaType::Image, 1); // access=5
 
     // Need to add 50 more bytes: target=250, need_to_free=50
-    // BTreeMap order: Image(2, access=2), Image(1, access=5), Video(3, access=3), WebKit(4, access=4)
+    // BTreeMap order: Image(2, access=2), Image(1, access=5), Video(3, access=3), Surface(4, access=4)
     // Evict Image(2) first → 50 bytes freed, enough
     let candidates = budget.get_eviction_candidates(50);
     assert_eq!(candidates.len(), 1);
@@ -663,7 +663,7 @@ fn test_register_touch_evict_unregister_workflow() {
     assert_eq!(budget.current_usage(), 150);
 
     // Now register the new item
-    budget.register(MediaType::WebKit, 5, 50);
+    budget.register(MediaType::Surface, 5, 50);
     assert_eq!(budget.current_usage(), 200);
     assert!(!budget.is_over_budget());
 }
@@ -673,7 +673,7 @@ fn test_eviction_cross_type_priority() {
     let mut budget = MediaBudget::with_max_bytes(100);
 
     // Register in reverse priority order
-    budget.register(MediaType::WebKit, 1, 30); // access=1
+    budget.register(MediaType::Surface, 1, 30); // access=1
     budget.register(MediaType::Video, 2, 30); // access=2
     budget.register(MediaType::Image, 3, 30); // access=3
 
@@ -681,7 +681,7 @@ fn test_eviction_cross_type_priority() {
     // BTreeMap order by key (MediaType, access, id):
     //   (Image, 3, 3)=30 → first (Image has lowest MediaType)
     //   (Video, 2, 2)=30 → second
-    //   (WebKit, 1, 1)=30 → third
+    //   (Surface, 1, 1)=30 → third
     // Evict Image(3)=30 bytes, enough
     let candidates = budget.get_eviction_candidates(30);
     assert_eq!(candidates.len(), 1);
@@ -714,7 +714,7 @@ fn test_register_after_full_drain() {
     assert_eq!(budget.current_usage(), 0);
 
     // Re-register fresh items
-    budget.register(MediaType::WebKit, 3, 100);
+    budget.register(MediaType::Surface, 3, 100);
     assert_eq!(budget.current_usage(), 100);
     assert!(!budget.is_over_budget());
 }
@@ -738,7 +738,7 @@ fn test_budget_entry_debug() {
 fn test_media_type_debug() {
     assert_eq!(format!("{:?}", MediaType::Image), "Image");
     assert_eq!(format!("{:?}", MediaType::Video), "Video");
-    assert_eq!(format!("{:?}", MediaType::WebKit), "WebKit");
+    assert_eq!(format!("{:?}", MediaType::Surface), "Surface");
 }
 
 // ---------------------------------------------------------------
@@ -751,11 +751,10 @@ fn test_media_type_debug() {
 #[test]
 fn test_surface_sorts_after_all_other_media_types() {
     // The driver relies on surfaces being offered last: everything the
-    // budget would rather evict (images, video frames, webkit views)
+    // budget would rather evict (images, video frames)
     // precedes them in the candidate list.
     assert!(MediaType::Image < MediaType::Surface);
     assert!(MediaType::Video < MediaType::Surface);
-    assert!(MediaType::WebKit < MediaType::Surface);
 
     let mut budget = MediaBudget::with_max_bytes(50);
     budget.register(MediaType::Surface, 1, 40); // older

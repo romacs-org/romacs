@@ -34,14 +34,8 @@ pub mod vertex;
 #[cfg(feature = "video")]
 pub mod video_cache;
 
-#[cfg(all(feature = "webview", target_os = "linux"))]
-pub mod webview_cache;
-
-#[cfg(all(feature = "webview", target_os = "linux"))]
-mod submission_retirement;
-
 #[cfg(all(
-    any(feature = "video-dmabuf", feature = "webview"),
+    feature = "video-dmabuf",
     target_os = "linux"
 ))]
 pub mod vulkan_dmabuf;
@@ -73,8 +67,6 @@ pub use tooltip_layout::TooltipLayout;
 pub use vertex::{GlyphVertex, RectVertex, RoundedRectVertex, TextureVertex, Uniforms};
 #[cfg(feature = "video")]
 pub use video_cache::{CachedVideo, VideoCache, VideoRecoveryManifest, VideoState};
-#[cfg(all(feature = "webview", target_os = "linux"))]
-pub use webview_cache::{CachedWebView, WgpuWebViewCache};
 
 /// Whether the WGPU backend has a concrete rendering path for a graphical
 /// face feature.
@@ -111,4 +103,3 @@ pub const fn supports_graphical_face_attribute(
 pub mod effect_config {
     pub use romacs_display_protocol::effect_config::*;
 }
-

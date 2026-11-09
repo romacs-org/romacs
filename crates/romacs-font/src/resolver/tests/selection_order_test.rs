@@ -118,7 +118,6 @@ fn selection_order_packs_overlapping_fields_with_or_and_caps_distances() {
         "OVERLAPPING_FIELDS_USE_OR_NOT_SUM_OR_MAX");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn selection_order_reorders_character_candidates() {
     let mut resolver = FontResolver::new().unwrap();
@@ -135,11 +134,10 @@ fn selection_order_reorders_character_candidates() {
     );
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn selection_order_change_invalidates_primary_and_character_answers() {
     assert!(crate::register_font_file(
-        &romacs_test_fonts::noto_sans_mono_variable()
+        romacs_test_fonts::noto_sans_mono_variable()
     ));
     let mut resolver = FontResolver::new().unwrap();
     let request = FontRequest::new("Noto Sans Mono", 16.0);

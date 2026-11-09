@@ -14,9 +14,6 @@ rustc-hash.workspace = true
 fontdb.workspace = true
 ttf-parser.workspace = true
 
-# Vulkan for DMA-BUF import (Linux WebView integration)
-ash.workspace = true
-
 # Winit + wgpu backend (always enabled)
 winit.workspace = true
 wgpu.workspace = true
@@ -58,7 +55,6 @@ romacs-renderer-wgpu.workspace = true
 romacs-scene.workspace = true
 kurbo.workspace = true
 romacs-video = { workspace = true, optional = true }
-romacs-webview.workspace = true
 
 [dev-dependencies]
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
@@ -78,11 +74,7 @@ video-dmabuf = [
     "video",
     "romacs-renderer-wgpu/video-dmabuf",
 ]
-# Cross-platform embedded WebView integration
-webview = [
-    "romacs-webview/webview",
-    "romacs-renderer-wgpu/webview",
-]
+
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 

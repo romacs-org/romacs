@@ -191,7 +191,7 @@ fn interpolate_value(timeline: &super::plan::Timeline, cycle: f64) -> Option<Ani
 /// Values remain decoded semantic text here; the patch boundary performs
 /// XML encoding according to the destination's attribute syntax.
 fn serialize(value: &AnimatedValue, rule: &AnimationRule) -> String {
-    let rendered = match (&rule.timeline.transform, value) {
+    match (&rule.timeline.transform, value) {
         (Some(kind), AnimatedValue::Numbers(numbers)) => {
             let arguments = numbers
                 .iter()
@@ -212,8 +212,7 @@ fn serialize(value: &AnimatedValue, rule: &AnimationRule) -> String {
             round_channel(*b)
         ),
         (_, AnimatedValue::Opaque(text)) => text.clone(),
-    };
-    rendered
+    }
 }
 
 fn round_channel(channel: f64) -> u8 {

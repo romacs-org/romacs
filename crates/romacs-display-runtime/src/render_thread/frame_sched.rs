@@ -163,7 +163,6 @@ pub(crate) enum DemandReason {
     /// still being redrawn after its parent's layout has settled.
     ChildFrameMotion,
     Video,
-    Webkit,
     /// Animated shader surfaces visible in a composited frame
     /// (docs/display-engine/SHADER_SURFACES.md).
     ShaderSurface,
