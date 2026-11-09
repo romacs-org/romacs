@@ -13,7 +13,6 @@
     "romacs-regex-engine": {"sites": 24, "undocumented": 17},
     "romacs-renderer-wgpu": {"sites": 33, "undocumented": 18},
     "romacs-snapshot": {"sites": 35, "undocumented": 34},
-    "romacs-terminfo": {"sites": 18, "undocumented": 4},
     "romacs-tui-tests": {"sites": 10, "undocumented": 6},
     "romacs-video": {"sites": 39, "undocumented": 35},
     "romacs-vm": {"sites": 882, "undocumented": 493},

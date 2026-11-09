@@ -10,14 +10,10 @@ members = [
     "tests/retired-vm-contract",
     "crates/romacs-chars",
     "crates/romacs-logo",
-    "crates/romacs-text",
-    "crates/romacs-props",
     "crates/romacs-regex",
     "crates/romacs-regex-engine",
     "crates/romacs-mcp",
-    "crates/romacs-terminfo",
     "crates/romacs-allocator",
-    "crates/romacs-diagnostics",
     "crates/romacs-display-protocol",
     "crates/romacs-display-runtime",
     "crates/romacs-face",
@@ -28,7 +24,6 @@ members = [
     "crates/romacs-gui-oracle",
     "crates/romacs-gui-tests",
     "crates/romacs-parity-reference",
-    "crates/romacs-perf",
     "crates/romacs-attach",
     "crates/romacs-imaging",
     "crates/romacs-renderer-wgpu",
@@ -40,7 +35,6 @@ members = [
     "crates/romacs-video-model",
     "crates/romacs-webview",
     "crates/romacs-gnudiff",
-    "crates/romacs-host-abi",
     "crates/xtask",
     "gnu-tests/runner",
 ]
@@ -79,9 +73,7 @@ unsafe_op_in_unsafe_fn = "deny"
 [workspace.dependencies]
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 # Internal crates
-romacs-terminfo = { path = "crates/romacs-terminfo" }
 romacs-allocator = { path = "crates/romacs-allocator" }
-romacs-host-abi = { path = "crates/romacs-host-abi" }
 romacs-display-runtime = { path = "crates/romacs-display-runtime", default-features = false }
 romacs-display-protocol = { path = "crates/romacs-display-protocol", default-features = false }
 romacs-logo = { path = "crates/romacs-logo" }
@@ -96,8 +88,6 @@ romacs-attach = { path = "crates/romacs-attach" }
 romacs-imaging = { path = "crates/romacs-imaging" }
 romacs-renderer-wgpu = { path = "crates/romacs-renderer-wgpu", default-features = false }
 romacs-scene = { path = "crates/romacs-scene" }
-romacs-diagnostics = { path = "crates/romacs-diagnostics", default-features = false }
-romacs-perf = { path = "crates/romacs-perf", default-features = false }
 romacs-infra = { path = "crates/romacs-infra" }
 romacs-tui-tests = { path = "crates/romacs-tui-tests" }
 romacs-gui-tests = { path = "crates/romacs-gui-tests" }
@@ -154,7 +144,6 @@ native-regex = { package = "regex", version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["std", "perf-literal"] }
 memchr = "2"
 rustc-hash = "2"
-hashbrown = "0.17"
 num_enum = "0.7.6"
 enum_dispatch = "0.3.13"
 enumset = "1.1.14"
@@ -186,7 +175,6 @@ serde_json = "1"
 toml = "1.1"
 clap = { version = "4.5", features = ["derive"] }
 command-group = "5.0"
-linux-perf-data = { version = "0.13", default-features = false }
 thiserror = "2.0"
 once_cell = "1.19"
 cfg-if = "1.0"
