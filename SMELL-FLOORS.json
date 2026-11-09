@@ -3,7 +3,7 @@
   "long_file_lines": 1500,
   "crates": {
     "romacs-display-protocol": {"allows": 0, "todos": 1, "long_files": 9},
-    "romacs-display-runtime": {"allows": 17, "todos": 0, "long_files": 6},
+    "romacs-display-runtime": {"allows": 15, "todos": 0, "long_files": 6},
     "romacs-face": {"allows": 1, "todos": 0, "long_files": 0},
     "romacs-font-materializer": {"allows": 0, "todos": 0, "long_files": 1},
     "romacs-introspect": {"allows": 1, "todos": 0, "long_files": 0},

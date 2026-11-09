@@ -23,9 +23,8 @@
 //! waits on the queue, so a send never wakes another thread. One writer owns
 //! the file and drains the queue every 10 ms into buffered JSONL (no fsync).
 //! The queue is bounded; dropped records are reported separately. Abrupt
-//! process exit can lose a tail, and so can a normal exit in two cases:
-//! a daemon is not drained at teardown, and the detached preparation worker
-//! may still record Prepared/Discarded after the final drain. Call [`init`]
+//! process exit can lose a tail, and so can a daemon's normal exit, which
+//! is not drained at teardown. Call [`init`]
 //! early so the writer thread is not started under a hot-path lock, and
 //! [`shutdown`] after GUI/evaluator teardown for a normal drain.
 
@@ -94,11 +93,9 @@ pub enum Stage {
     LayoutQueryEnd,
 
     Publish,
-    Prepared,
     RenderStart,
     Submit,
     Present,
-    Superseded,
     Discarded,
     Presented,
 }

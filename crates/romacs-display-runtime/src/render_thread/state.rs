@@ -908,12 +908,8 @@ pub(super) struct RenderApp {
     pub(super) transition_policy: TransitionPolicy,
 
     pub(super) frame_windows: GuiFrameWindowManager,
-    /// Latest child snapshots whose immediate ancestry has not been presented
-    /// yet. They are retried transactionally when an ancestor arrives.
-    pub(super) pending_child_frames: HashMap<u64, super::frame_preparation::PreparedFrame>,
     /// The child frames the last paint scene showed (core-free hosts).
     pub(super) scene_children: Vec<u64>,
-    pub(super) frame_preparation: Option<super::frame_preparation::FramePreparation>,
 
     pub(super) child_frame_style: ChildFrameStyle,
     pub(super) toolbar: ToolbarResources,
@@ -1118,9 +1114,7 @@ impl RenderApp {
             effects: EffectsConfig::default(),
             transition_policy: TransitionPolicy::default(),
             frame_windows,
-            pending_child_frames: HashMap::new(),
             scene_children: Vec::new(),
-            frame_preparation: None,
             child_frame_style: ChildFrameStyle::default(),
             toolbar: ToolbarResources::default(),
             scroll_indicators_enabled: false,

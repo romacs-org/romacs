@@ -9,13 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 mod command_channel;
-mod frame_mailbox;
 pub(crate) use command_channel::{CommandReceiver, CommandSender, command_channel};
 mod frame_opacity;
 use crate::host_types::GuiFrameGeometryHints;
-pub(crate) use frame_mailbox::{
-    FrameReceiver, FrameSender, QueuedPresentation,
-};
 pub(crate) use frame_opacity::FrameOpacityState;
 use romacs_display_protocol::{
     ImageId, ImageLoadToken,
@@ -448,10 +444,6 @@ pub(crate) enum RenderCommand {
 }
 
 /// Channel capacities
-// Frame channel: unbounded so try_send never drops frames.
-// The render thread drains all queued frames and keeps only the latest
-// (see poll_frame()), so memory stays bounded in practice.
-//
 // GNU Emacs' `kbd_buffer` holds 4096 input events and `tty_read_avail_input`
 // stops reading terminal bytes when the buffer is under pressure rather than
 // silently dropping command input.  Keep Romacs' render-to-evaluator input
@@ -463,10 +455,6 @@ const COMMAND_CHANNEL_CAPACITY: usize = 64;
 pub(crate) struct ThreadComms {
     /// The pointer over the primary window: Render → Emacs.
     pub pointer: Arc<PointerCell>,
-
-    /// Frame display state: Emacs → Render
-    pub frame_tx: FrameSender,
-    pub frame_rx: FrameReceiver,
 
     /// Commands: Emacs → Render
     pub cmd_tx: CommandSender,
@@ -492,13 +480,10 @@ pub(crate) struct LostImages {
 impl ThreadComms {
     /// Create new thread communication channels
     pub fn new() -> Self {
-        let (frame_tx, frame_rx) = frame_mailbox::channel();
         let (cmd_tx, cmd_rx) = command_channel(COMMAND_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
         Self {
             pointer: Arc::default(),
-            frame_tx,
-            frame_rx,
             cmd_tx,
             cmd_rx,
             input_tx,
@@ -514,7 +499,6 @@ impl ThreadComms {
             pointer: self.pointer.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
-            frame_tx: self.frame_tx,
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
         };
@@ -528,7 +512,6 @@ impl ThreadComms {
             input_stream: Default::default(),
             frame_opacity: self.frame_opacity,
             lost_images: self.lost_images,
-            frame_rx: self.frame_rx,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
         };
@@ -546,9 +529,6 @@ impl Default for ThreadComms {
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
     pub pointer: Arc<PointerCell>,
-    /// Frames for the render thread; only tests submit through it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "production frames arrive through the paint host; the held sender keeps the frame mailbox connected and lets tests submit"))]
-    pub frame_tx: FrameSender,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
@@ -578,7 +558,6 @@ pub(crate) struct RenderComms {
     pub keep_alive_without_frames: bool,
     pub native_window_waits: Option<Arc<crate::native_window_wait::NativeWindowWaits>>,
     input_stream: romacs_display_protocol::input_progress::InputStream,
-    pub frame_rx: FrameReceiver,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,

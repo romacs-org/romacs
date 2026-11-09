@@ -37,6 +37,7 @@
 //! correspond to nothing.
 
 use romacs_display_protocol::frame_glyphs::WindowInfo;
+#[cfg(test)]
 use romacs_display_protocol::glyph_matrix::{GlyphRow, NO_BUFFER_POSITION_CHARPOS};
 
 /// Why a reflow could not be measured.
@@ -126,6 +127,7 @@ pub(in crate::render_thread) struct RowImprint {
 }
 
 impl RowImprint {
+    #[cfg(test)]
     /// The imprint a row leaves, or `None` if it may not be matched.
     pub(in crate::render_thread) fn of(row: &GlyphRow) -> Option<Self> {
         row_content(row).map(|content| Self {
@@ -135,6 +137,7 @@ impl RowImprint {
     }
 }
 
+#[cfg(test)]
 /// A row's content fingerprint, or `None` if the row cannot be matched.
 fn row_content(row: &GlyphRow) -> Option<u64> {
     // Only real buffer text reflows: a mode line stays put while the text
@@ -265,6 +268,7 @@ pub(in crate::render_thread) fn shift(
     }
 }
 
+#[cfg(test)]
 /// The imprints every window in a presentation offers, keyed by window.
 ///
 /// Taken at ingest, while the presentation still has its glyph matrices. The

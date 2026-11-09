@@ -337,12 +337,10 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
         (Stage::NonRootStart, "non_root_start"),
         (Stage::NonRootEnd, "non_root_end"),
         (Stage::GpuDone, "gpu_done"),
-        (Stage::Prepared, "prepared"),
         (Stage::RenderStart, "render_start"),
         (Stage::Submit, "submit"),
         (Stage::Present, "present"),
         (Stage::Presented, "presented"),
-        (Stage::Superseded, "superseded"),
         (Stage::Discarded, "discarded"),
     ] {
         let mut bytes = Vec::new();
@@ -357,7 +355,7 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
 fn full_channel_drops_without_replacing_queued_evidence() {
     let (recorder, incoming) = queue(1);
     recorder.send(event(Stage::Publish));
-    recorder.send(event(Stage::Prepared));
+    recorder.send(event(Stage::RenderStart));
     recorder.send(event(Stage::Present));
     assert_eq!(recorder.dropped.load(Ordering::Relaxed), 2);
     assert_eq!(incoming.try_recv().unwrap().stage, Stage::Publish);
@@ -415,7 +413,7 @@ fn writer_drains_and_flushes_at_normal_shutdown() {
     let (events, incoming) = bounded(2);
     let (stop, stopped) = bounded(1);
     events.try_send(event(Stage::Publish)).unwrap();
-    events.try_send(event(Stage::Prepared)).unwrap();
+    events.try_send(event(Stage::RenderStart)).unwrap();
     stop.try_send(()).unwrap();
     let dropped = AtomicU64::new(3);
     let mut bytes = Vec::new();
@@ -429,7 +427,7 @@ fn writer_drains_and_flushes_at_normal_shutdown() {
         .iter()
         .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap()["stage"].clone())
         .collect();
-    assert_eq!(stages, ["publish", "prepared", "dropped"]);
+    assert_eq!(stages, ["publish", "render_start", "dropped"]);
 }
 
 #[test]
@@ -487,14 +485,12 @@ fn environment_trace_writes_and_drains_jsonl() {
         assert_eq!(enabled(), expected == "enabled");
         for stage in [
             Stage::Publish,
-            Stage::Prepared,
             Stage::RenderStart,
             Stage::Submit,
             Stage::Present,
-            Stage::Superseded,
             Stage::Discarded,
         ] {
-            if stage == Stage::Superseded {
+            if stage == Stage::Discarded {
                 // The deferred form queues exactly what it sampled.
                 if let Some(stamp) = stamp(stage, 7, PresentationId::new(42)) {
                     stamp.emit();
@@ -547,23 +543,23 @@ fn environment_trace_writes_and_drains_jsonl() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(records.len(), 8);
+    assert_eq!(records.len(), 6);
     for record in &records {
         assert_eq!(record["frame"], 7);
         assert_eq!(record["presentation"], 42);
     }
     assert_eq!(records[0]["stage"], "publish");
     assert!(records[0]["realtime_ns"].is_u64());
-    assert_eq!(records[7]["stage"], "presented");
-    assert_eq!(records[7]["clock_id"], 17);
-    assert_eq!(records[7]["ns"], 999);
+    assert_eq!(records[5]["stage"], "presented");
+    assert_eq!(records[5]["clock_id"], 17);
+    assert_eq!(records[5]["ns"], 999);
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn local_stages_share_monotonic_clock_and_publish_pairs_realtime() {
     let (clock, ns, realtime) = sample(Stage::Publish).unwrap();
-    let (next_clock, next_ns, next_realtime) = sample(Stage::Prepared).unwrap();
+    let (next_clock, next_ns, next_realtime) = sample(Stage::RenderStart).unwrap();
     assert_eq!(clock, libc::CLOCK_MONOTONIC as u32);
     assert_eq!(next_clock, clock);
     assert!(next_ns >= ns);

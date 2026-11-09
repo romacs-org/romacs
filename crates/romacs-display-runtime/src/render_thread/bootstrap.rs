@@ -463,7 +463,6 @@ fn run_render_loop_with_startup(
     };
 
     tracing::info!("Render thread entering winit event loop");
-    let preparation_proxy = event_loop.create_proxy();
     let exit_input = comms.input_tx.clone();
     let result = startup::run(event_loop, initial, move |size| {
         let app = RenderApp::new(
@@ -475,18 +474,12 @@ fn run_render_loop_with_startup(
             shared_monitors,
             poll_when_idle,
         );
-        let mut app = app;
-        match super::frame_preparation::FramePreparation::spawn(
-            app.comms.frame_rx.clone(),
-            move || preparation_proxy.wake_up(),
-        ) {
-            Ok(worker) => app.frame_preparation = Some(worker),
-            Err(error) => tracing::warn!(%error, "frame preparation worker unavailable"),
-        }
         #[cfg(feature = "video")]
-        {
+        let app = {
+            let mut app = app;
             app.video_wake = video_wake;
-        }
+            app
+        };
         app
     });
     // Notify Emacs that the render thread is exiting so it can shut down gracefully.

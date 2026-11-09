@@ -384,7 +384,7 @@ impl RenderApp {
             }
         }
 
-        self.poll_frame();
+        self.refresh_frame_state();
         self.synchronize_toolbar_resources();
 
         // Frame ingestion is the ownership edge for image textures. Publish

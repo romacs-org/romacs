@@ -1,8 +1,6 @@
 use super::*;
-use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
-use romacs_display_protocol::glyph_matrix::FrameDisplayState;
 use romacs_display_protocol::{
-    ImageId, ImageStateEvent, SealedFramePresentation,
+    ImageId, ImageStateEvent,
 };
 
 #[test]
@@ -58,58 +56,6 @@ fn native_page_keys_keep_read_and_scroll_completion_receipts_separate() {
     drop(command);
     assert!(completion.acknowledged_by(&progress.checkpoint()));
     assert!(!read.acknowledged_by(&progress.checkpoint()));
-}
-
-#[test]
-fn accepted_opacity_is_independent_of_superseded_visual_mailbox() {
-    let (emacs, render) = ThreadComms::new().split();
-    emacs.frame_opacity.lock().unwrap().accept(1, [0.5; 2], 0.2);
-    let mut numeric = FrameDisplayState::new(12, 4, 8.0, 16.0);
-    numeric.frame_alpha = [0.5; 2];
-    assert!(
-        emacs
-            .frame_tx
-            .submit(sealed_test_state(numeric))
-            .unwrap()
-            .is_none()
-    );
-    emacs
-        .frame_opacity
-        .lock()
-        .unwrap()
-        .accept(1, [-1.0; 2], 0.2);
-    let mut nil = FrameDisplayState::new(12, 4, 8.0, 16.0);
-    nil.frame_alpha = [-1.0; 2];
-    assert!(
-        emacs
-            .frame_tx
-            .submit(sealed_test_state(nil))
-            .unwrap()
-            .is_some()
-    );
-    let latest = render.frame_rx.try_recv().unwrap();
-    assert_eq!(latest.frame_alpha, [-1.0; 2]);
-    assert_eq!(render.frame_opacity.lock().unwrap().applied(1), Some(0.5));
-}
-
-fn sealed_test_state(mut state: FrameDisplayState) -> SealedFramePresentation {
-    if state.presentation_id == romacs_display_protocol::PresentationId::default() {
-        state.presentation_id = romacs_display_protocol::PresentationId::new(1);
-    }
-    state.frame_placement = romacs_display_protocol::PresentedFramePlacement::new(
-        romacs_display_protocol::DisplayFrameId::new(1),
-        state.presentation_id,
-        None,
-        romacs_display_protocol::ParentFrameRect::new(0.0, 0.0, 1.0, 1.0).unwrap(),
-        0,
-    );
-    state.presented_hit_index = romacs_display_protocol::PresentedHitIndex::from_parts(
-        state.presentation_id,
-        vec![],
-        vec![],
-    )
-    .unwrap();
-    SealedFramePresentation::seal(state).unwrap()
 }
 
 fn unpresented_pointer(x: f32, y: f32, target_frame_id: u64, action: PointerAction) -> InputEvent {
@@ -187,84 +133,6 @@ fn thread_comms_cmd_channel_roundtrip() {
         RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {} // ok
         other => panic!("Expected Shutdown, got {:?}", other),
     }
-}
-
-#[test]
-fn thread_comms_frame_channel_roundtrip() {
-    let comms = ThreadComms::new();
-
-    let buf = FrameGlyphBuffer::new();
-    let state = FrameDisplayState::from_frame_glyph_buffer(&buf);
-    comms.frame_tx.submit(sealed_test_state(state)).unwrap();
-
-    let received = comms.frame_rx.try_recv().unwrap();
-    assert_eq!(received.frame_pixel_width, 0.0);
-    assert_eq!(received.frame_pixel_height, 0.0);
-}
-
-#[test]
-fn pending_frames_keep_only_the_latest_revision() {
-    let comms = ThreadComms::new();
-    for i in 0..100 {
-        let buf = FrameGlyphBuffer::with_size(i as f32, i as f32);
-        let state = FrameDisplayState::from_frame_glyph_buffer(&buf);
-        let old = comms.frame_tx.submit(sealed_test_state(state)).unwrap();
-        assert_eq!(
-            old.map(|state| state.frame_pixel_width),
-            (i > 0).then_some((i - 1) as f32)
-        );
-    }
-    let received = comms.frame_rx.try_recv().unwrap();
-    assert_eq!(received.frame_pixel_width, 99.0);
-    assert!(received.skipped_predecessor);
-    assert!(comms.frame_rx.try_recv().is_err());
-}
-
-#[test]
-fn frame_mailbox_drains_after_producer_disconnect_and_returns_rejected_submission() {
-    let (emacs, render) = ThreadComms::new().split();
-    emacs
-        .frame_tx
-        .submit(sealed_test_state(FrameDisplayState::new(80, 24, 8.0, 16.0)))
-        .unwrap();
-    drop(emacs);
-    assert!(render.frame_rx.recv().is_ok());
-    assert!(render.frame_rx.recv().is_err());
-
-    let (emacs, render) = ThreadComms::new().split();
-    drop(render);
-    let rejected = emacs
-        .frame_tx
-        .submit(sealed_test_state(FrameDisplayState::new(80, 24, 8.0, 16.0)))
-        .unwrap_err();
-    assert_eq!(rejected.0.presentation().get(), 1);
-}
-
-#[test]
-fn concurrent_take_and_replace_assign_every_revision_exactly_once() {
-    let (emacs, render) = ThreadComms::new().split();
-    let reader = std::thread::spawn(move || {
-        let mut taken = Vec::new();
-        while let Ok(state) = render.frame_rx.recv() {
-            taken.push(state.presentation().get());
-        }
-        taken
-    });
-    let mut retired = Vec::new();
-    for revision in 1..=1000 {
-        let mut state = FrameDisplayState::new(80, 24, 8.0, 16.0);
-        state.presentation_id = romacs_display_protocol::PresentationId::new(revision);
-        if let Some(old) = emacs.frame_tx.submit(sealed_test_state(state)).unwrap() {
-            retired.push(old.presentation().get());
-        }
-    }
-    drop(emacs);
-    let taken = reader.join().unwrap();
-    assert_eq!(taken.last(), Some(&1000));
-    assert!(taken.windows(2).all(|pair| pair[0] < pair[1]));
-    retired.extend(taken);
-    retired.sort_unstable();
-    assert_eq!(retired, (1..=1000).collect::<Vec<_>>());
 }
 
 #[test]
@@ -939,7 +807,6 @@ fn channel_empty_recv_returns_error() {
     let comms = ThreadComms::new();
     assert!(comms.input_rx.try_recv().is_err());
     assert!(comms.cmd_rx.try_recv().is_err());
-    assert!(comms.frame_rx.try_recv().is_err());
 }
 
 // ===================================================================
@@ -1008,24 +875,6 @@ fn cross_thread_command_delivery() {
             title: "test-title".to_string(),
         }))
         .unwrap();
-
-    handle.join().unwrap();
-}
-
-#[test]
-fn cross_thread_frame_delivery() {
-    let comms = ThreadComms::new();
-    let (emacs, render) = comms.split();
-
-    let handle = std::thread::spawn(move || {
-        let frame = render.frame_rx.recv().unwrap();
-        assert_eq!(frame.frame_pixel_width, 1920.0);
-        assert_eq!(frame.frame_pixel_height, 1080.0);
-    });
-
-    let buf = FrameGlyphBuffer::with_size(1920.0, 1080.0);
-    let state = FrameDisplayState::from_frame_glyph_buffer(&buf);
-    emacs.frame_tx.submit(sealed_test_state(state)).unwrap();
 
     handle.join().unwrap();
 }

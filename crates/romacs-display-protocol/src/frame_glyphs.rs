@@ -14,7 +14,7 @@ use crate::types::{
     WebViewId, XwidgetId,
 };
 use crate::xwidget_extent::XwidgetPresentationGeometry;
-use crate::{ContentTransitionIntent, FrameSpace, GeometryRect, LogicalPixels};
+use crate::{ContentTransitionIntent, FrameSpace};
 use rustc_hash::FxHashMap as HashMap;
 
 pub use crate::cursor::{CursorKind, CursorSpec, CursorStyle};
@@ -1333,8 +1333,9 @@ impl FrameGlyphBuffer {
         self.presented_hit_index.resolve_unified(query)
     }
 
+    #[cfg(test)]
     /// Semantic hit index installed for this exact rendered presentation.
-    pub fn presented_hit_index(&self) -> &crate::presented_pointer::PresentedHitIndex {
+    pub(crate) fn presented_hit_index(&self) -> &crate::presented_pointer::PresentedHitIndex {
         &self.presented_hit_index
     }
 
@@ -2112,12 +2113,6 @@ impl FrameGlyphBuffer {
         fallback: &'a EffectsConfig,
     ) -> &'a EffectsConfig {
         self.window_cursor_effects(window_id).unwrap_or(fallback)
-    }
-
-    /// Return the active physical cursor's effect profile, if any.
-    pub fn phys_cursor_effects(&self) -> Option<&EffectsConfig> {
-        self.active_cursor()
-            .and_then(|cursor| self.window_cursor_effects(cursor.window_id))
     }
 
     /// Resolve the effect profile used to render and schedule the active

@@ -19,6 +19,7 @@
 //! difference of its pixel positions.
 
 use romacs_display_protocol::frame_glyphs::WindowInfo;
+#[cfg(test)]
 use romacs_display_protocol::glyph_matrix::{GlyphRow, NO_BUFFER_POSITION_CHARPOS};
 use romacs_display_protocol::transition_policy::TransitionDirection;
 
@@ -137,6 +138,7 @@ pub(in crate::render_thread) struct RowAnchor {
 }
 
 impl RowAnchor {
+    #[cfg(test)]
     /// The anchor a row offers, or `None` if it may not anchor a measurement.
     pub(in crate::render_thread) fn of(row: &GlyphRow) -> Option<Self> {
         anchor_key(row).map(|key| Self {
@@ -146,6 +148,7 @@ impl RowAnchor {
     }
 }
 
+#[cfg(test)]
 /// A row eligible to anchor a measurement, or `None` if it cannot.
 fn anchor_key(row: &GlyphRow) -> Option<RowKey> {
     // Only real buffer text can anchor: a mode line does not move with the
@@ -265,6 +268,7 @@ pub(in crate::render_thread) fn displacement(
     }
 }
 
+#[cfg(test)]
 /// The anchors every window in a presentation offers, keyed by window.
 ///
 /// Taken at ingest, while the presentation still has its glyph matrices. The

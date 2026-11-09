@@ -1,6 +1,5 @@
 use super::*;
 use crate::BasicFaceId;
-use crate::WebViewId;
 
 // -----------------------------------------------------------------------
 // Helper: assert a Color matches expected RGBA (with tolerance for floats)
