@@ -4573,13 +4573,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-retired-vm-contract"
-version = "0.1.0"
-dependencies = [
- "romacs-vm",
-]
-
-[[package]]
 name = "romacs-scene"
 version = "0.0.20"
 dependencies = [
@@ -7525,16 +7518,6 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
-
-[[package]]
-name = "xtask"
-version = "0.0.20"
-dependencies = [
- "resvg",
- "serde",
- "serde_json",
- "tempfile",
-]
 
 [[package]]
 name = "y4m"

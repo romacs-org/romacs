@@ -48,7 +48,7 @@ use std::time::Duration;
 
 use wait_timeout::ChildExt;
 
-/// GNU's `loadup` dump protocol, exactly as `crates/xtask` drives it.
+/// GNU's `loadup` dump protocol.
 const BOOTSTRAP_ARGS: [&str; 4] = ["--batch", "-l", "loadup", "--temacs=pbootstrap"];
 
 /// The smoke evaluation that proves the dumped image loads and evaluates.

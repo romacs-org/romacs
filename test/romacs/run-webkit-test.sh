@@ -14,7 +14,7 @@ EMACS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$EMACS_DIR"
 
 if [ ! -x "./target/release/romacs" ]; then
-    echo "Error: ./target/release/romacs not found. Run: cargo xtask fresh-build --release."
+    echo "Error: ./target/release/romacs not found. Run: cargo build --release -p romacs-vm-gui."
     exit 1
 fi
 

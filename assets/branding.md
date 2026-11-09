@@ -14,8 +14,7 @@ Historical `emacs*` asset names remain because Lisp packages reference them.
 The splash retains its 333 × 233 native size.
 
 Linux packages install the source SVG as `romacs.svg`; the window runtime
-renders it with resvg. macOS packaging uses `cargo xtask render-window-icon`
-to render the same source at each icon size before assembling its ICNS.
+renders it with resvg.
 
 [`wordmark.svg`](wordmark.svg) contains outlined Iosevka ExtraBold letters.
 The banner and social preview compose those outlines with the source mark.
