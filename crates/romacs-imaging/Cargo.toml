@@ -21,7 +21,7 @@ simplecss.workspace = true
 romacs-display-protocol.workspace = true
 
 [dev-dependencies]
-romacs-infra.workspace = true
+romacs-test-fonts.workspace = true
 jpeg-encoder.workspace = true
 image-extras.workspace = true
 

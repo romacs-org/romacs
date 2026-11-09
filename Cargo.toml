@@ -71,7 +71,6 @@ repository = "https://git.thanosapollo.org/romacs"
 unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.dependencies]
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
 # Internal crates
 romacs-allocator = { path = "crates/romacs-allocator" }
 romacs-display-runtime = { path = "crates/romacs-display-runtime", default-features = false }
@@ -211,8 +210,6 @@ encoding_rs = "0.8"
 
 # Compression
 flate2 = "1"
-tar = "0.4"
-ureq = "3"
 
 # Parsing
 quick-xml = "0.41"

@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Download the pinned test assets that tests read but never fetch.
+
+crates/romacs-test-fonts/fixtures.json lists each asset: its file in the cache,
+its SHA-256, and where it comes from (a URL, or a member of a pinned archive;
+one is the gzip of another). This puts every asset that is missing or wrong
+into the cache, ROMACS_TEST_FONTS_DIR or ~/.cache/romacs-test-fonts, and
+verifies each against its pin before it lands. Files are written whole (a
+temporary name, then rename). Run it once per cache; tests fail with a pointer
+here when an asset is missing.
+
+Usage: scripts/fetch-test-fixtures [--check]
+  --check   download nothing; list what is missing or wrong, exit 1 if any.
+"""
+import gzip
+import hashlib
+import io
+import json
+import os
+import pathlib
+import sys
+import tarfile
+import time
+import urllib.error
+import urllib.request
+import zipfile
+
+MANIFEST = pathlib.Path(__file__).resolve().parent.parent / 'crates/romacs-test-fonts/fixtures.json'
+MAX_BYTES = 256 * 1024 * 1024
+
+
+def cache_root():
+    if os.environ.get('ROMACS_TEST_FONTS_DIR'):
+        return pathlib.Path(os.environ['ROMACS_TEST_FONTS_DIR'])
+    return pathlib.Path.home() / '.cache/romacs-test-fonts'
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def holds(path, digest):
+    return path.is_file() and sha256(path.read_bytes()) == digest
+
+
+def write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f'.{path.name}.partial')
+    partial.write_bytes(data)
+    partial.replace(path)
+
+
+class FetchError(Exception):
+    pass
+
+
+def download(url, digest, attempts=4):
+    """URL's bytes, which must be DIGEST's. Server and network errors are
+    retried with a growing pause: release hosts answer 5xx at times."""
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                data = response.read(MAX_BYTES + 1)
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            client = isinstance(error, urllib.error.HTTPError) and error.code < 500
+            if client or attempt == attempts:
+                raise FetchError(f'{url}: {error}') from None
+            time.sleep(5 * attempt)
+    if len(data) > MAX_BYTES:
+        raise FetchError(f'{url}: larger than {MAX_BYTES} bytes')
+    if sha256(data) != digest:
+        raise FetchError(f'{url}: SHA-256 {sha256(data)}, pinned {digest}')
+    return data
+
+
+ARCHIVE_FAILURES = {}
+
+
+def archive_bytes(root, archive):
+    """ARCHIVE's bytes, fetched once per run; a failure is remembered, so
+    its other members do not retry it."""
+    if archive['file'] in ARCHIVE_FAILURES:
+        raise ARCHIVE_FAILURES[archive['file']]
+    path = root / archive['file']
+    if not holds(path, archive['sha256']):
+        print(f'fetch {archive["url"]}', flush=True)
+        try:
+            write(path, download(archive['url'], archive['sha256']))
+        except FetchError as error:
+            ARCHIVE_FAILURES[archive['file']] = error
+            raise
+    return path.read_bytes()
+
+
+def member(data, name):
+    if data[:2] == b'PK':
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            return zf.read(name)
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tf:
+        return tf.extractfile(name).read()
+
+
+def wanted(root, fixtures):
+    """The fixtures absent or not their pin; a gzip copy, when absent."""
+    return [f for f in fixtures
+            if not (holds(root / f['file'], f['sha256']) if 'sha256' in f
+                    else (root / f['file']).is_file())]
+
+
+def fetch(root, manifest, fixture):
+    target = root / fixture['file']
+    if 'gzip_of' in fixture:
+        data = gzip.compress((root / fixture['gzip_of']).read_bytes(), mtime=0)
+    elif 'url' in fixture:
+        print(f'fetch {fixture["url"]}', flush=True)
+        data = download(fixture['url'], fixture['sha256'])
+    else:
+        archive = next(a for a in manifest['archives'] if a['file'] == fixture['archive'])
+        data = member(archive_bytes(root, archive), fixture['member'])
+        if sha256(data) != fixture['sha256']:
+            raise FetchError(f'{fixture["member"]}: SHA-256 {sha256(data)}, pinned {fixture["sha256"]}')
+    write(target, data)
+
+
+def main(argv):
+    manifest = json.loads(MANIFEST.read_text())
+    root = cache_root()
+    # Gzip copies come last: they are made from fixtures fetched before them.
+    fixtures = sorted(manifest['fixtures'], key=lambda f: 'gzip_of' in f)
+    missing = wanted(root, fixtures)
+    if '--check' in argv:
+        for fixture in missing:
+            print(f'missing {root / fixture["file"]}')
+        return 1 if missing else 0
+    failed = []
+    for fixture in missing:
+        try:
+            fetch(root, manifest, fixture)
+        except (FetchError, OSError, KeyError, tarfile.TarError, zipfile.BadZipFile) as error:
+            failed.append(fixture['file'])
+            print(f'failed {fixture["file"]}: {error}', file=sys.stderr)
+    print(f'{len(fixtures)} fixtures in {root}: {len(missing) - len(failed)} fetched, {len(failed)} failed')
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
