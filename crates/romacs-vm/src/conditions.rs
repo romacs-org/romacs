@@ -342,11 +342,17 @@ impl Vm {
             let id = self.symbol_id(condition)?;
             let property = self.intern_symbol("error-message");
             let template = self.get_property(id, property);
-            // Only the condition's template is quote-substituted; an explicit
-            // error/file-error message is user data and stays literal.
-            let template = match self.message_string(template) {
-                Ok(text) if text.contains('\'') => {
-                    let text = text.replace('\'', "’");
+            // Only the condition's template is quote-substituted, as GNU
+            // print_error_message passes it through `substitute-command-keys';
+            // an explicit error/file-error message is user data and stays literal.
+            let quoted = self.message_string(template).ok().filter(|t| t.contains(['`', '\''])).map(str::to_owned);
+            // GNU's safe_call1 keeps the template when substitution fails.
+            let style = quoted.as_ref().and_then(|_| crate::prim::text_quoting_style(self).ok());
+            let template = match (quoted, style) {
+                (Some(text), Some(style)) => {
+                    let text: String = text.chars()
+                        .map(|c| char::from_u32(crate::productivity::requoted(style, c as u32)).unwrap_or(c))
+                        .collect();
                     self.allocate_object(data::Object::String(Box::new(data::LispString::new(&text))))
                 }
                 _ => template,
