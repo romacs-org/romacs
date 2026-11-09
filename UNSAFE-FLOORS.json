@@ -10,7 +10,7 @@
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
     "romacs-gui-tests": {"sites": 4, "undocumented": 1},
     "romacs-regex-engine": {"sites": 6, "undocumented": 0},
-    "romacs-renderer-wgpu": {"sites": 32, "undocumented": 14},
+    "romacs-renderer-wgpu": {"sites": 18, "undocumented": 0},
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
     "romacs-video": {"sites": 28, "undocumented": 0},
     "romacs-vm": {"sites": 882, "undocumented": 493},

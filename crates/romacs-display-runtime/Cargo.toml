@@ -67,10 +67,6 @@ video = [
     "dep:romacs-video",
     "romacs-renderer-wgpu/video",
 ]
-video-dmabuf = [
-    "video",
-    "romacs-renderer-wgpu/video-dmabuf",
-]
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-clipboard.workspace = true
 x11-dl.workspace = true

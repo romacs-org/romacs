@@ -7,7 +7,6 @@
 
 pub mod gpu_policy;
 pub mod diagnostics;
-pub(crate) mod external_buffer;
 pub(crate) mod frame_post;
 pub mod glyph_atlas;
 #[cfg(feature = "video")]
@@ -36,16 +35,7 @@ pub mod vertex;
 #[cfg(feature = "video")]
 pub(crate) mod video_cache;
 
-#[cfg(all(
-    feature = "video-dmabuf",
-    target_os = "linux"
-))]
-pub(crate) mod vulkan_dmabuf;
-
 pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
-#[cfg(target_os = "linux")]
-pub use external_buffer::DmaBufBuffer;
-pub use external_buffer::{BufferFormat, ExternalBuffer, PlatformBuffer, SharedMemoryBuffer};
 pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
@@ -61,8 +51,6 @@ pub use tooltip_layout::TooltipLayout;
 pub use vertex::{Uniforms};
 #[cfg(feature = "video")]
 pub use video_cache::VideoRecoveryManifest;
-#[cfg(feature = "video")]
-pub(crate) use video_cache::{CachedVideo, VideoCache, VideoState};
 pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
 pub use shader_surface_cache::ShaderSurfaceCache;
 

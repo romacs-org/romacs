@@ -97,17 +97,6 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              model's own ModelBudget, admitted before allocation and never \
              evicted.",
         ),
-        (
-            "src/external_buffer.rs",
-            "Sized to the imported platform buffer, whose extent comes from the \
-             producer; it backs one media surface and is charged with it.",
-        ),
-        (
-            "src/vulkan_dmabuf.rs",
-            "Sized to the imported DMA-BUF, whose extent comes from the \
-             producer (a WPE view or a video decoder); it backs one media \
-             surface and is charged with it.",
-        ),
     ])
 }
 

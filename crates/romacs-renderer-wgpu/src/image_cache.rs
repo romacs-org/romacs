@@ -32,8 +32,6 @@ pub use romacs_imaging::decode::{
     SemanticImageSequenceReservation, SemanticImageSource,
 };
 
-#[cfg(target_os = "linux")]
-use crate::external_buffer::DmaBufBuffer;
 
 /// Maximum total cache memory in bytes (64MB)
 const MAX_CACHE_MEMORY: usize = 64 * 1024 * 1024;
@@ -1096,75 +1094,6 @@ impl ImageCache {
             frame: ImageFrameIndex::default(),
             identity: ImageLoadIdentity::unspecified(),
         });
-    }
-
-    /// Import image from DMA-BUF (zero-copy if supported)
-    #[cfg(target_os = "linux")]
-    pub fn import_dmabuf(
-        &mut self,
-        dmabuf: DmaBufBuffer,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> ImageId {
-        let image = self.allocate_image_id();
-        let (width, height) = dmabuf.dimensions();
-
-        // Try zero-copy import
-        if let Some(texture) = dmabuf.to_wgpu_texture(device, queue) {
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("DMA-BUF Image Bind Group"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-
-            let memory_size = (width * height * 4) as usize;
-            self.total_memory += memory_size;
-            self.accounting
-                .push(crate::media_budget::MediaAccounting::Registered {
-                    media_type: crate::media_budget::MediaType::Image,
-                    id: image.get(),
-                    size_bytes: memory_size,
-                });
-
-            self.textures.insert(
-                image,
-                CachedImage {
-                    texture,
-                    view,
-                    bind_group,
-                    raster: ImageRasterExtent::new(width, height),
-                    // The imported buffer is the whole image already.
-                    filled: FilledRows::complete(ImageRasterExtent::new(width, height)),
-                    metadata: None,
-                    memory_size,
-                    last_access: Cell::new(self.next_access_stamp()),
-                },
-            );
-            self.states.insert(image, ImageState::Ready);
-
-            tracing::info!(
-                "Imported DMA-BUF image {} ({}x{}) zero-copy",
-                image,
-                width,
-                height
-            );
-        } else {
-            self.states
-                .insert(image, ImageState::Failed("DMA-BUF import failed".into()));
-            tracing::warn!("DMA-BUF import failed for image {}", image);
-        }
-
-        image
     }
 
     /// Process pending decoded images (call each frame)
