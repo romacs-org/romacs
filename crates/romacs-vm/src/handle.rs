@@ -460,6 +460,8 @@ mod tests {
     #[test]
     fn an_unwinding_mark_leaves_no_marks_behind() {
         let mut vm = Vm::new();
+        // On one thread, which does all the looking the fixture counts.
+        vm.set_gc_threads(1);
         vm.eval_source_raw("(defvar kept nil) (let ((i 0)) (while (< i 300000) (setq kept (cons i kept)) (setq i (1+ i))))").unwrap();
         vm.collect_garbage();
         vm.set_host_input(Some(Box::new(PanicAfter(3))));

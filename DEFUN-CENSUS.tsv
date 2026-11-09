@@ -211,7 +211,6 @@ menu-bar-menu-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers
 menu-or-popup-active-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 message-box	needed	lane A (editing, windows, frames, minibuffer readers, display)
 message-or-box	absent	no shipped Lisp calls it and it is no command
-module-function-p	elsewhere	help, in the in-Romacs session
 module-load	absent	dynamic modules: Romacs loads no native modules
 move-point-visually	needed	lane A (editing, windows, frames, minibuffer readers, display)
 msdos-downcase-filename	absent	platform: MS-DOS build only
