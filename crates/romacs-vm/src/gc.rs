@@ -287,7 +287,7 @@ impl Drop for UnwindMark {
         vm.unwind(vm.dynamic.len().saturating_sub(self.dynamic));
         vm.trapped = trapped;
         for base in vm.retrap.drain(self.retrap.min(vm.retrap.len())..) { vm.trapped.insert(base); }
-        vm.suspended_code.truncate(self.code);
+        vm.suspended.truncate(self.code);
         vm.suspended_stacks.truncate(self.stacks);
         vm.external_roots.truncate(self.roots);
         vm.running_engines = self.engines;
@@ -460,7 +460,7 @@ impl Vm {
     /// caller's frame ([`UnwindMark`]).
     pub(crate) fn unwind_mark(&mut self) -> UnwindMark {
         UnwindMark {
-            code: self.suspended_code.len(),
+            code: self.suspended.len(),
             stacks: self.suspended_stacks.len(),
             roots: self.external_roots.len(),
             engines: self.running_engines,
@@ -529,7 +529,7 @@ impl Vm {
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
+        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
     /// Set the suspended engine's register stack aside for a nested run,
     /// still traced, its allocation unmoved for the frames' raw pointers.
@@ -1032,7 +1032,7 @@ impl Vm {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
-        debug_assert!(self.suspended_code.len() <= self.running_engines, "suspended engines outnumber running ones");
+        debug_assert!(self.suspended.len() <= self.running_engines, "suspended engines outnumber running ones");
         if !self.may_collect(0) {
             return false;
         }
@@ -1147,8 +1147,7 @@ impl Vm {
         // The code this collection traced, for the next one's pacing.
         self.gc_code = code_marks.iter().zip(&self.functions).filter(|&(&live, _)| live).map(|(_, f)| f.code.len()).sum::<usize>()
             + self.execution.code_len()
-            // SAFETY: as in the mark phase.
-            + self.suspended_code.iter().map(|code| unsafe { code.code_len() }).sum::<usize>();
+            + self.suspended.iter().map(threaded::Suspended::code_len).sum::<usize>();
         // Only a collection with no request running retires live request
         // code; one inside an engine must not postpone the next of those.
         if self.stack.is_empty() && self.suspended_stacks.is_empty() {
@@ -1348,9 +1347,8 @@ impl Vm {
         for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
         }
-        for code in &self.suspended_code {
-            // SAFETY: as in the mark phase.
-            unsafe { code.visit_values(&mut |v| rewrite(v)) };
+        for engine in &mut self.suspended {
+            engine.visit_values(&mut |v| rewrite(v));
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
         // Stress fillers: unreachable, so the next collection drops them.
@@ -1384,6 +1382,9 @@ impl Vm {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.external_roots);
+        for engine in &mut self.suspended {
+            engine.visit_state_values(&mut |v| if keep(v) { pending.push(*v) });
+        }
         pending.extend(self.doomed_finalizers.iter().copied());
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
@@ -1449,10 +1450,9 @@ impl Vm {
         let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
-            // lowered code, through the visitor a compaction rewrites it with.
-            for code in &this.suspended_code {
-                // SAFETY: each entry's engine is suspended in a nested call.
-                unsafe { code.visit_values(&mut |v| if keep(v) { pending.push(*v) }) };
+            // lowered code.
+            for engine in &this.suspended {
+                engine.code_values(&mut |v| if keep(&v) { pending.push(v) });
             }
             marking.add(&mut own, &mut pending);
             loop {

@@ -31,6 +31,10 @@ impl Leaf<'_> {
     pub(crate) fn gc_phases(&mut self) -> Value {
         self.vm.gc_phases()
     }
+    /// `Vm::suspended_activations'.
+    pub(crate) fn suspended_activations(&mut self) -> Value {
+        self.vm.suspended_activations()
+    }
     /// The usage log's read of the collections since its last.
     pub(crate) fn take_collections(&mut self) -> Value {
         self.vm.take_collections()

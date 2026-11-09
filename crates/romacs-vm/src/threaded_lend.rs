@@ -1,5 +1,5 @@
 //! The engine's lends: every way a running engine reaches a collection point.
-//! Each one suspends the engine (its state and code traced in place, its
+//! Each one suspends the engine (its state and code moved to the Vm, its
 //! registers set aside when Lisp runs nested), takes the permission
 //! (`crate::brand::Gc`), and hands what the call returned straight to a leaf.
 //! Only this module suspends an engine, so raw code cannot make a collection
@@ -31,7 +31,7 @@ pub(super) type Orch<'e, 'b, 'a> = Mx<'e, 'b, Engine<'a>>;
 pub(super) struct Pc<'x>(*const Inst, PhantomData<&'x Inst>);
 // SAFETY: a code address. Orchestration reads only the instruction's plain
 // operands through it (`a`, `b`, `late_bind`, `late_write`); constants stay
-// engine code, traced in place while the engine is suspended.
+// engine code, traced in place while the engine's state is with the Vm.
 unsafe impl Plain for Pc<'_> {}
 impl<'x> Pc<'x> {
     /// # Safety
@@ -78,32 +78,34 @@ impl<'x> Pc<'x> {
 }
 
 impl Engine<'_> {
-    /// Root this engine's state across a nested call that may collect: its
-    /// code and entries by reference, the rest copied into `external_roots'.
-    /// Returns the root mark for `resume_code`.
-    /// The code reference is taken last, and from the two fields only: the
-    /// caller must reach the Vm through `self.vm` alone until `resume_code`,
-    /// which drops the reference before reborrowing the engine.
-    fn suspend_code(&mut self) -> usize {
-        let roots = self.vm.external_roots.len();
-        let mut suspended = Vec::new();
-        self.visit_state_values(&mut |value| suspended.push(*value));
-        self.vm.external_roots.extend(suspended);
-        let code = SuspendedCode {
-            code: std::ptr::addr_of_mut!(self.code),
-            entries: std::ptr::addr_of_mut!(self.entries),
+    /// Hand this engine's state to the Vm across a nested call that may
+    /// collect. Its registers stay where they are. The caller must reach the
+    /// Vm through `self.vm` alone until `resume_code`.
+    fn suspend_code(&mut self) {
+        let record = Suspended {
+            code: std::mem::take(&mut self.code),
+            entries: std::mem::take(&mut self.entries),
+            rest: std::mem::take(&mut self.rest),
+            apply_function: self.apply_function.take(),
+            controls: std::mem::take(&mut self.controls),
+            escape: self.escape.take(),
+            frames: std::mem::take(&mut self.frames),
+            file: self.vm.suspended_stacks.len(),
+            function: self.function,
+            regs: self.regs,
         };
-        self.vm.suspended_code.push(code);
-        roots
+        self.vm.suspended.push(record);
     }
-    /// Drop the code reference, then take back the forwarded state values.
-    fn resume_code(&mut self, roots: usize) {
-        self.vm.suspended_code.pop();
-        let forwarded = self.vm.external_roots[roots..].to_vec();
-        let mut forwarded = forwarded.into_iter();
-        self.visit_state_values(&mut |value| *value = forwarded.next().unwrap());
-        debug_assert!(forwarded.next().is_none());
-        self.vm.external_roots.truncate(roots);
+    /// Take this engine's state back, as the collector left it.
+    fn resume_code(&mut self) {
+        let record = self.vm.suspended.pop().expect("this engine's suspended state");
+        self.code = record.code;
+        self.entries = record.entries;
+        self.rest = record.rest;
+        self.apply_function = record.apply_function;
+        self.controls = record.controls;
+        self.escape = record.escape;
+        self.frames = record.frames;
     }
     /// The current frame's offset in the register stack.
     #[inline(always)]
@@ -126,20 +128,20 @@ impl Engine<'_> {
     /// stay in place (a watcher, a reader body, a handler callback, a
     /// collection), so `e.regs` is still the frame's.
     fn code_suspended<T>(&mut self, run: impl FnOnce(&mut Vm) -> T) -> T {
-        let roots = self.suspend_code();
+        self.suspend_code();
         let out = run(self.vm);
-        self.resume_code(roots);
+        self.resume_code();
         out
     }
     /// RUN as a nested engine run: this engine suspended, its register stack
     /// set aside (traced, its allocation unmoved), then the frame pointers
     /// rebased, since the run can widen the registers. Whether they still fit.
     fn suspended<T>(&mut self, run: impl FnOnce(&mut Vm) -> T) -> (T, bool) {
-        let roots = self.suspend_code();
+        self.suspend_code();
         self.vm.suspend_stack();
         let out = run(self.vm);
         self.vm.resume_stack();
-        self.resume_code(roots);
+        self.resume_code();
         self.vm.end_nested_execution();
         self.code.resize_with(self.vm.functions.len(), Vec::new);
         // The stack is back in place; grow it only if the call widened the

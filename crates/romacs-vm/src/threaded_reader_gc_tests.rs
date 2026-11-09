@@ -253,7 +253,7 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
         vm.eval_source_raw("(let ((keep (list 1 2))) (eval '(read-from-minibuffer \"P: \")) keep)")
     }));
     assert!(caught.is_err(), "the host panic propagates");
-    assert!(vm.suspended_code.is_empty(), "no suspended engine outlives the panic");
+    assert!(vm.suspended.is_empty(), "no suspended engine outlives the panic");
     assert!(vm.suspended_stacks.is_empty() && vm.stack.is_empty());
     assert!(vm.external_roots.is_empty());
     assert_eq!((vm.running_engines, vm.gc_holds, vm.rooted_write), (0, 0, false));
@@ -398,4 +398,57 @@ fn a_hook_at_a_safepoint_can_widen_the_registers_under_it() {
     let value = vm.eval_source(&source).unwrap().display().unwrap();
     assert_eq!(value, "(179700 1 2 3 t)");
     assert!(vm.register_width > width, "the hook widened them: {} from {width}", vm.register_width);
+}
+
+/// A reader function that collects, moving everything, at each character: the
+/// engine that called `read' is suspended for each call, and the records of
+/// its state grow and shrink under the reader.
+#[test]
+fn a_reader_function_collects_under_a_suspended_engine() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_gc_moving(true);
+    let source = "(let ((chars (append \"(a \\\"b\\\" (c))\" nil)) (kept (list 1 2)) pushed)
+                    (list (read (lambda (&optional c)
+                                  (garbage-collect)
+                                  (if c (setq pushed c)
+                                    (if pushed (prog1 pushed (setq pushed nil))
+                                      (prog1 (car chars) (setq chars (cdr chars)))))))
+                          kept))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "((a \"b\" (c)) (1 2))");
+    assert!(vm.suspended.is_empty(), "every engine took its state back");
+}
+
+/// A backtrace read while engines are suspended finds each frame's arguments
+/// in that engine's register file, as a collection left them.
+#[test]
+fn a_backtrace_reads_suspended_engines_through_a_moving_collection() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    vm.set_gc_moving(true);
+    vm.eval_source_raw("(defun bt-args-of (name)
+                          (let (found)
+                            (mapbacktrace (lambda (_evald function args _flags)
+                                            (when (eq function name) (setq found args))))
+                            found))").unwrap();
+    vm.eval_source_raw("(defun bt-outer (arg) (eval '(progn (garbage-collect) (bt-args-of 'bt-outer)) t))").unwrap();
+    let out = vm.eval_source("(bt-outer (concat \"ke\" \"pt\"))").unwrap().display().unwrap();
+    assert_eq!(out, "(\"kept\")");
+}
+
+/// What a suspended engine runs is readable while it waits: which engine and
+/// function holds which registers, in the files the engines own.
+#[test]
+fn suspended_activations_name_each_engine_and_its_registers() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    assert_eq!(vm.eval_source("(romacs--suspended-activations)").unwrap().display().unwrap(), "nil");
+    vm.eval_source_raw("(defun sa-inner () (romacs--suspended-activations))").unwrap();
+    vm.eval_source_raw("(defun sa-outer () (eval '(sa-inner) t))").unwrap();
+    let out = vm.eval_source("(let* ((rows (sa-outer)) (first (car rows)))
+                                (list (> (length rows) 0) (car first) (car (cdr first))
+                                      (integerp (nth 2 first)) (nth 3 first) (natnump (nth 4 first))))")
+        .unwrap().display().unwrap();
+    assert_eq!(out, "(t 0 function t 0 t)");
+    assert!(vm.suspended.is_empty());
 }

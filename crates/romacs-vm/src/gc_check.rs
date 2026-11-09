@@ -100,9 +100,8 @@ impl Vm {
         let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
         code.extend((0..self.request_code.live.len()).filter(|&id| self.request_code.live[id] && (active || self.request_code.permanent[id])));
         self.source_code_roots(&mut code);
-        for engine in &self.suspended_code {
-            // SAFETY: each entry's engine is suspended in a nested call.
-            unsafe { engine.visit_values(&mut |v| values.push(*v)) };
+        for engine in &mut self.suspended {
+            engine.visit_values(&mut |v| values.push(*v));
         }
         let mut native = HashSet::default();
         loop {

@@ -74,6 +74,15 @@ fn gc_phases(cx) {
     Ok(cx.gc_phases())
 }}
 
+// Every suspended engine's activations, oldest first: ((ENGINE KIND FUNCTION
+// FILE START)...), KIND `function' or `continuation' (a primitive's), FUNCTION
+// its code's number, FILE and START where its registers are. The engine that
+// calls this is not suspended, so it sees those beneath it.
+defsubr! { name = "romacs--suspended-activations", gnu = "eval.c:4079", effect = Reads,
+fn suspended_activations(cx) {
+    Ok(cx.suspended_activations())
+}}
+
 defsubr! { name = "make-finalizer", gnu = "alloc.c:3978", effect = Global,
 fn make_finalizer(cx, function: Value) {
     if !super::vars::function_p(cx, function)? { return Err(Fault::Wrong("functionp", function)); }

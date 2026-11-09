@@ -746,29 +746,104 @@ impl Program {
         }
     }
 }
-/// A suspended engine's lowered code and entry caches, visited in place by
-/// the collector while a nested call runs (`Vm::suspended_code`): copying
-/// them into the root list cost a pass over all code per `read' call.
-pub(super) struct SuspendedCode {
-    code: *mut Vec<Vec<Inst>>,
-    entries: *mut Vec<EntryCache>,
+/// A suspended engine's own state, moved here while a nested call or a
+/// collection runs (`Vm::suspended`) and moved back as it resumes. The Vm owns
+/// it for that long, so the collector reads and rewrites it in place, with no
+/// pointer into the engine's frame and no copy. The instruction and entry
+/// buffers themselves do not move, so the addresses a suspended handler holds
+/// stay good; its registers stay in `Vm::stack' or `Vm::suspended_stacks'.
+pub(super) struct Suspended {
+    code: Vec<Vec<Inst>>,
+    entries: Vec<EntryCache>,
+    rest: RestStack,
+    apply_function: Option<Value>,
+    controls: Vec<Control>,
+    escape: Option<Escape>,
+    frames: Vec<Frame>,
+    /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack'
+    /// until something sets them aside.
+    file: usize,
+    function: usize,
+    regs: *mut Value,
 }
-impl SuspendedCode {
-    /// SAFETY: as for `visit_values`.
-    pub(super) unsafe fn code_len(&self) -> usize {
-        // SAFETY: the function's contract: the suspended engine's code is in place.
-        unsafe { (*self.code).iter().map(Vec::len).sum() }
+/// An activation of a suspended engine, for what must name one: which engine,
+/// whether a primitive's continuation (K_CODE) runs it, its function, and
+/// where its registers start in the engine's file.
+#[derive(Clone, Copy)]
+pub(super) struct Activation {
+    pub(super) engine: usize,
+    pub(super) continuation: bool,
+    pub(super) function: usize,
+    pub(super) file: usize,
+    pub(super) start: usize,
+}
+impl Suspended {
+    pub(super) fn code_len(&self) -> usize {
+        self.code.iter().map(Vec::len).sum()
     }
-    /// SAFETY: the engine owning both vectors stays suspended, neither moved
-    /// nor touched, until this reference is popped.
-    pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
-        // SAFETY: the function's contract: the suspended engine's code is in place.
-        unsafe {
-            visit_code(&mut *self.code, visit);
-            for entry in &mut *self.entries {
-                visit(&mut entry.target);
-            }
+    /// The Values its code and entry caches hold, each instruction read on a
+    /// copy: what a mark's threads may do while they work.
+    pub(super) fn code_values(&self, value: &mut impl FnMut(Value)) {
+        for inst in self.code.iter().flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
         }
+        for entry in &self.entries {
+            value(entry.target);
+        }
+    }
+    /// Every Value but its code's and entry caches'.
+    pub(super) fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.rest.visit_values(visit);
+        if let Some(function) = &mut self.apply_function { visit(function); }
+        for control in &mut self.controls {
+            control.visit_values(visit);
+        }
+        if let Some(exit) = &mut self.escape {
+            exit.visit_values(visit);
+        }
+    }
+    /// Every Value it holds, for a compaction's rewrite.
+    pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        visit_code(&mut self.code, visit);
+        for entry in &mut self.entries {
+            visit(&mut entry.target);
+        }
+        self.visit_state_values(visit);
+    }
+    /// Its activations, oldest first: those its frames saved, then the running one.
+    fn activations(&self, engine: usize, base: usize) -> impl Iterator<Item = Activation> + '_ {
+        let start = move |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
+        self.frames.iter().map(move |frame| Activation {
+            engine,
+            continuation: K_CODE.as_ptr_range().contains(&frame.pc),
+            function: frame.function as usize,
+            file: self.file,
+            start: start(frame.regs),
+        }).chain(std::iter::once(Activation { engine, continuation: false, function: self.function, file: self.file, start: start(self.regs) }))
+    }
+}
+impl Vm {
+    /// The activations of every suspended engine, oldest engine first: which
+    /// engine and function holds which registers.
+    pub(super) fn activations(&self) -> Vec<Activation> {
+        self.suspended.iter().enumerate().flat_map(|(engine, record)| {
+            let file = self.suspended_stacks.get(record.file).unwrap_or(&self.stack);
+            record.activations(engine, file.as_ptr() as usize)
+        }).collect()
+    }
+    /// The same as Lisp data: ((ENGINE KIND FUNCTION FILE START)...), KIND
+    /// `function' or `continuation', the others integers.
+    pub(crate) fn suspended_activations(&mut self) -> Value {
+        let number = |n: usize| Value::integer(n as i64).expect("an index fits a fixnum");
+        let (function, continuation) = (self.intern("function"), self.intern("continuation"));
+        let mut list = Value::NIL;
+        for a in self.activations().into_iter().rev() {
+            let kind = if a.continuation { continuation } else { function };
+            let row = self.list_value(&[number(a.engine), kind, number(a.function), number(a.file), number(a.start)]);
+            list = self.keymap_cons(row, list);
+        }
+        list
     }
 }
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
@@ -1324,11 +1399,6 @@ impl Engine<'_> {
         for entry in &mut self.entries {
             visit(&mut entry.target);
         }
-        self.visit_state_values(visit);
-    }
-    /// Every Value but the code and entry caches, which `lend`'s suspension
-    /// hands to the collector in place.
-    fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.rest.visit_values(visit);
         if let Some(function) = &mut self.apply_function { visit(function); }
         for control in &mut self.controls {

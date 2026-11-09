@@ -26,7 +26,7 @@ impl Vm {
             ("dynamic", self.dynamic.is_empty()),
             ("eval_depth", self.eval_depth == 0),
             ("external_roots", self.external_roots.is_empty()),
-            ("suspended_code", self.suspended_code.is_empty()),
+            ("suspended", self.suspended.is_empty()),
             ("signal_handlers", self.signal_handlers.is_empty()),
             ("propagated_escape", self.propagated_escape.is_none()),
             ("host_input", self.host_input.is_none()),
@@ -58,7 +58,7 @@ impl Vm {
             ("profiler", self.profiler.is_idle()),
             // A thread of this process: the running parse of a visit.
             ("treesit_early", crate::treesit::early_idle() && !self.objects.iter().any(|o| matches!(o, crate::data::Object::Buffer(b) if b.treesit.early.is_some()))),
-            ("suspended_code", self.suspended_code.is_empty()),
+            ("suspended", self.suspended.is_empty()),
             // The collector's reentry state: no engine running or suspended,
             // no frame holding Values out of its sight.
             ("suspended_stacks", self.suspended_stacks.is_empty()),

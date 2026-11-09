@@ -1540,7 +1540,7 @@ pub struct Vm {
     /// from native writers (`gc.rs`, `Vm::may_collect`).
     gc_holds: usize,
     /// Engines between entry and exit, suspended or not; those not in
-    /// `suspended_code` hold untraced registers and code.
+    /// `suspended` hold untraced registers and code.
     running_engines: usize,
     /// The writer notifying watchers is an engine write suspended for it,
     /// whose own Values the write roots (`threaded::watched_write`).
@@ -1649,8 +1649,9 @@ pub struct Vm {
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
-    /// Suspended engines' code and entry caches, traced and forwarded in place.
-    suspended_code: Vec<threaded::SuspendedCode>,
+    /// Suspended engines' own state, owned here until they resume: traced and
+    /// forwarded in place, and dropped with the engine by a caught panic.
+    suspended: Vec<threaded::Suspended>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
     /// (menu item, result); set and cleared around one walk, which never
     /// collects.
@@ -1820,7 +1821,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     images,
     lambda_lists,
     status_bar_line,
-    suspended_code,
+    suspended,
     host_input,
     layout_host,
     display,
@@ -2035,7 +2036,7 @@ impl Vm {
             aftermath_held: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],
-            suspended_code: vec![],
+            suspended: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
             dynamic: vec![],
