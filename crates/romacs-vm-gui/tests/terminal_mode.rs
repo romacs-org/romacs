@@ -1,13 +1,6 @@
-#[path = "../src/command.rs"] mod command;
-#[path = "../src/echo.rs"] mod echo;
-#[path = "../src/eval_last_sexp.rs"] mod eval_last_sexp;
-#[path = "../src/loadup.rs"] mod loadup;
-#[path = "../src/native.rs"] mod native;
-#[path = "../src/presentation.rs"] mod presentation;
-#[path = "../src/startup.rs"] mod startup;
+use romacs_vm_gui::{command, startup};
 use romacs_vm::{CommandEvent, TerminalHost, TerminalSnapshot, Vm};
 use std::{cell::RefCell, rc::Rc};
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> { vm.frame_snapshot(width,height) }
 
 thread_local! {
     /// The foreground of the first cell this thread's terminal shows.

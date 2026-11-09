@@ -35,7 +35,6 @@ members = [
     "crates/romacs-scene",
     "crates/romacs-test-fonts",
     "crates/romacs-infra",
-    "crates/romacs-tui-tests",
     "crates/romacs-video",
     "crates/romacs-video-model",
     "crates/romacs-webview",
@@ -99,7 +98,6 @@ romacs-scene = { path = "crates/romacs-scene" }
 romacs-diagnostics = { path = "crates/romacs-diagnostics", default-features = false }
 romacs-perf = { path = "crates/romacs-perf", default-features = false }
 romacs-infra = { path = "crates/romacs-infra" }
-romacs-tui-tests = { path = "crates/romacs-tui-tests" }
 romacs-gui-tests = { path = "crates/romacs-gui-tests" }
 
 # Native build glue

@@ -15,6 +15,25 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The display tool NAME (`Xvfb', `xauth', `xdpyinfo', `weston'): from
+/// `ROMACS_DISPLAY_TOOLS', the directory the gate puts on its PATH, when that
+/// is set, else from PATH. The host's own display server is never assumed.
+pub fn display_tool(name: &str) -> Command {
+    let tools = std::env::var_os("ROMACS_DISPLAY_TOOLS").map(PathBuf::from);
+    Command::new(tools.map_or_else(|| PathBuf::from(name), |dir| dir.join(name)))
+}
+
+/// SPAWNED, with a missing tool named: where it was looked for and how to
+/// supply it, not a bare ENOENT.
+fn spawned<T>(name: &str, spawned: io::Result<T>) -> io::Result<T> {
+    spawned.map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => io::Error::new(error.kind(), format!(
+            "{name} not found {}: set ROMACS_DISPLAY_TOOLS to the gate's display tools",
+            std::env::var("ROMACS_DISPLAY_TOOLS").map_or_else(|_| "on PATH".to_owned(), |dir| format!("in {dir}")))),
+        _ => error,
+    })
+}
+
 /// Output resolution and compositor scale are one test environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaylandOutput {
@@ -149,7 +168,7 @@ pub fn start_weston_with_desktop(
     let log_path = artifact_root.join("weston-headless.log");
 
     let socket = format!("romacs-infra-weston-{}", std::process::id());
-    let mut command = Command::new("weston");
+    let mut command = display_tool("weston");
     match desktop {
         WestonDesktop::Solid => {
             command
@@ -160,7 +179,7 @@ pub fn start_weston_with_desktop(
             command.arg("--no-config");
         }
     }
-    let mut child = command
+    let mut child = spawned("weston", command
         .arg("--backend=headless")
         .arg("--renderer=pixman")
         .arg(format!("--socket={socket}"))
@@ -186,7 +205,7 @@ pub fn start_weston_with_desktop(
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?;
+        .spawn())?;
 
     let socket_path = runtime_dir.join(&socket);
     if wait_for_path(&socket_path, Duration::from_secs(5)) {
@@ -268,7 +287,7 @@ impl WestonBenchSession {
         let log = fs::File::create(&log_path)?;
 
         let socket = format!("romacs-infra-bench-{}", std::process::id());
-        let mut command = Command::new("weston");
+        let mut command = display_tool("weston");
         match config.desktop {
             WestonDesktop::Solid => {
                 command.arg("--config").arg(
@@ -279,7 +298,7 @@ impl WestonBenchSession {
                 command.arg("--no-config");
             }
         }
-        let child = command
+        let child = spawned("weston", command
             .arg("--backend=headless")
             // GL exposes the GPU-backed Wayland surface capabilities clients
             // need to select a hardware adapter. Pixman made Romacs choose
@@ -299,7 +318,7 @@ impl WestonBenchSession {
             // The same log carries weston's own diagnostics and the Xwayland
             // display announcement the wait below parses.
             .stderr(Stdio::from(log))
-            .spawn()?;
+            .spawn())?;
 
         let mut pending = PendingBenchSession {
             child: Some(child),
@@ -498,14 +517,14 @@ fn start_xvfb_on(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let xauth = Command::new("xauth")
+    let xauth = spawned("xauth", display_tool("xauth")
         .arg("-f")
         .arg(&authority_path)
         .arg("add")
         .arg(&display)
         .arg("MIT-MAGIC-COOKIE-1")
         .arg(cookie)
-        .output()?;
+        .output())?;
     if !xauth.status.success() {
         let diagnostic = String::from_utf8_lossy(&xauth.stderr);
         return Err(io::Error::other(format!(
@@ -514,7 +533,7 @@ fn start_xvfb_on(
     }
     let stdout = fs::File::create(&stdout_path)?;
     let stderr = fs::File::create(&stderr_path)?;
-    let child = Command::new("Xvfb")
+    let child = spawned("Xvfb", display_tool("Xvfb")
         .arg(format!(":{display_number}"))
         .arg("-screen")
         .arg("0")
@@ -532,7 +551,7 @@ fn start_xvfb_on(
         .current_dir(&session_dir)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
-        .spawn()?;
+        .spawn())?;
     pending.child = Some(child);
 
     if wait_for_authenticated_x11_display(
@@ -740,12 +759,12 @@ fn wait_for_authenticated_x11_display(
         // A TCP listener can belong to another session, and listening alone
         // does not establish X11 readiness. Our fresh cookie identifies this
         // server. xdpyinfo is also used by the real session contract test.
-        let mut probe = Command::new("xdpyinfo")
+        let mut probe = spawned("xdpyinfo", display_tool("xdpyinfo")
             .env("DISPLAY", display)
             .env("XAUTHORITY", authority)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()?;
+            .spawn())?;
         let probe_deadline = deadline.min(Instant::now() + Duration::from_millis(250));
         let ready = (|| -> io::Result<bool> {
             while Instant::now() < probe_deadline {
@@ -824,7 +843,7 @@ mod bench_tests {
     use std::collections::BTreeMap;
 
     fn weston_available() -> bool {
-        Command::new("weston")
+        display_tool("weston")
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -3,7 +3,7 @@
 //! host key, as the host translates it into the Lisp event a command sees,
 //! encodes as the router's encoder (frozen in `frozen/router_encode.rs')
 //! encoded it, in both cursor modes.
-#[path = "../src/native.rs"] mod native;
+use romacs_vm_gui::native;
 #[path = "frozen/router_encode.rs"] mod terminal_input;
 use romacs_display_runtime::{backend::wgpu::*, host_types::FrontendKey, thread_comm::InputEvent};
 use romacs_vm::{CommandEvent, Vm};

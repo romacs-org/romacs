@@ -106,7 +106,6 @@ pub fn hide(vm: &mut Vm) -> Result<(), String> {
 }
 
 /// The echo area's current text.
-#[cfg(test)]
 pub fn text(vm: &mut Vm) -> Result<String, String> {
     // Not with-current-buffer: under --gnu-lisp that is GNU's macro over the
     // special form save-current-buffer, which the VM does not have yet.

@@ -9,6 +9,7 @@ after every step and compares it.  Each harness's docstring states its
 COMPARISON POLICY.
 """
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -167,6 +168,12 @@ def stop(process):
             process.wait(timeout=5)
 
 
+def ptraceable():
+    """For `Popen''s preexec_fn: let a later gdb attach to the child, which
+    Yama's ptrace_scope 1 allows only an ancestor (PR_SET_PTRACER_ANY)."""
+    ctypes.CDLL(None).prctl(0x59616d61, ctypes.c_ulong(-1), 0, 0, 0)
+
+
 class Engine:
     """One editor in its own private compositor, home and database copy."""
 
@@ -199,7 +206,7 @@ class Engine:
         time.sleep(.3)
         started = time.time()
         output = (self.root / 'engine.log').open('w')
-        self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work',
+        self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
         wait(lambda: (self.probe_dir / 'alive').exists(), self.timeout * 4, f'{self.name} init', self.process, .02)
@@ -214,6 +221,22 @@ class Engine:
         subprocess.run([f'{self.tools}/wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', mode, *(['--scale', scale] if scale else [])],
                        env=self.env, check=True, timeout=15, capture_output=True)
 
+    def write_stacks(self, samples=2, interval=2):
+        """Every thread's native stack, SAMPLES times, in the root's stacks.txt:
+        what a probe with no answer leaves to read, a hang told from slowness."""
+        env = {key: value for key, value in os.environ.items() if key != 'LD_LIBRARY_PATH'}
+        with (self.root / 'stacks.txt').open('w') as out:
+            for sample in range(samples):
+                if sample:
+                    time.sleep(interval)
+                out.write(f'--- sample {sample + 1}\n')
+                out.flush()
+                try:
+                    subprocess.run(['gdb', '-q', '-batch', '-p', str(self.process.pid), '-ex', 'thread apply all bt 40'],
+                                   env=env, stdout=out, stderr=subprocess.STDOUT, timeout=180)
+                except (OSError, subprocess.SubprocessError) as error:
+                    out.write(f'no stacks: {error}\n')
+
     def ask(self, form, timeout=None):
         """Evaluate FORM (Lisp source) in the engine's probe; return its value."""
         self.serial += 1
@@ -223,7 +246,11 @@ class Engine:
         temporary = self.probe_dir / 'request.tmp'
         temporary.write_text(f'({self.serial} . {form})', encoding='utf-8')
         temporary.rename(request)
-        wait(response.exists, timeout or self.timeout, f'{self.name} probe answer to {form[:60]}', self.process, .005)
+        try:
+            wait(response.exists, timeout or self.timeout, f'{self.name} probe answer to {form[:60]}', self.process, .005)
+        except TimeoutError:
+            self.write_stacks()
+            raise
         value = read_sexp(response.read_text(encoding='utf-8'))
         response.unlink()
         if value[0] != self.serial:

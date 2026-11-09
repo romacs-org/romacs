@@ -148,9 +148,11 @@ fn function_equal_and_its_hash_test() {
 
 /// A burst of CPU followed by a wait is charged to the burst: a sample
 /// counts only while the thread runs, so a wait never takes the samples
-/// of the work before it. 400 bursts of 0.2 ms at 1 ms are about 80
-/// samples (fewer when a loaded host delays the sampler); a sampler that
-/// charged late lost about half of them to the wait.
+/// of the work before it; a sampler that charged late lost about half of
+/// them to the wait. The bursts are timed by the wall clock, so a loaded
+/// host gives them fewer samples: rounds of 100 run until 40 have been
+/// taken, which an unloaded host does in about one round. Only a sampler
+/// that sees no burst at all goes the whole minute without them.
 #[test]
 fn a_burst_before_a_wait_is_charged_to_the_burst() {
     let mut vm = Vm::new();
@@ -158,14 +160,16 @@ fn a_burst_before_a_wait_is_charged_to_the_burst() {
       (progn
         (defalias 'pt-burst (lambda () (let ((end (+ (float-time) 0.0002)) (n 0)) (while (< (float-time) end) (setq n (1+ n))) n)))
         (defalias 'pt-wait (lambda () (sleep-for 0.001)))
-        (profiler-cpu-start 1000000)
-        (dotimes (_ 400) (pt-burst) (pt-wait))
-        (profiler-cpu-stop)
-        (let ((burst 0) (wait 0))
-          (maphash (lambda (k v) (cond ((memq 'pt-burst (append k nil)) (setq burst (+ burst v)))
-                                       ((memq 'pt-wait (append k nil)) (setq wait (+ wait v)))))
-                   (profiler-cpu-log))
-          (list (>= burst 20) (< (* 3 wait) burst) burst wait)))"#;
+        (let ((burst 0) (wait 0) (deadline (+ (float-time) 60)))
+          (profiler-cpu-start 1000000)
+          ;; A log taken while the profiler runs restarts it.
+          (while (and (< (+ burst wait) 40) (< (float-time) deadline))
+            (dotimes (_ 100) (pt-burst) (pt-wait))
+            (maphash (lambda (k v) (cond ((memq 'pt-burst (append k nil)) (setq burst (+ burst v)))
+                                         ((memq 'pt-wait (append k nil)) (setq wait (+ wait v)))))
+                     (profiler-cpu-log)))
+          (profiler-cpu-stop)
+          (list (>= (+ burst wait) 40) (< (* 3 wait) burst) burst wait)))"#;
     let result = eval(&mut vm, source);
     assert!(result.starts_with("(t t "), "{result}");
 }

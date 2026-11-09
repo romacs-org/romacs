@@ -1,26 +1,9 @@
 //! Motion in a minibuffer after its prompt, in the `--loadup` GUI through
 //! the GUI's keyboard: C-x C-f, then GNU's C-a, C-e, C-f, M-b and C-b keep
 //! to the input field and never enter the prompt (editfns.c fields).
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{command, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::collections::VecDeque;
-
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 struct Keys(VecDeque<HostEvent>);
 impl HostInput for Keys {

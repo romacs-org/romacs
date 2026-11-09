@@ -3,19 +3,8 @@
 //! `replace-buffer-in-windows' (whose `switch-to-prev-buffer' asks for the
 //! frame's `buffer-list'), and a sole *scratch*, its own `other-buffer',
 //! is kept. Compared with pinned GNU -Q --batch on the same form.
-#[path = "../src/loadup.rs"] mod loadup;
-#[path = "../src/eval_last_sexp.rs"] mod eval_last_sexp;
-#[path = "../src/startup.rs"] mod startup;
-#[path = "../src/command.rs"] mod command;
-#[path = "../src/presentation.rs"] mod presentation;
-#[path = "../src/native.rs"] mod native;
-#[path = "../src/echo.rs"] mod echo;
+use romacs_vm_gui::startup;
 use romacs_vm::Vm;
-
-#[allow(dead_code)]
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 const FORM: &str = r#"(let* ((a (get-buffer-create "kl-a")))
   (set-window-buffer (selected-window) a)
