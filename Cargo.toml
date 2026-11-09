@@ -10,7 +10,6 @@ members = [
     "tests/retired-vm-contract",
     "crates/romacs-chars",
     "crates/romacs-logo",
-    "crates/romacs-regex",
     "crates/romacs-regex-engine",
     "crates/romacs-mcp",
     "crates/romacs-allocator",
