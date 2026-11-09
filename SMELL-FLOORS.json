@@ -223,8 +223,6 @@
       "flake.nix",
       "gnu-lisp",
       "gnu-tests",
-      "local-dev",
-      "logs",
       "native",
       "nextstep",
       "nix",

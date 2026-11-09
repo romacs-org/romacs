@@ -1087,7 +1087,7 @@ def cmd_scoreboard(args) -> int:
              else [normalize(f) for f in args.files])
     if not files or args.jobs < 1:
         raise Refusal(2, 'name test files, or --all; jobs must be positive')
-    out = pathlib.Path(args.out or (HERE / 'out' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     if out.exists() and any(out.iterdir()):
         raise Refusal(2, 'scoreboard output directory must be empty')
     (out / 'log').mkdir(parents=True, exist_ok=True)
@@ -1224,7 +1224,7 @@ def cmd_run(args) -> int:
     files = suite_files() if args.all else [normalize(f) for f in args.files]
     if not files:
         raise Refusal(2, 'name test files, or --all')
-    out = pathlib.Path(args.out or (HERE / 'out' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     (out / 'log').mkdir(parents=True, exist_ok=True)
     baselines = {rel: load_baseline(rel) for rel in files}
     binary = pathlib.Path(args.bin) if args.bin else build_adapter()
