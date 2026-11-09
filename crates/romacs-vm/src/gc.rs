@@ -531,8 +531,9 @@ impl Vm {
     pub(crate) fn may_collect(&self, own: usize) -> bool {
         self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
     }
-    /// Set the suspended engine's register stack aside for a nested run,
-    /// still traced, its allocation unmoved for the frames' raw pointers.
+    /// Set the register stack aside, still traced, its allocation unmoved for
+    /// the frames' raw pointers: an engine's for a nested run, or for a
+    /// storage kernel's.
     pub(crate) fn suspend_stack(&mut self) {
         let stack = std::mem::take(&mut self.stack);
         self.suspended_stacks.push(stack);

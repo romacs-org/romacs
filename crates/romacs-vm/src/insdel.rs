@@ -459,11 +459,10 @@ impl Vm {
     /// the engine's stay traced beneath it, whatever the kernel comes to do.
     /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
-        let mut kernel = std::mem::take(&mut self.kernel_stack);
-        kernel.clear();
-        kernel.extend_from_slice(args);
         self.suspend_stack();
-        self.stack = kernel;
+        self.stack = std::mem::take(&mut self.kernel_stack);
+        self.stack.clear();
+        self.stack.extend_from_slice(args);
         self.change_prepared = true;
         let result = run(self, args.len());
         self.change_prepared = false;
