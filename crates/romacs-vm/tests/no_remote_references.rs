@@ -348,15 +348,19 @@ fn a_name_past_the_barrier_is_refused() {
 //   graves ride in a rayon job;
 // - a type a macro declares, or a cell held in a local or a closure's capture;
 // - statics. The global-state rule in `rooting_brand_rules.rs` sees one whose
-//   type spells `Value`, and any cell in a converted module; a static holding
-//   a crate type that holds Values, as `gc_mark.rs`'s `GRAVES` does, is seen
-//   by neither;
+//   type spells `Value`, and in a converted module's production code a
+//   `static mut`, a `thread_local!`, or a `Cell`, `RefCell`, `Mutex` or
+//   `OnceLock`. A static holding a crate type that holds Values, as
+//   `gc_mark.rs`'s `GRAVES` does, is seen by neither;
 // - a public field of a type an entry holds or derefs to: `AnnotatedBuffer`
 //   derefs to `Text`, whose syntax and category tables are `pub(crate)`;
 // - which type a name means, beyond this: a name two crate types share must
-//   be spelled in its own file or after its own module (`frame::Frame`), and
-//   a name only one crate type has is taken to mean it, even spelled through
-//   a re-export or from another crate.
+//   be spelled in its own file or after its own module (`frame::Frame`, or
+//   `crate::` for `lib.rs`), only the path's last word compared with the
+//   file's name, which can repeat across directories. A name only one crate
+//   type has is taken to mean it, even spelled through a re-export or from
+//   another crate. An alias is expanded one level, by the first alias of its
+//   name.
 // Atomics are not cells here: a root handle keeps Value bits in one, and the
 // root lists cover it. Raw-pointer writes are the unsafe census's. What these
 // lists miss is the collector verifier's to catch (`ROMACS_GC_VERIFY`).
@@ -436,8 +440,8 @@ const HELD: usize = 10;
 
 /// Each `Table` field of the VM, with its entry type as `FILE:TYPE`, or none
 /// where an entry is Values only.
-const TABLES: &[(&str, &str)] = &[
-    ("closures", "lib.rs:Closure"), ("cells", ""), ("conses", ""), ("objects", "data.rs:Object"),
+const TABLES: &[(&str, &[&str])] = &[
+    ("closures", &["lib.rs:Closure"]), ("cells", &[]), ("conses", &[]), ("objects", &["data.rs:Object"]),
 ];
 
 /// The enums whose variants hold table entries, each variant with its payload
@@ -500,7 +504,7 @@ struct Shape {
 struct Census<'c> {
     cells: &'c [(&'c str, Behind)],
     held: usize,
-    tables: &'c [(&'c str, &'c str)],
+    tables: &'c [(&'c str, &'c [&'c str])],
     entries: &'c [(&'c str, Variants)],
     public: &'c [(&'c str, &'c str)],
 }
@@ -730,7 +734,7 @@ fn match_named(at: &str, named: &[Named], listed: &[&str], shapes: &[Shape]) -> 
         let spellings: Vec<&Named> = named.iter().filter(|n| n.name == name).collect();
         if spellings.is_empty() { out.push(format!("{at}: lists {ty}, which it doesn't hold")); }
         let files: BTreeSet<&str> = shapes.iter().filter(|s| s.name == name && s.kind != Kind::Alias).map(|s| s.file.as_str()).collect();
-        let means = |n: &Named| n.path.as_deref().map_or(n.file == file, |path| path == module(file));
+        let means = |n: &Named| n.path.as_deref().map_or(n.file == file, |path| path == module(file) || (path == "crate" && file == "lib.rs"));
         if files.len() > 1 && !spellings.iter().all(|&n| means(n)) {
             out.push(format!("{at}: {name} names more than one type, and this spelling may not be {ty}"));
         }
@@ -769,10 +773,9 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
     problems.extend(new.into_iter().map(|f| format!("Vm.{f}: a table TABLES doesn't name")));
     problems.extend(gone.into_iter().map(|f| format!("Vm.{f}: listed, not a table")));
     for (field, named) in &tables {
-        let Some(&(_, ty)) = census.tables.iter().find(|(f, _)| f == field) else { continue };
-        let listed: Vec<&str> = [ty].into_iter().filter(|ty| !ty.is_empty()).collect();
-        problems.extend(match_named(&format!("Vm.{field}"), named, &listed, shapes));
-        for ty in listed { entry(ty, &mut problems); }
+        let Some(&(_, types)) = census.tables.iter().find(|(f, _)| f == field) else { continue };
+        problems.extend(match_named(&format!("Vm.{field}"), named, types, shapes));
+        for ty in types { entry(ty, &mut problems); }
     }
     for (enum_key, variants) in census.entries {
         let (file, name) = split_key(enum_key);
@@ -835,13 +838,13 @@ fn each_rule_of_the_census_fires() {
     let sources = [
         file("lib.rs", "pub(crate) struct Vm { closures: table::Table<Closure>, conses: Table<(Value, Value)>,
                                               objects: Table<data::Object>, extra: Table<Value>, renamed: Table<Closure2>,
-                                              strays: Table<other::Object>, aliased: Table<Slot> }
+                                              strays: Table<other::Object>, aliased: Table<Slot>, rooted: Table<crate::Closure> }
                         pub(crate) struct Closure { pub captures: Vec<Value> } pub(crate) struct Closure2 { v: Value }
                         pub(crate) struct Value(u64); type Slot = Box<entry::Thing>;"),
         file("data.rs", "pub(super) enum Object { A(Box<entry::Open>), B(Value), C(Box<entry::Closed>), D(Box<entry::Gone>),
-                                                  F(Value), G(Box<Object>), H(Hid), N(Box<Nested>) }
+                                                  F(Value), G(Box<Object>), H(Hid), I(Box<Object>), N(Box<Nested>) }
                          pub(super) enum Nested { P(Box<entry::Inner>) } type Hid = Box<entry::Hidden>;"),
-        file("other.rs", "pub(crate) struct Object { x: Value }"),
+        file("other.rs", "pub(crate) struct Object { x: Value } pub(crate) struct Closure { y: Value }"),
         file("entry.rs", "pub(crate) struct Open { pub v: Value, s: Shared<u8> } pub(crate) struct Closed { v: Value, h: Handle }
                           pub(crate) struct Inner { pub w: Value } pub(crate) struct Hidden { v: Value }
                           pub(crate) struct Thing { pub t: Value }
@@ -852,11 +855,12 @@ fn each_rule_of_the_census_fires() {
         cells: &[("entry.rs:Shared.0", Generic), ("entry.rs:Handle", Held), ("entry.rs:Open.s", Plain), ("entry.rs:Closed.h", Held),
                  ("entry.rs:S", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:Stale", Plain)],
         held: 1,
-        tables: &[("closures", "lib.rs:Closure"), ("conses", ""), ("objects", "data.rs:Object"), ("renamed", "lib.rs:Closure"),
-                  ("strays", "data.rs:Object"), ("aliased", "entry.rs:Thing"), ("gone", "")],
+        tables: &[("closures", &["lib.rs:Closure"]), ("conses", &[]), ("objects", &["data.rs:Object"]), ("renamed", &["lib.rs:Closure"]),
+                  ("strays", &["data.rs:Object"]), ("aliased", &["entry.rs:Thing"]),
+                  ("rooted", &["lib.rs:Closure"]), ("gone", &[])],
         entries: &[
             ("data.rs:Object", &[("A", &["entry.rs:Open"]), ("B", &["entry.rs:Open"]), ("C", &[]), ("D", &["entry.rs:Gone"]), ("E", &[]),
-                                 ("G", &["other.rs:Object"]), ("H", &[]), ("N", &["data.rs:Nested"])]),
+                                 ("G", &["other.rs:Object"]), ("H", &[]), ("I", &["data.rs:Object"]), ("N", &["data.rs:Nested"])]),
             ("data.rs:Nested", &[("P", &["entry.rs:Inner"])]),
             ("data.rs:Missing", &[]),
         ],
