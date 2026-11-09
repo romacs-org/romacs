@@ -881,6 +881,7 @@ turn starts, and last turn's failures have been seen."
     (define-key map (kbd "C-c C-/") #'romacs-agent-chat-show-commands)
     (define-key map (kbd "C-c C-n") #'romacs-agent-chat-new)
     (define-key map (kbd "C-c C-r") #'romacs-agent-chat-rename)
+    (define-key map (kbd "C-c C-e") #'romacs-agent-chat-effort)
     (define-key map (kbd "C-c C-b") #'romacs-agent-switch-chat)
     (define-key map (kbd "C-c C-t") #'romacs-agent-switch)
     (define-key map (kbd "C-c C-j") #'romacs-agent-chat-composer)
@@ -1427,6 +1428,18 @@ what was there."
     (rename-buffer (format "*agent: %s*" title) t)
     (romacs-agent-ui--dashboard-changed)))
 
+(defun romacs-agent-chat-effort (effort)
+  "Run this session at reasoning EFFORT from its next turn on, its model
+kept; nil leaves it to the harness."
+  (interactive
+   (let* ((session romacs-agent-ui--session)
+          (efforts (or (romacs-agent--efforts session) (user-error "This model offers no effort"))))
+     (list (romacs-agent--read-effort efforts (plist-get (romacs-agent--wanted session) :effort))))
+   romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (unless (romacs-agent-select session (plist-get (romacs-agent--wanted session) :model) effort)
+      (message "Effort is already %s" (or effort "the harness's")))))
+
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-chat-mode)
@@ -1619,6 +1632,14 @@ only sessions whose chat is open."
   (let ((waiting (and romacs-agent-ui--session (romacs-agent-queue-length romacs-agent-ui--session))))
     (if (and waiting (> waiting 0)) (format "Queue (%d waiting)" waiting) "Queue")))
 
+(defun romacs-agent-ui--effort-label ()
+  "The effort entry: the effort running, and the one to come if it differs."
+  (let* ((session romacs-agent-ui--session)
+         (now (and session (plist-get (romacs-agent--selection session) :effort)))
+         (next (and session (plist-get (romacs-agent--wanted session) :effort))))
+    (concat (format "Effort: %s" (or now "default"))
+            (if (equal now next) "" (format " → %s" (or next "default"))))))
+
 (require 'keymap-popup)
 
 (defun romacs-agent-ui--children-here ()
@@ -1673,6 +1694,7 @@ task's chat, or a harness's own subagent's card in this one."
   :row
   :group "Session"
   "R" ("Rename" romacs-agent-chat-rename)
+  "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "n" ("New session" romacs-agent-chat-new)
   "b" ("Switch chat" romacs-agent-switch-chat)
   "t" ("Switch thread" romacs-agent-switch)

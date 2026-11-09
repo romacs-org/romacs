@@ -253,5 +253,36 @@
     ;; No supervisor left to hear from.
     (should (free 'detached))))
 
+;; The chat's effort command and its entry in the actions menu.
+(ert-deftest romacs-agent-select-chat-effort ()
+  (romacs-agent-select-tests--with (:options '(:model "a" :effort "low") :state 'idle)
+    (let ((romacs-agent-providers '(("claude")))
+          (romacs-agent-models '((claude ("a" :efforts ("low" "high")) ("b" :efforts ("max")))))
+          (asked nil))
+      (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore))
+       (with-temp-buffer
+        (setq romacs-agent-ui--session session)
+        (should (equal (romacs-agent-ui--effort-label) "Effort: low"))
+        ;; The efforts of the model it runs, what runs offered first.
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (prompt table &rest _)
+                     (push (list prompt (all-completions "" table)) asked) "high"))
+                  ((symbol-function 'romacs-agent--note) #'ignore))
+          (call-interactively #'romacs-agent-chat-effort))
+        (should (string-match-p "Effort.*low" (car (car asked))))
+        (should (equal (cadr (car asked)) '("low" "high")))
+        ;; No harness runs: in effect at once, the model kept.
+        (should (equal (romacs-agent--selection session) '(:model "a" :effort "high")))
+        (should (equal (romacs-agent-ui--effort-label) "Effort: high"))
+        ;; One armed behind a turn shows what is to come.
+        (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
+        (should (equal (romacs-agent-ui--effort-label) "Effort: high → max"))
+        (should (equal (romacs-agent--efforts session) '("max")))
+        ;; A model with no efforts says so.
+        (setf (romacs-agent-pending-selection session) nil
+              (romacs-agent-options session) '(:model "c"))
+        (let ((romacs-agent-models '((claude ("c" :efforts nil)))))
+          (should-error (call-interactively #'romacs-agent-chat-effort) :type 'user-error)))))))
+
 (provide 'romacs-agent-select-tests)
 ;;; romacs-agent-select-tests.el ends here

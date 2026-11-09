@@ -687,6 +687,14 @@ does not know, or of none named."
 
 ;;; Choosing what a session runs on
 
+(defun romacs-agent--efforts-of (instance model)
+  "The efforts INSTANCE offers MODEL, its own model when nil; those of
+every model it knows when it knows neither."
+  (let* ((models (romacs-agent--models instance))
+         (row (assoc (or model (plist-get instance :model)) models)))
+    (if row (plist-get (cdr row) :efforts)
+      (delete-dups (cl-loop for row in models append (copy-sequence (plist-get (cdr row) :efforts)))))))
+
 (defun romacs-agent--instance-rows (instance label default)
   "The picker's rows of INSTANCE, called LABEL, the instance DEFAULT:
 each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
@@ -701,9 +709,7 @@ each (TEXT :provider NAME :model ID :efforts EFFORTS :default-effort EFFORT
          (group (format "%s  %s%s" label (abbreviate-file-name dir) (if default "  default" "")))
          (common (list :provider (plist-get instance :name) :group group)))
     (cons (append (list (format "%s · default" label)
-                        :efforts (if own (plist-get own :efforts)
-                                   (delete-dups (cl-loop for row in models
-                                                         append (copy-sequence (plist-get (cdr row) :efforts)))))
+                        :efforts (romacs-agent--efforts-of instance nil)
                         :default-effort (plist-get own :default-effort)
                         :note (or missing (if (or model effort)
                                               (mapconcat #'identity (delq nil (list model effort)) " · ")
@@ -1241,6 +1247,17 @@ waiting message starts a turn."
   (let ((options (romacs-agent-options session)))
     (list :model (plist-get options :model) :effort (plist-get options :effort))))
 
+(defun romacs-agent--wanted (session)
+  "SESSION's selection to come: the one waiting, else the one running."
+  (let ((switch (romacs-agent-pending-selection session)))
+    (if switch (list :model (plist-get switch :model) :effort (plist-get switch :effort))
+      (romacs-agent--selection session))))
+
+(defun romacs-agent--efforts (session)
+  "The efforts SESSION's instance offers the model it is to run."
+  (romacs-agent--efforts-of (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))
+                            (plist-get (romacs-agent--wanted session) :model)))
+
 (defun romacs-agent--switch-object (session)
   "SESSION's waiting selection for its manifest, or null.  One that took
 effect and only holds messages until the harness is back waits for nothing
@@ -1261,10 +1278,8 @@ wait until the change is in effect.  The last selection asked for wins.
 Return whether anything changes."
   (let* ((target (list :model model :effort effort))
          (switch (romacs-agent-pending-selection session))
-         (state (plist-get switch :state))
-         (wanted (if switch (list :model (plist-get switch :model) :effort (plist-get switch :effort))
-                   (romacs-agent--selection session))))
-    (unless (equal target wanted)
+         (state (plist-get switch :state)))
+    (unless (equal target (romacs-agent--wanted session))
       (romacs-agent--cancel-select session)
       (setf (romacs-agent-pending-selection session)
             (cond
