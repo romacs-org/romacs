@@ -605,10 +605,12 @@ fn jobs_past_the_pools_width_wait_and_run_in_order_of_room() {
 #[test]
 fn the_pools_memory_limit_holds_jobs_back_and_a_large_zygote_is_refused() {
     let mut vm = vm();
-    eval(&mut vm, "(setq isolate-pool-size 8 isolate-job-memory-headroom (* 8 1024 1024))");
+    eval(&mut vm, "(setq isolate-pool-size 8 isolate-job-memory-headroom (* 64 1024 1024))");
     ready_zygote(&mut vm);
-    // Room for one reservation over what the pool holds now.
-    eval(&mut vm, "(setq isolate-pool-memory-limit (+ (* 1024 (romacs--isolate-pss)) (* 12 1024 1024)))");
+    // Room for one reservation over what the pool holds now, and not two
+    // unless the pool's PSS falls by half a reservation (32 MiB) while
+    // the first runs: a few MiB of drift between samples is ordinary.
+    eval(&mut vm, "(setq isolate-pool-memory-limit (+ (* 1024 (romacs--isolate-pss)) (* 96 1024 1024)))");
     let out = eval(&mut vm, OVERLAP_JOBS);
     let [peak, _, done] = numbers(&out)[..] else { panic!("{out}") };
     assert!(peak == 1 && done == 6, "{out}");
