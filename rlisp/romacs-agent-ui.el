@@ -82,6 +82,8 @@
 (defface romacs-agent-effort-xhigh '((t :inherit (romacs-agent-effort warning))) "Effort xhigh.")
 (defface romacs-agent-effort-max '((t :inherit (romacs-agent-effort error))) "Effort max.")
 (defface romacs-agent-effort-ultra '((t :inherit (romacs-agent-effort error) :underline t)) "Effort ultra.")
+(defface romacs-agent-project '((t :inherit font-lock-function-name-face))
+  "A session's project, where a row names it.")
 (defface romacs-agent-context '((t :inherit font-lock-number-face))
   "Context tokens in a chat's header (hermes-chat-header-context).")
 (defface romacs-agent-mode '((t :inherit font-lock-builtin-face))
@@ -666,20 +668,62 @@ or a repeat."
                             :title (car (romacs-agent-ui--delegation (plist-get event :name) (plist-get event :input))))
                    table)
           (romacs-agent-ui--children-changed session))
-      (when-let* ((row (and table (gethash id table))))
+      ;; A task the harness runs on, in the background, ends by its own
+      ;; notice, not by its tool call returning.
+      (when-let* ((row (and table (gethash id table)))
+                  ((not (plist-get row :task))))
         (let ((failed (eq (plist-get event :state) 'failed)))
-          (puthash id (plist-put (plist-put row :state (if failed "failed" "completed")) :unseen failed) table))
+          (puthash id (plist-put (plist-put (plist-put row :state (if failed "failed" "completed")) :unseen failed)
+                                 :time (or (plist-get event :time) (plist-get row :time)))
+                   table))
         (romacs-agent-ui--children-changed session)))))
 
-(defun romacs-agent-ui--end-subagents (session next)
-  "SESSION's turn ended: a subagent still running was cut.  NEXT: a new
-turn starts, and last turn's failures have been seen."
+(defun romacs-agent-ui--task-state (state)
+  "A harness task's end STATE in a card's words."
+  (pcase state ('completed "completed") ('failed "failed") (_ "cancelled")))
+
+(defun romacs-agent-ui--task-tool (table task)
+  "The tool id of TABLE's row running harness task TASK, or nil."
+  (cl-loop for id being the hash-keys of table using (hash-values row)
+           when (equal (plist-get row :task) task) return id))
+
+(defun romacs-agent-ui--track-task (session event)
+  "Keep what task EVENT says of the work SESSION's harness runs under a tool
+call: its subagents, and commands.  The task's row is its tool's, made
+here for a tool that is not a subagent's: hidden while it runs in the
+foreground, as the tool's own card shows it."
+  (let* ((table (or (romacs-agent-subagents session)
+                    (setf (romacs-agent-subagents session) (make-hash-table :test #'equal))))
+         (id (or (plist-get event :id) (romacs-agent-ui--task-tool table (plist-get event :task))))
+         (row (and id (or (gethash id table)
+                          (list :tool id :state "running" :time (plist-get event :time) :title (plist-get event :title)
+                                :hidden (not (plist-get event :background)))))))
+    (when row
+     (puthash id
+             (pcase (plist-get event :state)
+               ('started (plist-put row :task (plist-get event :task)))
+               ('backgrounded (plist-put row :hidden nil))
+               ('progress (plist-put (plist-put row :activity (plist-get event :activity))
+                                     :time (or (plist-get event :time) (plist-get row :time))))
+               (end (let ((failed (eq end 'failed)))
+                      (plist-put (plist-put (plist-put (plist-put row :task nil) :state (romacs-agent-ui--task-state end))
+                                            :unseen failed)
+                                 :time (or (plist-get event :time) (plist-get row :time))))))
+             table)
+     (romacs-agent-ui--children-changed session))))
+
+(defun romacs-agent-ui--end-subagents (session next gone time)
+  "SESSION's turn ended at TIME: a subagent still running was cut, unless
+it runs on as a task, which only its harness's going (GONE) ends.  NEXT: a
+new turn starts, and last turn's failures have been seen."
   (when-let* ((table (romacs-agent-subagents session)))
     (dolist (id (hash-table-keys table))
       (let ((row (gethash id table)))
         (cond (next (puthash id (plist-put row :unseen nil) table))
-              ((equal (plist-get row :state) "running")
-               (puthash id (plist-put row :state "cancelled") table)))))
+              ((and (equal (plist-get row :state) "running") (or gone (not (plist-get row :task))))
+               (puthash id (plist-put (plist-put (plist-put row :state "cancelled") :task nil)
+                                      :time (or time (plist-get row :time)))
+                        table)))))
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--child-statuses '("detached" "supervisor not reachable" "cancelled")
@@ -690,8 +734,9 @@ turn starts, and last turn's failures have been seen."
   (let ((type (plist-get event :type)))
     (pcase type
       ('tool (romacs-agent-ui--track-subagent session event))
-      ('input (romacs-agent-ui--end-subagents session t))
-      ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil)))
+      ('task (romacs-agent-ui--track-task session event))
+      ('input (romacs-agent-ui--end-subagents session t nil nil))
+      ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil (eq type 'exit) (plist-get event :time))))
     (when (or (memq type '(run session input approval answered done exit))
               (and (eq type 'status) (member (plist-get event :text) romacs-agent-ui--child-statuses)))
       (when-let* ((parent (plist-get (romacs-agent-options session) :parent))
@@ -717,7 +762,8 @@ turn starts, and last turn's failures have been seen."
   "Make SESSION's rows and its summary."
   (let* ((rows (append (mapcar #'romacs-agent-ui--child-row (romacs-agent-children session))
                        (and (romacs-agent-subagents session)
-                            (hash-table-values (romacs-agent-subagents session)))))
+                            (cl-remove-if (lambda (row) (plist-get row :hidden))
+                                          (hash-table-values (romacs-agent-subagents session))))))
          (counts (make-vector 3 0)))
     (dolist (row rows)
       (pcase (romacs-agent-ui--child-rank row)
@@ -1458,6 +1504,37 @@ kept; nil leaves it to the harness."
     (unless (romacs-agent-select session (plist-get (romacs-agent--wanted session) :model) effort)
       (message "Effort is already %s" (or effort "the harness's")))))
 
+(defun romacs-agent-chat-model (model effort)
+  "Run this session on MODEL, of its own instance, from its next turn on,
+at EFFORT: the effort it runs at when MODEL takes it, else MODEL's default;
+with a prefix argument, asked for."
+  (interactive
+   (let* ((session romacs-agent-ui--session)
+          (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+          (fields (cdr (romacs-agent--pick-row
+                        (romacs-agent--instance-rows instance (plist-get instance :display) nil))))
+          (model (plist-get fields :model))
+          (efforts (plist-get fields :efforts))
+          (now (plist-get (romacs-agent--wanted session) :effort))
+          (fitting (if (member now efforts) now (plist-get fields :default-effort))))
+     (list model (if (and current-prefix-arg efforts) (romacs-agent--read-effort efforts fitting) fitting)))
+   romacs-agent-chat-mode)
+  (unless (romacs-agent-select romacs-agent-ui--session model effort)
+    (message "Already on %s" (romacs-agent-ui--selection-label (list :model model :effort effort)))))
+
+(defun romacs-agent-ui--model-label ()
+  "The model entry: the model running, and the one to come if it differs."
+  (let* ((session romacs-agent-ui--session)
+         (harness (and session (romacs-agent-harness session)))
+         (shown (lambda (model)
+                  (propertize (or (and model (romacs-agent-ui--instance nil harness model nil)) "default")
+                              'face (if model 'romacs-agent-model 'romacs-agent-effort-default))))
+         (now (and session (or (plist-get (romacs-agent--selection session) :model) (romacs-agent-model session))))
+         (next (and session (plist-get (romacs-agent--wanted session) :model))))
+    (concat "Model: " (funcall shown now)
+            (if (or (null (romacs-agent-pending-selection session)) (equal now next)) ""
+              (concat " → " (funcall shown next))))))
+
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-chat-mode)
@@ -1496,26 +1573,57 @@ can show: a reply can be long."
      (string-trim (replace-regexp-in-string "[\n\t ]+" " " (substring text 0 (min (length text) (* 4 (max 0 width))))))
      width)))
 
+(defcustom romacs-agent-switch-context-share 70
+  "The context share, in percent, from which the switcher shows a
+session's: below, it is nothing to act on."
+  :type 'natnum :group 'romacs-agent)
+
 (defun romacs-agent-ui--switch-facts (session default)
-  "What is worth knowing of SESSION at a glance, the most useful first;
-DEFAULT is the provider not worth naming."
-  (let ((queued (romacs-agent-queue-length session)))
-    (delq nil (list (romacs-agent-ui--context-share session)
-                    (and (> queued 0) (format "%d queued" queued))
-                    (romacs-agent-ui--instance
-                     (romacs-agent-provider session) (romacs-agent-harness session)
-                     (or (romacs-agent-model session) (plist-get (romacs-agent-options session) :model))
-                     default)
-                    (and (romacs-agent-cwd session)
-                         (file-name-nondirectory (directory-file-name (romacs-agent-cwd session))))))))
+  "What is worth acting on in SESSION at a glance, each in its face: its
+project, its context when nearly full, what waits in its queue, and its
+instance when not DEFAULT."
+  (let ((queued (romacs-agent-queue-length session))
+        (used (romacs-agent-context-used session)) (window (romacs-agent-context-window session))
+        (provider (romacs-agent-provider session)))
+    (delq nil (list (and (romacs-agent-cwd session)
+                         (propertize (file-name-nondirectory (directory-file-name (romacs-agent-cwd session)))
+                                     'face 'romacs-agent-project))
+                    (and (numberp used) (numberp window) (> window 0)
+                         (>= (* 100.0 (/ used (float window))) romacs-agent-switch-context-share)
+                         (propertize (romacs-agent-ui--context-share session) 'face 'warning))
+                    (and (> queued 0) (propertize (format "%d queued" queued) 'face 'romacs-agent-running))
+                    (and provider (not (equal provider default)) (propertize provider 'face 'romacs-agent-dim))))))
+
+(defun romacs-agent-ui--plain (text)
+  "TEXT, a reply's Markdown, as plain words for one line: links as their
+text, code and emphasis marks, headings' and lists' marks gone."
+  (thread-last (or text "")
+               (replace-regexp-in-string "```[^\n]*" "")
+               (replace-regexp-in-string "\\[\\([^]]*\\)\\](\\([^)]*\\))" "\\1")
+               (replace-regexp-in-string "\\*\\*\\|__\\|`" "")
+               (replace-regexp-in-string "^[ \t]*\\(?:#+\\|[-*+]\\|[0-9]+\\.\\)[ \t]+" "")
+               (romacs-agent-ui--unemphasize)))
+
+(defun romacs-agent-ui--unemphasize (text)
+  "TEXT without single-marker emphasis, *word* or _word_, an underscore
+within a word kept.  Again until none is left: a match takes the boundary
+an adjacent span needs."
+  (let ((next (replace-regexp-in-string
+               "\\(^\\|[^[:alnum:]]\\)\\([*_]\\)\\([^*_ \n][^*_\n]*\\)\\2\\([^[:alnum:]]\\|$\\)"
+               "\\1\\3\\4" text)))
+    (if (equal next text) text (romacs-agent-ui--unemphasize next))))
+
+(defconst romacs-agent-ui--switch-words '("working" "needs you" "failed")
+  "The states the switcher names: the rest its mark says.")
 
 (defun romacs-agent-ui--switch-suffix (session width default)
   "What the switcher says of SESSION after its title, in at most WIDTH
-columns: the state always, then facts, then what room leaves of its reply.
-DEFAULT is the provider not worth naming."
+columns: a state that wants attention, then facts, then what room leaves
+of its reply.  DEFAULT is the provider not worth naming."
   (pcase-let* ((`(,_mark ,face ,word) (romacs-agent-ui--status session))
                (unread (> (romacs-agent-done-seq session) (romacs-agent-seen-seq session)))
-               (head (concat (propertize (format "%-9s" (or word "")) 'face face)
+               (head (concat (propertize (format "%-9s" (if (member word romacs-agent-ui--switch-words) word ""))
+                                         'face face)
                              (propertize (format "%5s  " (or (romacs-agent-ui--ago (romacs-agent-last-time session)) ""))
                                          'face 'romacs-agent-dim)
                              (if unread (propertize "● " 'face 'romacs-agent-unread) "  ")))
@@ -1524,9 +1632,10 @@ DEFAULT is the provider not worth naming."
                        (mapconcat #'identity (romacs-agent-ui--switch-facts session default) " · ") space))
                (room (- space (string-width facts) 2)))
     (truncate-string-to-width
-     (concat head (propertize facts 'face 'romacs-agent-dim)
+     (concat head facts
              (if (> room 8)
-                 (propertize (concat "  " (romacs-agent-ui--one-line (romacs-agent-reply session) room)) 'face 'romacs-agent-dim)
+                 (propertize (concat "  " (romacs-agent-ui--one-line (romacs-agent-ui--plain (romacs-agent-reply session)) room))
+                             'face 'romacs-agent-dim)
                ""))
      (max 0 width))))
 
@@ -1660,19 +1769,46 @@ only sessions whose chat is open."
 
 (require 'keymap-popup)
 
+(defconst romacs-agent-ui--finished-workers 3
+  "How many finished workers the actions menu keeps after the active ones.")
+
+(defun romacs-agent-ui--workers (rows)
+  "ROWS (`romacs-agent-children-rows', ranked) as the menu lists them:
+those running or wanting the user, then the few that finished last,
+however they ended."
+  (let* ((active (seq-filter (lambda (row) (< (romacs-agent-ui--child-rank row) 3)) rows))
+         (finished (sort (seq-difference rows active #'eq)
+                         (lambda (a b) (> (or (plist-get a :time) 0) (or (plist-get b :time) 0))))))
+    (append active (seq-take finished romacs-agent-ui--finished-workers))))
+
 (defun romacs-agent-ui--children-here ()
-  (and romacs-agent-ui--session (romacs-agent-children-rows romacs-agent-ui--session)))
+  (and romacs-agent-ui--session (romacs-agent-ui--workers (romacs-agent-children-rows romacs-agent-ui--session))))
 
 (defun romacs-agent-ui--children-title ()
   (let ((summary (and romacs-agent-ui--session (romacs-agent-children-summary romacs-agent-ui--session))))
     ;; A menu heading fits 40 columns.
-    (if summary (concat "Agents " summary) "Agents")))
+    (if summary (concat "Workers " summary) "Workers")))
 
 (defun romacs-agent-ui--child-label (index)
-  "The menu's row of the child at INDEX, or nil to show none."
+  "The menu's row of the child at INDEX, or nil to show none: its state,
+what it is doing and when it last did something, its title in the room a
+menu entry leaves (`keymap-popup--max-description-width')."
   (when-let* ((row (nth index (romacs-agent-ui--children-here))))
-    (concat (truncate-string-to-width (or (plist-get row :title) "task") 36 nil nil "…")
-            "  " (romacs-agent-ui--chip (plist-get row :state)))))
+    (let* ((state (plist-get row :state))
+           (activity (and (equal state "running") (plist-get row :activity)
+                          (truncate-string-to-width
+                           (replace-regexp-in-string "\\`mcp__[^_]+\\(?:_[^_]+\\)*__" "" (plist-get row :activity))
+                           14 nil nil "…")))
+           (ago (romacs-agent-ui--ago (plist-get row :time)))
+           (tail (mapconcat #'identity
+                            (delq nil (list (romacs-agent-ui--chip state)
+                                            (and activity (propertize activity 'face 'romacs-agent-running))
+                                            (and (not (string-empty-p ago)) (propertize ago 'face 'romacs-agent-dim))))
+                            " ")))
+      (concat (truncate-string-to-width (or (plist-get row :title) "task")
+                                        (max 8 (- keymap-popup--max-description-width (string-width tail) 1))
+                                        nil nil "…")
+              " " tail))))
 
 (defun romacs-agent-chat-open-child ()
   "Open the child on the menu row of the digit just pressed: a delegated
@@ -1694,35 +1830,32 @@ task's chat, or a harness's own subagent's card in this one."
   (romacs-agent-switch session))
 
 (keymap-popup-define romacs-agent-chat-actions-map
-  "Actions of an agent chat, as emacs-hermes's chat has them."
+  "Actions of an agent chat: an approval waiting first; then the turn, what
+it runs on, the session and the workers under it; then composing and the
+view."
   :popup-key "?"
   :exit-key "C-g"
-  :group "Turn"
-  "s" ("Steer (send now)" romacs-agent-chat-steer)
-  "i" ("Interrupt" romacs-agent-chat-interrupt :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
-  "k" ("Interrupt + send" romacs-agent-chat-interrupt-and-send)
-  "q" (#'romacs-agent-ui--queue-label romacs-agent-chat-queue)
-  :group "Compose"
-  "RET" ("Send" romacs-agent-chat-return)
-  "A" ("Attach image" romacs-agent-chat-attach)
-  "W" ("Remove image" romacs-agent-chat-remove-image :inapt-if (lambda () (not romacs-agent-ui--draft-images)))
-  "Q" ("Quote region" romacs-agent-chat-quote-region :inapt-if (lambda () (not (use-region-p))))
-  "e" ("Edit turn at point" romacs-agent-chat-edit-turn)
-  "w" ("Copy turn or region" romacs-agent-chat-copy)
+  :group ("Approval" :if (lambda () (and romacs-agent-ui--session
+                                         (> (hash-table-count (romacs-agent-approvals romacs-agent-ui--session)) 0))))
+  "a" ("Allow" romacs-agent-chat-allow)
+  "d" ("Deny" romacs-agent-chat-deny)
   :row
-  :group "Session"
-  "R" ("Rename" romacs-agent-chat-rename)
+  :group "Turn"
+  "s" ("Steer (send now)" romacs-agent-chat-steer :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
+  "i" ("Interrupt" romacs-agent-chat-interrupt :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
+  "k" ("Interrupt + send" romacs-agent-chat-interrupt-and-send :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
+  "q" (#'romacs-agent-ui--queue-label romacs-agent-chat-queue)
+  :group "Runs on"
+  "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
-  "n" ("New session" romacs-agent-chat-new)
+  :group "Session"
   "b" ("Switch chat" romacs-agent-switch-chat)
   "t" ("Switch thread" romacs-agent-switch)
+  "n" ("New session" romacs-agent-chat-new)
+  "R" ("Rename" romacs-agent-chat-rename)
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
-  "x" ("Stop" romacs-agent-chat-stop)
+  "x" ("Stop" romacs-agent-chat-stop :inapt-if (lambda () (eq (romacs-agent-state romacs-agent-ui--session) 'ended)))
   "h" ("Home page" romacs-agent-chat-home)
-  :group "Show"
-  "+" ("Expand all outputs" romacs-agent-chat-expand-all)
-  "-" ("Collapse all outputs" romacs-agent-chat-collapse-all)
-  "c" ("Show commands" romacs-agent-chat-show-commands)
   :group (#'romacs-agent-ui--children-title :if #'romacs-agent-ui--children-here)
   "1" ((lambda () (romacs-agent-ui--child-label 0)) romacs-agent-chat-open-child)
   "2" ((lambda () (romacs-agent-ui--child-label 1)) romacs-agent-chat-open-child)
@@ -1735,10 +1868,17 @@ task's chat, or a harness's own subagent's card in this one."
   "9" ((lambda () (romacs-agent-ui--child-label 8)) romacs-agent-chat-open-child)
   "o" ("All delegated tasks" romacs-agent-chat-children
        :if (lambda () (romacs-agent-children romacs-agent-ui--session)))
-  :group ("Approval" :if (lambda () (and romacs-agent-ui--session
-                                         (> (hash-table-count (romacs-agent-approvals romacs-agent-ui--session)) 0))))
-  "a" ("Allow" romacs-agent-chat-allow)
-  "d" ("Deny" romacs-agent-chat-deny))
+  :row
+  :group "Compose"
+  "A" ("Attach image" romacs-agent-chat-attach)
+  "W" ("Remove image" romacs-agent-chat-remove-image :inapt-if (lambda () (not romacs-agent-ui--draft-images)))
+  "Q" ("Quote region" romacs-agent-chat-quote-region :inapt-if (lambda () (not (use-region-p))))
+  "e" ("Edit turn at point" romacs-agent-chat-edit-turn)
+  "w" ("Copy turn or region" romacs-agent-chat-copy)
+  :group "View"
+  "+" ("Expand all outputs" romacs-agent-chat-expand-all)
+  "-" ("Collapse all outputs" romacs-agent-chat-collapse-all)
+  "c" ("Show commands" romacs-agent-chat-show-commands))
 
 (put 'romacs-agent-chat-actions-map-popup 'command-modes '(romacs-agent-chat-mode))
 

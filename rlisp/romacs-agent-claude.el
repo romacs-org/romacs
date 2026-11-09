@@ -94,6 +94,35 @@ own \"Compacted\" is already said by its row."
     (unless (member output '("" "Compacted"))
       (list (list :type 'status :text output :parent parent)))))
 
+(defun romacs-agent--claude-task (line)
+  "LINE, a notice of work the harness runs under a tool call (a subagent,
+or a command), as a `task' event: its tool's :id, then what it says:
+started (in the background or not), what it is doing, moved to the
+background (known by its :task alone), or how it ended.  Work a subagent
+runs is that subagent's: no event."
+  (let ((id (romacs-agent--value (gethash "tool_use_id" line)))
+        (patch (gethash "patch" line)))
+    (cond
+     ((or (romacs-agent--value (gethash "parent_task_id" line))
+          (eq (gethash "owned_by_subagent" line) t))
+      nil)
+     ((equal (gethash "subtype" line) "task_updated")
+      (when (and (hash-table-p patch) (eq (gethash "is_backgrounded" patch) t))
+        (list (list :type 'task :task (gethash "task_id" line) :state 'backgrounded))))
+     (id
+      (list (append (list :type 'task :id id)
+                  (pcase (gethash "subtype" line)
+                    ("task_started" (list :state 'started :task (gethash "task_id" line)
+                                          :title (romacs-agent--value (gethash "description" line))
+                                          :background (or (eq (gethash "is_backgrounded" line) t)
+                                                          (equal (gethash "task_type" line) "local_agent"))))
+                    ("task_progress" (list :state 'progress
+                                           :activity (or (romacs-agent--value (gethash "last_tool_name" line))
+                                                         (romacs-agent--value (gethash "description" line)))))
+                    (_ (list :state (pcase (gethash "status" line)
+                                      ("completed" 'completed) ("failed" 'failed) (_ 'stopped))
+                             :summary (romacs-agent--value (gethash "summary" line)))))))))))
+
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
   (let ((type (gethash "type" line))
@@ -111,6 +140,7 @@ own \"Compacted\" is already said by its row."
                              :mcp (gethash "mcp_servers" line))))
          ("status" (romacs-agent--claude-status line))
          ("compact_boundary" (setf (romacs-agent-compacting session) t) nil)
+         ((or "task_started" "task_progress" "task_notification" "task_updated") (romacs-agent--claude-task line))
          (_ nil)))
       ("stream_event"
        (let* ((event (gethash "event" line))

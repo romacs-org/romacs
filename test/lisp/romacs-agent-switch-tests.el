@@ -75,8 +75,8 @@
                   :queue-length 12 :last-time (float-time) :reply "text")))
     (dolist (width '(120 58 30 12))
       (should (<= (string-width (romacs-agent-ui--switch-suffix session width nil)) width)))
-    ;; The context comes first of the facts.
-    (should (string-match-p "25%" (romacs-agent-ui--switch-suffix session 30 nil)))))
+    ;; A quarter full is nothing to act on.
+    (should-not (string-match-p "25%" (romacs-agent-ui--switch-suffix session 120 nil)))))
 
 (ert-deftest romacs-agent-switch-reads-only-what-a-reply-can-show ()
   (let ((reply (concat (make-string 40 ?a) (make-string 1000 ?\s) "tail")))
@@ -143,22 +143,36 @@
 
 (ert-deftest romacs-agent-switch-row-says-what-matters-on-one-line ()
   (let* ((session (romacs-agent-switch-tests--session
-                   "s" :model "claude-opus-5-5" :context-used 250000 :context-window 1000000
+                   "s" :model "claude-opus-5-5" :context-used 850000 :context-window 1000000
                    :done-seq 2 :seen-seq 1 :queue-length 2 :last-time (- (float-time) 120)
-                   :reply "The first line of the reply\nand a second"))
+                   :reply "**The first** line of [the reply](https://x.org)\n- and `a second`"))
          (row (romacs-agent-ui--switch-suffix session 120 nil)))
-    (should (string-match-p "opus-5-5" row))
-    (should (string-match-p "25%" row))
-    (should (string-match-p "romacs" row))
+    ;; Its model is noise; a nearly full context is not.
+    (should-not (string-match-p "opus-5-5" row))
+    (should (string-match-p "85%" row))
+    (should (eq (get-text-property (string-search "85%" row) 'face row) 'warning))
+    (should (eq (get-text-property (string-search "romacs" row) 'face row) 'romacs-agent-project))
     (should (string-match-p "2 queued" row))
     (should (string-match-p "●" row))
+    ;; The reply, as words.
     (should (string-match-p "The first line of the reply and a second" row))
     (should-not (string-match-p "\n" row))
     (should (<= (string-width row) 120))
     ;; Narrow: the facts stay, the reply goes first.
     (let ((narrow (romacs-agent-ui--switch-suffix session 60 nil)))
-      (should (string-match-p "25%" narrow))
+      (should (string-match-p "85%" narrow))
       (should-not (string-match-p "second" narrow)))))
+
+(ert-deftest romacs-agent-switch-plain-words ()
+  (should (equal (romacs-agent-ui--plain "*Important* and _urgent_, snake_case_name stays") "Important and urgent, snake_case_name stays"))
+  (should (equal (romacs-agent-ui--plain "- **bold** item\n## Head") "bold item\nHead"))
+  (should (equal (romacs-agent-ui--plain "*one* *two* _three_ _four_") "one two three four")))
+
+(ert-deftest romacs-agent-switch-row-names-only-states-that-want-you ()
+  (should-not (string-match-p "done\\|idle" (romacs-agent-ui--switch-suffix
+                                             (romacs-agent-switch-tests--session "s" :turns 1 :state 'idle) 80 nil)))
+  (should (string-match-p "working" (romacs-agent-ui--switch-suffix
+                                     (romacs-agent-switch-tests--session "s" :state 'running) 80 nil))))
 
 (ert-deftest romacs-agent-switch-copes-with-a-bare-session ()
   (let ((row (romacs-agent-ui--switch-suffix
