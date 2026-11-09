@@ -26,6 +26,10 @@ OLD = """;;; probes.el --- probes  -*- lexical-binding: t -*-
 
 (scaling-probe vectors :n 20 :body (vector ?\\) ?a))  ; trailing
 
+(scaling-probe keys :n 5
+  :setup (list ?\\M-\\) [?\\C-\\M-(] ?\\^? ?\\s-a)
+  :body (length it))
+
 (scaling--completion-probe completion-basic basic)
 
 (provide 'scaling-probes)
@@ -35,7 +39,8 @@ OLD = """;;; probes.el --- probes  -*- lexical-binding: t -*-
 class SplitTest(unittest.TestCase):
     def test_each_probe_moves_with_its_comment_and_nothing_is_lost(self):
         harness, probes = scaling_probes.split_text(OLD)
-        self.assertEqual(sorted(probes), ['completion-basic', 'lists', 'vectors'])
+        self.assertEqual(sorted(probes), ['completion-basic', 'keys', 'lists', 'vectors'])
+        self.assertIn(':body (length it))', probes['keys'], 'a modified character literal is one character')
         self.assertIn(';; Grows a list.\n;; Two lines of comment.\n(scaling-probe lists', probes['lists'])
         self.assertIn('(defun scaling--helper ()', harness)
         self.assertNotIn('scaling-probe lists', harness)
@@ -48,6 +53,13 @@ class SplitTest(unittest.TestCase):
 
 def git(root, *args, check=True):
     return subprocess.run(['git', '-C', str(root), *args], check=check, capture_output=True, text=True)
+
+
+class RefusalTest(unittest.TestCase):
+    def test_unbalanced_text_is_refused_before_anything_is_written(self):
+        for text in ('(scaling-probe a :n 1 :body (list 1)\n', '(scaling-probe a :n 1))\n'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                scaling_probes.split_text(text)
 
 
 class MergeTest(unittest.TestCase):
@@ -80,7 +92,7 @@ class MergeTest(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr)
             probes = root / scaling_probes.DIR / 'probes'
             self.assertEqual(sorted(p.stem for p in probes.glob('*.el')),
-                             ['completion-basic', 'lists', 'strings', 'vectors'])
+                             ['completion-basic', 'keys', 'lists', 'strings', 'vectors'])
             self.assertNotIn('(scaling-probe ', path.read_text())
             self.assertEqual(path.read_text(), (root / scaling_probes.DIR / scaling_probes.FILE).read_text())
             git(root, 'commit', '-qm', 'merge trunk')

@@ -33,9 +33,22 @@ LOADER = """;; Every probe lives in probes/NAME.el beside this file.
 PROVIDE = "(provide 'scaling-probes)"
 
 
+MODIFIER = re.compile(r'\\(?:[ACHMSs]-|\^)')
+
+
+def char_end(text, i):
+    """The offset past the character literal at TEXT[I] == '?': its modifier
+    prefixes (`\\C-`, `\\M-`, `\\^`, ...) and then one character, itself
+    perhaps escaped (`?\\M-\\)` is a character, not a closing paren)."""
+    i += 1
+    while (found := MODIFIER.match(text, i)):
+        i = found.end()
+    return i + (2 if text[i:i + 1] == '\\' else 1)
+
+
 def forms(text):
     """[(start, end)] offsets of TEXT's top-level forms, read past strings,
-    comments and character literals."""
+    comments and character literals. Unbalanced text is refused."""
     found, depth, start, i = [], 0, None, 0
     while i < len(text):
         c = text[i]
@@ -47,18 +60,23 @@ def forms(text):
             i += 1
             while i < len(text) and text[i] != '"':
                 i += 2 if text[i] == '\\' else 1
-        elif c == '?' and (i == 0 or text[i - 1] in ' \t\n(\'`,'):
-            i += 2 if text[i + 1:i + 2] == '\\' else 1
+        elif c == '?' and (i == 0 or text[i - 1] in ' \t\n([\'`,'):
+            i = char_end(text, i)
+            continue
         elif c in '([':
             if depth == 0:
                 start = i
             depth += 1
         elif c in ')]':
             depth -= 1
+            if depth < 0:
+                raise ValueError(f'a closing paren with nothing open, at line {text.count(chr(10), 0, i) + 1}')
             if depth == 0 and start is not None:
                 found.append((start, i + 1))
                 start = None
         i += 1
+    if depth:
+        raise ValueError(f'a form opened at line {text.count(chr(10), 0, start or 0) + 1} never closes')
     return found
 
 
@@ -105,7 +123,11 @@ def main():
     if args.command == 'merge':
         return entry_merge.merge(root, split, lambda *revs: [(DIR / FILE).as_posix()], DIR, 'scaling probes')
     path = root / DIR / FILE
-    out = split({(DIR / FILE).as_posix(): path.read_text()})
+    try:
+        out = split({(DIR / FILE).as_posix(): path.read_text()})
+    except ValueError as exc:
+        print(f'scaling probes: {exc}; nothing written', file=sys.stderr)
+        return 2
     for name, text in out.items():
         (root / DIR / name).parent.mkdir(parents=True, exist_ok=True)
         (root / DIR / name).write_text(text)
