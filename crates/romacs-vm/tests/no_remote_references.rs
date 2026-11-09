@@ -56,7 +56,10 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
-    ("mode_line_forms", Cache), ("lambda_lists", Cache),
+    // Each segment's last value, by permanent slot.
+    ("mode_line_forms", Root),
+    // An ephemeron table: an entry is traced while its list, the key, lives.
+    ("lambda_lists", Root),
     ("images", Free),
     // A `Band`: its object constants are `Rooted` handles, and its `rule` keeps
     // a `CharTableView` no root list reads. Inert: those Values reach only

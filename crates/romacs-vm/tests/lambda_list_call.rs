@@ -88,3 +88,23 @@ fn a_lambda_list_compiles_once_while_unchanged() {
     assert_eq!((again, changed, after), (0, 1, 0));
     assert_eq!(vm.eval_source("(funcall lambda-list-once 1)").unwrap().display().unwrap(), "3");
 }
+
+/// A collection is invisible to Lisp: a list keeps its compiled code across
+/// one, so its macros expand no more often than with none.
+#[test]
+fn a_collection_does_not_compile_a_lambda_list_again() {
+    let mut vm = Vm::new();
+    vm.eval_source(
+        "(progn (defvar lambda-list-expansions 0)
+                (defmacro lambda-list-counted () (setq lambda-list-expansions (1+ lambda-list-expansions)) 1)
+                (defun lambda-list-caller () (funcall '(lambda () (lambda-list-counted)))))",
+    )
+    .unwrap();
+    let counts = vm
+        .eval_source(
+            "(list (progn (lambda-list-caller) (lambda-list-caller) (lambda-list-caller) lambda-list-expansions)
+                   (progn (garbage-collect) (lambda-list-caller) (lambda-list-caller) lambda-list-expansions))",
+        )
+        .unwrap();
+    assert_eq!(counts.display().unwrap(), "(1 1)");
+}

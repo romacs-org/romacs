@@ -764,8 +764,10 @@ impl Vm {
     }
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
-    /// Marking only grows, so the rounds reach a fixpoint; weak tables reached
-    /// by the new marks join the next round. True when anything was pushed.
+    /// `lambda_lists` is an ephemeron table too: a live list keeps what its
+    /// entry holds. Marking only grows, so the rounds reach a fixpoint; weak
+    /// tables reached by the new marks join the next round. True when
+    /// anything was pushed.
     fn weak_round(
         &self,
         weak: &[usize],
@@ -798,6 +800,11 @@ impl Vm {
                         pending.push(value);
                     }
                 }
+            }
+        }
+        for (&list, entry) in &self.lambda_lists {
+            if self.survives(symbols, regions, Value(list)) {
+                entry.trace(&mut |v| if !self.survives(symbols, regions, v) { pending.push(v) });
             }
         }
         !pending.is_empty()
@@ -1052,8 +1059,6 @@ impl Vm {
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);
-        self.mode_line_forms.clear();
-        self.lambda_lists.clear();
         let before = self.heap_objects();
         // Finished nested runs' programs are caches: relowering what is used
         // again costs less than tracing, retiring and forwarding every copy.
@@ -1119,6 +1124,10 @@ impl Vm {
                 table.compact_local_bindings();
             }
         }
+        // A dead list's compiled closure goes with it (`weak_round`).
+        let dead: Vec<u64> = self.lambda_lists.keys().copied()
+            .filter(|&list| !self.survives(&obarray_symbols_live, &region_marks, Value(list))).collect();
+        for list in dead { self.lambda_lists.remove(&list); }
         // The dead with side effects go here, on this thread, on either path:
         // markers leave their buffers, and the rest are dropped.
         // Both taken here, by the collection they were planted for.
@@ -1301,6 +1310,14 @@ impl Vm {
         for c in &mut self.caches {
             rewrite(&mut c.target);
         }
+        for (known, _) in self.mode_line_forms.values_mut() { rewrite(known); }
+        // Keyed by the list's bits, which move with it.
+        self.lambda_lists = std::mem::take(&mut self.lambda_lists).into_iter().map(|(list, mut entry)| {
+            let mut list = Value(list);
+            rewrite(&mut list);
+            entry.forward(&rewrite);
+            (list.0, entry)
+        }).collect();
         // Forward each physical native slot once, even when several live
         // cursors retain the same subtree (possibly detached from its table).
         native_nodes.clear();
@@ -1414,6 +1431,9 @@ impl Vm {
         self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
+        // A segment's form is converted from this value while the slot holds
+        // it; the form's own objects are rooted handles.
+        pending.extend(self.mode_line_forms.values().map(|&(known, _)| known).filter(keep));
         self.charsets.trace(&mut pending);
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches

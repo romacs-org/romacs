@@ -5,10 +5,11 @@
 //! come from its own `visit_values', the visitor a moving collection rewrites
 //! through, which moving stress proves apart from either marker.
 //!
-//! It does not follow a weak table's entries, the finalizers a collection
-//! dooms, symbols only their own obarray holds unless reached, nor the symbols
-//! code names: what it reaches is a floor of what must live, and the mark must
-//! have reached all of it. A miss is a reachable entry the sweep would free.
+//! It does not follow a weak table's entries or those of `lambda_lists`
+//! (ephemerons too), the finalizers a collection dooms, symbols only their
+//! own obarray holds unless reached, nor the symbols code names: what it
+//! reaches is a floor of what must live, and the mark must have reached all
+//! of it. A miss is a reachable entry the sweep would free.
 //!
 //! What it cannot see: an omission in what it shares with the marker, each
 //! kind's `visit_values' and the accessors of root sources
@@ -78,6 +79,7 @@ impl Vm {
         self.forwarded.visit_values(&mut |v| values.push(*v));
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
+        values.extend(self.mode_line_forms.values().map(|&(known, _)| known));
         self.charsets.trace(&mut values);
         for &(slot, old, buffer, _) in &self.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);

@@ -74,3 +74,45 @@ fn a_band_shows_control_characters_as_gnu_display_does() {
     assert_eq!(runs, vec![(0..2, 'x'), (2..3, 'y'), (3..5, 'z')]);
     assert_eq!(stretches, vec![romacs_layout_input::Stretch { byte: 2, width: align }]);
 }
+
+/// The value of `romacs-mode-line-format`.
+fn segment(vm: &mut Vm) -> Value {
+    let slot = vm.slot("romacs-mode-line-format");
+    vm.slots[slot].value
+}
+
+/// A segment's form survives a collection, in place or moving: the cached
+/// form comes back, and its key follows the moved value.
+#[test]
+fn a_mode_line_form_survives_collections() {
+    let mut vm = Vm::new();
+    vm.eval_source(
+        "(progn (defvar romacs-mode-line-format nil)
+                (let ((garbage (make-list 2000 (copy-sequence \"g\"))))
+                  (setq romacs-mode-line-format (list \"a\" (propertize \"b\" 'face 'bold) (length garbage)))))",
+    )
+    .unwrap();
+    // The form's propertized string: a rooted handle, the same one while
+    // the form is the cached one.
+    let handle = |vm: &mut Vm| {
+        let value = segment(vm);
+        match vm.band_format_form(value) {
+            Form::List(items) => match &items[1] {
+                Form::Object(object) => object.0.clone(),
+                other => panic!("a propertized string is an object: {other:?}"),
+            },
+            other => panic!("a list segment is a list: {other:?}"),
+        }
+    };
+    let first = handle(&mut vm);
+    let slot = vm.slot("romacs-mode-line-format");
+    vm.collect_garbage();
+    assert!(std::sync::Arc::ptr_eq(&first, &handle(&mut vm)), "an in-place collection keeps the form");
+    let before = segment(&mut vm);
+    vm.set_gc_moving(true);
+    vm.collect_garbage();
+    let after = segment(&mut vm);
+    assert_ne!(after, before, "the fixture must move the segment");
+    assert_eq!(vm.mode_line_forms.get(&slot).map(|(known, _)| *known), Some(after), "the key moved with it");
+    assert!(std::sync::Arc::ptr_eq(&first, &handle(&mut vm)), "a moving collection keeps the form");
+}
