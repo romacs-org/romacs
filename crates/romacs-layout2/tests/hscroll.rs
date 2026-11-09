@@ -24,7 +24,7 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
         text: TextSlice { extends: vec![], utf8: text.into(), face_runs: vec![], raw: vec![] },
         mode_line: None, mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
         vscroll_px: 0, hscroll: Hscroll { rows: px(hscroll), point_row: px(point_row) }, tab_width: 8, wrap: LineWrap::Truncate,
-        cursor_off: false, no_cursor: false, stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, faces: vec![face()],
+        cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, faces: vec![face()],
         chrome: if fringes { WindowChrome { left_fringe: 8, right_fringe: 8, indicators, ..WindowChrome::default() } } else { WindowChrome::default() },
     }
 }

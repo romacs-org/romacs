@@ -429,7 +429,6 @@ impl<'a> Encoder<'a> {
             }
             Op::Define(s, r) => { out.byte(12); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
             Op::DefineMacro(s, r) => { out.byte(13); let s = self.local_symbol(s, deps)?; n(out, &[s, r]) }
-            Op::DeclareSpecial(s) => { out.byte(14); let s = self.local_symbol(s, deps)?; n(out, &[s]) }
             Op::Call(d, x, start, k) => { out.byte(15); n(out, &[d, x, start, k]) }
             Op::Direct(d, s, cache, start, k) => {
                 out.byte(16);
@@ -710,7 +709,6 @@ impl Vm {
                 11 => { let d = v()?; let c = child(v()?)?; Op::Closure(d, c, v()?) }
                 12 => { let s = symbol(v()?)?; Op::Define(s, v()?) }
                 13 => { let s = symbol(v()?)?; Op::DefineMacro(s, v()?) }
-                14 => Op::DeclareSpecial(symbol(v()?)?),
                 15 => Op::Call(v()?, v()?, v()?, v()?),
                 16 => {
                     let d = v()?;
@@ -825,7 +823,6 @@ fn validate_body(f: &Function, captures: impl Fn(usize) -> Option<usize>, slots:
             Op::Unbind(n) | Op::PopHandlers(n) => n <= f.code.len(),
             Op::Protect(d, cleanup, end) => r(d) && jump(cleanup) && jump(end),
             Op::ResumeExit => true,
-            Op::DeclareSpecial(x) => s(x),
             Op::Jump(t) => jump(t),
             Op::Unless(d, t) => r(d) && jump(t),
             Op::Catch(d, x, t) => r(d) && r(x) && jump(t),

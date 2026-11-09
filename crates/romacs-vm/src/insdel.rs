@@ -446,9 +446,9 @@ impl Vm {
     /// deactivate-mark set by a change whose hooks were not inhibited.
     pub(crate) fn mark_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
-        // Already t with no buffer-local binding: nothing changes.
-        if self.slots[deactivate].value == Value::TRUE && self.slots[deactivate].local == Value::NIL
-            && self.trapped.is_empty() && self.indirect_variable(deactivate) == deactivate {
+        // This buffer's own binding is t already: only a watcher could tell.
+        let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
+        if local != deactivate && self.slots[local].value == Value::TRUE && !self.variable_trapped(deactivate) {
             return Ok(());
         }
         self.set_variable_value(deactivate, Value::TRUE).map_err(Fault::Error)

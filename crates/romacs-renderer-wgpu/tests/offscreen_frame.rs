@@ -56,7 +56,7 @@ struct Harness {
 }
 
 fn try_harness() -> Option<Harness> {
-    let renderer = WgpuRenderer::new(None, W, H).ok()?;
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok()?;
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());
@@ -1641,57 +1641,89 @@ fn popup_redraw_preserves_unchanged_main_frame_pixels() {
 // Stage 4 reuse invariant: a retained static scene built once is reused
 // across cursor color changes. The static region stays bit-identical while
 // only the cursor color updates — the actual cursor-cycling win.
-#[test]
-fn retained_static_reused_across_cursor_colors() {
-    let Some(mut h) = try_harness() else {
-        return;
-    };
+/// The retained (cursorless) static scene of a bar-cursor frame, rendered
+/// ONCE, then composited through the cursor-only path with a red and then a
+/// blue cursor, as the compositor reuses it across cursor-only frames.
+/// Returns (the static scene alone, the red composite, the blue composite).
+fn composite_cursor_colors(h: &mut Harness) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     // The default config cycles cursor color from time; disable it so the
     // frame's explicit cursor colors drive the pixels for this test.
     h.renderer.effects.cursor_color_cycle.enabled = false;
     let frame_a = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0)); // red cursor
     let frame_b = frame_with_cursor(Color::rgb(0.0, 0.4, 1.0)); // blue cursor
 
-    // Build the retained (cursorless) static scene ONCE.
     let (_ts, vs) = make_tex(&h.renderer, "static");
-    h.renderer.render_frame_glyphs(
-        &vs,
-        &frame_a,
-        &mut h.atlas,
-        mapping_for(&frame_a, W, H),
-        false,
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
+    h.renderer.render_frame_glyphs(&vs, &frame_a, &mut h.atlas, mapping_for(&frame_a, W, H), false, None, None, None, None, None);
     let bg = h.renderer.create_texture_bind_group(&vs);
 
-    // Composite the SAME retained scene with the red then blue cursor.
-    let (tr, vr) = make_tex(&h.renderer, "comp-red");
-    h.renderer
-        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-            &vr,
-            mapping_for(&frame_a, W, H).surface(),
-        ))
-        .blit_retained(&bg);
-    h.renderer
-        .render_cursor_only(&vr, &frame_a, mapping_for(&frame_a, W, H), true, None, None);
-    let red = read_tex(&h.renderer, &tr);
+    let composite = |h: &mut Harness, frame: Option<&FrameGlyphBuffer>, label: &str| {
+        let (texture, view) = make_tex(&h.renderer, label);
+        h.renderer
+            .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(&view, mapping_for(&frame_a, W, H).surface()))
+            .blit_retained(&bg);
+        if let Some(frame) = frame {
+            h.renderer.render_cursor_only(&view, frame, mapping_for(frame, W, H), true, None, None);
+        }
+        read_tex(&h.renderer, &texture)
+    };
+    let alone = composite(h, None, "static-alone");
+    let red = composite(h, Some(&frame_a), "comp-red");
+    let blue = composite(h, Some(&frame_b), "comp-blue");
+    (alone, red, blue)
+}
 
-    let (tb, vb) = make_tex(&h.renderer, "comp-blue");
-    h.renderer
-        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
-            &vb,
-            mapping_for(&frame_b, W, H).surface(),
-        ))
-        .blit_retained(&bg);
-    h.renderer
-        .render_cursor_only(&vb, &frame_b, mapping_for(&frame_b, W, H), true, None, None);
-    let blue = read_tex(&h.renderer, &tb);
+/// Whether the cursor slot (x 8..12, y 8..31) shows red in RED and blue in BLUE.
+fn cursor_slot_changed(red: &[u8], blue: &[u8]) -> bool {
+    (8..31).any(|y| {
+        (8..12).any(|x| {
+            let (r, b) = (pxb(red, x, y), pxb(blue, x, y));
+            r[0] > b[0] + 40 && b[2] > r[2] + 40
+        })
+    })
+}
 
-    // Outside the cursor slot (x>=16), the two composites are bit-identical.
+/// The retained static scene is reused across cursor-only frames: rendered
+/// once, it composites with either cursor color, and only the cursor
+/// layer's footprint differs.  Under the default `soft' look the cursor
+/// lights a glow around itself, so the footprint is the cursor's slot grown
+/// by `cursor_light_outset': outside it the composites are bit-identical,
+/// and identical to the static scene alone (the glow stays inside it).
+#[test]
+fn retained_static_reused_across_cursor_colors() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let outset = romacs_renderer_wgpu::renderer::cursor_light_outset(&h.renderer.cursor_look);
+    assert!(outset > 0.0, "the soft look lights beyond the slot");
+    let (alone, red, blue) = composite_cursor_colors(&mut h);
+    let (x0, x1) = ((8.0 - outset).floor() as u32, (12.0 + outset).ceil() as u32);
+    let (y0, y1) = ((8.0 - outset).floor().max(0.0) as u32, (32.0 + outset).ceil() as u32);
+    let outside = |x: u32, y: u32| x < x0 || x >= x1 || y < y0 || y >= y1;
+    let (mut static_diffs, mut stray) = (0, 0);
+    for y in 0..H {
+        for x in 0..W {
+            if outside(x, y) {
+                static_diffs += usize::from(pxb(&red, x, y) != pxb(&blue, x, y));
+                stray += usize::from(pxb(&red, x, y) != pxb(&alone, x, y));
+            }
+        }
+    }
+    assert_eq!(static_diffs, 0, "static scene must be identical across cursor colors outside the cursor's footprint");
+    assert_eq!(stray, 0, "the cursor layer draws nothing beyond its footprint");
+    assert!(cursor_slot_changed(&red, &blue), "cursor color must change between composites");
+}
+
+/// Under the `plain' look (GNU's cursor) the cursor layer is the slot and
+/// nothing else: the composites stay pixel-exact outside it, as before any
+/// look existed.
+#[test]
+fn retained_static_reused_across_cursor_colors_plain() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    h.renderer.cursor_look.style = romacs_display_protocol::CursorLookStyle::Plain;
+    assert_eq!(romacs_renderer_wgpu::renderer::cursor_light_outset(&h.renderer.cursor_look), 0.0);
+    let (_alone, red, blue) = composite_cursor_colors(&mut h);
     let mut static_diffs = 0;
     for y in 0..H {
         for x in 16..W {
@@ -1700,26 +1732,8 @@ fn retained_static_reused_across_cursor_colors() {
             }
         }
     }
-    assert_eq!(
-        static_diffs, 0,
-        "static scene must be identical across cursor colors"
-    );
-
-    // The cursor slot itself differs (red vs blue).
-    let mut cursor_changed = false;
-    for y in 8..31 {
-        for x in 8..12 {
-            let r = pxb(&red, x, y);
-            let b = pxb(&blue, x, y);
-            if r[0] > b[0] + 40 && b[2] > r[2] + 40 {
-                cursor_changed = true;
-            }
-        }
-    }
-    assert!(
-        cursor_changed,
-        "cursor color must change between composites"
-    );
+    assert_eq!(static_diffs, 0, "static scene must be identical across cursor colors");
+    assert!(cursor_slot_changed(&red, &blue), "cursor color must change between composites");
 }
 
 // Filled-box cursor over a glyph: the composite (static cursorless scene +
@@ -2102,20 +2116,31 @@ fn read_image_texture(
     out
 }
 
-/// Load `data` through the renderer and drain image events the way the frame
-/// loop does. Stops, leaving the decode running, the first time `watch` is
-/// satisfied — which is how a test asks for a frame drawn at one particular
-/// point of the fill rather than after it — and otherwise runs to the end.
-///
-/// Returns every fill observed while rows were still arriving, in order; an
-/// empty list says the decode was never caught mid-flight.
-fn drive_banded_load(
+/// A decode held at a band (`BandHold`), let go when this is dropped, so a
+/// failing assertion cannot leave a decoder waiting forever.
+struct Held(std::sync::Arc<romacs_renderer_wgpu::image_cache::BandHold>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+/// Load `data` through the renderer with its decode held at the first band
+/// that reaches `hold` of the image's rows, and drain image events the way
+/// the frame loop does until that band has landed. Returns the fill there,
+/// with the decode waiting on the returned [`Held`]: the test acts at that
+/// point of the fill however the decoder and this thread are scheduled,
+/// rather than racing a decoder that may finish before it looks.
+fn load_held(
     h: &mut Harness,
     image: u32,
     data: &[u8],
     realization: ImageRealization,
-    watch: impl Fn(FilledRows) -> bool,
-) -> Vec<FilledRows> {
+    hold: f32,
+) -> (FilledRows, Held) {
+    let held = Held(std::sync::Arc::clone(h.renderer.image_cache().band_hold()));
+    held.0.hold(ImageId::new(image), hold);
     h.renderer.load_image_data_with_id(
         test_image_load(image),
         EncodedBytes::copy_of(data),
@@ -2132,25 +2157,27 @@ fn drive_banded_load(
     );
     let image_id = ImageId::new(image);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    let mut partial = Vec::new();
     while std::time::Instant::now() < deadline {
         h.renderer.process_pending_images();
         if let Some(cached) = h.renderer.image_cache().get(image_id)
-            && !cached.filled.is_complete()
-            && partial.last() != Some(&cached.filled)
+            && cached.filled.filled_fraction() >= hold
         {
-            partial.push(cached.filled);
-            if watch(cached.filled) {
-                return partial;
-            }
-        }
-        if h.renderer.is_image_ready(image_id) {
-            break;
+            return (cached.filled, held);
         }
         std::thread::yield_now();
     }
+    panic!("the held band of image {image} never landed");
+}
+
+/// Drain image events until `image` has decoded.
+fn drain_until_ready(h: &mut Harness, image: u32) {
+    let image_id = ImageId::new(image);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline && !h.renderer.is_image_ready(image_id) {
+        h.renderer.process_pending_images();
+        std::thread::yield_now();
+    }
     assert!(h.renderer.is_image_ready(image_id), "the image must decode");
-    partial
 }
 
 /// `sin(pi * t) / (pi * t)`, with the removable singularity at zero taken.
@@ -2372,17 +2399,14 @@ fn a_banded_image_ends_in_the_texture_its_own_filter_defines() {
     // one, and the clamping is part of what this pins.
     let (width, height) = (5000u32, 1000u32);
     let data = banding_png(width, height);
-    let fills = drive_banded_load(
-        &mut h,
-        907,
-        &data,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        |_| false,
-    );
+    // Held at its first band, so the image is caught arriving in bands.
+    let (first, held) = load_held(&mut h, 907, &data, ImageRealization::with_device_scale(1.0, 1.0), 0.0);
     assert!(
-        !fills.is_empty(),
-        "a five-megapixel PNG is still arriving when the first frame is drained"
+        !first.is_complete(),
+        "a five-megapixel PNG arrives in bands, not in one"
     );
+    drop(held);
+    drain_until_ready(&mut h, 907);
 
     let cached = h
         .renderer
@@ -2464,19 +2488,15 @@ fn a_frame_drawn_mid_decode_shows_only_the_rows_that_have_arrived() {
 
     let (width, height) = (5000u32, 1000u32);
     let data = banding_png(width, height);
-    // Stopped somewhere in the middle of the decode, so the boundary between
+    // Held in the middle of the decode, so the boundary between
     // drawn and undrawn rows lands inside the target: one row of it drawn, or
     // all but one, would not exercise the boundary at all.
-    let fills = drive_banded_load(
-        &mut h,
-        908,
-        &data,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        |filled| (0.2..0.8).contains(&filled.filled_fraction()),
+    let (filled, _held) = load_held(&mut h, 908, &data, ImageRealization::with_device_scale(1.0, 1.0), 0.2);
+    assert!(
+        (0.2..0.8).contains(&filled.filled_fraction()),
+        "the decode must be held part-way through, got {}",
+        filled.filled_fraction()
     );
-    let filled = *fills
-        .last()
-        .expect("the decode must be caught part-way through");
     let image_id = ImageId::new(908);
 
     let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
@@ -2556,30 +2576,15 @@ fn a_failed_banded_decode_leaves_no_partial_texture() {
     let (width, height) = (5000u32, 1000u32);
     let full = banding_png(width, height);
     let data = &full[..full.len() * 2 / 5];
-    h.renderer.load_image_data_with_id(
-        test_image_load(909),
-        EncodedBytes::copy_of(data),
-        ImageSizeSpec::default(),
-        ImageRotation::None,
-        ImageRealization::with_device_scale(1.0, 1.0),
-        ImageColorContext::default(),
-        ImageMaskPolicy::Preserve,
-        romacs_display_protocol::ImageAnimationPolicy::disabled(),
-        ImageFrameIndex::default(),
-        ImageSequenceId::new(909).expect("non-zero test sequence"),
-        romacs_renderer_wgpu::SvgResourceContext::Isolated,
-        romacs_display_protocol::image_diagnostic::ImageLoadIdentity::unspecified(),
-    );
+    // Held at its first band: the band is in the texture before the decode
+    // can go on to fail.
+    let (first, held) = load_held(&mut h, 909, data, ImageRealization::with_device_scale(1.0, 1.0), 0.0);
+    let saw_band = !first.is_complete();
+    drop(held);
     let image_id = ImageId::new(909);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    let mut saw_band = false;
     while std::time::Instant::now() < deadline {
         h.renderer.process_pending_images();
-        saw_band |= h
-            .renderer
-            .image_cache()
-            .get(image_id)
-            .is_some_and(|cached| !cached.filled.is_complete());
         if matches!(
             h.renderer.image_cache().get_state(image_id),
             Some(romacs_renderer_wgpu::ImageState::Failed(_))

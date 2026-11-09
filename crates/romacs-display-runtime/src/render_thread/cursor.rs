@@ -14,11 +14,27 @@ pub(super) struct CursorTarget {
     pub(super) window_id: i64,
     pub(super) x: f32,
     pub(super) y: f32,
+    /// The width the cursor shows at (`CursorTarget::new`): a bar's
+    /// thickness, else its cell's, so a change of kind is a change of width
+    /// the size transition morphs.
     pub(super) width: f32,
+    /// The width of the cell it stands on, the glide's measure of distance.
+    pub(super) cell: f32,
     pub(super) height: f32,
     pub(super) style: CursorStyle,
     /// Which frame owns this cursor (0 = root frame, non-zero = child frame_id)
     pub(super) frame_id: u64,
+}
+
+impl CursorTarget {
+    /// A cursor of STYLE on the cell at X, Y, CELL by HEIGHT.
+    pub(super) fn new(window_id: i64, (x, y, cell, height): (f32, f32, f32, f32), style: CursorStyle, frame_id: u64) -> Self {
+        let width = match style {
+            CursorStyle::Bar(thickness) => thickness.min(cell),
+            _ => cell,
+        };
+        Self { window_id, x, y, width, cell, height, style, frame_id }
+    }
 }
 
 /// Per-corner spring state for the 4-corner cursor trail animation.
@@ -90,6 +106,13 @@ pub(super) struct CursorState {
     pub(super) size_target_w: f32,
     pub(super) size_target_h: f32,
     pub(super) size_anim_start: romacs_display_protocol::frame_time::EventTime,
+
+    // The frame's focus as its cursor shows it (`romacs-cursor-look'): 1
+    // focused, 0 not, eased between over the size transition's time.
+    pub(super) light: f32,
+    light_from: f32,
+    focused: bool,
+    focus_since: romacs_display_protocol::frame_time::EventTime,
 }
 
 impl CursorState {
@@ -129,16 +152,26 @@ impl CursorState {
             }; 4],
             trail_size: visual.cursor_motion.trail_size,
             distance_length_adjust: visual.cursor_motion.distance_length_adjust,
-            size_transition_enabled: visual.cursor_size_transition.enabled,
-            size_transition_duration: visual.cursor_size_transition.duration.as_secs_f32(),
+            size_transition_enabled: look_morphs(&visual.cursor_look),
+            size_transition_duration: visual.cursor_look.morph.as_secs_f32(),
             size_animating: false,
             size_start_w: 0.0,
             size_start_h: 0.0,
             size_target_w: 0.0,
             size_target_h: 0.0,
             size_anim_start: at,
+            light: 1.0,
+            light_from: 1.0,
+            focused: true,
+            focus_since: at,
         }
     }
+}
+
+/// Whether LOOK morphs the cursor between kinds and sizes: any look but
+/// `plain' (GNU's, which changes at once), in its `morph' time.
+fn look_morphs(look: &romacs_display_protocol::CursorLookConfig) -> bool {
+    look.style != romacs_display_protocol::CursorLookStyle::Plain && !look.morph.is_zero()
 }
 
 impl CursorState {
@@ -150,8 +183,8 @@ impl CursorState {
         self.short_duration = config.cursor_motion.short_duration.as_secs_f32();
         self.trail_size = config.cursor_motion.trail_size;
         self.distance_length_adjust = config.cursor_motion.distance_length_adjust;
-        self.size_transition_enabled = config.cursor_size_transition.enabled;
-        self.size_transition_duration = config.cursor_size_transition.duration.as_secs_f32();
+        self.size_transition_enabled = look_morphs(&config.cursor_look);
+        self.size_transition_duration = config.cursor_look.morph.as_secs_f32();
         self.settle_disabled();
     }
 
@@ -213,23 +246,30 @@ impl CursorState {
                 || (old.width - new_target.width).abs() > 0.5
                 || (old.height - new_target.height).abs() > 0.5
         });
+        // One owner for each change of shape.  A cursor that moves (or is
+        // already gliding) glides, the glide carrying its change of kind or
+        // size with it; one that changes shape where it stands morphs, the
+        // size transition alone easing its width and height.  Both writing
+        // them would pull the width between the two.
+        let stays = self.target.as_ref().is_some_and(|old| {
+            same_window && (old.x - new_target.x).abs() <= 0.5 && (old.y - new_target.y).abs() <= 0.5
+        });
+        let glides = had_target && self.anim_enabled && target_moved && (!stays || self.animating);
+        let morphs = self.size_transition_enabled
+            && had_target
+            && !glides
+            && ((new_target.width - self.size_target_w).abs() > 2.0
+                || (new_target.height - self.size_target_h).abs() > 2.0);
 
-        if !had_target || !self.anim_enabled {
-            self.current_x = new_target.x;
-            self.current_y = new_target.y;
-            self.current_w = new_target.width;
-            self.current_h = new_target.height;
-            self.animating = false;
-            let corners = Self::target_corners(&new_target);
-            for (spring, (x, y)) in self.corner_springs.iter_mut().zip(corners) {
-                spring.x = x;
-                spring.y = y;
-                spring.vx = 0.0;
-                spring.vy = 0.0;
-                spring.target_x = x;
-                spring.target_y = y;
+        if glides {
+            if self.size_animating {
+                // A morph cut short by a move: the glide starts from the
+                // shape shown, not from where the morph was going.
+                let (x, y, w, h) = (self.current_x, self.current_y, self.current_w, self.current_h);
+                for (spring, (cx, cy)) in self.corner_springs.iter_mut().zip([(x, y), (x + w, y), (x + w, y + h), (x, y + h)]) {
+                    (spring.x, spring.y, spring.vx, spring.vy) = (cx, cy, 0.0, 0.0);
+                }
             }
-        } else if target_moved {
             self.animating = true;
             self.last_anim_time = at;
             self.start_x = self.current_x;
@@ -244,20 +284,33 @@ impl CursorState {
             ) {
                 self.aim_corners(&new_target, same_window);
             }
-        }
-
-        if self.size_transition_enabled {
-            let dw = (new_target.width - self.size_target_w).abs();
-            let dh = (new_target.height - self.size_target_h).abs();
-            if dw > 2.0 || dh > 2.0 {
+            self.size_animating = false;
+        } else if !had_target || target_moved || !self.anim_enabled {
+            // The same target again leaves a glide in flight alone.
+            if morphs {
                 self.size_animating = true;
                 self.size_start_w = self.current_w;
                 self.size_start_h = self.current_h;
                 self.size_anim_start = at;
+            } else if !self.size_animating {
+                self.current_w = new_target.width;
+                self.current_h = new_target.height;
             }
-            self.size_target_w = new_target.width;
-            self.size_target_h = new_target.height;
+            self.current_x = new_target.x;
+            self.current_y = new_target.y;
+            self.animating = false;
+            let corners = Self::target_corners(&new_target);
+            for (spring, (x, y)) in self.corner_springs.iter_mut().zip(corners) {
+                spring.x = x;
+                spring.y = y;
+                spring.vx = 0.0;
+                spring.vy = 0.0;
+                spring.target_x = x;
+                spring.target_y = y;
+            }
         }
+        self.size_target_w = new_target.width;
+        self.size_target_h = new_target.height;
 
         self.target = Some(new_target);
         (had_target, target_moved)
@@ -265,7 +318,8 @@ impl CursorState {
 
     pub(super) fn animated_cursor(&self) -> Option<AnimatedCursor> {
         let target = self.target.as_ref()?;
-        if !self.anim_enabled {
+        // A morph shows through the animated rect even with the glide off.
+        if !self.anim_enabled && !self.size_animating {
             return None;
         }
         let corners = if matches!(
@@ -304,7 +358,49 @@ impl CursorState {
     }
 
     pub(super) fn is_animating(&self) -> bool {
-        self.animating || self.size_animating
+        self.animating || self.size_animating || self.light_fading()
+    }
+
+    /// Whether the focus light is between lit and unlit.
+    pub(super) fn light_fading(&self) -> bool {
+        self.light != self.light_target()
+    }
+
+    fn light_target(&self) -> f32 {
+        if self.focused { 1.0 } else { 0.0 }
+    }
+
+    /// The frame gained or lost focus AT: its cursor's light fades from
+    /// where it is toward lit or unlit.
+    pub(super) fn set_focused(&mut self, focused: bool, at: romacs_display_protocol::frame_time::EventTime) {
+        if focused != self.focused {
+            self.light_from = self.light;
+            self.focused = focused;
+            self.focus_since = at;
+        }
+    }
+
+    /// The window this cursor is drawn in has, or has not, the focus as it
+    /// appears: lit or unlit at once.  A window made without the focus
+    /// never hears that it lost it.
+    pub(super) fn seed_focus(&mut self, focused: bool) {
+        self.focused = focused;
+        self.light = self.light_target();
+        self.light_from = self.light;
+    }
+
+    /// Advance the focus light to AT; whether it changed (needs redraw).
+    pub(super) fn tick_light(&mut self, at: romacs_display_protocol::frame_time::EventTime) -> bool {
+        let target = self.light_target();
+        let next = if !self.size_transition_enabled || self.size_transition_duration <= 0.0 {
+            target
+        } else {
+            let t = (at.saturating_since(self.focus_since).as_secs_f32() / self.size_transition_duration).min(1.0);
+            self.light_from + (target - self.light_from) * t
+        };
+        let changed = next != self.light;
+        self.light = next;
+        changed
     }
 
     /// Point each corner's spring at NEW's matching corner, with its own
@@ -324,7 +420,7 @@ impl CursorState {
         let corners = Self::target_corners(new);
         let dx = (new.x + new.width / 2.0) - (self.current_x + self.current_w / 2.0);
         let dy = (new.y + new.height / 2.0) - (self.current_y + self.current_h / 2.0);
-        let cells = (dx / new.width.max(1.0), dy / new.height.max(1.0));
+        let cells = (dx / new.cell.max(1.0), dy / new.height.max(1.0));
         let short = neovide && same_window && cells.0.abs() <= 2.0 + f32::EPSILON
             && cells.1.abs() <= 1.0 + f32::EPSILON;
         let durations = if short {

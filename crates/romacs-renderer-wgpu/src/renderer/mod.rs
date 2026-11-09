@@ -25,6 +25,8 @@ mod composition_ring;
 pub use composition_ring::CompositionRing;
 mod content;
 mod cursor_effects;
+mod cursor_look;
+pub use cursor_look::cursor_light_outset;
 mod cursor_presentation;
 mod deform;
 mod draw;
@@ -233,6 +235,11 @@ pub struct WgpuRenderer {
 
     // All visual effect configurations
     pub effects: crate::effect_config::EffectsConfig,
+    /// How cursors are drawn (`romacs-cursor-look-*').
+    pub cursor_look: romacs_display_protocol::CursorLookConfig,
+    /// The frame's focus light for its cursor: 1 focused, 0 not, between
+    /// while it fades; the compositor sets it before each frame.
+    pub cursor_light: f32,
     /// Grouped per-effect animation state (transferred by frame-effects swaps)
     pub(super) fx: EffectsState,
     /// Free-running animation clocks (transferred with preserve-if-unset semantics)
@@ -265,16 +272,22 @@ pub struct WgpuRenderer {
 }
 
 impl WgpuRenderer {
-    /// Create a new WgpuRenderer with its own GPU device.
-    ///
-    /// Returns an error if GPU initialization fails.
-    /// Prefer `with_device()` when you already have a device/queue.
-    pub fn new(
-        surface: Option<wgpu::Surface<'static>>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
-        pollster::block_on(Self::new_async(surface, width, height))
+    /// An offscreen renderer WIDTH by HEIGHT on DEVICE and QUEUE: no surface,
+    /// scale 1. Tests take theirs from `gpu_policy::test_gpu::renderer`.
+    pub fn offscreen(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, width: u32, height: u32) -> Self {
+        Self::create_renderer_internal(
+            device,
+            queue,
+            None,
+            None,
+            width,
+            height,
+            1.0,
+            #[cfg(feature = "video")]
+            romacs_video::GpuGeneration::INITIAL,
+            #[cfg(feature = "video")]
+            romacs_video::VideoWake::noop(),
+        )
     }
 
     /// Create a new WgpuRenderer using an existing device and queue.
@@ -336,7 +349,7 @@ impl WgpuRenderer {
 
     /// Internal helper that creates the renderer with the given device/queue.
     ///
-    /// This handles pipeline and buffer creation, and is used by both `new_async`
+    /// This handles pipeline and buffer creation, and is used by both `offscreen`
     /// and `with_device`.
     ///
     /// The `surface_format` parameter specifies the texture format for render pipelines.
@@ -1192,6 +1205,8 @@ impl WgpuRenderer {
             height,
             scale_factor,
             effects: crate::effect_config::EffectsConfig::default(),
+            cursor_look: romacs_display_protocol::CursorLookConfig::default(),
+            cursor_light: 1.0,
             fx: EffectsState::default(),
             clocks: EffectClocks::default(),
             ambient: AmbientClocks::default(),
@@ -1205,59 +1220,6 @@ impl WgpuRenderer {
         };
         renderer.install_stencil_targets(width, height);
         renderer
-    }
-
-    async fn new_async(
-        surface: Option<wgpu::Surface<'static>>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
-        // Create wgpu instance
-        let instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-        let instance = wgpu::Instance::new(instance_descriptor);
-
-        // Request adapter
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: crate::gpu_power_preference(),
-                compatible_surface: surface.as_ref(),
-                force_fallback_adapter: false,
-                apply_limit_buckets: false,
-            })
-            .await
-            .map_err(|e| format!("Failed to find a suitable GPU adapter: {}", e))?;
-
-        // Request device and queue
-        let (device, queue) = crate::request_renderer_device(&adapter, "Romacs Device").await?;
-
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
-
-        // Configure surface if provided and extract format
-        let surface_format = surface.as_ref().map(|s| {
-            let caps = s.get_capabilities(&adapter);
-            tracing::warn!(adapter = ?adapter.get_info(), surface_caps = ?caps, "renderer standalone surface capabilities");
-            caps.formats
-                .iter()
-                .copied()
-                .find(|f| f.is_srgb())
-                .unwrap_or(caps.formats[0])
-        });
-
-        // Use the internal helper for pipeline/buffer creation (1.0 scale for standalone usage)
-        Ok(Self::create_renderer_internal(
-            device,
-            queue,
-            surface,
-            surface_format,
-            width,
-            height,
-            1.0,
-            #[cfg(feature = "video")]
-            romacs_video::GpuGeneration::INITIAL,
-            #[cfg(feature = "video")]
-            romacs_video::VideoWake::noop(),
-        ))
     }
 
     /// Allocate the stencil clip target at `width`x`height` and charge it.

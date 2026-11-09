@@ -478,10 +478,7 @@ impl Vm {
         let Form::List(items) = form else {
             return Ok(None);
         };
-        let Some(Form::Sym(name)) = items.first() else {
-            return Ok(None);
-        };
-        let Some(&head) = self.names.get(name) else {
+        let Some(head) = items.first().and_then(|head| self.head_slot(head)) else {
             return Ok(None);
         };
         // GNU Fmacroexpand (eval.c:1290-1305) follows symbol aliases to the

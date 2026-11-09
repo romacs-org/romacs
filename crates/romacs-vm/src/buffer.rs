@@ -76,7 +76,8 @@ mod model_tests {
     fn killing_a_buffer_visits_its_own_state() {
         let small = kill_work(10);
         assert_eq!(small, kill_work(2000));
-        assert!(small.0 <= 1 && small.1 <= 3, "{small:?}");
+        // Its own local, and the `deactivate-mark' its edits made local.
+        assert!(small.0 <= 2 && small.1 <= 3, "{small:?}");
     }
 
     /// A collection that moves objects drops both indices; they are listed
@@ -1036,9 +1037,7 @@ impl Vm {
         if p == BufferString {
             let o = match &self.objects[index] {
                 Object::Buffer(t) => data::string_object(t.lisp_string(t.accessible())?),
-                Object::ByteBuffer(b) => {
-                    data::unibyte_object(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
-                }
+                Object::ByteBuffer(b) => b.text_object(b.restriction.clone()),
                 _ => unreachable!(),
             };
             return Ok(self.allocate_object(o));

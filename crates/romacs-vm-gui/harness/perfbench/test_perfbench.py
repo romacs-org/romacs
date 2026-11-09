@@ -332,7 +332,7 @@ class Lead(unittest.TestCase):
     def test_every_name_in_the_template_is_filled_and_none_is_left(self):
         text = readme.lead_section(lead_results())
         self.assertNotIn('{{', text)
-        for part in ('3 s', '19 s', '183,574', '5 ms', '650 ms', '770 ms', '16 MB', '50 ms', '60 ms'):
+        for part in ('3 s', '19 s', '183,574', '770 ms', '16 MB', '50 ms', '60 ms'):
             self.assertIn(part, text)
 
     def test_the_template_keeps_the_names_of_the_draft(self):
@@ -457,7 +457,8 @@ class Markdown(unittest.TestCase):
 
     def test_the_lead_keeps_the_hero_clip_under_its_title(self):
         lines = [line for line in readme.LEAD.read_text().splitlines() if line]
-        self.assertEqual(lines[:2], ['# Romacs', '<!-- hero-clip -->'])
+        self.assertEqual(lines[0], '# Romacs')
+        self.assertIn('romacs.webp', lines[1])
 
 
 class Ratio(unittest.TestCase):

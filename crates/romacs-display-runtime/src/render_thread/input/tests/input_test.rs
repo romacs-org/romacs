@@ -142,22 +142,11 @@ fn stale_root_presentation_does_not_own_newly_exposed_surface_area() {
 }
 
 fn make_test_device() -> Option<wgpu::Device> {
-    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    instance_descriptor.backends = wgpu::Backends::all();
-    let instance = wgpu::Instance::new(instance_descriptor);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-        apply_limit_buckets: false,
-    }))
-    .ok()?;
-    let (device, _queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    romacs_renderer_wgpu::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("input test device"),
         ..Default::default()
-    }))
-    .ok()?;
-    Some(device)
+    })
+    .map(|(device, _queue)| device)
 }
 
 fn test_present_mapping(
@@ -461,7 +450,7 @@ struct PresentedPointerRuntimeRenderHarness {
 fn presented_pointer_runtime_render_harness() -> Option<PresentedPointerRuntimeRenderHarness> {
     const WIDTH: u32 = 140;
     const HEIGHT: u32 = 24;
-    let renderer = romacs_renderer_wgpu::WgpuRenderer::new(None, WIDTH, HEIGHT).ok()?;
+    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(WIDTH, HEIGHT).ok()?;
     let mut atlas = romacs_renderer_wgpu::WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());
@@ -1594,15 +1583,7 @@ fn nested_child_ime_cursor_area_uses_presented_root_relative_placement() {
     set_test_frame_placement(&mut nested, 0x51, 0x50, 15.0, 12.0, 2);
     assert!(render.update_child_frame(nested));
 
-    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget {
-        window_id: 9,
-        x: 7.0,
-        y: 9.0,
-        width: 8.0,
-        height: 16.0,
-        style: crate::core::frame_glyphs::CursorStyle::FilledBox,
-        frame_id: 0x51,
-    });
+    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget::new(9, (7.0, 9.0, 8.0, 16.0), crate::core::frame_glyphs::CursorStyle::FilledBox, 0x51));
 
     assert_eq!(
         area,

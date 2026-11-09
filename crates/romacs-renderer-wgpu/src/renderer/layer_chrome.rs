@@ -23,6 +23,7 @@ impl WgpuRenderer {
         // For filled box cursor (style 0), we draw the cursor background BEFORE text
         // so the character under the cursor can be re-drawn with inverse colors on top.
         let mut cursor_bg_vertices: Vec<RectVertex> = Vec::new();
+        let mut cursor_glow_vertices = Vec::new();
 
         // === Collect behind-text cursor shapes (animated trail for filled box) ===
         let mut behind_text_cursor_vertices: Vec<RectVertex> = Vec::new();
@@ -159,8 +160,10 @@ impl WgpuRenderer {
                 &cursor_effects,
                 cursor_visible,
                 animated_cursor,
+                cursor.active,
                 &mut cursor_bg_vertices,
                 &mut behind_text_cursor_vertices,
+                &mut cursor_glow_vertices,
                 &mut cursor_vertices,
             );
         }
@@ -168,6 +171,7 @@ impl WgpuRenderer {
         ChromeLayerVertices {
             cursor_bg: cursor_bg_vertices,
             behind_text_cursor: behind_text_cursor_vertices,
+            cursor_glow: cursor_glow_vertices,
             cursors: cursor_vertices,
         }
     }
@@ -189,6 +193,22 @@ impl WgpuRenderer {
         self.draw_rect_vertex_layer(render_pass, behind_text_cursor_vertices);
     }
 
+    /// The light around lit cursors, drawn with the cursors, after text: the
+    /// cursor-only fast path draws over a retained cursorless scene, so light
+    /// drawn anywhere else would sit behind text in one frame and over it in
+    /// the next.
+    pub(super) fn draw_cursor_glow(
+        &mut self,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &wgpu::RenderPipeline,
+        glow: &[crate::vertex::RoundedRectVertex],
+    ) {
+        let Some(upload) = self.arenas.rounded.upload(&self.device, &self.queue, glow) else { return };
+        render_pass.set_pipeline(pipeline);
+        render_pass.set_vertex_buffer(0, upload.buffer_slice());
+        render_pass.draw(0..glow.len() as u32, 0..1);
+    }
+
     /// Draw front cursors and window borders (after text).
     pub(super) fn draw_cursor_layer(
         &mut self,
@@ -196,6 +216,8 @@ impl WgpuRenderer {
         chrome: &ChromeLayerVertices,
     ) {
         let render_pass = &mut ctx.pass;
+        let rounded = wgpu::RenderPipeline::clone(&self.pipelines.rounded_rect);
+        self.draw_cursor_glow(render_pass, &rounded, &chrome.cursor_glow);
         let cursor_vertices = &chrome.cursors;
         // Draw cursors and borders (after text)
         if let Some(upload) = self

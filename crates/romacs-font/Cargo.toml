@@ -33,7 +33,7 @@ yeslogic-fontconfig-sys.workspace = true
 freetype-rs = { version = "0.38.0" }
 
 [dev-dependencies]
-romacs-renderer-wgpu.workspace = true
+romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-test-fonts.workspace = true
 wgpu.workspace = true
 

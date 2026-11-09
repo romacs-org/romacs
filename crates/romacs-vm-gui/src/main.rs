@@ -498,7 +498,7 @@ pub(crate) fn frames_alike(a: &romacs_layout_input::FrameSnapshot, b: &romacs_la
 }
 
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
-    a.lays_out_like(b) && a.cursor_off == b.cursor_off && a.no_cursor == b.no_cursor
+    a.lays_out_like(b) && a.cursor_off == b.cursor_off
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
@@ -615,11 +615,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
-    // Before any font resolver is built (DIVERGENCES.md VM2-MODE-LINE).
-    fonts::register_icon_font();
+    // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
+    for refused in fonts::register_bundled_fonts() {
+        eprintln!("romacs: Fontconfig refused the bundled font {}", refused.display());
+    }
     let mut args = argv.into_iter();
     let mut serve = None;
     let mut serve_frame = false;
+    let mut serve_landing = false;
     let mut socket = None;
     let mut floor = None;
     let mut force_gc = false;
@@ -651,6 +654,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
             // The client that starts a server and asks for its window: the
             // window comes up while the world restores, as a session's does.
             "--serve-frame" => serve_frame = true,
+            // Its client has nothing to visit: the first paint is the landing.
+            "--serve-landing" => serve_landing = true,
             // A layer builder's: the init, the plan digest and the entries left out (world.rs).
             "--init-layer" => {
                 let mut word = || args.next().ok_or("--init-layer needs INIT DIGEST EXCLUDED");
@@ -853,7 +858,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, quit, prune, serve, early_window)
+                     isolate_world, worlds, first_presentation, quit, prune, serve, serve_landing, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1176,6 +1181,7 @@ fn evaluate(
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
     serve: Option<String>,
+    serve_landing: bool,
     early_window: Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
@@ -1210,6 +1216,7 @@ fn evaluate(
     // Its window system, which the session opens (fonts.rs).
     let alpha_sender = sender.clone();
     let visual_sender = sender.clone();
+    let lose_sender = sender.clone();
     let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
@@ -1222,7 +1229,8 @@ fn evaluate(
         .with_visual_hook(move |config| {
             // Only a closed render thread refuses, and then nothing paints.
             let _ = visual_sender.set_visual_config(config.clone());
-        }))));
+        })
+        .with_lose_device_hook(move || lose_sender.debug_lose_device().unwrap_or(false)))));
     // A completed background command wakes the same wait as a terminal.
     if live { vm.set_background_wake(terminal_service.waker()); }
     // SIGTERM and SIGHUP end the session through `kill-emacs' (terminate):
@@ -1272,7 +1280,12 @@ fn evaluate(
                 if let Err(error) = user_init::start_saved_settings(&mut vm, &path) {
                     eprintln!("romacs: saved settings: {error}");
                 }
-                // What the init loads is its layer's plan (world.rs).
+                // GNU's step before the init (startup.el:1560): installed
+                // packages activate.
+                if let Err(error) = vm.eval_source("(romacs--activate-packages)") {
+                    eprintln!("romacs: packages: {error}");
+                }
+                                // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
                 // configures, and skip the ones the layer made (rlisp/romacs-loadup-bootstrap.el).
                 if worlds.is_some() {
@@ -1340,6 +1353,11 @@ fn evaluate(
         host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
         vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
             .map_err(|error| format!("server {name}: {error}"))?;
+        // `daemonp' kept startup from showing the screen, and the window
+        // paints before the client that asked for it is served.
+        if serve_landing && let Err(error) = vm.eval_source("(romacs-server--landing)") {
+            eprintln!("romacs: landing: {error}");
+        }
     }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");

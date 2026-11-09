@@ -12,6 +12,10 @@ pub(crate) enum SignalHandler {
     /// around the compilation sees an escape GNU would raise at the form's
     /// reach, inside the form's own handlers.
     Boundary,
+    /// A job's claim (`romacs--isolate-claim'), above its handler's entry:
+    /// signal search passes it by, and the job runs while it stands
+    /// (`Vm::isolate_claim').
+    Job(u64),
 }
 romacs_snapshot::snapshot_enum!(SignalHandler {
     SignalHandler::Condition(f0) => (f0),
@@ -19,6 +23,7 @@ romacs_snapshot::snapshot_enum!(SignalHandler {
     SignalHandler::Bind { conditions, function, group } => (conditions, function, group),
     SignalHandler::Mask(f0) => (f0),
     SignalHandler::Boundary => (),
+    SignalHandler::Job(f0) => (f0),
 });
 
 impl SignalHandler {
@@ -26,7 +31,7 @@ impl SignalHandler {
         match self {
             Self::Condition(value) | Self::Catch(value) => visit(value),
             Self::Bind { conditions, function, .. } => { visit(conditions); visit(function); }
-            Self::Mask(_) | Self::Boundary => {}
+            Self::Mask(_) | Self::Boundary | Self::Job(_) => {}
         }
     }
 }
@@ -191,6 +196,9 @@ fn handler_callback(e: &mut Engine<'_>, function: Value, object: Value, group: u
     e.fatal_image_failure |= e.vm.execution_fatal;
     e.code.resize_with(e.vm.functions.len(), Vec::new);
     let r = e.regs;
+    // SAFETY: `r' is `e.regs': it and every frame's registers point into
+    // `e.vm.stack', whose allocation the nested call set aside unmoved and
+    // gave back (`Vm::suspend_stack'), as `widen_registers' rebases from.
     if unsafe { widen_registers(e, r, e.vm.register_width) }.is_none() {
         e.error = Some("register storage exhausted".into());
         e.fatal_image_failure = true;

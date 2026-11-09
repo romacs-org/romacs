@@ -1095,6 +1095,15 @@ impl RenderApp {
         self.effects = effective.effects.clone();
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.effects = self.effects.clone();
+            renderer.cursor_look = effective.cursor_look.clone();
+        }
+        // Motion turned off ends what runs, not only what starts, however
+        // it was turned off: reduced motion, the user, or the adapter.
+        if effective.child_frame_animations.off {
+            self.frame_windows.finish_top_level_child_frame_animations();
+        }
+        if effective.window_animations.off {
+            self.frame_windows.settle_top_level_pane_layouts();
         }
         self.frame_windows
             .sync_top_level_cursor_config(&self.cursor_defaults, true);

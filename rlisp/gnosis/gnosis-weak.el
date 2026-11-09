@@ -563,7 +563,6 @@ With prefix SUBTREE, include descendant nodes.  Not-due themata are skipped."
 
 (defvar-keymap gnosis-weak-mode-map
   :doc "Keymap for `gnosis-weak-mode'."
-  "C-c C-;" #'gnosis-weak-practice
   "C-c C-=" #'gnosis-weak-review)
 
 ;;;###autoload

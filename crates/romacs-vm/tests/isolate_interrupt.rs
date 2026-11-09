@@ -31,7 +31,7 @@ fn sigusr1_quits_a_tight_loop_and_sigterm_quits_once() {
     signal_self_after("USR1", 100);
     assert_eq!(eval(&mut vm, "(condition-case e (progn (let ((inhibit-quit t) (n 0)) (while (< n 2000000) (setq n (1+ n)))) (while t)) (quit 'interrupted))"), "interrupted");
     // The worker's shape: the loop's condition-case around a running job.
-    vm.eval_source("(defun journey-job () (condition-case err (progn (romacs--isolate-running 1) (while t)) (quit (romacs--isolate-running nil) 'caught-in-job)))").unwrap();
+    vm.eval_source("(defun journey-job () (condition-case err (progn (romacs--isolate-claim 1) (while t)) (quit 'caught-in-job)))").unwrap();
     signal_self_after("USR1", 200);
     assert_eq!(eval(&mut vm, "(let ((n 0) r) (while (< n 1) (setq n (1+ n)) (setq r (journey-job))) r)"), "caught-in-job");
     for (name, body) in [("plain", "(set 'journey-var 1)"), ("env", "(set 'process-environment process-environment)"),
@@ -42,14 +42,14 @@ fn sigusr1_quits_a_tight_loop_and_sigterm_quits_once() {
                          ("env-seed", "(set 'process-environment (thaw (freeze process-environment)))"),
                          ("load-path-seed", "(set 'load-path (thaw (freeze load-path)))")] {
         signal_self_after("USR1", 200);
-        assert_eq!(eval(&mut vm, &format!("(progn (romacs--isolate-running 1) (condition-case e (while t {body}) (quit 'caught)))")), "caught", "{name}");
+        assert_eq!(eval(&mut vm, &format!("(progn (romacs--isolate-claim 1) (condition-case e (while t {body}) (quit 'caught)))")), "caught", "{name}");
     }
     // The real job runner, whose reply fails harmlessly without a parent.
     vm.eval_source("(defun journey-loop () (while t))").unwrap();
     signal_self_after("USR1", 200);
     assert_eq!(eval(&mut vm, "(condition-case e (list 'returned (romacs--isolate-run-job 1 (list 'journey-loop (freeze nil) (freeze nil) nil nil))) (quit 'escaped))"), "(returned nil)");
     signal_self_after("USR1", 200);
-    assert_eq!(eval(&mut vm, "(condition-case e (list 'returned (unwind-protect (condition-case err (progn (romacs--isolate-running 1) (while t)) (quit 'caught)) (romacs--isolate-running nil))) (quit 'escaped))"), "(returned caught)");
+    assert_eq!(eval(&mut vm, "(condition-case e (list 'returned (unwind-protect (condition-case err (progn (romacs--isolate-claim 1) (while t)) (quit 'caught)) nil)) (quit 'escaped))"), "(returned caught)");
     // SIGTERM: one quit, then `romacs--isolate-terminated-p' says so.
     signal_self_after("TERM", 200);
     assert_eq!(eval(&mut vm, "(condition-case e (let ((inhibit-quit t)) (while t)) (quit (list 'terminated (romacs--isolate-terminated-p))))"), "(terminated t)");

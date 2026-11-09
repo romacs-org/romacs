@@ -32,6 +32,7 @@ PROVIDER (a name in `romacs-agent-providers', by default
 the harness, :role, :parent (the delegating session's id) and :request
 (its client request id) for the record.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
+Interactively, open the chat without sending an initial prompt.
 
 (fn CWD &optional PROMPT TITLE PROVIDER OPTIONS KNOWN)" t)
 (defvar romacs-agent-restored-hook nil
@@ -83,6 +84,10 @@ with the session before its harness starts.  Return the session.
 
 ;;; Generated autoloads from romacs-agent-ui.el
 
+(defvar romacs-agents-map (let ((map (make-sparse-keymap))) (define-key map "n" #'romacs-agent-start) (define-key map "s" #'romacs-agent-switch-chat) (define-key map "a" #'romacs-agents) map)
+"Global prefix map for starting and finding agent sessions.
+\\{romacs-agents-map}")
+ (define-key global-map (kbd "C-c C-;") romacs-agents-map)
 (autoload 'romacs-agent-switch "romacs-agent-ui"
 "Switch to agent SESSION, in this window, chosen by what each is doing:
 those that want you first, finished delegated tasks last, each with its
@@ -229,6 +234,11 @@ disabled.
 ;;; Generated autoloads from romacs-completion-defaults.el
 
 (register-definition-prefixes "romacs-completion-defaults" '("romacs-completion-"))
+
+
+;;; Generated autoloads from romacs-cursor.el
+
+(register-definition-prefixes "romacs-cursor" '("romacs-cursor-"))
 
 
 ;;; Generated autoloads from romacs-custom.el
@@ -510,6 +520,11 @@ a value in `ivy-re-builders-alist'.
 
 (fn STR)")
 (register-definition-prefixes "romacs-orderless" '("orderless-"))
+
+
+;;; Generated autoloads from romacs-package.el
+
+(register-definition-prefixes "romacs-package" '("romacs-package--"))
 
 
 ;;; Generated autoloads from romacs-pgtk.el
@@ -904,20 +919,6 @@ abstention, cancellation and retry never accept a scheduled or practice grade.
 (register-definition-prefixes "gnosis-agent-eval" '("gnosis-agent-eval-"))
 
 
-;;; Generated autoloads from gnosis-agent-eval-hermes.el
-
-(autoload 'gnosis-agent-eval-hermes "gnosis-agent-eval-hermes"
-"Evaluate captured REQUEST with Hermes; call RESOLVE or REJECT once.
-REQUEST contains :question, :reference-answer, :rubric and :response strings.
-RESOLVE receives a plist with :verdict (pass, fail or ungradable) and a
-nonempty :explanation.  REJECT receives an evaluation error string.
-Return an idempotent cancellation function; cancellation suppresses callbacks.
-The selected profile is captured before dispatch.  No grade is recorded.
-
-(fn REQUEST RESOLVE REJECT)")
-(register-definition-prefixes "gnosis-agent-eval-hermes" '("gnosis-agent-eval-hermes-"))
-
-
 ;;; Generated autoloads from gnosis-agent-review.el
 
 (autoload 'gnosis-agent-review-bind-provider "gnosis-agent-review"
@@ -988,26 +989,11 @@ another current batch.  The ongoing question remains session-local.
 (register-definition-prefixes "gnosis-agent-review-data" '("gnosis-agent-review--"))
 
 
-;;; Generated autoloads from gnosis-agent-review-hermes.el
-
-(autoload 'gnosis-agent-review-hermes "gnosis-agent-review-hermes"
-"Send contextual REQUEST to Hermes, calling RESOLVE or REJECT at most once.
-Return an idempotent cancellation function.  Replay explicit local transcript
-and context on every request, without requiring a provider conversation handle.
-Use `gnosis-agent-review-hermes-profile', independently of isolated grading.
-The prompt requests no tools; transport does not sandbox profile instructions
-or enforce tool-free execution.  Provider/profile errors never select a
-fallback.
-
-(fn REQUEST RESOLVE REJECT)")
-(register-definition-prefixes "gnosis-agent-review-hermes" '("gnosis-agent-review-hermes-"))
-
-
 ;;; Generated autoloads from gnosis-agent-romacs.el
 
 (autoload 'gnosis-agent-eval-romacs "gnosis-agent-romacs"
 "Evaluate captured REQUEST in a Romacs agent session; RESOLVE or REJECT once.
-As `gnosis-agent-eval-hermes': REQUEST holds :question, :reference-answer,
+REQUEST holds :question, :reference-answer,
 :rubric and :response strings; RESOLVE gets (:verdict pass|fail|ungradable
 :explanation STRING).  Return an idempotent cancellation function.  No
 grade is recorded.
@@ -1015,8 +1001,8 @@ grade is recorded.
 (fn REQUEST RESOLVE REJECT)")
 (autoload 'gnosis-agent-review-romacs "gnosis-agent-romacs"
 "Send contextual REQUEST to a Romacs agent session; RESOLVE or REJECT once.
-As `gnosis-agent-review-hermes': the same tutor protocol and the same
-validation of its answer.  Return an idempotent cancellation function.
+Replay captured transcript, source and rubric, validating the response.
+Return an idempotent cancellation function.  No grade is recorded.
 
 (fn REQUEST RESOLVE REJECT)")
 (register-definition-prefixes "gnosis-agent-romacs" '("gnosis-agent-romacs-"))

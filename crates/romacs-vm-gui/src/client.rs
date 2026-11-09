@@ -137,8 +137,7 @@ fn start(request: &Request) -> Result<(), String> {
         command.arg(setting);
     }
     let mut launch = server_launch(&request.launch);
-    // It will ask for the window: the server makes it while it starts.
-    if wants_frame(request) { launch.push("--serve-frame".into()); }
+    launch.extend(window_options(request).iter().map(|option| option.to_string()));
     command.arg("--").arg(&exe).args(["--serve", &request.name]).args(&launch);
     let output = command.stdin(std::process::Stdio::null()).output();
     match output {
@@ -290,6 +289,17 @@ fn wants_frame(request: &Request) -> bool {
     request.stop.is_none() && (request.eval.is_none() || !request.files.is_empty())
 }
 
+/// What a server this client starts is told of its window.  It will ask for
+/// one: the server makes it while it starts.  With nothing to visit it will
+/// show the landing, which the server must choose before its first paint.
+fn window_options(request: &Request) -> &'static [&'static str] {
+    match (wants_frame(request), request.files.is_empty()) {
+        (false, _) => &[],
+        (true, true) => &["--serve-frame", "--serve-landing"],
+        (true, false) => &["--serve-frame"],
+    }
+}
+
 fn frame_params(request: &Request, cwd: &Path) -> Json {
     let files: Vec<Json> = request.files.iter().map(|(path, at)| {
         let mut file = json!({"path": path.to_string_lossy()});
@@ -389,6 +399,17 @@ mod tests {
         assert_eq!(request.files, vec![(PathBuf::from("/home/u/a.txt"), Some((3, 4))), (PathBuf::from("/home/u/b"), None)]);
         assert_eq!(request.launch, args(&["--loadup", "--geometry", "800x600"]));
         assert!(!request.wait);
+    }
+
+    /// Only a client with nothing to visit has the server land before its
+    /// first paint: the landing must not flash before a file.
+    #[test]
+    fn a_server_lands_for_a_window_with_nothing_to_visit() {
+        let options = |argv: &[&str]| window_options(&parse(&args(argv), Path::new("/")).unwrap()).to_vec();
+        assert_eq!(options(&["-n"]), ["--serve-frame", "--serve-landing"]);
+        assert_eq!(options(&["a.txt"]), ["--serve-frame"]);
+        assert!(options(&["-e", "(+ 1 2)"]).is_empty());
+        assert!(options(&["--stop=none"]).is_empty());
     }
 
     #[test]

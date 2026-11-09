@@ -211,7 +211,6 @@ menu-bar-menu-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers
 menu-or-popup-active-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 message-box	needed	lane A (editing, windows, frames, minibuffer readers, display)
 message-or-box	absent	no shipped Lisp calls it and it is no command
-module-function-p	elsewhere	help, in the in-Romacs session
 module-load	absent	dynamic modules: Romacs loads no native modules
 move-point-visually	needed	lane A (editing, windows, frames, minibuffer readers, display)
 msdos-downcase-filename	absent	platform: MS-DOS build only
@@ -390,7 +389,6 @@ w32notify-rm-watch	absent	platform: MS-Windows build only
 w32notify-valid-p	absent	platform: MS-Windows build only
 window-at	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-bump-use-time	needed	lane A (editing, windows, frames, minibuffer readers, display)
-window-configuration-equal-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-cursor-info	absent	no shipped Lisp calls it and it is no command
 window-cursor-type	needed	lane A (editing, windows, frames, minibuffer readers, display)
 window-lines-pixel-dimensions	needed	lane A (editing, windows, frames, minibuffer readers, display)

@@ -13,7 +13,7 @@
 (require 'gnosis-review)
 
 (defconst gnosis-test-demo--file
-  (expand-file-name "../collections/demo.gnosis"
+  (expand-file-name "collections/demo.gnosis"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Repository fixture resolved independently of the working directory.")
 

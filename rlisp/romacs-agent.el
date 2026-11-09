@@ -1582,10 +1582,11 @@ configuration directory comes from its instance, never from here."
     (if project (project-root project) default-directory)))
 
 (defun romacs-agent--start-arguments (directory)
-  "`romacs-agent-start''s arguments, asked for, DIRECTORY offered."
+  "`romacs-agent-start''s arguments, asked for, DIRECTORY offered.
+A chat opens with no initial prompt."
   (let* ((cwd (read-directory-name "Project directory: " directory))
          (selection (romacs-agent--read-selection current-prefix-arg)))
-    (list cwd (read-string "Prompt (empty for none): ") nil (car selection) (cdr selection))))
+    (list cwd nil nil (car selection) (cdr selection))))
 
 ;;;###autoload
 (defun romacs-agent-start (cwd &optional prompt title provider options known)
@@ -1594,7 +1595,8 @@ PROVIDER (a name in `romacs-agent-providers', by default
 `romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
 \(its client request id) for the record.  KNOWN, when given, is called
-with the session before its harness starts.  Return the session."
+with the session before its harness starts.  Return the session.
+Interactively, open the chat without sending an initial prompt."
   (interactive (romacs-agent--start-arguments (romacs-agent--project-default)))
   (let* ((name (or provider (romacs-agent--default-provider)))
          (instance (or (romacs-agent--configured name)

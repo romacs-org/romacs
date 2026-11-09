@@ -402,7 +402,7 @@ python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --qu
 ```
 
 After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
-"Romacs and GNU Emacs compared" tables in the top-level README.md from that run, keeping every
+tables in `doc/benchmarks.md` from that run, keeping every
 row: the editor workloads between `<!-- perfbench-table-begin -->` and
 `<!-- perfbench-table-end -->`, and the elisp-benchmarks members between
 `<!-- perfbench-elb-begin -->` and `<!-- perfbench-elb-end -->`.  A block the run did not

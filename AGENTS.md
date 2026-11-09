@@ -34,6 +34,11 @@ possible; say so where you do.
   interfaces should expose meaningful state, structured results, and clear errors.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
+- Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
+  the keyword. `tools/unsafe_census.py` (run by `scripts/check-derived`) holds
+  each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
+  deleting unsafe, run `python3 tools/unsafe_census.py lower` and commit the
+  lowered floors with the change. Raising a floor is a deliberate commit.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -126,6 +131,14 @@ the pinned oracle.
   for compute-heavy GNU loading and oracle tests, with the same focused selectors.
 - Editable Lisp checks on a prebuilt host: `python3 scripts/test-elisp`. Its
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
+- Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
+  `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
+  (`make check-list` names the modules: a package like `gnosis`, or one library),
+  with `SELECTOR=`, `TEST_FILES=`, `EMACS_TEST_TIMEOUT=` (seconds per file) and `JOBS=`.
+  Each file runs in a fresh process with a private HOME. Set `ROMACS_TEST_BINARY`
+  or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `scripts/test-ert` keeps
+  each file's output. Lisp edits take effect without a rebuild. `make check-runner`
+  checks the runner itself against pinned GNU.
 - ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
 - Real GNU ERT execution: `python3 gnu-tests/run.py run --harness real --bootstrap ert --ert-adapter romacs-batch --bin BINARY --out OUTPUT FILE ...`.
 - Scaling probes: `python3 crates/romacs-vm-gui/harness/scaling_live.py --binary BINARY --output OUTPUT`,

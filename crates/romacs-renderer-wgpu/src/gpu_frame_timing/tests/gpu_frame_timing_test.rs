@@ -80,11 +80,7 @@ fn wrapped_timestamp_is_rejected_instead_of_becoming_a_huge_sample() {
 
 #[test]
 fn timestamp_query_submission_retires_into_a_video_sample() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let Ok(adapter) =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-    else {
+    let Some(adapter) = crate::gpu_policy::test_gpu::adapter() else {
         eprintln!("skipping: no headless wgpu adapter");
         return;
     };
@@ -92,14 +88,11 @@ fn timestamp_query_submission_retires_into_a_video_sample() {
         eprintln!("skipping: adapter has no timestamp-query support");
         return;
     }
-    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let Some((device, queue)) = crate::gpu_policy::test_gpu::device(&wgpu::DeviceDescriptor {
         label: Some("gpu-frame-timing-test"),
         required_features: wgpu::Features::TIMESTAMP_QUERY,
-        required_limits: wgpu::Limits::default(),
-        memory_hints: Default::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        trace: wgpu::Trace::Off,
-    })) else {
+        ..Default::default()
+    }) else {
         eprintln!("skipping: timestamp-query device request failed");
         return;
     };

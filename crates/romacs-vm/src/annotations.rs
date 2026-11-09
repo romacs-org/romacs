@@ -1013,18 +1013,16 @@ impl Vm {
             let b = self.scalar_position(self.stack[start + 1])?;
             let index = self.buffer_index()?;
             if let Object::ByteBuffer(bb) = &self.objects[index] {
-                // A unibyte buffer's substring is unibyte; its positions are bytes.
+                // A unibyte buffer's substring is unibyte, its positions
+                // bytes, its properties the text's (make_buffer_string_both).
                 let at = |v: i64| usize::try_from(v).ok().and_then(|v| v.checked_sub(1)).ok_or("index out of range");
                 let (a, b) = (at(a)?, at(b)?);
-                let range = a.min(b)..a.max(b);
-                if range.start < bb.restriction.start.0 || range.end > bb.restriction.end.0 {
+                let range = ByteOffset(a.min(b))..ByteOffset(a.max(b));
+                if range.start < bb.restriction.start || range.end > bb.restriction.end {
                     return Err("index out of range".into());
                 }
-                if bb.properties.range(ByteOffset(range.start)..ByteOffset(range.end)).next().is_some() {
-                    return Err("VM2 buffer-substring of unibyte text with properties is unsupported".into());
-                }
-                let bytes = bb.bytes[range].to_vec();
-                return Ok(self.make_lisp_string(bytes, false));
+                let object = bb.text_object(range);
+                return Ok(self.allocate_object(object));
             }
             let Object::Buffer(t) = &self.objects[index] else {
                 return Err("text buffer required".into());

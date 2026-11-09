@@ -330,5 +330,7 @@ pub(super) struct BoxSpanSet {
 pub(super) struct ChromeLayerVertices {
     pub(super) cursor_bg: Vec<RectVertex>,
     pub(super) behind_text_cursor: Vec<RectVertex>,
+    /// The light around cursors (`romacs-cursor-look-glow-*'), behind text.
+    pub(super) cursor_glow: Vec<crate::vertex::RoundedRectVertex>,
     pub(super) cursors: Vec<RectVertex>,
 }

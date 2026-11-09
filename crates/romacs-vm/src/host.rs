@@ -1732,11 +1732,15 @@ pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
     struct Restore(libc::sigset_t);
     impl Drop for Restore {
         fn drop(&mut self) {
+            // SAFETY: the mask pthread_sigmask filled in below, set back on the
+            // thread it came from; a null old set asks for nothing back.
             unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &self.0, std::ptr::null_mut()) };
         }
     }
     let mut all = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
     let mut old = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    // SAFETY: both write only the locals they are given; SIG_SETMASK is a valid
+    // `how', so pthread_sigmask has filled OLD before it is read.
     let _restore = unsafe {
         libc::sigfillset(all.as_mut_ptr());
         libc::pthread_sigmask(libc::SIG_SETMASK, all.as_ptr(), old.as_mut_ptr());

@@ -12,6 +12,8 @@ default = []
 video = ["dep:romacs-video"]
 video-dmabuf = ["video"]
 webview = []
+# The shared test GPU (gpu_policy::test_gpu), for other crates' tests.
+test-gpu = []
 
 [dependencies]
 enum_dispatch.workspace = true
@@ -49,6 +51,8 @@ romacs-scene.workspace = true
 romacs-video = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Its own integration tests share one test GPU (gpu_policy::test_gpu).
+romacs-renderer-wgpu = { path = ".", features = ["test-gpu"] }
 romacs-infra.workspace = true
 romacs-test-fonts.workspace = true
 tracing-test.workspace = true

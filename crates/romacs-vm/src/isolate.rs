@@ -43,7 +43,7 @@ const TERMINATION_SECONDS: u32 = 2;
 #[repr(u8)]
 pub(crate) enum Kind {
     Hello = 1, Job = 2, Result = 3, Error = 4, Message = 5, Child = 6, Retire = 7, Bye = 8, Died = 9, Interrupt = 10,
-    Fork = 11, Forked = 12, Reaped = 13,
+    Fork = 11, Forked = 12, Reaped = 13, Memory = 14,
 }
 
 impl Kind {
@@ -51,13 +51,15 @@ impl Kind {
         match self {
             Kind::Hello => "hello", Kind::Job => "job", Kind::Result => "result", Kind::Error => "error", Kind::Message => "message",
             Kind::Child => "child", Kind::Retire => "retire", Kind::Bye => "bye", Kind::Died => "died", Kind::Interrupt => "interrupt",
-            Kind::Fork => "fork", Kind::Forked => "forked", Kind::Reaped => "reaped",
+            Kind::Fork => "fork", Kind::Forked => "forked", Kind::Reaped => "reaped", Kind::Memory => "memory",
         }
     }
     /// The kinds Lisp posts (`romacs--isolate-post').
     const POSTED: [Kind; 9] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye, Kind::Interrupt];
-    const RECEIVED: [Kind; 12] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
-                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped];
+    /// `memory' is among them, never among POSTED: only a job child's
+    /// `job_memory_exit' sends it, from Rust.
+    const RECEIVED: [Kind; 13] = [Kind::Hello, Kind::Job, Kind::Result, Kind::Error, Kind::Message, Kind::Child, Kind::Retire, Kind::Bye,
+                                  Kind::Interrupt, Kind::Fork, Kind::Forked, Kind::Reaped, Kind::Memory];
     pub(crate) fn parse(name: &str) -> Option<Self> {
         Self::POSTED.into_iter().find(|k| k.name() == name)
     }
@@ -109,14 +111,14 @@ pub(crate) struct Frame {
 
 /// One end of a control socket and the frames read from it.
 pub(crate) struct Peer {
-    socket: OwnedFd,
+    socket: std::sync::Arc<OwnedFd>,
     inbox: VecDeque<Frame>,
     closed: bool,
 }
 
 impl Peer {
     fn new(socket: OwnedFd) -> Self {
-        Peer { socket, inbox: VecDeque::new(), closed: false }
+        Peer { socket: std::sync::Arc::new(socket), inbox: VecDeque::new(), closed: false }
     }
 
     /// Send a frame; with WAIT, a full peer buffer is waited for (the
@@ -169,10 +171,14 @@ impl Peer {
     /// which REPORT takes.
     fn receive(&mut self, report: &mut impl FnMut(Report)) -> std::io::Result<Received> {
         let received = match crate::host::recv_packet(self.socket.as_fd(), PACKET) {
+            // A peer that died with frames of ours unread: the error comes
+            // once, ahead of its own last frames and then the close.
+            Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => crate::host::recv_packet(self.socket.as_fd(), PACKET),
+            first => first,
+        };
+        let received = match received {
             Ok(received) => received,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(Received::Nothing),
-            // A peer that died mid-packet is a closed peer.
-            Err(e) if matches!(e.raw_os_error(), Some(libc::ECONNRESET | libc::EPIPE)) => None,
             Err(e) => return Err(e),
         };
         let Some((bytes, mut fds)) = received else {
@@ -200,7 +206,7 @@ impl Peer {
             }
             Kind::Fork => Payload::Socket(fds.pop().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "fork frame without a socket"))?),
             Kind::Hello => Payload::Text(String::from_utf8_lossy(body).into_owned()),
-            Kind::Bye | Kind::Interrupt => Payload::None,
+            Kind::Bye | Kind::Interrupt | Kind::Memory => Payload::None,
             Kind::Job | Kind::Result | Kind::Error | Kind::Message => {
                 if sealed {
                     let fd = fds.pop().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "sealed frame without a descriptor"))?;
@@ -308,8 +314,10 @@ pub(crate) struct Isolates {
     next: u64,
     /// In a worker: the socket to its spawner.
     parent: Option<Peer>,
-    /// In a worker: the generation of the job running, while one does.
-    running: Option<u64>,
+    /// In a worker: the running job's claim, the index of its marker entry
+    /// on the signal-handler stack and its generation
+    /// (`Vm::isolate_claim').
+    claim: Option<(usize, u64)>,
     /// In a zygote: the sockets of children asked for, by generation,
     /// from their `fork' frames until forked.
     fork_sockets: HashMap<u64, OwnedFd>,
@@ -322,7 +330,7 @@ pub(crate) struct Isolates {
 
 impl Isolates {
     pub(crate) fn is_empty(&self) -> bool {
-        self.workers.is_empty() && self.parent.is_none() && self.pool_memory.is_none()
+        self.workers.is_empty() && self.parent.is_none() && self.pool_memory.is_none() && self.claim.is_none()
     }
 }
 
@@ -332,30 +340,72 @@ pub(crate) fn hello(boot: &str) -> String {
     format!("romacs-isolate\n{PROTOCOL}\n{exe}\n{boot}")
 }
 
-/// The worker's parent socket, for the subprocess hooks below, which run
-/// outside the VM (`subprocess.rs`).
-static PARENT_SOCKET: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+/// The worker's parent socket, for what runs off the VM: the reports of the
+/// commands it starts (`process_jobs.rs`, `subprocess.rs`) and a job's
+/// memory exit. Weak, so it ends with the VM's parent peer; a forked child
+/// drops the zygote's and adopts its own (`fork_child_reinit').
+static PARENT_SOCKET: std::sync::Mutex<std::sync::Weak<OwnedFd>> = std::sync::Mutex::new(std::sync::Weak::new());
 
-fn report_to_parent(kind: Kind, pid: i32, pidfd: Option<BorrowedFd<'_>>) {
-    let socket = PARENT_SOCKET.load(std::sync::atomic::Ordering::SeqCst);
-    if socket < 0 { return; }
-    // SAFETY: the socket lives in the VM's parent peer for the process's life.
-    let socket = unsafe { BorrowedFd::borrow_raw(socket) };
-    let _ = crate::host::send_packet(socket, &report_frame(kind, 0, &[pid]), pidfd);
+fn parent_socket() -> Option<std::sync::Arc<OwnedFd>> {
+    PARENT_SOCKET.lock().unwrap_or_else(std::sync::PoisonError::into_inner).upgrade()
+}
+
+/// How long a `memory' frame or a command's report waits for room in the
+/// spawner's socket; past it the frame or report is lost.
+const REPORT_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Send BYTES to the spawner over SOCKET, one packet with PIDFD beside it,
+/// waiting up to REPORT_WAIT for room.
+fn send_report(socket: BorrowedFd<'_>, bytes: &[u8], pidfd: Option<BorrowedFd<'_>>) -> std::io::Result<()> {
+    let deadline = crate::host::monotonic() + REPORT_WAIT;
+    loop {
+        match crate::host::send_packet(socket, bytes, pidfd) {
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                let left = deadline.saturating_duration_since(crate::host::monotonic());
+                if left.is_zero() { return Err(e); }
+                crate::subprocess::poll(&[(socket.as_raw_fd(), libc::POLLOUT)], Some(left))?;
+            }
+            sent => return sent,
+        }
+    }
+}
+
+/// The fixed exit status of a job child that grew past its budget: a
+/// diagnostic only; the reason travels as a `memory' frame.
+const JOB_MEMORY_EXIT: i32 = 87;
+
+/// End this job child at once, its heap grown past its budget: native, no
+/// Lisp and no unwinding. One `memory' frame tells its spawner first, which
+/// replies for the job with the budget it forked the child under; if that
+/// frame finds no room the death reads as an ordinary one. The job's handlers,
+/// finalizers, `post-gc-hook' and cleanups never see it; as for any death, its
+/// spawner signals the groups of the commands it reported.
+pub(crate) fn job_memory_exit() -> ! {
+    if let Some(socket) = parent_socket() {
+        let _ = send_report(socket.as_fd(), &report_frame(Kind::Memory, 0, &[]), None);
+    }
+    // SAFETY: `_exit' takes only a status; it ends the process at once, and
+    // nothing of this process (destructor, atexit handler, other thread) runs
+    // after it. No safe std call exits without running atexit handlers.
+    unsafe { libc::_exit(JOB_MEMORY_EXIT) }
 }
 
 /// A child PID was spawned by this process: a worker reports it with a
-/// pidfd, so its spawner can reach the child's group should the worker be
-/// killed (`subprocess::spawn`).
+/// pidfd, so its spawner can reach the child's group at the worker's death
+/// (`subprocess::spawn`, `process_jobs`). Best effort: a command it could not
+/// report outlives it, as after a crash (VM2-ISOLATE-MEMORY).
 pub(crate) fn child_spawned(pid: i32) {
-    if PARENT_SOCKET.load(std::sync::atomic::Ordering::SeqCst) < 0 { return; }
-    let pidfd = crate::host::pidfd_open(pid);
-    report_to_parent(Kind::Child, pid, pidfd.as_ref().map(|fd| fd.as_fd()));
+    if let Some(socket) = parent_socket() {
+        let pidfd = crate::host::pidfd_open(pid);
+        let _ = send_report(socket.as_fd(), &report_frame(Kind::Child, 0, &[pid]), pidfd.as_ref().map(|fd| fd.as_fd()));
+    }
 }
 
 /// A child PID was reaped: its report is retired.
 pub(crate) fn child_reaped(pid: i32) {
-    report_to_parent(Kind::Retire, pid, None);
+    if let Some(socket) = parent_socket() {
+        let _ = crate::host::send_packet(socket.as_fd(), &report_frame(Kind::Retire, 0, &[pid]), None);
+    }
 }
 
 impl Vm {
@@ -447,9 +497,30 @@ impl Vm {
         total
     }
 
-    /// Whether a job runs here now, inside its handler.
-    pub(crate) fn isolate_job_running(&self) -> bool {
-        self.isolates.running.is_some()
+    /// The job whose claim stands: its marker entry is still at its index on
+    /// the signal-handler stack, above the job's handler. Whatever removes that
+    /// entry ends the claim with no code of its own: the handler's normal exit
+    /// or landing (truncation to its mark), its engine's end, a caught panic
+    /// (`UnwindMark'). O(1).
+    pub(crate) fn isolate_claim(&self) -> Option<u64> {
+        let (index, generation) = self.isolates.claim?;
+        matches!(self.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
+            .then_some(generation)
+    }
+    /// `romacs--isolate-claim': GENERATION's job runs from here, inside the
+    /// handler that encloses the call, under a marker entry above it. Jobs
+    /// do not nest.
+    pub(crate) fn isolate_claim_job(&mut self, generation: u64) -> Result<()> {
+        if let Some(running) = self.isolate_claim() {
+            return Err(format!("Job {running} already runs here"));
+        }
+        self.isolates.claim = Some((self.signal_handlers.len(), generation));
+        self.signal_handlers.push(crate::threaded::SignalHandler::Job(generation));
+        Ok(())
+    }
+    /// Forget a claim whose entry is gone, as a world is normalized.
+    pub(crate) fn isolate_forget_claim(&mut self) {
+        self.isolates.claim = None;
     }
 
     /// In a child: BYTES of growth over the zygote's heap pace its
@@ -486,7 +557,7 @@ impl Vm {
         self.isolates.forked.clear();
         self.isolates.unreleased.clear();
         self.isolates.fork_sockets.clear();
-        self.isolates.running = None;
+        self.isolates.claim = None;
         self.isolates.parent = None;
         self.isolate_adopt_parent(socket);
         self.random = crate::random::Random::from_entropy();
@@ -522,8 +593,9 @@ impl Vm {
     /// In a worker: descriptor FD is the socket to the spawner (peer 0).
     pub(crate) fn isolate_adopt_parent(&mut self, socket: OwnedFd) {
         let _ = crate::host::set_nonblocking(socket.as_fd());
-        PARENT_SOCKET.store(socket.as_raw_fd(), std::sync::atomic::Ordering::SeqCst);
-        self.isolates.parent = Some(Peer::new(socket));
+        let peer = Peer::new(socket);
+        *PARENT_SOCKET.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = std::sync::Arc::downgrade(&peer.socket);
+        self.isolates.parent = Some(peer);
     }
 
     pub(crate) fn isolate_has_parent(&self) -> bool {
@@ -535,11 +607,6 @@ impl Vm {
         self.isolates.parent.as_ref().is_some_and(|p| p.closed)
     }
 
-    /// In a worker: the job of GENERATION runs now (None: none does).
-    pub(crate) fn isolate_set_running(&mut self, generation: Option<u64>) {
-        self.isolates.running = generation;
-    }
-
     /// At an engine safepoint after SIGUSR1: whether the spawner's interrupt
     /// names the running job. The spawner sends an `interrupt' frame for a
     /// generation before the signal, so the frame is readable here: those
@@ -547,16 +614,17 @@ impl Vm {
     /// naming a queued job stays for the loop to cancel that job; a late one
     /// (its job done) is dropped. Without a frame the signal is nobody's.
     pub(crate) fn isolate_interrupt_targets_running(&mut self) -> bool {
+        let running = self.isolate_claim();
         // No spawner to name a generation: the signal is taken as it is.
         let Some(parent) = self.isolates.parent.as_mut() else { return true };
-        let Some(running) = self.isolates.running else { return false };
+        let Some(running) = running else { return false };
         let _ = parent.drain(|_| {});
         let before = parent.inbox.len();
         parent.inbox.retain(|frame| frame.kind != Kind::Interrupt || frame.generation != running);
         let targeted = parent.inbox.len() != before;
         // One quit per job: a safepoint after the job's body (its cleanup,
         // its handler) must not quit again.
-        if targeted { self.isolates.running = None; }
+        if targeted { self.isolates.claim = None; }
         targeted
     }
 
@@ -865,7 +933,8 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     }
     crate::host::catch_isolate_signals().map_err(|e| e.to_string())?;
     crate::host::limit_termination(TERMINATION_SECONDS);
-    // SAFETY: the launcher put the socket at FD and nothing else owns it.
+    // SAFETY: the launcher put the socket at FD and nothing else owns it, so
+    // this one owner closes it once.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
@@ -886,5 +955,30 @@ impl Vm {
             std::process::exit(i32::from(served.is_err() || shutdown.is_err()));
         }
         served
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A peer that dies with a frame of ours unread: the reset comes first,
+    /// and its last frame and report still come through, then the close.
+    #[test]
+    fn a_peer_dead_with_our_frame_unread_still_delivers_its_last_frames() {
+        let (ours, theirs) = crate::host::socketpair().unwrap();
+        let mut peer = Peer::new(ours);
+        peer.send(Kind::Interrupt, 7, &Payload::None, false).unwrap();
+        crate::host::send_packet(theirs.as_fd(), &report_frame(Kind::Memory, 0, &[]), None).unwrap();
+        crate::host::send_packet(theirs.as_fd(), &report_frame(Kind::Child, 0, &[42]), None).unwrap();
+        drop(theirs);
+        let mut reported = Vec::new();
+        let mut report = |report| if let Report::Child(pid, _) = report { reported.push(pid) };
+        assert!(matches!(peer.receive(&mut report).unwrap(), Received::Frame), "its memory frame");
+        assert!(matches!(peer.receive(&mut report).unwrap(), Received::Frame), "its report");
+        assert!(matches!(peer.receive(&mut report).unwrap(), Received::Closed), "then the close");
+        assert_eq!(peer.inbox.iter().map(|frame| frame.kind).collect::<Vec<_>>(), [Kind::Memory]);
+        assert_eq!(reported, [42]);
+        assert!(peer.closed);
     }
 }

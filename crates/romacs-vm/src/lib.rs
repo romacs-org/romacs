@@ -71,8 +71,8 @@ type NameSet<K> = std::collections::HashSet<K, NameState>;
 /// foldhash's own `RandomState` reads a seed each process draws anew.
 #[derive(Clone)]
 pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
-// Its own seed is a number, and its shared seed the one `default` leaked
-// to the heap, never foldhash's global one in a writable static.
+// SAFETY: its own seed is a number, and its shared seed the one `default`
+// leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
 
 impl Default for NameState {
@@ -884,7 +884,6 @@ enum Op {
     Closure(usize, usize, usize),
     Define(usize, usize),
     DefineMacro(usize, usize),
-    DeclareSpecial(usize),
     Call(usize, usize, usize, usize),
     Direct(usize, usize, usize, usize, usize),
     /// A call GNU compiles to a byte code (sealed.rs): the primitive itself,
@@ -918,7 +917,6 @@ romacs_snapshot::snapshot_enum!(Op {
     Op::Closure(f0, f1, f2) => (f0, f1, f2),
     Op::Define(f0, f1) => (f0, f1),
     Op::DefineMacro(f0, f1) => (f0, f1),
-    Op::DeclareSpecial(f0) => (f0),
     Op::Call(f0, f1, f2, f3) => (f0, f1, f2, f3),
     Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
     Op::Sealed(f0, f1, f2, f3) => (f0, f1, f2, f3),
@@ -970,7 +968,6 @@ impl Op {
             }
             Self::Unbind(_)
             | Self::Jump(_)
-            | Self::DeclareSpecial(_)
             | Self::PopHandlers(_)
             | Self::ResumeExit => {}
         }
@@ -1138,8 +1135,9 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
             rest = true;
             continue;
         }
-        // GNU binds a repeated name again; the last binding wins.
-        if name.source().is_some_and(|n| n.starts_with('&')) {
+        // GNU binds a repeated name again; the last binding wins. Any other
+        // `&' name is an ordinary parameter to it (funcall_lambda).
+        if matches!(name.source(), Some("&optional" | "&rest")) {
             return Err("invalid lambda argument list".into());
         }
         if matches!(name.source(), Some("nil" | "t")) {
@@ -1385,6 +1383,10 @@ pub struct Vm {
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
+    /// Variables whose watchers run now, each trapped again as its call ends
+    /// (`Vm::notify_watchers_at'), or as a panic unwinds past it
+    /// (`UnwindMark').
+    retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
@@ -1437,6 +1439,8 @@ pub struct Vm {
     /// no function, that call compiles to signal void-function at once, not
     /// to defer again. Consumed by the call's own compilation.
     reached_head: Option<String>,
+    /// As `reached_head', for a head no name reaches.
+    reached_generated: Option<GeneratedName>,
     /// Set for the builder about to be created (`Builder::loader_order`).
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
@@ -1497,10 +1501,9 @@ pub struct Vm {
     /// An embedder's pacing floor (`set_collection_floor'), which replaces
     /// the Lisp pacing variables while set.
     gc_floor: Option<usize>,
-    /// In a child forked for one job: the heap it was forked with, the
-    /// growth over it allowed now, and the grace added after each signal of
-    /// exhaustion, in objects (`Vm::set_job_budget`).
-    job_budget: Option<(usize, usize, usize)>,
+    /// In a child forked for one job: the heap it was forked with and the
+    /// growth over it allowed, in objects (`Vm::set_job_budget`).
+    job_budget: Option<(usize, usize)>,
     /// The payload the last collection kept, as allocation charges it
     /// (`data::payload_bytes`), measured only for a job's budget
     /// (`Vm::job_live`).
@@ -1612,6 +1615,10 @@ pub struct Vm {
     /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
     /// zero whenever no engine runs.
     aftermath_held: usize,
+    /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
+    /// interrupt naming the job waits (`threaded::isolate_quit'), so
+    /// finalizers and `post-gc-hook' never take it.
+    aftermath_runs: usize,
     /// Register stacks of engines suspended across a nested run, traced and
     /// forwarded in place: their frames keep raw pointers into them.
     suspended_stacks: Vec<Vec<Value>>,
@@ -1675,6 +1682,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     keymap_generation,
     environment_snapshot,
     trapped,
+    retrap,
     doc_file,
     terminal_bindings,
     pending_specials,
@@ -1689,6 +1697,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     thrown_no_catch,
     strict_root,
     reached_head,
+    reached_generated,
     loader_order_request,
     keep_captures,
     lambda_depth,
@@ -1760,6 +1769,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     doomed_finalizers,
     post_gc_due,
     aftermath_held,
+    aftermath_runs,
     keymap_filters,
     keymap_pending_filter,
     dynamic,
@@ -1896,6 +1906,7 @@ impl Vm {
             subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
+            retrap: Vec::new(),
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
@@ -1912,6 +1923,7 @@ impl Vm {
             thrown_no_catch: Vec::new(),
             strict_root: false,
             reached_head: None,
+            reached_generated: None,
             loader_order_request: false,
             keep_captures: false,
             lambda_depth: 0,
@@ -1994,6 +2006,7 @@ impl Vm {
             doomed_finalizers: Default::default(),
             post_gc_due: false,
             aftermath_held: 0,
+            aftermath_runs: 0,
             suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
@@ -2314,7 +2327,7 @@ impl Vm {
                 rest = true;
                 continue;
             }
-            if name.source().is_some_and(|n| n.starts_with('&')) {
+            if matches!(name.source(), Some("&optional" | "&rest")) {
                 return Err("invalid lambda argument list".into());
             }
             if !optional && !rest {
@@ -2616,13 +2629,16 @@ impl Vm {
         // void-function before any argument runs (`reached_head'); the calls
         // in its arguments defer as ever.
         if std::mem::take(&mut self.strict_root) {
-            if let Form::List(items) = f
-                && let Some(Form::Sym(head)) = items.first()
-            {
-                self.reached_head = Some(head.clone());
+            if let Form::List(items) = f {
+                match items.first() {
+                    Some(Form::Sym(head)) => self.reached_head = Some(head.clone()),
+                    Some(Form::Generated(id)) => self.reached_generated = Some(*id),
+                    _ => {}
+                }
             }
             let result = self.expr_now(b, f);
             self.reached_head = None;
+            self.reached_generated = None;
             return result;
         }
         if self.evaluating && self.defer_expansion_errors {
@@ -2662,11 +2678,11 @@ impl Vm {
     /// forms in turn.
     fn expr_evaluated(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         let Form::List(items) = f else { return self.expr_now(b, f) };
-        let Some(Form::Sym(head)) = items.first() else { return self.expr_now(b, f) };
-        if head.starts_with("#:") {
+        let Some(head) = items.first() else { return self.expr_now(b, f) };
+        if !matches!(head, Form::Sym(name) if !name.starts_with("#:")) && !matches!(head, Form::Generated(_)) {
             return self.expr_now(b, f);
         }
-        if self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND) {
+        if self.head_slot(head).is_none_or(|slot| self.function_void(slot)) {
             return self.reach_thunk(b, f);
         }
         let (expanded, quit) = self.quit_watched(|vm| vm.expanding_alone(|vm| vm.expand_macro(f)));
@@ -2750,19 +2766,55 @@ impl Vm {
     /// The special form HEAD's function names through a chain of symbol
     /// aliases (GNU indirect_function), if it ends at one.
     fn special_form_alias(&self, head: &str) -> Option<String> {
-        let mut slot = *self.names.get(head)?;
+        self.special_form_alias_at(*self.names.get(head)?)
+    }
+    fn special_form_alias_at(&self, mut slot: usize) -> Option<String> {
         for _ in 0..self.slots.len() {
             let function = self.slots[slot].function;
             if let Some(name) = prim::name(function) {
                 return prim::prims::special_forms::special_form_min(name).map(|_| name.to_owned());
             }
             slot = function.index_if(7)?.checked_sub(1)?;
+            // By identity: a symbol of another obarray may share the spelling.
             let name = &self.symbol_names[slot];
-            if prim::prims::special_forms::special_form_min(name).is_some() {
+            if self.names.get(name) == Some(&slot) && prim::prims::special_forms::special_form_min(name).is_some() {
                 return Some(name.clone());
             }
         }
         None
+    }
+    /// Whether SLOT has no function: its cell was never set, or
+    /// `fmakunbound' or `(fset F nil)' emptied it (GNU's void cell is nil).
+    fn function_void(&self, slot: usize) -> bool {
+        matches!(self.slots[slot].function, Value::UNBOUND | Value::NIL)
+    }
+    /// SLOT's cell read when reached: a void one takes the call at once, with
+    /// no arguments, so its (void-function HEAD) comes before any argument
+    /// runs. The caller compiles the call and points the jump returned past it.
+    fn void_cell_guard(&mut self, b: &mut Builder, slot: usize) -> usize {
+        let symbol = b.reg();
+        b.emit(Op::Const(symbol, Value::reference(slot + 1, 7)));
+        let cell = b.reg();
+        let reader = self.slot("symbol-function");
+        b.emit(Op::Sealed(cell, reader, symbol, 1));
+        let void = b.emit(Op::Unless(cell, 0));
+        let bound = b.emit(Op::Jump(0));
+        b.code[void] = Op::Unless(cell, b.code.len());
+        let r = b.reg();
+        let cache = self.install_cache();
+        b.emit(Op::Direct(r, slot, cache, b.next, 0));
+        let after = b.emit(Op::Jump(0));
+        b.code[bound] = Op::Jump(b.code.len());
+        after
+    }
+    /// The slot of a call's head: by name, or for a symbol no name reaches
+    /// (uninterned, or of another obarray) by its identity.
+    pub(crate) fn head_slot(&self, head: &Form) -> Option<usize> {
+        match head {
+            Form::Sym(name) => self.names.get(name).copied(),
+            Form::Generated(id) => self.generated_symbols.get(id).copied(),
+            _ => None,
+        }
     }
     fn expr_now(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
         if let Some(expanded) = self.expand_macro(f)? {
@@ -2851,7 +2903,37 @@ impl Vm {
             Form::List(a) => {
                 let head = match &a[0] {
                     Form::Sym(head) => head.as_str(),
-                    Form::Generated(_) => a[0].sym()?,
+                    // A symbol no name reaches, uninterned or of another
+                    // obarray, is the same call as a named head's, by its slot:
+                    // GNU eval_sub reads its function cell like any symbol's.
+                    Form::Generated(id) => {
+                        let slot = self.generated_symbol(*id).index(7)? - 1;
+                        if let Some(form) = self.special_form_alias_at(slot) {
+                            let mut aliased = a.clone();
+                            aliased[0] = Form::Sym(form);
+                            return self.expr(b, &Form::List(aliased));
+                        }
+                        let void = self.function_void(slot);
+                        if self.defer_expansion_errors && void
+                            && self.reached_generated.take_if(|reached| reached == id).is_none()
+                        {
+                            return Err("defer unresolved function".into());
+                        }
+                        let guard = if b.loader_order && void { Some(self.void_cell_guard(b, slot)) } else { None };
+                        let start = b.next;
+                        b.next += a.len() - 1;
+                        for (i, f) in a[1..].iter().enumerate() {
+                            let r = self.expr(b, f)?;
+                            b.emit(Op::Move(start + i, r));
+                        }
+                        let r = b.reg();
+                        let cache = self.install_cache();
+                        b.emit(Op::Direct(r, slot, cache, start, a.len() - 1));
+                        if let Some(after) = guard {
+                            b.code[after] = Op::Jump(b.code.len());
+                        }
+                        return Ok(r);
+                    }
                     // GNU eval_sub (src/eval.c) passes a non-symbol head through
                     // `function`: a lambda becomes a closure applied to the
                     // evaluated arguments; any other head signals
@@ -2956,19 +3038,18 @@ impl Vm {
                             return Err("cannot declare a constant".into());
                         }
                         let slot = self.slot(name);
-                        if let Some(doc) = rest.get(2) {
-                            if !matches!(doc, Form::Sym(s) if s == "nil") {
-                                let doc = Form::List(vec![Form::Sym("put".into()), Form::List(vec![Form::Sym("quote".into()), rest[0].clone()]), Form::List(vec![Form::Sym("quote".into()), Form::Sym("variable-documentation".into())]), Form::List(vec![Form::Sym("quote".into()), doc.clone()])]);
-                                self.expr(b, &doc)?;
-                            }
-                        }
                         if rest.len() > 1 {
                             self.pending_specials.insert(name.into());
-                            b.emit(Op::DeclareSpecial(slot));
+                            let quote = |form: &Form| Form::List(vec![Form::Sym("quote".into()), form.clone()]);
+                            let doc = quote(rest.get(2).unwrap_or(&Form::Sym("nil".into())));
                             if head == "defconst" {
-                                let r = self.expr(b, &rest[1])?;
-                                b.emit(Op::SetGlobal(slot, r));
+                                // eval.c Fdefconst: the value first, then Fdefconst_1.
+                                let define = Form::List(vec![Form::Sym("defconst-1".into()), quote(&rest[0]), rest[1].clone(), doc]);
+                                self.expr(b, &define)?;
                             } else {
+                                // eval.c defvar: declared before the value, for self-references.
+                                let declare = Form::List(vec![Form::Sym("internal--define-uninitialized-variable".into()), quote(&rest[0]), doc]);
+                                self.expr(b, &declare)?;
                                 let lowered = Form::List(vec![
                                     Form::Sym("if".into()),
                                     Form::List(vec![
@@ -3184,7 +3265,7 @@ impl Vm {
                             // Non-eager Lisp bodies may name a macro before its
                             // defining file is loaded. Keep that entire form
                             // unevaluated until reached, not just its arguments.
-                            if self.defer_expansion_errors && self.slots[slot].function == Value::UNBOUND
+                            if self.defer_expansion_errors && self.function_void(slot)
                                 && self.reached_head.take_if(|reached| reached == head).is_none()
                             {
                                 return Err(format!("defer unresolved function {head}"));
@@ -3202,23 +3283,10 @@ impl Vm {
                         // any argument runs. No name is read and no constant but
                         // the head's symbol is needed (the source cache spells it).
                         let loader_guard = if target.is_none() && !sealed && b.loader_order
-                            && self.names.get(head).is_none_or(|&slot| self.slots[slot].function == Value::UNBOUND)
+                            && self.names.get(head).is_none_or(|&slot| self.function_void(slot))
                         {
                             let slot = self.slot(head);
-                            let symbol = b.reg();
-                            b.emit(Op::Const(symbol, Value::reference(slot + 1, 7)));
-                            let cell = b.reg();
-                            let reader = self.slot("symbol-function");
-                            b.emit(Op::Sealed(cell, reader, symbol, 1));
-                            let void = b.emit(Op::Unless(cell, 0));
-                            let bound = b.emit(Op::Jump(0));
-                            b.code[void] = Op::Unless(cell, b.code.len());
-                            let r = b.reg();
-                            let cache = self.install_cache();
-                            b.emit(Op::Direct(r, slot, cache, b.next, 0));
-                            let after = b.emit(Op::Jump(0));
-                            b.code[bound] = Op::Jump(b.code.len());
-                            Some(after)
+                            Some(self.void_cell_guard(b, slot))
                         } else {
                             None
                         };
@@ -3467,7 +3535,6 @@ impl Vm {
                     }
                     Op::Define(s, r) => format!("function s{s} = r{r}"),
                     Op::DefineMacro(s, r) => format!("macro s{s} = r{r}"),
-                    Op::DeclareSpecial(s) => format!("declare-special s{s}"),
                     Op::Call(d, t, start, n) => {
                         format!("r{d} = funcall r{t} args r{start} count {n}")
                     }
@@ -4004,7 +4071,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
                     targets.insert(end);
                 }
                 Op::LeaveProtect(r) => read(r),
-                Op::Unbind(_) | Op::PopHandlers(_) | Op::ResumeExit | Op::DeclareSpecial(_) => {}
+                Op::Unbind(_) | Op::PopHandlers(_) | Op::ResumeExit => {}
             }
         }
         let mut live: Vec<Option<Op>> = code.iter().copied().map(Some).collect();

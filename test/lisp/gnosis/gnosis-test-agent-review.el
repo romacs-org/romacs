@@ -4,10 +4,8 @@
 
 (require 'ert)
 (require 'gnosis-agent-review)
-(require 'gnosis-agent-review-hermes)
+(require 'gnosis-agent-romacs)
 (require 'gnosis-test-helpers)
-
-(defvar hermes-dashboard-transport-url "http://unused.invalid")
 
 (defun gnosis-test-local--question (&optional id)
   "Return fresh synthetic question with ID."
@@ -275,16 +273,16 @@ Only recursive input and feedback choice are controlled; writers are real."
      (should (= 1 (gnosis-review-state-reviewed state)))
      (should-not (gnosis-review--work-p state)))))
 
-(ert-deftest gnosis-test-local-hermes-unicode-and-duplicate-fields ()
+(ert-deftest gnosis-test-local-romacs-unicode-and-duplicate-fields ()
   (gnosis-test-local--with-session
    (gnosis-agent-review--present state)
    (let* ((request (gnosis-agent-review--request state "evaluate" "request" "Greek α\n🧠"))
-          (prompt (gnosis-agent-review-hermes--prompt request))
+          (prompt (gnosis-agent-romacs--review-prompt request))
           (outer (json-parse-string (json-serialize (list :prompt prompt)) :object-type 'plist)))
      (should (string-match-p "Greek α" (plist-get outer :prompt)))
      (should (string-match-p "🧠" (plist-get outer :prompt)))
-     (should-error (gnosis-agent-review-hermes--parse "{\"verdict\":\"pass\",\"verdict\":\"fail\"}"))
-     (should-error (gnosis-agent-review-hermes--parse "{} trailing")))))
+     (should-error (gnosis-agent-romacs--parse-review "{\"verdict\":\"pass\",\"verdict\":\"fail\"}"))
+     (should-error (gnosis-agent-romacs--parse-review "{} trailing")))))
 
 (ert-deftest gnosis-test-local-acceptance-and-plan-rollback ()
   (gnosis-test-local--with-session
@@ -752,7 +750,7 @@ Only recursive input and feedback choice are controlled; writers are real."
 
 (defun gnosis-test-local--parsed-plan (question)
   "Round-trip QUESTION in a plan through the real provider JSON parser."
-  (gnosis-agent-review-hermes--parse
+  (gnosis-agent-romacs--parse-review
    (decode-coding-string
     (json-serialize (list :agent-note "Next α" :context nil :remaining (vector question) :done :false)
                     :false-object :false :null-object nil) 'utf-8)))
@@ -796,7 +794,7 @@ Only recursive input and feedback choice are controlled; writers are real."
                         (gnosis-agent-review--data state)
                         (gnosis-test-local--parsed-plan (append reordered '(:unknown "No"))))
                        :type 'user-error)
-         (should-error (gnosis-agent-review-hermes--parse
+         (should-error (gnosis-agent-romacs--parse-review
                         "{\"remaining\":[{\"id\":\"q2\",\"id\":\"q2\"}]}"))
          (let ((gnosis-agent-review-function
                 (lambda (_request resolve _reject)
@@ -809,52 +807,49 @@ Only recursive input and feedback choice are controlled; writers are real."
          (gnosis-agent-review--present state)
          (should (equal "q2" (plist-get (plist-get (gnosis-agent-review--data state) :current) :id))))))))
 
-(ert-deftest gnosis-test-local-hermes-independent-profile-no-fallback ()
+(ert-deftest gnosis-test-local-romacs-provider-no-fallback ()
   (let ((original-require (symbol-function 'require))
-        (hermes-dashboard-transport-url "http://unused.invalid")
-        (gnosis-agent-eval-hermes-backend-url "http://tutor.invalid")
-        (gnosis-agent-eval-hermes-profile "grader-only")
-        (gnosis-agent-review-hermes-profile "chosen-tutor")
+        (gnosis-agent-romacs-provider "chosen-tutor")
+        (gnosis-agent-romacs-model "chosen-model")
         calls resolutions rejections)
     (cl-letf (((symbol-function 'require)
-               (lambda (feature &optional filename noerror)
-                 (if (eq feature 'hermes-request) t
-                   (funcall original-require feature filename noerror)))))
-      (cl-letf (((symbol-function 'hermes-request)
-		 (lambda (request resolve _reject)
-                   (push (list (plist-get request :profile) hermes-dashboard-transport-url) calls)
-                   (funcall resolve "{\"verdict\":\"pass\",\"explanation\":\"Correct\"}")
+               (lambda (feature &rest args)
+                 (if (eq feature 'romacs-agent) t
+                   (apply original-require feature args))))
+              ((symbol-function 'romacs-agent-ask)
+               (lambda (_prompt resolve _reject &rest options)
+                 (push options calls)
+                 (funcall resolve "{\"verdict\":\"pass\",\"explanation\":\"Correct\"}")
+                 #'ignore)))
+      (dolist (phase '("evaluate" "adapt"))
+        (gnosis-agent-review-romacs (list :phase phase)
+                                   (lambda (value) (push value resolutions))
+                                   (lambda (failure) (push failure rejections)))))
+    (should (= 2 (length calls)))
+    (dolist (options calls)
+      (should (equal (plist-get options :provider) "chosen-tutor"))
+      (should (equal (plist-get options :model) "chosen-model")))
+    (should (= 2 (length resolutions)))
+    (should-not rejections)
+    (setq calls nil resolutions nil)
+    (let ((gnosis-agent-romacs-provider "missing-tutor"))
+      (cl-letf (((symbol-function 'require)
+                 (lambda (feature &rest args)
+                   (if (eq feature 'romacs-agent) t
+                     (apply original-require feature args))))
+                ((symbol-function 'romacs-agent-ask)
+                 (lambda (_prompt resolve reject &rest options)
+                   (push (plist-get options :provider) calls)
+                   (funcall reject "Unknown provider")
+                   (funcall reject "Duplicate rejection")
+                   (funcall resolve "{\"verdict\":\"pass\",\"explanation\":\"Late\"}")
                    #'ignore)))
-	(dolist (phase '("evaluate" "adapt"))
-          (gnosis-agent-review-hermes (list :phase phase)
-                                      (lambda (value) (push value resolutions))
-                                      (lambda (failure) (push failure rejections)))))
-      (should (equal calls '(("chosen-tutor" "http://tutor.invalid")
-                             ("chosen-tutor" "http://tutor.invalid"))))
-      (should (= 2 (length resolutions)))
-      (should-not rejections)
-      (setq calls nil resolutions nil)
-      (let ((gnosis-agent-review-hermes-profile "missing-tutor"))
-	(cl-letf (((symbol-function 'hermes-request)
-                   (lambda (request resolve reject)
-                     (push (plist-get request :profile) calls)
-                     (funcall reject "Unknown profile")
-                     (funcall reject "Duplicate rejection")
-                     (funcall resolve "{\"verdict\":\"pass\",\"explanation\":\"Late\"}")
-                     #'ignore)))
-          (gnosis-agent-review-hermes '(:phase "adapt")
-                                      (lambda (value) (push value resolutions))
-                                      (lambda (failure) (push failure rejections)))))
-      (should (equal calls '("missing-tutor")))
-      (should (equal rejections '("Unknown profile")))
-      (should-not resolutions)
-      (dolist (profile '(nil ""))
-	(let ((gnosis-agent-review-hermes-profile profile))
-          (cl-letf (((symbol-function 'hermes-request)
-                     (lambda (&rest _) (push "Unexpected transport" calls))))
-            (should-error (gnosis-agent-review-hermes '(:phase "adapt") #'ignore #'ignore)
-                          :type 'user-error))))
-      (should (equal calls '("missing-tutor"))))))
+        (gnosis-agent-review-romacs '(:phase "adapt")
+                                   (lambda (value) (push value resolutions))
+                                   (lambda (failure) (push failure rejections)))))
+    (should (equal calls '("missing-tutor")))
+    (should (equal rejections '("Unknown provider")))
+    (should-not resolutions)))
 
 (ert-deftest gnosis-test-local-ui-prose-response-and-viewport ()
   "Keep all verdict prose navigable without touching the response or view."
@@ -1187,8 +1182,8 @@ Only recursive input and feedback choice are controlled; writers are real."
 
 (ert-deftest gnosis-test-local-tutor-policy-keeps-learning-evidence-distinct ()
   "Send teaching and finite revisit policy through the existing prompt only."
-  (let ((evaluation (gnosis-agent-review-hermes--prompt '(:phase "evaluate")))
-        (adaptation (gnosis-agent-review-hermes--prompt '(:phase "adapt"))))
+  (let ((evaluation (gnosis-agent-romacs--review-prompt '(:phase "evaluate")))
+        (adaptation (gnosis-agent-romacs--review-prompt '(:phase "adapt"))))
     (dolist (policy '("smallest useful model" "demonstrated part" "clarification question"
                       "contradictory wording" "clear spelling errors" "captured rubric"))
       (should (string-match-p policy evaluation)))

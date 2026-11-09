@@ -25,3 +25,5 @@ sha2.workspace = true
 ureq.workspace = true
 wait-timeout.workspace = true
 
+[lints]
+workspace = true

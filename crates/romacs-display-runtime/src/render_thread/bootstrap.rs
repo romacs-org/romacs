@@ -30,7 +30,7 @@ impl RenderApp {
             "wgpu requested backends: {:?}",
             instance_descriptor.backends
         );
-        let instance = wgpu::Instance::new(instance_descriptor);
+        let instance = romacs_renderer_wgpu::new_instance(instance_descriptor);
 
         let surface = match instance.create_surface(window.clone()) {
             Ok(s) => s,
@@ -40,19 +40,11 @@ impl RenderApp {
             }
         };
 
-        let adapter =
-            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: crate::gpu_power_preference(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                apply_limit_buckets: false,
-            })) {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::error!("Failed to find suitable GPU adapter: {:?}", e);
-                    return;
-                }
-            };
+        let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+        let Some(adapter) = romacs_renderer_wgpu::choose_adapter(adapters, Some(&surface)) else {
+            tracing::error!("Failed to find a GPU adapter that supports the native surface");
+            return;
+        };
 
         let (device, queue) = match pollster::block_on(
             romacs_renderer_wgpu::request_renderer_device(&adapter, "Romacs Render Thread Device"),

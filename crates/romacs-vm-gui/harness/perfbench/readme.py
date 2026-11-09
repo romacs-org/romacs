@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Write a perfbench run's results into README.md's Romacs comparison tables.
+"""Write a perfbench run's results into README.md's lead and the comparison
+tables of doc/benchmarks.md.
 
-Usage: readme.py RESULTS.json [README.md]
+Usage: readme.py RESULTS.json [FILE...]
+
+A block goes to whichever FILE holds its markers.
 
 Replaces the text between the `<!-- perfbench-table-begin -->' and
-`<!-- perfbench-table-end -->' lines of README.md with a Markdown table of the
+`<!-- perfbench-table-end -->' lines with a Markdown table of the
 editor workloads built from RESULTS.json (perfbench's output), the text
 between `<!-- perfbench-session-begin -->' and `<!-- perfbench-session-end -->' with one
 of the session rows, and the text between `<!-- perfbench-elb-begin -->' and
@@ -15,8 +18,8 @@ block whose rows the run did not measure is left as it was.  Between
 rows where Romacs clearly beats a rival, with build and rerun command, and
 names on standard error any headline this run no longer has.  Between
 `<!-- perfbench-lead-begin -->' and `<!-- perfbench-lead-end -->' it writes lead.md with
-each {{name}} filled from the run; a name with no value stops it, and
-README.md stays as it was.
+each {{name}} filled from the run; a name with no value stops it, and every
+file stays as it was.
 """
 import json
 import os
@@ -220,14 +223,12 @@ def lead_values(results):
     size = results['meta'].get('header_bytes')
     return {'vc-history-romacs': figure(VC_HISTORY, 'romacs'), 'vc-history-gnu': figure(VC_HISTORY, 'gnu'),
             'vc-history-commits': commits(rows, results['meta'].get('history_commits')),
-            'vc-history-key': figure(VC_HISTORY, 'romacs', 'key'),
-            'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'), 'open-xdisp-gnu': figure(OPEN_XDISP, 'gnu'),
+            'open-xdisp-romacs': figure(OPEN_XDISP, 'romacs'),
             'open-big-size': f'{size / 1e6:.0f} MB' if size else None,
-            'open-big-romacs': figure(OPEN_HEADER, 'romacs'), 'open-big-gnu': figure(OPEN_HEADER, 'gnu'),
+            'open-big-romacs': figure(OPEN_HEADER, 'romacs'),
             'open-xdisp-ts-gnu': figure(OPEN_XDISP_TS, 'gnu'), 'open-big-ts-gnu': figure(OPEN_HEADER_TS, 'gnu'),
             'theme-romacs': figure(THEME, 'romacs'), 'theme-gnu': figure(THEME, 'gnu'),
-            **{f'uncompiled-{key}-{engine}': figure(row, engine)
-               for key, row in UNCOMPILED.items() for engine in ('romacs', 'gnu')}}
+            **{f'uncompiled-call-{engine}': figure(UNCOMPILED['call'], engine) for engine in ('romacs', 'gnu')}}
 
 
 def lead_measured(results):
@@ -353,11 +354,11 @@ def replace(text, block, body):
 
 
 def main(argv):
-    if not 1 <= len(argv) <= 2:
+    if not argv:
         raise SystemExit(__doc__)
     results = json.loads(Path(argv[0]).read_text())
-    readme = Path(argv[1] if len(argv) == 2 else 'README.md')
-    text = readme.read_text()
+    paths = [Path(name) for name in argv[1:]] or [Path('README.md'), Path('doc/benchmarks.md')]
+    texts = {path: path.read_text() for path in paths}
     groups = {r['group'] for r in results['rows']}
     whole = bool(groups - {'elb', 'session'}) and 'elb' in groups
     for block, measured_here, body in (('lead', lead_measured(results), lead_section),
@@ -365,15 +366,17 @@ def main(argv):
                                        ('session', 'session' in groups, session_section),
                                        ('elb', 'elb' in groups, elb_section),
                                        ('headlines', whole, headlines)):
+        path = next((p for p in paths if BLOCKS[block][0] in texts[p]), paths[0])
         if measured_here:
             if block == 'headlines':
-                lost = kept_wins(text) - {(made['row'], name) for made, name, *_ in wins(results)}
+                lost = kept_wins(texts[path]) - {(made['row'], name) for made, name, *_ in wins(results)}
                 for row_, name in sorted(lost):
-                    print(f'{readme}: no longer a headline: {row_} against {name}', file=sys.stderr)
-            text = replace(text, block, body(results))
+                    print(f'{path}: no longer a headline: {row_} against {name}', file=sys.stderr)
+            texts[path] = replace(texts[path], block, body(results))
         else:
-            print(f'{readme}: this run has no {block} rows; that block is unchanged', file=sys.stderr)
-    readme.write_text(text)
+            print(f'{path}: this run has no {block} rows; that block is unchanged', file=sys.stderr)
+    for path, text in texts.items():
+        path.write_text(text)
     return 0
 
 

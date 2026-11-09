@@ -160,8 +160,7 @@ impl Table {
     /// Reap killed children recorded by `delete-process' and `call-process'.
     pub(crate) fn reap_deleted(&mut self) {
         self.deleted.retain(|(pid, file)| {
-            let mut status = 0;
-            let done = unsafe { libc::waitpid(*pid, &mut status, libc::WNOHANG) } != 0;
+            let done = reaped(*pid);
             if done && let Some(file) = file {
                 let _ = crate::host::remove_file(file);
             }
@@ -208,7 +207,7 @@ struct Reaper {
 struct Reaping {
     orphans: Vec<Orphan>,
     /// The running thread's eventfd, None until a start succeeds.
-    wake: Option<OwnedFd>,
+    wake: Option<std::fs::File>,
 }
 
 static REAPER: Reaper = Reaper { state: std::sync::Mutex::new(Reaping { orphans: Vec::new(), wake: None }) };
@@ -241,34 +240,31 @@ impl Reaper {
             if !fresh {
                 return;
             }
-            let one = 1u64;
-            unsafe { libc::write(wake.as_raw_fd(), (&one as *const u64).cast(), 8) };
+            let _ = std::io::Write::write(&mut &*wake, &1u64.to_ne_bytes());
         } else if !state.orphans.is_empty() {
             state.wake = self.start(start).ok();
         }
     }
 
-    fn start(&'static self, start: Start) -> io::Result<OwnedFd> {
-        let wake = crate::host::eventfd()?;
-        let fd = wake.as_raw_fd();
-        start(Box::new(move || self.run(fd)))?;
+    fn start(&'static self, start: Start) -> io::Result<std::fs::File> {
+        let wake = std::fs::File::from(crate::host::eventfd()?);
+        let read_end = wake.try_clone()?;
+        start(Box::new(move || self.run(read_end)))?;
         Ok(wake)
     }
 
     /// Poll the orphans' pidfds and WAKE, then reap whichever ended. Only
     /// this thread removes orphans, so the polled descriptors stay open. An
     /// orphan without a pidfd is checked every 100ms.
-    fn run(&self, wake: RawFd) {
-        let watch = |fd: RawFd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    fn run(&self, wake: std::fs::File) {
         loop {
-            let (mut fds, timeout) = {
+            let (fds, timeout) = {
                 let state = self.lock();
-                let fds: Vec<_> = std::iter::once(wake).chain(state.orphans.iter().filter_map(|o| o.pidfd.as_ref().map(|fd| fd.as_raw_fd()))).map(watch).collect();
-                (fds, if state.orphans.iter().any(|o| o.pidfd.is_none()) { 100 } else { -1 })
+                let fds: Vec<_> = std::iter::once(wake.as_raw_fd()).chain(state.orphans.iter().filter_map(|o| o.pidfd.as_ref().map(|fd| fd.as_raw_fd()))).map(|fd| (fd, libc::POLLIN)).collect();
+                (fds, state.orphans.iter().any(|o| o.pidfd.is_none()).then(|| std::time::Duration::from_millis(100)))
             };
-            unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };
-            let mut count = 0u64;
-            unsafe { libc::read(wake, (&mut count as *mut u64).cast(), 8) };
+            let _ = poll(&fds, timeout);
+            let _ = std::io::Read::read(&mut &wake, &mut [0; 8]);
             self.lock().orphans.retain(|o| !reap(o));
         }
     }
@@ -277,14 +273,7 @@ impl Reaper {
 /// Wait for ORPHAN without blocking, then unlink its file: true once it is
 /// no longer this host's child to wait for.
 fn reap(orphan: &Orphan) -> bool {
-    let mut status = 0;
-    let r = loop {
-        let r = unsafe { libc::waitpid(orphan.pid, &mut status, libc::WNOHANG) };
-        if r >= 0 || last_error().kind() != io::ErrorKind::Interrupted {
-            break r;
-        }
-    };
-    if r == 0 {
+    if !reaped(orphan.pid) {
         return false;
     }
     if let Some(file) = &orphan.file {
@@ -293,12 +282,27 @@ fn reap(orphan: &Orphan) -> bool {
     true
 }
 
+/// Wait for PID without blocking: true once it is no longer this host's
+/// child to wait for (reaped now, or not a child).
+fn reaped(pid: i32) -> bool {
+    let mut status = 0;
+    loop {
+        // SAFETY: `status' is a live local the call may write.
+        let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if r >= 0 || last_error().kind() != io::ErrorKind::Interrupted {
+            return r != 0;
+        }
+    }
+}
+
 pub(crate) fn last_error() -> io::Error {
     io::Error::last_os_error()
 }
 
 pub(crate) fn set_nonblocking(fd: RawFd) -> io::Result<()> {
+    // SAFETY: F_GETFL takes and returns integers only.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    // SAFETY: F_SETFL takes and returns integers only.
     if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
         return Err(last_error());
     }
@@ -309,12 +313,18 @@ pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
     fd.try_clone()
 }
 
+/// The terminal modes of the pty on FD, or None if it is not one.
+fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
+    // SAFETY: termios is plain integers and arrays, for which all zeroes is
+    // a valid value.
+    let mut s: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: tcgetattr writes only the live local it is given.
+    (unsafe { libc::tcgetattr(fd, &mut s) } == 0).then_some(s)
+}
+
 /// sysdep.c child_setup_tty: the terminal modes a pty child starts with.
 pub(crate) fn child_setup_tty(fd: RawFd) {
-    let mut s: libc::termios = unsafe { std::mem::zeroed() };
-    if unsafe { libc::tcgetattr(fd, &mut s) } != 0 {
-        return;
-    }
+    let Some(mut s) = terminal_modes(fd) else { return };
     s.c_oflag |= libc::OPOST;
     s.c_oflag &= !libc::ONLCR;
     s.c_oflag &= !(libc::NLDLY | libc::CRDLY | libc::TABDLY | libc::BSDLY | libc::VTDLY | libc::FFDLY);
@@ -329,16 +339,22 @@ pub(crate) fn child_setup_tty(fd: RawFd) {
     s.c_lflag |= libc::ICANON;
     s.c_cc[libc::VEOF] = 4;
     s.c_cc[libc::VEOL] = 0xff;
+    // SAFETY: tcsetattr reads only the live termios it is given.
     unsafe { libc::tcsetattr(fd, libc::TCSANOW, &s) };
 }
 
 /// The pty's end-of-file character (process_send_eof sends it).
 pub(crate) fn tty_eof_char(fd: RawFd) -> u8 {
-    let mut s: libc::termios = unsafe { std::mem::zeroed() };
-    if unsafe { libc::tcgetattr(fd, &mut s) } != 0 {
-        return 4;
-    }
-    s.c_cc[libc::VEOF]
+    terminal_modes(fd).map_or(4, |s| s.c_cc[libc::VEOF])
+}
+
+/// A close-on-exec duplicate of FD numbered 3 or above, so placing a child's
+/// standard descriptors cannot close it first.
+fn duplicate_above_stdio(fd: RawFd) -> io::Result<OwnedFd> {
+    // SAFETY: F_DUPFD_CLOEXEC takes and returns integers only.
+    let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+    // SAFETY: the new descriptor is this call's alone, so one owner closes it.
+    if duplicate < 0 { Err(last_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(duplicate) }) }
 }
 
 /// What a spawned child gets: GNU emacs_spawn's arguments.
@@ -363,11 +379,7 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     // A program named by a path and no controlling terminal: posix_spawn,
     // which a fork's page-table copy would make cost what the heap weighs.
     if !spec.controlling_tty && spec.argv.first().is_some_and(|p| p.contains(&b'/')) {
-        let above = |fd: RawFd| -> io::Result<OwnedFd> {
-            let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
-            if duplicate < 0 { Err(last_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(duplicate) }) }
-        };
-        let fds = [above(spec.stdin)?, above(spec.stdout)?, above(spec.stderr)?];
+        let fds = [duplicate_above_stdio(spec.stdin)?, duplicate_above_stdio(spec.stdout)?, duplicate_above_stdio(spec.stderr)?];
         let env: Vec<Vec<u8>> = spec.env.iter().filter(|e| e.contains(&b'=')).cloned().collect();
         let pid = crate::host::spawn_child(spec.argv, &env, spec.dir, fds.each_ref().map(|fd| fd.as_raw_fd()))?;
         crate::isolate::child_spawned(pid);
@@ -383,15 +395,11 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
         }
     }
     command.current_dir(os(spec.dir));
-    let stdio = |fd: RawFd| -> io::Result<std::process::Stdio> {
-        let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
-        if duplicate < 0 {
-            return Err(last_error());
-        }
-        Ok(std::process::Stdio::from(unsafe { OwnedFd::from_raw_fd(duplicate) }))
-    };
+    let stdio = |fd: RawFd| duplicate_above_stdio(fd).map(std::process::Stdio::from);
     command.stdin(stdio(spec.stdin)?).stdout(stdio(spec.stdout)?).stderr(stdio(spec.stderr)?);
     let tty = spec.controlling_tty;
+    // SAFETY: the hook runs in the forked child before exec, and calls only
+    // async-signal-safe functions (setsid, ioctl, signal), allocating nothing.
     unsafe {
         command.pre_exec(move || {
             if libc::setsid() < 0 {
@@ -427,6 +435,7 @@ pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
 pub(crate) fn wait_status(pid: i32, options: i32) -> Option<i32> {
     let mut status = 0;
     loop {
+        // SAFETY: `status' is a live local the call may write.
         let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG | options) };
         if r == pid {
             if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) { crate::isolate::child_reaped(pid); }
@@ -443,6 +452,7 @@ pub(crate) fn wait_status(pid: i32, options: i32) -> Option<i32> {
 pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
     let mut status = 0;
     loop {
+        // SAFETY: `status' is a live local the call may write.
         let r = unsafe { libc::waitpid(pid, &mut status, 0) };
         if r == pid {
             crate::isolate::child_reaped(pid);
@@ -455,9 +465,32 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
     }
 }
 
+/// Whether child PID has exited, without reaping it: its number stays pinned
+/// until a wait takes it.
+pub(crate) fn child_exited(pid: i32) -> io::Result<bool> {
+    loop {
+        // SAFETY: siginfo_t is plain data, valid as all zeroes; waitid writes
+        // only the live local it is given, and si_pid reads what that left:
+        // zero while the child runs (WNOHANG).
+        let (result, exited) = unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            let result = libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT);
+            (result, info.si_pid() != 0)
+        };
+        if result == 0 {
+            return Ok(exited);
+        }
+        let error = last_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
 /// emacs_read: Ok(0) at end of file.
 pub(crate) fn read(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
     loop {
+        // SAFETY: read writes at most `buf.len()' bytes into `buf'.
         let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
         if n >= 0 {
             return Ok(n as usize);
@@ -472,7 +505,7 @@ pub(crate) fn read(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
 /// One nonblocking write: bytes written, 0 when it would block.
 pub(crate) fn write(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
     loop {
-        let n = unsafe { send_or_write(fd, buf) };
+        let n = send_or_write(fd, buf);
         if n >= 0 {
             return Ok(n as usize);
         }
@@ -486,9 +519,11 @@ pub(crate) fn write(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
 }
 
 /// write(2), except that a socket never raises SIGPIPE.
-unsafe fn send_or_write(fd: RawFd, buf: &[u8]) -> isize {
+fn send_or_write(fd: RawFd, buf: &[u8]) -> isize {
+    // SAFETY: send reads at most `buf.len()' bytes from `buf'.
     let n = unsafe { libc::send(fd, buf.as_ptr().cast(), buf.len(), libc::MSG_NOSIGNAL) };
-    if n < 0 && unsafe { *libc::__errno_location() } == libc::ENOTSOCK {
+    if n < 0 && last_error().raw_os_error() == Some(libc::ENOTSOCK) {
+        // SAFETY: write reads at most `buf.len()' bytes from `buf'.
         return unsafe { libc::write(fd, buf.as_ptr().cast(), buf.len()) };
     }
     n
@@ -539,6 +574,7 @@ pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -
         // Round up, so a wait never returns before its deadline.
         Some(d) => i32::try_from(d.as_nanos().div_ceil(1_000_000)).unwrap_or(i32::MAX),
     };
+    // SAFETY: poll reads and writes the `set.len()' pollfds `set' owns.
     let n = unsafe { libc::poll(set.as_mut_ptr(), set.len() as libc::nfds_t, millis) };
     if n < 0 {
         let error = last_error();
@@ -563,10 +599,14 @@ fn decode_sockaddr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> Op
     let base = (storage as *const libc::sockaddr_storage).cast::<u8>();
     match i32::from(storage.ss_family) {
         libc::AF_INET => {
+            // SAFETY: the family says the storage holds a sockaddr_in, which
+            // sockaddr_storage is sized and aligned for.
             let sin = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
             Some(Address::V4(sin.sin_addr.s_addr.to_ne_bytes(), u16::from_be(sin.sin_port)))
         }
         libc::AF_INET6 => {
+            // SAFETY: the family says the storage holds a sockaddr_in6, which
+            // sockaddr_storage is sized and aligned for.
             let sin6 = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
             let octets = sin6.sin6_addr.s6_addr;
             let segments = std::array::from_fn(|i| u16::from_be_bytes([octets[2 * i], octets[2 * i + 1]]));
@@ -577,6 +617,8 @@ fn decode_sockaddr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> Op
             // path, while a Linux abstract name (leading NUL) may hold NULs.
             let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
             let available = (len as usize).saturating_sub(offset).min(std::mem::size_of::<libc::sockaddr_un>() - offset);
+            // SAFETY: `offset + available' is at most sockaddr_un's size,
+            // within STORAGE, whose bytes are initialised.
             let path = unsafe { std::slice::from_raw_parts(base.add(offset), available) };
             let name = if path.first().is_some_and(|&b| b != 0) { path.iter().position(|&b| b == 0).map_or(path, |end| &path[..end]) } else { path };
             Some(Address::Local(name.to_vec()))
@@ -587,9 +629,13 @@ fn decode_sockaddr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> Op
 
 /// getsockname (LOCAL) or getpeername of the socket FD.
 pub(crate) fn socket_address(fd: RawFd, local: bool) -> io::Result<Option<Address>> {
+    // SAFETY: sockaddr_storage is plain integers and arrays, valid as all
+    // zeroes.
     let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
     let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
+    // SAFETY: getsockname and getpeername write at most LEN bytes into the
+    // storage, and LEN back.
     let result = if local { unsafe { libc::getsockname(fd, sa, &mut len) } } else { unsafe { libc::getpeername(fd, sa, &mut len) } };
     if result != 0 {
         return Err(last_error());
@@ -608,6 +654,7 @@ pub(crate) fn accept(listener: RawFd) -> io::Result<(OwnedFd, Option<Address>)> 
 pub(crate) fn socket_error(fd: RawFd) -> i32 {
     let mut error: libc::c_int = 0;
     let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: getsockopt writes at most LEN bytes into the live int `error'.
     if unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, (&mut error as *mut libc::c_int).cast(), &mut len) } != 0 {
         return last_error().raw_os_error().unwrap_or(libc::ECONNREFUSED);
     }
@@ -617,15 +664,19 @@ pub(crate) fn socket_error(fd: RawFd) -> i32 {
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.
 pub(crate) fn tty_pgrp(fd: RawFd) -> Option<i32> {
     let mut group: libc::pid_t = -1;
+    // SAFETY: TIOCGPGRP writes one pid_t into the live local it is given.
     (unsafe { libc::ioctl(fd, libc::TIOCGPGRP, &mut group) } != -1).then_some(group)
 }
 
 /// GNU's strsignal text for SIGNAL (glibc's English table).
 pub(crate) fn signal_description(signal: i32) -> Option<String> {
+    // SAFETY: strsignal accepts any number.
     let text = unsafe { libc::strsignal(signal) };
     if text.is_null() {
         return None;
     }
+    // SAFETY: strsignal's text is NUL-terminated and valid until the next
+    // call on this thread; it is copied before that.
     Some(unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned())
 }
 
@@ -703,6 +754,7 @@ mod tests {
         reaper.adopt(Vec::new(), spawn_reaper);
         assert!(reaper.lock().wake.is_some());
         poll_until("the orphan to be reaped", || reaper.lock().orphans.is_empty());
+        // SAFETY: waitpid accepts a null status pointer.
         assert_eq!(unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
         assert_eq!(last_error().raw_os_error(), Some(libc::ECHILD));
         assert!(!file.exists());
