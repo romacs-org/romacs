@@ -53,7 +53,6 @@ import json
 import math
 import os
 from pathlib import Path
-import resource
 import shutil
 import signal
 import subprocess
@@ -192,13 +191,16 @@ def bounded(what, argv, timeout, **kwargs):
     """ARGV run to its end within TIMEOUT seconds of CPU, its output captured;
     a session that waits without working ends at WALL_FACTOR times that."""
     cpu = max(1, math.ceil(timeout))
+    # prlimit, not a preexec_fn: callers run this from a thread pool.
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout * WALL_FACTOR,
-                              preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 10)), **kwargs)
+        done = subprocess.run(['prlimit', f'--cpu={cpu}:{cpu + 1}', '--', *argv], capture_output=True, text=True,
+                              timeout=timeout * WALL_FACTOR, **kwargs)
     except subprocess.TimeoutExpired:
         raise Refused(f'{what}: no end after {timeout * WALL_FACTOR:.0f}s, within {cpu}s of CPU: hung') from None
     if done.returncode == -signal.SIGXCPU:
         raise Refused(f'{what}: used its {cpu}s of CPU')
+    if done.returncode == -signal.SIGKILL:
+        raise Refused(f'{what}: killed (SIGKILL) under a CPU limit of {cpu}s, hard {cpu + 1}s')
     return done
 
 
@@ -218,10 +220,10 @@ def prepare(binary, home, timeout):
         (home / sub).mkdir(parents=True, exist_ok=True)
     built = bounded('--world-build', [str(binary), '--loadup', '--world-build'], timeout, env=private_env(home), cwd=home)
     if built.returncode != 0:
-        raise Refused(f'--world-build: {built.stderr.strip()[-600:]}')
+        raise Refused(f'--world-build: exit {built.returncode}: {built.stderr.strip()[-600:]}')
     probes = [probe_entry(raw) for raw in batch(binary, home, '(scaling-list)', timeout)]
     store = home / 'cache' / 'romacs' / 'worlds'
-    deadline = time.monotonic() + timeout * WALL_FACTOR
+    deadline = time.monotonic() + timeout
     while sum(1 for image in store.glob('*.rwi') if image.with_suffix('.json').is_file()) < 2:
         if time.monotonic() > deadline:
             raise Refused('no batch world after the first session')

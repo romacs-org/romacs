@@ -96,6 +96,11 @@ class Bounded(unittest.TestCase):
         with self.assertRaisesRegex(s.Refused, r'spin: used its 1s of CPU'):
             s.bounded('spin', [sys.executable, '-c', 'while True: pass'], 1)
 
+    def test_a_session_past_its_hard_limit_says_so(self):
+        ignore = 'import signal; signal.signal(signal.SIGXCPU, signal.SIG_IGN)\nwhile True: pass'
+        with self.assertRaisesRegex(s.Refused, r'ignore: killed \(SIGKILL\) under a CPU limit of 1s, hard 2s'):
+            s.bounded('ignore', [sys.executable, '-c', ignore], 1)
+
     def test_a_session_that_waits_without_working_is_refused_by_the_wall_clock(self):
         with self.assertRaisesRegex(s.Refused, r'sleep: no end after 2s, within 1s of CPU: hung'):
             s.bounded('sleep', [sys.executable, '-c', 'import time; time.sleep(60)'], 0.2)
