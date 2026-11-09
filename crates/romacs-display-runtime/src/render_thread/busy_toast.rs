@@ -45,15 +45,15 @@ impl BusyToast {
         self.due
     }
 
-    /// At NOW, when a check is due, ask BUSY_FOR how long the evaluator has
-    /// run its command: whether the indicator appeared or went.
+    /// At NOW, when a check is due, ask `busy_for` how long the evaluator
+    /// has run its command: whether the indicator appeared or went.
     pub(super) fn update(&mut self, now: EventTime, busy_for: impl FnOnce() -> Option<Duration>) -> bool {
         if self.due.is_none_or(|due| now < due) {
             return false;
         }
         let busy = busy_for();
         let shown = busy.is_some_and(|ran| ran >= SHOW_AFTER);
-        self.due = busy.map(|ran| now.plus(if shown { RECHECK } else { SHOW_AFTER - ran }));
+        self.due = busy.map(|ran| now.plus(if shown { RECHECK } else { SHOW_AFTER.saturating_sub(ran) }));
         std::mem::replace(&mut self.shown, shown) != shown
     }
 }
@@ -123,8 +123,8 @@ mod tests {
         let later = start.plus(ms(1000));
         assert!(toast.update(later, || Some(ms(40))), "another command: hidden until it lasts");
         assert!(!toast.shown());
-        assert_eq!(toast.deadline(), Some(later.plus(SHOW_AFTER - ms(40))), "asked again when it could have");
-        assert!(toast.update(later.plus(SHOW_AFTER - ms(40)), || Some(SHOW_AFTER)));
+        assert_eq!(toast.deadline(), Some(later.plus(ms(260))), "asked again when it could have");
+        assert!(toast.update(later.plus(ms(260)), || Some(SHOW_AFTER)));
         assert!(toast.shown());
     }
 }

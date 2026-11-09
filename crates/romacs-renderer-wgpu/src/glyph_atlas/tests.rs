@@ -1397,7 +1397,7 @@ fn mask_glyph_identities_ignore_the_foreground() {
 /// in the catalog the first time, a stall of hundreds of milliseconds.
 #[test]
 fn faceless_text_draws_in_the_frames_default_face() {
-    use romacs_display_protocol::font::FontSlantKind;
+    use romacs_display_protocol::font::{FontSlantKind, FontUnderline, ResolvedFontAdvance};
 
     let Some((device, queue, mut atlas)) = try_test_device_and_atlas() else {
         return;
@@ -1422,7 +1422,7 @@ fn faceless_text_draws_in_the_frames_default_face() {
         None,
     );
     let id = ResolvedFontId(611);
-    frame.fonts.insert(id, ResolvedFont { underline: Default::default(),
+    frame.fonts.insert(id, ResolvedFont { underline: FontUnderline::default(),
         id,
         replay: file_replay_for(&identity),
         identity,
@@ -1436,7 +1436,7 @@ fn faceless_text_draws_in_the_frames_default_face() {
         ascent_px: 12.0,
         descent_px: 4.0,
         space_advance_px: 8.0,
-        glyph_advance: Default::default(),
+        glyph_advance: ResolvedFontAdvance::default(),
     });
     let mut face = Face::new(FaceId::new(0));
     face.font_family = "M PLUS 1 Code".to_owned();

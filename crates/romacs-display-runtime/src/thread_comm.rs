@@ -655,7 +655,7 @@ impl RenderComms {
         }
     }
 
-    /// How long the evaluator has been busy, while it is (`InputInterrupt').
+    /// How long the evaluator has been busy, while it is (`InputInterrupt`).
     pub(crate) fn evaluator_busy_for(&self) -> Option<std::time::Duration> {
         self.input_interrupt.as_ref().and_then(|hook| hook.busy_for())
     }

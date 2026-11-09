@@ -2785,7 +2785,8 @@ impl WgpuGlyphAtlas {
         face: Option<&Face>,
         subpixel: SubpixelRequest,
     ) -> Option<GlyphAtlasHandle> {
-        match self.get_or_create_atlas_result(device, queue, key, face, subpixel) {
+        let default_face = if face.is_none() { self.default_face.clone() } else { None };
+        match self.get_or_create_atlas_result(device, queue, key, face.or(default_face.as_deref()), subpixel) {
             Ok(handle) => Some(handle),
             Err(err) => {
                 if !matches!(err, GlyphAtlasError::Whitespace) {
@@ -2806,8 +2807,6 @@ impl WgpuGlyphAtlas {
     ) -> Result<GlyphAtlasHandle, GlyphAtlasError> {
         let c =
             char::from_u32(key.charcode).ok_or(GlyphAtlasError::InvalidCharCode(key.charcode))?;
-        let default_face = if face.is_none() { self.default_face.clone() } else { None };
-        let face = face.or(default_face.as_deref());
         let mut glyph_identity = key.identity();
         glyph_identity.font_identity = self.glyph_font_identity_for_char(face, c);
         let cache_key = CachedGlyphKey {
