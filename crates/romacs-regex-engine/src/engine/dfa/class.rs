@@ -1,3 +1,8 @@
+//! Character classes: characters partitioned by the vector of the NFA's
+//! per-character test results, so the DFA caches one transition per class.
+//!
+//! GNU has no counterpart.
+
 use crate::SyntaxClass;
 use crate::emacs_char;
 use crate::engine::dfa::nfa::{Assertions, Nfa, Predicate};
@@ -9,10 +14,6 @@ use crate::engine::pattern::CompiledPattern;
 use crate::engine::syntax::{LookupClassKey, SyntaxCacheKey, SyntaxLookup};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-
-// ---------------------------------------------------------------------------
-// Character classes (C3)
-// ---------------------------------------------------------------------------
 
 /// Facts about one character that the zero-width assertions read, besides
 /// the predicates.  Only the facts a pattern's assertions read are kept

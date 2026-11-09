@@ -126,7 +126,7 @@ pub struct MatchScratch {
     /// Work done by the candidates of the current search, in bytes stepped
     /// or failure points popped: `re_search` resets it and hands the rest of
     /// a forward search to the linear matcher once it exceeds what the text
-    /// justifies ([`search_work_budget`]).
+    /// justifies (`search::search_work_budget`).
     pub(crate) work: u64,
     /// The work at which the current search switches ([`note_search_work`]);
     /// `u64::MAX` outside a forward search that may switch.

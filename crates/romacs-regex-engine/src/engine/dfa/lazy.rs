@@ -1,3 +1,9 @@
+//! The lazy DFA: states are an NFA kernel plus facts about the previous
+//! character, and transitions are cached per (state, class) as they are
+//! first taken, within a memory cap.
+//!
+//! GNU has no counterpart.
+
 use crate::engine::dfa::class::{
     BaseTableView, CharClasses, Facts, NO_FACTS, TooManyClasses, UNKNOWN_CLASS,
 };
@@ -6,10 +12,6 @@ use crate::engine::dfa::nfa::{Assertions, ClosureScratch, KernelItem, Nfa, Place
 use crate::engine::pattern::CompiledPattern;
 use crate::engine::syntax::SyntaxLookup;
 use rustc_hash::FxHashMap;
-
-// ---------------------------------------------------------------------------
-// The lazy DFA (C4)
-// ---------------------------------------------------------------------------
 
 /// The DFA's verdict on one candidate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -361,7 +363,7 @@ impl ExistenceDfa {
 
     /// Can a match of `pattern` start at `p` and end by `stop`?  The same
     /// question the backtracker answers at the candidate, without registers.
-    /// Inlined into the out-of-line [`DfaLease::candidate`]: a rejection the
+    /// Inlined into the out-of-line [`DfaLease::candidate`](crate::engine::dfa::filter::DfaLease::candidate): a rejection the
     /// cached loop settles costs one call from `re_search`.
     #[inline]
     #[allow(clippy::too_many_arguments)]

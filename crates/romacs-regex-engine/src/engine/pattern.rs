@@ -132,13 +132,13 @@ macro_rules! compiled_pattern_struct {
         /// True if the pattern used a non-greedy optional `??`.  Set at the sole
         /// `??` emit site, which produces GNU's `on_failure_jump` + `jump` shape
         /// (regex-emacs.c:2009-2015; no keep-string jump).  It keeps the pattern
-        /// off the Pike VM (see [`compute_pike_eligible`]), whose priority order
+        /// off the Pike VM (see [`compute_pike_eligible`](crate::engine::compile::seal::compute_pike_eligible)), whose priority order
         /// for that skip-first split has not been validated.
         $vis has_nongreedy_optional: bool,
 
         /// True if this pattern is eligible for the non-backtracking Pike VM
-        /// fast path (see [`pike_match`]).  Computed once at compile time by
-        /// [`compute_pike_eligible`]: the bytecode must contain no
+        /// fast path (see [`pike_match`](crate::engine::matcher::pike_match)).  Computed once at compile time by
+        /// [`compute_pike_eligible`](crate::engine::compile::seal::compute_pike_eligible): the bytecode must contain no
         /// backreference (`Duplicate`), no interval-counter op
         /// (`SucceedN`/`JumpN`/`SetNumberAt` from `\{n,m\}`), and the pattern
         /// must not be POSIX-longest — every remaining op is simulated
@@ -155,7 +155,7 @@ macro_rules! compiled_pattern_struct {
         /// GNU's empty-loop rule.
         $vis linear: linear::Linear,
 
-        /// True once [`validate_sealed_buffer`] proved every opcode byte valid,
+        /// True once [`validate_sealed_buffer`](crate::engine::compile::seal::validate_sealed_buffer) proved every opcode byte valid,
         /// every operand span in-bounds, and every jump target on an op
         /// boundary — the backtracker then dispatches with unchecked fetches
         /// (the seal-then-trust protocol the bytecode VM uses for `seal_ops`).
@@ -179,7 +179,7 @@ macro_rules! compiled_pattern_struct {
         /// no such literal set could be proven (fall back to the fastmap — always
         /// correct).  A case-folded pattern gets the ASCII case variants of its
         /// literals, used only while its translation folds nothing non-ASCII into
-        /// ASCII (see [`fold_prefix_literals`]).  Never set for patterns whose
+        /// ASCII (see [`fold_prefix_literals`](crate::engine::scan::fold_prefix_literals)).  Never set for patterns whose
         /// only required literals are single bytes (the fastmap's memchr already
         /// handles those).
         ///
@@ -191,9 +191,9 @@ macro_rules! compiled_pattern_struct {
         $vis prefilter: std::cell::OnceCell<Option<LiteralPrefilter>>,
 
         /// The zero-width anchor every path from the start meets before it
-        /// consumes anything ([`start_anchor`]), when that is more than the first
+        /// consumes anything ([`start_anchor`](crate::engine::search::start_anchor)), when that is more than the first
         /// opcode shows (`\(?:^a\|^b\)`).  Computed only under
-        /// `ROMACS_REGEX_ANCHOR_ALT` ([`anchor_alt_enabled`]); `None` otherwise.
+        /// `ROMACS_REGEX_ANCHOR_ALT` ([`anchor_alt_enabled`](crate::engine::search::anchor_alt_enabled)); `None` otherwise.
         $vis start_anchor: StartAnchor,
 
         /// The existence DFA's slot (`ROMACS_REGEX_DFA`, [`dfa::DfaCell`]): built

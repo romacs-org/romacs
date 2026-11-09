@@ -42,7 +42,6 @@
 
 // Every unsafe block says why it holds (the unsafe census keeps the count).
 #![deny(clippy::undocumented_unsafe_blocks)]
-
 // The API seal, checked by doctests in builds without the seams (with them,
 // these items are reachable on purpose).
 #![cfg_attr(

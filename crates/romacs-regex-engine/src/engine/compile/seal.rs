@@ -158,7 +158,7 @@ fn rewrite_keep_string_loops(orig: &[u8]) -> Option<Option<Vec<u8>>> {
 }
 
 /// Walk the compiled bytecode and decide whether the Pike VM (see
-/// [`pike_match`]) can simulate it byte-exactly.
+/// [`pike_match`](crate::engine::matcher::pike_match)) can simulate it byte-exactly.
 ///
 /// The Pike VM reproduces Emacs's leftmost-greedy NFA semantics by
 /// exploring the SAME bytecode the backtracker does, in the SAME priority

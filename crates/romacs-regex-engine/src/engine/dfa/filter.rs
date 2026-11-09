@@ -1,3 +1,9 @@
+//! The candidate filter `re_search` consults: per pattern, whether a DFA is
+//! built, warm or given up, and per candidate, whether any match can start
+//! there.  Also the `ROMACS_REGEX_DFA*` knobs and the statistics.
+//!
+//! GNU has no counterpart.
+
 use crate::engine::dfa::class::ClassContext;
 use crate::engine::dfa::lazy::{DfaCounters, DfaGaveUp, ExistenceDfa, Exists, MEMORY_CAP};
 use crate::engine::dfa::nfa::{DfaIneligible, Nfa};
@@ -8,10 +14,6 @@ use crate::engine::matcher::re_match_candidate_in;
 use crate::engine::pattern::{CompiledPattern, MatchRegisters};
 use crate::engine::syntax::SyntaxLookup;
 use std::cell::{RefCell, RefMut};
-
-// ---------------------------------------------------------------------------
-// The candidate filter in `re_search` (C5)
-// ---------------------------------------------------------------------------
 
 /// `ROMACS_REGEX_DFA`: whether `re_search` filters candidates through the
 /// existence DFA.

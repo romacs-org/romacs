@@ -1,3 +1,10 @@
+//! The NFA the existence DFA is built from: the consuming positions of the
+//! pattern's rewind view, the per-character test each runs, and the epsilon
+//! closure, whose zero-width assertions run the matcher's own tests at the
+//! real text position.
+//!
+//! GNU has no counterpart: its only engine is the backtracker.
+
 use crate::emacs_char;
 use crate::engine::class::posix_class_bits_read_syntax;
 use crate::engine::matcher::step::{SyntaxAssertion, evaluate_syntax_assertion};
@@ -6,10 +13,6 @@ use crate::engine::pattern::CompiledPattern;
 use crate::engine::syntax::SyntaxLookup;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-
-// ---------------------------------------------------------------------------
-// The NFA over the rewind view (C2)
-// ---------------------------------------------------------------------------
 
 /// Why a pattern has no existence DFA.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
