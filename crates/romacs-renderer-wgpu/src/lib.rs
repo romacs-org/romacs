@@ -16,7 +16,7 @@ pub mod image_cache;
 pub use romacs_imaging::{
     image_bands, image_probe, image_scale, image_sequence, svg, svg_animation, xbm, xpm,
 };
-pub mod media_budget;
+pub(crate) mod media_budget;
 pub mod model;
 #[cfg(target_os = "linux")]
 pub mod native_presentation;
@@ -53,9 +53,8 @@ pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
 pub use external_buffer::DmaBufBuffer;
 pub use external_buffer::{BufferFormat, ExternalBuffer, PlatformBuffer, SharedMemoryBuffer};
 pub(crate) use glyph_atlas::{ComposedGlyphKey, GlyphAtlasHandle, GlyphPixelKind, RasterizeResult};
-pub use image_cache::{
-    CachedImage, FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState,
-};
+pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
+pub(crate) use image_cache::{CachedImage};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
     BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudgetOwner, PaneBlit,
@@ -67,12 +66,16 @@ pub use shader_surface::{
     validate_surface_wgsl,
 };
 pub use tooltip_layout::TooltipLayout;
-pub use vertex::{GlyphVertex, Uniforms};
+pub use vertex::{Uniforms};
+pub(crate) use vertex::{GlyphVertex};
 #[cfg(feature = "video")]
-pub use video_cache::{CachedVideo, VideoCache, VideoRecoveryManifest, VideoState};
+pub use video_cache::{VideoRecoveryManifest};
+#[cfg(feature = "video")]
+pub(crate) use video_cache::{CachedVideo, VideoCache, VideoState};
 #[cfg(all(feature = "webview", target_os = "linux"))]
 pub use webview_cache::{CachedWebView, WgpuWebViewCache};
-pub use glyph_atlas::{GlyphKey, WgpuGlyphAtlas, allocator, pages, types};
+pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
+pub(crate) use glyph_atlas::{GlyphKey};
 pub(crate) use gpu_policy::power_preference;
 pub(crate) use renderer::{
     GpuBudget, RowDamageInfo, RowReuseStats, SnapshotId, SnapshotPool, SnapshotResources,

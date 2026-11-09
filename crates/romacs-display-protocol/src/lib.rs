@@ -10,7 +10,7 @@ pub mod animated_visual;
 pub(crate) mod child_frame_animation;
 pub mod clipboard;
 pub mod cursor;
-pub mod display_scale;
+pub(crate) mod display_scale;
 pub mod dma_buf;
 pub(crate) mod effect_command;
 pub mod effect_config;

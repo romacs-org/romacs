@@ -233,7 +233,7 @@ impl VideoSubmissionTracker {
 
 /// Compatibility presentation of the typed native session lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VideoState {
+pub(crate) enum VideoState {
     Loading,
     Playing,
     Paused,
@@ -257,7 +257,7 @@ impl From<VideoSessionState> for VideoState {
 
 /// Renderer-facing metadata. The authoritative frame, GPU handles, and native
 /// lease remain together in [`VideoSystem`].
-pub struct CachedVideo {
+pub(crate) struct CachedVideo {
     pub id: VideoId,
     pub width: u32,
     pub height: u32,
@@ -511,7 +511,7 @@ impl VideoSystemState {
 
 /// Cross-platform video cache. Decode and native-surface import belong to
 /// `romacs-video`; this facade maintains renderer metadata and budget events.
-pub struct VideoCache {
+pub(crate) struct VideoCache {
     system: VideoSystemState,
     sampling: Option<VideoSamplingResources>,
     channel_targets: Option<VideoChannelTargets>,

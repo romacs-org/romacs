@@ -1,7 +1,8 @@
 //! Owned tooltip presentation requests. Scheduling belongs to the producer.
 mod lifetime;
+pub(crate) use lifetime::TooltipClient;
 pub(crate) use lifetime::TooltipGeneration;
-pub use lifetime::{TooltipClient, TooltipContext, TooltipTicket};
+pub use lifetime::{TooltipContext, TooltipTicket};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuTooltips {

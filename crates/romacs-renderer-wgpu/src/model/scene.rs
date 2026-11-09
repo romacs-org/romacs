@@ -190,7 +190,7 @@ impl ModelScene {
         })
     }
 
-    pub fn meshes(&self) -> &[ObjMesh] {
+    pub(crate) fn meshes(&self) -> &[ObjMesh] {
         &self.meshes
     }
 

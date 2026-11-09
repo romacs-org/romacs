@@ -39,7 +39,7 @@ use swash::zeno::{Angle, Format, Transform, Vector};
 /// the atlas keys on [`GlyphIdentity`] (via [`GlyphKey::identity`]), which
 /// excludes `face_id`. See [`GlyphIdentity`] for why.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct GlyphKey {
+pub(crate) struct GlyphKey {
     /// Character code
     pub charcode: u32,
     /// Face ID that requested this glyph. Carried for `key_uses_default_font_metrics`
@@ -79,7 +79,7 @@ pub struct GlyphKey {
 /// [`GlyphKey::identity`] to populate it -- there is no hand-written `Hash`/`Eq`
 /// to silently fall out of sync.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct GlyphIdentity {
+pub(crate) struct GlyphIdentity {
     pub charcode: u32,
     pub font_size_bits: u32,
     pub font_identity: u64,
@@ -2262,7 +2262,7 @@ impl WgpuGlyphAtlas {
     }
 
     /// Get the default line height
-    pub fn default_line_height(&self) -> f32 {
+    pub(crate) fn default_line_height(&self) -> f32 {
         self.default_line_height
     }
 

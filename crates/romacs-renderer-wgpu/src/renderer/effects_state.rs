@@ -82,26 +82,6 @@ impl WgpuRenderer {
         offset
     }
 
-    /// Trigger edge snap indicator
-    pub fn trigger_edge_snap(
-        &mut self,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-    ) {
-        let duration_ms = self.effects.edge_snap.duration_ms;
-        self.primary_frame_effects_mut().trigger_edge_snap(
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            now,
-            duration_ms,
-        );
-    }
-
     /// Trigger click halo at position
     pub fn trigger_click_halo(&mut self, x: f32, y: f32, now: std::time::Instant) {
         let duration_ms = self.effects.click_halo.duration_ms;
@@ -152,12 +132,6 @@ impl WgpuRenderer {
         } else {
             0.0
         }
-    }
-
-    /// Trigger a cursor error pulse
-    pub fn trigger_cursor_error_pulse(&mut self, now: std::time::Instant) {
-        self.primary_frame_effects_mut()
-            .trigger_cursor_error_pulse(now);
     }
 
     pub fn trigger_transient_resize_padding(
@@ -436,35 +410,6 @@ impl RendererFrameEffectsRef<'_> {
             started: EventTime::from_observed_instant(now),
             duration: std::time::Duration::from_millis(duration_ms as u64),
         });
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_edge_snap(
-        &mut self,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-        duration_ms: u32,
-    ) {
-        self.renderer.fx.edge_snap.snaps.push(EdgeSnapEntry {
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            started: EventTime::from_observed_instant(now),
-            duration: std::time::Duration::from_millis(duration_ms as u64),
-        });
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`; it stays an
-    // `Instant` only because `romacs-display-runtime` still bridges through
-    // `into_instant()` at the call site.
-    fn trigger_cursor_error_pulse(&mut self, now: std::time::Instant) {
-        self.renderer.fx.error_pulse.started = Some(EventTime::from_observed_instant(now));
     }
 
     fn spawn_ripple(&mut self, cx: f32, cy: f32) {

@@ -1072,10 +1072,6 @@ impl ImageCache {
         });
     }
 
-    pub(crate) fn retire_sequence(&self, retirement: ImageSequenceRetirement) {
-        self.sequence_cache.retire(retirement);
-    }
-
     pub(crate) fn memory_usage(&self) -> ImageCacheUsage {
         ImageCacheUsage::new(
             u64::try_from(self.total_memory).unwrap_or(u64::MAX),

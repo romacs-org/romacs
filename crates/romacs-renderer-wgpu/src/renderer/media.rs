@@ -93,37 +93,6 @@ impl WgpuRenderer {
         }
     }
 
-    /// Load image from file path with a pre-allocated ID (for threaded mode)
-    #[allow(clippy::too_many_arguments)]
-    pub fn load_image_file_with_id(
-        &mut self,
-        load: ImageLoadToken,
-        path: &str,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        realization: ImageRealization,
-        colors: ImageColorContext,
-        mask: ImageMaskPolicy,
-        animation: ImageAnimationPolicy,
-        frame: ImageFrameIndex,
-        sequence: ImageSequenceId,
-        identity: romacs_display_protocol::image_diagnostic::ImageLoadIdentity,
-    ) {
-        self.caches.image.load_file_with_id(
-            load,
-            path,
-            size,
-            rotation,
-            realization,
-            colors,
-            mask,
-            animation,
-            frame,
-            sequence,
-            identity,
-        )
-    }
-
     /// Load image from data with pre-allocated ID (for threaded mode)
     #[allow(clippy::too_many_arguments)]
     pub fn load_image_data_with_id(
@@ -157,12 +126,6 @@ impl WgpuRenderer {
         )
     }
 
-    /// Invalidate CPU-side animation decoder/compositor state independently
-    /// from frame textures.
-    pub fn retire_image_sequence(&mut self, retirement: ImageSequenceRetirement) {
-        self.caches.image.retire_sequence(retirement);
-    }
-
     /// Load image from raw ARGB32 pixel data with pre-allocated ID (for threaded mode)
     pub fn load_image_argb32_with_id(
         &mut self,
@@ -175,20 +138,6 @@ impl WgpuRenderer {
         self.caches
             .image
             .load_raw_argb32_with_id(load, data, width, height, stride)
-    }
-
-    /// Load image from raw RGB24 pixel data with pre-allocated ID (for threaded mode)
-    pub fn load_image_rgb24_with_id(
-        &mut self,
-        load: ImageLoadToken,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) {
-        self.caches
-            .image
-            .load_raw_rgb24_with_id(load, data, width, height, stride)
     }
 
     /// Get image dimensions (works for pending and loaded images)
@@ -422,32 +371,6 @@ impl WgpuRenderer {
             channel0,
         )?;
         self.register_surface_bytes(id, width_px, height_px, recreatable);
-        Ok(())
-    }
-
-    /// Create a static surface from raw RGBA8 pixel data. Pixel surfaces are
-    /// only created through the imperative API, so they are never
-    /// budget-evictable.
-    pub fn create_pixel_surface(
-        &mut self,
-        id: u32,
-        data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> Result<(), String> {
-        let layout = self.caches.image.bind_group_layout();
-        let sampler = self.caches.image.sampler();
-        let (width_px, height_px) = self.caches.surface.create_pixels(
-            &self.device,
-            &self.queue,
-            layout,
-            sampler,
-            id,
-            data,
-            width,
-            height,
-        )?;
-        self.register_surface_bytes(id, width_px, height_px, false);
         Ok(())
     }
 
@@ -702,24 +625,6 @@ impl WgpuRenderer {
         self.frame_post = Some(post);
         tracing::info!("frame post shader installed");
         Ok(())
-    }
-
-    /// Update one named uniform on the installed frame post shader (cheap;
-    /// no recompile). Unknown names warn inside [`crate::frame_post::FramePost::set_uniform`];
-    /// no shader installed warns here — the host errors to Lisp before this
-    /// point, so hitting it means install/remove raced ahead in the queue.
-    pub fn set_frame_post_uniform(&mut self, name: &str, value: [f32; 4]) {
-        match self.frame_post.as_mut() {
-            Some(post) => post.set_uniform(name, value),
-            None => tracing::warn!("set_frame_post_uniform: no frame post shader installed"),
-        }
-    }
-
-    /// Remove the full-frame post shader.
-    pub fn clear_frame_post(&mut self) {
-        if self.frame_post.take().is_some() {
-            tracing::info!("frame post shader removed");
-        }
     }
 
     /// Whether a frame post shader is installed.

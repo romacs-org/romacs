@@ -63,7 +63,7 @@ impl TextureVertex {
 /// Vertex for glyph rendering (textured with color).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct GlyphVertex {
+pub(crate) struct GlyphVertex {
     pub position: [f32; 2],
     pub tex_coords: [f32; 2],
     pub color: [f32; 4],

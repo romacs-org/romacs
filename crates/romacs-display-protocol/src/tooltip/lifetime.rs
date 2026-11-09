@@ -47,7 +47,7 @@ impl TooltipTicket {
         self.context.generation() == self.generation
             && self.visibility.load(Ordering::Acquire) != Visibility::Cancelled as u8
     }
-    pub fn same_request(&self, other: &Self) -> bool {
+    pub(crate) fn same_request(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.visibility, &other.visibility)
     }
     pub fn mark_visible(&self) -> bool {
@@ -75,7 +75,7 @@ impl TooltipTicket {
 
 /// Evaluator-side intent owner. Capture before Lisp schedules delayed help.
 #[derive(Default)]
-pub struct TooltipClient {
+pub(crate) struct TooltipClient {
     context: Arc<TooltipContext>,
     current: Option<TooltipTicket>,
 }

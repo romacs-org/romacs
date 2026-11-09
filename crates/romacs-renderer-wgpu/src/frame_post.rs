@@ -138,20 +138,6 @@ impl FramePost {
         })
     }
 
-    /// Update one named uniform; unknown names are ignored with a warning
-    /// (the accessor set is fixed at install time). No dirty flag needed:
-    /// the post pass runs every frame while installed, so the next frame
-    /// picks the value up — no recompile.
-    pub fn set_uniform(&mut self, name: &str, value: [f32; 4]) {
-        match self.uniform_slots.get(name) {
-            Some((slot, _)) => self.custom[*slot] = value,
-            None => tracing::warn!(
-                "frame shader has no uniform {name:?} (accessor {})",
-                uniform_accessor_name(name)
-            ),
-        }
-    }
-
     /// Record the post pass: sample `src_view` (the rendered frame), write the
     /// shaded result into `dst_view`. `width_px`/`height_px` are physical
     /// pixels; `mouse` is the pointer in physical px, y-up (zeros when

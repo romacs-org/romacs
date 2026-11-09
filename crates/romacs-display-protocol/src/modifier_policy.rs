@@ -194,19 +194,6 @@ pub(crate) enum SideAssignment {
     Explicit(ModifierAssignment),
 }
 
-/// How winit should rewrite Option-key chords, mirror of
-/// `winit::platform::macos::OptionAsAlt`.
-///
-/// Defined here so the protocol crate stays winit-free; the macOS display
-/// runtime maps this 1:1 onto winit's shape.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum OptionAsAltShape {
-    None,
-    LeftOnly,
-    RightOnly,
-    Both,
-}
-
 /// A modifier bit in the frontend transport.
 ///
 /// Bit positions are wire values shared with `romacs-core`'s `RENDER_*` and
@@ -354,40 +341,6 @@ impl ModifierPolicy {
             || self.family_bits_for_option(Some(ModifierSideState::RightOnly), kind) != 0
     }
 
-    /// Per-side Option mapping, the shape winit's `set_option_as_alt`
-    /// needs.
-    ///
-    /// A side is command-like when EITHER of its ordinary or function slots
-    /// maps to a real modifier: GNU re-derives characters with
-    /// `UCKeyTranslate' only when a control-like modifier is also down, and
-    /// a chord on a function key consults the :function slot
-    /// (`nsterm.m:2722-2725`).  Sides mapped to `none' must keep composing
-    /// characters, which is exactly what winit's non-rewriting shapes do.
-    pub fn option_as_alt_shape(&self) -> OptionAsAltShape {
-        let left = self.family_bits_for_option(
-            Some(ModifierSideState::LeftOnly),
-            ModifierEventKind::Ordinary,
-        ) != 0
-            || self.family_bits_for_option(
-                Some(ModifierSideState::LeftOnly),
-                ModifierEventKind::Function,
-            ) != 0;
-        let right = self.family_bits_for_option(
-            Some(ModifierSideState::RightOnly),
-            ModifierEventKind::Ordinary,
-        ) != 0
-            || self.family_bits_for_option(
-                Some(ModifierSideState::RightOnly),
-                ModifierEventKind::Function,
-            ) != 0;
-        match (left, right) {
-            (true, true) => OptionAsAltShape::Both,
-            (true, false) => OptionAsAltShape::LeftOnly,
-            (false, true) => OptionAsAltShape::RightOnly,
-            (false, false) => OptionAsAltShape::None,
-        }
-    }
-
     fn family_bits_for_option(
         &self,
         side: Option<ModifierSideState>,
@@ -458,16 +411,16 @@ impl ModifierPolicy {
         }
     }
 
-    pub fn with_option(self, value: EmacsModifierKey) -> Self {
+    pub(crate) fn with_option(self, value: EmacsModifierKey) -> Self {
         self.with_option_assignment(Some(value), Some(value), Some(value))
     }
 
-    pub fn with_option_none(self) -> Self {
+    pub(crate) fn with_option_none(self) -> Self {
         self.with_option_assignment(None, None, None)
     }
 
     /// Replace BOTH sides of the Option family with per-kind assignments.
-    pub fn with_option_assignment(
+    pub(crate) fn with_option_assignment(
         self,
         ordinary: Option<EmacsModifierKey>,
         function: Option<EmacsModifierKey>,
