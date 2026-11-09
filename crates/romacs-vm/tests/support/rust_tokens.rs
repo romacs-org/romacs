@@ -1,10 +1,6 @@
 //! Rust source as tokens, for the source checks of the rooting rule
-//! (`reentry_sites.rs` for unconverted files, `rooting_brand_rules.rs` for
-//! converted ones).
-
-/// Modules converted to rooting as a type (`romacs_brand`): the brand's own
-/// source checks cover what the types leave.
-pub const CONVERTED: &[&str] = &["command.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
+//! (`reentry_sites.rs` over the whole crate, `rooting_brand_rules.rs` over the
+//! converted modules).
 
 #[derive(Debug, PartialEq)]
 pub enum Token {

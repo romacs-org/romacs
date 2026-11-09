@@ -71,7 +71,7 @@ const CASES: &str = r###"
 
 /// Writes GNU's C makes by assignment (`Vname = value`), which no watcher
 /// hears, reached through the real coding systems and commands.
-const LOADED_CASES: &str = r###"
+const LOADED_CASES: &str = r#"
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'last-coding-system-used 'wv-log) (decode-coding-string "abc" 'utf-8) (encode-coding-string "abc" 'utf-8) (list log last-coding-system-used))
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'coding-category-list 'wv-log) (set-coding-system-priority 'utf-8) (list log (car (coding-system-priority-list))))
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'this-command 'wv-log) (add-variable-watcher 'real-this-command 'wv-log) (let ((this-command 'wv-outer)) (setq log nil) (call-interactively 'ignore) (list log this-command)))
@@ -79,7 +79,7 @@ const LOADED_CASES: &str = r###"
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'buffer-file-coding-system 'wv-log) (with-temp-buffer (rename-buffer "wv-fc") (let ((coding-system-for-read 'utf-8)) (insert-file-contents "/etc/passwd")) (list buffer-file-coding-system (mapcar (lambda (e) (list (nth 0 e) (nth 1 e) (nth 2 e) (nth 3 e))) (nreverse log)))))
 (progn (setq log nil) (fset 'wv-log LOG) (add-variable-watcher 'wv-state 'wv-log) (setq wv-state nil) (setq log nil) (frame-or-buffer-changed-p 'wv-state) (list (mapcar (lambda (e) (list (nth 0 e) (vectorp (nth 1 e)) (nth 2 e))) log) (vectorp wv-state)))
 (progn (setq log nil) (fset 'wv-cmd (lambda () (interactive) (setq log (cons (list 'command (length command-history)) log)))) (add-variable-watcher 'command-history (lambda (s n o w) (setq log (cons (list 'history o (length n) (length command-history)) log)))) (let ((command-history nil)) (setq log nil) (call-interactively 'wv-cmd t) (list (nreverse log) (length command-history))))
-"###;
+"#;
 
 const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w) (buffer-name w) w) (if (boundp s) (symbol-value s) 'void)) log)))";
 
@@ -173,7 +173,7 @@ fn a_queued_write_runs_after_the_rest_of_its_primitive() {
          r#"("No" wv-d1 "Doc")"#),
     ];
     for (source, expected) in cases {
-        assert_eq!(vm.eval_source(source).and_then(|v| v.display()).as_deref(), Ok(expected), "{source}");
+        assert_eq!(vm.eval_source(source).and_then(romacs_vm::Local::display).as_deref(), Ok(expected), "{source}");
     }
 }
 

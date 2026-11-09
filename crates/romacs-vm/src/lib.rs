@@ -1542,9 +1542,9 @@ pub struct Vm {
     /// The writer notifying watchers is an engine write suspended for it,
     /// whose own Values the write roots (`threaded::watched_write`).
     rooted_write: bool,
-    /// A native call's writes its watchers will hear (`watchers.rs'), each with
+    /// A native call's writes its watchers will hear (`watchers.rs`), each with
     /// the buffer current then, until the engine that called it completes it.
-    /// Never traced: no collection runs while it holds any (`may_collect').
+    /// Never traced: no collection runs while it holds any (`may_collect`).
     deferred_writes: Vec<(watchers::NativeWrite, Value)>,
     /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
     gc_stress: gc::Stress,

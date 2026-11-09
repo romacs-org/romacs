@@ -3520,20 +3520,20 @@ fn continue_lent(e: Eng<'_, '_>, to: Continue<'_>) -> Value {
 }
 /// A native call's queued writes, then the instruction.
 #[inline(never)]
-fn drained<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
+fn drained<'x, 'b>(mut m: Orch<'_, 'b, '_>, mut gc: Gc<'_, 'b>, pc: Pc<'x>) -> Continue<'x> {
     if drain_writes(&mut m, gc.by_ref()) { Continue::At(pc) } else { Continue::Stop }
 }
 /// The writes the native call that just returned queued, in order, each a lend
 /// (`watchers.rs`). The call's outcome is already in registers, handler storage
 /// or `e.escape`. Whether all were made: a watcher's escape replaces any pending
 /// one and drops the rest, as it would have ended the call first.
-#[inline(always)]
-fn drain_writes<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>) -> bool {
+#[inline]
+fn drain_writes<'b>(m: &mut Orch<'_, 'b, '_>, gc: Gc<'_, 'b>) -> bool {
     m.leaf((), |e, ()| e.vm.deferred_writes.is_empty()) || make_queued_writes(m, gc)
 }
 #[cold]
 #[inline(never)]
-fn make_queued_writes<'a, 'b>(m: &mut Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>) -> bool {
+fn make_queued_writes<'b>(m: &mut Orch<'_, 'b, '_>, mut gc: Gc<'_, 'b>) -> bool {
     let Some((frame, writes)) = m.leaf((), |e, ()| e.vm.take_deferred()) else { return true };
     let made = (0..writes).all(|i| lend::deferred_write(m, gc.by_ref(), (&frame, i), (), write_made));
     m.leaf(frame, |e, frame| e.vm.drop_frame(frame));
@@ -3827,7 +3827,7 @@ unsafe fn take_step(
 }
 /// Where a step continues once its Values are in registers or handler storage:
 /// PC, after any writes it queued.
-#[inline(always)]
+#[inline]
 fn step_at<'x>(e: &Engine<'_>, pc: Pc<'x>) -> Continue<'x> {
     if e.vm.deferred_writes.is_empty() { Continue::At(pc) } else { Continue::Drain(pc) }
 }

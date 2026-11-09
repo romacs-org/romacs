@@ -454,7 +454,7 @@ impl Vm {
         }
         self.store_deactivated()
     }
-    /// `mark_deactivated' where no watcher hears it.
+    /// `mark_deactivated` where no watcher hears it.
     fn store_deactivated(&mut self) -> Faulty<()> {
         let deactivate = self.change_slots().deactivate;
         // This buffer's own binding is t already: nothing changes. An inherited

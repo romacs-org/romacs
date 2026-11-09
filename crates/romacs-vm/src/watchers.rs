@@ -4,9 +4,9 @@
 //! watcher is funcalled, from whatever write point reached it.
 //!
 //! A native call keeps Values in Rust locals, so it cannot run Lisp that may
-//! collect. Its writes of a trapped variable wait in `deferred_writes', the
+//! collect. Its writes of a trapped variable wait in `deferred_writes`, the
 //! store with its notifications, until the engine that called it has published
-//! the call's outcome (`threaded::drained'). So those watchers run after the
+//! the call's outcome (`threaded::drained`). So those watchers run after the
 //! rest of the call, before the next instruction, and may collect and throw.
 use crate::*;
 use crate::gc::RootFrame;
@@ -15,19 +15,19 @@ use crate::prim::Fault;
 /// What a native write does: the watchers are told, then its store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriteKind {
-    /// GNU `Fset' of VALUE.
+    /// GNU `Fset` of VALUE.
     Set,
-    /// GNU `set_internal' of VALUE with SET_INTERNAL_BIND: `let' reported.
+    /// GNU `set_internal` of VALUE with `SET_INTERNAL_BIND`: `let` reported.
     Bound,
-    /// GNU `Fset_default' of VALUE.
+    /// GNU `Fset_default` of VALUE.
     SetDefault,
-    /// `defvaralias': the variable becomes an alias of the symbol VALUE.
+    /// `defvaralias`: the variable becomes an alias of the symbol VALUE.
     Alias,
-    /// A kept local: `makunbound' reported with VALUE, and no store.
+    /// A kept local: `makunbound` reported with VALUE, and no store.
     Report,
-    /// `makunbound' reported with nil, then the current buffer's binding goes.
+    /// `makunbound` reported with nil, then the current buffer's binding goes.
     ClearLocal,
-    /// A permanent hook's filter: `makunbound' reported with VALUE, then stored.
+    /// A permanent hook's filter: `makunbound` reported with VALUE, then stored.
     StoreLocal,
 }
 romacs_snapshot::snapshot_enum!(WriteKind {
@@ -78,19 +78,20 @@ impl Vm {
         let writes = std::mem::take(&mut self.deferred_writes);
         let values: Vec<Value> = writes.iter().flat_map(|(write, buffer)| {
             let kind = WRITE_KINDS.iter().position(|&kind| kind == write.kind).expect("every kind is listed");
-            [Value::reference(write.slot + 1, 7), write.value, *buffer, Value::integer(kind as i64).expect("a small index")]
+            [Value::reference(write.slot + 1, 7), write.value, *buffer, Value::integer(i64::try_from(kind).expect("a small index")).expect("a small index")]
         }).collect();
         Some((self.root_frame(&values), writes.len()))
     }
-    /// Write number I of a frame `take_deferred' made, in the buffer it was
+    /// Write number I of a frame `take_deferred` made, in the buffer it was
     /// made in: the buffer current now is current again after, or a watcher's
-    /// own `set-buffer' stands when that was the same one. If a watcher has
+    /// own `set-buffer` stands when that was the same one. If a watcher has
     /// killed that buffer the write runs in the current one, as GNU's C goes on
-    /// with `current_buffer', but what it meant for a binding of the killed
+    /// with `current_buffer`, but what it meant for a binding of the killed
     /// buffer has nothing left to do.
     pub(crate) fn perform_deferred(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
-        let slot = self.rooted(frame, 4 * i).payload() as usize - 1;
-        let kind = WRITE_KINDS[self.rooted(frame, 4 * i + 3).integer_value().expect("a kind's index") as usize];
+        let slot = usize::try_from(self.rooted(frame, 4 * i).payload()).expect("a symbol's slot") - 1;
+        let kind = self.rooted(frame, 4 * i + 3).integer_value().and_then(|index| usize::try_from(index).ok()).expect("a kind's index");
+        let kind = WRITE_KINDS[kind];
         let write = NativeWrite { kind, slot, value: self.rooted(frame, 4 * i + 1) };
         let buffer = self.rooted(frame, 4 * i + 2);
         if !self.live_buffer_value(buffer) {
@@ -109,7 +110,7 @@ impl Vm {
         outcome
     }
     /// Tell the watchers, then store. A watcher's escape waits in
-    /// `propagated_escape' behind `Fault::Error'; a store's fault is itself.
+    /// `propagated_escape` behind `Fault::Error`; a store's fault is itself.
     fn perform_write(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
         let NativeWrite { kind, slot, value } = write;
         if kind == WriteKind::Set {

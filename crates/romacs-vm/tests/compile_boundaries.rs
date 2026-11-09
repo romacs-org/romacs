@@ -43,7 +43,7 @@ fn the_sealed_api_is_usable() {
     assert_eq!(read, Some(("(a . b)".to_string(), 7)));
 }
 
-/// Data listed field by field and variant by variant is SnapshotSafe, and a
+/// Data listed field by field and variant by variant is `SnapshotSafe`, and a
 /// capture takes it as the embedder's carry.
 #[test]
 fn listed_data_is_snapshot_safe() {

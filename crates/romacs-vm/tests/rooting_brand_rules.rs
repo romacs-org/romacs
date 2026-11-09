@@ -1,5 +1,5 @@
 //! What the rooting types (`romacs_brand`) leave to source checks, over the
-//! converted modules (`rust_tokens::CONVERTED`):
+//! converted modules (`CONVERTED`):
 //!
 //! - A dispatch moves the raw handler's engine (`Eng`), so nothing after it
 //!   reaches the engine; a store through the raw register pointer, or a stale
@@ -14,8 +14,12 @@
 //!   and deferred runs in converted modules are counted, so they only go down.
 #[path = "support/rust_tokens.rs"]
 mod rust_tokens;
-use rust_tokens::{tokens, Token, CONVERTED};
+use rust_tokens::{tokens, Token};
 use std::path::Path;
+
+/// Modules converted to rooting as a type (`romacs_brand`): these checks cover
+/// what the types leave.
+const CONVERTED: &[&str] = &["command.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
 
 fn source(name: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)).unwrap()

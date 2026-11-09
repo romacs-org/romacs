@@ -1,6 +1,5 @@
-//! The stand-in engine the rooting fixtures share: `src/brand.rs`'s rules, proved
-//! on the types themselves, with no VM behind them.
-#![allow(dead_code)]
+//! The stand-in engine the rooting fixtures share: the crate's rules, proved on
+//! the types themselves, with no VM behind them.
 use romacs_brand::*;
 /// A heap value of the stand-in engine: a word a collection may free or move.
 pub struct Word(pub u64);

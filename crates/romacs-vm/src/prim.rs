@@ -1163,8 +1163,8 @@ mod leaf {
             let slot = self.symbol_slot(v)?;
             self.write(crate::watchers::NativeWrite::set(slot, value))
         }
-        /// GNU C's `Vname = value', which no watcher hears (`variable_set' is
-        /// `Fset'): a variable C assigns directly, or Romacs's own state.
+        /// GNU C's `Vname = value`, which no watcher hears (`variable_set` is
+        /// `Fset`): a variable C assigns directly, or Romacs's own state.
         pub fn store_variable(&mut self, v: Value, value: Value) -> std::result::Result<(), Fault> {
             let slot = self.symbol_slot(v)?;
             self.vm.assign_variable(slot, value).map_err(Fault::Error)
@@ -1176,7 +1176,7 @@ mod leaf {
             let slot = self.symbol_slot(new)?;
             self.write(crate::watchers::NativeWrite { kind: crate::watchers::WriteKind::Alias, slot, value: base })
         }
-        /// `make_variable_alias' once NEW's watchers have been told.
+        /// `make_variable_alias` once NEW's watchers have been told.
         pub(in crate::prim) fn alias_now(&mut self, new: usize, base: Value) -> std::result::Result<(), Fault> {
             let base = if base == Value::NIL || base == Value::TRUE {
                 let slot = self.vm.slot(if base == Value::NIL { "nil" } else { "t" });
@@ -2116,11 +2116,11 @@ pub(crate) fn native_watcher(vm: &Vm, mut watcher: Value) -> Option<&'static Pri
     }
     None
 }
-/// `Leaf::alias_now', for a write the watchers have heard (`Vm::perform_write').
+/// `Leaf::alias_now`, for a write the watchers have heard (`Vm::perform_write`).
 pub(crate) fn alias_now(vm: &mut Vm, new: usize, base: Value) -> std::result::Result<(), Fault> {
     Leaf::new(vm).alias_now(new, base)
 }
-/// `Leaf::clear_local_slot', likewise.
+/// `Leaf::clear_local_slot`, likewise.
 pub(crate) fn clear_local_slot(vm: &mut Vm, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
     Leaf::new(vm).clear_local_slot(slot, buffer)
 }
