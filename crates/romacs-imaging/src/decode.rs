@@ -738,6 +738,7 @@ impl Decode {
     /// drops both frame selection and animation metadata. Route animated
     /// formats through `AnimationDecoder` first, then use the still-image path
     /// only for frame zero.
+    #[allow(clippy::too_many_arguments, reason = "the realization quartet (size, rotation, realization, mask) travels separately through Decode; one request type across Decode's API is a follow-up")]
     fn decode_raster_data(
         data: EncodedBytes,
         frame: ImageFrameIndex,
@@ -773,6 +774,7 @@ impl Decode {
     /// policy does not materialize (disabled policy, no plan, no loop), so
     /// this arm falling through is the ordinary static path, and the
     /// fallback ladder still ends at GNU's single-frame behavior.
+    #[allow(clippy::too_many_arguments, reason = "the realization quartet (size, rotation, realization, mask) travels separately through Decode; one request type across Decode's API is a follow-up")]
     fn decode_computed_sequence_data(
         data: EncodedBytes,
         frame: ImageFrameIndex,
