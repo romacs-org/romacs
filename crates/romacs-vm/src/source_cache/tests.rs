@@ -101,7 +101,8 @@ fn a_snapshot_keeps_the_children_only_it_names() {
 
 /// However many weak rounds a mark takes, each live entry is traced once:
 /// a chain through a key-weak table, whose next key each entry's value
-/// holds, makes a round per link.
+/// holds, makes a round per link, and a list the chain's last value holds
+/// is found live only in the last of them.
 #[test]
 fn a_live_entry_is_traced_once_per_collection() {
     let mut vm = Vm::new();
@@ -111,11 +112,18 @@ fn a_live_entry_is_traced_once_per_collection() {
                 (defvar cache-chain (make-hash-table :weakness 'key :test 'eq))
                 (defvar cache-chain-head (list 'link))
                 (let ((key cache-chain-head))
-                  (dotimes (_ 4) (let ((next (list 'link))) (puthash key (list next) cache-chain) (setq key next)))))",
+                  (dotimes (_ 4) (let ((next (list 'link))) (puthash key (list next) cache-chain) (setq key next)))
+                  (let ((late (list 'lambda '() 4))) (funcall late) (puthash key (list late) cache-chain))))",
     )
     .unwrap();
     vm.collect_garbage();
     let (rounds, traced) = vm.gc_stress.last_mark;
-    assert!(rounds > 4, "the chain must force a round per link: {rounds}");
+    assert!(rounds > 5, "the chain must force a round per link: {rounds}");
     assert_eq!(traced, vm.lambda_lists.len(), "each live entry traced once, in {rounds} rounds");
+    let late = vm
+        .eval_source_raw(
+            "(let ((key cache-chain-head)) (dotimes (_ 4) (setq key (car (gethash key cache-chain)))) (car (gethash key cache-chain)))",
+        )
+        .unwrap();
+    assert!(vm.lambda_lists.contains_key(&late.0), "the last round's list was traced, so kept");
 }

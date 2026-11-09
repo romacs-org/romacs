@@ -176,9 +176,7 @@ struct MarkState {
     untraced_lists: Vec<u64>,
     /// Weak rounds run and `lambda_lists` entries traced (`Stress::last_mark`).
     #[cfg(test)]
-    weak_rounds: usize,
-    #[cfg(test)]
-    lists_traced: usize,
+    last_mark: (usize, usize),
 }
 
 /// A running phase clock (`GcTimes').
@@ -789,7 +787,7 @@ impl Vm {
         local_live: &mut HashSet<usize>,
     ) -> bool {
         #[cfg(test)]
-        { state.weak_rounds += 1; }
+        { state.last_mark.0 += 1; }
         let (symbols, regions) = (&state.obarray_symbols_live, &state.region_marks);
         for &t in &state.weak_tables {
             let data::Object::HashTable(table) = &self.objects[t] else {
@@ -822,7 +820,7 @@ impl Vm {
             let live = self.survives(symbols, regions, Value(list));
             if live && let Some(entry) = lists.get_mut(&list) {
                 #[cfg(test)]
-                { state.lists_traced += 1; }
+                { state.last_mark.1 += 1; }
                 entry.visit_values(&mut |v| if !self.survives(symbols, regions, *v) { pending.push(*v) });
             }
             !live
@@ -1098,9 +1096,9 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
+        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
-        { self.gc_stress.last_mark = (state.weak_rounds, state.lists_traced); }
-        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, .. } = state;
+        { self.gc_stress.last_mark = last_mark; }
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
