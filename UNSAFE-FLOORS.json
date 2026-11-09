@@ -14,7 +14,6 @@
     "romacs-renderer-wgpu": {"sites": 33, "undocumented": 18},
     "romacs-snapshot": {"sites": 35, "undocumented": 34},
     "romacs-terminfo": {"sites": 18, "undocumented": 4},
-    "romacs-tui-tests": {"sites": 10, "undocumented": 6},
     "romacs-video": {"sites": 172, "undocumented": 168},
     "romacs-vm": {"sites": 882, "undocumented": 493},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2},
