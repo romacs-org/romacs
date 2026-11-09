@@ -90,6 +90,18 @@ fn frame_ime_preedit_overlay<'a>(
     })
 }
 
+/// The IME pre-edit panel `draw_panels` draws for RENDER: its text and
+/// where, at the cursor's target.
+#[cfg(test)]
+pub(in crate::render_thread) fn ime_preedit_overlay(render: &GuiFrameRenderState) -> Option<GuiFrameImeOverlay<'_>> {
+    frame_ime_preedit_overlay(
+        render.input_method.preedit(),
+        render.cursor.target_cloned(),
+        render.emacs_frame_id,
+        &render.compositor.child_frames,
+    )
+}
+
 /// Draw the IME pre-edit panel. Menus and tooltips use native surfaces.
 pub(super) fn draw_panels(
     renderer: &mut WgpuRenderer,

@@ -1257,3 +1257,71 @@ fn clipboard_command_before_display_initialization_returns_an_explicit_error() {
         Err("clipboard is unavailable before display initialization".to_owned())
     );
 }
+
+#[test]
+fn a_blinked_off_cursor_keeps_the_drawn_ime_preedit() {
+    let comms = ThreadComms::new();
+    let (emacs, render) = comms.split();
+    let mut app = RenderApp::new(render, 800, 600, "test".to_string(),
+        Arc::new(crate::render_thread::ImageRenderState::default()),
+        Arc::new((Mutex::new(Vec::new()), std::sync::Condvar::new())), true);
+    let id = app.frame_windows.primary_window().unwrap().render.emacs_frame_id;
+    let frame = |presentation: u64, blinked_off: bool| {
+        let mut frame = frame_with_cursor_effects(None, CursorStyle::FilledBox);
+        frame.presentation_id = romacs_display_protocol::PresentationId::new(presentation);
+        frame.set_frame_identity(romacs_display_protocol::DisplayFrameId::new(id), romacs_display_protocol::DisplayFrameId::new(0),
+            0.0, 0.0, 0, false, 0.0, romacs_display_protocol::Color::BLACK, false, 1.0);
+        if blinked_off {
+            frame.window_cursors.clear();
+            frame.cursor_blinked_off = true;
+        }
+        seal_state(FrameDisplayState::from_frame_glyph_buffer(&frame))
+    };
+    let drawn = |app: &RenderApp| {
+        let render = &app.frame_windows.primary_window().unwrap().render;
+        crate::render_thread::render_pass::chrome::transient_overlays::ime_preedit_overlay(render)
+            .map(|overlay| (overlay.text.to_owned(), overlay.x, overlay.y, overlay.height))
+    };
+    // Composing: the cursor's frame places the IME and its panel.
+    app.frame_windows.primary_window_mut().unwrap().render.set_ime_preedit("composition".into(), Some((0, 3)));
+    emacs.frame_tx.submit(frame(1, false)).expect("queue the cursor's frame");
+    app.poll_frame();
+    let shown = drawn(&app);
+    let area = app.frame_windows.primary_window().unwrap().lifecycle.last_ime_cursor_area();
+    assert!(shown.is_some() && area.is_some(), "the cursor placed the IME and its panel");
+    emacs.frame_tx.submit(frame(2, true)).expect("queue the blink-off frame");
+    app.poll_frame();
+    let window = app.frame_windows.primary_window().unwrap();
+    assert!(RenderApp::cursor_blinked_off(&window.render), "the blink-off frame is current");
+    assert!(window.render.compositor.current_frame.as_ref().unwrap().active_cursor().is_none(), "no cursor is painted");
+    assert_eq!(drawn(&app), shown, "the pre-edit panel draws as before the blink");
+    assert_eq!(app.frame_windows.primary_window().unwrap().lifecycle.last_ime_cursor_area(), area, "the IME keeps its anchor");
+}
+
+#[test]
+fn backend_recovery_rederives_quality_from_the_unchanged_request() {
+    let mut app = make_test_app();
+    app.requested_visual_config.cursor_motion.enabled = true;
+    let requested = app.requested_visual_config.clone();
+
+    app.install_backend_profile(RenderBackendProfile::hardware());
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_motion(requested.clone())
+    );
+
+    app.install_backend_profile(RenderBackendProfile::software());
+    assert!(app.requested_visual_config.cursor_motion.enabled);
+    assert!(
+        !app.render_policy
+            .effective_visual_config()
+            .cursor_motion
+            .enabled
+    );
+
+    app.install_backend_profile(RenderBackendProfile::hardware());
+    assert_eq!(
+        app.render_policy.effective_visual_config(),
+        &super::render_quality::with_motion(requested.clone())
+    );
+}
