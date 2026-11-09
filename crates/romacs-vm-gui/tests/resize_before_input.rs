@@ -2,19 +2,8 @@
 //! `window-size-change-functions', once, from the repaint's redisplay: the
 //! session installs window.c's change functions (rlisp/vm/window-change.el)
 //! itself rather than waiting for the command loop's first key.
-#[path = "../src/loadup.rs"] mod loadup;
-#[path = "../src/eval_last_sexp.rs"] mod eval_last_sexp;
-#[path = "../src/startup.rs"] mod startup;
-#[path = "../src/command.rs"] mod command;
-#[path = "../src/presentation.rs"] mod presentation;
-#[path = "../src/native.rs"] mod native;
-#[path = "../src/echo.rs"] mod echo;
+use romacs_vm_gui::startup;
 use romacs_vm::Vm;
-
-#[allow(dead_code)]
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 fn size_calls_after_an_early_resize(start: fn(&mut Vm)) -> String {
     std::thread::Builder::new().stack_size(64 << 20).spawn(move || {

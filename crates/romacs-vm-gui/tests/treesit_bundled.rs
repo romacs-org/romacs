@@ -3,8 +3,7 @@
 //! `treesit-language-source-alist', and the loader finds it after the
 //! user's grammar directories and before the system's, never for a
 //! language `treesit-load-name-override-list' names.
-#[path = "../src/grammars.rs"]
-mod grammars;
+use romacs_vm_gui::grammars;
 use romacs_vm::Vm;
 use std::path::{Path, PathBuf};
 
