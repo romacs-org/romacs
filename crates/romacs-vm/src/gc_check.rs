@@ -79,7 +79,6 @@ impl Vm {
         self.forwarded.visit_values(&mut |v| values.push(*v));
         values.extend_from_slice(&self.standard_case_tables);
         values.push(self.command_point.1);
-        values.extend(self.mode_line_forms.values().map(|&(known, _)| known));
         self.charsets.trace(&mut values);
         for &(slot, old, buffer, _) in &self.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);

@@ -1326,7 +1326,7 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
-    /// object: each value a root, which a moving collection rewrites.
+    /// object: dropped when that value dies, rewritten when it moves.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
     /// GNU's image caches (graphics.rs): facts of the images frames have
     /// loaded, their pixels the display host's.

@@ -50,3 +50,48 @@ fn a_moved_lambda_list_keeps_its_closure() {
     assert_eq!(call(&mut vm), "(2011 1)");
     assert_eq!(vm.source_cache_stats().lambda_compiles, before.1, "compiled once");
 }
+
+/// Every Value ENTRY's snapshot names, read from the nodes themselves.
+fn snapshot_values(entry: &LambdaList) -> Vec<Value> {
+    entry.snapshot.iter().flat_map(|node| match node {
+        LambdaNode::Cons(node, car, cdr) => vec![*node, *car, *cdr],
+        LambdaNode::Text(node, ..) => vec![*node],
+        LambdaNode::Vector(node, items) => std::iter::once(*node).chain(items.iter().copied()).collect(),
+    }).collect()
+}
+
+/// Whether V is a live object: verify mode poisons a freed cons and frees
+/// an object's entry, and reuses neither.
+fn live(vm: &Vm, v: Value) -> bool {
+    match v.tag() {
+        3 => vm.cons_pair(v).is_ok_and(|pair| pair != (crate::gc::POISON, crate::gc::POISON)),
+        0 if v != Value::NIL => vm.object(v).is_ok(),
+        _ => true,
+    }
+}
+
+/// An old child only the snapshot still reaches lives through a
+/// collection, in place or moving: no new object takes its index and
+/// passes for it, and the next call sees the change and compiles again.
+#[test]
+fn a_snapshot_keeps_the_children_only_it_names() {
+    for moving in [false, true] {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        vm.set_gc_moving(moving);
+        vm.eval_source(
+            "(progn (defvar cache-list (list 'lambda '() (list 'car (list 'quote (list 'old 'child)))))
+                    (funcall cache-list)
+                    (setcar (cdr (cdr cache-list)) (list 'quote 'new)))",
+        )
+        .unwrap();
+        let compiles = vm.source_cache_stats().lambda_compiles;
+        vm.collect_garbage();
+        let list = variable(&mut vm, "cache-list");
+        let values = snapshot_values(&vm.lambda_lists[&list.0]);
+        let dead: Vec<Value> = values.into_iter().filter(|&v| !live(&vm, v)).collect();
+        assert!(dead.is_empty(), "the snapshot names freed objects {dead:?} (moving: {moving})");
+        assert_eq!(vm.eval_source("(funcall cache-list)").unwrap().display().unwrap(), "new", "moving: {moving}");
+        assert_eq!(vm.source_cache_stats().lambda_compiles, compiles + 1, "changed, so compiled again (moving: {moving})");
+    }
+}

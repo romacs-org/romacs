@@ -56,8 +56,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
-    // Each segment's last value, by permanent slot.
-    ("mode_line_forms", Root),
+    // An entry goes when the value it was converted from dies (gc.rs), and
+    // a moving collection rewrites that value.
+    ("mode_line_forms", Cache),
     // An ephemeron table: an entry is traced while its list, the key, lives.
     ("lambda_lists", Root),
     ("images", Free),

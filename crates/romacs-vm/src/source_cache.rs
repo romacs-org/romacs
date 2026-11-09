@@ -48,30 +48,20 @@ enum LambdaNode {
     Vector(Value, Vec<Value>),
 }
 // SAFETY: at rest in a world image (`world_quiescent' requires the map
-// empty); a moving collection rewrites its Values (`LambdaList::forward`).
+// empty); a moving collection rewrites its Values (`LambdaList::visit_values`).
 unsafe impl romacs_snapshot::SnapshotSafe for LambdaList {}
 impl LambdaList {
     /// Each Value the entry holds, to VISIT: its closure and every object
-    /// and child its snapshot names. Traced while the list lives, so none is
-    /// freed and reused under the bits `lambda_unchanged` compares.
-    pub(super) fn trace(&self, visit: &mut impl FnMut(Value)) {
-        visit(self.closure);
-        for node in &self.snapshot {
-            match node {
-                LambdaNode::Cons(node, car, cdr) => [*node, *car, *cdr].into_iter().for_each(&mut *visit),
-                LambdaNode::Text(node, ..) => visit(*node),
-                LambdaNode::Vector(node, items) => std::iter::once(node).chain(items).copied().for_each(&mut *visit),
-            }
-        }
-    }
-    /// Each Value `trace` visits, through REWRITE: a moving collection's.
-    pub(super) fn forward(&mut self, rewrite: &impl Fn(&mut Value)) {
-        rewrite(&mut self.closure);
+    /// and child its snapshot names. The collector traces them while the
+    /// list lives, so none is freed and reused under the bits
+    /// `lambda_unchanged` compares, and rewrites them when they move.
+    pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        visit(&mut self.closure);
         for node in &mut self.snapshot {
             match node {
-                LambdaNode::Cons(node, car, cdr) => [node, car, cdr].into_iter().for_each(rewrite),
-                LambdaNode::Text(node, ..) => rewrite(node),
-                LambdaNode::Vector(node, items) => std::iter::once(node).chain(items).for_each(rewrite),
+                LambdaNode::Cons(node, car, cdr) => [node, car, cdr].into_iter().for_each(&mut *visit),
+                LambdaNode::Text(node, ..) => visit(node),
+                LambdaNode::Vector(node, items) => std::iter::once(node).chain(items).for_each(&mut *visit),
             }
         }
     }

@@ -2845,6 +2845,25 @@ closures over a mutable variable (each a closure and a cell)."
           (message nil)
           (setq scaling--retire-collections gcs-done)))
 
+;; Compiled `(lambda ...)' lists (source_cache.rs `lambda_lists'): N live
+;; lists, each called once, then collections.  A list's entry, its closure
+;; and the snapshot a call compares, is traced once per collection, by the
+;; weak round that finds the list live (gc.rs `weak_round'), and a dead
+;; list's entry goes after the mark: linear in N.  An entry traced again
+;; at every round, or the map scanned per entry, would grow faster.
+(defvar scaling--lambda-lists nil
+  "The lists the `gc-lambda-lists' probe calls and keeps.")
+
+(scaling-probe gc-lambda-lists :n 20000 :budget 1.1
+  :setup (let ((lists nil))
+           (dotimes (i n)
+             (let ((f (list 'lambda '(x) (list '+ 'x i (list 'length (list 'quote (make-list 8 i)))))))
+               (funcall f 1)
+               (push f lists)))
+           (setq scaling--lambda-lists lists)
+           nil)
+  :body (dotimes (_ 3) (garbage-collect)))
+
 ;; The collections a usage log reads (gc.rs `Vm::note_collection'): N
 ;; collections, past what the log keeps at 4N, then its read.  A record
 ;; costs the same however many were kept, and past the limit only a count.

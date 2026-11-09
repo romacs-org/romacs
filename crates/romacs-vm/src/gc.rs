@@ -166,6 +166,10 @@ struct MarkState {
     /// Frozen regions reached (`frozen.rs'); region 0 is the executable
     /// image, always live.
     region_marks: Vec<bool>,
+    /// `lambda_lists` keys whose entry is not traced yet: each is traced
+    /// once, by the round that finds its list live, and those left at the
+    /// fixpoint are the dead lists.
+    untraced_lists: Vec<u64>,
 }
 
 /// A running phase clock (`GcTimes').
@@ -764,19 +768,19 @@ impl Vm {
     }
     /// GNU `sweep_weak_table (h, false)`, run whenever the worklist drains:
     /// an entry whose keep rule already holds makes its other half live.
-    /// `lambda_lists` is an ephemeron table too: a live list keeps what its
-    /// entry holds. Marking only grows, so the rounds reach a fixpoint; weak
-    /// tables reached by the new marks join the next round. True when
-    /// anything was pushed.
+    /// LISTS, `lambda_lists` lent to the mark, is an ephemeron table too: a
+    /// live list keeps what its entry holds. Marking only grows, so the
+    /// rounds reach a fixpoint; weak tables reached by the new marks join
+    /// the next round. True when anything was pushed.
     fn weak_round(
         &self,
-        weak: &[usize],
-        symbols: &HashSet<usize>,
-        regions: &[bool],
+        state: &mut MarkState,
+        lists: &mut std::collections::HashMap<u64, source_cache::LambdaList>,
         pending: &mut Vec<Value>,
         local_live: &mut HashSet<usize>,
     ) -> bool {
-        for &t in weak {
+        let (symbols, regions) = (&state.obarray_symbols_live, &state.region_marks);
+        for &t in &state.weak_tables {
             let data::Object::HashTable(table) = &self.objects[t] else {
                 unreachable!("weak table index");
             };
@@ -802,11 +806,14 @@ impl Vm {
                 }
             }
         }
-        for (&list, entry) in &self.lambda_lists {
-            if self.survives(symbols, regions, Value(list)) {
-                entry.trace(&mut |v| if !self.survives(symbols, regions, v) { pending.push(v) });
+        // Traced once: what an entry pushes stays marked.
+        state.untraced_lists.retain(|&list| {
+            let live = self.survives(symbols, regions, Value(list));
+            if live && let Some(entry) = lists.get_mut(&list) {
+                entry.visit_values(&mut |v| if !self.survives(symbols, regions, *v) { pending.push(*v) });
             }
-        }
+            !live
+        });
         !pending.is_empty()
     }
     /// Allocated heap accounting; unreachable objects are included until collection.
@@ -1078,7 +1085,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks } = state;
+        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists } = state;
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
@@ -1124,10 +1131,15 @@ impl Vm {
                 table.compact_local_bindings();
             }
         }
-        // A dead list's compiled closure goes with it (`weak_round`).
-        let dead: Vec<u64> = self.lambda_lists.keys().copied()
-            .filter(|&list| !self.survives(&obarray_symbols_live, &region_marks, Value(list))).collect();
-        for list in dead { self.lambda_lists.remove(&list); }
+        // A cache entry goes when what it is keyed by dies: a list's
+        // compiled closure with the list (`weak_round`), a segment's form
+        // with the value it was converted from, which the slot can never
+        // hold again.
+        for list in untraced_lists { self.lambda_lists.remove(&list); }
+        let dead: Vec<usize> = self.mode_line_forms.iter()
+            .filter(|&(_, &(known, _))| !self.survives(&obarray_symbols_live, &region_marks, known))
+            .map(|(&slot, _)| slot).collect();
+        for slot in dead { self.mode_line_forms.remove(&slot); }
         // The dead with side effects go here, on this thread, on either path:
         // markers leave their buffers, and the rest are dropped.
         // Both taken here, by the collection they were planted for.
@@ -1315,7 +1327,7 @@ impl Vm {
         self.lambda_lists = std::mem::take(&mut self.lambda_lists).into_iter().map(|(list, mut entry)| {
             let mut list = Value(list);
             rewrite(&mut list);
-            entry.forward(&rewrite);
+            entry.visit_values(&mut |v| rewrite(v));
             (list.0, entry)
         }).collect();
         // Forward each physical native slot once, even when several live
@@ -1431,9 +1443,6 @@ impl Vm {
         self.forwarded.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         pending.extend_from_slice(&self.standard_case_tables);
         pending.push(self.command_point.1);
-        // A segment's form is converted from this value while the slot holds
-        // it; the form's own objects are rooted handles.
-        pending.extend(self.mode_line_forms.values().map(|&(known, _)| known).filter(keep));
         self.charsets.trace(&mut pending);
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches
@@ -1463,7 +1472,11 @@ impl Vm {
             }
         }
         lap.lap(&mut self.gc_times, Phase::Roots);
-        let mut state = MarkState { region_marks: vec![false; self.regions.len()], ..MarkState::default() };
+        // Lent to the mark, which visits an entry through `&mut`, and back
+        // however it ends.
+        let mut lists = std::mem::take(&mut self.lambda_lists);
+        let untraced_lists = lists.keys().copied().collect();
+        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, ..MarkState::default() };
         state.region_marks[0] = true;
         // GNU dooms finalizers once, after the roots and before the weak
         // tables' contents are marked.
@@ -1495,7 +1508,7 @@ impl Vm {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
-                if this.weak_round(&state.weak_tables, &state.obarray_symbols_live, &state.region_marks, &mut pending, &mut local_live) {
+                if this.weak_round(&mut state, &mut lists, &mut pending, &mut local_live) {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
@@ -1505,6 +1518,7 @@ impl Vm {
         // The host goes back however the mark ended: a session that lost it
         // would see no key at any later idle collection.
         if until_key { self.host_input = host; }
+        self.lambda_lists = lists;
         let finished = finished.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         if !finished { return None; }
         let census = marking.census(&own);
@@ -1538,6 +1552,7 @@ impl Vm {
         let sorted = |list: &[usize]| { let mut list = list.to_vec(); list.sort_unstable(); list };
         assert_eq!(sorted(&threads.state.weak_tables), sorted(&alone.state.weak_tables), "threads and one thread found different weak tables");
         assert_eq!(sorted(&threads.state.live_obarrays), sorted(&alone.state.live_obarrays), "threads and one thread found different obarrays");
+        assert_eq!(threads.state.untraced_lists, alone.state.untraced_lists, "threads and one thread kept different lambda lists");
         let mut alone = alone;
         alone.marking.sweep_on(n);
         alone
