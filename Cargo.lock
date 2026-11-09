@@ -4213,6 +4213,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-brand"
+version = "0.0.20"
+dependencies = [
+ "trybuild",
+]
+
+[[package]]
 name = "romacs-chars"
 version = "0.1.0"
 dependencies = [
@@ -4748,6 +4755,7 @@ dependencies = [
  "num-integer",
  "rayon",
  "romacs-allocator",
+ "romacs-brand",
  "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",

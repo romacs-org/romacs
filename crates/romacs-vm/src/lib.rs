@@ -103,10 +103,7 @@ mod tzfile;
 mod undo;
 mod insdel;
 mod indirect;
-// Rooting as a type; public, hidden, so tests/rooting_brand.rs compiles
-// against it.
-#[doc(hidden)]
-pub mod brand;
+use romacs_brand as brand;
 mod gc;
 mod gc_check;
 mod gc_mark;

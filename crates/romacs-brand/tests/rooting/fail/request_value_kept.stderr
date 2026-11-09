@@ -1,0 +1,26 @@
+error[E0277]: the trait bound `Word: romacs_brand::Plain` is not satisfied
+ --> tests/rooting/fail/request_value_kept.rs:7:19
+  |
+7 |     let binding = request(&mut m, gc.by_ref(), (), |_, (), value| value);
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `romacs_brand::Plain` is not implemented for `Word`
+ --> tests/rooting/fail/../standin.rs
+  |
+  | pub struct Word(pub u64);
+  | ^^^^^^^^^^^^^^^
+  = help: the following other types implement trait `romacs_brand::Plain`:
+            &T
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            Box<T>
+            Option<T>
+            Result<T, E>
+          and $N others
+note: required by a bound in `standin::request`
+ --> tests/rooting/fail/../standin.rs
+  |
+  | pub fn request<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Engine>, gc: Gc<'_, 'b>, b: B,
+  |                                 ^^^^^ required by this bound in `request`

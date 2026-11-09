@@ -1,4 +1,4 @@
-//! What the rooting types (`src/brand.rs`) leave to source checks, over the
+//! What the rooting types (`romacs_brand`) leave to source checks, over the
 //! converted modules (`rust_tokens::CONVERTED`):
 //!
 //! - A dispatch moves the raw handler's engine (`Eng`), so nothing after it
@@ -20,6 +20,10 @@ use std::path::Path;
 fn source(name: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)).unwrap()
 }
+
+/// The rooting types, a crate of their own: held to these rules with the modules
+/// that use them, and to no `Key`, since a key is its user's.
+const BRAND: &str = "../../romacs-brand/src/lib.rs";
 
 /// SOURCE's tokens with `#[cfg(test)]` items removed.
 fn production(source: &str) -> Vec<Token> {
@@ -281,8 +285,7 @@ fn non_tail_handoffs(files: &[(String, Vec<Token>)]) -> (Vec<String>, usize) {
 
 #[test]
 fn converted_modules_hand_their_engine_on_only_in_tail_position() {
-    // `brand.rs` is the handle's own definition (`orchestrate` takes it apart).
-    let files: Vec<(String, Vec<Token>)> = CONVERTED.iter().filter(|&&f| f != "brand.rs").map(|f| (f.to_string(), production(&source(f)))).collect();
+    let files: Vec<(String, Vec<Token>)> = CONVERTED.iter().map(|f| (f.to_string(), production(&source(f)))).collect();
     let (problems, handoffs) = non_tail_handoffs(&files);
     assert!(handoffs > 100, "found the engine's handoffs: {handoffs}");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
@@ -515,16 +518,18 @@ fn no_global_state_holds_a_value() {
                 problems.push(format!("{relative}: the static {name} holds a Value"));
             }
             if CONVERTED.contains(&relative.as_str()) {
-                let toks = production(&text);
-                for (what, pattern) in GLOBAL_STATE {
-                    if count(&toks, pattern) > 0 {
-                        problems.push(format!("{relative}: {what} in a converted module"));
-                    }
-                }
+                problems.extend(global_state(&relative, &text));
             }
         }
     }
+    problems.extend(global_state("romacs-brand", &source(BRAND)));
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+fn global_state(file: &str, text: &str) -> Vec<String> {
+    let toks = production(text);
+    GLOBAL_STATE.iter().filter(|(_, pattern)| count(&toks, pattern) > 0)
+        .map(|(what, _)| format!("{file}: {what} in a converted module")).collect()
 }
 
 /// Global or shared mutable state, as token patterns.
@@ -578,6 +583,13 @@ fn permissions_come_from_one_key_and_counted_mints() {
         }
     }
     assert_eq!(keys, 1, "one key (`src/threaded_lend.rs`)");
+    let brand = source(BRAND);
+    assert!(brand.contains("pub unsafe trait Key"), "the rules read the rooting types");
+    assert_eq!(key_impls(&brand), 0, "a key is its user's, not the rooting types'");
+    let toks = production(&brand);
+    for &pattern in MINT_PATTERNS {
+        assert_eq!(count(&toks, pattern), 0, "romacs-brand mints `{}`", pattern.concat());
+    }
     for &file in CONVERTED {
         let toks = production(&source(file));
         for &pattern in MINT_PATTERNS {

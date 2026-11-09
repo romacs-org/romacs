@@ -7,6 +7,7 @@ description = "Lexical Elisp reader, register compiler and runtime for romacs"
 
 # Deliberately isolated: no inherited evaluator or workspace build graph.
 [dependencies]
+romacs-brand = { path = "../romacs-brand" }
 romacs-layout-input = { path = "../romacs-layout-input" }
 romacs-display-protocol = { path = "../romacs-display-protocol" }
 romacs-face = { path = "../romacs-face" }

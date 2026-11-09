@@ -3,6 +3,7 @@
   "crates": {
     "romacs-allocator": {"sites": 3, "undocumented": 3},
     "romacs-attach": {"sites": 2, "undocumented": 0},
+    "romacs-brand": {"sites": 5, "undocumented": 0},
     "romacs-display-protocol": {"sites": 7, "undocumented": 4},
     "romacs-display-runtime": {"sites": 28, "undocumented": 12},
     "romacs-font": {"sites": 60, "undocumented": 49},
@@ -16,7 +17,7 @@
     "romacs-terminfo": {"sites": 18, "undocumented": 4},
     "romacs-tui-tests": {"sites": 10, "undocumented": 6},
     "romacs-video": {"sites": 172, "undocumented": 168},
-    "romacs-vm": {"sites": 882, "undocumented": 493},
+    "romacs-vm": {"sites": 877, "undocumented": 493},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2},
     "romacs-webview": {"sites": 219, "undocumented": 197}
   },
