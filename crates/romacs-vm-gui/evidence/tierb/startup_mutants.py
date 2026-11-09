@@ -44,7 +44,7 @@ for name, old, new, target in MUTANTS:
     f.write_text(src.replace(old, new))
     assert f.read_text() != src
     try:
-        p = subprocess.run(['cargo', 'test', '-j', '6', '-p', 'romacs-vm-gui', '--bins', '--no-fail-fast', '--', 'startup::tests'],
+        p = subprocess.run(['cargo', 'test', '-j', '6', '-p', 'romacs-vm-gui', '--lib', '--no-fail-fast', '--', 'startup::tests'],
                            cwd=root, capture_output=True, text=True)
         out = p.stdout + p.stderr
         log = pathlib.Path(sys.argv[1]).with_name(f'{pathlib.Path(sys.argv[1]).stem}-{name}.log')

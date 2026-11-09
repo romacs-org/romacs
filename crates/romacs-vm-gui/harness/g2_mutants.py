@@ -30,7 +30,7 @@ def main():
         ]:
             for p,s in originals.items():(clone/p).write_text(s)
             s=originals[path];assert old in s;(clone/path).write_text(s.replace(old,new,1))
-            cmd=['cargo','test','-p','romacs-vm-gui','--bin','romacs-vm-gui','native::tests','--','--nocapture'] if unit else ['cargo','build','-p','romacs-vm-gui','--quiet']
+            cmd=['cargo','test','-p','romacs-vm-gui','--lib','native::tests','--','--nocapture'] if unit else ['cargo','build','-p','romacs-vm-gui','--quiet']
             build=subprocess.run(cmd,cwd=clone,env=env,capture_output=True,text=True)
             if unit:
                 output=build.stdout+build.stderr

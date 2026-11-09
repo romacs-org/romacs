@@ -27,6 +27,7 @@ const ENTRIES: &[&str] = &[
     "perform_write", "perform_rooted", "perform_deferred", "prepared_function", "prepare_source",
     "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
     "load_file_kind", "load_artifact", "compile_walk", "compile_unit", "run_aftermath",
+    "call_prepared_source", "call_prepared_source_propagating", "invoke_prepared_with",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];

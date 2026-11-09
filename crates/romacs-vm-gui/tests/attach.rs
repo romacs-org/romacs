@@ -3,30 +3,10 @@
 //! plans, the pure list operations, the tray's cached string and batch
 //! insertion, edit mode, drafts reconciliation and preparation through the
 //! helper (tests/romacs-attach-test.el).
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/fonts.rs"]
-mod fonts;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{fonts, startup};
 use romacs_vm::Vm;
 
 const LINE: u32 = 20;
-
-/// The frame's snapshot, as the included modules ask the crate root.
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))

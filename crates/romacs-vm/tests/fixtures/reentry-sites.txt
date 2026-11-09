@@ -45,10 +45,10 @@ handle.rs execute execute_raw 1 boundary  # embedder API: the result is a Local 
 handle.rs execute finish_request 1 collector  # the outcome is its root, rewritten in place
 handle.rs invoke_prepared invoke_prepared_raw 1 boundary  # embedder API: arguments come from Rooted handles
 handle.rs load_file load_file_raw 1 boundary  # embedder API: the result is a Local borrowing the VM
-host_input.rs host_wait_state call_prepared_source_raw 1 clean  # no arguments; its value is printed before anything else allocates
-host_input.rs read_host_event_with call_prepared_source_raw 1 clean  # no arguments; its value is discarded, and the wait holds no Value across it
-host_input.rs run_pre_redisplay call_prepared_source_raw 1 clean  # WINDOWS is only the call's argument; its value is discarded, and frame_snapshot holds no Value across it
-host_input.rs run_window_change_functions call_prepared_source_raw 1 clean  # no arguments; its value is discarded
+host_input.rs host_wait_state call_prepared_source_propagating 1 clean  # no arguments; its value is printed before anything else allocates
+host_input.rs read_host_event_with call_prepared_source_propagating 1 clean  # no arguments; its value is discarded, and the wait holds no Value across it
+host_input.rs run_pre_redisplay call_prepared_source_propagating 1 clean  # WINDOWS is only the call's argument; its value is discarded, and frame_snapshot holds no Value across it
+host_input.rs run_window_change_functions call_prepared_source_propagating 1 clean  # no arguments; its value is discarded
 insdel.rs mark_deactivated write_from_native 1 held  # a native writer: queued for its engine's completion, or, with no engine to complete it, its watchers hold collection (rooted_write unset)
 lib.rs execute_raw execute_rooted 1 clean  # no roots
 lib.rs execute_rooted execute 1 rooted  # ROOTS are a frame, written back after
@@ -97,7 +97,7 @@ mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s);
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
 prim.rs install_lisp_prelude_raw eval_source_raw 5 boundary  # VM setup: no caller Values
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
-prim/leaf/graphics.rs land_images call_prepared_source_raw 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
+prim/leaf/graphics.rs land_images call_prepared_source_propagating 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
 prim.rs write write_from_native 1 held  # a native writer: queued for its engine's completion, or, with no engine to complete it, its watchers hold collection (rooted_write unset)
 prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not suspended
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
@@ -132,9 +132,12 @@ source_cache.rs expand_macro call_macro_expander 1 clean  # FUNCTION and the lit
 source_cache.rs lambda_list_closure eval_primitive 1 rooted  # LIST is in a RootFrame across the compile and read back; the closure is its result
 source_cache/prepared.rs call_prepared execute_args 1 boundary  # ARGS become the engine's registers before it can collect
 source_cache/prepared.rs call_prepared finish_request 1 collector  # the request's result is its root
-source_cache/prepared.rs call_prepared_source_raw invoke_prepared_raw 2 clean  # ARGS are passed on, never used after the call
-source_cache/prepared.rs call_prepared_source_raw prepare_source 1 rooted  # ARGS are a frame across the preparation, read back for the call
-source_cache/prepared.rs invoke_prepared_raw prepared_function 1 rooted  # ARGS are a frame across the refresh, read back for the call
+source_cache/prepared.rs call_prepared_source invoke_prepared_with 2 clean  # ARGS are passed on, never used after the call
+source_cache/prepared.rs call_prepared_source prepare_source 1 rooted  # ARGS are a frame across the preparation, read back for the call
+source_cache/prepared.rs call_prepared_source_propagating call_prepared_source 1 clean  # ARGS are passed on, never used after the call
+source_cache/prepared.rs call_prepared_source_raw call_prepared_source 1 clean  # ARGS are passed on, never used after the call
+source_cache/prepared.rs invoke_prepared_raw invoke_prepared_with 1 clean  # ARGS are passed on, never used after the call
+source_cache/prepared.rs invoke_prepared_with prepared_function 1 rooted  # ARGS are a frame across the refresh, read back for the call
 source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
 source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted

@@ -203,7 +203,7 @@ impl Vm {
     /// the Lisp half is installed.
     fn host_wait_state(&mut self) -> Result<String> {
         let probe = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
-        let state = self.call_prepared_source_raw(probe, &[])?;
+        let state = self.call_prepared_source_propagating(probe, &[])?;
         self.display(state)
     }
 
@@ -217,7 +217,7 @@ impl Vm {
         let run = "(lambda () (and (fboundp 'romacs--run-window-change-functions)
                      (condition-case err (romacs--run-window-change-functions)
                        (error (message \"Error in window change functions: %S\" err)))))";
-        self.call_prepared_source_raw(run, &[])?;
+        self.call_prepared_source_propagating(run, &[])?;
         self.window_change_seen = self.window_change_signature()?;
         Ok(())
     }
@@ -227,7 +227,7 @@ impl Vm {
     /// buffer has work on `pre-redisplay-functions'.
     pub(crate) fn run_pre_redisplay(&mut self) -> Result<()> {
         let Some(windows) = self.pre_redisplay_call()? else { return Ok(()) };
-        self.call_prepared_source_raw("(lambda (windows) (and (fboundp 'romacs--pre-redisplay) (romacs--pre-redisplay windows)))", &[windows])?;
+        self.call_prepared_source_propagating("(lambda (windows) (and (fboundp 'romacs--pre-redisplay) (romacs--pre-redisplay windows)))", &[windows])?;
         Ok(())
     }
     /// The windows argument `romacs--pre-redisplay' takes now, when it has
@@ -366,7 +366,7 @@ impl Vm {
                 // a redisplay's Lisp (a mode-line :eval) may change them,
                 // and then the wait ends for Lisp to compute it again.
                 let before = self.host_wait_state()?;
-                let echoed = self.call_prepared_source_raw("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])? != Value::NIL;
+                let echoed = self.call_prepared_source_propagating("(lambda () (and (fboundp 'romacs--echo-sync) (romacs--echo-sync)))", &[])? != Value::NIL;
                 if echoed || !host.input_pending() {
                     let (width, height) = (self.window_state.width, self.window_state.height);
                     let started = crate::host::monotonic();

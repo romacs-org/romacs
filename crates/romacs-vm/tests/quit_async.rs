@@ -94,6 +94,37 @@ fn a_pathological_regexp_quits() {
     assert_eq!(eval(&mut vm, "quit-flag"), "nil");
 }
 
+/// The Lisp a read's wait runs quits as any other, and its caller sees `quit',
+/// which `romacs--host-event' takes for the read's key, rather than an error
+/// named after one. A press stops a loop at a safepoint and a regexp in its
+/// matcher: two routes out.
+#[test]
+fn a_quit_in_a_reads_wait_stays_a_quit() {
+    let pattern = r#""\\(a*\\)*\\1b""#;
+    for body in [format!("(string-match {pattern} (make-string 40 ?a))"), "(while t)".to_string()] {
+        let (mut vm, signal) = busy_vm();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(Arriving(Arc::new(AtomicBool::new(false)), vec![]))));
+        eval(&mut vm, &format!("(defun romacs--wait-state () {body})"));
+        let read = "(condition-case err (romacs--read-host-event 1) (quit (list 'quit err)) (error (list 'error err)))";
+        assert_eq!(quit_into(&mut vm, &signal, read), "(quit (quit))", "{body}");
+    }
+}
+
+/// A host snapshot outside any read has no engine to take the escape: the
+/// failure is the host's, and the next evaluation does not raise it again.
+#[test]
+fn a_quit_in_a_hosts_snapshot_does_not_outlive_it() {
+    let (mut vm, signal) = busy_vm();
+    vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+    eval(&mut vm, "(defun romacs--run-window-change-functions () (while t))");
+    let presser = press(&signal, Duration::from_millis(200), 1);
+    assert!(vm.frame_snapshot(800, 600).is_err(), "the press ended the window change functions");
+    presser.join().unwrap();
+    eval(&mut vm, "(defun romacs--run-window-change-functions () nil)");
+    assert_eq!(eval(&mut vm, "(eval '(+ 1 1) t)"), "2");
+}
+
 /// Quitting out of `eval-buffer' and `load' keeps the forms evaluated
 /// before the quit, as GNU's readevalloop does.
 #[test]

@@ -3,29 +3,8 @@
 //! one table, a key grid lays groups out in bands that fit, which-key's
 //! popup is a `panel', an eval chip a `cursor', and the host fades a
 //! `fade' layer without sliding it.
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/fonts.rs"]
-mod fonts;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/measure.rs"]
-mod measure;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{command, fonts, measure, presentation, startup};
 use romacs_vm::{CommandEvent, Vm};
-
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 const META: i64 = 1 << 27;
 
