@@ -93,10 +93,11 @@ The current release program is the inherited VM. These measurements do not claim
 ## Running the contract
 
 ```sh
-cargo test --manifest-path tests/coordinate-contract/Cargo.toml
-# Intentional controlled faults: compiles, then fails at char-to-byte assertions.
-cargo test --manifest-path tests/coordinate-contract/Cargo.toml -- --ignored
+cargo test -p romacs-vm --lib text::
 emacs -Q --batch -l tests/coordinate-contract/semantic_contract.el
 ```
 
-The two ignored tests are explicitly named fault injections, not disabled production tests. Their ordinary `should_panic` counterparts run on every suite invocation. Baseline correctness is expected GREEN; stale-cache faults and the measured performance bar are RED. There is no claim that valid inherited coordinate semantics are broken or that an unimplemented VM2 path passed.
+The contract is a library; the VM's text runs it (`crates/romacs-vm/src/text.rs`). Among those
+tests, `the_contract_catches_a_stale_coordinate` wraps the text in `contract::Stale`, a cached
+coordinate that edits leave stale, and must fail at the char-to-byte assertion: it checks the
+suite, not the text.

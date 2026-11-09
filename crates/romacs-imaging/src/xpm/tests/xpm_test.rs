@@ -166,7 +166,7 @@ fn rgb_and_rgbi_color_values_resolve_like_gnu() {
 /// of them decoded to black, which is the shadow the report's screenshot shows.
 #[test]
 fn shipped_commit_xpm_keeps_its_named_gray_ladder() {
-    let path = romacs_infra::workspace_root().join("etc/images/commit.xpm");
+    let path = romacs_test_fonts::workspace_root().join("etc/images/commit.xpm");
     let (width, height, rgba) = decode_xpm_file(&path, FALLBACK).expect("commit.xpm decodes");
     assert!(width > 0 && height > 0);
     let painted: std::collections::HashSet<[u8; 3]> = rgba

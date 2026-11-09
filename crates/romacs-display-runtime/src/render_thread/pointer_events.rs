@@ -5,23 +5,13 @@ use super::frame_windows::{ChromePress, GuiFrameWindowState};
 use super::input::{MenuBarHit, frame_chrome_hit, frame_chrome_owns_pointer};
 use super::state::PointerCursorIntent;
 use super::state::PresentedInteractionKey;
-#[cfg(feature = "webview")]
-use super::state::WebViewPointerCapture;
 use crate::backend::wgpu::ROMACS_SUPER_MASK;
-#[cfg(feature = "webview")]
-use crate::backend::wgpu::{ROMACS_CTRL_MASK, ROMACS_META_MASK, ROMACS_SHIFT_MASK};
 use crate::core::frame_glyphs::FrameGlyph;
 use crate::thread_comm::{
     InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput, ScrollDelta,
 };
 use romacs_display_protocol::PresentationFramePoint;
 use romacs_display_protocol::frame_chrome::{ChromeAction, FrameChromeKind};
-#[cfg(any(test, feature = "webview"))]
-use romacs_webview::WebViewScrollDelta;
-#[cfg(feature = "webview")]
-use romacs_webview::{
-    ButtonState, PointerButton, WebContentPoint, WebViewInput, WebViewInputTarget, WebViewModifiers,
-};
 
 use winit::dpi::PhysicalPosition;
 use winit::event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
@@ -144,33 +134,6 @@ impl RenderApp {
     }
 }
 
-// Embedded browsers own their distance policy and fractional viewport. Do not
-// impose the editor's integral Lisp boundary on their input.
-#[cfg(any(test, feature = "webview"))]
-fn webview_scroll_delta(delta: MouseScrollDelta, scale: f64) -> Option<WebViewScrollDelta> {
-    if !scale.is_finite() || scale <= 0.0 {
-        return None;
-    }
-    match delta {
-        MouseScrollDelta::LineDelta(x, y) | MouseScrollDelta::ContinuousLineDelta(x, y)
-            if x.is_finite() && y.is_finite() =>
-        {
-            Some(WebViewScrollDelta::Lines { x, y })
-        }
-        MouseScrollDelta::PixelDelta(p) if p.x.is_finite() && p.y.is_finite() => {
-            Some(WebViewScrollDelta::Pixels {
-                x: (p.x / scale) as f32,
-                y: (p.y / scale) as f32,
-            })
-        }
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-#[path = "pointer_events/tests/webview_scroll_test.rs"]
-mod webview_scroll_test;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum PointerOwner {
     Child {
@@ -190,10 +153,6 @@ pub(super) enum PointerOwner {
         y: f32,
     },
 }
-
-#[cfg(all(test, feature = "webview"))]
-#[path = "tests/pointer_events_webview_test.rs"]
-mod webview_tests;
 
 #[cfg(test)]
 #[path = "pointer_events/tests/shader_surface_test.rs"]
@@ -236,75 +195,6 @@ impl PointerOwner {
     pub(super) fn permits_native_chrome(self) -> bool {
         matches!(self, Self::Root { .. } | Self::Expose { .. })
     }
-}
-
-#[cfg(feature = "webview")]
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct WebViewPointerHit {
-    view: romacs_display_protocol::WebViewId,
-    position: WebContentPoint,
-}
-
-#[cfg(feature = "webview")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WebViewDeliveryTarget {
-    Current(romacs_display_protocol::WebViewId),
-    Captured(WebViewInputTarget),
-}
-
-#[cfg(feature = "webview")]
-impl WebViewDeliveryTarget {
-    fn resolve(self, system: &romacs_webview::WebViewSystem) -> Option<WebViewInputTarget> {
-        match self {
-            Self::Current(view) => system.presented_target(view),
-            Self::Captured(target) => Some(target),
-        }
-    }
-
-    const fn view(self) -> romacs_display_protocol::WebViewId {
-        match self {
-            Self::Current(view) => view,
-            Self::Captured(target) => target.view(),
-        }
-    }
-}
-
-/// Search a glyph buffer for an inline WebView under `point`.
-///
-/// Takes the witnessed point rather than coordinates for the reason
-/// [`PresentedHitQuery`](romacs_display_protocol::PresentedHitQuery) does:
-/// the widget rects belong to the destination presentation, so a pointer
-/// position that has not been through the projection names a different pixel
-/// for as long as the widget's pane is moving.
-#[cfg(feature = "webview")]
-fn webview_glyph_hit_test(
-    glyphs: &[FrameGlyph],
-    point: PresentationFramePoint,
-) -> Option<WebViewPointerHit> {
-    let point = point.in_frame_space();
-    for glyph in glyphs.iter().rev() {
-        // The pointer target is the widget itself, GNU `xww->width` by
-        // `xww->height` at the glyph origin, minus what the text-area clip
-        // hides: the same content-and-clip pair `collect_frame_webviews`
-        // places the native view with, so hits and placement cannot differ.
-        if let FrameGlyph::Xwidget {
-            webview_id,
-            presentation,
-            ..
-        } = glyph
-        {
-            let Ok(Some(visible)) = presentation.resolve_visible(None) else {
-                continue;
-            };
-            if let Some(content_point) = visible.content_point_at(point) {
-                return Some(WebViewPointerHit {
-                    view: *webview_id,
-                    position: WebContentPoint::new(content_point.x(), content_point.y()),
-                });
-            }
-        }
-    }
-    None
 }
 
 /// Search a glyph buffer for an inline shader surface under `point` (the
@@ -379,36 +269,6 @@ impl RenderApp {
         Ok(target)
     }
 
-    #[cfg(feature = "webview")]
-    pub(super) fn webview_modifiers(modifiers: u32) -> WebViewModifiers {
-        let mut result = WebViewModifiers::empty();
-        if modifiers & ROMACS_SHIFT_MASK != 0 {
-            result |= WebViewModifiers::SHIFT;
-        }
-        if modifiers & ROMACS_CTRL_MASK != 0 {
-            result |= WebViewModifiers::CONTROL;
-        }
-        if modifiers & ROMACS_META_MASK != 0 {
-            result |= WebViewModifiers::META;
-        }
-        if modifiers & ROMACS_SUPER_MASK != 0 {
-            result |= WebViewModifiers::SUPER;
-        }
-        result
-    }
-
-    #[cfg(feature = "webview")]
-    fn webview_button(button: MouseButton) -> PointerButton {
-        match button {
-            MouseButton::Left => PointerButton::Primary,
-            MouseButton::Middle => PointerButton::Middle,
-            MouseButton::Right => PointerButton::Secondary,
-            MouseButton::Back => PointerButton::Back,
-            MouseButton::Forward => PointerButton::Forward,
-            other => PointerButton::Other(other as u16 + 1),
-        }
-    }
-
     pub(super) fn suppress_root_chrome_hover(
         render: &mut super::frame_windows::GuiFrameRenderState,
     ) -> bool {
@@ -468,17 +328,6 @@ impl RenderApp {
         } else {
             (x, y, window_state.render.emacs_frame_id)
         }
-    }
-
-    #[cfg(feature = "webview")]
-    fn webview_target_for_frame_window(
-        render: &super::frame_windows::GuiFrameRenderState,
-        target_fid: u64,
-        ev_x: f32,
-        ev_y: f32,
-    ) -> Option<WebViewPointerHit> {
-        let (glyphs, point) = render.glyph_hit_target(target_fid, ev_x, ev_y)?;
-        webview_glyph_hit_test(glyphs, point)
     }
 
     /// The shader surface under a pointer at frame-local `(x, y)`, and where
@@ -1040,12 +889,6 @@ impl RenderApp {
         if button == MouseButton::Left {
             self.route_model_button(window_id, state);
         }
-        #[cfg(feature = "webview")]
-        let captured_release = if state == ElementState::Released {
-            self.webview_pointer_capture.take()
-        } else {
-            None
-        };
         if state == ElementState::Released
             && let Some(renderer) = self.renderer.as_mut()
         {
@@ -1060,31 +903,10 @@ impl RenderApp {
             let mut captured_events = Vec::new();
             let mut handled_chrome = false;
             let mut delivered_mouse_button = false;
-            #[cfg(feature = "webview")]
-            let mut webview_delivery = None;
-            #[cfg(feature = "webview")]
-            let mut captured_press = None;
-            #[cfg(feature = "webview")]
-            let mut focus_webview = None;
             if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
                 let x = window_state.render.mouse_pos.0;
                 let y = window_state.render.mouse_pos.1;
                 let pointer_owner = Self::pointer_owner(window_state, x, y);
-                #[cfg(feature = "webview")]
-                if let Some(capture) = captured_release {
-                    webview_delivery = Some((
-                        WebViewDeliveryTarget::Captured(capture.target),
-                        WebViewInput::PointerButton {
-                            position: WebContentPoint::new(
-                                x - capture.surface_origin_x,
-                                y - capture.surface_origin_y,
-                            ),
-                            button: Self::webview_button(button),
-                            state: ButtonState::Released,
-                            modifiers: Self::webview_modifiers(self.modifiers),
-                        },
-                    ));
-                }
                 if button == MouseButton::Left {
                     let target = if window_state.render.pointer_inside {
                         pointer_owner
@@ -1303,29 +1125,6 @@ impl RenderApp {
                                 window_state.render.mouse_pos.1,
                             )
                         });
-                    #[cfg(feature = "webview")]
-                    if state == ElementState::Pressed {
-                        let hit = Self::webview_target_for_frame_window(
-                            &window_state.render,
-                            target_fid,
-                            ev_x,
-                            ev_y,
-                        );
-                        if let Some(hit) = hit {
-                            webview_delivery = Some((
-                                WebViewDeliveryTarget::Current(hit.view),
-                                WebViewInput::PointerButton {
-                                    position: hit.position,
-                                    button: Self::webview_button(button),
-                                    state: ButtonState::Pressed,
-                                    modifiers: Self::webview_modifiers(self.modifiers),
-                                },
-                            ));
-                            captured_press =
-                                Some((hit.view, x - hit.position.x(), y - hit.position.y()));
-                            focus_webview = Some(hit.view);
-                        }
-                    }
                     // iMouse click state (docs/display-engine/SHADER_SURFACES.md):
                     // a press over a shader-surface glyph routes the press
                     // position into that surface's iMouse.zw — the Surface
@@ -1382,56 +1181,6 @@ impl RenderApp {
                     }
                 }
             }
-            #[cfg(feature = "webview")]
-            {
-                if state == ElementState::Pressed {
-                    let focused_target = focus_webview.and_then(|view| {
-                        self.webview_system
-                            .as_ref()
-                            .and_then(|system| system.presented_target(view))
-                    });
-                    if self.focused_webview != focused_target {
-                        if let (Some(previous), Some(system)) =
-                            (self.focused_webview, self.webview_system.as_mut())
-                        {
-                            let _ = system.command(romacs_webview::WebViewCommand::Focus {
-                                id: previous.view(),
-                                intent: romacs_webview::FocusIntent::Blur,
-                            });
-                        }
-                        if let (Some(target), Some(system)) =
-                            (focused_target, self.webview_system.as_mut())
-                        {
-                            let _ = system.command(romacs_webview::WebViewCommand::Focus {
-                                id: target.view(),
-                                intent: romacs_webview::FocusIntent::Focus,
-                            });
-                        }
-                    }
-                    self.focused_webview = focused_target;
-                    self.webview_pointer_capture =
-                        captured_press.and_then(|(view, surface_origin_x, surface_origin_y)| {
-                            self.webview_system
-                                .as_ref()
-                                .and_then(|system| system.presented_target(view))
-                                .map(|target| WebViewPointerCapture {
-                                    target,
-                                    surface_origin_x,
-                                    surface_origin_y,
-                                })
-                        });
-                }
-                if let Some((delivery, input)) = webview_delivery
-                    && let Some(system) = self.webview_system.as_mut()
-                {
-                    let view = delivery.view();
-                    if let Some(target) = delivery.resolve(system)
-                        && let Err(error) = system.input(target, input)
-                    {
-                        tracing::warn!(%view, %error, "dropping WebView pointer input");
-                    }
-                }
-            }
             for event in captured_events {
                 self.comms.send_input(event);
             }
@@ -1464,10 +1213,6 @@ impl RenderApp {
     ) {
         self.record_idle_dim_activity(window_id);
         let modifiers = self.modifiers;
-        #[cfg(feature = "webview")]
-        let pointer_capture = self.webview_pointer_capture;
-        #[cfg(feature = "webview")]
-        let mut webview_delivery = None;
         if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
             let mut event = None;
             let scale = window_state.scale_factor();
@@ -1669,41 +1414,6 @@ impl RenderApp {
             {
                 renderer.surface_mouse_hover(surface_id, u, v);
             }
-            #[cfg(feature = "webview")]
-            {
-                let hit = pointer_capture.map_or_else(
-                    || {
-                        Self::webview_target_for_frame_window(
-                            &window_state.render,
-                            target_fid,
-                            ev_x,
-                            ev_y,
-                        )
-                    },
-                    |capture| {
-                        Some(WebViewPointerHit {
-                            view: capture.target.view(),
-                            position: WebContentPoint::new(
-                                lx - capture.surface_origin_x,
-                                ly - capture.surface_origin_y,
-                            ),
-                        })
-                    },
-                );
-                if let Some(hit) = hit {
-                    let delivery = pointer_capture
-                        .map_or(WebViewDeliveryTarget::Current(hit.view), |capture| {
-                            WebViewDeliveryTarget::Captured(capture.target)
-                        });
-                    webview_delivery = Some((
-                        delivery,
-                        WebViewInput::PointerMove {
-                            position: hit.position,
-                            modifiers: Self::webview_modifiers(modifiers),
-                        },
-                    ));
-                }
-            }
             let appearance_target = pointer_owner
                 .target()
                 .map(|(x, y, frame_id)| (frame_id, x, y));
@@ -1744,17 +1454,6 @@ impl RenderApp {
             }
         }
         self.flush_model_events();
-        #[cfg(feature = "webview")]
-        if let Some((delivery, input)) = webview_delivery
-            && let Some(system) = self.webview_system.as_mut()
-        {
-            let view = delivery.view();
-            if let Some(target) = delivery.resolve(system)
-                && let Err(error) = system.input(target, input)
-            {
-                tracing::warn!(%view, %error, "dropping WebView pointer-move input");
-            }
-        }
     }
 
     pub(super) fn handle_cursor_left(&mut self, window_id: WindowId) {
@@ -1866,20 +1565,6 @@ impl RenderApp {
                 .render
                 .scroll_input
                 .convert(delta, scroll_target, phase);
-            #[cfg(feature = "webview")]
-            let webview_delivery = webview_scroll_delta(delta, scale).and_then(|delta| {
-                Self::webview_target_for_frame_window(&window_state.render, target_fid, ev_x, ev_y)
-                    .map(|hit| {
-                        (
-                            WebViewDeliveryTarget::Current(hit.view),
-                            WebViewInput::Scroll {
-                                position: hit.position,
-                                delta,
-                                modifiers: Self::webview_modifiers(self.modifiers),
-                            },
-                        )
-                    })
-            });
             if let Some(delta) = converted {
                 let action = PointerAction::Scroll {
                     delta,
@@ -1935,17 +1620,6 @@ impl RenderApp {
                         super::frame_state::next_scene_generation();
                     state.render.compositor.current_row_damage = None;
                     state.render.mark_dirty();
-                }
-            }
-            #[cfg(feature = "webview")]
-            if let Some((delivery, input)) = webview_delivery
-                && let Some(system) = self.webview_system.as_mut()
-            {
-                let view = delivery.view();
-                if let Some(target) = delivery.resolve(system)
-                    && let Err(error) = system.input(target, input)
-                {
-                    tracing::warn!(%view, %error, "dropping WebView scroll input");
                 }
             }
             self.record_idle_dim_activity(window_id);

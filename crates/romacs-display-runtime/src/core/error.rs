@@ -23,9 +23,6 @@ pub enum DisplayError {
     #[error("Video error: {0}")]
     Video(String),
 
-    #[error("WebKit error: {0}")]
-    WebKit(String),
-
     #[error("Font error: {0}")]
     Font(String),
 

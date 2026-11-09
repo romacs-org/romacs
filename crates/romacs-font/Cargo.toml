@@ -11,10 +11,6 @@ description = "Evaluator-free font resolution for Romacs: plain-data faces and f
 # display built on it cannot reach romacs-core through the font path; the
 # dependency graph, not discipline, enforces it.
 
-[features]
-default = []
-freetype-bundled = ["freetype-rs/bundled"]
-
 [dependencies]
 cosmic-text.workspace = true
 fontdb.workspace = true
@@ -26,8 +22,6 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 ttf-parser.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
 fontconfig.workspace = true
 yeslogic-fontconfig-sys.workspace = true
 freetype-rs = { version = "0.38.0" }

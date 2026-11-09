@@ -32,8 +32,6 @@ pub use events::{
     ROMACS_EVENT_TOOL_BAR_CLICK, ROMACS_HYPER_MASK, ROMACS_META_MASK, ROMACS_SHIFT_MASK,
     ROMACS_SUPER_MASK, RomacsInputEvent,
 };
-#[cfg(all(feature = "webview", target_os = "linux"))]
-pub use romacs_renderer_wgpu::{CachedWebView, WgpuWebViewCache};
 
 // DRM device discovery for GPU device path mapping
 #[cfg(target_os = "linux")]

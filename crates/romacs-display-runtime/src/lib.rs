@@ -1,6 +1,6 @@
 //! Romacs Display Runtime
 //!
-//! A GPU-accelerated display engine for Romacs using WPE WebKit and wgpu.
+//! A GPU-accelerated display engine for Romacs using wgpu.
 //!
 //! # Architecture
 //!

@@ -18,8 +18,6 @@ pub type Cell = (char, Option<u32>);
 /// Seconds between the starts of two sweeps of light.
 pub const SWEEP: f64 = 6.0;
 
-const RED: u32 = 0xff5f59;
-const BLUE: u32 = 0x2fafff;
 const WORD: u32 = 0xd8d8d8;
 const MARK: &str = include_str!("../../romacs-display-runtime/assets/window-icon.svg");
 const WORDMARK: &str = include_str!("../../../assets/wordmark.svg");
@@ -63,7 +61,7 @@ fn outlines(d: &str) -> Vec<Polygon> {
     flush(&mut number, &mut tokens);
     let mut polygons: Vec<Polygon> = vec![];
     let (mut command, mut at, mut i) = ('M', (0.0, 0.0), 0);
-    let mut take = |i: &mut usize| match tokens.get(*i) { Some(Token::Number(n)) => { *i += 1; Some(*n) } _ => None };
+    let take = |i: &mut usize| match tokens.get(*i) { Some(Token::Number(n)) => { *i += 1; Some(*n) } _ => None };
     while i < tokens.len() {
         if let Token::Command(c) = tokens[i] { command = c; i += 1; if c == 'Z' || c == 'z' { if let Some(p) = polygons.last().and_then(|p| p.first().copied()) { at = p; } continue; } }
         let start = i;
@@ -137,10 +135,13 @@ pub struct Placement {
     pub word: (f64, f64, f64, f64),
 }
 
-/// The shapes drawn, each its colour and outlines: the R, the crescent,
-/// then the wordmark.
-fn shapes() -> &'static (Vec<(u32, Vec<Polygon>)>, Vec<Polygon>) {
-    static SHAPES: OnceLock<(Vec<(u32, Vec<Polygon>)>, Vec<Polygon>)> = OnceLock::new();
+/// The mark's filled shapes, each its colour and outlines (the R, then the
+/// crescent), and the wordmark's outlines.
+type Shapes = (Vec<(u32, Vec<Polygon>)>, Vec<Polygon>);
+
+/// The shapes drawn.
+fn shapes() -> &'static Shapes {
+    static SHAPES: OnceLock<Shapes> = OnceLock::new();
     SHAPES.get_or_init(|| {
         let mark = paths(MARK).into_iter().filter_map(|(fill, polygons)| Some((fill?, polygons))).collect();
         let word = paths(WORDMARK).into_iter().flat_map(|(_, polygons)| polygons).collect();
@@ -322,6 +323,10 @@ pub fn text(cells: &[Cell], cols: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mark's two fills, as window-icon.svg gives them.
+    const RED: u32 = 0xff5f59;
+    const BLUE: u32 = 0x2fafff;
 
     fn view() -> View { View { cols: 120, rows: 40, cell_aspect: 0.5 } }
 

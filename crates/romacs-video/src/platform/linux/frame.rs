@@ -74,13 +74,17 @@ pub(super) fn dmabuf_cache_key(
         .iter()
         .map(|object| {
             let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-            if unsafe { libc::fstat(object.fd.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
-                return Err(format!(
-                    "failed to identify DMA-BUF object: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            let stat = unsafe { stat.assume_init() };
+            // SAFETY: the descriptor is the object's own, open while it is;
+            // fstat fills `stat` when it returns 0, and only then is it read.
+            let stat = unsafe {
+                if libc::fstat(object.fd.as_raw_fd(), stat.as_mut_ptr()) != 0 {
+                    return Err(format!(
+                        "failed to identify DMA-BUF object: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                stat.assume_init()
+            };
             Ok(DmaBufObjectKey {
                 device: stat.st_dev,
                 inode: stat.st_ino,

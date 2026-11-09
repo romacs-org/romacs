@@ -185,12 +185,10 @@ pub enum InputEvent {
     },
     /// The wgpu device was lost (user shader hang → driver reset) and the
     /// render thread rebuilt its GPU state from scratch. Every renderer-side
-    /// media object (decoded images, videos, webkit textures, shader
+    /// media object (decoded images, videos, shader
     /// surfaces, the frame post shader) is gone; the evaluator must
     /// re-resolve them and force a full redisplay.
     DisplayReset,
-    /// Backend-neutral embedded-browser lifecycle and page event.
-    WebView(romacs_webview::WebViewEvent),
     /// Image decoding completed or renderer residency was lost.
     ImageStateChanged {
         event: ImageStateEvent,
@@ -584,8 +582,6 @@ pub enum AssetCommand {
     /// a healthy device. Sent by the hidden `romacs--debug-lose-device`
     /// builtin; never used in production paths.
     DebugSimulateDeviceLoss,
-    /// Backend-neutral embedded-browser operation.
-    WebView(romacs_webview::WebViewCommand),
     /// Create a shader surface (docs/display-engine/SHADER_SURFACES.md)
     SurfaceCreate {
         id: u32,
@@ -1247,9 +1243,6 @@ impl RenderComms {
                 action: PointerAction::Move { .. },
                 ..
             })
-        ) || matches!(
-            event,
-            InputEvent::WebView(romacs_webview::WebViewEvent::LoadProgressChanged { .. })
         )
     }
 
@@ -1281,21 +1274,6 @@ impl RenderComms {
             InputEvent::WindowFocus { .. } => "window-focus",
             InputEvent::MonitorsChanged { .. } => "monitors-changed",
             InputEvent::DisplayReset => "display-reset",
-            InputEvent::WebView(event) => match event {
-                romacs_webview::WebViewEvent::Ready { .. } => "webview-ready",
-                romacs_webview::WebViewEvent::Failed { .. } => "webview-failed",
-                romacs_webview::WebViewEvent::Closed { .. } => "webview-closed",
-                romacs_webview::WebViewEvent::TitleChanged { .. } => "webview-title-changed",
-                romacs_webview::WebViewEvent::UriChanged { .. } => "webview-uri-changed",
-                romacs_webview::WebViewEvent::LoadProgressChanged { .. } => {
-                    "webview-load-progress-changed"
-                }
-                romacs_webview::WebViewEvent::LoadChanged { .. } => "webview-load-changed",
-                romacs_webview::WebViewEvent::LoadFinished { .. } => "webview-load-finished",
-                romacs_webview::WebViewEvent::ScriptFinished { .. } => "webview-script-finished",
-                romacs_webview::WebViewEvent::ProcessFailed { .. } => "webview-process-failed",
-                romacs_webview::WebViewEvent::FocusChanged { .. } => "webview-focus-changed",
-            },
             InputEvent::ImageStateChanged { .. } => "image-state-changed",
             InputEvent::SurfaceCreateFailed { .. } => "surface-create-failed",
             InputEvent::Model { .. } => "model",

@@ -11,16 +11,6 @@ description = "GNU Emacs regexp engine (regex-emacs.c translation): compile, bac
 # value -- and no handle into a moving heap -- can cross into it. The
 # dependency graph, not discipline, enforces that.
 
-[features]
-default = []
-# Test/diagnostic seams (engine routing overrides, matcher counters, the
-# fail-stack probe) for a HOST's unit tests. romacs-core enables this from its
-# dev-dependencies, which reproduces the `cfg(test)` these had while the
-# engine lived in core. Never enabled by a shipping build.
-test-hooks = []
-# Typed differential-fuzzing seam, set by romacs-core's `fuzzing` feature.
-fuzzing = []
-
 [dependencies]
 romacs-snapshot = { path = "../romacs-snapshot" }
 libc.workspace = true

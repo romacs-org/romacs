@@ -75,11 +75,6 @@ pub struct RomacsInputEvent {
     pub height: u32,
     /// Emacs frame_id targeted by hit testing (root frame or child frame)
     pub target_frame_id: u64,
-    /// WebView ID hit by render-thread glyph search (0 = none).
-    pub webview_id: u32,
-    /// Coordinates relative to the WebView (valid when `webview_id != 0`).
-    pub webview_rel_x: i32,
-    pub webview_rel_y: i32,
 }
 
 impl Default for RomacsInputEvent {
@@ -100,9 +95,6 @@ impl Default for RomacsInputEvent {
             width: 0,
             height: 0,
             target_frame_id: 0,
-            webview_id: 0,
-            webview_rel_x: 0,
-            webview_rel_y: 0,
         }
     }
 }

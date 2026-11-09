@@ -40,12 +40,6 @@ fn display_video() {
 }
 
 #[test]
-fn display_webkit() {
-    let err = DisplayError::WebKit("context failed".into());
-    assert_eq!(err.to_string(), "WebKit error: context failed");
-}
-
-#[test]
 fn display_font() {
     let err = DisplayError::Font("missing glyph".into());
     assert_eq!(err.to_string(), "Font error: missing glyph");

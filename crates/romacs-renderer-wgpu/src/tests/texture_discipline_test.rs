@@ -77,11 +77,6 @@ fn allowlist() -> BTreeMap<&'static str, &'static str> {
              accounting.",
         ),
         (
-            "src/webview_cache.rs",
-            "Sized to the WPE browser frame, bounded by media_budget's WebKit \
-             accounting.",
-        ),
-        (
             "src/shader_surface_cache.rs",
             "Sized to the shader surface's own clamped extent (MAX_SURFACE_SIZE), \
              bounded by media_budget's Surface accounting and its eviction driver.",
