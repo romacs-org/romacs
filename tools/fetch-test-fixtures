@@ -9,7 +9,7 @@ verifies each against its pin before it lands. Files are written whole (a
 temporary name, then rename). Run it once per cache; tests fail with a pointer
 here when an asset is missing.
 
-Usage: scripts/fetch-test-fixtures [--check]
+Usage: tools/fetch-test-fixtures [--check]
   --check   download nothing; list what is missing or wrong, exit 1 if any.
 """
 import gzip

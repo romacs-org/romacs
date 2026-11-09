@@ -57,7 +57,7 @@ class FixtureProvisioning(unittest.TestCase):
     """The gate fills the pinned test-fixture cache before tests, which only read it."""
 
     def tree_with_fetcher(self, root, status):
-        script = root / 'scripts/fetch-test-fixtures'
+        script = root / 'tools/fetch-test-fixtures'
         script.parent.mkdir(parents=True)
         script.write_text(f'import os, pathlib, sys\n'
                           f'pathlib.Path(sys.argv[0]).with_name("seen").write_text(os.environ["ROMACS_TEST_FONTS_DIR"])\n'
