@@ -790,6 +790,28 @@ with ASK-EFFORT, or when nothing gives the chosen model one."
                    (romacs-agent--read-effort efforts (if (member own efforts) own (plist-get fields :default-effort))))))
     (cons provider (append (and model (list :model model)) (and effort (list :effort effort))))))
 
+;;; What a harness is told of Romacs
+
+(defconst romacs-agent--runtime-note
+  "You are running inside Romacs, an Emacs-compatible editor, through its agent client.  \
+The user reads your replies as Markdown in an editor buffer: name files by absolute path, \
+which the user can follow as links.  The romacs_* tools act on the user's live editor \
+session, its buffers, windows and state: treat it as their real work.  \
+romacs_delegate_task starts a separate agent that sees only the brief you write."
+  "What every session's harness is told of where it runs, beside its own
+instructions.")
+
+(defconst romacs-agent--child-note
+  "You are a delegated task: your parent sees only your final reply.  Do the work yourself, \
+start no delegated tasks unless your task says to, and end with a self-contained result."
+  "What a delegated session's harness is told besides.")
+
+(defun romacs-agent--instructions (session)
+  "What SESSION's harness is told of Romacs, for its system prompt."
+  (if (plist-get (romacs-agent-options session) :parent)
+      (concat romacs-agent--runtime-note "\n\n" romacs-agent--child-note)
+    romacs-agent--runtime-note))
+
 ;;; Writing to a harness
 
 (defun romacs-agent--option-words (session model-flag effort-flag)
@@ -816,10 +838,23 @@ runs is attached first; one whose supervisor ended says so: it resumes with
            (process-send-string (romacs-agent-connection session) line))
           (t (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session))))))
 
+(defun romacs-agent--image-caption (file)
+  "The line telling a model where an attached image FILE is saved."
+  (format "[Attached image saved at: %s]" file))
+
+(defconst romacs-agent--image-caption-regexp
+  "\\`\\[Attached image saved at: [^\n]*\\]\\'"
+  "A text block that is an image's caption (`romacs-agent--image-caption'):
+the image's, not the message's text.")
+
 (defun romacs-agent--text-of (content)
-  "The text of a message CONTENT: a string or a vector of blocks."
+  "The text of a message CONTENT: a string or a vector of blocks, images'
+captions left out."
   (if (stringp content) content
-    (mapconcat (lambda (block) (or (and (hash-table-p block) (gethash "text" block)) "")) content "")))
+    (mapconcat (lambda (block)
+                 (let ((text (and (hash-table-p block) (gethash "text" block))))
+                   (if (and text (not (string-match-p romacs-agent--image-caption-regexp text))) text "")))
+               content "")))
 
 (defcustom romacs-agent-image-max-bytes (* 20 1024 1024)
   "The largest image that may be attached or sent: one goes whole into a

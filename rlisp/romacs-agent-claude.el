@@ -33,7 +33,8 @@ RESUME is non-nil."
                   "--thinking-display" "summarized"
                   ;; The harness's own approvals come to this session's UI.
                   "--permission-prompt-tool" "stdio"
-                  "--mcp-config" (expand-file-name "mcp.json" dir))
+                  "--mcp-config" (expand-file-name "mcp.json" dir)
+                  "--append-system-prompt" (romacs-agent--instructions session))
             (if resume (list "--resume" (romacs-agent--native-id session))
               (list "--session-id" (romacs-agent-id session)))
             (romacs-agent--option-words session "--model" "--effort")
@@ -54,8 +55,8 @@ RESUME is non-nil."
                       (buffer-string)))))
 
 (defun romacs-agent--claude-user (_session text)
-  "The harness's message of TEXT, with the images attached to it as content:
-the model is given them, and no file is named for it to open."
+  "The harness's message of TEXT, with the images attached to it as content,
+each after a line naming where it is saved: the model can refer to it."
   (let ((images (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
     (romacs-mcp--object
      "type" "user"
@@ -63,7 +64,12 @@ the model is given them, and no file is named for it to open."
                 "role" "user"
                 "content" (if images
                               (vconcat (list (romacs-mcp--object "type" "text" "text" text))
-                                       (mapcar #'romacs-agent--claude-image images))
+                                       (mapcan (lambda (file)
+                                                 (list (romacs-mcp--object
+                                                        "type" "text"
+                                                        "text" (romacs-agent--image-caption file))
+                                                       (romacs-agent--claude-image file)))
+                                               images))
                             text)))))
 
 (defun romacs-agent--claude-reason (result)
