@@ -63,6 +63,9 @@ impl Vm {
     /// unless rooted. Prepared handles themselves remain valid. Embedders pass
     /// `Arg::Fixed`/`Arg::Rooted` through the public wrapper (handle.rs).
     pub(crate) fn invoke_prepared_raw(&mut self, handle: PreparedHandle, args: &[Value]) -> Result<Value> {
+        self.invoke_prepared_with(handle, args, false)
+    }
+    fn invoke_prepared_with(&mut self, handle: PreparedHandle, args: &[Value], propagate: bool) -> Result<Value> {
         let p = self
             .source_cache
             .prepared
@@ -77,31 +80,42 @@ impl Vm {
             let args: Vec<Value> = (0..args.len()).map(|i| self.rooted(&frame, i)).collect();
             self.drop_frame(frame);
             self.source_cache.prepared[handle.0] = updated?;
-            return self.call_prepared(handle, &args);
+            return self.call_prepared(handle, &args, propagate);
         }
-        self.call_prepared(handle, args)
+        self.call_prepared(handle, args, propagate)
     }
-    fn call_prepared(&mut self, handle: PreparedHandle, args: &[Value]) -> Result<Value> {
+    fn call_prepared(&mut self, handle: PreparedHandle, args: &[Value], propagate: bool) -> Result<Value> {
         let function = self.source_cache.prepared[handle.0].function;
         if args.len() != self.functions[function].arity {
             return Err("wrong number of arguments".into());
         }
+        self.propagate_next |= propagate;
         let outcome = threaded::execute_args(self, function, args);
+        if propagate { self.propagate_next = false; }
         self.finish_request(outcome)
     }
     /// Call the fixed-arity lambda SOURCE with ARGS: a native caller's direct
     /// path into Lisp. Its prepared handle is made on the first call, so no
     /// call compiles a request.
     pub(crate) fn call_prepared_source_raw(&mut self, source: &str, args: &[Value]) -> Result<Value> {
+        self.call_prepared_source(source, args, false)
+    }
+    /// `call_prepared_source_raw' for Lisp a primitive runs with no handler of
+    /// its own: what it signals stays structured in `propagated_escape', for
+    /// the calling engine to raise, so a quit stays a quit.
+    pub(crate) fn call_prepared_source_propagating(&mut self, source: &str, args: &[Value]) -> Result<Value> {
+        self.call_prepared_source(source, args, true)
+    }
+    fn call_prepared_source(&mut self, source: &str, args: &[Value], propagate: bool) -> Result<Value> {
         if let Some(index) = self.source_cache.prepared.iter().position(|p| p.source == source) {
-            return self.invoke_prepared_raw(PreparedHandle(index), args);
+            return self.invoke_prepared_with(PreparedHandle(index), args, propagate);
         }
         // Preparing runs Lisp, which may collect: ARGS wait in a frame.
         let frame = self.root_frame(args);
         let handle = self.prepare_source(source);
         let args: Vec<Value> = (0..args.len()).map(|i| self.rooted(&frame, i)).collect();
         self.drop_frame(frame);
-        self.invoke_prepared_raw(handle?, &args)
+        self.invoke_prepared_with(handle?, &args, propagate)
     }
     pub fn prepared_ir(&self, handle: PreparedHandle) -> Result<String> {
         let p = self

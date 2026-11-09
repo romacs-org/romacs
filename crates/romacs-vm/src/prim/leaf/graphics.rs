@@ -716,7 +716,7 @@ impl crate::Vm {
         let (messages, landed) = self.image_completions();
         for message in messages {
             let text = self.allocate_object(crate::data::Object::String(Box::new(crate::data::LispString::new(&message))));
-            self.call_prepared_source_raw("(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))", &[text])?;
+            self.call_prepared_source_propagating("(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))", &[text])?;
         }
         Ok(landed)
     }
