@@ -1082,7 +1082,7 @@ impl Vm {
         // A lexical pair's cell takes its value, which marking only read.
         let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(&i, _)| self.cells.marked(i))
             .map(|(&i, &pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
-        for (i, value) in pairs { self.cells[i] = value; }
+        for (i, value) in pairs { self.cells.collector_entries_mut()[i] = value; }
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         if !doomed.is_empty() {
             let gone: HashSet<u64> = doomed.iter().map(|f| f.0).collect();
@@ -1112,7 +1112,7 @@ impl Vm {
                     .collect(),
                 _ => unreachable!("weak table index"),
             };
-            if let data::Object::HashTable(table) = &mut self.objects[t] {
+            if let data::Object::HashTable(table) = &mut self.objects.collector_entries_mut()[t] {
                 for slot in dead {
                     table.sweep(slot);
                 }
@@ -1133,7 +1133,7 @@ impl Vm {
             if let data::Object::Marker(m) = &self.objects[i as usize] && let Some(anchor) = m.anchor {
                 let buffer = m.buffer;
                 let Ok(index) = buffer.index(0) else { continue };
-                match self.objects.get_mut(index.saturating_sub(1)) {
+                match self.objects.collector_entries_mut().get_mut(index.saturating_sub(1)) {
                     Some(data::Object::Buffer(b)) => { b.anchors.remove(anchor); }
                     Some(data::Object::ByteBuffer(b)) => { b.anchors.remove(anchor); }
                     _ => {}
@@ -1168,7 +1168,7 @@ impl Vm {
         // entry into one is left (swept above), so their ids can be reused.
         self.sweep_regions(&region_marks);
         for &i in &live_obarrays {
-            if let data::Object::Obarray(t) = &mut self.objects[i] {
+            if let data::Object::Obarray(t) = &mut self.objects.collector_entries_mut()[i] {
                 t.reclaim_removed(&obarray_symbols_live);
             }
         }
@@ -1180,7 +1180,7 @@ impl Vm {
             let cells = &self.cells;
             self.cell_pairs.retain(|&i, _| cells.marked(i));
             for &i in &dead {
-                self.objects[i as usize] = data::Object::Free;
+                self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
             }
             let verify = self.gc_stress.verify;
             #[cfg(test)]
@@ -1468,7 +1468,7 @@ impl Vm {
             marking.add(&mut own, &mut pending);
             loop {
                 let drained = marking.round(&view, &mut own, KEY_POLL,
-                    &mut |v, pending| this.mark_serial(&marking, v, in_obarray, pending, &mut state),
+                    &mut |handed, pending| this.mark_serial(handed, in_obarray, pending, &mut state),
                     &mut || host.as_mut().is_some_and(|host| host.key_pending()));
                 if !drained { return false; }
                 if !std::mem::replace(&mut finalizers_doomed, true) && this.doom_finalizers(&mut pending, &mut doomed) {
@@ -1524,9 +1524,10 @@ impl Vm {
     }
     /// What the workers hand back, claimed: the kinds with `&mut' visitors,
     /// symbols of an obarray of their own, and frozen values. Only the entry
-    /// is written, through MARKING, beside the workers' reads of others.
-    fn mark_serial(&self, marking: &gc_mark::Marking, v: Value, in_obarray: &[bool], pending: &mut Vec<Value>, state: &mut MarkState) {
+    /// is written, through HANDED, beside the workers' reads of others.
+    fn mark_serial(&self, handed: gc_mark::Handed<'_>, in_obarray: &[bool], pending: &mut Vec<Value>, state: &mut MarkState) {
         let keep = |v: &Value| traced(*v, in_obarray);
+        let v = handed.value();
         if v.tag() == 7 {
             let slot = v.payload() as usize - 1;
             if let Some(&name) = self.obarray_symbol_names.get(&slot) && state.obarray_symbols_live.insert(slot) {
@@ -1552,8 +1553,7 @@ impl Vm {
         }
         let i = v.payload() as usize - 1;
         let native_nodes = &mut state.native_nodes;
-        // SAFETY: claimed by the worker that handed it over, which reads it no more.
-        match unsafe { marking.objects.get_mut(i) } {
+        match handed.object() {
             data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Obarray(t) => {
                 state.live_obarrays.push(i);

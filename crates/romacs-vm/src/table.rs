@@ -9,7 +9,10 @@
 //! dead is exactly ALLOCATED, and `sweep' frees those and turns MARKED back.
 //! So after a finished collection a table holds no marks; one a key press or a
 //! panic ended keeps them, unread, until the next mark clears them (`raw').
-use std::ops::{Deref, DerefMut};
+use crate::Value;
+use crate::data::Object;
+use crate::hash::HashTable;
+use std::ops::Index;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 const FREE: u8 = 0;
@@ -177,6 +180,62 @@ impl<T> RawTable<T> {
     }
 }
 
+/// What a store into a table tells a later collector. Apart from the entries,
+/// so a `Stores` can hold it beside a `&mut HashTable`.
+#[derive(Default)]
+struct Barrier {
+    /// Whether a collector watches stores; nothing does yet, and the test of
+    /// this is all a store pays.
+    watch: u8,
+}
+
+impl Barrier {
+    #[inline(always)]
+    fn stored(&mut self, i: usize, new: Value) {
+        if self.watch != 0 {
+            on_store(self, i, new);
+        }
+    }
+    #[inline(always)]
+    fn touched(&mut self, i: usize) {
+        if self.watch != 0 {
+            on_touch(self, i);
+        }
+    }
+}
+
+/// B and C fill this: NEW was stored in entry I.
+#[cold]
+#[inline(never)]
+fn on_store(_barrier: &mut Barrier, _i: usize, _new: Value) {}
+
+/// B and C fill this: entry I may have changed anywhere.
+#[cold]
+#[inline(never)]
+fn on_touch(_barrier: &mut Barrier, _i: usize) {}
+
+/// Why `Table::update_element` stored nothing. Holds no Value: each caller
+/// already has the offending one and builds its own fault from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotFault {
+    NotSlots,
+    OutOfRange,
+}
+
+/// The barrier of the object a `HashTable` lives in, for that table's writing
+/// methods to tell each key and value they put in.
+pub(crate) struct Stores<'t> {
+    barrier: &'t mut Barrier,
+    entry: usize,
+}
+
+impl Stores<'_> {
+    #[inline]
+    pub(crate) fn stored(&mut self, new: Value) {
+        self.barrier.stored(self.entry, new);
+    }
+}
+
 pub(crate) struct Table<T> {
     entries: Vec<T>,
     colors: Vec<u8>,
@@ -195,6 +254,7 @@ pub(crate) struct Table<T> {
     marking: bool,
     /// Which marks the colours hold: a new mark, or marks cleared, is another.
     generation: u64,
+    barrier: Barrier,
     /// Free entries `alloc' has handed out again, for tests.
     #[cfg(test)]
     pub(crate) reused: usize,
@@ -203,7 +263,7 @@ pub(crate) struct Table<T> {
 impl<T> Default for Table<T> {
     fn default() -> Self {
         Self {
-            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, generation: 0,
+            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, generation: 0, barrier: Barrier::default(),
             #[cfg(test)]
             reused: 0,
         }
@@ -214,18 +274,11 @@ impl<T> Default for Table<T> {
 // the table's own storage.
 unsafe impl<T: romacs_snapshot::SnapshotSafe> romacs_snapshot::SnapshotSafe for Table<T> {}
 
-impl<T> Deref for Table<T> {
-    type Target = [T];
-    #[inline(always)]
-    fn deref(&self) -> &[T] {
-        &self.entries
-    }
-}
-
-impl<T> DerefMut for Table<T> {
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut [T] {
-        &mut self.entries
+impl<T> Index<usize> for Table<T> {
+    type Output = T;
+    #[inline]
+    fn index(&self, i: usize) -> &T {
+        &self.entries[i]
     }
 }
 
@@ -237,7 +290,108 @@ impl<'a, T> IntoIterator for &'a Table<T> {
     }
 }
 
+impl Table<(Value, Value)> {
+    #[inline]
+    pub(crate) fn set_car(&mut self, i: usize, new: Value) {
+        self.barrier.stored(i, new);
+        self.entries[i].0 = new;
+    }
+    #[inline]
+    pub(crate) fn set_cdr(&mut self, i: usize, new: Value) {
+        self.barrier.stored(i, new);
+        self.entries[i].1 = new;
+    }
+}
+
+impl Table<Value> {
+    #[inline]
+    pub(crate) fn set(&mut self, i: usize, new: Value) {
+        self.barrier.stored(i, new);
+        self.entries[i] = new;
+    }
+}
+
+impl Table<Object> {
+    /// Store NEW in slot K of the vector or record at entry I.
+    #[inline]
+    pub(crate) fn update_element(&mut self, i: usize, k: usize, new: Value) -> Result<(), SlotFault> {
+        let (Object::Vector(items) | Object::Record(items)) = &mut self.entries[i] else {
+            return Err(SlotFault::NotSlots);
+        };
+        let slot = items.get_mut(k).ok_or(SlotFault::OutOfRange)?;
+        self.barrier.stored(i, new);
+        *slot = new;
+        Ok(())
+    }
+    /// The hash table at entry I, if it is one, and what its stores tell. Not
+    /// `entry_mut`: a whole-entry hook would re-trace the table on every put.
+    #[inline]
+    pub(crate) fn hash_mut(&mut self, i: usize) -> Option<(&mut HashTable, Stores<'_>)> {
+        let Object::HashTable(table) = &mut self.entries[i] else { return None };
+        Some((&mut **table, Stores { barrier: &mut self.barrier, entry: i }))
+    }
+    pub(crate) fn swap(&mut self, a: usize, b: usize) {
+        self.barrier.touched(a);
+        self.barrier.touched(b);
+        self.entries.swap(a, b);
+    }
+    /// Entry TARGET to change, beside entry SOURCE to read, a different one.
+    pub(crate) fn entry_mut_with(&mut self, target: usize, source: usize) -> (&mut Object, &Object) {
+        self.barrier.touched(target);
+        if source < target {
+            let (low, high) = self.entries.split_at_mut(target);
+            (&mut high[0], &low[source])
+        } else {
+            let (low, high) = self.entries.split_at_mut(source);
+            (&mut low[target], &high[0])
+        }
+    }
+}
+
+/// The kinds of entry a `&mut` may be had to. Not conses or cells, whose few
+/// stores `set_car`, `set_cdr` and `set` name.
+pub(crate) trait WholeEntry {}
+impl WholeEntry for Object {}
+impl WholeEntry for crate::Closure {}
+
+impl<T: WholeEntry> Table<T> {
+    /// Entry I, to change anywhere. The borrow keeps everything else off this
+    /// table while it lives, and nothing runs Lisp without the VM it is part of.
+    #[inline]
+    pub(crate) fn entry_mut(&mut self, i: usize) -> &mut T {
+        self.barrier.touched(i);
+        &mut self.entries[i]
+    }
+    /// As `entry_mut`, for an I that may be past the table.
+    #[inline]
+    pub(crate) fn get_entry_mut(&mut self, i: usize) -> Option<&mut T> {
+        if i >= self.entries.len() {
+            return None;
+        }
+        Some(self.entry_mut(i))
+    }
+}
+
 impl<T> Table<T> {
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    #[inline]
+    pub(crate) fn get(&self, i: usize) -> Option<&T> {
+        self.entries.get(i)
+    }
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.entries.iter()
+    }
+    /// Every entry, past the barrier: the collector's own writes, which only
+    /// `gc*.rs` and this file make (`tests/no_remote_references.rs`).
+    pub(crate) fn collector_entries_mut(&mut self) -> &mut [T] {
+        &mut self.entries
+    }
     /// A new entry holding VALUE: the lowest free one, else one at the end.
     /// Its index.
     #[inline]
@@ -394,9 +548,7 @@ impl<T> Table<T> {
     fn cut(&mut self, len: usize) {
         self.high = self.high.max(self.entries.len());
         self.free -= self.entries.len() - len;
-        // SAFETY: a tombstone owns nothing (`sweep'), so forgetting one
-        // leaks nothing, and the length only falls.
-        unsafe { self.entries.set_len(len) };
+        self.entries.truncate(len);
         self.colors.truncate(len);
     }
     /// Give back what the table holds beyond twice its entries, or FLOOR:
@@ -571,10 +723,10 @@ mod tests {
             t.mark(i);
         }
         t.compact(|entry| *entry += 100);
-        assert_eq!(&t[..], [102, 105, 107]);
+        assert_eq!(t.entries, [102, 105, 107]);
         assert_eq!((t.unused(), t.live()), (0, 3));
         t.prepend(2, || 0);
-        assert_eq!(&t[..], [0, 0, 102, 105, 107]);
+        assert_eq!(t.entries, [0, 0, 102, 105, 107]);
         assert_eq!(t.alloc(1), 5, "dense: the end");
     }
 
@@ -589,11 +741,11 @@ mod tests {
         }
         if !crate::world::arena::may_reserve() { return; }
         assert!(t.reserved, "past RESERVE_FROM");
-        let at = t.as_ptr();
+        let at = t.entries.as_ptr();
         for _ in 0..(4 << 20) {
             t.push(0);
         }
-        assert_eq!(t.as_ptr(), at, "no copy");
+        assert_eq!(t.entries.as_ptr(), at, "no copy");
         assert_eq!(t.capacity(), t.len(), "the reservation is not capacity");
     }
 

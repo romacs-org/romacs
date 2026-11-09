@@ -174,7 +174,7 @@ impl Leaf<'_> {
             if let Some((old, at)) = point {
                 let end = self.point()?;
                 self.vm.set_marker_object(stream, Value::integer(end).unwrap(), buffer).map_err(Fault::Error)?;
-                let data::Object::Buffer(target) = &mut self.vm.objects[buffer.index(0).unwrap() - 1] else { unreachable!() };
+                let data::Object::Buffer(target) = self.vm.objects.entry_mut(buffer.index(0).unwrap() - 1) else { unreachable!() };
                 target.point = if old >= at { crate::coordinates::ByteOffset(old.0 + target.point.0 - at.0) } else { old };
             }
             Ok(())
@@ -185,7 +185,7 @@ impl Leaf<'_> {
 
     fn print_marker_point(&mut self, stream: Value, buffer: Value) -> std::result::Result<(crate::coordinates::ByteOffset, crate::coordinates::ByteOffset), Fault> {
         let position = self.vm.marker_position_value(stream).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
-        let data::Object::Buffer(target) = &mut self.vm.objects[buffer.index(0).unwrap() - 1] else {
+        let data::Object::Buffer(target) = self.vm.objects.entry_mut(buffer.index(0).unwrap() - 1) else {
             return Err(Fault::Error("printing to unibyte buffer markers is not supported".into()));
         };
         let at = target.byte_of_char(crate::coordinates::CharOffset(position as usize - 1)).map_err(Fault::Error)?;
@@ -221,7 +221,7 @@ impl Leaf<'_> {
         let unmodified = !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified();
         let (point, _, _) = self.vm.point_extent()?;
         let marks = self.vm.family_record(index);
-        let edited = match &mut self.vm.objects[index] {
+        let edited = match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(target) => target.replace(target.point..target.point, &bytes),
             data::Object::ByteBuffer(target) => target.replace(target.point..target.point, &bytes),
             _ => unreachable!(),

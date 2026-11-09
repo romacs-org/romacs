@@ -276,7 +276,7 @@ impl Vm {
             if prefix != end || prefix != inserted_end {
                 let index = buffer.index(0)? - 1;
                 let marks = self.family_record(index);
-                let Object::Buffer(text) = &mut self.objects[index] else { unreachable!("terminal buffer") };
+                let Object::Buffer(text) = self.objects.entry_mut(index) else { unreachable!("terminal buffer") };
                 let edited = text.replace(ByteOffset(prefix)..ByteOffset(end), &snapshot.text.as_bytes()[prefix..inserted_end]);
                 self.family_fetch(marks);
                 edited?;

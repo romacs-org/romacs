@@ -139,7 +139,7 @@ impl Leaf<'_> {
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(buffer) => buffer.point = buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?,
             data::Object::ByteBuffer(buffer) => buffer.point = ByteOffset(at),
             _ => unreachable!(),

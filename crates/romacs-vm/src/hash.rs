@@ -14,6 +14,7 @@
 //! re-hashed. Slot indices never move, so iteration order is independent of
 //! collection. No borrowed `&Value` outlives a single primitive call.
 use super::*;
+use crate::table::Stores;
 #[cfg(test)]
 #[path = "fixnum_hash_tests.rs"]
 mod fixnum_tag_tests;
@@ -206,6 +207,22 @@ impl HashTable {
     fn chain(&self, hash: u64) -> u32 {
         assert!(!self.stale, "hash table lookup through a stale index");
         self.buckets[self.bucket(hash)]
+    }
+    /// `puthash` after a lookup that found slot FOUND, or none. Only a strong
+    /// table tells its stores: a weak one's entries keep nothing alive, and the
+    /// collector reads them in its last rounds.
+    fn put(&mut self, mut stores: Stores<'_>, found: Option<usize>, key: Value, value: Value, hash: u64, moving: bool) {
+        let strong = self.weakness == Weakness::None;
+        if let Some(slot) = found {
+            if strong { stores.stored(value); }
+            self.values[slot] = value;
+        } else {
+            if strong {
+                stores.stored(key);
+                stores.stored(value);
+            }
+            self.insert(key, value, hash, moving);
+        }
     }
     /// GNU `hash_put` after a failed lookup, including `maybe_resize_hash_table`.
     fn insert(&mut self, key: Value, value: Value, hash: u64, moving: bool) {
@@ -781,11 +798,8 @@ impl Vm {
         }
         table
     }
-    fn table_mut(&mut self, i: usize) -> &mut HashTable {
-        match &mut self.objects[i] {
-            data::Object::HashTable(t) => t,
-            _ => unreachable!("checked hash table"),
-        }
+    fn table_mut(&mut self, i: usize) -> (&mut HashTable, Stores<'_>) {
+        self.objects.hash_mut(i).expect("checked hash table")
     }
     /// Re-hash keys whose hash read a heap index, then rebuild the chains.
     /// A frozen table's keys never move, so it is never stale.
@@ -803,7 +817,8 @@ impl Vm {
                 .filter(|(slot, _, _)| table.moving[*slot])
                 .map(|(slot, key, _)| (slot, self.hash_key(test, key)))
                 .collect();
-            let table = self.table_mut(i);
+            // The same keys and values, in new chains: nothing is stored.
+            let (table, _) = self.table_mut(i);
             for (slot, (hash, moving)) in hashes {
                 table.hashes[slot] = hash;
                 table.moving[slot] = moving;
@@ -913,8 +928,9 @@ impl Vm {
         let (found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
         let i = self.table_index(table).map_err(|_| "hash table required")?;
         if let Some(slot) = found {
-            let value = self.table_mut(i).values[slot];
-            self.table_mut(i).remove(slot);
+            let (table, _) = self.table_mut(i);
+            let value = table.values[slot];
+            table.remove(slot);
             if let Some(binding) = value.index_if(7).and_then(|n| n.checked_sub(1)) {
                 if self.local_binding_slots.contains(&binding) && !self.dynamic.iter().any(|(active, _, _, _)| *active == binding) {
                     self.slots[binding].value = Value::UNBOUND;
@@ -934,11 +950,8 @@ impl Vm {
             .table_lookup(table, key)
             .map_err(|_| "hash table required")?;
         let i = self.table_index(table).map_err(|_| "hash table required")?;
-        let table = self.table_mut(i);
-        match found {
-            Some(slot) => table.values[slot] = value,
-            None => table.insert(key, value, hash, moving),
-        }
+        let (table, stores) = self.table_mut(i);
+        table.put(stores, found, key, value, hash, moving);
         Ok(())
     }
     fn hash_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Hashed<Value> {
@@ -970,24 +983,21 @@ impl Vm {
                 let (key, value) = (args[0], args[1]);
                 let (found, hash, moving) = self.table_lookup(args[2], key)?;
                 let i = self.table_index(args[2])?;
-                let table = self.table_mut(i);
-                match found {
-                    Some(slot) => table.values[slot] = value,
-                    None => table.insert(key, value, hash, moving),
-                }
+                let (table, stores) = self.table_mut(i);
+                table.put(stores, found, key, value, hash, moving);
                 Ok(value)
             }
             Remhash => {
                 let (found, _, _) = self.table_lookup(args[1], args[0])?;
                 let i = self.table_index(args[1])?;
                 if let Some(slot) = found {
-                    self.table_mut(i).remove(slot);
+                    self.table_mut(i).0.remove(slot);
                 }
                 Ok(Value::NIL)
             }
             Clrhash => {
                 let i = self.table_index(args[0])?;
-                self.table_mut(i).clear();
+                self.table_mut(i).0.clear();
                 Ok(args[0])
             }
             HashTableCount => Ok(Value::integer(self.table(args[0])?.count() as i64).unwrap()),
@@ -1125,11 +1135,8 @@ impl Vm {
         for pair in items.chunks_exact(2) {
             let (found, hash, moving) = self.table_lookup(table, pair[0])?;
             let i = self.table_index(table)?;
-            let t = self.table_mut(i);
-            match found {
-                Some(slot) => t.values[slot] = pair[1],
-                None => t.insert(pair[0], pair[1], hash, moving),
-            }
+            let (t, stores) = self.table_mut(i);
+            t.put(stores, found, pair[0], pair[1], hash, moving);
         }
         Ok(table)
     }

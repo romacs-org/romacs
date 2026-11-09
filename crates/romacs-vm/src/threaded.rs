@@ -3469,13 +3469,9 @@ static K_CODE: [Inst; 3] = [k_inst(t2_call), k_inst(t2_resume), k_inst(ret)];
 fn k_count(v: Value) -> usize {
     v.integer_value().expect("continuation count register") as usize
 }
-/// Registers used by the continuation activation at `k`.
-/// # Safety
-/// K is a continuation activation's registers (`take_step`), its counts in
-/// place.
-unsafe fn k_width(k: *mut Value) -> usize {
-    // SAFETY: K as the function's contract.
-    unsafe { K_SAVED + k_count(*k.add(K_SAVED_N)) + k_count(*k.add(K_ARGS_N)) }
+/// Registers used by a continuation activation with these count registers.
+fn k_width(saved_n: Value, args_n: Value) -> usize {
+    K_SAVED + k_count(saved_n) + k_count(args_n)
 }
 /// Where a handler continues after a Step, as plain data in two words, the
 /// registers the current frame's: a step's argument vectors are owned and
@@ -3736,7 +3732,7 @@ unsafe fn take_step(
         } else {
             if !depth_room(e) { return Continue::Stop; }
             let width = if std::ptr::eq(pc, &K_CODE[0]) {
-                k_width(r)
+                k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N))
             } else {
                 e.vm.functions.get_unchecked(e.function).regs.max(1)
             };
@@ -4096,7 +4092,7 @@ unsafe fn t2_enter_closure(
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
-        let new = r.add(k_width(r));
+        let new = r.add(k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N)));
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
         // As in the cached entry: read every argument, the backtrace's
@@ -5129,13 +5125,7 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
     }
     // Only an insertion that runs no Lisp skips the general bracket.
     let quiet = vm.quiet_insertion()?;
-    let (source, target) = if a < b {
-        let (x, y) = vm.objects.split_at_mut(b);
-        (&x[a], &mut y[0])
-    } else {
-        let (x, y) = vm.objects.split_at_mut(a);
-        (&y[0], &mut x[b])
-    };
+    let (target, source) = vm.objects.entry_mut_with(b, a);
     // An edit of shared text moves the other buffers' positions: the
     // general path does that.
     let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
@@ -5240,7 +5230,7 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     if v == Value::NIL || v.tag() != 0 {
         return None;
     }
-    let Some(data::Object::Buffer(t)) = vm.objects.get_mut(v.payload() as usize - 1) else {
+    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(v.payload() as usize - 1) else {
         return None;
     };
     let kind = (target.0 >> 3) as usize;
@@ -5413,7 +5403,7 @@ unsafe fn nconc2(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
             last = next;
             steps += 1;
         }
-        e.vm.conses[last.payload() as usize].1 = tail;
+        e.vm.conses.set_cdr(last.payload() as usize, tail);
         *r.add(i.a) = list;
         advance(e, r, pc)
     }

@@ -102,7 +102,7 @@ impl Leaf<'_> {
             self.check_insertion_read_only(at, inhibit)?;
         }
         // modify_text: the region counts as modified whatever changes.
-        if let data::Object::Buffer(b) = &mut self.vm.objects[index] {
+        if let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) {
             b.state.modification.changed((hi - lo) as usize, true);
         }
         let mut chars: Vec<u32> = {
@@ -134,7 +134,7 @@ impl Leaf<'_> {
                 let n = crate::lstring::char_string(c, &mut encoded);
                 bytes.extend_from_slice(&encoded[..n]);
             }
-            let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!() };
+            let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!() };
             let from = b.byte_of_char(CharOffset(base + at)).map_err(Fault::Error)?;
             let to = b.byte_of_char(CharOffset(base + at + len)).map_err(Fault::Error)?;
             if scalar && to.0 - from.0 == bytes.len() {
@@ -148,11 +148,11 @@ impl Leaf<'_> {
                 let pt = b.char_of_byte(b.point).map_err(Fault::Error)?.0;
                 let (start, old_end) = (base + at, base + at + len);
                 let marks = self.vm.family_record(index);
-                let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!() };
+                let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!() };
                 let edited = b.replace_with_bias(to..to, &bytes, true).and_then(|()| b.replace_with_bias(from..to, &[], false));
                 self.vm.family_fetch(marks);
                 edited.map_err(Fault::Error)?;
-                let data::Object::Buffer(b) = &mut self.vm.objects[index] else { unreachable!() };
+                let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!() };
                 let new_end = start + replacement.len();
                 let new_pt = if pt >= old_end { pt + replacement.len() - len } else if pt > start { new_end } else { pt };
                 b.point = b.byte_of_char(CharOffset(new_pt)).map_err(Fault::Error)?;

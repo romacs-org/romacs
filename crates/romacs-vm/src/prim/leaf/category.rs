@@ -59,7 +59,7 @@ impl Leaf<'_> {
 
     pub(crate) fn set_current_category_table(&mut self, table: Value) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.category_table = table,
             data::Object::ByteBuffer(b) => b.category_table = table,
             _ => unreachable!("buffer_index validates"),

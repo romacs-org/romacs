@@ -94,7 +94,7 @@ impl Vm {
                     self.stack[start].as_integer()?
                 };
                 let index = self.buffer_index()?;
-                let shortage = match &mut self.objects[index] {
+                let shortage = match self.objects.entry_mut(index) {
                     Object::Buffer(b) => {
                         let range = b.accessible();
                         let (pos, shortage) = line_motion(b.body(), range.start.0..range.end.0, b.point.0, count);

@@ -58,7 +58,7 @@ impl Leaf<'_> {
     /// set_char_table_ascii (table, char_table_ascii (table)).
     pub(crate) fn uniprop_reset_ascii(&mut self, table: Value) {
         let index = table.index_if(0).unwrap() - 1;
-        if let data::Object::CharTable(t) = &mut self.vm.objects[index] {
+        if let data::Object::CharTable(t) = self.vm.objects.entry_mut(index) {
             t.ascii = char_table::CharTable::ascii_from_root(&t.root);
         }
     }
@@ -126,7 +126,7 @@ impl Leaf<'_> {
         )));
         node.lock().unwrap().slots[index] = expanded.clone();
         let table = table.index_if(0).unwrap() - 1;
-        let data::Object::CharTable(table) = &mut self.vm.objects[table] else {
+        let data::Object::CharTable(table) = self.vm.objects.entry_mut(table) else {
             unreachable!()
         };
         table.ascii = char_table::CharTable::ascii_from_root(&table.root);
@@ -268,7 +268,7 @@ impl Leaf<'_> {
         };
         let mut cursor = cursor.clone();
         let next = cursor.next(self)?;
-        self.vm.objects[index] = data::Object::MapKeymapCursor(cursor);
+        *self.vm.objects.entry_mut(index) = data::Object::MapKeymapCursor(cursor);
         Ok(next)
     }
 }

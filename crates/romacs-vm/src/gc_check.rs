@@ -162,7 +162,7 @@ impl Vm {
                 if !first(&mut r.tables[3], i) { return; }
                 let mut push = |v: &mut Value| values.push(*v);
                 use data::Object::*;
-                match &mut self.objects[i] {
+                match &mut self.objects.collector_entries_mut()[i] {
                     Vector(slots) | Record(slots) => slots.iter_mut().for_each(&mut push),
                     Finalizer(function) => push(function),
                     String(s) | RawString(s) => s.properties.visit_values(&mut push),
