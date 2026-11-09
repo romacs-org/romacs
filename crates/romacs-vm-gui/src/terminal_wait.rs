@@ -39,7 +39,7 @@ impl Mailbox {
     pub(crate) fn ready(&self) -> Receiver<()> { self.ready.clone() }
 }
 
-pub(crate) enum Wake {
+pub enum Wake {
     Input(InputEvent),
     Terminal,
     /// One of PROCESSES is ready.
@@ -50,7 +50,7 @@ pub(crate) enum Wake {
 
 /// Block for input, a terminal, one of the PROCESSES descriptors
 /// (`Vm::process_wait_fds'), or TIMEOUT, input first.
-pub(crate) fn wait(input: &Receiver<InputEvent>, terminal: &Receiver<()>, timeout: Option<Duration>,
+pub fn wait(input: &Receiver<InputEvent>, terminal: &Receiver<()>, timeout: Option<Duration>,
                    processes: &[(std::os::fd::RawFd, i16)]) -> Wake {
     let deadline = timeout.map(crossbeam_channel::after).unwrap_or_else(crossbeam_channel::never);
     let (signal, process) = bounded(1);

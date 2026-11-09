@@ -5,29 +5,8 @@
 //! column's width the frame's character width whatever the weight, in
 //! `line-pixel-height', `window-text-pixel-size', `buffer-text-pixel-size'
 //! and `fit-window-to-buffer' alike, on the GUI's display with its layout.
-#[path = "../src/command.rs"]
-mod command;
-#[path = "../src/echo.rs"]
-mod echo;
-#[path = "../src/eval_last_sexp.rs"]
-mod eval_last_sexp;
-#[path = "../src/fonts.rs"]
-mod fonts;
-#[path = "../src/loadup.rs"]
-mod loadup;
-#[path = "../src/measure.rs"]
-mod measure;
-#[path = "../src/native.rs"]
-mod native;
-#[path = "../src/presentation.rs"]
-mod presentation;
-#[path = "../src/startup.rs"]
-mod startup;
+use romacs_vm_gui::{fonts, measure, startup};
 use romacs_vm::Vm;
-
-fn snapshot(vm: &mut Vm, _: bool, width: u32, height: u32) -> Result<romacs_layout_input::FrameSnapshot, String> {
-    vm.frame_snapshot(width, height)
-}
 
 fn forms(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter(|line| !line.is_empty() && !line.starts_with(';'))

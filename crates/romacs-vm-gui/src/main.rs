@@ -16,25 +16,14 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
 
-mod native;
-mod loadup;
-mod startup;
-mod command;
-mod eval_last_sexp;
-mod presentation;
+use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
-mod echo;
 mod title;
 mod prompt;
-mod terminal_service;
-mod terminal_wait;
 mod batch;
 mod user_init;
-mod measure;
-mod fonts;
 use fonts::residency;
 mod defun_census;
-mod grammars;
 mod timers;
 mod world;
 mod isolate_worker;
@@ -1733,7 +1722,7 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 
 /// A native close: GUI quit, lent like any Lisp the loop runs, whose
 /// confirmation may read input. Whether to shut down.
-fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, mut lent: Lent<'_>) -> Result<bool, String> {
+fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
     terminate(vm, host, Lent { queue: &mut *lent.queue, live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     // A server's window is a resource of the session: closing it ends the
     // session only when Lisp says so (rlisp/romacs-server.el).

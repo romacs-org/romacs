@@ -132,6 +132,18 @@ Use the configured pinned GNU oracle and mirror. Retain an explicit
 `ROMACS_GNU_SOURCE` when tests isolate HOME, and never substitute PATH's Emacs for
 the pinned oracle.
 
+The gates, small and whole for each side:
+
+- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
+  master, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
+  in `scripts/gate`). A change it cannot map, such as Lisp or a crate root, runs
+  everything, so give a branch of a branch its real base.
+- Rust, whole: `make gate-full`, for the final combined candidate.
+- Lisp, one module: `make check-MODULE`.
+- Lisp, whole: `make check`.
+
+The other commands:
+
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
 - Fast development checks: `python3 scripts/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.

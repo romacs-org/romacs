@@ -1,7 +1,4 @@
-#[path = "../src/terminal_wait.rs"]
-mod terminal_wait;
-#[path = "../src/terminal_service.rs"]
-mod terminal_service;
+use romacs_vm_gui::{terminal_service, terminal_wait};
 
 use romacs_vm::{TerminalHost, TerminalSnapshot};
 use std::time::{Duration, Instant};

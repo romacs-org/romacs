@@ -25,7 +25,7 @@ const ENTRIES: &[&str] = &[
     "finish_request", "poll_collect", "poll_collect_unless_key", "collect_garbage", "collect_garbage_until_key", "collect_compacting",
     "collect_until_key", "watched_write", "call_suspended",
     "load_source_named", "variable_set", "notify", "prepared_function",
-    "prepare_source", "call_prepared_source_raw", "eval_datum_raw", "cached_datum", "compile_guarded",
+    "prepare_source", "call_prepared_source", "call_prepared_source_raw", "call_prepared_source_propagating", "invoke_prepared_with", "eval_datum_raw", "cached_datum", "compile_guarded",
     "load_file_kind", "load_artifact", "compile_walk", "compile_unit",
     "run_aftermath",
 ];

@@ -1096,7 +1096,7 @@ fn key_label(key: &str) -> String {
     }).collect::<Vec<_>>().join(" ")
 }
 
-pub(crate) fn lisp_string(text: &str) -> String {
+pub fn lisp_string(text: &str) -> String {
     format!(
         "\"{}\"",
         text.replace('\\', "\\\\")
@@ -1136,7 +1136,7 @@ mod tests {
     }
     #[test]
     fn workspace_defaults_to_iosevka_without_a_launcher_override() {
-        let mut vm = workspace(1);
+        let vm = workspace(1);
         let face = vm.display_default_face().unwrap();
         assert_eq!(face.family, "Iosevka", "WORKSPACE_DEFAULT_MUST_BE_IOSEVKA");
         assert_eq!(face.pixel_size, 20.0);
@@ -1540,7 +1540,7 @@ mod tests {
         std::fs::write(&denied, "denied").unwrap();
         let _ = std::fs::remove_file(&hard);
         std::fs::hard_link(&denied, &hard).unwrap();
-        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o000)).unwrap();
         assert!(std::fs::read(&denied).is_err(), "IDENTITY_DENIED_FIXTURE_REALLY_UNREADABLE");
         let result = visit_files(&mut vm, &[denied.clone(), denied.clone(), hard]);
         std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o600)).unwrap();
