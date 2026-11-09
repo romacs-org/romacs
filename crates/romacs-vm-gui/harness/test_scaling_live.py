@@ -1,5 +1,6 @@
 """scaling_live.py's pure parts: exponents, verdicts, overrides and parsing."""
 import math
+import sys
 import unittest
 
 import scaling_live as s
@@ -82,6 +83,22 @@ class Parsing(unittest.TestCase):
         self.assertIn('KNOWN', text)
         self.assertIn('known: tickets.md#x', text)
 
+
+
+class Bounded(unittest.TestCase):
+    """A session is bounded by CPU, which load does not spend; wall time only
+    ends one that waits without working."""
+    def test_a_session_that_ends_returns_its_output(self):
+        done = s.bounded('quick', [sys.executable, '-c', 'print("SCALING {}")'], 5)
+        self.assertEqual(done.stdout.strip(), 'SCALING {}')
+
+    def test_a_session_that_keeps_computing_is_refused_by_its_cpu_bound(self):
+        with self.assertRaisesRegex(s.Refused, r'spin: used its 1s of CPU'):
+            s.bounded('spin', [sys.executable, '-c', 'while True: pass'], 1)
+
+    def test_a_session_that_waits_without_working_is_refused_by_the_wall_clock(self):
+        with self.assertRaisesRegex(s.Refused, r'sleep: no end after 2s, within 1s of CPU: hung'):
+            s.bounded('sleep', [sys.executable, '-c', 'import time; time.sleep(60)'], 0.2)
 
 if __name__ == '__main__':
     unittest.main()
