@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::{Receiver, SendError, Sender, TryRecvError, TrySendError, bounded};
 use romacs_display_protocol::{SealedFramePresentation, present_trace};
 
-pub struct QueuedPresentation {
+pub(crate) struct QueuedPresentation {
     pub(crate) state: SealedFramePresentation,
     pub(crate) skipped_predecessor: bool,
 }
@@ -17,7 +17,7 @@ pub struct QueuedPresentation {
 /// never acquired by the renderer and may be retired by the evaluator.
 #[must_use = "retire the superseded evaluator presentation with discard"]
 #[derive(Debug)]
-pub struct SupersededPresentation(SealedFramePresentation);
+pub(crate) struct SupersededPresentation(SealedFramePresentation);
 
 impl std::ops::Deref for SupersededPresentation {
     type Target = SealedFramePresentation;
@@ -36,13 +36,13 @@ impl std::ops::Deref for QueuedPresentation {
 type Pending = Arc<Mutex<VecDeque<QueuedPresentation>>>;
 
 #[derive(Clone)]
-pub struct FrameSender {
+pub(crate) struct FrameSender {
     pending: Pending,
     wake: Arc<Sender<()>>,
 }
 
 #[derive(Clone)]
-pub struct FrameReceiver {
+pub(crate) struct FrameReceiver {
     pending: Pending,
     wake: std::sync::Weak<Sender<()>>,
     available: Receiver<()>,
@@ -149,10 +149,6 @@ impl FrameReceiver {
             // last frame and disconnect after the preceding empty check.
             let _ = self.available.recv();
         }
-    }
-
-    pub fn try_iter(&self) -> impl Iterator<Item = QueuedPresentation> + '_ {
-        std::iter::from_fn(|| self.try_recv().ok())
     }
 
     /// One finite batch for the synchronous fallback. Submissions arriving

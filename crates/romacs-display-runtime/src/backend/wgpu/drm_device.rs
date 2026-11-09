@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// candidate under `/dev/dri` must itself be a character device with that same
 /// pair, which keeps containers and bind mounts from silently relabeling a
 /// different device.
-pub fn render_node_from_device_number(major: u32, minor: u32) -> Option<PathBuf> {
+pub(crate) fn render_node_from_device_number(major: u32, minor: u32) -> Option<PathBuf> {
     render_node_from_device_number_in(
         major,
         minor,

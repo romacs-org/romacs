@@ -16,7 +16,7 @@ use winit::platform::wayland::EventLoopExtWayland;
 use x11_dl::xlib;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WindowCoordinateSystem {
+pub(crate) enum WindowCoordinateSystem {
     WinitLogical,
     X11Physical,
 }
@@ -33,18 +33,6 @@ fn coordinate_system_for_observation(observation: DisplayObservation) -> WindowC
 pub(crate) fn active_window_coordinate_system() -> Option<WindowCoordinateSystem> {
     ACTIVE_WINDOW_COORDINATE_SYSTEM.get().copied()
 }
-
-fn publish_window_coordinate_system(system: WindowCoordinateSystem) {
-    // The native event loop is constructed once per process. Keep that
-    // bootstrap invariant in the storage type instead of encoding it as
-    // mutable magic integers.
-    if let Err(system) = ACTIVE_WINDOW_COORDINATE_SYSTEM.set(system) {
-        debug_assert_eq!(ACTIVE_WINDOW_COORDINATE_SYSTEM.get().copied(), Some(system));
-    }
-}
-
-#[cfg(target_os = "linux")]
-const X11_DISPLAY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 
 #[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,50 +96,6 @@ fn observe_linux_backend(
     }
 }
 
-/// Observe the backend that winit actually selected, then gather native facts
-/// without choosing a font-DPI policy.
-#[must_use]
-pub fn observe_event_loop_display(event_loop: &EventLoop) -> DisplayObservation {
-    #[cfg(target_os = "linux")]
-    let observation = {
-        let backend = if event_loop.is_wayland() {
-            SelectedLinuxBackend::Wayland
-        } else {
-            SelectedLinuxBackend::X11
-        };
-        observe_linux_backend(backend, query_x11_display_bounded)
-    };
-
-    #[cfg(target_os = "macos")]
-    let observation = {
-        let _ = event_loop;
-        DisplayObservation::Cocoa
-    };
-
-    #[cfg(windows)]
-    let observation = {
-        let _ = event_loop;
-        DisplayObservation::Windows
-    };
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    let observation = {
-        let _ = event_loop;
-        DisplayObservation::Wayland
-    };
-
-    publish_window_coordinate_system(coordinate_system_for_observation(observation));
-    observation
-}
-
-#[cfg(target_os = "linux")]
-fn query_x11_display_bounded() -> X11DisplayObservation {
-    if std::env::var_os("DISPLAY").is_none() {
-        return fallback_x11_observation();
-    }
-    query_x11_display_with_timeout(X11_DISPLAY_PROBE_TIMEOUT, query_x11_display)
-}
-
 #[cfg(target_os = "linux")]
 fn query_x11_display_with_timeout(
     timeout: std::time::Duration,
@@ -177,56 +121,6 @@ fn query_x11_display_with_timeout(
             fallback_x11_observation()
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-fn query_x11_display() -> X11DisplayObservation {
-    let Ok(xlib) = xlib::Xlib::open() else {
-        return fallback_x11_observation();
-    };
-    let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
-    if display.is_null() {
-        return fallback_x11_observation();
-    }
-
-    let raw = unsafe {
-        let mut opcode = 0;
-        let mut first_event = 0;
-        let mut first_error = 0;
-        let has_xwayland_extension = (xlib.XQueryExtension)(
-            display,
-            c"XWAYLAND".as_ptr(),
-            &mut opcode,
-            &mut first_event,
-            &mut first_error,
-        ) != 0;
-        let vendor = (xlib.XServerVendor)(display);
-        let vendor = if vendor.is_null() {
-            None
-        } else {
-            CStr::from_ptr(vendor).to_str().ok().map(str::to_owned)
-        };
-        let resource = (xlib.XGetDefault)(display, c"Xft".as_ptr(), c"dpi".as_ptr());
-        let xft_dpi = if resource.is_null() {
-            None
-        } else {
-            CStr::from_ptr(resource)
-                .to_str()
-                .ok()
-                .and_then(|value| value.trim().parse::<f32>().ok())
-        };
-        let screen = (xlib.XDefaultScreen)(display);
-        RawX11DisplayObservation {
-            has_xwayland_extension,
-            vendor,
-            xft_dpi,
-            display_height_px: (xlib.XDisplayHeight)(display, screen),
-            display_height_mm: (xlib.XDisplayHeightMM)(display, screen),
-        }
-    };
-    unsafe { (xlib.XCloseDisplay)(display) };
-
-    raw.validate()
 }
 
 // Every test here drives the X11/Wayland probe, whose types exist only

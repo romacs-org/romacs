@@ -46,7 +46,7 @@ struct PanelState {
 }
 
 impl MenuPresentation {
-    pub fn tooltip_deadline(&self) -> Option<std::time::Instant> {
+    pub(crate) fn tooltip_deadline(&self) -> Option<std::time::Instant> {
         self.help
             .deadline()
             .into_iter()
@@ -145,7 +145,7 @@ impl MenuPresentation {
 
     /// Horizontal navigation moves between headings only when the current
     /// submenu cannot consume it. Pending menus support the same navigation.
-    pub fn heading_step(&self, id: WindowId, key: &winit::keyboard::Key) -> Option<i32> {
+    pub(crate) fn heading_step(&self, id: WindowId, key: &winit::keyboard::Key) -> Option<i32> {
         self.heading()?;
         if !self.owns_parent(id) && self.host.depth(id).is_none() {
             return None;
@@ -175,7 +175,7 @@ impl MenuPresentation {
         }
     }
 
-    pub fn select_heading(
+    pub(crate) fn select_heading(
         &mut self,
         heading: super::MenuHeading,
         pressed: bool,
@@ -230,7 +230,7 @@ impl MenuPresentation {
         self.panels.truncate(len);
     }
 
-    pub fn commit_retirements(&mut self, commit: &PopupCommit<'_>) {
+    pub(crate) fn commit_retirements(&mut self, commit: &PopupCommit<'_>) {
         // Passive children must release their retained menu parents first.
         self.tooltip.commit_retirements(commit);
         self.host.commit_retirements(commit);
@@ -248,7 +248,7 @@ impl MenuPresentation {
             .or_else(|| self.request.as_ref().map(|r| r.frame_id))
     }
 
-    pub fn owns_parent(&self, id: WindowId) -> bool {
+    pub(crate) fn owns_parent(&self, id: WindowId) -> bool {
         self.heading().is_some_and(|h| h.parent == id)
             || self.request.as_ref().is_some_and(|r| r.parent.id() == id)
     }

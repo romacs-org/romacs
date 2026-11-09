@@ -116,7 +116,7 @@ pub struct Animation {
 
 impl Animation {
     /// Get the current interpolated value based on elapsed time and easing.
-    pub fn current_value(&self) -> f32 {
+    pub(crate) fn current_value(&self) -> f32 {
         let elapsed = self.started.elapsed();
         let progress = if self.duration.as_secs_f32() > 0.0 {
             (elapsed.as_secs_f32() / self.duration.as_secs_f32()).min(1.0)
@@ -136,7 +136,7 @@ impl Animation {
 
 /// Engine for managing multiple animations.
 #[derive(Debug)]
-pub struct AnimationEngine {
+pub(crate) struct AnimationEngine {
     /// Active animations.
     animations: Vec<Animation>,
     /// Next animation ID to assign.
@@ -202,7 +202,11 @@ impl AnimationEngine {
     /// Get the current animated value for a target and property.
     ///
     /// Returns `None` if there is no active animation for this combination.
-    pub fn get_value(&self, target: AnimationTarget, property: AnimatedProperty) -> Option<f32> {
+    pub(crate) fn get_value(
+        &self,
+        target: AnimationTarget,
+        property: AnimatedProperty,
+    ) -> Option<f32> {
         self.animations
             .iter()
             .find(|a| a.target == target && a.property == property)
@@ -210,7 +214,7 @@ impl AnimationEngine {
     }
 
     /// Check if there are any active animations.
-    pub fn has_animations(&self) -> bool {
+    pub(crate) fn has_animations(&self) -> bool {
         !self.animations.is_empty()
     }
 }

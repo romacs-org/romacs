@@ -9,7 +9,7 @@ use winit::dpi::{LogicalSize, PhysicalSize, Size};
 
 use crate::clipboard::ClipboardService;
 use crate::host_types::ResolvedImageMetadata;
-pub use crate::thread_comm::MonitorInfo;
+pub(crate) use crate::thread_comm::MonitorInfo;
 use crate::thread_comm::{FrameShaderAvailability, RenderComms};
 pub(super) use romacs_display_protocol::PointerAppearancePhase;
 use romacs_display_protocol::{
@@ -35,7 +35,7 @@ pub(super) use super::toolbar::ToolbarResources;
 /// superseding the last — so a reader asking for the terminal state keeps
 /// waiting past any number of bands.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ImageDecodeTerminal {
+pub(crate) enum ImageDecodeTerminal {
     /// One band of a decode still running: rows that exist, in source-row
     /// coordinates.
     Band(RowRange),
@@ -62,19 +62,12 @@ impl ImageDecodeTerminal {
     }
 }
 
-/// Result of a redisplay-safe, non-blocking terminal-state observation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ImageTerminalProbe {
-    Busy,
-    Available(Option<ImageDecodeTerminal>),
-}
-
 /// Exclusive renderer publication capability for terminal image results.
 ///
 /// The contained map is deliberately private. Holding this value models the
 /// only contention redisplay's [`ImageTerminalProbe::Busy`] path must tolerate;
 /// dropping it wakes bounded synchronous waiters once for the whole batch.
-pub struct ImageTerminalPublication<'a> {
+pub(crate) struct ImageTerminalPublication<'a> {
     terminals: MutexGuard<'a, HashMap<ImageLoadToken, ImageDecodeTerminal>>,
     terminal_changed: &'a Condvar,
 }
@@ -93,11 +86,7 @@ impl ImageTerminalPublication<'_> {
         self.publish(load, ImageDecodeTerminal::Band(rows));
     }
 
-    pub fn remove(&mut self, load: ImageLoadToken) {
-        self.terminals.remove(&load);
-    }
-
-    pub fn clear_image(&mut self, image: ImageId) {
+    pub(crate) fn clear_image(&mut self, image: ImageId) {
         self.terminals.retain(|load, _| load.image() != image);
     }
 }
@@ -113,7 +102,7 @@ impl Drop for ImageTerminalPublication<'_> {
 /// Terminal decode results need a condition variable for bounded synchronous
 /// measurement. Cache usage is an independent lock-free snapshot: querying
 /// `image-cache-size` never waits for a decode or the render thread.
-pub struct ImageRenderState {
+pub(crate) struct ImageRenderState {
     terminals: Mutex<HashMap<ImageLoadToken, ImageDecodeTerminal>>,
     terminal_changed: Condvar,
     cache_bytes: AtomicU64,
@@ -148,33 +137,14 @@ impl ImageRenderState {
             .and_then(ImageDecodeTerminal::terminal)
     }
 
-    pub fn begin_terminal_publication(&self) -> ImageTerminalPublication<'_> {
+    pub(crate) fn begin_terminal_publication(&self) -> ImageTerminalPublication<'_> {
         ImageTerminalPublication {
             terminals: self.lock_terminals(),
             terminal_changed: &self.terminal_changed,
         }
     }
 
-    pub fn try_terminal(&self, load: ImageLoadToken) -> ImageTerminalProbe {
-        match self.terminals.try_lock() {
-            Ok(terminals) => ImageTerminalProbe::Available(
-                terminals
-                    .get(&load)
-                    .cloned()
-                    .and_then(ImageDecodeTerminal::terminal),
-            ),
-            Err(std::sync::TryLockError::WouldBlock) => ImageTerminalProbe::Busy,
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => ImageTerminalProbe::Available(
-                poisoned
-                    .into_inner()
-                    .get(&load)
-                    .cloned()
-                    .and_then(ImageDecodeTerminal::terminal),
-            ),
-        }
-    }
-
-    pub fn publish_terminal(&self, load: ImageLoadToken, terminal: ImageDecodeTerminal) {
+    pub(crate) fn publish_terminal(&self, load: ImageLoadToken, terminal: ImageDecodeTerminal) {
         self.begin_terminal_publication().publish(load, terminal);
     }
 
@@ -196,15 +166,11 @@ impl ImageRenderState {
         }
     }
 
-    pub fn remove_terminal(&self, load: ImageLoadToken) {
-        self.begin_terminal_publication().remove(load);
-    }
-
-    pub fn clear_image_terminals(&self, image: ImageId) {
+    pub(crate) fn clear_image_terminals(&self, image: ImageId) {
         self.begin_terminal_publication().clear_image(image);
     }
 
-    pub fn wait_for_terminal(
+    pub(crate) fn wait_for_terminal(
         &self,
         load: ImageLoadToken,
         timeout: std::time::Duration,
@@ -240,7 +206,7 @@ impl ImageRenderState {
         }
     }
 
-    pub fn publish_cache_usage(&self, usage: ImageCacheUsage) {
+    pub(crate) fn publish_cache_usage(&self, usage: ImageCacheUsage) {
         self.cache_bytes
             .store(usage.total_bytes(), Ordering::Release);
     }
@@ -251,11 +217,11 @@ impl ImageRenderState {
     }
 }
 
-pub type SharedImageRenderState = Arc<ImageRenderState>;
+pub(crate) type SharedImageRenderState = Arc<ImageRenderState>;
 
 /// Shared storage for monitor info accessible from both threads.
 /// The Condvar is notified once monitors have been populated.
-pub type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
+pub(crate) type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
 
 pub(super) fn backend_uses_winit_logical_pixels() -> bool {
     #[cfg(target_os = "linux")]
@@ -1024,15 +990,15 @@ pub(super) struct RenderLifecycle {
 }
 
 impl RenderLifecycle {
-    pub fn request_shutdown(&mut self, reason: RenderShutdownReason) {
+    pub(crate) fn request_shutdown(&mut self, reason: RenderShutdownReason) {
         self.shutdown_reason.get_or_insert(reason);
     }
 
-    pub fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         self.shutdown_reason.is_some()
     }
 
-    pub fn shutdown_reason(&self) -> Option<RenderShutdownReason> {
+    pub(crate) fn shutdown_reason(&self) -> Option<RenderShutdownReason> {
         self.shutdown_reason
     }
 

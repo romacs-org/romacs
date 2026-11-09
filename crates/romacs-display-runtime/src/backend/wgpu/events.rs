@@ -3,7 +3,7 @@
 /// Input event kinds matching Emacs event types.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventKind {
+pub(crate) enum EventKind {
     KeyPress = 1,
     KeyRelease = 2,
     MousePress = 3,
@@ -37,28 +37,26 @@ pub const ROMACS_ALT_MASK: u32 = 1 << 4;
 pub const ROMACS_HYPER_MASK: u32 = 1 << 5;
 
 /// Event kind constants for FFI.
-pub const ROMACS_EVENT_KEY_PRESS: u32 = EventKind::KeyPress as u32;
-pub const ROMACS_EVENT_KEY_RELEASE: u32 = EventKind::KeyRelease as u32;
-pub const ROMACS_EVENT_BUTTON_PRESS: u32 = EventKind::MousePress as u32;
-pub const ROMACS_EVENT_BUTTON_RELEASE: u32 = EventKind::MouseRelease as u32;
-pub const ROMACS_EVENT_MOUSE_MOVE: u32 = EventKind::MouseMove as u32;
-pub const ROMACS_EVENT_SCROLL: u32 = EventKind::Scroll as u32;
-pub const ROMACS_EVENT_RESIZE: u32 = EventKind::Resize as u32;
-pub const ROMACS_EVENT_CLOSE: u32 = EventKind::CloseRequest as u32;
-pub const ROMACS_EVENT_FOCUS_IN: u32 = EventKind::FocusIn as u32;
-pub const ROMACS_EVENT_FOCUS_OUT: u32 = EventKind::FocusOut as u32;
-pub const ROMACS_EVENT_IMAGE_DIMENSIONS_READY: u32 = EventKind::ImageDimensionsReady as u32;
-pub const ROMACS_EVENT_TERMINAL_EXITED: u32 = EventKind::TerminalExited as u32;
-pub const ROMACS_EVENT_MENU_SELECTION: u32 = EventKind::MenuSelection as u32;
-pub const ROMACS_EVENT_FILE_DROP: u32 = EventKind::FileDrop as u32;
-pub const ROMACS_EVENT_TERMINAL_TITLE_CHANGED: u32 = EventKind::TerminalTitleChanged as u32;
-pub const ROMACS_EVENT_TOOL_BAR_CLICK: u32 = EventKind::ToolBarClick as u32;
-pub const ROMACS_EVENT_MENU_BAR_CLICK: u32 = EventKind::MenuBarClick as u32;
+pub(crate) const ROMACS_EVENT_KEY_PRESS: u32 = EventKind::KeyPress as u32;
+pub(crate) const ROMACS_EVENT_KEY_RELEASE: u32 = EventKind::KeyRelease as u32;
+pub(crate) const ROMACS_EVENT_BUTTON_PRESS: u32 = EventKind::MousePress as u32;
+pub(crate) const ROMACS_EVENT_BUTTON_RELEASE: u32 = EventKind::MouseRelease as u32;
+pub(crate) const ROMACS_EVENT_MOUSE_MOVE: u32 = EventKind::MouseMove as u32;
+pub(crate) const ROMACS_EVENT_SCROLL: u32 = EventKind::Scroll as u32;
+pub(crate) const ROMACS_EVENT_RESIZE: u32 = EventKind::Resize as u32;
+pub(crate) const ROMACS_EVENT_CLOSE: u32 = EventKind::CloseRequest as u32;
+pub(crate) const ROMACS_EVENT_FOCUS_IN: u32 = EventKind::FocusIn as u32;
+pub(crate) const ROMACS_EVENT_FOCUS_OUT: u32 = EventKind::FocusOut as u32;
+pub(crate) const ROMACS_EVENT_IMAGE_DIMENSIONS_READY: u32 = EventKind::ImageDimensionsReady as u32;
+pub(crate) const ROMACS_EVENT_TERMINAL_EXITED: u32 = EventKind::TerminalExited as u32;
+pub(crate) const ROMACS_EVENT_MENU_SELECTION: u32 = EventKind::MenuSelection as u32;
+pub(crate) const ROMACS_EVENT_FILE_DROP: u32 = EventKind::FileDrop as u32;
+pub(crate) const ROMACS_EVENT_TERMINAL_TITLE_CHANGED: u32 = EventKind::TerminalTitleChanged as u32;
 
 /// Input event structure passed to C.
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct RomacsInputEvent {
+pub(crate) struct RomacsInputEvent {
     pub kind: u32,
     pub window_id: u32,
     pub timestamp: u64,

@@ -74,7 +74,7 @@ impl WindowChromeController {
     /// Native safe areas become available only after window creation. Reserve
     /// them before GPU setup so they do not consume the requested editor area.
     /// A pending native configure remains authoritative when it arrives.
-    pub fn request_initial_content_size(
+    pub(crate) fn request_initial_content_size(
         window: &dyn Window,
         decorated: bool,
         content: PhysicalSize<u32>,

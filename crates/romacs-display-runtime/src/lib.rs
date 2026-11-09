@@ -16,12 +16,11 @@
 pub mod backend;
 pub(crate) mod clipboard;
 pub mod core;
-pub mod display_identity;
 pub mod display_scale;
 pub mod host_types;
-pub mod macos_bundle_runtime;
+pub(crate) mod macos_bundle_runtime;
 mod menus;
-pub mod native_window_wait;
+pub(crate) mod native_window_wait;
 pub mod paint_host;
 mod presentation;
 mod presentation_feedback;
@@ -49,8 +48,9 @@ pub mod model {
     pub use romacs_renderer_wgpu::model::ModelView;
 }
 
-pub use render_thread::frame_stats::{
-    DEMAND_REASON_NAMES, FRAME_TIME_BUCKET_UPPER_US, FrameSchedSnapshot, WindowFrameSnapshot,
+pub use render_thread::frame_stats::FrameSchedSnapshot;
+pub(crate) use render_thread::frame_stats::{
+    DEMAND_REASON_NAMES, FRAME_TIME_BUCKET_UPPER_US, WindowFrameSnapshot,
 };
 
 /// Read the current process-global frame-scheduling counters.
@@ -60,16 +60,6 @@ pub use render_thread::frame_stats::{
 /// thread's state.
 pub fn frame_metrics_snapshot() -> FrameSchedSnapshot {
     render_thread::frame_stats::snapshot()
-}
-
-/// Read the per-native-window demand attribution (currently-active demand
-/// reasons and per-reason planned-frame counts), sorted by window id.
-///
-/// Safe to call from any thread: the render thread publishes into the shared
-/// map only on event-loop wakes it was already performing, so sampling this
-/// never wakes or blocks the render loop at idle.
-pub fn window_frame_metrics_snapshot() -> Vec<WindowFrameSnapshot> {
-    render_thread::frame_stats::window_snapshots()
 }
 
 pub(crate) fn wgpu_instance_descriptor_with_display(

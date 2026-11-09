@@ -2,12 +2,11 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use super::bootstrap::{build_render_event_loop_any_thread, run_render_loop_with_event_loop};
 use super::{SharedImageRenderState, SharedMonitorInfo};
 use crate::thread_comm::RenderComms;
 
 /// Render thread state.
-pub struct RenderThread {
+pub(crate) struct RenderThread {
     handle: Option<JoinHandle<()>>,
 }
 
@@ -71,51 +70,6 @@ impl RenderThread {
         R: FnOnce(T) -> Result<(), String> + Send + 'static,
     {
         Self::spawn_with_state_timeout(startup, runner, Duration::from_secs(10))
-    }
-
-    /// Spawn the render thread.
-    pub fn spawn(
-        comms: RenderComms,
-        width: u32,
-        height: u32,
-        title: String,
-        image_metadata: SharedImageRenderState,
-        shared_monitors: SharedMonitorInfo,
-    ) -> Result<Self, String> {
-        Self::spawn_inner(comms, width, height, title, image_metadata, shared_monitors)
-    }
-
-    fn spawn_inner(
-        comms: RenderComms,
-        width: u32,
-        height: u32,
-        title: String,
-        image_metadata: SharedImageRenderState,
-        shared_monitors: SharedMonitorInfo,
-    ) -> Result<Self, String> {
-        let (startup_tx, startup_rx) = mpsc::sync_channel(1);
-        let handle = thread::spawn(move || match build_render_event_loop_any_thread() {
-            Ok(event_loop) => {
-                let _ = startup_tx.send(Ok(()));
-                if let Err(err) = run_render_loop_with_event_loop(
-                    event_loop,
-                    comms,
-                    width,
-                    height,
-                    title,
-                    image_metadata,
-                    shared_monitors,
-                    true,
-                ) {
-                    tracing::error!("Render thread exited with error: {}", err);
-                }
-            }
-            Err(err) => {
-                let _ = startup_tx.send(Err(err));
-            }
-        });
-
-        Self::finish_spawn(handle, startup_rx, Duration::from_secs(10))
     }
 
     /// Wait for render thread to finish.

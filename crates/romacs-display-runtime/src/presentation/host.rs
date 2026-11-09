@@ -9,7 +9,11 @@ pub(crate) struct PopupHost {
 }
 
 impl PopupHost {
-    pub fn reposition(&self, depth: usize, placement: romacs_display_protocol::PopupPlacement) {
+    pub(crate) fn reposition(
+        &self,
+        depth: usize,
+        placement: romacs_display_protocol::PopupPlacement,
+    ) {
         if let Some(surface) = self.surfaces.get(depth) {
             surface.reposition(placement);
         }
@@ -38,7 +42,7 @@ impl PopupHost {
         )
     }
 
-    pub fn open_with_role(
+    pub(crate) fn open_with_role(
         &mut self,
         commit: &super::PopupCommit<'_>,
         root: std::sync::Arc<dyn winit::window::Window>,
@@ -83,7 +87,7 @@ impl PopupHost {
 
     /// Borrowed parent after its first buffer submission. Callers retain
     /// child-before-parent teardown; this is not a compositor confirmation.
-    pub fn submitted_window(
+    pub(crate) fn submitted_window(
         &self,
         depth: usize,
     ) -> Option<std::sync::Arc<dyn winit::window::Window>> {
@@ -153,7 +157,7 @@ impl PopupHost {
 
     /// End-of-event-batch native teardown. Logical detachment happens earlier,
     /// so events for the retired surfaces can no longer resolve to a panel.
-    pub fn commit_retirements(&mut self, _commit: &super::PopupCommit<'_>) {
+    pub(crate) fn commit_retirements(&mut self, _commit: &super::PopupCommit<'_>) {
         self.retired.commit();
     }
 

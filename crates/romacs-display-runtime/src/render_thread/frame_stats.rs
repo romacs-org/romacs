@@ -104,7 +104,7 @@ static FRAME_TIME_BUCKETS: [AtomicU64; 8] = [
 
 /// Inclusive upper bound (microseconds) of each `FRAME_TIME_BUCKETS` slot; the
 /// last is unbounded (`u64::MAX`), i.e. frames slower than 66 ms.
-pub const FRAME_TIME_BUCKET_UPPER_US: [u64; 8] =
+pub(crate) const FRAME_TIME_BUCKET_UPPER_US: [u64; 8] =
     [1_000, 2_000, 4_000, 8_000, 16_000, 33_000, 66_000, u64::MAX];
 
 fn record_frame_time(latency_us: u64) {
@@ -265,7 +265,7 @@ pub struct FrameSchedSnapshot {
 }
 
 /// Names of the [`FrameSchedSnapshot::demand_reasons`] slots, in index order.
-pub const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] = {
+pub(crate) const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] = {
     let mut names = [""; super::frame_sched::DemandReason::COUNT];
     let all = super::frame_sched::DemandReason::ALL;
     let mut i = 0;
@@ -280,7 +280,7 @@ pub const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::COUNT] =
 /// keeping the window rendering plus its cumulative planned-frame counts per
 /// reason (frame scheduling plan, Observability).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WindowFrameSnapshot {
+pub(crate) struct WindowFrameSnapshot {
     /// Scheduler window id: the Emacs frame id once adopted, 0 for the
     /// primary window before adoption.
     pub window: u64,
@@ -292,7 +292,7 @@ pub struct WindowFrameSnapshot {
 
 /// Copy of the per-window demand attribution, sorted by window id. Safe from
 /// any thread; the render thread holds the lock only for map-sized updates.
-pub fn window_snapshots() -> Vec<WindowFrameSnapshot> {
+pub(crate) fn window_snapshots() -> Vec<WindowFrameSnapshot> {
     WINDOW_DEMAND
         .lock()
         .unwrap()

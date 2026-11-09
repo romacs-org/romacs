@@ -13,18 +13,18 @@ mod independent {
         Keysym(u32),
     }
 
-    pub fn native_key_macos(key: u16) -> u32 {
+    pub(crate) fn native_key_macos(key: u16) -> u32 {
         0x2000_0000 | u32::from(key)
     }
-    pub fn native_key_windows(key: u16) -> u32 {
+    pub(crate) fn native_key_windows(key: u16) -> u32 {
         0x2100_0000 | u32::from(key)
     }
-    pub fn native_key_android(key: u32) -> u32 {
+    pub(crate) fn native_key_android(key: u32) -> u32 {
         0x2200_0000 | (key & 0xffff)
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct GuiFrameGeometryHints {
+    pub(crate) struct GuiFrameGeometryHints {
         pub base_width: u32,
         pub base_height: u32,
         pub min_width: u32,
@@ -34,15 +34,15 @@ mod independent {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    pub struct ImageBaseUri(pub String);
+    pub(crate) struct ImageBaseUri(pub String);
     impl ImageBaseUri {
-        pub fn as_utf8_str(&self) -> Option<&str> {
+        pub(crate) fn as_utf8_str(&self) -> Option<&str> {
             Some(&self.0)
         }
     }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    pub enum ImageDataSource {
+    pub(crate) enum ImageDataSource {
         Isolated(EncodedBytes),
         WithBaseUri {
             data: EncodedBytes,
@@ -58,7 +58,7 @@ mod independent {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct ResolvedImageMetadata {
+    pub(crate) struct ResolvedImageMetadata {
         pub layout: ImageLayoutExtent,
         pub reported: ImageReportedExtent,
         pub background: u32,

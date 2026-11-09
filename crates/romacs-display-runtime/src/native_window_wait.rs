@@ -14,7 +14,7 @@ struct State {
     terminal: bool,
 }
 #[derive(Default)]
-pub struct NativeWindowWaits(Mutex<State>);
+pub(crate) struct NativeWindowWaits(Mutex<State>);
 impl NativeWindowWaits {
     pub fn register(&self, frame: u64, live: Arc<AtomicBool>, deadline: Instant) {
         self.0
@@ -31,7 +31,7 @@ impl NativeWindowWaits {
     }
     /// Claim terminal connection disposition before the exact socket shutdown.
     /// Finishing the synchronous call is serialized with this claim.
-    pub fn interrupt_required(&self) -> bool {
+    pub(crate) fn interrupt_required(&self) -> bool {
         let mut state = self.0.lock().unwrap();
         if state
             .active

@@ -136,7 +136,7 @@ impl Tooltips {
         visible
     }
 
-    pub fn commit_retirements(&mut self, _commit: &PopupCommit<'_>) {
+    pub(crate) fn commit_retirements(&mut self, _commit: &PopupCommit<'_>) {
         self.retired.commit();
     }
 
@@ -157,7 +157,7 @@ impl Tooltips {
     pub fn owner(&self) -> Option<u64> {
         self.ready().map(|r| r.owner.frame)
     }
-    pub fn owns_parent(&self, id: WindowId) -> bool {
+    pub(crate) fn owns_parent(&self, id: WindowId) -> bool {
         self.ready().is_some_and(|r| r.owner.parent.id() == id)
     }
     pub fn dismiss(&mut self, ticket: &romacs_display_protocol::tooltip::TooltipTicket) {

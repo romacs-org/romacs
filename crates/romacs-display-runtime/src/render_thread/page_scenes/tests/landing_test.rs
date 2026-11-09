@@ -1,5 +1,5 @@
 use super::*;
-use romacs_renderer_wgpu::shader_surface::{validate_surface_wgsl, SurfaceContract};
+use romacs_renderer_wgpu::shader_surface::{SurfaceContract, validate_surface_wgsl};
 use romacs_scene::draw::Paint;
 use romacs_scene::layout::{self, Measure, Measured};
 use romacs_scene::lower::{self, Resolve};
@@ -210,7 +210,9 @@ mod gpu {
     use super::*;
     use romacs_renderer_wgpu::image_cache::ImageCache;
     use romacs_renderer_wgpu::scene_graph::{CacheSources, SceneInputs, ScenePass};
-    use romacs_renderer_wgpu::shader_surface::{SurfaceChannelSource, SurfaceShaderLanguage, SurfaceUniformInit};
+    use romacs_renderer_wgpu::shader_surface::{
+        SurfaceChannelSource, SurfaceShaderLanguage, SurfaceUniformInit,
+    };
     use romacs_renderer_wgpu::shader_surface_cache::ShaderSurfaceCache;
     use romacs_renderer_wgpu::WgpuGlyphAtlas;
     use std::path::{Path, PathBuf};

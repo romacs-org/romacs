@@ -54,7 +54,7 @@ impl MacOsBundleRuntime {
 /// caller is deliberately the first statement in `main`, before Romacs starts
 /// the evaluator, renderer, or decoder threads.
 #[cfg(target_os = "macos")]
-pub fn configure_before_threads() {
+pub(crate) fn configure_before_threads() {
     let Some(runtime) = std::env::current_exe()
         .ok()
         .and_then(|path| MacOsBundleRuntime::from_executable(&path))
@@ -81,9 +81,6 @@ pub fn configure_before_threads() {
         }
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-pub fn configure_before_threads() {}
 
 #[cfg(test)]
 #[path = "macos_bundle_runtime/tests/macos_bundle_runtime_test.rs"]

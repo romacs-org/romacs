@@ -429,7 +429,7 @@ impl InputMethodState {
 impl ChromeState {
     /// Apply a mouse press on a chrome hit during a popup interaction.
     /// Dismisses popup-related state and records the interaction.
-    pub fn press_with_popup(&mut self, press: &ChromePress) {
+    pub(crate) fn press_with_popup(&mut self, press: &ChromePress) {
         self.interaction.menu_bar_active = None;
         self.interaction.compact_bar_menu_active = None;
         let ChromePress::ToolBar(idx) = press;
@@ -1454,21 +1454,21 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn chrome_mut(&mut self) -> &mut WindowChrome {
+    pub(crate) fn chrome_mut(&mut self) -> &mut WindowChrome {
         match self {
             Self::Active { native, .. } => &mut native.chrome,
             Self::Pending { chrome, .. } => chrome,
         }
     }
 
-    pub fn ime_enabled(&self) -> bool {
+    pub(crate) fn ime_enabled(&self) -> bool {
         match self {
             Self::Active { ime_enabled, .. } => *ime_enabled,
             Self::Pending { ime_enabled, .. } => *ime_enabled,
         }
     }
 
-    pub fn set_ime_enabled(&mut self, enabled: bool) {
+    pub(crate) fn set_ime_enabled(&mut self, enabled: bool) {
         match self {
             Self::Active {
                 ime_enabled: ie, ..
@@ -1479,7 +1479,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn mouse_hidden_for_typing(&self) -> bool {
+    pub(crate) fn mouse_hidden_for_typing(&self) -> bool {
         match self {
             Self::Active {
                 mouse_hidden_for_typing: m,
@@ -1492,7 +1492,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
+    pub(crate) fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
         match self {
             Self::Active {
                 mouse_hidden_for_typing: m,
@@ -1505,7 +1505,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn last_ime_cursor_area(&self) -> Option<ImeCursorArea> {
+    pub(crate) fn last_ime_cursor_area(&self) -> Option<ImeCursorArea> {
         match self {
             Self::Active {
                 last_ime_cursor_area,
@@ -1518,7 +1518,7 @@ impl FrameLifecycle {
         }
     }
 
-    pub fn geometry_hints(&self) -> Option<GuiFrameGeometryHints> {
+    pub(crate) fn geometry_hints(&self) -> Option<GuiFrameGeometryHints> {
         match self {
             Self::Pending { geometry_hints, .. } => *geometry_hints,
             _ => None,
@@ -1590,7 +1590,7 @@ impl GuiFrameWindowState {
         surface_state
     }
 
-    pub fn handle_resize(
+    pub(crate) fn handle_resize(
         &mut self,
         device: &wgpu::Device,
         instance: &wgpu::Instance,
@@ -1918,11 +1918,11 @@ impl GuiFrameWindowState {
         self.lifecycle.chrome_mut()
     }
 
-    pub fn ime_enabled(&self) -> bool {
+    pub(crate) fn ime_enabled(&self) -> bool {
         self.lifecycle.ime_enabled()
     }
 
-    pub fn set_ime_enabled(&mut self, enabled: bool) {
+    pub(crate) fn set_ime_enabled(&mut self, enabled: bool) {
         self.lifecycle.set_ime_enabled(enabled);
     }
 
@@ -2056,7 +2056,7 @@ impl GuiFrameWindowManager {
         })
     }
 
-    pub fn adopt_primary_frame_id(&mut self, emacs_frame_id: u64) {
+    pub(crate) fn adopt_primary_frame_id(&mut self, emacs_frame_id: u64) {
         let old_key = FrameKey::from_primary(self.primary_emacs_frame_id);
         self.primary_emacs_frame_id = Some(emacs_frame_id);
         if let Some(window_state) = self.windows.remove(&old_key) {
@@ -2070,15 +2070,15 @@ impl GuiFrameWindowManager {
     }
 
     #[allow(dead_code)] // used by the frame-window manager tests
-    pub fn primary_frame_id(&self) -> Option<u64> {
+    pub(crate) fn primary_frame_id(&self) -> Option<u64> {
         self.primary_emacs_frame_id
     }
 
-    pub fn primary_event_frame_id(&self) -> u64 {
+    pub(crate) fn primary_event_frame_id(&self) -> u64 {
         self.primary_emacs_frame_id.unwrap_or(0)
     }
 
-    pub fn is_primary_frame_id(&self, emacs_frame_id: u64) -> bool {
+    pub(crate) fn is_primary_frame_id(&self, emacs_frame_id: u64) -> bool {
         emacs_frame_id == 0 || self.primary_emacs_frame_id == Some(emacs_frame_id)
     }
 
@@ -2137,11 +2137,11 @@ impl GuiFrameWindowManager {
         self.windows.remove(&key)
     }
 
-    pub fn is_primary_winit(&self, winit_id: WindowId) -> bool {
+    pub(crate) fn is_primary_winit(&self, winit_id: WindowId) -> bool {
         self.primary_winit_id == Some(winit_id)
     }
 
-    pub fn clear_primary_mapping(&mut self) {
+    pub(crate) fn clear_primary_mapping(&mut self) {
         if let Some(winit_id) = self.primary_winit_id.take() {
             self.winit_to_emacs.remove(&winit_id);
         }
@@ -2157,7 +2157,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Schedule a new window to be created on the next event loop iteration.
-    pub fn request_create(
+    pub(crate) fn request_create(
         &mut self,
         emacs_frame_id: u64,
         width: u32,
@@ -2176,15 +2176,15 @@ impl GuiFrameWindowManager {
     }
 
     /// Schedule a window for destruction.
-    pub fn request_destroy(&mut self, emacs_frame_id: u64) {
+    pub(crate) fn request_destroy(&mut self, emacs_frame_id: u64) {
         self.pending_destroys.push(emacs_frame_id);
     }
 
-    pub fn destroy_pending(&self, emacs_frame_id: u64) -> bool {
+    pub(crate) fn destroy_pending(&self, emacs_frame_id: u64) -> bool {
         self.pending_destroys.contains(&emacs_frame_id)
     }
 
-    pub fn await_ready(
+    pub(crate) fn await_ready(
         &mut self,
         frame: u64,
         reply: crossbeam_channel::Sender<Result<(), String>>,
@@ -2212,7 +2212,7 @@ impl GuiFrameWindowManager {
 
     /// Process pending window creations. Must be called from the event loop
     /// (requires ActiveEventLoop for window creation).
-    pub fn process_creates(
+    pub(crate) fn process_creates(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
         comms: &crate::thread_comm::RenderComms,
@@ -2475,7 +2475,7 @@ impl GuiFrameWindowManager {
 
     /// Process pending window destructions, reporting the frames that went
     /// away so their GPU accounting can be retired with them.
-    pub fn process_destroys(&mut self) -> Vec<u64> {
+    pub(crate) fn process_destroys(&mut self) -> Vec<u64> {
         let pending = std::mem::take(&mut self.pending_destroys);
         let mut destroyed = Vec::new();
         for frame_id in pending {
@@ -2491,7 +2491,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Drop all windows and their wgpu surfaces (for clean shutdown).
-    pub fn destroy_all(&mut self) {
+    pub(crate) fn destroy_all(&mut self) {
         self.pending_creates.clear();
         self.pending_destroys.clear();
         self.ready_replies.clear();
@@ -2502,11 +2502,11 @@ impl GuiFrameWindowManager {
     }
 
     /// Look up the Emacs frame_id for a winit WindowId.
-    pub fn emacs_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+    pub(crate) fn emacs_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
         self.winit_to_emacs.get(&winit_id).copied()
     }
 
-    pub fn event_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+    pub(crate) fn event_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
         if self.is_primary_winit(winit_id) {
             Some(self.primary_event_frame_id())
         } else {
@@ -2575,7 +2575,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Get a window state by winit WindowId.
-    pub fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
+    pub(crate) fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
         if self.primary_winit_id == Some(winit_id) {
             return self.primary_window();
         }
@@ -2585,7 +2585,7 @@ impl GuiFrameWindowManager {
     }
 
     /// Get a mutable window state by winit WindowId.
-    pub fn get_by_winit_mut(&mut self, winit_id: WindowId) -> Option<&mut GuiFrameWindowState> {
+    pub(crate) fn get_by_winit_mut(&mut self, winit_id: WindowId) -> Option<&mut GuiFrameWindowState> {
         if self.primary_winit_id == Some(winit_id) {
             return self.primary_window_mut();
         }

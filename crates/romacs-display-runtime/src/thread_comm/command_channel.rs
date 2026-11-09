@@ -27,18 +27,18 @@ struct Shared {
     capacity: usize,
 }
 #[derive(Clone)]
-pub struct CommandSender {
+pub(crate) struct CommandSender {
     shared: Arc<Shared>,
     wake: Arc<Sender<()>>,
 }
-pub struct CommandReceiver {
+pub(crate) struct CommandReceiver {
     shared: Arc<Shared>,
     wake: Weak<Sender<()>>,
     available: Receiver<()>,
 }
 
 /// Create a finite transport. The wake channel carries no command payloads.
-pub fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
+pub(crate) fn command_channel(capacity: usize) -> (CommandSender, CommandReceiver) {
     assert!(capacity > 0);
     let shared = Arc::new(Shared {
         pending: Mutex::new(Pending {
@@ -95,9 +95,6 @@ impl CommandSender {
                 pending = self.shared.space.wait(pending).unwrap();
             }
         }
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn len(&self) -> usize {

@@ -85,7 +85,7 @@ pub(super) enum MenuDirection {
     Previous = -1,
 }
 
-pub struct MenuSession {
+pub(crate) struct MenuSession {
     menu: MeasuredMenu,
     /// The main (root) menu panel
     pub root_panel: MenuPanel,
@@ -136,11 +136,11 @@ impl MenuSession {
     }
 
     /// Get the active panel (deepest open submenu, or root)
-    pub fn active_panel(&self) -> &MenuPanel {
+    pub(crate) fn active_panel(&self) -> &MenuPanel {
         self.submenu_panels.last().unwrap_or(&self.root_panel)
     }
 
-    pub fn active_panel_mut(&mut self) -> &mut MenuPanel {
+    pub(crate) fn active_panel_mut(&mut self) -> &mut MenuPanel {
         self.submenu_panels
             .last_mut()
             .unwrap_or(&mut self.root_panel)
@@ -220,7 +220,7 @@ impl MenuSession {
     }
 
     /// Open submenu for the currently hovered item (if it has one)
-    pub fn open_submenu(&mut self) -> bool {
+    pub(crate) fn open_submenu(&mut self) -> bool {
         let depth = self.submenu_panels.len();
         let hover_index = self.active_panel().hover_index;
         if hover_index < 0 {
@@ -286,7 +286,7 @@ impl MenuSession {
     }
 
     /// Close the deepest open submenu. Returns true if one was closed.
-    pub fn close_submenu(&mut self) -> bool {
+    pub(crate) fn close_submenu(&mut self) -> bool {
         self.submenu_panels.pop().is_some()
     }
 

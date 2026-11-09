@@ -424,93 +424,10 @@ pub(super) fn composite_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::
     modes[0]
 }
 
-fn build_render_event_loop_impl(allow_any_thread: bool) -> Result<EventLoop, String> {
-    #[cfg(target_os = "linux")]
-    {
-        validate_linux_display_before_winit()?;
-        tracing::info!(
-            "Building winit event loop (allow_any_thread={} wayland_display_present={})",
-            allow_any_thread,
-            std::env::var("WAYLAND_DISPLAY").is_ok(),
-        );
-        let mut builder = EventLoop::builder();
-        // Try Wayland first, fall back to X11.
-        if allow_any_thread {
-            if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                EventLoopBuilderExtWayland::with_any_thread(&mut builder, true);
-            } else {
-                EventLoopBuilderExtX11::with_any_thread(&mut builder, true);
-            }
-        }
-        let event_loop = builder
-            .build()
-            .map_err(|err| format!("Failed to create event loop: {err}"))?;
-        tracing::info!("Built winit event loop");
-        Ok(event_loop)
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        EventLoop::builder()
-            .build()
-            .map_err(|err| format!("Failed to create event loop: {err}"))
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn validate_linux_display_before_winit() -> Result<(), String> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        return Ok(());
-    }
-    let Some(display) = std::env::var_os("DISPLAY") else {
-        return Ok(());
-    };
-    if display.is_empty() {
-        return Ok(());
-    }
-
-    let display_for_error = display.to_string_lossy().into_owned();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _ = std::thread::Builder::new()
-        .name("x11-display-probe".to_string())
-        .spawn(move || {
-            let result = x11_display_responds();
-            let _ = tx.send(result);
-        });
-
-    match rx.recv_timeout(std::time::Duration::from_secs(1)) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(format!("Cannot open X display {display_for_error}")),
-        Err(_) => Err(format!(
-            "Cannot open X display {display_for_error}: connection timed out"
-        )),
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn x11_display_responds() -> bool {
-    let Ok(xlib) = xlib::Xlib::open() else {
-        return false;
-    };
-    let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
-    if display.is_null() {
-        return false;
-    }
-    unsafe {
-        (xlib.XCloseDisplay)(display);
-    }
-    true
-}
-
-/// Build a render event loop for the current OS thread.
-pub fn build_render_event_loop() -> Result<EventLoop, String> {
-    build_render_event_loop_impl(false)
-}
-
 /// Build on the OS-main owner using the exact caller-selected Wayland socket.
 /// This path never consults ambient display/backend discovery.
 #[cfg(target_os = "linux")]
-pub fn build_render_event_loop_wayland(socket: &std::path::Path) -> Result<EventLoop, String> {
+pub(crate) fn build_render_event_loop_wayland(socket: &std::path::Path) -> Result<EventLoop, String> {
     use std::os::unix::net::UnixStream;
     use winit::platform::wayland::WaylandConnection;
     // WAYLAND_DISPLAY names are relative to XDG_RUNTIME_DIR, not the cwd.
@@ -537,7 +454,7 @@ pub fn build_render_event_loop_wayland(socket: &std::path::Path) -> Result<Event
 /// The caller retains an owned socket duplicate for cancellation of the actual
 /// synchronous registry waits. Native construction remains on the caller.
 #[cfg(target_os = "linux")]
-pub fn build_render_event_loop_wayland_stream(
+pub(crate) fn build_render_event_loop_wayland_stream(
     stream: std::os::unix::net::UnixStream,
     socket: &std::path::Path,
 ) -> Result<EventLoop, String> {
@@ -553,114 +470,6 @@ pub fn build_render_event_loop_wayland_stream(
     builder
         .build()
         .map_err(|error| format!("Cannot open Wayland socket {}: {error}", socket.display()))
-}
-
-/// OS-main daemon root. Once constructed, the native singleton is never
-/// dropped merely because an attachment request or frame preparation failed.
-pub struct DaemonRenderRoot {
-    event_loop: EventLoop,
-    app: startup::StartingApp,
-    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl DaemonRenderRoot {
-    pub fn new(event_loop: EventLoop) -> Self {
-        let cancelled = Default::default();
-        Self {
-            event_loop,
-            app: startup::StartingApp::retained(),
-            cancelled,
-        }
-    }
-    pub fn event_loop(&self) -> &EventLoop {
-        &self.event_loop
-    }
-    pub fn proxy(&self) -> winit::event_loop::EventLoopProxy {
-        self.event_loop.create_proxy()
-    }
-    pub fn install(
-        &mut self,
-        comms: RenderComms,
-        initial: InitialWindowReceiver,
-        image_metadata: SharedImageRenderState,
-        shared_monitors: SharedMonitorInfo,
-    ) {
-        let mut app = RenderApp::new(
-            comms,
-            0,
-            0,
-            "Romacs".into(),
-            image_metadata,
-            shared_monitors,
-            false,
-        );
-        app.gpu_startup_cancelled = self.cancelled.clone();
-        let proxy = self.event_loop.create_proxy();
-        match super::frame_preparation::FramePreparation::spawn(
-            app.comms.frame_rx.clone(),
-            move || proxy.wake_up(),
-        ) {
-            Ok(worker) => app.frame_preparation = Some(worker),
-            Err(error) => tracing::warn!(%error, "frame preparation worker unavailable"),
-        }
-        #[cfg(feature = "video")]
-        {
-            let proxy = self.event_loop.create_proxy();
-            app.video_wake = romacs_video::VideoWake::new(move || proxy.wake_up());
-        }
-        #[cfg(feature = "webview")]
-        {
-            let proxy = self.event_loop.create_proxy();
-            app.webview_wake = romacs_webview::WebViewWake::new(move || proxy.wake_up());
-        }
-        self.app.install(initial, app);
-    }
-    pub fn pump(&mut self) -> bool {
-        use winit::event_loop::pump_events::{EventLoopExtPumpEvents, PumpStatus};
-        matches!(
-            self.event_loop.pump_app_events(None, &mut self.app),
-            PumpStatus::Continue
-        )
-    }
-    /// Retire exact attachment resources before root acknowledgement/re-exec.
-    pub fn retire(&mut self) {
-        self.app.retire();
-    }
-    pub fn bypass_finalizers(&self) -> bool {
-        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
-    }
-}
-
-/// Build a render event loop for the legacy render-thread helper.
-pub(crate) fn build_render_event_loop_any_thread() -> Result<EventLoop, String> {
-    build_render_event_loop_impl(true)
-}
-
-/// Run the render loop with an already-created event loop.
-pub(crate) fn run_render_loop_with_event_loop(
-    event_loop: EventLoop,
-    comms: RenderComms,
-    width: u32,
-    height: u32,
-    title: String,
-    image_metadata: SharedImageRenderState,
-    shared_monitors: SharedMonitorInfo,
-    poll_when_idle: bool,
-) -> Result<(), String> {
-    run_render_loop_with_startup(
-        event_loop,
-        comms,
-        InitialWindow::Ready {
-            size: InitialWindowSize { width, height },
-            evaluator: None,
-        },
-        title,
-        image_metadata,
-        shared_monitors,
-        poll_when_idle,
-    )
-    .map(|_| ())
-    .map_err(|error| error.to_string())
 }
 
 fn run_render_loop_with_startup(
@@ -732,7 +541,7 @@ fn run_render_loop_with_startup(
 /// Run the render loop on the current OS thread. Product GUI startup uses
 /// this path so winit/AppKit/Windows ownership stays on the process main
 /// thread; evaluator-to-render traffic must wake it via EventLoopProxy.
-pub fn run_render_loop_current_thread(
+pub(crate) fn run_render_loop_current_thread(
     event_loop: EventLoop,
     comms: RenderComms,
     initial: InitialWindowReceiver,
@@ -744,28 +553,6 @@ pub fn run_render_loop_current_thread(
         event_loop,
         comms,
         InitialWindow::Waiting(initial),
-        title,
-        image_metadata,
-        shared_monitors,
-        false,
-    )
-}
-
-/// Build the render event loop and run it on the render thread.
-pub fn run_render_loop(
-    comms: RenderComms,
-    width: u32,
-    height: u32,
-    title: String,
-    image_metadata: SharedImageRenderState,
-    shared_monitors: SharedMonitorInfo,
-) -> Result<(), String> {
-    let event_loop = build_render_event_loop()?;
-    run_render_loop_with_event_loop(
-        event_loop,
-        comms,
-        width,
-        height,
         title,
         image_metadata,
         shared_monitors,

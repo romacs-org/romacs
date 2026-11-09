@@ -13,7 +13,7 @@ struct FrameOpacity {
 }
 
 #[derive(Debug, Default)]
-pub struct FrameOpacityState {
+pub(crate) struct FrameOpacityState {
     frames: HashMap<u64, FrameOpacity>,
     redirects: HashMap<u64, Option<u64>>,
     native_focus: Option<u64>,
@@ -35,7 +35,7 @@ impl FrameOpacityState {
 
     /// Publishing the variable does not itself reapply alpha. GNU consults
     /// the current scalar on the next setter or focus/highlight operation.
-    pub fn set_lower_limit(&mut self, limit: f32) {
+    pub(crate) fn set_lower_limit(&mut self, limit: f32) {
         for state in self.frames.values_mut() {
             state.limit = limit;
         }
@@ -52,7 +52,7 @@ impl FrameOpacityState {
         self.rehighlight(old_highlight);
     }
 
-    pub fn set_redirects(&mut self, redirects: Vec<(u64, Option<u64>)>) {
+    pub(crate) fn set_redirects(&mut self, redirects: Vec<(u64, Option<u64>)>) {
         let old_highlight = self.highlight();
         self.redirects = redirects.into_iter().collect();
         self.rehighlight(old_highlight);

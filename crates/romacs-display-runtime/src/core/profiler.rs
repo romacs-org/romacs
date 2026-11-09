@@ -32,7 +32,7 @@ use std::hash::{Hash, Hasher};
 /// Each frame is a `u64` that may represent a function pointer address,
 /// a symbol identifier, or any other opaque tag chosen by the caller.
 #[derive(Debug, Clone, Eq)]
-pub struct CallStack {
+pub(crate) struct CallStack {
     /// The frames in this call stack, from innermost to outermost.
     pub frames: Vec<u64>,
 }
@@ -52,7 +52,7 @@ impl CallStack {
     ///
     /// Uses the standard library's `DefaultHasher` (SipHash) for a good
     /// balance of speed and collision resistance.
-    pub fn hash_value(&self) -> u64 {
+    pub(crate) fn hash_value(&self) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
@@ -106,7 +106,7 @@ impl From<Vec<u64>> for CallStack {
 /// of distinct entries (`max_entries`). When full, new samples are discarded
 /// and the `discarded` counter is incremented.
 #[derive(Debug, Clone)]
-pub struct ProfilerLog {
+pub(crate) struct ProfilerLog {
     /// Maximum depth of call stacks recorded. Backtraces longer than
     /// this are truncated to `max_stack_depth` frames.
     max_stack_depth: usize,
@@ -156,7 +156,7 @@ impl ProfilerLog {
     ///
     /// This is useful for memory profiling where the weight is the
     /// allocation size.
-    pub fn record_weighted(&mut self, backtrace: &[u64], count: u64) {
+    pub(crate) fn record_weighted(&mut self, backtrace: &[u64], count: u64) {
         let truncated = if backtrace.len() > self.max_stack_depth {
             &backtrace[..self.max_stack_depth]
         } else {
@@ -180,7 +180,7 @@ impl ProfilerLog {
     /// These are tracked separately because the hash table cannot be
     /// safely modified during garbage collection (mirrors the C
     /// implementation's `gc_count` field).
-    pub fn record_gc(&mut self, count: u64) {
+    pub(crate) fn record_gc(&mut self, count: u64) {
         self.gc_count = self.gc_count.saturating_add(count);
     }
 
@@ -198,7 +198,7 @@ impl ProfilerLog {
     }
 
     /// Return the number of distinct backtraces in the log.
-    pub fn num_entries(&self) -> usize {
+    pub(crate) fn num_entries(&self) -> usize {
         self.entries.len()
     }
 
@@ -208,17 +208,17 @@ impl ProfilerLog {
     }
 
     /// Return the number of GC samples.
-    pub fn gc_count(&self) -> u64 {
+    pub(crate) fn gc_count(&self) -> u64 {
         self.gc_count
     }
 
     /// Return the maximum stack depth for this log.
-    pub fn max_stack_depth(&self) -> usize {
+    pub(crate) fn max_stack_depth(&self) -> usize {
         self.max_stack_depth
     }
 
     /// Return the maximum number of entries this log can hold.
-    pub fn max_entries(&self) -> usize {
+    pub(crate) fn max_entries(&self) -> usize {
         self.max_entries
     }
 
@@ -248,7 +248,7 @@ impl ProfilerLog {
 
 /// The profiler mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProfilerMode {
+pub(crate) enum ProfilerMode {
     /// CPU sampling profiler: takes call-stack samples at a periodic
     /// interval.
     Cpu,
@@ -263,7 +263,7 @@ pub enum ProfilerMode {
 
 /// Manages the profiler lifecycle (start/stop) and owns the current log.
 #[derive(Debug)]
-pub struct ProfilerState {
+pub(crate) struct ProfilerState {
     /// Whether the profiler is currently running.
     running: bool,
     /// The profiling mode (CPU or Memory).
@@ -319,7 +319,7 @@ impl ProfilerState {
     }
 
     /// Return `true` if the profiler is currently running.
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         self.running
     }
 
@@ -329,7 +329,7 @@ impl ProfilerState {
     }
 
     /// Return the current sampling interval in nanoseconds.
-    pub fn sample_interval_ns(&self) -> u64 {
+    pub(crate) fn sample_interval_ns(&self) -> u64 {
         self.sample_interval_ns
     }
 
@@ -342,7 +342,7 @@ impl ProfilerState {
     ///
     /// This is used by the sampling signal handler (or equivalent) to
     /// record samples while the profiler is running.
-    pub fn log_mut(&mut self) -> &mut ProfilerLog {
+    pub(crate) fn log_mut(&mut self) -> &mut ProfilerLog {
         &mut self.log
     }
 }
@@ -353,7 +353,7 @@ impl ProfilerState {
 
 /// A summary report generated from a profiler log.
 #[derive(Debug, Clone)]
-pub struct ProfilerReport {
+pub(crate) struct ProfilerReport {
     /// Total number of samples (including GC, excluding discarded).
     pub total_samples: u64,
     /// Number of distinct backtraces.
@@ -371,7 +371,7 @@ pub struct ProfilerReport {
 ///
 /// The report includes the top entries (all of them, sorted by count
 /// descending) and aggregate statistics.
-pub fn generate_report(log: &ProfilerLog) -> ProfilerReport {
+pub(crate) fn generate_report(log: &ProfilerLog) -> ProfilerReport {
     let mut top: Vec<(Vec<u64>, u64)> = log
         .entries
         .iter()
@@ -391,7 +391,7 @@ pub fn generate_report(log: &ProfilerLog) -> ProfilerReport {
 /// Return the top `n` entries from the log, sorted by count descending.
 ///
 /// Each entry is `(backtrace_frames, count)`.
-pub fn top_entries(log: &ProfilerLog, n: usize) -> Vec<(Vec<u64>, u64)> {
+pub(crate) fn top_entries(log: &ProfilerLog, n: usize) -> Vec<(Vec<u64>, u64)> {
     let mut entries: Vec<(Vec<u64>, u64)> = log
         .entries
         .iter()
@@ -409,7 +409,7 @@ pub fn top_entries(log: &ProfilerLog, n: usize) -> Vec<(Vec<u64>, u64)> {
 /// `max_entries` from the input logs (so nothing is lost due to
 /// capacity limits during the merge itself). GC counts and discarded
 /// counts are also summed.
-pub fn merge_logs(logs: &[&ProfilerLog]) -> ProfilerLog {
+pub(crate) fn merge_logs(logs: &[&ProfilerLog]) -> ProfilerLog {
     if logs.is_empty() {
         return ProfilerLog::new(16);
     }

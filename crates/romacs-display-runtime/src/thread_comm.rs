@@ -11,11 +11,13 @@ use std::time::Instant;
 
 mod command_channel;
 mod frame_mailbox;
-pub use command_channel::{CommandReceiver, CommandSender, command_channel};
+pub(crate) use command_channel::{CommandReceiver, CommandSender, command_channel};
 mod frame_opacity;
 use crate::host_types::GuiFrameGeometryHints;
-pub use frame_mailbox::{FrameReceiver, FrameSender, QueuedPresentation, SupersededPresentation};
-pub use frame_opacity::FrameOpacityState;
+pub(crate) use frame_mailbox::{
+    FrameReceiver, FrameSender, QueuedPresentation, SupersededPresentation,
+};
+pub(crate) use frame_opacity::FrameOpacityState;
 use romacs_display_protocol::{
     ImageColorContext, ImageId, ImageLoadToken, ImageMaskPolicy, ImageRealization, ImageRotation,
     ImageSizeSpec, SelectionOwner, VideoId,
@@ -34,7 +36,7 @@ use romacs_video_model::{PlaybackAction, VideoDiagnostics, VideoOpenRequest};
 /// and can observe foreign ownership; the clipboard runtime documents that
 /// explicit divergence beside its process-local state.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ClipboardSelection {
+pub(crate) enum ClipboardSelection {
     Clipboard,
     Primary,
 }
@@ -66,7 +68,7 @@ pub struct PointerPosition {
 /// display answers GNU's `mouse_position_hook' with, read at the moment it
 /// is asked.  Nothing while the pointer is elsewhere.
 #[derive(Debug)]
-pub struct PointerCell(std::sync::atomic::AtomicU64);
+pub(crate) struct PointerCell(std::sync::atomic::AtomicU64);
 
 impl Default for PointerCell {
     fn default() -> Self { Self(std::sync::atomic::AtomicU64::new(Self::OUTSIDE)) }
@@ -282,7 +284,7 @@ pub enum InputEvent {
     },
 }
 
-pub type PopupAnchorRect = romacs_display_protocol::Rect;
+pub(crate) type PopupAnchorRect = romacs_display_protocol::Rect;
 
 /// Frame reference in commands flowing from Emacs to the render thread.
 ///
@@ -290,7 +292,7 @@ pub type PopupAnchorRect = romacs_display_protocol::Rect;
 /// Matches GNU Emacs convention: 0 is never a valid frame ID
 /// (`frame_next_id = 1` in GNU Emacs `frame.c:343`).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FrameRef {
+pub(crate) enum FrameRef {
     /// Route to the primary frame (resolved at render-time).
     Primary,
     /// Route to a specific frame by its Emacs-assigned ID.
@@ -298,7 +300,7 @@ pub enum FrameRef {
 }
 
 impl FrameRef {
-    pub fn raw_id(&self) -> u64 {
+    pub(crate) fn raw_id(&self) -> u64 {
         match self {
             Self::Primary => 0,
             Self::Frame(id) => *id,
@@ -313,7 +315,7 @@ impl From<FrameRef> for u64 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowFullscreenMode {
+pub(crate) enum WindowFullscreenMode {
     None,
     Fullboth,
     Fullscreen,
@@ -324,7 +326,7 @@ pub enum WindowFullscreenMode {
 
 /// Native-window projection of GNU's visible/iconified/invisible frame state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowVisibility {
+pub(crate) enum WindowVisibility {
     Visible,
     Iconified,
     Invisible,
@@ -332,7 +334,7 @@ pub enum WindowVisibility {
 
 /// Lifecycle commands for the render thread.
 #[derive(Debug)]
-pub enum LifecycleCommand {
+pub(crate) enum LifecycleCommand {
     /// Shutdown the render thread
     Shutdown,
     /// Suspend the active TTY frontend.
@@ -343,7 +345,7 @@ pub enum LifecycleCommand {
 
 /// Window and chrome management commands.
 #[derive(Debug)]
-pub enum WindowCommand {
+pub(crate) enum WindowCommand {
     /// Wake presentation after a synchronous CPU opacity control operation.
     RefreshFrameOpacity,
     /// Paint an evaluator-resolved viewport while canonical layout is pending.
@@ -449,7 +451,7 @@ pub enum WindowCommand {
 /// loosely-related asset variants. Adding a playback operation now makes the
 /// render-thread match exhaustive at compile time.
 #[derive(Debug)]
-pub enum VideoSessionCommand {
+pub(crate) enum VideoSessionCommand {
     Open {
         id: VideoId,
         request: VideoOpenRequest,
@@ -477,7 +479,7 @@ pub enum VideoSessionCommand {
 /// Content source for a shader surface
 /// (`docs/display-engine/SHADER_SURFACES.md`).
 #[derive(Debug)]
-pub enum SurfaceSource {
+pub(crate) enum SurfaceSource {
     /// User shader source (WGSL or Shadertoy-dialect GLSL) defining
     /// `mainImage`; the render thread composes it with the generated prelude.
     /// `uniforms` carries the named user uniforms in slot order with initial
@@ -502,7 +504,7 @@ pub enum SurfaceSource {
 
 /// Asset and embedded-content commands.
 #[derive(Debug)]
-pub enum AssetCommand {
+pub(crate) enum AssetCommand {
     /// Load image from file (async, ID pre-allocated)
     ImageLoadFile {
         load: ImageLoadToken,
@@ -643,7 +645,7 @@ pub enum AssetCommand {
 
 /// UI overlay commands.
 #[derive(Debug)]
-pub enum UiCommand {
+pub(crate) enum UiCommand {
     PresentTooltip {
         ticket: romacs_display_protocol::tooltip::TooltipTicket,
         frame: FrameRef,
@@ -683,7 +685,7 @@ pub enum UiCommand {
 // Boxing `VisualConfig` only to narrow the enum would break downstream
 // constructors and destructuring code.
 #[allow(clippy::large_enum_variant)]
-pub enum ConfigCommand {
+pub(crate) enum ConfigCommand {
     /// Enable or disable font ligatures
     SetLigaturesEnabled { enabled: bool },
     /// Replace the complete, already validated visual configuration snapshot.
@@ -725,7 +727,7 @@ pub enum ConfigCommand {
 /// The evaluator may await `reply`, but the Winit event loop only forwards the
 /// request and never performs native clipboard I/O itself.
 #[derive(Debug)]
-pub enum ClipboardCommand {
+pub(crate) enum ClipboardCommand {
     SetText {
         selection: ClipboardSelection,
         text: Option<String>,
@@ -759,7 +761,7 @@ impl ClipboardCommand {
 /// first, and the text animations drawn over the primary frame, each by
 /// its key. A child or an animation absent from the next paint is removed.
 #[derive(Debug)]
-pub struct PaintScene {
+pub(crate) struct PaintScene {
     pub root: romacs_display_protocol::FrameGlyphBuffer,
     pub children: Vec<romacs_display_protocol::FrameGlyphBuffer>,
     pub text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
@@ -776,7 +778,7 @@ impl From<romacs_display_protocol::FrameGlyphBuffer> for PaintScene {
 // This public transport enum preserves its established by-value command API.
 // Boxing `Config` would move the same downstream break one level outward.
 #[allow(clippy::large_enum_variant)]
-pub enum RenderCommand {
+pub(crate) enum RenderCommand {
     Paint(Box<PaintScene>),
     Lifecycle(LifecycleCommand),
     Window(WindowCommand),
@@ -801,7 +803,7 @@ const COMMAND_CHANNEL_CAPACITY: usize = 64;
 /// Effective full-frame shader availability published by the render thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum FrameShaderAvailability {
+pub(crate) enum FrameShaderAvailability {
     /// No adapter has been selected. Callers may queue a request; bootstrap
     /// will negotiate the final policy before processing normal commands.
     Pending = 0,
@@ -811,11 +813,11 @@ pub enum FrameShaderAvailability {
 
 /// Identity of one requested full-frame shader state transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FrameShaderRequestId(u64);
+pub(crate) struct FrameShaderRequestId(u64);
 
 /// Renderer-acknowledged state for one frame-shader request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameShaderExecution {
+pub(crate) enum FrameShaderExecution {
     Absent,
     Pending,
     Installed,
@@ -849,7 +851,7 @@ impl Default for FrameShaderRuntimeState {
 /// check. Request generations and acknowledgements use one small mutex so a
 /// late renderer reply cannot describe a newer request.
 #[derive(Debug)]
-pub struct SharedRenderCapabilities {
+pub(crate) struct SharedRenderCapabilities {
     frame_shader: AtomicU8,
     frame_shader_runtime: Mutex<FrameShaderRuntimeState>,
     /// A GPU renderer is live now (set on renderer creation, cleared on
@@ -866,7 +868,7 @@ impl Default for SharedRenderCapabilities {
 /// Prepared evaluator-side request. Dropping it before [`commit`](Self::commit)
 /// restores the previous logical state, so a disconnected command channel
 /// cannot publish an unqueued request.
-pub struct PreparedFrameShaderRequest<'a> {
+pub(crate) struct PreparedFrameShaderRequest<'a> {
     capabilities: &'a SharedRenderCapabilities,
     request: FrameShaderRequestId,
     previous: FrameShaderRuntimeState,
@@ -910,15 +912,9 @@ impl SharedRenderCapabilities {
     }
 
     /// Publish whether a GPU renderer is live (render thread only).
-    pub fn set_model_renderer_live(&self, live: bool) {
+    pub(crate) fn set_model_renderer_live(&self, live: bool) {
         self.model_renderer
             .store(live, std::sync::atomic::Ordering::Release);
-    }
-
-    /// Whether a GPU renderer is live now, so a native model can be drawn.
-    pub fn model_renderer_live(&self) -> bool {
-        self.model_renderer
-            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn frame_shader_runtime_state(&self) -> std::sync::MutexGuard<'_, FrameShaderRuntimeState> {
@@ -930,7 +926,7 @@ impl SharedRenderCapabilities {
 
     /// Reserve and publish a pending request before it is queued. The
     /// returned transaction rolls back unless the caller commits it.
-    pub fn prepare_frame_shader_request(&self, requested: bool) -> PreparedFrameShaderRequest<'_> {
+    pub(crate) fn prepare_frame_shader_request(&self, requested: bool) -> PreparedFrameShaderRequest<'_> {
         let mut state = self.frame_shader_runtime_state();
         let previous = *state;
         let request = FrameShaderRequestId(state.next_request);
@@ -962,7 +958,7 @@ impl SharedRenderCapabilities {
     }
 
     /// Observe effective state only if REQUEST still names the latest request.
-    pub fn frame_shader_execution(&self, request: FrameShaderRequestId) -> FrameShaderExecution {
+    pub(crate) fn frame_shader_execution(&self, request: FrameShaderRequestId) -> FrameShaderExecution {
         let state = self.frame_shader_runtime_state();
         if state.current_request == request {
             state.execution
@@ -985,7 +981,7 @@ impl SharedRenderCapabilities {
         }
     }
 
-    pub fn frame_shader_availability(&self) -> FrameShaderAvailability {
+    pub(crate) fn frame_shader_availability(&self) -> FrameShaderAvailability {
         match self.frame_shader.load(Ordering::Acquire) {
             1 => FrameShaderAvailability::Available,
             2 => FrameShaderAvailability::SuppressedByQualityPolicy,
@@ -1026,7 +1022,7 @@ impl SharedRenderCapabilities {
 }
 
 /// Communication channels between threads
-pub struct ThreadComms {
+pub(crate) struct ThreadComms {
     /// The pointer over the primary window: Render → Emacs.
     pub pointer: Arc<PointerCell>,
 
@@ -1052,7 +1048,7 @@ pub struct ThreadComms {
 /// it evicted, by id, and whether a GPU rebuild lost every one.  The
 /// render thread records them; the evaluator's residency takes them.
 #[derive(Debug, Default)]
-pub struct LostImages {
+pub(crate) struct LostImages {
     pub evicted: Vec<u32>,
     pub reset: bool,
 }
@@ -1119,7 +1115,7 @@ impl Default for ThreadComms {
 }
 
 /// Emacs thread communication handle
-pub struct EmacsComms {
+pub(crate) struct EmacsComms {
     pub pointer: Arc<PointerCell>,
     pub frame_tx: FrameSender,
     pub cmd_tx: CommandSender,
@@ -1144,7 +1140,7 @@ pub trait InputInterrupt: Send + Sync {
 }
 
 /// Render thread communication handle
-pub struct RenderComms {
+pub(crate) struct RenderComms {
     pub pointer: Arc<PointerCell>,
     /// The embedder's quit for a busy evaluator, when it has one.
     pub input_interrupt: Option<Arc<dyn InputInterrupt>>,
@@ -1319,7 +1315,7 @@ impl RenderComms {
         let _ = self.send_input_with_receipt(event);
     }
 
-    pub fn send_input_with_receipt(
+    pub(crate) fn send_input_with_receipt(
         &self,
         event: InputEvent,
     ) -> (

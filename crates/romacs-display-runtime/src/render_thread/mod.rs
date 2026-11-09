@@ -68,22 +68,23 @@ mod ui_commands;
 mod window_commands;
 mod window_events;
 
-pub use bootstrap::{
-    DaemonRenderRoot, build_render_event_loop, run_render_loop, run_render_loop_current_thread,
-};
+pub(crate) use bootstrap::run_render_loop_current_thread;
 #[cfg(target_os = "linux")]
-pub use bootstrap::{build_render_event_loop_wayland, build_render_event_loop_wayland_stream};
+pub(crate) use bootstrap::{
+    build_render_event_loop_wayland, build_render_event_loop_wayland_stream,
+};
 pub(crate) use lifecycle::PopupCommit;
-pub use startup::{
+pub(crate) use startup::{
     InitialWindowLifetime, InitialWindowReceiver, InitialWindowReply, InitialWindowSize,
-    RenderLoopError, RenderLoopExit,
 };
+pub use startup::{RenderLoopError, RenderLoopExit};
+pub use state::RenderShutdownReason;
 use state::{FpsCounter, ImeCursorArea, RenderApp};
-pub use state::{
-    ImageDecodeTerminal, ImageRenderState, ImageTerminalProbe, ImageTerminalPublication,
-    MonitorInfo, RenderShutdownReason, SharedImageRenderState, SharedMonitorInfo,
+pub(crate) use state::{
+    ImageDecodeTerminal, ImageRenderState, ImageTerminalPublication, MonitorInfo,
+    SharedImageRenderState, SharedMonitorInfo,
 };
-pub use thread_handle::RenderThread;
+pub(crate) use thread_handle::RenderThread;
 
 pub use romacs_renderer_wgpu::SvgResourceContext;
 /// Complete CPU semantic decoding, independent of render-loop service.
@@ -101,7 +102,7 @@ pub use romacs_renderer_wgpu::RowRange;
 
 use winit::event_loop::EventLoopProxy;
 
-pub type RenderEventLoopProxy = EventLoopProxy;
-pub type RenderEventLoop = winit::event_loop::EventLoop;
+pub(crate) type RenderEventLoopProxy = EventLoopProxy;
+pub(crate) type RenderEventLoop = winit::event_loop::EventLoop;
 
 // All GPU caches (image, video, webkit) are managed by WgpuRenderer
