@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "8c16b8aa3c65072b1c8d54f353c30eb144266659729a4f4904359d322f890a6f",
+  "input_hash": "070a4cf0323baf875f3318892334284d1d03ee34cbb65df6641ec29cb8b33db6",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 391,
-  "symbols": 1191,
+  "rows": 392,
+  "symbols": 1192,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -72,7 +72,7 @@
    94
   ],
   "[:class:]": [
-   390
+   391
   ],
   "\\": [
    298
@@ -690,8 +690,8 @@
    167,
    195,
    233,
-   382,
-   386
+   383,
+   387
   ],
   "define-category": [
    334
@@ -890,7 +890,7 @@
    369
   ],
   "downcase_char_code_emacs_compat": [
-   389
+   390
   ],
   "elt": [
    36,
@@ -905,7 +905,7 @@
    203
   ],
   "emacs_downcase_compat": [
-   389
+   390
   ],
   "emoji": [
    30
@@ -1051,17 +1051,17 @@
    164,
    165,
    166,
-   382,
    383,
-   386
+   384,
+   387
   ],
   "face-family": [
    162,
-   385
+   386
   ],
   "face-font": [
    161,
-   384
+   385
   ],
   "face-ignored-fonts": [
    248
@@ -1077,7 +1077,7 @@
    165,
    166,
    267,
-   388
+   389
   ],
   "face-set-after-frame-default": [
    271
@@ -2282,7 +2282,8 @@
    343
   ],
   "modify-syntax-entry": [
-   199
+   199,
+   381
   ],
   "monospace": [
    29
@@ -2445,7 +2446,8 @@
    357
   ],
   "parse-partial-sexp": [
-   200
+   200,
+   381
   ],
   "permanent-local": [
    202
@@ -2842,7 +2844,7 @@
   ],
   "reset": [
    164,
-   381
+   382
   ],
   "resize-mini-windows": [
    367
@@ -3350,10 +3352,10 @@
    160,
    161,
    162,
-   383,
    384,
    385,
-   387
+   386,
+   388
   ],
   "set-file-acl": [
    11
@@ -3472,10 +3474,10 @@
    34
   ],
   "skip-chars-backward": [
-   390
+   391
   ],
   "skip-chars-forward": [
-   390
+   391
   ],
   "sleep-for": [
    226,
@@ -3620,6 +3622,9 @@
   ],
   "syntax-class-to-char": [
    200
+  ],
+  "syntax-ppss": [
+   381
   ],
   "syntax-table": [
    199
@@ -10988,6 +10993,23 @@
     "autoload",
     "use-package",
     "romacs-init-layer-exclude"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-SYNTAX-SUMMARIES",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package: syntax summaries",
+   "observable": true,
+   "planned": false,
+   "mechanism": "A long `parse-partial-sexp`, and `syntax-ppss`",
+   "gnu": "Every call scans each character from FROM to TO; `syntax-ppss` parses from states syntax.el caches, invalidated below each edit.",
+   "romacs": "From FROM to TO over at least four leaves of a multibyte text, with no TARGETDEPTH, STOPBEFORE or COMMENTSTOP and, where `syntax-table` properties are honoured, propertized past TO, the scan reads only its two end leaves and composes kept summaries of the leaves between (`crates/romacs-vm/src/syntax_index.rs`, `syntax_summary.rs`); every value, point included, is the scanner's. Summaries are kept per syntax table and per count of char-table writes, which every change of any char table's characters, default or parent (`modify-syntax-entry`, `aset`, `set-char-table-range`, `set-char-table-parent`, `optimize-char-table`, a new table) advances, per `comment-end-can-be-escaped` and per `parse-sexp-lookup-properties`; a `syntax-table` property change drops those of the text it covers. A syntax descriptor changed in place (`setcar` on a `(CODE . MATCH)` cons a table or a `syntax-table` property holds) is not seen until some char table, or that property, changes: descriptor conses are shared values (`string-to-syntax` returns one cons for every plain descriptor, as GNU's `syntax_code_object` does), and no GNU or bundled code mutates one. `syntax-ppss` is syntax.el's; its long parses from the states it caches are the ones served. `romacs-inhibit-syntax-summaries` scans every character; `romacs-syntax-summaries-check` scans as well and signals where they differ; `romacs-syntax-summaries-stats` shows what was served.",
+   "why": "An edit near the top of a large file no longer costs a scan of all the text after it. Tests: `tests/syntax_summaries.rs` (against pinned GNU, with edits), the seeded property tests in `syntax_scan.rs`, `syntax_summary.rs` and `syntax_index.rs`.",
+   "symbols": [
+    "parse-partial-sexp",
+    "syntax-ppss",
+    "modify-syntax-entry"
    ],
    "symbols_derived": false
   },

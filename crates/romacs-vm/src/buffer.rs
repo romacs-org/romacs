@@ -1995,7 +1995,7 @@ impl Vm {
             result?;
         }
         let install = |properties: &mut properties::Properties| match plan.apply {
-            PlanApply::Reset => *properties = properties::Properties::new(),
+            PlanApply::Reset => properties.reset(),
             PlanApply::Ops(ops) => apply_plan_ops(properties, ops),
         };
         match &mut self.objects[index] {

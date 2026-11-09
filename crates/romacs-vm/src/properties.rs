@@ -626,9 +626,51 @@ impl KeyReader<'_> {
 pub(crate) struct Properties {
     layers: BTreeMap<String, Link>,
     stamp: u32,
+    /// Where `syntax-table' changed since the text's parse-state summaries
+    /// last took the changes (`crate::syntax_index`). Boxed, and made by the
+    /// first such change, so that a string, which never has summaries,
+    /// pays one word.
+    syntax_changes: Option<Box<SyntaxChanges>>,
 }
-romacs_snapshot::snapshot_struct!(Properties { layers, stamp });
+romacs_snapshot::snapshot_struct!(Properties { layers, stamp, syntax_changes });
+
+/// Byte ranges where the `syntax-table' property changed, or `all' once
+/// there are too many to keep.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SyntaxChanges {
+    pub ranges: Vec<Range<usize>>,
+    pub all: bool,
+}
+romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all });
+impl SyntaxChanges {
+    /// Note RANGE in SLOT, making the log there if it has none.
+    fn note(slot: &mut Option<Box<Self>>, range: Range<usize>) {
+        let changes = slot.get_or_insert_default();
+        if changes.all {
+            return;
+        }
+        if changes.ranges.len() == 64 {
+            changes.ranges.clear();
+            changes.all = true;
+        } else {
+            changes.ranges.push(range);
+        }
+    }
+}
+
 impl Properties {
+    /// The `syntax-table' changes since the last take.
+    pub(crate) fn take_syntax_changes(&mut self) -> SyntaxChanges {
+        self.syntax_changes.take().map(|changes| *changes).unwrap_or_default()
+    }
+    /// No properties at all, as a new store, the change noted.
+    pub(crate) fn reset(&mut self) {
+        let mut changes = self.syntax_changes.take();
+        if self.layers.contains_key("syntax-table") {
+            changes.get_or_insert_default().all = true;
+        }
+        *self = Self { syntax_changes: changes, ..Self::new() };
+    }
     pub fn properties_keys(&self) -> Vec<String> {
         self.layers.keys().cloned().collect()
     }
@@ -708,6 +750,9 @@ impl Properties {
         if range.start >= range.end {
             return;
         }
+        if key == "syntax-table" {
+            SyntaxChanges::note(&mut self.syntax_changes, range.start.0..range.end.0);
+        }
         if self.stamp == u32::MAX {
             // Dense rank compression preserves all ordering and merge decisions;
             // dead stamps must not impose a lifetime limit on an editor buffer.
@@ -769,6 +814,9 @@ impl Properties {
         let end = range.end.0.min(len);
         if start >= end {
             return;
+        }
+        if key == "syntax-table" {
+            SyntaxChanges::note(&mut self.syntax_changes, start..end);
         }
         let (a, b) = Tree::split(root.take(), start, &mut work);
         let (_, c) = Tree::split(b, end - start, &mut work);
@@ -992,6 +1040,9 @@ impl Properties {
                     + 12 * size_of::<usize>()
                     + root.as_ref().map_or(0, |n| n.storage())
             })
-            .sum()
+            .sum::<usize>()
+            + self.syntax_changes.as_ref().map_or(0, |changes| {
+                size_of::<SyntaxChanges>() + changes.ranges.capacity() * size_of::<Range<usize>>()
+            })
     }
 }

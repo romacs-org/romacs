@@ -4,6 +4,7 @@
 //! immutably, so nothing allocates or collects while the engine runs.
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
+use crate::syntax_index::{Context, Decline, SyntaxIndex};
 use crate::syntax_scan::{self as scan, Halt, ParseState, Pos, Scanner};
 use std::collections::BTreeMap;
 
@@ -29,9 +30,19 @@ struct View<'a> {
     ascii: [std::cell::Cell<Option<i32>>; 128],
     replay: Vec<i32>,
     read: std::cell::RefCell<Vec<i32>>,
+    /// Whether the scan can stop to call Lisp, which reruns it from `read'.
+    record: bool,
     /// The last character read, as (byte, code): a scan reads a
     /// character, its syntax and its width at one position in turn.
     last: std::cell::Cell<(usize, u32)>,
+}
+
+/// The text of the multibyte buffer at INDEX.
+fn buffer_text(vm: &Vm, index: usize) -> &crate::text::Text {
+    match &vm.objects[index] {
+        data::Object::Buffer(b) => b,
+        _ => unreachable!("a multibyte buffer"),
+    }
 }
 
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
@@ -55,7 +66,7 @@ impl<'a> View<'a> {
             _ => unreachable!("buffer_index validates"),
         };
         let ascii = std::array::from_fn(|_| std::cell::Cell::new(None));
-        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default(), last: std::cell::Cell::new((usize::MAX, 0)) }
+        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default(), record: true, last: std::cell::Cell::new((usize::MAX, 0)) }
     }
     fn len(&self) -> usize {
         match self.body {
@@ -117,6 +128,9 @@ impl scan::Text for View<'_> {
         }
     }
     fn syntax(&self, at: Pos) -> i32 {
+        if !self.record {
+            return self.live_syntax(at);
+        }
         let mut read = self.read.borrow_mut();
         let syntax = match self.replay.get(read.len()) {
             Some(&syntax) => syntax,
@@ -170,6 +184,14 @@ pub(crate) enum Outcome {
 
 enum Result_ { Comment(Pos, bool), Lists(Option<i64>), Parse(ParseState), Prefix(Pos) }
 
+/// A parse the text's summaries serve (`crate::syntax_index`), and whether
+/// the plain scanner checks it.
+struct Served {
+    context: Context,
+    check: bool,
+}
+
+
 /// A scan's memory: the first run's BEGV, ZV and point, coerced FROM and
 /// TO, its variables as flags, its initial parse state (`state_memory'),
 /// then the syntax it read.
@@ -192,6 +214,7 @@ fn memory_state(values: &[Value]) -> ParseState {
         mindepth: int(5), thislevelstart: int(6), prevlevelstart: int(7), location: int(8), comstr_start: int(9),
         prev_syntax: int(10) as i32,
         levelstarts: values[12..12 + count].iter().map(|v| v.integer_value()).collect(),
+        ..ParseState::default()
     }
 }
 
@@ -380,32 +403,8 @@ impl Leaf<'_> {
             }
             Op::BackwardPrefixChars => {}
         }
-        const FLAGS: [&str; 6] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments", "comment-end-can-be-escaped",
-            "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start", "comment-use-syntax-ppss"];
-        let flags = match &memory {
-            Some(memory) => int(memory[5]),
-            None => {
-                let mut flags = 0;
-                for (bit, name) in FLAGS.iter().enumerate() {
-                    if self.syntax_var(name)? != Value::NIL { flags |= 1 << bit; }
-                }
-                flags
-            }
-        };
-        let flag = |bit: usize| flags & (1 << bit) != 0;
-        let properties = flag(0);
-        let options = scan::Options {
-            ignore_comments: flag(1),
-            comment_end_can_be_escaped: flag(2),
-            multibyte_syntax_as_symbol: flag(3),
-            open_paren_in_column_0_is_defun_start: flag(4),
-            comment_use_syntax_ppss: flag(5),
-            propertize_done: if properties {
-                Some(self.syntax_var("syntax-propertize--done")?.integer_value().unwrap_or(-1))
-            } else {
-                None
-            },
-        };
+        let (flags, options) = self.syntax_options(memory.as_ref().map(|memory| int(memory[5])))?;
+        let properties = options.propertize_done.is_some();
         let mut ppss = BTreeMap::new();
         let mut tail = answers;
         while let Some((answer, rest)) = self.pair(tail) {
@@ -415,6 +414,16 @@ impl Leaf<'_> {
         }
         let table = self.vm.current_syntax_table()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        if let (Op::ParsePartialSexp, None, Some((from, to, target, stopbefore, commentstop, state))) = (op, &memory, &parse) {
+            let plain = *target != i64::MIN || *stopbefore || *commentstop != 0;
+            if let Some(served) = self.served(index, table, *from, *to, plain, options)? {
+                let mut state = state.clone();
+                if self.summarized(index, table, &served, options, (*from, *to), &mut state)? {
+                    self.syntax_set_point(state.location)?;
+                    return Ok(Outcome::Done(self.externalize_parse_state(&state)));
+                }
+            }
+        }
         let (begv, zv, point) = self.syntax_bounds(index)?;
         let epoch = self.vm.defun_start_epoch;
         let (cached, modiff) = {
@@ -422,6 +431,8 @@ impl Leaf<'_> {
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
         let mut view = View::new(self.vm, index, table, properties);
+        // Only a stop for Lisp reads the syntax a scan recorded.
+        view.record = properties || (options.comment_use_syntax_ppss && !matches!(op, Op::ParsePartialSexp));
         // A rerun scans from the first run's start, whatever the call did
         // to point or the restriction.
         let (begv, zv, point) = match &memory {
@@ -497,6 +508,133 @@ impl Leaf<'_> {
                 Value::NIL
             }
         }))
+    }
+
+    /// Whether the summaries of the current buffer's text serve a parse
+    /// from FROM to TO, PLAIN when its arguments ask for a stop: a long
+    /// enough span of a multibyte text whose `syntax-table' properties, if
+    /// honoured, are propertized past TO, so that no scan of it would stop
+    /// for Lisp. Counts the reason when they do not; when they do, gives
+    /// the summaries the property changes since they last served.
+    fn served(&mut self, index: usize, table: Value, from: i64, to: i64, plain: bool, options: scan::Options)
+        -> std::result::Result<Option<Served>, Fault> {
+        if !matches!(self.vm.objects[index], data::Object::Buffer(_)) { return Ok(None); }
+        let decline = if !SyntaxIndex::pays(to - from) {
+            Some(Decline::Short)
+        } else if plain {
+            Some(Decline::Arguments)
+        } else if self.syntax_var("romacs-inhibit-syntax-summaries")? != Value::NIL {
+            Some(Decline::Inhibited)
+        } else if let Some(done) = options.propertize_done.filter(|&done| done <= to)
+            && done < self.syntax_bounds(index)?.1.char {
+            // update_forward stops for Lisp at `syntax-propertize--done' and
+            // past it, short of ZV, and forw_comment updates at TO itself.
+            Some(Decline::Properties)
+        } else {
+            None
+        };
+        let data::Object::Buffer(buffer) = &mut self.vm.objects[index] else { unreachable!("checked above") };
+        let text: &mut crate::text::Text = buffer;
+        if let Some(decline) = decline {
+            text.syntax.get_mut().stats.declined[decline as usize] += 1;
+            return Ok(None);
+        }
+        text.sync_syntax_properties();
+        let check = self.syntax_var("romacs-syntax-summaries-check")? != Value::NIL;
+        let context = Context {
+            table: self.vm.char_table_identity(table),
+            writes: crate::char_table::writes(),
+            escaped_ends: options.comment_end_can_be_escaped,
+            properties: options.propertize_done.is_some(),
+        };
+        Ok(Some(Served { context, check }))
+    }
+
+    /// The variables a scan obeys, from SAVED (a rerun's flags) or read
+    /// now, as flags and as the engine's options.
+    fn syntax_options(&mut self, saved: Option<i64>) -> std::result::Result<(i64, scan::Options), Fault> {
+        const FLAGS: [&str; 6] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments", "comment-end-can-be-escaped",
+            "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start", "comment-use-syntax-ppss"];
+        let flags = match saved {
+            Some(flags) => flags,
+            None => {
+                let mut flags = 0;
+                for (bit, name) in FLAGS.iter().enumerate() {
+                    if self.syntax_var(name)? != Value::NIL { flags |= 1 << bit; }
+                }
+                flags
+            }
+        };
+        let flag = |bit: usize| flags & (1 << bit) != 0;
+        let options = scan::Options {
+            ignore_comments: flag(1),
+            comment_end_can_be_escaped: flag(2),
+            multibyte_syntax_as_symbol: flag(3),
+            open_paren_in_column_0_is_defun_start: flag(4),
+            comment_use_syntax_ppss: flag(5),
+            propertize_done: if flag(0) {
+                Some(self.syntax_var("syntax-propertize--done")?.integer_value().unwrap_or(-1))
+            } else {
+                None
+            },
+        };
+        Ok((flags, options))
+    }
+
+    /// The summaries' parse of SPAN (character positions) of the buffer at
+    /// INDEX under TABLE, from STATE into STATE: false, STATE as it was,
+    /// where they do not serve it. Under `romacs-syntax-summaries-check' the
+    /// scanner parses too, and a difference signals.
+    fn summarized(&mut self, index: usize, table: Value, served: &Served, options: scan::Options,
+                  (from, to): (i64, i64), state: &mut ParseState) -> std::result::Result<bool, Fault> {
+        let (begv, zv, _) = self.syntax_bounds(index)?;
+        let mut view = View::new(self.vm, index, table, options.propertize_done.is_some());
+        view.record = false;
+        let Body::Multibyte(text, _) = &view.body else { return Ok(false) };
+        let ppss = BTreeMap::new();
+        let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: None, modiff: 0 };
+        let stopped = |_| Fault::Error("syntax summaries: a served parse stopped for Lisp".into());
+        let start = state.clone();
+        let summarized = text.syntax.borrow_mut()
+            .parse(&mut scanner, text.len_chars(), served.context.clone(), from, to, state).map_err(stopped)?;
+        if summarized && served.check {
+            let mut plain = start;
+            scanner.scan_sexps_forward(&mut plain, scan::Text::pos(&view, from), to, i64::MIN, false, 0).map_err(stopped)?;
+            if plain != *state {
+                return Err(Fault::Error(format!("romacs-syntax-summaries-check: {from}..{to}: summaries {state:?}, scanner {plain:?}")));
+            }
+        }
+        Ok(summarized)
+    }
+
+    /// `romacs-syntax-summaries-stats' of the current buffer.
+    pub(crate) fn syntax_summaries_stats(&mut self) -> super::super::Out {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let data::Object::Buffer(_) = &self.vm.objects[index] else { return Ok(Value::NIL) };
+        let (stats, leaves, bytes) = {
+            let summaries = buffer_text(self.vm, index).syntax.borrow();
+            (summaries.stats, summaries.leaves(), summaries.storage_bytes())
+        };
+        let int = |n: u64| Value::integer(n as i64).expect("count");
+        let mut declined = Value::NIL;
+        for decline in Decline::ALL.into_iter().rev() {
+            let name = self.intern(decline.name());
+            let pair = self.cons(name, int(stats.declined[decline as usize]));
+            declined = self.cons(pair, declined);
+        }
+        let items = [
+            ("served", int(stats.served)), ("declined", declined), ("leaves", int(leaves as u64)),
+            ("leaf-scans", int(stats.leaf_scans)), ("plain-leaves", int(stats.plain_leaves)),
+            ("composed", int(stats.composed)), ("context-switches", int(stats.switches)),
+            ("bytes", int(bytes as u64)), ("char-table-writes", int(crate::char_table::writes())),
+        ];
+        let mut plist = Value::NIL;
+        for (key, value) in items.into_iter().rev() {
+            let key = self.intern(&format!(":{key}"));
+            plist = self.cons(value, plist);
+            plist = self.cons(key, plist);
+        }
+        Ok(plist)
     }
 
     /// Fchar_syntax.

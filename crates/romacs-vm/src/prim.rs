@@ -1733,6 +1733,7 @@ mod leaf {
                 }
                 let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
                 t.parent = parent;
+                char_table::note_write();
                 Ok(parent)
             } else { Ok(old) }
         }
@@ -1752,7 +1753,10 @@ mod leaf {
             let slot = self.vm.literal_table_slot(value);
             let data::Object::CharTable(t) = self.object_mut(table)? else { unreachable!() };
             if let Some((from, to)) = bounds { t.set_range_slot(from, to, slot).map_err(Fault::Error)?; }
-            else { t.default = value; }
+            else {
+                t.default = value;
+                char_table::note_write();
+            }
             Ok(value)
         }
         pub fn list_limit(&self) -> usize {

@@ -347,6 +347,15 @@ impl Vm {
 
     /// TABLE's own runs of one value, in character order, each slot of the
     /// table once: char_table_ref_and_range walked over the characters.
+    /// What tells TABLE from every other live char table: its root node's
+    /// address (0 for a value that is not a char table).
+    pub(crate) fn char_table_identity(&self, table: Value) -> usize {
+        match self.object_if(table) {
+            Some(data::Object::CharTable(t)) => Arc::as_ptr(&t.root) as usize,
+            _ => 0,
+        }
+    }
+
     pub(crate) fn char_table_edits(&self, table: Value) -> Result<u64> {
         match self.object(table)? {
             data::Object::CharTable(t) => Ok(t.edits),
@@ -650,9 +659,25 @@ impl CharTable {
     }
 }
 
+// Every char table's contents (characters, default, parent), counted
+// process-wide: what is derived from a table, the syntax summaries, keys on
+// it and the table's identity, so a change of any table, through any table
+// sharing a node with it, renews the key. A new table counts too: its root
+// may reuse a dead one's address.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Count a change to some char table's contents.
+pub(crate) fn note_write() {
+    WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+/// The changes to char tables' contents so far in this process.
+pub(crate) fn writes() -> u64 {
+    WRITES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {
     fn clone(&self) -> Self {
+        note_write();
         let mut copies = HashMap::default();
         let root = CharTableNode::deep_copy(&self.root, &mut copies);
         let ascii = Self::ascii_from_root(&root);
@@ -688,6 +713,7 @@ impl CharTable {
         slots
     }
     pub fn new(purpose: Value) -> Self {
+        note_write();
         Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0 }
     }
     // Called before publication, in a leaf allocation window (never collects).
@@ -759,6 +785,7 @@ impl CharTable {
     pub(super) fn set_range_slot(&mut self, from: usize, to: usize, value: CharTableSlot) -> Result<()> {
         if from >= Self::LEN || to >= Self::LEN { return Err("index out of range".into()); }
         self.edits += 1;
+        note_write();
         // Preserve this API's historical no-op for inverted ranges. GNU may
         // retain subdivisions for such a write; that structural divergence is intentional.
         if from > to { return Ok(()); }
@@ -780,6 +807,7 @@ impl CharTable {
     /// extras), as map_char_table + set-char-table-range would.
     pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
         self.edits += 1;
+        note_write();
         visit_char_table_node_values(&self.root, &mut HashSet::default(), map);
         self.ascii = Self::ascii_from_root(&self.root);
     }

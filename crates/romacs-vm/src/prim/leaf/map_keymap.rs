@@ -22,6 +22,7 @@ impl Leaf<'_> {
             }
         }
         self.uniprop_reset_ascii(table);
+        char_table::note_write();
         Ok(())
     }
     /// optimize_sub_char_table: NODE's slot in its parent after optimizing.
@@ -60,6 +61,7 @@ impl Leaf<'_> {
         let index = table.index_if(0).unwrap() - 1;
         if let data::Object::CharTable(t) = &mut self.vm.objects[index] {
             t.ascii = char_table::CharTable::ascii_from_root(&t.root);
+            char_table::note_write();
         }
     }
     pub(crate) fn map_table_has_decoder(&self, table: Value) -> bool {
@@ -130,6 +132,7 @@ impl Leaf<'_> {
             unreachable!()
         };
         table.ascii = char_table::CharTable::ascii_from_root(&table.root);
+        char_table::note_write();
         Ok(expanded)
     }
     /// GNU sub_char_table_set's uniprop_table_uncompress: expand C's

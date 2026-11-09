@@ -96,6 +96,13 @@ impl Vm {
                 self.set_directory_of(buffer, directory);
             }
         }
+        // Syntax summaries were read under the building process's char-table
+        // writes; this process counts its own.
+        for object in self.objects.iter_mut() {
+            if let crate::data::Object::Buffer(text) = object {
+                text.syntax.get_mut().forget();
+            }
+        }
         self.random = crate::random::Random::from_entropy();
         self.mktime_offset = 0;
         self.tz_rule_dstoff = 0;
