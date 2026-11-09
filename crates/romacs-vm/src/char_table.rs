@@ -48,8 +48,12 @@ mod tests {
         let lifted = funnelled(|| optimize(&table.root, &mut |a, b| Ok::<bool, ()>(a == b)).unwrap());
         assert_eq!(lifted, 3, "a Value lifted into each of three parents");
         assert!(matches!(table.root.lock().unwrap().slots[0], CharTableSlot::Value(v) if v == one));
-        let mapped = funnelled(|| table.map_entries(&mut |value| *value = Value::NIL));
+        let mut read = vec![];
+        assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
+        let mut mapped_order = vec![];
+        let mapped = funnelled(|| table.map_entries(&mut |value| { mapped_order.push(*value); *value = Value::NIL }));
         assert_eq!(mapped, 65, "each root Value written back, then the ASCII slot");
+        assert_eq!(read, mapped_order, "a read sees what a map would, in its order");
         let mut extra = CharTable::new(Value::NIL);
         extra.initialize(2, Value::NIL).unwrap();
         assert_eq!(funnelled(|| extra.set_extra(0, one)), 1, "an extra slot");
@@ -685,7 +689,9 @@ fn optimize_node<E>(node: &CharTableNodeHandle, same: &mut impl FnMut(Value, Val
 /// each Value a map writes back. The collector's barrier hooks here, and the
 /// write generation is bumped here. A node may be shared by several entries
 /// (a `CharTable`, a `SubCharTable`, a keymap cursor), so this is not
-/// `Table`'s barrier, which hooks one entry.
+/// `Table`'s barrier, which hooks one entry. It runs with the parent node
+/// locked, and a node it is handed may be that parent, so a hook must queue
+/// a `Node`'s handle, never lock it here.
 #[inline]
 fn wrote(_stored: &CharTableSlot) {
     #[cfg(test)]
@@ -963,6 +969,23 @@ impl CharTable {
         drop(parent);
         self.reset_ascii();
         expanded
+    }
+    /// Every character entry's Value, in `map_entries`' order: a read, so
+    /// nothing passes the funnel.
+    pub(crate) fn entry_values(&self) -> Vec<Value> {
+        fn read(handle: &CharTableNodeHandle, seen: &mut HashSet<usize>, out: &mut Vec<Value>) {
+            if !seen.insert(char_table_node_id(handle)) { return; }
+            let node = handle.lock().unwrap();
+            for slot in &node.slots {
+                match slot {
+                    CharTableSlot::Value(value) => out.push(*value),
+                    CharTableSlot::Node(child) => read(child, seen, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        read(&self.root, &mut HashSet::default(), &mut out);
+        out
     }
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.

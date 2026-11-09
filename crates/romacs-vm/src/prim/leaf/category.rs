@@ -141,8 +141,7 @@ impl Leaf<'_> {
     /// copy_category_table: fresh sets everywhere, a fresh docstring vector.
     pub(crate) fn copy_category_table(&mut self, table: Value) -> super::super::Out {
         let mut copy = self.category_table_ref(table)?.clone();
-        let mut entries = Vec::new();
-        copy.map_entries(&mut |value| entries.push(*value));
+        let entries = copy.entry_values();
         let mut copies = Vec::with_capacity(entries.len());
         for value in entries {
             copies.push(match self.bool_vector(value) { Ok(bits) => self.bool_vector_from(bits), Err(_) => value });
