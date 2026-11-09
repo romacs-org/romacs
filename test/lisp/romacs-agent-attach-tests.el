@@ -573,8 +573,10 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (let* ((romacs-agent--message-images (list image))
              (line (romacs-agent--claude-user session "see" 1))
              (content (gethash "content" (gethash "message" line)))
-             (block (aref content 1)))
+             (block (aref content 2)))
         (should (equal (gethash "text" (aref content 0)) "see"))
+        ;; Each image after the line saying where it is saved.
+        (should (equal (gethash "text" (aref content 1)) (romacs-agent--image-caption image)))
         (should (equal (gethash "type" block) "image"))
         (should (equal (gethash "media_type" (gethash "source" block)) "image/png"))
         (should (equal (gethash "data" (gethash "source" block)) (base64-encode-string "PNG" t)))

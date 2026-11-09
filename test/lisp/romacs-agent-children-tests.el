@@ -223,7 +223,7 @@
       (romacs-agent-ui--summarize-children parent)
       (with-temp-buffer
         (let ((romacs-agent-ui--session parent))
-          (should (string-prefix-p "Agents 1 running" (romacs-agent-ui--children-title)))
+          (should (string-prefix-p "Workers 1 running" (romacs-agent-ui--children-title)))
           (should (string-search "task 1" (romacs-agent-ui--child-label 0)))
           (should (string-search "waiting" (romacs-agent-ui--child-label 0)))
           (should-not (romacs-agent-ui--child-label 2))
@@ -261,6 +261,99 @@
         (cl-letf (((symbol-function 'recenter) #'ignore))
           (let ((last-command-event ?1)) (romacs-agent-chat-open-child)))
         (should (= (point) 8))))))
+
+;; Work the harness runs on past its tool call: a background subagent, or
+;; a command left running.
+
+(ert-deftest romacs-agent-children-claude-task-notices ()
+  (let ((line (lambda (json) (romacs-agent--claude-events (romacs-agent--make :harness 'claude) (json-parse-string json)))))
+    (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\",\"tool_use_id\":\"t1\",\"description\":\"Read package.json\",\"task_type\":\"local_agent\"}")
+                   '((:type task :id "t1" :state started :task "a1" :title "Read package.json" :background t))))
+    ;; A subagent's own command is its.
+    (should-not (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"b2\",\"tool_use_id\":\"t5\",\"parent_task_id\":\"a1\",\"owned_by_subagent\":true}"))
+    (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_updated\",\"task_id\":\"b3\",\"patch\":{\"is_backgrounded\":true}}")
+                   '((:type task :task "b3" :state backgrounded))))
+    (should-not (funcall line "{\"type\":\"system\",\"subtype\":\"task_updated\",\"task_id\":\"b3\",\"patch\":{\"status\":\"completed\"}}"))
+    (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_progress\",\"task_id\":\"a1\",\"tool_use_id\":\"t1\",\"description\":\"Reading\",\"last_tool_name\":\"Read\"}")
+                   '((:type task :id "t1" :state progress :activity "Read"))))
+    (should (equal (funcall line "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"tool_use_id\":\"t1\",\"status\":\"completed\",\"summary\":\"Read it\"}")
+                   '((:type task :id "t1" :state completed :summary "Read it"))))
+    (should (eq (plist-get (car (funcall line "{\"type\":\"system\",\"subtype\":\"task_notification\",\"tool_use_id\":\"t1\",\"status\":\"killed\"}")) :state)
+                'stopped))
+    ;; No tool to hang it on: nothing.
+    (should-not (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\"}"))))
+
+(ert-deftest romacs-agent-children-a-background-subagent-runs-past-its-call ()
+  (romacs-agent-children-tests--with
+    (let ((row (lambda () (car (romacs-agent-children-rows parent))))
+          (track (lambda (event) (romacs-agent-ui--track-children parent event) (romacs-agent-ui--summarize-children parent))))
+      (funcall track (list :type 'tool :state 'started :id "t1" :name "Agent"
+                           :input (romacs-mcp--object "description" "build the driver")))
+      (funcall track '(:type task :id "t1" :state started :task "a1" :title "build the driver"))
+      ;; Its call returns at once; its turn ends: it still runs.
+      (funcall track '(:type tool :state completed :id "t1"))
+      (funcall track '(:type done))
+      (should (equal (plist-get (funcall row) :state) "running"))
+      (funcall track '(:type task :id "t1" :state progress :activity "Bash"))
+      (with-temp-buffer
+        (let ((romacs-agent-ui--session parent))
+          (should (string-search "running Bash" (substring-no-properties (romacs-agent-ui--child-label 0))))))
+      ;; Its own notice ends it.
+      (funcall track '(:type task :id "t1" :state failed :summary "no"))
+      (should (equal (plist-get (funcall row) :state) "failed"))
+      (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
+      (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
+
+(ert-deftest romacs-agent-children-a-task-ends-with-its-harness ()
+  (romacs-agent-children-tests--with
+    ;; A command in the foreground is its card's; sent to the background,
+    ;; it has a row of its own.
+    (romacs-agent-ui--track-children parent '(:type task :id "t9" :state started :task "b1" :title "make test"))
+    (romacs-agent-ui--summarize-children parent)
+    (should-not (romacs-agent-children-rows parent))
+    (romacs-agent-ui--track-children parent '(:type task :task "b1" :state backgrounded))
+    (romacs-agent-ui--summarize-children parent)
+    (should (equal (plist-get (car (romacs-agent-children-rows parent)) :title) "make test"))
+    (should (equal (romacs-agent-children-tests--summary parent) "1 running"))
+    (romacs-agent-ui--track-children parent '(:type exit))
+    (romacs-agent-ui--summarize-children parent)
+    (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
+    (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
+
+(ert-deftest romacs-agent-children-menu-keeps-the-latest-finished ()
+  ;; The latest to finish, however each ended: a seen failure among them.
+  (let ((rows (append (list '(:state "running" :title "r") '(:state "failed" :unseen t :title "f"))
+                      (cl-loop for i below 4 collect (list :state "completed" :title (format "c%d" i) :time i))
+                      (list '(:state "failed" :title "seen" :time 10)))))
+    (should (equal (mapcar (lambda (row) (plist-get row :title)) (romacs-agent-ui--workers rows))
+                   '("r" "f" "seen" "c3" "c2")))))
+
+(ert-deftest romacs-agent-children-a-worker-is-dated-by-its-end ()
+  (romacs-agent-children-tests--with
+    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state started :task "a" :title "long" :background t :time 1))
+    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state completed :time 50))
+    (romacs-agent-ui--summarize-children parent)
+    (should (= (plist-get (car (romacs-agent-children-rows parent)) :time) 50))
+    ;; Cut by its harness's going: dated by that.
+    (romacs-agent-ui--track-children parent '(:type task :id "t2" :state started :task "b" :title "cut" :background t :time 2))
+    (romacs-agent-ui--track-children parent '(:type exit :time 70))
+    (romacs-agent-ui--summarize-children parent)
+    (should (equal (plist-get (car (romacs-agent-ui--workers (romacs-agent-children-rows parent))) :title) "cut"))
+    (should (= (plist-get (car (romacs-agent-ui--workers (romacs-agent-children-rows parent))) :time) 70))
+    (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
+
+(ert-deftest romacs-agent-children-a-label-fits-the-menu ()
+  (romacs-agent-children-tests--with
+    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state started :task "a" :background t
+                                                 :title "a rather long title for a worker row"))
+    (romacs-agent-ui--track-children parent `(:type task :id "t1" :state progress :activity "mcp__romacs__romacs_eval"
+                                                    :time ,(float-time)))
+    (romacs-agent-ui--summarize-children parent)
+    (with-temp-buffer
+      (let* ((romacs-agent-ui--session parent) (label (romacs-agent-ui--child-label 0)))
+        (should (<= (string-width label) keymap-popup--max-description-width))
+        (should (string-suffix-p "romacs_eval now" (substring-no-properties label)))))
+    (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here

@@ -292,18 +292,24 @@ call stays running until its answer is ready."
           ((eq state 'ended) "failed")
           (t (symbol-name state)))))
 
+(defconst romacs-agent-tools--running-next
+  "Its end wakes you with its result, so end your turn now: do not wait on it or poll it."
+  "What a caller is told to do about a task still running.")
+
 (defun romacs-agent-tools--task (session)
-  "SESSION as a task record."
-  (let ((options (romacs-agent-options session)) (null (lambda (v) (or v :null))))
+  "SESSION as a task record; one still running says what to do next."
+  (let* ((options (romacs-agent-options session)) (null (lambda (v) (or v :null)))
+         (status (romacs-agent-tools--status session)))
     (romacs-mcp--object
-     "taskId" (romacs-agent-id session) "status" (romacs-agent-tools--status session)
+     "taskId" (romacs-agent-id session) "status" status
      "state" (symbol-name (romacs-agent-state session)) "title" (romacs-agent-title session)
      "provider" (romacs-agent-provider session) "harness" (symbol-name (romacs-agent-harness session))
      "model" (funcall null (or (romacs-agent-model session) (plist-get options :model)))
      "role" (funcall null (plist-get options :role)) "parent" (funcall null (plist-get options :parent))
      "turns" (romacs-agent-turns session) "result" (funcall null (romacs-agent-reply session))
      "cost" (funcall null (romacs-agent-cost session))
-     "pendingApproval" (if (> (hash-table-count (romacs-agent-approvals session)) 0) t :false))))
+     "pendingApproval" (if (> (hash-table-count (romacs-agent-approvals session)) 0) t :false)
+     "next" (if (equal status "running") romacs-agent-tools--running-next :null))))
 
 (defun romacs-agent-tools--known (arguments)
   (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
@@ -323,10 +329,28 @@ parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
     (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))))
 
+(defconst romacs-agent-tools--wake-limit 16000
+  "The most of a child's result a wake carries: the rest is
+romacs_task_status's.")
+
+(defun romacs-agent-tools--wake-result (id result)
+  "RESULT, of task ID, as a wake carries it: whole, or its start and where
+the rest is."
+  (if (<= (length result) romacs-agent-tools--wake-limit) result
+    (format "%s\n[Result cut at %d of %d characters: romacs_task_status with taskId %s has it whole.]"
+            (substring result 0 romacs-agent-tools--wake-limit) romacs-agent-tools--wake-limit (length result) id)))
+
 (defun romacs-agent-tools--wake-text (session end)
   "The parent's message for SESSION's turn END, (SEQ RESULT FAILED)."
   (format "Delegated task %s (%s) [%s]:\n%s" (romacs-agent-id session) (romacs-agent-title session)
-          (if (nth 2 end) "failed" "completed") (or (nth 1 end) "")))
+          (if (nth 2 end) "failed" "completed")
+          (romacs-agent-tools--wake-result (romacs-agent-id session) (or (nth 1 end) ""))))
+
+(defun romacs-agent-tools--brief (role task)
+  "What a child is started on: TASK, as the ROLE sub-agent when one is named."
+  (if (and role (not (string-empty-p role)))
+      (format "Act as the %s sub-agent for this task.\n\n%s" role task)
+    task))
 
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as a `romacs-agent-tools--wake-text', a plist of :id
@@ -448,7 +472,8 @@ default instance."
                      (or (gethash "cwd" arguments)
                          (and parent (romacs-agent-get parent) (romacs-agent-cwd (romacs-agent-get parent)))
                          default-directory)
-                     (gethash "task" arguments) (gethash "title" arguments) provider
+                     (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
+                     (gethash "title" arguments) provider
                      (list :model (gethash "model" target)
                            :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
                            :role (gethash "role" arguments) :parent parent :request request)))))
@@ -708,8 +733,10 @@ with its result."
 (defun romacs-agent-tools--delegate-description ()
   "romacs_delegate_task's description, naming the instances it accepts now."
   (concat
-   "Start a child agent session on TASK, as T3 Code's delegate_task: target {provider, model, options \
-{reasoningEffort|effort}}, role, cwd (default the caller's), title. provider defaults to your own session's instance \
+   "Start a child agent session on TASK, as T3 Code's delegate_task. The child gets only TASK (and ROLE): none of \
+your conversation, so write a complete brief: the goal, the files and facts it needs, constraints, and what done \
+means. target {provider, model, options {reasoningEffort|effort}}, role, cwd (default the caller's), title. \
+provider defaults to your own session's instance \
 (claude to claude, codex to codex); name another to run there: "
    (or (ignore-errors
          (mapconcat #'identity (cl-loop for i in (romacs-agent-instances) when (plist-get i :enabled)
@@ -717,7 +744,7 @@ with its result."
                     ", "))
        "see romacs_orchestrator_capabilities")
    " (romacs_orchestrator_capabilities has their models and options). mode async (default) answers at once with \
-the taskId and wakes you with the child's result when its turn ends; mode wait answers when it ends, asks for an \
+the taskId and wakes you with the child's result when its turn ends: end your turn then, do not poll; mode wait answers when it ends, asks for an \
 approval, or timeoutMs (default 600000) passes, and the child goes on. The same clientRequestId returns the task it \
 started before."))
 

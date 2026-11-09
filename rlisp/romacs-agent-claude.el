@@ -33,7 +33,8 @@ RESUME is non-nil."
                   "--thinking-display" "summarized"
                   ;; The harness's own approvals come to this session's UI.
                   "--permission-prompt-tool" "stdio"
-                  "--mcp-config" (expand-file-name "mcp.json" dir))
+                  "--mcp-config" (expand-file-name "mcp.json" dir)
+                  "--append-system-prompt" (romacs-agent--instructions session))
             (if resume (list "--resume" (romacs-agent--native-id session))
               (list "--session-id" (romacs-agent-id session)))
             (romacs-agent--option-words session "--model" "--effort")
@@ -54,8 +55,8 @@ RESUME is non-nil."
                       (buffer-string)))))
 
 (defun romacs-agent--claude-user (_session text _id)
-  "The harness's message of TEXT, with the images attached to it as content:
-the model is given them, and no file is named for it to open."
+  "The harness's message of TEXT, with the images attached to it as content,
+each after a line naming where it is saved: the model can refer to it."
   (let ((images (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
     (romacs-mcp--object
      "type" "user"
@@ -63,7 +64,12 @@ the model is given them, and no file is named for it to open."
                 "role" "user"
                 "content" (if images
                               (vconcat (list (romacs-mcp--object "type" "text" "text" text))
-                                       (mapcar #'romacs-agent--claude-image images))
+                                       (mapcan (lambda (file)
+                                                 (list (romacs-mcp--object
+                                                        "type" "text"
+                                                        "text" (romacs-agent--image-caption file))
+                                                       (romacs-agent--claude-image file)))
+                                               images))
                             text)))))
 
 (defun romacs-agent--claude-reason (result)
@@ -88,6 +94,35 @@ own \"Compacted\" is already said by its row."
     (unless (member output '("" "Compacted"))
       (list (list :type 'status :text output :parent parent)))))
 
+(defun romacs-agent--claude-task (line)
+  "LINE, a notice of work the harness runs under a tool call (a subagent,
+or a command), as a `task' event: its tool's :id, then what it says:
+started (in the background or not), what it is doing, moved to the
+background (known by its :task alone), or how it ended.  Work a subagent
+runs is that subagent's: no event."
+  (let ((id (romacs-agent--value (gethash "tool_use_id" line)))
+        (patch (gethash "patch" line)))
+    (cond
+     ((or (romacs-agent--value (gethash "parent_task_id" line))
+          (eq (gethash "owned_by_subagent" line) t))
+      nil)
+     ((equal (gethash "subtype" line) "task_updated")
+      (when (and (hash-table-p patch) (eq (gethash "is_backgrounded" patch) t))
+        (list (list :type 'task :task (gethash "task_id" line) :state 'backgrounded))))
+     (id
+      (list (append (list :type 'task :id id)
+                  (pcase (gethash "subtype" line)
+                    ("task_started" (list :state 'started :task (gethash "task_id" line)
+                                          :title (romacs-agent--value (gethash "description" line))
+                                          :background (or (eq (gethash "is_backgrounded" line) t)
+                                                          (equal (gethash "task_type" line) "local_agent"))))
+                    ("task_progress" (list :state 'progress
+                                           :activity (or (romacs-agent--value (gethash "last_tool_name" line))
+                                                         (romacs-agent--value (gethash "description" line)))))
+                    (_ (list :state (pcase (gethash "status" line)
+                                      ("completed" 'completed) ("failed" 'failed) (_ 'stopped))
+                             :summary (romacs-agent--value (gethash "summary" line)))))))))))
+
 (defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
   (let ((type (gethash "type" line))
@@ -105,6 +140,7 @@ own \"Compacted\" is already said by its row."
                              :mcp (gethash "mcp_servers" line))))
          ("status" (romacs-agent--claude-status line))
          ("compact_boundary" (setf (romacs-agent-compacting session) t) nil)
+         ((or "task_started" "task_progress" "task_notification" "task_updated") (romacs-agent--claude-task line))
          (_ nil)))
       ("stream_event"
        (let* ((event (gethash "event" line))
