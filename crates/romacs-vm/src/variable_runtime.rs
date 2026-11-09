@@ -172,7 +172,14 @@ impl Vm {
         // eval.c:720), including nil, t and keywords as bases.
         base == self.multibyte_slot
             || self.fixnum_slots.contains(&base)
-            || (base != slot && (matches!(self.symbol_names[base].as_str(), "nil" | "t") || self.symbol_names[base].starts_with(':')))
+            || (base != slot && (matches!(self.symbol_names[base].as_str(), "nil" | "t") || self.interned_keyword_slot(base)))
+    }
+    /// Whether SLOT is a keyword GNU makes constant: only a `:' name interned
+    /// in the obarray is SYMBOL_NOWRITE (lread.c intern_sym); an uninterned
+    /// `:x' is an ordinary variable.
+    pub(crate) fn interned_keyword_slot(&self, slot: usize) -> bool {
+        let name = &self.symbol_names[slot];
+        name.starts_with(':') && self.names.get(name) == Some(&slot)
     }
     /// Follow GNU's variable-alias chain (`indirect_variable`, data.c:1291) to
     /// the variable that actually holds the value. `defvaralias` refuses
@@ -442,7 +449,7 @@ impl Vm {
         Ok(())
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
-        if self.protected_variable_slot(slot) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
+        if self.protected_variable_slot(slot) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
         // A fenced variable's forwarding is `Fwd::Fence`, whose arm acts
         // through the fence: the kept forwarding would never localize it.
         if let Some(fwd) = self.access_forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
@@ -518,7 +525,7 @@ impl Vm {
             Set | Makunbound => {
                 // ORIGINAL, not the resolved base: an alias of nil, t or a
                 // keyword is itself constant (GNU copies trapped_write).
-                if self.protected_variable_slot(original) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
+                if self.protected_variable_slot(original) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
                 let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
                 self.set_variable_value(slot, value)?;
                 Ok(if p == Set { value } else { symbol })
