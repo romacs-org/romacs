@@ -295,7 +295,7 @@ fn x11_session_owns_authenticated_tcp_display_below_artifact_root() {
         .expect("Xauthority is below an owned session root")
         .to_path_buf();
 
-    let authenticated = Command::new("xdpyinfo")
+    let authenticated = romacs_infra::display::display_tool("xdpyinfo")
         .env("DISPLAY", &display)
         .env("XAUTHORITY", &authority)
         .output()
@@ -308,7 +308,7 @@ fn x11_session_owns_authenticated_tcp_display_below_artifact_root() {
 
     let unauthorized_authority = owned_session_root.join("unauthorized-Xauthority");
     std::fs::write(&unauthorized_authority, []).expect("create empty unauthorized authority");
-    let unauthorized = Command::new("xdpyinfo")
+    let unauthorized = romacs_infra::display::display_tool("xdpyinfo")
         .env("DISPLAY", &display)
         .env("XAUTHORITY", &unauthorized_authority)
         .output()
@@ -359,7 +359,7 @@ fn x11_session_owns_authenticated_tcp_display_below_artifact_root() {
         .find_map(|(name, value)| (name == "DISPLAY").then_some(value))
         .unwrap();
     assert_ne!(second_display, &display, "sessions must not share a server");
-    let second_client = Command::new("xdpyinfo")
+    let second_client = romacs_infra::display::display_tool("xdpyinfo")
         .envs(second.env().iter().map(|(name, value)| (name, value)))
         .output()
         .expect("connect using the second session's own credentials");

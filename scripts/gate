@@ -485,9 +485,9 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         print(f'gate: {reason}', flush=True)
         return None
     try:
-        # The workspace config still describes retired editor targets and setup
-        # scripts. Use one explicit config for build, inventory and execution;
-        # slot admission supplies the memory limit, and this bounds test hangs.
+        # One explicit config for build, inventory and execution, apart from
+        # the workspace's; slot admission supplies the memory limit, and this
+        # bounds test hangs.
         config = run_dir / 'nextest.toml'
         # The warm census loads GNU's loadup chain through abbrev.el into a
         # fresh VM per file: about 275s per pass alone in the gate, and over
