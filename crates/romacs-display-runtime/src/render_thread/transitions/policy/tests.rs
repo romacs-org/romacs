@@ -1,9 +1,5 @@
 use super::*;
-use crate::{
-    ContentTransitionIntent, DirectionlessTransitionEffect, ResolvedTransitionEffect,
-    TransitionAxis, TransitionAxisPreference, TransitionDirection, TransitionEdge,
-    TransitionEffect, VerticalPostProcessTransitionEffect, VerticalTransitionEffect, types::Rect,
-};
+use romacs_display_protocol::TransitionAxisPreference;
 
 #[test]
 fn navigation_intent_overrides_the_configured_buffer_direction() {

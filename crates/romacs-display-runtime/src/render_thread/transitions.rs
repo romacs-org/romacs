@@ -5,12 +5,15 @@ use romacs_display_protocol::frame_glyphs::{
 };
 use romacs_display_protocol::{
     DirectionlessTransitionEffect, DisplayWindowId, Rect, ResolvedTransitionEffect,
-    TransitionEasing, TransitionPlan, TransitionPolicy,
+    TransitionEasing,
 };
 use romacs_renderer_wgpu::{
     BudgetExceeded, CompositionRing, SnapshotLease, SnapshotSize, WgpuRenderer,
 };
 use std::collections::HashMap;
+
+pub(super) mod policy;
+pub(super) use policy::{TransitionPlan, TransitionPolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransitionSource {
@@ -421,7 +424,7 @@ fn plan_scroll(
     scroll: &crate::render_thread::frame_compositor::continuity::ScrollObservation,
 ) -> Option<PlannedTransition> {
     let bounds = scroll.transition?.region.bounds();
-    if bounds.height < policy.minimum_scroll_region_height() {
+    if bounds.height < policy::MINIMUM_SCROLL_REGION_HEIGHT_PX {
         return None;
     }
     let pixels = scroll.displacement.exact_pixels()?;

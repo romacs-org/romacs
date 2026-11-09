@@ -15,7 +15,7 @@ pub(super) use romacs_display_protocol::PointerAppearancePhase;
 use romacs_display_protocol::{
     EffectsConfig, FrameGlyphBuffer, FrameRect, ImageCacheUsage, ImageId, ImageLoadToken,
     InteractionId, PointerAppearanceId, PointerAppearanceSelection, PresentationId,
-    PresentedResizeAxis, TransitionPolicy, VisualConfig,
+    PresentedResizeAxis, VisualConfig,
 };
 use romacs_renderer_wgpu::{RowRange, WgpuRenderer};
 
@@ -25,6 +25,7 @@ use super::frame_windows::{
 };
 use super::render_quality::{RenderBackendProfile, RenderQualityPolicy};
 pub(super) use super::toolbar::ToolbarResources;
+use super::transitions::TransitionPolicy;
 
 /// Decoded image facts shared from the render thread to the evaluator.
 ///

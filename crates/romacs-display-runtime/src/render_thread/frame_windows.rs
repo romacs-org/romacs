@@ -2474,7 +2474,7 @@ impl GuiFrameWindowManager {
 
     pub(super) fn apply_top_level_transition_policy(
         &mut self,
-        policy: romacs_display_protocol::TransitionPolicy,
+        policy: super::transitions::TransitionPolicy,
     ) {
         self.for_each_top_level_window_mut(|window_state| {
             window_state

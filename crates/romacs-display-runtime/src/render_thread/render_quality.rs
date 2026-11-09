@@ -8,9 +8,10 @@
 
 use romacs_display_protocol::motion_spec::MotionSpec;
 use std::num::NonZeroU16;
+use super::transitions::TransitionPolicy;
 
 use romacs_display_protocol::{
-    EffectOperation, EffectValue, FrameGlyphBuffer, TransitionPolicy, VisualConfig,
+    EffectOperation, EffectValue, FrameGlyphBuffer, VisualConfig,
 };
 
 /// Coarse cost class of the active adapter.
