@@ -277,6 +277,12 @@
         ;; One armed behind a turn shows what is to come.
         (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
         (should (equal (romacs-agent-ui--effort-label) "Effort: high → max"))
+        ;; Each level in its own face; one unknown in the common one.
+        (let ((label (romacs-agent-ui--effort-label)))
+          (should (eq (get-text-property 8 'face label) 'romacs-agent-effort-high))
+          (should (eq (get-text-property (1- (length label)) 'face label) 'romacs-agent-effort-max)))
+        (should (eq (get-text-property 0 'face (romacs-agent-ui--effort "bespoke")) 'romacs-agent-effort))
+        (should (eq (get-text-property 0 'face (romacs-agent-ui--effort nil)) 'romacs-agent-effort-default))
         (should (equal (romacs-agent--efforts session) '("max")))
         ;; A model with no efforts says so.
         (setf (romacs-agent-pending-selection session) nil

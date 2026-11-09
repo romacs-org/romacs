@@ -72,6 +72,16 @@
   "A failed tool call or turn.")
 (defface romacs-agent-model '((t :inherit font-lock-type-face))
   "The model in a chat's header (hermes-chat-header-model).")
+(defface romacs-agent-effort '((t :weight bold))
+  "A reasoning effort; each level's face inherits it.")
+(defface romacs-agent-effort-default '((t :inherit shadow))
+  "No effort named: the harness's own.")
+(defface romacs-agent-effort-low '((t :inherit (romacs-agent-effort success))) "Effort low.")
+(defface romacs-agent-effort-medium '((t :inherit (romacs-agent-effort font-lock-constant-face))) "Effort medium.")
+(defface romacs-agent-effort-high '((t :inherit (romacs-agent-effort font-lock-keyword-face))) "Effort high.")
+(defface romacs-agent-effort-xhigh '((t :inherit (romacs-agent-effort warning))) "Effort xhigh.")
+(defface romacs-agent-effort-max '((t :inherit (romacs-agent-effort error))) "Effort max.")
+(defface romacs-agent-effort-ultra '((t :inherit (romacs-agent-effort error) :underline t)) "Effort ultra.")
 (defface romacs-agent-context '((t :inherit font-lock-number-face))
   "Context tokens in a chat's header (hermes-chat-header-context).")
 (defface romacs-agent-mode '((t :inherit font-lock-builtin-face))
@@ -743,6 +753,14 @@ turn starts, and last turn's failures have been seen."
     ('history (propertize "History" 'face 'romacs-agent-dim))
     (_ (and (romacs-agent-failed session) (propertize "Failed" 'face 'romacs-agent-error)))))
 
+(defun romacs-agent-ui--effort (effort)
+  "EFFORT for a person, in its level's face: one Romacs does not know in
+`romacs-agent-effort', none as \"default\"."
+  (if effort
+      (let ((face (intern (concat "romacs-agent-effort-" effort))))
+        (propertize effort 'face (if (facep face) face 'romacs-agent-effort)))
+    (propertize "default" 'face 'romacs-agent-effort-default)))
+
 (defun romacs-agent-ui--header-line ()
   "The chat's header: harness | permission mode | model | context used/window
 | state, fitted to the window (the instance named when not the default)."
@@ -763,11 +781,11 @@ turn starts, and last turn's failures have been seen."
                       (and mode (if (equal mode "bypassPermissions")
                                     (propertize "YOLO" 'face 'warning 'help-echo mode)
                                   (propertize mode 'face 'romacs-agent-mode)))
-                      (propertize (mapconcat #'identity
-                                             (delq nil (list (or (romacs-agent-model session) "...")
-                                                             (plist-get (romacs-agent-options session) :effort)))
-                                             " · ")
-                                  'face 'romacs-agent-model)
+                      (let ((model (propertize (or (romacs-agent-model session) "...") 'face 'romacs-agent-model))
+                            (effort (plist-get (romacs-agent-options session) :effort)))
+                        (if effort (concat model (propertize " · " 'face 'romacs-agent-model)
+                                           (romacs-agent-ui--effort effort))
+                          model))
                       (when-let* ((switch (romacs-agent-pending-selection session)))
                         (propertize (format "→ %s next turn" (romacs-agent-ui--selection-label switch)) 'face 'warning))
                       (when-let* ((children (romacs-agent-children-summary session)))
@@ -1637,8 +1655,8 @@ only sessions whose chat is open."
   (let* ((session romacs-agent-ui--session)
          (now (and session (plist-get (romacs-agent--selection session) :effort)))
          (next (and session (plist-get (romacs-agent--wanted session) :effort))))
-    (concat (format "Effort: %s" (or now "default"))
-            (if (equal now next) "" (format " → %s" (or next "default"))))))
+    (concat "Effort: " (romacs-agent-ui--effort now)
+            (if (equal now next) "" (concat " → " (romacs-agent-ui--effort next))))))
 
 (require 'keymap-popup)
 
