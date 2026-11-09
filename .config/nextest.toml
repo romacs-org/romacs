@@ -10,3 +10,9 @@ test-threads = 24
 
 # Bound surviving tests without the retired legacy oracle's package overrides.
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
+
+# The trybuild test compiles some thirty programs with cargo: 270-600 s in
+# romacs-check at ordinary load. A wrong verdict is its failure, not time.
+[[profile.default.overrides]]
+filter = 'test(=the_compiler_enforces_the_boundaries)'
+slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
