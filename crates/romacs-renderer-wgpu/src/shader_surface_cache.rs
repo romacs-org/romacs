@@ -544,8 +544,8 @@ impl ShaderSurfaceCache {
         Ok((width, height))
     }
 
-    /// The fallible half of [`Self::insert_rendered`]: build the surface
-    /// entry (its composite bind group) without touching the cache, so a
+    /// Build the surface entry (its composite bind group) for a rendered
+    /// texture without touching the cache. This is the fallible step, so a
     /// caller can stage it with other resources and commit all or nothing.
     pub(crate) fn prepare_rendered(
         device: &wgpu::Device,
@@ -591,8 +591,8 @@ impl ShaderSurfaceCache {
         }))
     }
 
-    /// The infallible half of [`Self::insert_rendered`]: install (or
-    /// replace) surface `id`.
+    /// Install (or replace) surface `id` from [`Self::prepare_rendered`],
+    /// the infallible step.
     pub(crate) fn install_prepared(&mut self, id: u32, prepared: PreparedSurface) {
         self.surfaces.insert(id, prepared.0);
     }
