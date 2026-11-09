@@ -276,35 +276,6 @@ pub(crate) const DEMAND_REASON_NAMES: [&str; super::frame_sched::DemandReason::C
     names
 };
 
-/// Point-in-time per-native-window demand attribution: the reasons currently
-/// keeping the window rendering plus its cumulative planned-frame counts per
-/// reason (frame scheduling plan, Observability).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WindowFrameSnapshot {
-    /// Scheduler window id: the Emacs frame id once adopted, 0 for the
-    /// primary window before adoption.
-    pub window: u64,
-    /// Currently-active demand reasons, in [`DEMAND_REASON_NAMES`] order.
-    pub active_reasons: Vec<&'static str>,
-    /// Planned frames per demand reason, indexed as [`DEMAND_REASON_NAMES`].
-    pub demand_reasons: [u64; super::frame_sched::DemandReason::COUNT],
-}
-
-/// Copy of the per-window demand attribution, sorted by window id. Safe from
-/// any thread; the render thread holds the lock only for map-sized updates.
-pub(crate) fn window_snapshots() -> Vec<WindowFrameSnapshot> {
-    WINDOW_DEMAND
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(id, stats)| WindowFrameSnapshot {
-            window: *id,
-            active_reasons: stats.active.iter().map(DemandReason::name).collect(),
-            demand_reasons: stats.plans.into_array(),
-        })
-        .collect()
-}
-
 pub fn snapshot() -> FrameSchedSnapshot {
     FrameSchedSnapshot {
         wakeups: EVENT_LOOP_WAKEUPS.load(Ordering::Relaxed),

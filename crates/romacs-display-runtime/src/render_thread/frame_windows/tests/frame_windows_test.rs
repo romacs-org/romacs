@@ -1,11 +1,10 @@
 use super::*;
-use crate::core::frame_glyphs::{
-    BufferTransitionTarget, ContentTransitionHint, CursorStyle, DisplaySlotId, FrameGlyph,
+use romacs_display_protocol::frame_glyphs::{
+    BufferTransitionTarget, ContentTransitionHint, CursorStyle, DisplaySlotId,
     FrameGlyphBuffer, PresentedWindowRegions, WindowCursor,
 };
 use crate::host_types::GuiFrameGeometryHints;
 use crate::render_thread::cursor::CursorTarget;
-use romacs_display_protocol::FrameFaceMap;
 use romacs_display_protocol::types::Color;
 
 #[test]
@@ -69,7 +68,6 @@ fn gui_text_input_policy_enables_native_ime_on_window_creation() {
     );
 }
 
-use romacs_display_protocol::ModifierPolicy;
 
 #[test]
 fn child_focus_opacity_invalidates_retained_scene_without_new_payload() {
@@ -319,7 +317,6 @@ fn zero_size_observation_stays_suspended_after_scale_refresh() {
             last_ime_cursor_area: None,
             chrome: Default::default(),
             geometry_hints: None,
-            fullscreen: None,
         },
         render: GuiFrameRenderState::new_without_device(
             42,
@@ -438,12 +435,12 @@ fn make_test_device() -> Option<wgpu::Device> {
 #[test]
 fn secondary_frame_cursor_target_uses_top_level_frame_identity() {
     let mut frame = make_frame(0x42, 0);
-    frame.set_phys_cursor(crate::core::frame_glyphs::PhysCursor {
+    frame.set_phys_cursor(romacs_display_protocol::frame_glyphs::PhysCursor {
         window_id: romacs_display_protocol::types::DisplayWindowId::new(7),
         charpos: 0,
         row: 0,
         col: 0,
-        slot_id: crate::core::frame_glyphs::DisplaySlotId {
+        slot_id: romacs_display_protocol::frame_glyphs::DisplaySlotId {
             window_id: romacs_display_protocol::types::DisplayWindowId::new(7),
             row: 0,
             col: 0,
@@ -1357,7 +1354,6 @@ fn pending_window_stores_all_fields() {
         height: 1080,
         title: "My Emacs Frame".to_string(),
         geometry_hints: default_geometry_hints(),
-        fullscreen: None,
     };
 
     assert_eq!(pw.emacs_frame_id, 123);
@@ -1374,7 +1370,6 @@ fn pending_window_unicode_title() {
         height: 600,
         title: "Emacs \u{2014} \u{1F680} Romacs".to_string(),
         geometry_hints: default_geometry_hints(),
-        fullscreen: None,
     };
 
     assert!(pw.title.contains('\u{2014}')); // em dash

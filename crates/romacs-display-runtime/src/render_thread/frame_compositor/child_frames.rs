@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_windows::GuiFrameRenderState;
 use romacs_display_protocol::frame_time::observe_platform_now;
 use romacs_display_protocol::motion_spec::MotionSpec;

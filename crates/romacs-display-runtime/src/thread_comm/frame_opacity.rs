@@ -33,6 +33,7 @@ impl FrameOpacityState {
         self.apply(frame);
     }
 
+    #[cfg(test)]
     /// Publishing the variable does not itself reapply alpha. GNU consults
     /// the current scalar on the next setter or focus/highlight operation.
     pub(crate) fn set_lower_limit(&mut self, limit: f32) {
@@ -52,12 +53,14 @@ impl FrameOpacityState {
         self.rehighlight(old_highlight);
     }
 
+    #[cfg(test)]
     pub(crate) fn set_redirects(&mut self, redirects: Vec<(u64, Option<u64>)>) {
         let old_highlight = self.highlight();
         self.redirects = redirects.into_iter().collect();
         self.rehighlight(old_highlight);
     }
 
+    #[cfg(test)]
     pub fn retire(&mut self, frame: u64) {
         let old_highlight = self.highlight();
         self.frames.remove(&frame);

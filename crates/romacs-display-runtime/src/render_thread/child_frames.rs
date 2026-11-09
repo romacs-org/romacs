@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use romacs_display_protocol::frame_time::{EventTime, FrameSample};
 use romacs_display_protocol::motion_spec::MotionSpec;
 
-use crate::core::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
 use crate::render_thread::frame_compositor::motion::{Motion, ProgressRate};
 use romacs_display_protocol::{
     PlaceChildQuery, PresentedClip, PresentedFramePlacement, PresentedFrameScene,

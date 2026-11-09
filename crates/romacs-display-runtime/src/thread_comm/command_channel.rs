@@ -9,12 +9,13 @@
 mod tests;
 
 use super::{LifecycleCommand, RenderCommand};
-use crossbeam_channel::{
-    Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError, bounded,
-};
+use crossbeam_channel::{Receiver, SendError, Sender, TryRecvError, TrySendError, bounded};
+#[cfg(test)]
+use crossbeam_channel::{RecvError, RecvTimeoutError};
+#[cfg(test)]
+use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::time::{Duration, Instant};
 
 struct Pending {
     queue: VecDeque<RenderCommand>,
@@ -97,6 +98,7 @@ impl CommandSender {
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         let pending = self.shared.pending.lock().unwrap();
         pending.queue.len() + usize::from(pending.shutdown)
@@ -172,6 +174,7 @@ impl CommandReceiver {
         let pending = self.shared.pending.lock().unwrap();
         pending.shutdown || pending.queue.iter().any(|command| startup_command(command, daemon))
     }
+    #[cfg(test)]
     pub fn recv(&self) -> Result<RenderCommand, RecvError> {
         loop {
             match self.try_recv() {
@@ -183,6 +186,7 @@ impl CommandReceiver {
             let _ = self.available.recv();
         }
     }
+    #[cfg(test)]
     pub fn recv_timeout(&self, timeout: Duration) -> Result<RenderCommand, RecvTimeoutError> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -200,6 +204,7 @@ impl CommandReceiver {
             }
         }
     }
+    #[cfg(test)]
     pub fn try_iter(&self) -> impl Iterator<Item = RenderCommand> + '_ {
         std::iter::from_fn(|| self.try_recv().ok())
     }
@@ -210,6 +215,7 @@ impl CommandReceiver {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    #[cfg(test)]
     pub(crate) fn available(&self) -> &Receiver<()> {
         &self.available
     }

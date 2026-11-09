@@ -51,22 +51,18 @@ impl MenuBarTracking {
         HeadingAction::Request(id)
     }
 
+    #[cfg(test)]
     pub fn accepts(&self, id: MenuBarRequestId) -> bool {
         self.requested.as_ref().is_some_and(|r| r.id == id)
     }
 
+    #[cfg(test)]
     pub fn shown(&mut self, id: MenuBarRequestId, token: MenuToken) {
         if let Some(r) = &mut self.requested
             && r.id == id
         {
             r.shown = Some(token);
         }
-    }
-
-    pub(crate) fn owns_popup(&self, token: MenuToken) -> bool {
-        self.requested
-            .as_ref()
-            .is_some_and(|r| r.shown == Some(token))
     }
 
     pub fn heading(&self) -> Option<&MenuHeading> {

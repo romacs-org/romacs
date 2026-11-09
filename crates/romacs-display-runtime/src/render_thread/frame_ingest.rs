@@ -4,12 +4,12 @@ use super::RenderApp;
 use super::frame_windows::{
     ActivePresentationTransition, GuiFrameRenderState, GuiFrameWindowState,
 };
-use crate::core::types::DisplayFrameId;
+use romacs_display_protocol::types::DisplayFrameId;
 use crate::render_thread::cursor::{CursorConfigSnapshot, CursorTarget};
 
 #[cfg(feature = "webview")]
 fn collect_frame_webviews(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     offset_x: f32,
     offset_y: f32,
     frame_clip: romacs_display_protocol::RootSurfaceRect,
@@ -21,7 +21,7 @@ fn collect_frame_webviews(
     >,
 ) {
     for glyph in &frame.glyphs {
-        let crate::core::frame_glyphs::FrameGlyph::Xwidget {
+        let romacs_display_protocol::frame_glyphs::FrameGlyph::Xwidget {
             window_id,
             webview_id,
             presentation,
@@ -212,7 +212,7 @@ impl RenderApp {
 
     fn ingest_primary_paint(
         &mut self,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
@@ -262,7 +262,7 @@ impl RenderApp {
     /// Install or update FRAME, a child of the primary frame, in the
     /// primary window: its open, resize and drift animations, and the
     /// presentation events its activation or discard owes the producer.
-    fn update_primary_child(&mut self, frame: crate::core::frame_glyphs::FrameGlyphBuffer) {
+    fn update_primary_child(&mut self, frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer) {
         let frame_id = frame.frame_placement.frame();
         if let Some(ws) = self.frame_windows.primary_window_mut() {
             let old_presentation = ws
@@ -470,7 +470,7 @@ impl RenderApp {
 
     fn ingest_frame_window_root_frame(
         window_state: &mut GuiFrameWindowState,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         cursor_config: CursorConfigSnapshot,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
@@ -488,7 +488,7 @@ impl RenderApp {
 
     fn ingest_top_level_render_frame(
         render: &mut GuiFrameRenderState,
-        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         row_damage: romacs_renderer_wgpu::FrameRowDamage,
         cursor_config: CursorConfigSnapshot,
         scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
@@ -745,22 +745,22 @@ impl RenderApp {
                     let mut other_count = 0usize;
                     for g in &frame.glyphs {
                         match g {
-                            crate::core::frame_glyphs::FrameGlyph::Char { .. } => char_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Background { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Char { .. } => char_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Background { .. } => {
                                 bg_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Border { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Border { .. } => {
                                 border_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::ScrollBar { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::ScrollBar { .. } => {
                                 scrollbar_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Image { .. } => image_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Stretch { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Image { .. } => image_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Stretch { .. } => {
                                 stretch_count += 1
                             }
-                            crate::core::frame_glyphs::FrameGlyph::Video { .. } => video_count += 1,
-                            crate::core::frame_glyphs::FrameGlyph::Xwidget { .. } => {
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Video { .. } => video_count += 1,
+                            romacs_display_protocol::frame_glyphs::FrameGlyph::Xwidget { .. } => {
                                 webkit_count += 1
                             }
                             _ => other_count += 1,
@@ -770,7 +770,7 @@ impl RenderApp {
                     // can tell whether tab-line/header-line glyphs are emitted at
                     // all (and where) vs. silently dropped.
                     {
-                        use crate::core::frame_glyphs::FrameGlyph;
+                        use romacs_display_protocol::frame_glyphs::FrameGlyph;
                         let mut per_role: std::collections::HashMap<String, (usize, f32, String)> =
                             std::collections::HashMap::new();
                         for g in &frame.glyphs {
@@ -1105,9 +1105,9 @@ impl RenderApp {
 /// text diff (romacs before-vs-after, or vs GNU) with no rebuild or screenshot.
 /// The face is resolved to final fg/bg (hex) + stipple size, so e.g. a text
 /// glyph and a stipple on the same cell reveal a face-id/color mismatch inline.
-fn dump_frame_glyphs_resolved(frame: &crate::core::frame_glyphs::FrameGlyphBuffer) -> String {
-    use crate::core::frame_glyphs::FrameGlyph;
-    use crate::core::types::Color;
+fn dump_frame_glyphs_resolved(frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer) -> String {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    use romacs_display_protocol::types::Color;
     let hx = |c: Color| -> String {
         let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         format!("#{:02x}{:02x}{:02x}", ch(c.r), ch(c.g), ch(c.b))

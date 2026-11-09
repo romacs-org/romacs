@@ -194,6 +194,7 @@ impl MenuPresentation {
         action
     }
 
+    #[cfg(test)]
     pub fn open(&mut self, request: MenuRequest) -> bool {
         if let Some(id) = request.request_id
             && !self.menu_bar.accepts(id)
@@ -255,18 +256,6 @@ impl MenuPresentation {
 
     pub fn take_result(&mut self) -> Option<romacs_display_protocol::menu::MenuResult> {
         self.lifetime.take_result()
-    }
-
-    pub fn hide(&mut self, token: romacs_display_protocol::menu::MenuToken) -> bool {
-        if self.heading().is_some() && !self.menu_bar.owns_popup(token) {
-            // Old evaluator teardown may arrive before the new ShowPopupMenu.
-            return false;
-        }
-        if self.lifetime.hide(token) {
-            self.close();
-            return true;
-        }
-        false
     }
 
     pub fn cancel(&mut self) {

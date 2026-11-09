@@ -2,9 +2,6 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use super::{SharedImageRenderState, SharedMonitorInfo};
-use crate::thread_comm::RenderComms;
-
 /// Render thread state.
 pub(crate) struct RenderThread {
     handle: Option<JoinHandle<()>>,
@@ -72,6 +69,7 @@ impl RenderThread {
         Self::spawn_with_state_timeout(startup, runner, Duration::from_secs(10))
     }
 
+    #[cfg(test)]
     /// Wait for render thread to finish.
     pub fn join(mut self) {
         if let Some(handle) = self.handle.take() {

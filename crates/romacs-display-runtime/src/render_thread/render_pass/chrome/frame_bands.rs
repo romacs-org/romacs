@@ -36,7 +36,7 @@ fn color_rgb_tuple(color: romacs_display_protocol::types::Color) -> (f32, f32, f
 }
 
 pub(in crate::render_thread) fn frame_chrome_toolbar_bounds(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
 ) -> Option<FrameRect> {
     frame
         .frame_chrome
@@ -70,7 +70,7 @@ pub(super) fn draw(
     native: &GuiFrameNativeWindowState,
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     toolbar: &ToolbarResources,
 ) {
     let (width, height) = (native.content_size().0, native.content_size().1);
@@ -117,10 +117,7 @@ pub(super) fn draw(
     let interaction = render.chrome.interaction;
     let glyph_atlas = render.compositor.glyph_atlas.as_mut().unwrap();
 
-    if !native_chrome.decorations_enabled
-        && !native_chrome.is_fullscreen
-        && native_chrome.titlebar_height > 0.0
-    {
+    if !native_chrome.decorations_enabled && native_chrome.titlebar_height > 0.0 {
         renderer.render_custom_titlebar(
             surface_view,
             &native_chrome.title,
@@ -190,7 +187,7 @@ pub(super) fn draw_corner_mask(
     width: u32,
     height: u32,
 ) {
-    if !chrome.decorations_enabled && !chrome.is_fullscreen && chrome.corner_radius > 0.0 {
+    if !chrome.decorations_enabled && chrome.corner_radius > 0.0 {
         renderer.render_corner_mask(surface_view, chrome.corner_radius, width, height);
     }
 }

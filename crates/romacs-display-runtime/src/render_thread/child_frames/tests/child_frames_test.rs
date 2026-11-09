@@ -981,7 +981,7 @@ fn hit_test_respects_updated_z_order() {
 
 use romacs_display_protocol::motion_spec::{MotionDuration, TweenSpec};
 use romacs_display_protocol::scroll_animation::TransitionEasing;
-use crate::core::frame_glyphs::FrameGlyph;
+use romacs_display_protocol::frame_glyphs::FrameGlyph;
 
 fn tween_100ms() -> MotionSpec {
     MotionSpec::Tween(TweenSpec {

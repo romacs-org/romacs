@@ -29,6 +29,7 @@ impl NativeWindowWaits {
     pub fn terminal(&self) -> bool {
         self.0.lock().unwrap().terminal
     }
+    #[cfg(test)]
     /// Claim terminal connection disposition before the exact socket shutdown.
     /// Finishing the synchronous call is serialized with this claim.
     pub(crate) fn interrupt_required(&self) -> bool {

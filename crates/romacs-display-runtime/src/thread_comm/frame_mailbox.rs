@@ -5,8 +5,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::{Receiver, SendError, Sender, TryRecvError, TrySendError, bounded};
-use romacs_display_protocol::{SealedFramePresentation, present_trace};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, bounded};
+#[cfg(test)]
+use crossbeam_channel::{SendError, TrySendError};
+use romacs_display_protocol::SealedFramePresentation;
+#[cfg(test)]
+use romacs_display_protocol::present_trace;
 
 pub(crate) struct QueuedPresentation {
     pub(crate) state: SealedFramePresentation,
@@ -66,6 +70,7 @@ pub(super) fn channel() -> (FrameSender, FrameReceiver) {
 }
 
 impl FrameSender {
+    #[cfg(test)]
     /// Submit without waiting for rendering. The returned revision was never
     /// acquired by the consumer; the evaluator MUST retire its presentation
     /// and interaction records. Independent logical frames retain their own
@@ -138,6 +143,7 @@ impl FrameReceiver {
         }
     }
 
+    #[cfg(test)]
     pub fn recv(&self) -> Result<QueuedPresentation, crossbeam_channel::RecvError> {
         loop {
             match self.try_recv() {

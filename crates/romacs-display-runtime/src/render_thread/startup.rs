@@ -132,29 +132,7 @@ pub(super) struct StartingApp {
     ended: Rc<std::cell::Cell<Option<super::RenderShutdownReason>>>,
 }
 
-impl StartingApp {
-    pub(super) fn retained() -> Self {
-        Self {
-            phase: Phase::Stopped,
-            can_create_surfaces: false,
-            outcome: Default::default(),
-            evaluator: None,
-            retained: true,
-            ended: Default::default(),
-        }
-    }
-    pub(super) fn install(&mut self, receiver: InitialWindowReceiver, app: RenderApp) {
-        self.retire();
-        self.phase = Phase::Preparing {
-            initial: InitialWindow::Waiting(receiver),
-            app: Box::new(app),
-        };
-    }
-    pub(super) fn retire(&mut self) {
-        self.evaluator = None;
-        self.phase = Phase::Stopped;
-    }
-}
+impl StartingApp {}
 
 /// Keep APP's shutdown cause for the loop's exit.
 fn note_end(ended: &std::cell::Cell<Option<super::RenderShutdownReason>>, app: &RenderApp) {

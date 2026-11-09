@@ -90,17 +90,6 @@ fn frame_ime_preedit_overlay<'a>(
     })
 }
 
-/// The IME pre-edit panel `draw_panels` draws for RENDER: its text and
-/// where, at the cursor's target.
-pub(in crate::render_thread) fn ime_preedit_overlay(render: &GuiFrameRenderState) -> Option<GuiFrameImeOverlay<'_>> {
-    frame_ime_preedit_overlay(
-        render.input_method.preedit(),
-        render.cursor.target_cloned(),
-        render.emacs_frame_id,
-        &render.compositor.child_frames,
-    )
-}
-
 /// Draw the IME pre-edit panel. Menus and tooltips use native surfaces.
 pub(super) fn draw_panels(
     renderer: &mut WgpuRenderer,
@@ -166,7 +155,7 @@ pub(super) fn draw_fps(
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     width: u32,
     height: u32,
 ) {
@@ -200,7 +189,7 @@ pub(super) fn draw_typing_speed(
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
 ) {
     if !renderer.effects.typing_speed.enabled {
         return;

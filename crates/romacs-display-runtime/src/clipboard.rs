@@ -1,7 +1,6 @@
 use crate::thread_comm::{ClipboardCommand, ClipboardSelection};
 use arboard::Clipboard;
 use crossbeam_channel::{Receiver, Sender};
-use romacs_display_protocol::SelectionOwner;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use winit::event_loop::OwnedDisplayHandle;
@@ -24,8 +23,6 @@ trait ClipboardBackend: Send {
     -> Result<(), String>;
 
     fn text(&mut self, selection: ClipboardSelection) -> Result<text_policy::TextRead, String>;
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String>;
 }
 
 enum ServiceCommand {
@@ -200,17 +197,6 @@ fn execute_command(backend: &mut dyn ClipboardBackend, command: ClipboardCommand
                 tracing::debug!("clipboard get reply receiver was dropped");
             }
         }
-        ClipboardCommand::GetOwnership {
-            selection, reply, ..
-        } => {
-            let result = backend.owner(selection);
-            if let Err(err) = &result {
-                tracing::warn!(?selection, "clipboard ownership query failed: {err}");
-            }
-            if reply.send(result).is_err() {
-                tracing::debug!("clipboard ownership reply receiver was dropped");
-            }
-        }
     }
 }
 
@@ -220,9 +206,6 @@ pub(crate) fn reject_command(command: ClipboardCommand, error: String) {
             let _ = reply.send(Err(error));
         }
         ClipboardCommand::GetText { reply, .. } => {
-            let _ = reply.send(Err(error));
-        }
-        ClipboardCommand::GetOwnership { reply, .. } => {
             let _ = reply.send(Err(error));
         }
     }
@@ -264,7 +247,6 @@ impl ClipboardBackend for ArboardClipboard {
             target_os = "linux" => {
                 let selection = match selection {
                     ClipboardSelection::Clipboard => LinuxClipboardKind::Clipboard,
-                    ClipboardSelection::Primary => LinuxClipboardKind::Primary,
                 };
                 match text {
                     Some(text) => self
@@ -297,7 +279,6 @@ impl ClipboardBackend for ArboardClipboard {
             target_os = "linux" => {
                 let selection = match selection {
                     ClipboardSelection::Clipboard => LinuxClipboardKind::Clipboard,
-                    ClipboardSelection::Primary => LinuxClipboardKind::Primary,
                 };
                 Self::text_result(self.clipboard.get().clipboard(selection).text())
             }
@@ -306,21 +287,6 @@ impl ClipboardBackend for ArboardClipboard {
                     ClipboardSelection::Clipboard => Self::text_result(self.clipboard.get_text()),
                     ClipboardSelection::Primary => Ok(self.primary.load()),
                 }
-            }
-        }
-    }
-
-    fn owner(&mut self, selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        std::cfg_select! {
-            target_os = "linux" => {
-                let _ = selection;
-                Ok(SelectionOwner::Unknown)
-            }
-            _ => {
-                Ok(match selection {
-                    ClipboardSelection::Clipboard => SelectionOwner::Unknown,
-                    ClipboardSelection::Primary => self.primary.owner(),
-                })
             }
         }
     }
@@ -402,7 +368,6 @@ impl ClipboardBackend for WaylandClipboard {
         };
         match selection {
             ClipboardSelection::Clipboard => self.clipboard.store(text.to_owned()),
-            ClipboardSelection::Primary => self.clipboard.store_primary(text.to_owned()),
         }
         // smithay-clipboard queues ownership requests to its protocol worker;
         // success here means accepted by that API, not compositor confirmation.
@@ -416,13 +381,8 @@ impl ClipboardBackend for WaylandClipboard {
         // fallback is `text_policy::wayland_read`'s business.
         let native = match selection {
             ClipboardSelection::Clipboard => self.clipboard.load(),
-            ClipboardSelection::Primary => self.clipboard.load_primary(),
         };
         text_policy::wayland_read(selection, native, || self.data_control_text())
-    }
-
-    fn owner(&mut self, _selection: ClipboardSelection) -> Result<SelectionOwner, String> {
-        Ok(SelectionOwner::Unknown)
     }
 }
 

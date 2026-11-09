@@ -160,13 +160,6 @@ impl Tooltips {
     pub(crate) fn owns_parent(&self, id: WindowId) -> bool {
         self.ready().is_some_and(|r| r.owner.parent.id() == id)
     }
-    pub fn dismiss(&mut self, ticket: &romacs_display_protocol::tooltip::TooltipTicket) {
-        if self.ready().is_some_and(
-            |r| matches!(&r.source, TooltipSource::Lisp(current) if current.same_request(ticket)),
-        ) {
-            self.hide();
-        }
-    }
     pub fn deadline(&self) -> Option<Instant> {
         self.ready().map(|r| r.expires)
     }

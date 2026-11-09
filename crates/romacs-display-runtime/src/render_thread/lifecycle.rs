@@ -985,7 +985,7 @@ impl RenderApp {
     /// renderer will color-cycle. `None` represents no visible cycle work;
     /// otherwise the fastest enabled profile wins and is display-capped.
     pub(super) fn cursor_color_cycle_cadence(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
     ) -> Option<std::num::NonZeroU16> {
@@ -1009,7 +1009,7 @@ impl RenderApp {
     /// frame coordinator: lifecycle code does not reconstruct the cadence,
     /// invalidation, or diagnostic reason independently.
     pub(super) fn cursor_color_cycle_demand(
-        frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+        frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         window_focused: bool,
@@ -1040,7 +1040,7 @@ impl RenderApp {
     pub(super) fn reconcile_cursor_color_cycle_demand(
         coordinator: &mut super::frame_sched::FrameCoordinator,
         id: super::frame_sched::NativeWindowId,
-        frame: Option<&crate::core::frame_glyphs::FrameGlyphBuffer>,
+        frame: Option<&romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         global_effects: &romacs_display_protocol::EffectsConfig,
         display_max_rate: std::num::NonZeroU16,
         now: EventTime,

@@ -47,6 +47,7 @@ pub(crate) enum ImageDecodeTerminal {
 }
 
 impl ImageDecodeTerminal {
+    #[cfg(test)]
     /// Whether this publication ends a load, as opposed to advancing one.
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
@@ -56,6 +57,7 @@ impl ImageDecodeTerminal {
         }
     }
 
+    #[cfg(test)]
     /// The terminal state of a load, if the terminal one is what is published.
     fn terminal(self) -> Option<Self> {
         self.is_terminal().then_some(self)
@@ -125,6 +127,7 @@ impl ImageRenderState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    #[cfg(test)]
     /// The terminal state of `load`, if it has one.
     ///
     /// A load whose decode is still running has bands published but no terminal
@@ -153,6 +156,7 @@ impl ImageRenderState {
         self.begin_terminal_publication().publish_band(load, rows);
     }
 
+    #[cfg(test)]
     /// The newest band published for `load`, if one is.
     ///
     /// Only the newest: a band supersedes the one before it, so what is
@@ -170,6 +174,7 @@ impl ImageRenderState {
         self.begin_terminal_publication().clear_image(image);
     }
 
+    #[cfg(test)]
     pub(crate) fn wait_for_terminal(
         &self,
         load: ImageLoadToken,
@@ -211,6 +216,7 @@ impl ImageRenderState {
             .store(usage.total_bytes(), Ordering::Release);
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn cached_size_bytes(&self) -> u64 {
         self.cache_bytes.load(Ordering::Acquire)
@@ -224,15 +230,7 @@ pub(crate) type SharedImageRenderState = Arc<ImageRenderState>;
 pub(crate) type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
 
 pub(super) fn backend_uses_winit_logical_pixels() -> bool {
-    crate::display_scale::active_window_coordinate_system().map_or_else(
-        || std::env::var_os("WAYLAND_DISPLAY").is_some(),
-        |system| {
-            matches!(
-                system,
-                crate::display_scale::WindowCoordinateSystem::WinitLogical
-            )
-        },
-    )
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 pub(super) fn effective_window_scale_factor(raw_scale_factor: f64) -> f64 {
@@ -398,7 +396,6 @@ pub(super) struct WindowChrome {
     /// and pretending otherwise made the first click within the double-click
     /// interval of opening a window maximize it instead of dragging it.
     pub(super) last_titlebar_click: Option<EventTime>,
-    pub(super) is_fullscreen: bool,
     pub(super) corner_radius: f32,
 }
 
@@ -412,7 +409,6 @@ impl Default for WindowChrome {
             titlebar_height: 30.0,
             titlebar_hover: 0,
             last_titlebar_click: None,
-            is_fullscreen: false,
             corner_radius: 0.0,
         }
     }
@@ -1096,7 +1092,6 @@ impl RenderApp {
                         ..WindowChrome::default()
                     },
                     geometry_hints: None,
-                    fullscreen: None,
                 },
                 render: GuiFrameRenderState::new_without_device(
                     0,

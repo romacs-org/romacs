@@ -27,6 +27,7 @@ impl WindowChromeController {
         }
     }
 
+    #[cfg(test)]
     /// An external native-style operation may invalidate the cached appearance.
     pub fn invalidate(&mut self) {
         self.applied = None;

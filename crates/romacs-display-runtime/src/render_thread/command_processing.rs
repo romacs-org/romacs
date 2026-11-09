@@ -102,15 +102,8 @@ impl RenderApp {
                         continue;
                     }
                 }
-                RenderCommand::Window(c) => {
-                    if matches!(c, WindowCommand::ScrollBlit { .. }) {
-                        tracing::debug!("ScrollBlit ignored (full-frame rendering mode)");
-                        continue;
-                    }
-                    self.handle_window(c);
-                }
+                RenderCommand::Window(c) => self.handle_window(c),
                 RenderCommand::Asset(c) => self.handle_asset(c),
-                RenderCommand::Ui(c) => self.handle_ui(c),
                 RenderCommand::Config(c) => self.handle_config(c),
                 RenderCommand::Clipboard(c) => self.handle_clipboard(c),
             }

@@ -4,7 +4,7 @@ pub use independent::*;
 
 mod independent {
     use romacs_display_protocol::{
-        EncodedBytes, ImageEmbeddedMetadata, ImageLayoutExtent, ImageMaskKind, ImageReportedExtent,
+        ImageEmbeddedMetadata, ImageLayoutExtent, ImageMaskKind, ImageReportedExtent,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,30 +23,6 @@ mod independent {
         pub height_inc: u32,
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    pub(crate) struct ImageBaseUri(pub String);
-    impl ImageBaseUri {
-        pub(crate) fn as_utf8_str(&self) -> Option<&str> {
-            Some(&self.0)
-        }
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    pub(crate) enum ImageDataSource {
-        Isolated(EncodedBytes),
-        WithBaseUri {
-            data: EncodedBytes,
-            base_uri: ImageBaseUri,
-        },
-    }
-    impl ImageDataSource {
-        pub fn bytes(&self) -> &[u8] {
-            match self {
-                Self::Isolated(data) | Self::WithBaseUri { data, .. } => data,
-            }
-        }
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct ResolvedImageMetadata {
         pub layout: ImageLayoutExtent,
@@ -57,6 +33,7 @@ mod independent {
         pub embedded: ImageEmbeddedMetadata,
     }
     impl ResolvedImageMetadata {
+        #[cfg(test)]
         pub const fn layout_is_image_pixels(
             width: u32,
             height: u32,

@@ -1,5 +1,5 @@
 use super::startup::{
-    self, InitialWindow, InitialWindowReceiver, InitialWindowSize, RenderLoopError,
+    self, InitialWindow, InitialWindowReceiver, RenderLoopError,
 };
 use super::{RenderApp, SharedImageRenderState, SharedMonitorInfo, surface_readback};
 use crate::render_thread::frame_windows::{FrameLifecycle, GuiFrameNativeWindowState};
@@ -10,11 +10,7 @@ use std::sync::Arc;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_os = "linux")]
 use winit::platform::wayland::EventLoopBuilderExtWayland;
-#[cfg(target_os = "linux")]
-use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::window::Window;
-#[cfg(target_os = "linux")]
-use x11_dl::xlib;
 
 impl RenderApp {
     pub(super) fn init_wgpu(&mut self, event_loop: &dyn ActiveEventLoop, window: Arc<dyn Window>) {
@@ -429,7 +425,7 @@ pub(super) fn composite_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::
 #[cfg(target_os = "linux")]
 pub(crate) fn build_render_event_loop_wayland(socket: &std::path::Path) -> Result<EventLoop, String> {
     use std::os::unix::net::UnixStream;
-    use winit::platform::wayland::WaylandConnection;
+    
     // WAYLAND_DISPLAY names are relative to XDG_RUNTIME_DIR, not the cwd.
     let resolved;
     let socket = if socket.is_absolute() {

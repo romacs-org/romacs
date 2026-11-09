@@ -1,9 +1,7 @@
 //! Input translation and window chrome hit-testing.
 
-use crate::backend::wgpu::{
-    ROMACS_ALT_MASK, ROMACS_CTRL_MASK, ROMACS_HYPER_MASK, ROMACS_META_MASK, ROMACS_SUPER_MASK,
-};
 use crate::host_types::FrontendKey;
+use romacs_display_protocol::TransportModifierBit;
 use winit::keyboard::{Key, NamedKey, NativeKey};
 
 use super::RenderApp;
@@ -13,7 +11,7 @@ use crate::thread_comm::PopupAnchorRect;
 use romacs_display_protocol::frame_chrome::{ChromeAction, FramePoint, FrameRect};
 
 pub(super) fn frame_chrome_hit(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     x: f32,
     y: f32,
 ) -> Option<(&ChromeAction, FrameRect)> {
@@ -21,7 +19,7 @@ pub(super) fn frame_chrome_hit(
 }
 
 pub(super) fn frame_chrome_owns_pointer(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     x: f32,
     y: f32,
 ) -> bool {
@@ -293,11 +291,11 @@ impl RenderApp {
     /// (`src/keyboard.c:7941`).
     pub(super) fn translate_committed_text(text: &str, modifiers: u32) -> Option<Vec<FrontendKey>> {
         let command_modifiers_active = modifiers
-            & (ROMACS_CTRL_MASK
-                | ROMACS_META_MASK
-                | ROMACS_SUPER_MASK
-                | ROMACS_ALT_MASK
-                | ROMACS_HYPER_MASK)
+            & (TransportModifierBit::Ctrl.mask()
+                | TransportModifierBit::Meta.mask()
+                | TransportModifierBit::Super.mask()
+                | TransportModifierBit::Alt.mask()
+                | TransportModifierBit::Hyper.mask())
             != 0;
         if command_modifiers_active {
             return None;
@@ -483,7 +481,7 @@ impl RenderApp {
         x: f32,
         y: f32,
     ) -> u32 {
-        if chrome.decorations_enabled || chrome.is_fullscreen || chrome.titlebar_height <= 0.0 {
+        if chrome.decorations_enabled || chrome.titlebar_height <= 0.0 {
             return 0;
         }
         let w = logical_width;

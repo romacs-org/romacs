@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use winit::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 use winit::event_loop::ActiveEventLoop;
-use winit::monitor::Fullscreen;
 use winit::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData, Window,
     WindowId,
@@ -25,7 +24,7 @@ use super::state::{
     TypingSpeedState, WindowChrome, effective_window_scale_factor, window_size_from_emacs_pixels,
 };
 use super::transitions::clear_frame_transition_textures;
-use crate::core::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use crate::host_types::GuiFrameGeometryHints;
 use romacs_display_protocol::effect_config::IdleDimConfig;
 use romacs_display_protocol::frame_time::EventTime;
@@ -34,9 +33,8 @@ use romacs_display_protocol::{
     PresentationFramePoint, PresentationId, PresentedHit, PresentedHitError, PresentedHitQuery,
     RetainedImageSet, SurfaceState,
 };
-use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
+use romacs_renderer_wgpu::WgpuGlyphAtlas;
 
-use crate::thread_comm::WindowFullscreenMode;
 
 /// How close together two titlebar clicks must be to count as a double click.
 const TITLEBAR_DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
@@ -422,7 +420,6 @@ pub(super) enum FrameLifecycle {
         last_ime_cursor_area: Option<ImeCursorArea>,
         chrome: WindowChrome,
         geometry_hints: Option<GuiFrameGeometryHints>,
-        fullscreen: Option<WindowFullscreenMode>,
     },
     /// Window with a live winit native window and wgpu surface.
     Active {
@@ -591,6 +588,7 @@ impl GuiFrameRenderState {
     }
 
     /// Project already-applied native controls; scenes never replay setters.
+    #[cfg(test)]
     pub(super) fn apply_frame_opacity(
         &mut self,
         controls: &crate::thread_comm::FrameOpacityState,
@@ -1086,19 +1084,6 @@ impl GuiFrameRenderState {
         self.pointer_appearance.selection_for(frame)
     }
 
-    pub(super) fn font_metrics(&self) -> (f32, f32, f32) {
-        self.compositor
-            .glyph_atlas
-            .as_ref()
-            .map_or((13.0, 17.0, 13.0 * 0.6), |atlas| {
-                (
-                    atlas.default_font_size(),
-                    atlas.default_line_height(),
-                    atlas.default_char_width(),
-                )
-            })
-    }
-
     pub(super) fn set_ime_preedit(&mut self, text: String, cursor_range: Option<(usize, usize)>) {
         self.input_method.replace_preedit(text, cursor_range);
         self.compositor.dirty = true;
@@ -1247,7 +1232,7 @@ impl GuiFrameRenderState {
 
     pub(super) fn set_current_frame(
         &mut self,
-        frame: Option<crate::core::frame_glyphs::FrameGlyphBuffer>,
+        frame: Option<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
         row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
         scroll_anchors: super::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: super::frame_compositor::ReflowImprintsByWindow,
@@ -1325,20 +1310,6 @@ impl GuiFrameRenderState {
             self.compositor.dirty = true;
         }
         transition
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_chrome_interaction_mut(
-        &mut self,
-        f: impl FnOnce(&mut GuiChromeInteractionState),
-    ) -> bool {
-        let previous = self.chrome.interaction;
-        f(&mut self.chrome.interaction);
-        let changed = self.chrome.interaction != previous;
-        if changed {
-            self.compositor.dirty = true;
-        }
-        changed
     }
 
     /// Take the retained presentation to draw from.
@@ -1598,16 +1569,10 @@ impl GuiFrameWindowState {
     /// Replay retained cosmetic state onto this frame's owner-held window.
     /// Never request a size: primary adoption must preserve native host geometry.
     pub(super) fn replay_pending_native_state(&self, window: &dyn Window) {
-        if let FrameLifecycle::Pending {
-            chrome, fullscreen, ..
-        } = &self.lifecycle
-        {
+        if let FrameLifecycle::Pending { chrome, .. } = &self.lifecycle {
             window.set_title(&chrome.title);
             if let Some(hints) = self.lifecycle.geometry_hints() {
                 apply_window_geometry_hints(window, hints);
-            }
-            if let Some(mode) = fullscreen {
-                apply_native_fullscreen_mode(window, *mode);
             }
         }
     }
@@ -1623,58 +1588,6 @@ impl GuiFrameWindowState {
             }
             FrameLifecycle::Pending { chrome, .. } => {
                 chrome.title = title;
-            }
-        }
-    }
-
-    pub(super) fn set_fullscreen_mode(&mut self, mode: WindowFullscreenMode) {
-        match &mut self.lifecycle {
-            FrameLifecycle::Pending { fullscreen, .. } => *fullscreen = Some(mode),
-            FrameLifecycle::Active { native, .. } => {
-                apply_native_fullscreen_mode(native.window.as_ref(), mode);
-                match mode {
-                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
-                        native.chrome.is_fullscreen = true;
-                    }
-                    WindowFullscreenMode::None | WindowFullscreenMode::Maximized => {
-                        native.chrome.is_fullscreen = false;
-                    }
-                    WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {}
-                }
-            }
-        }
-        self.render.compositor.dirty = true;
-    }
-
-    pub(super) fn request_inner_size(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> super::surface_resize::ResizeRequestOutcome {
-        use super::surface_resize::ResizeRequestOutcome;
-        match &mut self.lifecycle {
-            FrameLifecycle::Active { native, .. } => {
-                let content: PhysicalSize<u32> = window_size_from_emacs_pixels(width, height)
-                    .to_physical(native.window.scale_factor());
-                let insets = native.content_insets();
-                let (width, height) = insets.surface_size(content.width, content.height);
-                let size = PhysicalSize::new(width, height);
-                match native.window.request_surface_size(size.into()) {
-                    Some(size) => ResizeRequestOutcome::Applied {
-                        window: native.window.id(),
-                        size,
-                    },
-                    None => ResizeRequestOutcome::AwaitingConfigure,
-                }
-            }
-            FrameLifecycle::Pending {
-                width: pw,
-                height: ph,
-                ..
-            } => {
-                *pw = width;
-                *ph = height;
-                ResizeRequestOutcome::PendingRealization
             }
         }
     }
@@ -1702,20 +1615,6 @@ impl GuiFrameWindowState {
     pub(super) fn forget_applied_geometry_hints(&mut self) {
         if let FrameLifecycle::Active { native, .. } = &mut self.lifecycle {
             native.applied_geometry_hints = None;
-        }
-    }
-
-    pub(super) fn set_decorations(&mut self, decorated: bool) {
-        match &mut self.lifecycle {
-            FrameLifecycle::Active { native, .. } => {
-                native.chrome.decorations_enabled = decorated;
-                native.window_chrome.invalidate();
-                native.window.set_decorations(decorated);
-                self.render.compositor.dirty = true;
-            }
-            FrameLifecycle::Pending { chrome, .. } => {
-                chrome.decorations_enabled = decorated;
-            }
         }
     }
 
@@ -1935,27 +1834,6 @@ pub(crate) struct GuiFrameWindowManager {
     pub(super) fps_enabled: bool,
 }
 
-fn apply_native_fullscreen_mode(window: &dyn Window, mode: WindowFullscreenMode) {
-    match mode {
-        WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
-            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-        }
-        WindowFullscreenMode::Maximized => {
-            window.set_fullscreen(None);
-            window.set_maximized(true);
-        }
-        WindowFullscreenMode::None => {
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-        }
-        WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {
-            tracing::warn!(
-                "partial fullscreen modes are not implemented by the native window backend"
-            );
-        }
-    }
-}
-
 /// A request to create a new OS window.
 pub(crate) struct PendingWindow {
     pub emacs_frame_id: u64,
@@ -1963,7 +1841,6 @@ pub(crate) struct PendingWindow {
     pub height: u32,
     pub title: String,
     pub geometry_hints: GuiFrameGeometryHints,
-    pub fullscreen: Option<WindowFullscreenMode>,
 }
 
 impl GuiFrameWindowManager {
@@ -2048,16 +1925,6 @@ impl GuiFrameWindowManager {
         let key = self.primary_frame_key();
         if let Some(window_state) = self.windows.get_mut(&key) {
             window_state.replay_pending_native_state(native.window.as_ref());
-            if let FrameLifecycle::Pending {
-                fullscreen: Some(mode),
-                ..
-            } = &window_state.lifecycle
-            {
-                native.chrome.is_fullscreen = matches!(
-                    mode,
-                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth
-                );
-            }
             let winit_id = native.window.id();
             let surface_state = native.surface_state();
             window_state.render.cursor.seed_focus(native.window.has_focus());
@@ -2115,7 +1982,6 @@ impl GuiFrameWindowManager {
             height,
             title,
             geometry_hints,
-            fullscreen: None,
         });
     }
 
@@ -2319,12 +2185,6 @@ impl GuiFrameWindowManager {
                             render,
                         },
                     );
-                    if let Some(mode) = req.fullscreen
-                        && let Some(state) =
-                            self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
-                    {
-                        state.set_fullscreen_mode(mode);
-                    }
                     if let Some(state) =
                         self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
                         && let FrameLifecycle::Active { native, .. } = &mut state.lifecycle
@@ -2387,7 +2247,6 @@ impl GuiFrameWindowManager {
                     ..WindowChrome::default()
                 },
                 geometry_hints,
-                fullscreen: None,
             },
             render: GuiFrameRenderState::new_without_device(
                 frame,
@@ -2614,37 +2473,6 @@ impl GuiFrameWindowManager {
     pub(super) fn clear_top_level_idle_dim(&mut self) {
         self.for_each_top_level_window_mut(|window_state| {
             window_state.render.clear_idle_dim();
-        });
-    }
-
-    pub(super) fn set_top_level_titlebar_height(&mut self, height: f32) {
-        self.chrome_defaults.titlebar_height = height;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.chrome_mut().titlebar_height = height;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    pub(super) fn set_top_level_corner_radius(&mut self, radius: f32) {
-        self.chrome_defaults.corner_radius = radius;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.chrome_mut().corner_radius = radius;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    pub(super) fn set_top_level_fps_enabled(&mut self, enabled: bool) {
-        self.fps_enabled = enabled;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.render.overlays.fps.enabled = enabled;
-            window_state.render.compositor.dirty = true;
-        });
-    }
-
-    pub(super) fn set_top_level_decorations(&mut self, decorated: bool) {
-        self.chrome_defaults.decorations_enabled = decorated;
-        self.for_each_top_level_window_mut(|window_state| {
-            window_state.set_decorations(decorated);
         });
     }
 

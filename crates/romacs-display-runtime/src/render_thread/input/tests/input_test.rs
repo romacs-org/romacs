@@ -1,6 +1,7 @@
 use super::*;
-use crate::core::frame_glyphs::FrameGlyphBuffer;
-use crate::core::types::Color;
+use romacs_display_protocol::TransportModifierBit;
+use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
+use romacs_display_protocol::types::Color;
 use crate::render_thread::frame_windows::{FrameLifecycle, GuiFrameRenderState};
 use crate::render_thread::pointer_events::PointerOwner;
 use crate::render_thread::state::{
@@ -1178,7 +1179,7 @@ fn active_pointer_appearance_selects_only_its_exact_presented_frame() {
     frame.presentation_id = PresentationId::new(7);
     frame
         .faces
-        .insert(FaceId::new(9), crate::core::face::Face::new(FaceId::new(9)));
+        .insert(FaceId::new(9), romacs_display_protocol::face::Face::new(FaceId::new(9)));
     frame.add_char('a', 0.0, 0.0, 10.0, 20.0, 15.0, false);
     frame
         .install_presented_pointer(
@@ -1491,25 +1492,6 @@ fn focus_cancellation_dirties_toolbar_and_compact_only_state() {
 }
 
 #[test]
-fn programmatic_popup_open_suppresses_underlying_hover_immediately() {
-    let key = appearance_key(61, 1);
-    let mut render = GuiFrameRenderState::new_without_device(
-        0x42,
-        false,
-        romacs_display_protocol::frame_time::observe_platform_now(),
-    );
-    render.pointer_appearance.hover(Some(key));
-    render.pointer_appearance.press();
-    render.set_dirty(false);
-
-    render.menu_opened();
-
-    assert_eq!(render.pointer_appearance.active(), None);
-    assert_eq!(render.pointer_appearance.pressed(), Some(key));
-    assert!(render.compositor.dirty);
-}
-
-#[test]
 fn non_root_owner_clears_stale_root_chrome_hover() {
     let mut render = GuiFrameRenderState::new_without_device(
         0x42,
@@ -1583,7 +1565,7 @@ fn nested_child_ime_cursor_area_uses_presented_root_relative_placement() {
     set_test_frame_placement(&mut nested, 0x51, 0x50, 15.0, 12.0, 2);
     assert!(render.update_child_frame(nested));
 
-    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget::new(9, (7.0, 9.0, 8.0, 16.0), crate::core::frame_glyphs::CursorStyle::FilledBox, 0x51));
+    let area = app.ime_cursor_area_for_target(&crate::render_thread::cursor::CursorTarget::new(9, (7.0, 9.0, 8.0, 16.0), romacs_display_protocol::frame_glyphs::CursorStyle::FilledBox, 0x51));
 
     assert_eq!(
         area,
@@ -2081,15 +2063,15 @@ fn named_backspace_does_not_use_control_text_path() {
 #[test]
 fn translate_committed_text_skips_command_modified_input() {
     assert_eq!(
-        RenderApp::translate_committed_text("x", ROMACS_META_MASK),
+        RenderApp::translate_committed_text("x", TransportModifierBit::Meta.mask()),
         None
     );
     assert_eq!(
-        RenderApp::translate_committed_text("x", ROMACS_CTRL_MASK),
+        RenderApp::translate_committed_text("x", TransportModifierBit::Ctrl.mask()),
         None
     );
     assert_eq!(
-        RenderApp::translate_committed_text("x", ROMACS_SUPER_MASK),
+        RenderApp::translate_committed_text("x", TransportModifierBit::Super.mask()),
         None
     );
 }
@@ -2385,26 +2367,6 @@ fn titlebar_returns_zero_when_decorations_enabled() {
             .decorations_enabled
     );
     assert_eq!(app.titlebar_hit_test(0.0, 0.0), 0);
-    assert_eq!(app.titlebar_hit_test(400.0, 10.0), 0);
-}
-
-// ===================================================================
-// titlebar_hit_test — fullscreen (always 0)
-// ===================================================================
-
-#[test]
-fn titlebar_returns_zero_when_fullscreen() {
-    let mut app = make_test_app(800, 600, 1.0);
-    app.frame_windows
-        .primary_window_mut()
-        .expect("primary window state")
-        .chrome_mut()
-        .decorations_enabled = false;
-    app.frame_windows
-        .primary_window_mut()
-        .expect("primary window state")
-        .chrome_mut()
-        .is_fullscreen = true;
     assert_eq!(app.titlebar_hit_test(400.0, 10.0), 0);
 }
 

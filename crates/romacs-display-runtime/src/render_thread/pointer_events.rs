@@ -7,15 +7,13 @@ use super::state::PointerCursorIntent;
 use super::state::PresentedInteractionKey;
 #[cfg(feature = "webview")]
 use super::state::WebViewPointerCapture;
-use crate::backend::wgpu::ROMACS_SUPER_MASK;
-#[cfg(feature = "webview")]
-use crate::backend::wgpu::{ROMACS_CTRL_MASK, ROMACS_META_MASK, ROMACS_SHIFT_MASK};
-use crate::core::frame_glyphs::FrameGlyph;
 use crate::thread_comm::{
     InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput, ScrollDelta,
 };
 use romacs_display_protocol::PresentationFramePoint;
+use romacs_display_protocol::TransportModifierBit;
 use romacs_display_protocol::frame_chrome::{ChromeAction, FrameChromeKind};
+use romacs_display_protocol::frame_glyphs::FrameGlyph;
 #[cfg(any(test, feature = "webview"))]
 use romacs_webview::WebViewScrollDelta;
 #[cfg(feature = "webview")]
@@ -382,16 +380,16 @@ impl RenderApp {
     #[cfg(feature = "webview")]
     pub(super) fn webview_modifiers(modifiers: u32) -> WebViewModifiers {
         let mut result = WebViewModifiers::empty();
-        if modifiers & ROMACS_SHIFT_MASK != 0 {
+        if modifiers & TransportModifierBit::Shift.mask() != 0 {
             result |= WebViewModifiers::SHIFT;
         }
-        if modifiers & ROMACS_CTRL_MASK != 0 {
+        if modifiers & TransportModifierBit::Ctrl.mask() != 0 {
             result |= WebViewModifiers::CONTROL;
         }
-        if modifiers & ROMACS_META_MASK != 0 {
+        if modifiers & TransportModifierBit::Meta.mask() != 0 {
             result |= WebViewModifiers::META;
         }
-        if modifiers & ROMACS_SUPER_MASK != 0 {
+        if modifiers & TransportModifierBit::Super.mask() != 0 {
             result |= WebViewModifiers::SUPER;
         }
         result
@@ -1120,7 +1118,7 @@ impl RenderApp {
 
                     if !handled_chrome
                         && !window_state.chrome().decorations_enabled
-                        && (self.modifiers & ROMACS_SUPER_MASK) != 0
+                        && (self.modifiers & TransportModifierBit::Super.mask()) != 0
                     {
                         window_state.drag_window();
                         handled_chrome = true;

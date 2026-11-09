@@ -23,12 +23,14 @@ pub(super) struct MenuLifetime {
 }
 
 impl MenuLifetime {
+    #[cfg(test)]
     pub fn reject(&mut self, token: romacs_display_protocol::menu::MenuToken) {
         self.results
             .push_back(romacs_display_protocol::menu::MenuResult::from_index(
                 token, -1,
             ));
     }
+    #[cfg(test)]
     pub fn show(&mut self, token: romacs_display_protocol::menu::MenuToken) -> bool {
         match self.state {
             MenuLifetimeState::Unseen => {}
@@ -48,6 +50,7 @@ impl MenuLifetime {
         }
     }
 
+    #[cfg(test)]
     pub fn hide(&mut self, token: romacs_display_protocol::menu::MenuToken) -> bool {
         let accepted = match self.state {
             MenuLifetimeState::Unseen => true,
@@ -101,6 +104,7 @@ pub(crate) struct MenuSession {
 }
 
 impl MenuSession {
+    #[cfg(test)]
     pub fn new(x: f32, y: f32, menu: MeasuredMenu, font_size: f32, line_height: f32) -> Self {
         // Collect top-level item indices (depth == 0)
         let root_indices: Vec<usize> = menu

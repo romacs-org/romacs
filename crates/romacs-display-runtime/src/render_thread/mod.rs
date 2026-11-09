@@ -27,9 +27,6 @@ mod key_repeat;
 #[cfg(test)]
 #[path = "tests/legacy_frame_admission_test.rs"]
 mod legacy_frame_admission_test;
-#[cfg(all(test, target_os = "linux"))]
-#[path = "tests/legacy_ready_native_test.rs"]
-mod legacy_ready_native_test;
 mod lifecycle;
 mod media;
 mod models;
@@ -70,9 +67,7 @@ mod window_events;
 
 pub(crate) use bootstrap::run_render_loop_current_thread;
 #[cfg(target_os = "linux")]
-pub(crate) use bootstrap::{
-    build_render_event_loop_wayland, build_render_event_loop_wayland_stream,
-};
+pub(crate) use bootstrap::build_render_event_loop_wayland;
 pub(crate) use lifecycle::PopupCommit;
 pub(crate) use startup::{
     InitialWindowLifetime, InitialWindowReceiver, InitialWindowReply, InitialWindowSize,
@@ -80,11 +75,9 @@ pub(crate) use startup::{
 pub use startup::{RenderLoopError, RenderLoopExit};
 pub use state::RenderShutdownReason;
 use state::{FpsCounter, ImeCursorArea, RenderApp};
-pub(crate) use state::{
-    ImageDecodeTerminal, ImageRenderState, ImageTerminalPublication, MonitorInfo,
-    SharedImageRenderState, SharedMonitorInfo,
-};
-pub(crate) use thread_handle::RenderThread;
+pub(crate) use state::{ImageDecodeTerminal, SharedImageRenderState, SharedMonitorInfo};
+#[cfg(test)]
+pub(crate) use state::ImageRenderState;
 
 pub use romacs_renderer_wgpu::SvgResourceContext;
 /// Complete CPU semantic decoding, independent of render-loop service.

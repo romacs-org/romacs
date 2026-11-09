@@ -503,7 +503,8 @@ fn install(
     info: &WindowInfo,
     rows: &[GlyphRow],
 ) {
-    let mut frame = crate::core::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
+    let mut frame =
+        romacs_display_protocol::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
     frame.presentation_id = next_presentation(render);
     frame.window_infos.push(info.clone());
     let mut by_window = std::collections::HashMap::default();
@@ -673,7 +674,8 @@ fn install_without_composing(
     info: &WindowInfo,
     rows: &[GlyphRow],
 ) {
-    let mut frame = crate::core::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
+    let mut frame =
+        romacs_display_protocol::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
     frame.presentation_id = next_presentation(render);
     frame.window_infos.push(info.clone());
     let mut by_window = std::collections::HashMap::default();

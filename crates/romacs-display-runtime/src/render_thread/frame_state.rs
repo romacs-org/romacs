@@ -1,8 +1,8 @@
 use super::{FpsCounter, RenderApp};
-use crate::core::face::Face;
-use crate::core::frame_glyphs::{DisplaySlotId, FrameGlyph, WindowCursor};
-use crate::core::types::FaceId;
 use romacs_display_protocol::FrameFaceMap;
+use romacs_display_protocol::face::Face;
+use romacs_display_protocol::frame_glyphs::{DisplaySlotId, FrameGlyph, WindowCursor};
+use romacs_display_protocol::types::FaceId;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const FACE_DIFF_SAMPLE_LIMIT: usize = 10;

@@ -15,8 +15,6 @@
 
 pub mod backend;
 pub(crate) mod clipboard;
-pub mod core;
-pub mod display_scale;
 pub mod host_types;
 mod menus;
 pub(crate) mod native_window_wait;
@@ -33,7 +31,6 @@ mod window_identity;
 
 pub mod render_thread;
 
-pub use crate::core::*;
 pub use romacs_renderer_wgpu::supports_graphical_face_attribute;
 
 /// Shader-surface composition/validation (re-exported so the frontend can
@@ -42,15 +39,12 @@ pub mod shader_surface {
     pub use romacs_renderer_wgpu::shader_surface::*;
 }
 
-/// Native model view types the frontend passes in `SurfaceSource::Model`.
+/// Native model view types.
 pub mod model {
     pub use romacs_renderer_wgpu::model::ModelView;
 }
 
 pub use render_thread::frame_stats::FrameSchedSnapshot;
-pub(crate) use render_thread::frame_stats::{
-    DEMAND_REASON_NAMES, FRAME_TIME_BUCKET_UPPER_US, WindowFrameSnapshot,
-};
 
 /// Read the current process-global frame-scheduling counters.
 ///
