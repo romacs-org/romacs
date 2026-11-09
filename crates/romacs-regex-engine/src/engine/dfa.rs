@@ -42,15 +42,21 @@
 //! | `ROMACS_REGEX_DFA_STATS` | unset (default), `1` | Print this thread's [`DfaStats`] on stderr at exit with the filter on. |
 //! | `ROMACS_REGEX_DFA_FIRST_STEP` | `on` (default), `off` | Reject cached prefixes of at most eight bytes inline; verify also checks the predicate against the matcher ([`first_step_enabled`]). |
 
-use super::{
-    CompiledPattern, LookupClassKey, MatchRegisters, MatchScratch, RegexOp, SyntaxAssertion,
-    SyntaxCacheKey, SyntaxLookup, evaluate_syntax_assertion, extract_number, extract_number_u16,
-    fail_stack_overflow_free_span, match_anychar_at, match_categoryspec_at, match_charset_at,
-    match_exactn_char_at, match_syntaxspec_at, match_syntaxspecset_at, matcher_overflow_pending,
-    opcode_len, posix_class_bits_read_syntax, re_match_candidate_in, re_text_char,
-};
 use crate::SyntaxClass;
 use crate::emacs_char;
+use crate::engine::class::posix_class_bits_read_syntax;
+use crate::engine::matcher::fail::{
+    MatchScratch, fail_stack_overflow_free_span, matcher_overflow_pending,
+};
+use crate::engine::matcher::re_match_candidate_in;
+use crate::engine::matcher::step::{
+    SyntaxAssertion, evaluate_syntax_assertion, match_anychar_at, match_categoryspec_at,
+    match_charset_at, match_exactn_char_at, match_syntaxspec_at, match_syntaxspecset_at,
+    re_text_char,
+};
+use crate::engine::opcode::{RegexOp, extract_number, extract_number_u16, opcode_len};
+use crate::engine::pattern::{CompiledPattern, MatchRegisters};
+use crate::engine::syntax::{LookupClassKey, SyntaxCacheKey, SyntaxLookup};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::cell::{RefCell, RefMut};
@@ -197,7 +203,7 @@ pub struct Nfa {
     position_of: FxHashMap<KernelItem, u16>,
     pub assertions: Assertions,
     /// Opcodes that push onto the backtracker's fail stack (the overflow
-    /// bound, [`super::fail_stack_may_overflow`]).
+    /// bound, [`crate::engine::matcher::fail::fail_stack_may_overflow`]).
     pub push_sites: usize,
     /// Whether the pattern tests categories (`\cC`), which the class tables
     /// then depend on.
@@ -248,7 +254,7 @@ impl Nfa {
             predicates: Vec::new(),
             position_of: FxHashMap::default(),
             assertions: Assertions::empty(),
-            push_sites: super::fail_stack_push_sites(&pattern.buffer),
+            push_sites: crate::engine::matcher::fail::fail_stack_push_sites(&pattern.buffer),
             uses_categories: false,
             reads_syntax: false,
             bytecode,
@@ -1770,10 +1776,11 @@ impl ExistenceDfa {
         } else {
             &base
         };
-        let facts = match super::re_prev_char_start(text, p, target_multibyte) {
-            None => Facts::EDGE,
-            Some(start) => self.classes.facts_at(text, start, target_multibyte, lookup),
-        };
+        let facts =
+            match crate::engine::matcher::step::re_prev_char_start(text, p, target_multibyte) {
+                None => Facts::EDGE,
+                Some(start) => self.classes.facts_at(text, start, target_multibyte, lookup),
+            };
         self.start_row(Facts(facts.0 & self.prev_mask.0))
     }
 
@@ -2103,7 +2110,9 @@ pub fn cold_path_enabled() -> bool {
     }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        let on = !super::regex_knob_off(std::env::var("ROMACS_REGEX_DFA_COLD").ok().as_deref());
+        let on = !crate::engine::search::regex_knob_off(
+            std::env::var("ROMACS_REGEX_DFA_COLD").ok().as_deref(),
+        );
         tracing::debug!(target: "romacs::regex", on, "ROMACS_REGEX_DFA_COLD");
         on
     })
@@ -2125,7 +2134,9 @@ fn read_dfa_mode() -> DfaMode {
     let mode = DfaMode::parse(std::env::var("ROMACS_REGEX_DFA").ok().as_deref());
     tracing::debug!(target: "romacs::regex", ?mode, "ROMACS_REGEX_DFA");
     if mode != DfaMode::Off
-        && super::regex_knob_on(std::env::var("ROMACS_REGEX_DFA_STATS").ok().as_deref())
+        && crate::engine::search::regex_knob_on(
+            std::env::var("ROMACS_REGEX_DFA_STATS").ok().as_deref(),
+        )
     {
         STATS_ON.store(true, std::sync::atomic::Ordering::Relaxed);
         register_stats_report();
@@ -2166,8 +2177,9 @@ pub fn first_step_enabled() -> bool {
     }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        let on =
-            !super::regex_knob_off(std::env::var("ROMACS_REGEX_DFA_FIRST_STEP").ok().as_deref());
+        let on = !crate::engine::search::regex_knob_off(
+            std::env::var("ROMACS_REGEX_DFA_FIRST_STEP").ok().as_deref(),
+        );
         tracing::debug!(target: "romacs::regex", on, "ROMACS_REGEX_DFA_FIRST_STEP");
         on
     })
@@ -2346,8 +2358,8 @@ pub enum DfaSlot {
     },
     Live(Box<LiveDfa>),
     /// The reasons are kept for tests and debugging.
-    Ineligible(#[allow(dead_code)] DfaIneligible),
-    Disabled(#[allow(dead_code)] DfaGaveUp),
+    Ineligible(#[allow(dead_code, reason = "read by tests and Debug")] DfaIneligible),
+    Disabled(#[allow(dead_code, reason = "read by tests and Debug")] DfaGaveUp),
 }
 
 /// `CompiledPattern`'s DFA slot. A clone starts cold: the DFA's caches
@@ -2367,7 +2379,10 @@ pub struct DfaCell {
 impl Default for DfaCell {
     fn default() -> Self {
         Self {
-            slot: RefCell::new(DfaSlot::Cold { failed: 0, keyless: false }),
+            slot: RefCell::new(DfaSlot::Cold {
+                failed: 0,
+                keyless: false,
+            }),
             initialized: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -2500,7 +2515,7 @@ fn classic_candidate(
     regs: &mut MatchRegisters,
 ) -> Option<usize> {
     #[cfg(any(test, feature = "test-hooks"))]
-    super::MATCHER_ENTRY_COUNT.with(|c| c.set(c.get() + 1));
+    crate::engine::matcher::route::MATCHER_ENTRY_COUNT.with(|c| c.set(c.get() + 1));
     re_match_candidate_in(scratch, pattern, text, pos, stop, syntax, point, regs)
 }
 
@@ -2681,7 +2696,7 @@ impl<'p> DfaLease<'p> {
                 // The search's work: what makes a long failing scan
                 // quadratic is this, summed over its candidates.
                 scratch.work = scratch.work.saturating_add(consumed as u64);
-                super::note_search_work(scratch);
+                crate::engine::matcher::fail::note_search_work(scratch);
                 self.skipped += 1;
                 return None;
             }
@@ -2832,7 +2847,10 @@ impl<'p> DfaLease<'p> {
                 // cold, and count failures toward another try from zero only
                 // under a lookup that has one.
                 let Some(context) = ClassContext::of_search(pattern, dfa.nfa(), syntax) else {
-                    *self.slot = DfaSlot::Cold { failed: 0, keyless: true };
+                    *self.slot = DfaSlot::Cold {
+                        failed: 0,
+                        keyless: true,
+                    };
                     return;
                 };
                 dfa.classes.sync(context);

@@ -1,3 +1,9 @@
+//! Case folding: the translation a case-insensitive pattern compiles and
+//! matches with.
+//!
+//! GNU: `RE_TRANSLATE` and `TRANSLATE` in regex-emacs.c, over the buffer's
+//! case canon table (casetab.c).
+
 use crate::case_table::{CaseTable, emacs_downcase_compat};
 use crate::emacs_char;
 

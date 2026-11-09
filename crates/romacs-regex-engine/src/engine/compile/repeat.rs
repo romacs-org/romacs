@@ -1,3 +1,9 @@
+//! Postfix operators (`*`, `+`, `?` and their non-greedy forms) and
+//! intervals (`\{n,m\}`).
+//!
+//! GNU: `regex_compile`'s `handle_plus` and `handle_interval` cases and
+//! `GET_INTERVAL_COUNT` in regex-emacs.c.
+
 use crate::emacs_char;
 use crate::engine::compile::RegexCompileError;
 use crate::engine::compile::emit::{

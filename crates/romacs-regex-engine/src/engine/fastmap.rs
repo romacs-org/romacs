@@ -1,3 +1,7 @@
+//! The fastmap: the bytes a match can start with.
+//!
+//! GNU: `analyze_first` and `re_compile_fastmap` in regex-emacs.c.
+
 use crate::emacs_char;
 use crate::engine::class::{PosixClassCaseMode, posix_class_matches};
 use crate::engine::opcode::{RegexOp, extract_number};

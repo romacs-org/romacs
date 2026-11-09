@@ -1,3 +1,10 @@
+//! Bracket expressions (`[...]`) compiled to `charset` / `charset_not`.
+//!
+//! GNU: `regex_compile`'s `case '['` and the range-table work area
+//! (`SETUP_ASCII_RANGE`, `SETUP_MULTIBYTE_RANGE`) in regex-emacs.c.  Romacs
+//! keeps the multibyte ranges and class bits in side tables keyed by the
+//! charset's opcode position instead of inline.
+
 use crate::emacs_char;
 use crate::engine::class::{
     CHARSET_CLASS_BIT_SPACE, CHARSET_CLASS_BIT_WORD, parse_posix_char_class, posix_class_bit,
@@ -8,6 +15,7 @@ use crate::engine::opcode::RegexOp;
 use crate::engine::pattern::CompiledPattern;
 use crate::engine::translate::CaseTranslation;
 
+/// Compile a bracket expression `[...]` into charset bytecode.
 pub(crate) fn compile_charset(
     pattern: &[u8],
     p: &mut usize,

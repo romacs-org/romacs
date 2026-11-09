@@ -1,4 +1,8 @@
-use crate::engine::compile::{RegexCompileError, regex_compile};
+//! The search loop: try each candidate start, or hand the rest of a
+//! forward search to the linear matcher.
+//!
+//! GNU: `re_search_2` in regex-emacs.c.
+
 use crate::engine::dfa;
 use crate::engine::linear;
 use crate::engine::matcher::fail::{
@@ -8,7 +12,7 @@ use crate::engine::matcher::fail::{
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::engine::matcher::route::{LINEAR_SEARCH_COUNT, MATCHER_ENTRY_COUNT};
 use crate::engine::matcher::route::{force_backtrack, force_linear_search};
-use crate::engine::matcher::{MatchScratchLease, re_match, re_match_candidate_in};
+use crate::engine::matcher::{MatchScratchLease, re_match_candidate_in};
 use crate::engine::opcode::{RegexOp, extract_number};
 use crate::engine::pattern::{CompiledPattern, MatchRegisters, PREFILTER_MIN_BUILD_SPAN};
 use crate::engine::scan::{FoldedScan, SparseAsciiFastmap};
@@ -965,50 +969,4 @@ pub fn re_search(
         ));
     }
     result
-}
-
-// ---------------------------------------------------------------------------
-// Convenience: compile + search in one call
-// ---------------------------------------------------------------------------
-
-/// Compile a pattern and search for it in text.
-#[allow(dead_code)] // grandfathered when dead_code lint was enabled; delete or wire up
-pub fn search_pattern(
-    pattern_str: &str,
-    text: &str,
-    start: usize,
-    case_fold: bool,
-    syntax: &dyn SyntaxLookup,
-    point: usize,
-) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
-    let compiled = regex_compile(pattern_str, false, case_fold)?;
-    Ok(re_search(
-        &compiled,
-        text.as_bytes(),
-        start,
-        (text.len() - start) as isize,
-        syntax,
-        point,
-    ))
-}
-
-/// Compile a pattern and match at a specific position.
-#[allow(dead_code)] // grandfathered when dead_code lint was enabled; delete or wire up
-pub fn match_pattern(
-    pattern_str: &str,
-    text: &str,
-    pos: usize,
-    case_fold: bool,
-    syntax: &dyn SyntaxLookup,
-    point: usize,
-) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
-    let compiled = regex_compile(pattern_str, false, case_fold)?;
-    Ok(re_match(
-        &compiled,
-        text.as_bytes(),
-        pos,
-        text.len(),
-        syntax,
-        point,
-    ))
 }

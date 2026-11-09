@@ -1,3 +1,14 @@
+//! The per-character tests every engine shares (the backtracker, the Pike
+//! VM and the DFA): reading a character, `anychar`, `exactn`, charsets,
+//! syntax and category specs, and the word and symbol assertions.  One
+//! implementation of each predicate is what keeps the Pike VM and the DFA
+//! byte-exact with the backtracker on case folding, multibyte text,
+//! charsets, syntax classes, categories and boundaries.
+//!
+//! GNU: `re_match_2_internal`'s character macros (`PREFETCH`,
+//! `WORDCHAR_P`, `AT_WORD_BOUNDARY`) and `execute_charset` in
+//! regex-emacs.c.
+
 use crate::emacs_char;
 use crate::engine::class::{
     PosixClassCaseMode, posix_class_matches, regex_char_to_unibyte, regex_scalar_char,
@@ -8,17 +19,6 @@ use crate::engine::pattern::CompiledPattern;
 use crate::engine::syntax::SyntaxLookup;
 use crate::engine::translate::{CaseTranslation, re_tr};
 use crate::syntax_class::SyntaxClass;
-
-// ---------------------------------------------------------------------------
-// Shared per-op character tests.
-//
-// These free functions hold the EXACT per-character predicates that both
-// the backtracking matcher (`re_match_internal`) and the non-backtracking
-// Pike VM (`pike_match`) execute.  Sharing one implementation is what
-// guarantees the Pike fast path is byte-exact with the backtracker on
-// case-fold, multibyte, charsets, syntax classes, categories and word /
-// symbol boundaries — every subtlety lives in one place.
-// ---------------------------------------------------------------------------
 
 /// Decode the Emacs character at `pos` (mirrors the `text_char` closure).
 #[inline]

@@ -2,9 +2,7 @@
 
 use super::*;
 
-use crate::emacs_core::regex_emacs::{
-    DefaultSyntaxLookup, fail_stack_push_sites, re_match, regex_compile,
-};
+use crate::engine::{DefaultSyntaxLookup, fail_stack_push_sites, re_match, regex_compile};
 
 fn nfa_of(pattern: &str) -> Nfa {
     let compiled = regex_compile(pattern, false, false).expect("pattern compiles");
@@ -230,7 +228,7 @@ fn encode(code: u32) -> Vec<u8> {
 // The lazy DFA (C4)
 // ---------------------------------------------------------------------------
 
-use crate::emacs_core::regex_emacs::{
+use crate::engine::{
     MatchRegisters, MatchScratch, re_match_internal, take_fail_stack_probe, take_matcher_overflow,
     take_pike_fallback,
 };
@@ -515,7 +513,7 @@ fn a_full_cache_is_cleared_and_relearned() {
 // The candidate filter in `re_search` (C5)
 // ---------------------------------------------------------------------------
 
-use crate::emacs_core::regex_emacs::{matcher_entry_count, re_search};
+use crate::engine::{matcher_entry_count, re_search};
 
 type SearchResult = Option<(usize, Vec<i64>, Vec<i64>)>;
 
@@ -569,7 +567,13 @@ fn cold_successful_searches_take_no_dfa_lease() {
         });
     });
     assert!(!compiled.dfa.initialized());
-    assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+    assert!(matches!(
+        *compiled.dfa.slot(),
+        DfaSlot::Cold {
+            failed: 0,
+            keyless: false
+        }
+    ));
     let stats = dfa_stats();
     assert_eq!(stats.searches, 0, "{stats:?}");
     assert_eq!(stats.builds, 0, "{stats:?}");
@@ -593,7 +597,13 @@ fn cold_failure_threshold_filters_the_rest_of_the_same_search() {
                 assert_eq!(found.0.as_ref().map(|(at, _, _)| *at), Some(1));
             }
             assert!(!compiled.dfa.initialized());
-            assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+            assert!(matches!(
+                *compiled.dfa.slot(),
+                DfaSlot::Cold {
+                    failed: 0,
+                    keyless: false
+                }
+            ));
             assert_eq!(dfa_stats().searches, 0);
             let before = matcher_entry_count();
             assert_eq!(
@@ -644,7 +654,14 @@ fn a_keyless_lookup_does_not_rebuild_a_syntax_pattern() {
     let dense = vec![b'z'; 129];
     let before = matcher_entry_count();
     let expected = with_dfa_mode(DfaMode::Off, || {
-        search(&compiled, &dense, 0, dense.len() as isize, &KeylessLookup, 0)
+        search(
+            &compiled,
+            &dense,
+            0,
+            dense.len() as isize,
+            &KeylessLookup,
+            0,
+        )
     });
     let entries = matcher_entry_count() - before;
     assert_eq!(expected, (None, false));
@@ -653,18 +670,35 @@ fn a_keyless_lookup_does_not_rebuild_a_syntax_pattern() {
             for _ in 0..4 {
                 let before = matcher_entry_count();
                 assert_eq!(
-                    search(&compiled, &dense, 0, dense.len() as isize, &KeylessLookup, 0),
+                    search(
+                        &compiled,
+                        &dense,
+                        0,
+                        dense.len() as isize,
+                        &KeylessLookup,
+                        0
+                    ),
                     expected
                 );
                 // The matcher alone decides every candidate.
                 assert_eq!(matcher_entry_count() - before, entries);
                 assert!(matches!(
                     *compiled.dfa.slot(),
-                    DfaSlot::Cold { failed: 0, keyless: true }
+                    DfaSlot::Cold {
+                        failed: 0,
+                        keyless: true
+                    }
                 ));
             }
             assert_eq!(
-                search(&compiled, &dense, 0, dense.len() as isize, &DefaultSyntaxLookup, 0),
+                search(
+                    &compiled,
+                    &dense,
+                    0,
+                    dense.len() as isize,
+                    &DefaultSyntaxLookup,
+                    0
+                ),
                 expected
             );
         });
@@ -677,7 +711,10 @@ fn a_keyless_lookup_does_not_rebuild_a_syntax_pattern() {
 /// lookup builds it; `[:word:]' reads the table and stays cold there.
 #[test]
 fn table_free_classes_build_under_a_keyless_lookup() {
-    for (pattern, live) in [("\\.~[-[:alnum:]]+~[[:digit:]]", true), ("\\.~[[:word:]]+~", false)] {
+    for (pattern, live) in [
+        ("\\.~[-[:alnum:]]+~[[:digit:]]", true),
+        ("\\.~[[:word:]]+~", false),
+    ] {
         let compiled = regex_compile(pattern, false, false).unwrap();
         let text = b"file-0001.txt.~a1~ x.y.z.~bb~ q".repeat(4);
         let expected = with_dfa_mode(DfaMode::Off, || {
@@ -687,10 +724,24 @@ fn table_free_classes_build_under_a_keyless_lookup() {
             with_dfa_mode(DfaMode::On, || {
                 for start in 0..text.len() {
                     let reference = with_dfa_mode(DfaMode::Off, || {
-                        search(&compiled, &text, start, (text.len() - start) as isize, &KeylessLookup, 0)
+                        search(
+                            &compiled,
+                            &text,
+                            start,
+                            (text.len() - start) as isize,
+                            &KeylessLookup,
+                            0,
+                        )
                     });
                     assert_eq!(
-                        search(&compiled, &text, start, (text.len() - start) as isize, &KeylessLookup, 0),
+                        search(
+                            &compiled,
+                            &text,
+                            start,
+                            (text.len() - start) as isize,
+                            &KeylessLookup,
+                            0
+                        ),
                         reference,
                         "{pattern} from {start}"
                     );
@@ -701,7 +752,11 @@ fn table_free_classes_build_under_a_keyless_lookup() {
                 );
             });
         });
-        assert_eq!(matches!(*compiled.dfa.slot(), DfaSlot::Live(_)), live, "{pattern}");
+        assert_eq!(
+            matches!(*compiled.dfa.slot(), DfaSlot::Live(_)),
+            live,
+            "{pattern}"
+        );
     }
 }
 
@@ -715,9 +770,24 @@ fn file_name_handler_patterns_match_as_the_matcher_under_a_keyless_lookup() {
         r"\.gpg\(~\|\.~[0-9]+~\)?\'",
     ];
     let names: Vec<&[u8]> = vec![
-        b"file-0001.txt", b"/home/u/.cache/d5000/file-0001.txt", b"a.tar.gz", b"b.el.gz.~1~",
-        b"c.xz~", b"d.Z.~a.b~", b"e.tgz.~x:y~12~", b"f.tbz", b"g.tbz2", b"h.lzma.~#@^~", b"i.gz.~~",
-        b"j.txt.gpg", b"k.gpg~", b"l.gpg.~3~", b"m.gpg.~x~", b"/x/.gz/n", b".gz", b"o.zst.~1~2~",
+        b"file-0001.txt",
+        b"/home/u/.cache/d5000/file-0001.txt",
+        b"a.tar.gz",
+        b"b.el.gz.~1~",
+        b"c.xz~",
+        b"d.Z.~a.b~",
+        b"e.tgz.~x:y~12~",
+        b"f.tbz",
+        b"g.tbz2",
+        b"h.lzma.~#@^~",
+        b"i.gz.~~",
+        b"j.txt.gpg",
+        b"k.gpg~",
+        b"l.gpg.~3~",
+        b"m.gpg.~x~",
+        b"/x/.gz/n",
+        b".gz",
+        b"o.zst.~1~2~",
     ];
     for pattern in patterns {
         let compiled = regex_compile(pattern, false, false).unwrap();
@@ -732,12 +802,20 @@ fn file_name_handler_patterns_match_as_the_matcher_under_a_keyless_lookup() {
                         let found = with_dfa_mode(DfaMode::On, || {
                             search(&compiled, name, start, range, &KeylessLookup, 0)
                         });
-                        assert_eq!(found, reference, "{pattern} on {:?} from {start}", String::from_utf8_lossy(name));
+                        assert_eq!(
+                            found,
+                            reference,
+                            "{pattern} on {:?} from {start}",
+                            String::from_utf8_lossy(name)
+                        );
                     }
                 }
             }
         });
-        assert!(matches!(*compiled.dfa.slot(), DfaSlot::Live(_)), "{pattern}");
+        assert!(
+            matches!(*compiled.dfa.slot(), DfaSlot::Live(_)),
+            "{pattern}"
+        );
     }
 }
 
@@ -760,7 +838,13 @@ fn searches_skip_rejected_candidates_once_the_dfa_is_built() {
             );
         }
     });
-    assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+    assert!(matches!(
+        *compiled.dfa.slot(),
+        DfaSlot::Cold {
+            failed: 0,
+            keyless: false
+        }
+    ));
     let reference: Vec<_> = (0..=text.len())
         .map(|start| {
             with_dfa_mode(DfaMode::Off, || {
@@ -1006,7 +1090,7 @@ fn cached_first_step_keeps_memory_and_give_up_guards() {
 /// every span a text can have: `consumed` is below `usize::MAX`).
 #[test]
 fn the_overflow_free_span_is_the_fail_stack_bound() {
-    use crate::emacs_core::regex_emacs::fail_stack_may_overflow_with;
+    use crate::engine::fail_stack_may_overflow_with;
     for push_sites in [
         0,
         1,
@@ -1109,7 +1193,13 @@ fn mostly_matching_candidates_send_the_pattern_on_holiday() {
         }
     });
     // `[a-z]+` never fails, so it never builds: no holiday needed.
-    assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+    assert!(matches!(
+        *compiled.dfa.slot(),
+        DfaSlot::Cold {
+            failed: 0,
+            keyless: false
+        }
+    ));
     // A pattern that fails enough to build, then matches: holiday.
     let compiled = regex_compile("[a-z]+;", false, false).unwrap();
     let mixed_fail = b"ab cd ef gh ij kl mn op qr st uv wx yz";
@@ -1176,7 +1266,13 @@ fn cold_successful_passes_with_eof_failures_never_build() {
         });
     });
     assert!(!compiled.dfa.initialized());
-    assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+    assert!(matches!(
+        *compiled.dfa.slot(),
+        DfaSlot::Cold {
+            failed: 0,
+            keyless: false
+        }
+    ));
     let stats = dfa_stats();
     assert_eq!(stats.searches, 0, "{stats:?}");
     assert_eq!(stats.builds, 0, "{stats:?}");
@@ -1236,7 +1332,13 @@ fn cold_isolated_literal_failures_never_build() {
             });
         });
         assert!(!compiled.dfa.initialized());
-        assert!(matches!(*compiled.dfa.slot(), DfaSlot::Cold { failed: 0, keyless: false }));
+        assert!(matches!(
+            *compiled.dfa.slot(),
+            DfaSlot::Cold {
+                failed: 0,
+                keyless: false
+            }
+        ));
         let stats = dfa_stats();
         assert_eq!(stats.searches, 0, "{stats:?}");
         assert_eq!(stats.builds, 0, "{stats:?}");

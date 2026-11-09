@@ -1,3 +1,9 @@
+//! The compiler: a pattern string to bytecode.
+//!
+//! GNU: `regex_compile` in regex-emacs.c, with its subroutines
+//! `at_begline_loc_p` and `at_endline_loc_p`.  Bracket expressions,
+//! repetition and buffer editing live in the submodules.
+
 pub(super) mod charset;
 pub(super) mod emit;
 pub(super) mod repeat;
@@ -24,13 +30,6 @@ use crate::engine::translate::CaseTranslation;
 use crate::syntax_class::SyntaxClass;
 use crate::{case_table, emacs_char};
 
-// ---------------------------------------------------------------------------
-// Phase 2: Compiler (regex_compile)
-//
-// Translates GNU Emacs regex-emacs.c:1710-3400 (regex_compile function).
-// Compiles an Emacs regex pattern string into bytecode.
-// ---------------------------------------------------------------------------
-
 /// Error from regex compilation.
 #[derive(Debug, Clone)]
 pub struct RegexCompileError {
@@ -51,12 +50,6 @@ struct CompileStackEntry {
     begalt_offset: usize,
     /// Bytecode position of the fixup jump for alternation (or 0).
     fixup_alt_jump: Option<usize>,
-    /// Bytecode position of the last expression start (for postfix ops).
-    #[allow(dead_code)] // grandfathered when dead_code lint was enabled; delete or wire up
-    laststart_offset: Option<usize>,
-    /// Group number at the time of \( (before incrementing).
-    #[allow(dead_code)] // grandfathered when dead_code lint was enabled; delete or wire up
-    regnum: usize,
     /// The actual group number assigned to this \( (None for shy groups).
     assigned_group: Option<usize>,
     /// Bytecode position of the group's StartMemory (or OnFailureJump
@@ -75,7 +68,6 @@ struct CompileStackEntry {
 ///
 /// # Returns
 /// A `CompiledPattern` with bytecode ready for the matcher.
-#[allow(dead_code)] // grandfathered when dead_code lint was enabled; delete or wire up
 pub fn regex_compile(
     pattern: &str,
     posix: bool,
@@ -118,7 +110,6 @@ pub fn regex_compile_lisp_with_translation(
 
     // Compile stack for tracking open groups
     let mut compile_stack: Vec<CompileStackEntry> = Vec::new();
-    let mut regnum: usize = 0; // Current group number
 
     // Track positions in bytecode for fixup
     let mut begalt_offset: usize = 0; // Start of current alternative
@@ -362,11 +353,9 @@ pub fn regex_compile_lisp_with_translation(
                             Some(n)
                         } else if !is_shy {
                             // GNU `regex-emacs.c:2246`: an auto-numbered group is
-                            // `regnum = ++bufp->re_nsub`, i.e. one past the highest
-                            // group number seen so far - NOT `regnum + 1`.  After an
-                            // explicit `\(?N:...\)` lowered `regnum` below `re_nsub`
-                            // (e.g. `\(?2:\(?1:\)\)\(\)`), `regnum + 1` reused an
-                            // already-assigned number; `re_nsub + 1` matches GNU.
+                            // `++bufp->re_nsub`, one past the highest group number
+                            // seen so far, even after an explicit `\(?N:...\)`
+                            // numbered a group below it (`\(?2:\(?1:\)\)\(\)`).
                             Some(buf.re_nsub + 1)
                         } else {
                             None
@@ -392,8 +381,6 @@ pub fn regex_compile_lisp_with_translation(
                         compile_stack.push(CompileStackEntry {
                             begalt_offset,
                             fixup_alt_jump,
-                            laststart_offset: laststart,
-                            regnum,
                             assigned_group: assigned,
                             group_bytecode_start: group_start,
                         });
@@ -403,16 +390,14 @@ pub fn regex_compile_lisp_with_translation(
                             while buf.re_nsub < n {
                                 buf.re_nsub += 1;
                             }
-                            regnum = n;
                             emit_op!(RegexOp::StartMemory);
                             emit!(n as u8);
                         } else if !is_shy {
                             // Auto group: number = ++re_nsub (GNU
                             // regex-emacs.c:2246), kept in sync with `assigned`.
                             buf.re_nsub += 1;
-                            regnum = buf.re_nsub;
                             emit_op!(RegexOp::StartMemory);
-                            emit!(regnum as u8);
+                            emit!(buf.re_nsub as u8);
                         }
 
                         begalt_offset = bpos!();
@@ -447,8 +432,6 @@ pub fn regex_compile_lisp_with_translation(
                         // so postfix operators (?, *, +) apply to the group.
                         laststart = Some(entry.group_bytecode_start);
                         laststart_is_group = true;
-                        // Do NOT restore regnum — it keeps incrementing
-                        // across sibling groups (GNU behavior).
                         pending_exact = None;
                     }
 

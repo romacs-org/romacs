@@ -1,5 +1,47 @@
 use super::*;
 
+// Compile + search, and compile + match, in one call.
+
+/// Compile a pattern and search for it in text.
+fn search_pattern(
+    pattern_str: &str,
+    text: &str,
+    start: usize,
+    case_fold: bool,
+    syntax: &dyn SyntaxLookup,
+    point: usize,
+) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
+    let compiled = regex_compile(pattern_str, false, case_fold)?;
+    Ok(re_search(
+        &compiled,
+        text.as_bytes(),
+        start,
+        (text.len() - start) as isize,
+        syntax,
+        point,
+    ))
+}
+
+/// Compile a pattern and match at a specific position.
+fn match_pattern(
+    pattern_str: &str,
+    text: &str,
+    pos: usize,
+    case_fold: bool,
+    syntax: &dyn SyntaxLookup,
+    point: usize,
+) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
+    let compiled = regex_compile(pattern_str, false, case_fold)?;
+    Ok(re_match(
+        &compiled,
+        text.as_bytes(),
+        pos,
+        text.len(),
+        syntax,
+        point,
+    ))
+}
+
 #[test]
 fn sparse_fastmap_search_agrees_with_exhaustive_candidates() {
     crate::test_utils::init_test_tracing();
@@ -396,30 +438,12 @@ fn test_syntax_word() {
 fn default_syntax_lookup_uses_gnu_standard_classes() {
     crate::test_utils::init_test_tracing();
     let syn = DefaultSyntaxLookup;
-    assert_eq!(
-        syn.char_syntax('a'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
-    assert_eq!(
-        syn.char_syntax('$'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
-    assert_eq!(
-        syn.char_syntax('_'),
-        crate::emacs_core::syntax::SyntaxClass::Symbol
-    );
-    assert_eq!(
-        syn.char_syntax('-'),
-        crate::emacs_core::syntax::SyntaxClass::Symbol
-    );
-    assert_eq!(
-        syn.char_syntax(' '),
-        crate::emacs_core::syntax::SyntaxClass::Whitespace
-    );
-    assert_eq!(
-        syn.char_syntax('\u{4e2d}'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
+    assert_eq!(syn.char_syntax('a'), crate::SyntaxClass::Word);
+    assert_eq!(syn.char_syntax('$'), crate::SyntaxClass::Word);
+    assert_eq!(syn.char_syntax('_'), crate::SyntaxClass::Symbol);
+    assert_eq!(syn.char_syntax('-'), crate::SyntaxClass::Symbol);
+    assert_eq!(syn.char_syntax(' '), crate::SyntaxClass::Whitespace);
+    assert_eq!(syn.char_syntax('\u{4e2d}'), crate::SyntaxClass::Word);
 }
 
 #[test]

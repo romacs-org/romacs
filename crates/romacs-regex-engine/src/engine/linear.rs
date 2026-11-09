@@ -46,12 +46,14 @@
 //! candidate back ([`SearchOutcome::Defer`]) so the backtracker decides it
 //! with GNU's "Stack overflow in regexp matcher".
 
-use super::{
-    CompiledPattern, MatchRegisters, RegexOp, SyntaxAssertion, SyntaxLookup,
-    evaluate_syntax_assertion, extract_number, extract_number_u16, match_anychar_at,
-    match_categoryspec_at, match_charset_at, match_exactn_char_at, match_syntaxspec_at,
-    match_syntaxspecset_at, opcode_len, re_text_char,
+use crate::engine::matcher::step::{
+    SyntaxAssertion, evaluate_syntax_assertion, match_anychar_at, match_categoryspec_at,
+    match_charset_at, match_exactn_char_at, match_syntaxspec_at, match_syntaxspecset_at,
+    re_text_char,
 };
+use crate::engine::opcode::{RegexOp, extract_number, extract_number_u16, opcode_len};
+use crate::engine::pattern::{CompiledPattern, MatchRegisters};
+use crate::engine::syntax::SyntaxLookup;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 

@@ -1,3 +1,8 @@
+//! The compiled pattern and the match registers a match fills.
+//!
+//! GNU: `struct re_pattern_buffer` and `struct re_registers` in
+//! regex-emacs.h.
+
 use crate::engine::dfa;
 use crate::engine::fastmap::recompute_fastmap;
 use crate::engine::linear;
@@ -11,10 +16,6 @@ use crate::engine::translate::CaseTranslation;
 use regex_automata::util::prefilter::Prefilter as RaPrefilter;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-
-// ---------------------------------------------------------------------------
-// Compiled Pattern
-// ---------------------------------------------------------------------------
 
 // The compiled-pattern layout is the backtracker's own; it is not part of
 // the crate's API.  Its fields are crate-private in every build that does

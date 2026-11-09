@@ -1,3 +1,9 @@
+//! Editing the bytecode buffer while compiling: splicing bytes in and
+//! keeping the charset side tables keyed, and storing or inserting jumps.
+//!
+//! GNU: `STORE_JUMP`, `INSERT_JUMP` and their two-argument forms, and
+//! `store_op1` / `insert_op1` in regex-emacs.c.
+
 use crate::engine::compile::RegexCompileError;
 use crate::engine::dfa;
 use crate::engine::linear;
@@ -145,7 +151,6 @@ fn relocate_charset_keys<V>(
     }
 }
 
-/// Compile an interval \{n,m\} into bytecode.
 fn checked_i16_offset(offset: isize) -> Result<i16, RegexCompileError> {
     i16::try_from(offset).map_err(|_| RegexCompileError {
         message: "Regular expression too big".to_string(),

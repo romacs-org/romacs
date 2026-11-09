@@ -1,18 +1,13 @@
+//! What the matcher asks its host about syntax and categories (`\w`,
+//! `\sC`, `\cC`, word and symbol boundaries), and the cache keys that
+//! identify a syntax table.
+//!
+//! GNU: the `SYNTAX` macro (syntax.h) and `CHAR_HAS_CATEGORY` (category.h)
+//! as regex-emacs.c reads them, and search.c's `regexp_cache.syntax_table`.
+
 use crate::emacs_char;
 use crate::syntax_class::SyntaxClass;
 
-// ---------------------------------------------------------------------------
-// Phase 3: Matcher (re_match_2_internal)
-//
-// Translates GNU regex-emacs.c:4072-5340.
-// Executes compiled bytecode against input text with backtracking.
-// ---------------------------------------------------------------------------
-
-/// Context for syntax-table and category-table queries during matching.
-///
-/// The matcher queries the syntax table to implement `\w`, `\b`, `\sC`, etc.
-/// In GNU Emacs, this is done via the `SYNTAX()` macro which reads from
-/// `gl_state.current_syntax_table`.
 /// Identity of a syntax lookup for the compiled-pattern caches.
 ///
 /// GNU `search.c` keeps this as `regexp_cache.syntax_table` — the actual

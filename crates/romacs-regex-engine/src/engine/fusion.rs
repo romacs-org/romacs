@@ -1,9 +1,10 @@
+//! Peephole: fuse an alternation of single positive syntax-class tests
+//! (`\(?:\sw\|\s_\)`) into one set test.
+//!
+//! GNU has no counterpart.
+
 use crate::engine::opcode::{RegexOp, extract_number, opcode_len, store_number, store_number_u16};
 use crate::engine::pattern::CompiledPattern;
-
-// ---------------------------------------------------------------------------
-// Peephole: fuse alternations of single positive syntax-class tests.
-// ---------------------------------------------------------------------------
 
 #[cfg(any(test, feature = "test-hooks"))]
 thread_local! {

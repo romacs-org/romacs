@@ -1,3 +1,9 @@
+//! Facts proved about a compiled buffer once it is complete: that it is
+//! safe for the matcher's unchecked dispatch (the seal), its rewind view,
+//! and whether the Pike VM may run it.
+//!
+//! GNU has no counterpart: its matcher trusts the compiler.
+
 use crate::engine::opcode::{RegexOp, extract_number, opcode_len, store_number};
 use crate::engine::pattern::{CompiledPattern, RewindView};
 use smallvec::SmallVec;

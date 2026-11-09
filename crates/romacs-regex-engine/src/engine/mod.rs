@@ -1,29 +1,39 @@
-//! GNU Emacs regex engine translated to Rust.
+//! GNU Emacs regular expressions: GNU's `regex-emacs.c`, translated, plus
+//! the linear-time matchers that keep its answers without its blow-ups.
 //!
-//! This is a direct translation of GNU Emacs's `regex-emacs.c` — the same
-//! algorithm, same bytecode format, same semantics.  The engine compiles
-//! Emacs regex patterns to bytecode and executes them with syntax-table
-//! awareness, backreference support, and POSIX backtracking.
+//! A pattern compiles to GNU's bytecode ([`regex_compile`] to a
+//! [`CompiledPattern`]); [`re_search`] tries candidate starts and
+//! [`re_match`] runs the backtracker from one, filling [`MatchRegisters`].
 //!
-//! ## Architecture
+//! ## Where GNU's pieces live
 //!
-//! ```text
-//! Pattern string
-//!     ↓
-//! regex_compile()     →  CompiledPattern (bytecode + fastmap)
-//!     ↓
-//! re_search()         →  Find match position (uses fastmap for skipping)
-//!     ↓
-//! re_match_internal() →  Execute bytecode against text (backtracking)
-//!     ↓
-//! MatchRegisters      →  Group start/end positions
-//! ```
+//! | Module | Contents | GNU regex-emacs.c |
+//! |---|---|---|
+//! | `opcode` | opcodes, operand encoding | `re_opcode_t`, `STORE_NUMBER`, `EXTRACT_NUMBER` |
+//! | `pattern` | the compiled pattern, match registers | regex-emacs.h `re_pattern_buffer`, `re_registers` |
+//! | `translate` | case folding | `RE_TRANSLATE`, `TRANSLATE` |
+//! | `class` | `[[:alpha:]]` classes | `re_wctype_parse`, `re_iswctype`, `re_wctype_to_bit` |
+//! | `syntax` | the host's syntax and category tables | `SYNTAX`, `CHAR_HAS_CATEGORY` |
+//! | `compile` | the compiler | `regex_compile`, `at_begline_loc_p`, `at_endline_loc_p` |
+//! | `compile::charset` | `[...]` | `regex_compile`'s `case '['`, range tables |
+//! | `compile::repeat` | `*`, `+`, `?`, `\{n,m\}` | `handle_plus`, `handle_interval` |
+//! | `compile::emit` | buffer editing, jumps | `STORE_JUMP`, `INSERT_JUMP`, `insert_op1` |
+//! | `compile::seal` | the matcher's proof of a buffer | none |
+//! | `optimize` | loop analyses, smart jumps | `skip_one_char`, `mutually_exclusive_p` |
+//! | `fusion` | syntax-class peephole | none |
+//! | `fastmap` | first-byte sets | `analyze_first`, `re_compile_fastmap` |
+//! | `scan` | candidate scans | `re_search_2`'s fastmap loop |
+//! | `search` | the search loop | `re_search_2` |
+//! | `matcher` | match entry points | `re_match_2` |
+//! | `matcher::exec` | the backtracker's loop | `re_match_2_internal` |
+//! | `matcher::fail` | the failure stack | `PUSH_FAILURE_POINT`, `POP_FAILURE_POINT`, `CHECK_INFINITE_LOOP` |
+//! | `matcher::step` | per-character tests | `PREFETCH`, `AT_WORD_BOUNDARY`, `execute_charset` |
+//! | `matcher::route` | backtracker, Pike VM or linear | none |
+//! | `linear` | the linear-time Pike VM | none |
+//! | `dfa` | the existence DFA | none |
 //!
-//! ## Reference
-//!
-//! - GNU source: `src/regex-emacs.c` (5355 lines)
-//! - GNU header: `src/regex-emacs.h`
-//! - GNU search: `src/search.c` (3514 lines)
+//! GNU's search.c (the pattern cache, `looking-at`, `string-match`) is the
+//! host's: romacs-vm's `regexp.rs`.
 
 mod class;
 mod compile;
@@ -46,13 +56,6 @@ pub use self::compile::{
 pub use self::matcher::fail::{MATCHER_OVERFLOW_MESSAGE, take_matcher_overflow};
 pub use self::matcher::re_match;
 pub use self::optimize::pattern_max_match_chars;
-// Shared with `dfa` and `linear`, which import them through `super`.
-pub use self::matcher::fail::{MatchScratch, fail_stack_overflow_free_span};
-pub use self::matcher::step::{
-    match_anychar_at, match_categoryspec_at, match_charset_at, match_exactn_char_at,
-    match_syntaxspec_at, match_syntaxspecset_at, re_text_char,
-};
-pub use self::opcode::RegexOp;
 pub use self::pattern::{CompiledPattern, MatchRegisters};
 pub use self::search::re_search;
 pub use self::syntax::{
@@ -75,11 +78,19 @@ pub use self::search::{build_search_optimizations, with_anchor_alt, with_fastmap
 #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
 pub use self::{
     fastmap::recompute_fastmap,
-    matcher::fail::{fail_stack_may_overflow, fail_stack_may_overflow_with},
+    matcher::fail::{
+        MatchScratch, fail_stack_may_overflow, fail_stack_may_overflow_with,
+        fail_stack_overflow_free_span,
+    },
+    matcher::step::{
+        match_anychar_at, match_categoryspec_at, match_charset_at, match_exactn_char_at,
+        match_syntaxspec_at, match_syntaxspecset_at, re_text_char,
+    },
     matcher::{pike_match, re_match_internal},
+    opcode::RegexOp,
     pattern::{LiteralPrefilter, RewindView},
     scan::{FoldedScan, SparseAsciiFastmap, TextRepr},
-    search::{StartAnchor, anchor_alt_enabled, match_pattern, search_pattern, start_anchor},
+    search::{StartAnchor, anchor_alt_enabled, start_anchor},
     translate::CHAR_TABLE_WALK_MIN_SPAN,
 };
 #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
@@ -87,24 +98,17 @@ pub use crate::case_table::{CaseTable, EmacsText, emacs_downcase_compat};
 #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
 pub use crate::syntax_class::SyntaxClass;
 
-use self::class::posix_class_bits_read_syntax;
+// What the engine's tests (`tests/`, which glob this module) reach beyond the
+// seams above.
 #[cfg(test)]
-use self::compile::seal::validate_sealed_buffer;
-use self::matcher::fail::{fail_stack_push_sites, matcher_overflow_pending, note_search_work};
-use self::matcher::re_match_candidate_in;
-#[cfg(any(test, feature = "test-hooks"))]
-use self::matcher::route::MATCHER_ENTRY_COUNT;
-#[cfg(test)]
-use self::matcher::route::{force_backtrack, force_pike, take_pike_fallback};
-use self::matcher::step::{SyntaxAssertion, evaluate_syntax_assertion, re_prev_char_start};
-#[cfg(test)]
-use self::opcode::store_number;
-use self::opcode::{extract_number, extract_number_u16, opcode_len};
-#[cfg(test)]
-use self::scan::fold_prefix_literals;
-#[cfg(test)]
-use self::search::fastmap_force_disabled;
-use self::search::{regex_knob_off, regex_knob_on};
+use self::{
+    compile::seal::validate_sealed_buffer,
+    matcher::fail::fail_stack_push_sites,
+    matcher::route::{force_backtrack, force_pike, take_pike_fallback},
+    opcode::{extract_number, opcode_len, store_number},
+    scan::fold_prefix_literals,
+    search::fastmap_force_disabled,
+};
 #[cfg(test)]
 use crate::emacs_char;
 

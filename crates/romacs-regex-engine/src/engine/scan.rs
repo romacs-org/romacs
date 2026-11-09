@@ -1,13 +1,16 @@
+//! How a search finds its next candidate start beyond the plain fastmap:
+//! the multi-literal prefilter, the sparse ASCII fastmap, and case-folded
+//! scans.
+//!
+//! GNU: the fastmap skip loop of `re_search_2` in regex-emacs.c, which
+//! these extend.
+
 use crate::engine::opcode::{RegexOp, extract_number};
 use crate::engine::pattern::{CompiledPattern, LiteralPrefilter};
 use crate::engine::translate::{AsciiPreimage, CaseTranslation, ascii_translated_leading_code};
 use regex_automata::MatchKind;
 use regex_automata::util::prefilter::Prefilter as RaPrefilter;
 use smallvec::SmallVec;
-
-// ---------------------------------------------------------------------------
-// Multi-literal SIMD prefilter (sound literal extraction)
-// ---------------------------------------------------------------------------
 
 /// Cap on the number of distinct required literals handed to the prefilter.
 /// Big keyword alternations (`el-defs` has ~40 `def*` heads) must fit; beyond

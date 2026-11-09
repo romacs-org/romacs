@@ -82,11 +82,8 @@ mod engine;
 pub mod host;
 pub mod syntax_class;
 #[cfg(test)]
-mod test_paths;
+mod test_utils;
 mod tls_scope;
-
-#[cfg(test)]
-use test_paths::{emacs_core, test_utils};
 
 pub use case_table::{CaseTable, EmacsStr, EmacsText, emacs_downcase_compat};
 pub use syntax_class::{

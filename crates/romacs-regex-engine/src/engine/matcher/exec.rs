@@ -1,3 +1,7 @@
+//! The backtracker's dispatch loop over the bytecode.
+//!
+//! GNU: the body of `re_match_2_internal` in regex-emacs.c.
+
 use crate::engine::matcher::fail::{
     FAIL_STACK_ENTRY_LIMIT, FailFrame, FailUndo, FailureInput, FailureOrigin, FailureResume,
     MatchScratch, PARITY_POP_BUDGET, check_infinite_loop, get_counter, goto_fail, set_counter,

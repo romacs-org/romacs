@@ -1,23 +1,16 @@
+//! Bytecode analyses and rewrites after compilation: the longest match a
+//! pattern can make, whether a loop body excludes its continuation, and the
+//! resolution of `on_failure_jump_smart`.
+//!
+//! GNU: the "Optimization routines" of regex-emacs.c (`skip_one_char`,
+//! `mutually_exclusive_p`, and `re_match_2_internal`'s handling of
+//! `on_failure_jump_smart`).
+
 use crate::emacs_char;
 use crate::engine::opcode::{RegexOp, extract_number, opcode_len, store_number};
 use crate::engine::pattern::CompiledPattern;
 use std::collections::HashSet;
 
-// ---------------------------------------------------------------------------
-// Phase 4: Searcher (re_search_2)
-//
-// Translates GNU regex-emacs.c:3408-4070.
-// Searches for a match in text, using fastmap for optimization.
-// ---------------------------------------------------------------------------
-
-/// Analyze compiled bytecode to populate `pattern.fastmap`.
-///
-/// For each byte value `c` that could possibly appear as the first byte of a
-/// match, sets `pattern.fastmap[c] = true`.  The searcher (`re_search`) uses
-/// this to skip positions that cannot start a match, giving a significant
-/// speed-up for patterns that begin with a restricted set of characters.
-///
-/// Byte length of the opcode at `pc`, or `None` for a malformed buffer.
 /// Conservative upper bound, in characters, on the buffer text a single
 /// match attempt of this pattern can consume, or `None` when no finite
 /// bound is known (repetition, backreferences, repeat counters,

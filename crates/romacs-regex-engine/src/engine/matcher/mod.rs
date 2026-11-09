@@ -1,3 +1,10 @@
+//! The matcher's entry points: one anchored match with the reusable
+//! scratch, and the hand-off between the backtracker and the linear-time
+//! matcher.
+//!
+//! GNU: `re_match_2` and the entry of `re_match_2_internal` in
+//! regex-emacs.c.
+
 pub(super) mod exec;
 pub(super) mod fail;
 pub(super) mod route;

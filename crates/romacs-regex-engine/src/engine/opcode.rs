@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
-// Phase 1: Opcodes and Data Structures
-// ---------------------------------------------------------------------------
+//! The compiled pattern's bytecode: opcodes and their two-byte operands.
+//!
+//! GNU: `re_opcode_t` and the `STORE_NUMBER` / `EXTRACT_NUMBER` macros in
+//! regex-emacs.c.  The opcode numbers are GNU's, so bytecode dumps of the
+//! two engines compare directly.
 
-/// Bytecode opcodes for the compiled regex pattern.
-///
-/// Translated from `re_opcode_t` enum in regex-emacs.c (lines 202-337).
-/// Each opcode may be followed by argument bytes in the bytecode buffer.
 /// Bytecode opcodes for the compiled regex pattern.
 ///
 /// **Strict GNU parity**: the numeric values here mirror
@@ -18,7 +16,9 @@
 ///
 /// The one-byte form we emit via `<op> as u8` is the same as GNU's
 /// `BUF_COMPILED[pc++]` byte. **Do not reorder without updating the
-/// GNU reference at the top of this file.**
+/// GNU reference above.**
+///
+/// Each opcode may be followed by argument bytes in the bytecode buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::FromRepr, strum::VariantArray)]
 #[repr(u8)]
 pub enum RegexOp {
@@ -209,6 +209,7 @@ pub(crate) fn extract_number_u16(buf: &[u8], pos: usize) -> u16 {
     u16::from_le_bytes([buf[pos], buf[pos + 1]])
 }
 
+/// Byte length of the opcode at `pc`, or `None` for a malformed buffer.
 pub(crate) fn opcode_len(bytecode: &[u8], pc: usize) -> Option<usize> {
     let op = RegexOp::from_byte(*bytecode.get(pc)?)?;
     Some(match op {

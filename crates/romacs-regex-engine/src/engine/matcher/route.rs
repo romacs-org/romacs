@@ -1,3 +1,8 @@
+//! Which engine runs a match: the budgeted backtracker by default, the
+//! Pike VM after a catastrophic candidate, and the test seams that pin one.
+//!
+//! GNU has no counterpart: it has only the backtracker.
+
 // Engine routing (production): the backtracker runs by DEFAULT — it is
 // faster on the well-behaved patterns that dominate real workloads
 // (font-lock, search).  For a `pike_eligible` pattern the backtracker runs

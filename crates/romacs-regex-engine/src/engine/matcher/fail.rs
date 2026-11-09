@@ -1,3 +1,10 @@
+//! The failure stack: choice points, their undo log, GNU's overflow limit,
+//! and the per-thread scratch a match reuses.
+//!
+//! GNU: `PUSH_FAILURE_POINT`, `POP_FAILURE_POINT`, `PUSH_FAILURE_REG`,
+//! `PUSH_NUMBER`, `CHECK_INFINITE_LOOP` and `emacs_re_max_failures` in
+//! regex-emacs.c.
+
 use crate::engine::opcode::{RegexOp, extract_number_u16, opcode_len};
 use smallvec::SmallVec;
 
@@ -5,10 +12,6 @@ use smallvec::SmallVec;
 /// they never reallocate after warm-up, and a SmallVec's spilled-check on
 /// every register access cost ~6% of the matcher loop on the org op.
 type RegisterScratch = Vec<Option<usize>>;
-
-// ---------------------------------------------------------------------------
-// Failure Stack (for backtracking)
-// ---------------------------------------------------------------------------
 
 /// A failure point (choice point) on the backtracking stack.
 ///

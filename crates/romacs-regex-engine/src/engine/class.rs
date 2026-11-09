@@ -1,3 +1,9 @@
+//! POSIX character classes (`[[:alpha:]]` and the rest): parsing, the
+//! per-charset class bits, and class membership.
+//!
+//! GNU: `re_wctype_parse`, `re_iswctype`, `re_wctype_to_bit` and the
+//! `ISALPHA`-style macros in regex-emacs.c.
+
 use crate::emacs_char;
 use crate::engine::compile::RegexCompileError;
 use crate::engine::syntax::SyntaxLookup;
@@ -22,7 +28,6 @@ const CHARSET_CLASS_BIT_NONASCII: u32 = 1 << 14;
 const CHARSET_CLASS_BIT_UNIBYTE: u32 = 1 << 15;
 const CHARSET_CLASS_BIT_MULTIBYTE: u32 = 1 << 16;
 
-/// Compile a character class `[...]` into charset bytecode.
 /// POSIX named character class kind, returned by `parse_posix_char_class`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PosixCharClassKind {
