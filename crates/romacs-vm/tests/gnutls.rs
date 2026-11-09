@@ -283,19 +283,28 @@ fn tls_capability_claims_sessions_only() {
     assert_eq!(vm.eval_source("(list (gnutls-available-p) libgnutls-version)").unwrap().display().unwrap(), "((gnutls gnutls3) -1)");
 }
 
-/// BODY on a thread of its own, failing the test after LIMIT whatever it
-/// is doing, a TLS handshake included, rather than waiting for it.
-fn bounded(limit: std::time::Duration, body: impl FnOnce() + Send + 'static) {
-    let (done, finished) = std::sync::mpsc::channel();
+/// A bootstrapped VM with gnutls loaded, then BODY with it, on a thread of
+/// its own: the test fails after LIMIT of BODY, whatever it is doing, a TLS
+/// handshake included, rather than waiting for it. The bootstrap is not
+/// the subject and a loaded host slows it: it has a bound of its own.
+fn bounded(limit: std::time::Duration, body: impl FnOnce(Vm) + Send + 'static) {
+    const BOOTSTRAP: std::time::Duration = std::time::Duration::from_secs(600);
+    let (phase, reached) = std::sync::mpsc::channel();
     let worker = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-        body();
-        let _ = done.send(());
+        let mut vm = bootstrapped();
+        vm.eval_source("(require 'gnutls)").unwrap();
+        let _ = phase.send("bootstrap");
+        body(vm);
+        let _ = phase.send("body");
     }).unwrap();
-    match finished.recv_timeout(limit) {
-        Ok(()) => worker.join().unwrap(),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::panic::resume_unwind(worker.join().unwrap_err()),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("still running after {limit:?}"),
+    for (expected, limit) in [("bootstrap", BOOTSTRAP), ("body", limit)] {
+        match reached.recv_timeout(limit) {
+            Ok(done) => assert_eq!(done, expected),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::panic::resume_unwind(worker.join().unwrap_err()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("{expected} still running after {limit:?}"),
+        }
     }
+    worker.join().unwrap();
 }
 
 /// The bound holds against a peer that takes the connection and never
@@ -312,15 +321,12 @@ fn a_stalled_handshake_is_cut_off_by_the_bound() {
             let _ = accepted.send(());
         }
     });
-    // Long enough for the bootstrap under load; the peer's accept shows the
-    // bound cut off the handshake, not the bootstrap.
-    let outcome = std::panic::catch_unwind(|| bounded(std::time::Duration::from_secs(30), move || {
-        let mut vm = bootstrapped();
-        vm.eval_source("(require 'gnutls)").unwrap();
+    // The peer's accept shows the bound cut off the handshake.
+    let outcome = std::panic::catch_unwind(|| bounded(std::time::Duration::from_secs(10), move |mut vm| {
         let _ = vm.eval_source(&format!(r#"(gnutls-boot (make-network-process :name "stall" :host "127.0.0.1" :service {port} :noquery t) 'gnutls-x509pki (list :hostname "localhost"))"#));
     }));
     let message = outcome.expect_err("the stalled handshake finished").downcast::<String>().map(|s| *s).unwrap_or_default();
-    assert!(message.contains("still running after"), "{message}");
+    assert!(message.starts_with("body still running after"), "{message}");
     assert!(reached.try_recv().is_ok(), "the bound ran out before gnutls-boot reached the peer");
 }
 
@@ -332,10 +338,9 @@ fn a_large_echo_completes_every_time() {
     bounded(std::time::Duration::from_secs(240), large_echoes);
 }
 
-fn large_echoes() {
+fn large_echoes(mut vm: Vm) {
     let port = start_server();
-    let mut vm = bootstrapped();
-    vm.eval_source("(progn (require 'gnutls) (setq default-process-coding-system '(utf-8-unix . utf-8-unix)))").unwrap();
+    vm.eval_source("(setq default-process-coding-system '(utf-8-unix . utf-8-unix))").unwrap();
     let ca = fixture("ca.pem").display().to_string();
     for round in 0..20 {
         let case = format!(r#"(let* ((b (get-buffer-create "echo-{round}"))
@@ -360,10 +365,8 @@ fn a_nowait_tls_connection_opens_every_time() {
     bounded(std::time::Duration::from_secs(240), nowait_connections);
 }
 
-fn nowait_connections() {
+fn nowait_connections(mut vm: Vm) {
     let port = start_server();
-    let mut vm = bootstrapped();
-    vm.eval_source("(require 'gnutls)").unwrap();
     let ca = fixture("ca.pem").display().to_string();
     for round in 0..20 {
         let case = format!(r#"(let* ((events nil)
