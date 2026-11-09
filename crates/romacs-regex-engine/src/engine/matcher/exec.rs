@@ -7,7 +7,7 @@ use crate::engine::matcher::fail::{
     MatchScratch, PARITY_POP_BUDGET, check_infinite_loop, get_counter, goto_fail, set_counter,
     set_matcher_overflow,
 };
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 use crate::engine::matcher::route::note_fail_stack_push;
 use crate::engine::matcher::route::set_pike_fallback;
 use crate::engine::matcher::step::{
@@ -197,7 +197,7 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                 resume: FailureResume($resume),
                 input: $input,
             });
-            #[cfg(any(test, feature = "test-hooks"))]
+            #[cfg(test)]
             note_fail_stack_push(frames.len() + undo.len(), d);
         };
     }
@@ -211,7 +211,7 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                 return None;
             }
             undo.push($entry);
-            #[cfg(any(test, feature = "test-hooks"))]
+            #[cfg(test)]
             note_fail_stack_push(frames.len() + undo.len(), d);
         };
     }

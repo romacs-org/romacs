@@ -1,8 +1,24 @@
 //! Tests of the existence DFA (P3.3): the NFA over the rewind view (C2).
 
-use super::*;
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa::class::ClassContext;
+use crate::engine::dfa::filter::{
+    COLD_THRESHOLD, DfaLease, DfaMode, DfaSlot, dfa_stats, prime, reset_dfa_stats, with_cold_path,
+    with_dfa_mode, with_first_step,
+};
+use crate::engine::dfa::lazy::{DfaGaveUp, ExistenceDfa, Exists, MATCH, MEMORY_CAP, SLOW, UNKNOWN};
+use crate::engine::dfa::nfa::{ClosureScratch, DfaIneligible, Nfa, Place, Predicate, kernel_item};
+use crate::engine::matcher::fail::{fail_stack_overflow_free_span, fail_stack_push_sites};
+use crate::engine::matcher::route::matcher_entry_count;
+use crate::engine::matcher::step::re_text_char;
+use crate::engine::matcher::{re_match, re_match_internal};
+use crate::engine::opcode::RegexOp;
+use crate::engine::pattern::{CompiledPattern, MatchRegisters};
+use crate::engine::search::re_search;
+use crate::engine::syntax::{DefaultSyntaxLookup, SyntaxCacheKey, SyntaxLookup};
 
-use crate::engine::{DefaultSyntaxLookup, fail_stack_push_sites, re_match, regex_compile};
+use crate::SyntaxClass;
+use crate::emacs_char;
 
 fn nfa_of(pattern: &str) -> Nfa {
     let compiled = regex_compile(pattern, false, false).expect("pattern compiles");
@@ -228,10 +244,9 @@ fn encode(code: u32) -> Vec<u8> {
 // The lazy DFA (C4)
 // ---------------------------------------------------------------------------
 
-use crate::engine::{
-    MatchRegisters, MatchScratch, re_match_internal, take_fail_stack_probe, take_matcher_overflow,
-    take_pike_fallback,
-};
+use crate::engine::matcher::fail::{MatchScratch, take_matcher_overflow};
+
+use crate::engine::matcher::route::{take_fail_stack_probe, take_pike_fallback};
 
 struct DfaRng(u64);
 
@@ -512,8 +527,6 @@ fn a_full_cache_is_cleared_and_relearned() {
 // ---------------------------------------------------------------------------
 // The candidate filter in `re_search` (C5)
 // ---------------------------------------------------------------------------
-
-use crate::engine::{matcher_entry_count, re_search};
 
 type SearchResult = Option<(usize, Vec<i64>, Vec<i64>)>;
 
@@ -1090,7 +1103,7 @@ fn cached_first_step_keeps_memory_and_give_up_guards() {
 /// every span a text can have: `consumed` is below `usize::MAX`).
 #[test]
 fn the_overflow_free_span_is_the_fail_stack_bound() {
-    use crate::engine::fail_stack_may_overflow_with;
+    use crate::engine::matcher::fail::fail_stack_may_overflow_with;
     for push_sites in [
         0,
         1,

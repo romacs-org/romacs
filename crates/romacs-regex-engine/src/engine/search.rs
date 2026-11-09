@@ -9,8 +9,8 @@ use crate::engine::matcher::fail::{
     MATCHER_OVERFLOWED, MatchScratch, clear_matcher_overflow, fail_stack_overflow_free_span,
     fail_stack_push_sites, matcher_interrupt, matcher_overflow_pending,
 };
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::engine::matcher::route::{LINEAR_SEARCH_COUNT, MATCHER_ENTRY_COUNT};
+#[cfg(test)]
+use crate::engine::matcher::route::MATCHER_ENTRY_COUNT;
 use crate::engine::matcher::route::{force_backtrack, force_linear_search};
 use crate::engine::matcher::{MatchScratchLease, re_match_candidate_in};
 use crate::engine::opcode::{RegexOp, extract_number};
@@ -24,7 +24,7 @@ use regex_automata::Span;
 
 // Test/fuzz-only escape hatch: force `re_search` down the no-fastmap path so
 // equivalence checks can prove search optimizations never change match results.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum SearchOptimizationOverride {
     #[default]
@@ -32,13 +32,13 @@ enum SearchOptimizationOverride {
     Disabled,
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     static SEARCH_OPTIMIZATION_OVERRIDE: std::cell::Cell<SearchOptimizationOverride> =
         const { std::cell::Cell::new(SearchOptimizationOverride::Production) };
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub(crate) fn fastmap_force_disabled() -> bool {
     SEARCH_OPTIMIZATION_OVERRIDE.with(|slot| slot.get() == SearchOptimizationOverride::Disabled)
 }
@@ -48,7 +48,7 @@ pub(crate) fn fastmap_force_disabled() -> bool {
 /// This is the ORACLE for the prefilter differential fuzzer: comparing it
 /// against the normal (prefilter-enabled) search proves the prefilter never
 /// changes match results. The previous policy is restored even if `f` unwinds.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_fastmap_disabled<R>(f: impl FnOnce() -> R) -> R {
     let _guard = crate::tls_scope::TlsScope::new(
         &SEARCH_OPTIMIZATION_OVERRIDE,
@@ -57,7 +57,7 @@ pub fn with_fastmap_disabled<R>(f: impl FnOnce() -> R) -> R {
     f()
 }
 
-#[cfg(not(any(test, feature = "test-hooks", feature = "fuzzing")))]
+#[cfg(not(test))]
 #[inline(always)]
 pub(crate) fn fastmap_force_disabled() -> bool {
     false
@@ -66,7 +66,7 @@ pub(crate) fn fastmap_force_disabled() -> bool {
 /// Build every scanner a search derives lazily from `pattern`, as the first
 /// search long enough to use them would.  The differential checker calls this
 /// so a short generated text still exercises the optimized scans.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn build_search_optimizations(pattern: &CompiledPattern) {
     let _ = pattern.literal_prefilter();
     if let Some(table) = pattern.translate.as_ref() {
@@ -94,14 +94,14 @@ pub(crate) fn regex_knob_on(value: Option<&str>) -> bool {
     )
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     static ANCHOR_ALT_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 
 /// Run `f` with `ROMACS_REGEX_ANCHOR_ALT` forced to `on` on this thread.  It is
 /// read when a pattern compiles, so compile inside `f`.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_anchor_alt<R>(on: bool, f: impl FnOnce() -> R) -> R {
     let _guard = crate::tls_scope::TlsScope::new(&ANCHOR_ALT_OVERRIDE, Some(on));
     f()
@@ -114,7 +114,7 @@ pub fn with_anchor_alt<R>(on: bool, f: impl FnOnce() -> R) -> R {
 /// board A/B (org-editing -1.4% instructions, org-editing-heavy -0.45%, the
 /// census pattern pat-026 1.81M -> 0.20M instructions per search).
 pub fn anchor_alt_enabled() -> bool {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     if let Some(on) = ANCHOR_ALT_OVERRIDE.with(|slot| slot.get()) {
         return on;
     }
@@ -241,8 +241,6 @@ fn linear_search_rest(
     syntax: &dyn SyntaxLookup,
     point: usize,
 ) -> Option<(usize, MatchRegisters)> {
-    #[cfg(any(test, feature = "test-hooks"))]
-    LINEAR_SEARCH_COUNT.with(|c| c.set(c.get() + 1));
     scratch.work_budget = u64::MAX;
     let free_span = fail_stack_overflow_free_span(fail_stack_push_sites(&pattern.buffer));
     // The fastmap may skip a position only where GNU's own scan would: an
@@ -397,11 +395,12 @@ pub fn re_search(
     // fills them only on success, so a failed candidate moves nothing.
     let mut regs = MatchRegisters::default();
     // `ROMACS_REGEX_DFA`: the existence DFA filters the candidates, when on
-    // and usable for this search (see `dfa::DfaLease::acquire`).  Every
+    // and usable for this search (see `dfa::filter::DfaLease::acquire`).  Every
     // candidate of a search stops at most at `max_stop`.
-    let dfa_enabled = dfa::dfa_mode() != dfa::DfaMode::Off && !fastmap_force_disabled();
+    let dfa_enabled =
+        dfa::filter::dfa_mode() != dfa::filter::DfaMode::Off && !fastmap_force_disabled();
     let mut dfa_cold_pending =
-        dfa_enabled && dfa::cold_path_enabled() && !pattern.dfa.initialized();
+        dfa_enabled && dfa::filter::cold_path_enabled() && !pattern.dfa.initialized();
     let dfa_max_stop = if range >= 0 {
         start.saturating_add(range as usize).min(text_len)
     } else {
@@ -410,7 +409,7 @@ pub fn re_search(
     let mut dfa_lease = if !dfa_enabled || dfa_cold_pending {
         None
     } else {
-        dfa::DfaLease::acquire(pattern, syntax, dfa_max_stop)
+        dfa::filter::DfaLease::acquire(pattern, syntax, dfa_max_stop)
     };
     // Never-built successful searches have no lease under the cold path,
     // so they never read the first-step knob. A newly built lease renews
@@ -418,12 +417,12 @@ pub fn re_search(
     let mut dfa_first_step = dfa_lease
         .as_ref()
         .is_some_and(|lease| lease.inline_first_step_enabled());
-    let mut dfa_cold_heat = dfa::ColdSearchHeat::default();
+    let mut dfa_cold_heat = dfa::filter::ColdSearchHeat::default();
     macro_rules! try_candidate {
         ($pos:expr, $stop:expr) => {{
             let found = match dfa_lease.as_mut() {
                 None => {
-                    #[cfg(any(test, feature = "test-hooks"))]
+                    #[cfg(test)]
                     MATCHER_ENTRY_COUNT.with(|c| c.set(c.get() + 1));
                     re_match_candidate_in(
                         scratch, pattern, text, $pos, $stop, syntax, point, &mut regs,
@@ -480,7 +479,7 @@ pub fn re_search(
                         // successful candidates add no slot bookkeeping.
                         let credit = dfa_cold_heat.failure_credit();
                         if credit != 0 {
-                            dfa_lease = dfa::DfaLease::after_cold_failure(
+                            dfa_lease = dfa::filter::DfaLease::after_cold_failure(
                                 pattern,
                                 syntax,
                                 dfa_max_stop,
@@ -961,7 +960,7 @@ pub fn re_search(
     // reaching this epilogue, quit aborts are excluded, and zero-span
     // attempts never marked it.
     if dfa_cold_heat.is_isolated() && result.is_none() && !crate::host::quit_pending() {
-        drop(dfa::DfaLease::after_cold_failure(
+        drop(dfa::filter::DfaLease::after_cold_failure(
             pattern,
             syntax,
             dfa_max_stop,

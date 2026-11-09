@@ -1,4 +1,8 @@
-use super::*;
+use crate::engine::compile::seal::validate_sealed_buffer;
+use crate::engine::matcher::re_match;
+use crate::engine::opcode::{RegexOp, opcode_len, store_number};
+use crate::engine::pattern::CompiledPattern;
+use crate::engine::syntax::DefaultSyntaxLookup;
 use strum::VariantArray;
 
 #[test]

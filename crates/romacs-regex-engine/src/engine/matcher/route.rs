@@ -20,27 +20,27 @@ thread_local! {
     static PIKE_FALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 thread_local! {
     pub static PIKE_FALLBACK_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn pike_fallback_count() -> u64 {
     PIKE_FALLBACK_COUNT.with(|c| c.get())
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 thread_local! {
     /// Matcher entries made by `re_search`'s candidate scans, for tests that
     /// check how many candidates a scan leaves to the matcher.
     pub(crate) static MATCHER_ENTRY_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn matcher_entry_count() -> u64 {
     MATCHER_ENTRY_COUNT.with(|c| c.get())
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 thread_local! {
     /// The deepest fail stack (frames plus undo entries) any backtracker run
     /// reached, and the furthest position at which it pushed, since the last
@@ -50,14 +50,14 @@ thread_local! {
         const { std::cell::Cell::new(FailStackProbe { max_depth: 0, max_push_pos: 0 }) };
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FailStackProbe {
     pub max_depth: usize,
     pub max_push_pos: usize,
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub(crate) fn note_fail_stack_push(depth: usize, d: usize) {
     FAIL_STACK_PROBE.with(|probe| {
         let mut seen = probe.get();
@@ -67,14 +67,14 @@ pub(crate) fn note_fail_stack_push(depth: usize, d: usize) {
     });
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn take_fail_stack_probe() -> FailStackProbe {
     FAIL_STACK_PROBE.with(|probe| probe.replace(FailStackProbe::default()))
 }
 
 pub(crate) fn set_pike_fallback() {
     PIKE_FALLBACK.with(|f| f.set(true));
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     PIKE_FALLBACK_COUNT.with(|c| c.set(c.get() + 1));
 }
 
@@ -83,7 +83,7 @@ pub(crate) fn take_pike_fallback() -> bool {
     PIKE_FALLBACK.with(|f| f.replace(false))
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum RegexEngineOverride {
     #[default]
@@ -95,76 +95,64 @@ pub enum RegexEngineOverride {
     LinearSearch,
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     static REGEX_ENGINE_OVERRIDE: std::cell::Cell<RegexEngineOverride> =
         const { std::cell::Cell::new(RegexEngineOverride::Production) };
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 #[inline]
 pub(crate) fn force_backtrack() -> bool {
     REGEX_ENGINE_OVERRIDE.with(|slot| slot.get() == RegexEngineOverride::Backtracker)
 }
 
-#[cfg(not(any(test, feature = "test-hooks", feature = "fuzzing")))]
+#[cfg(not(test))]
 #[inline]
 pub(crate) fn force_backtrack() -> bool {
     false
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 #[inline]
 pub(crate) fn force_pike() -> bool {
     REGEX_ENGINE_OVERRIDE.with(|slot| slot.get() == RegexEngineOverride::PikeVm)
 }
 
-#[cfg(not(any(test, feature = "test-hooks", feature = "fuzzing")))]
+#[cfg(not(test))]
 #[inline]
 pub(crate) fn force_pike() -> bool {
     false
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 #[inline]
 pub(crate) fn force_linear_search() -> bool {
     REGEX_ENGINE_OVERRIDE.with(|slot| slot.get() == RegexEngineOverride::LinearSearch)
 }
 
-#[cfg(not(any(test, feature = "test-hooks", feature = "fuzzing")))]
+#[cfg(not(test))]
 #[inline]
 pub(crate) fn force_linear_search() -> bool {
     false
 }
 
-#[cfg(any(test, feature = "test-hooks"))]
-thread_local! {
-    /// Forward searches finished by the linear matcher (`linear_search_rest`).
-    pub(crate) static LINEAR_SEARCH_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// Forward searches the linear matcher has finished on this thread.
-#[cfg(any(test, feature = "test-hooks"))]
-pub fn linear_search_count() -> u64 {
-    LINEAR_SEARCH_COUNT.with(|c| c.get())
-}
-
 /// Run `f` with one regex routing policy, restoring the previous policy even
 /// when `f` unwinds.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_regex_engine_override<R>(engine: RegexEngineOverride, f: impl FnOnce() -> R) -> R {
     let _guard = crate::tls_scope::TlsScope::new(&REGEX_ENGINE_OVERRIDE, engine);
     f()
 }
 
 /// Run `f` with the pure backtracker forced (no budget/Pike). Test only.
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn with_backtracker_forced<R>(f: impl FnOnce() -> R) -> R {
     with_regex_engine_override(RegexEngineOverride::Backtracker, f)
 }
 
 /// Run `f` with the Pike VM forced for eligible patterns. Test only.
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn with_pike_forced<R>(f: impl FnOnce() -> R) -> R {
     with_regex_engine_override(RegexEngineOverride::PikeVm, f)
 }

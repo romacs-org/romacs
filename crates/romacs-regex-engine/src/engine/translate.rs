@@ -102,20 +102,18 @@ impl CaseTranslation {
         self.table.as_ref()
     }
 
-    seam! {
-        /// Which characters this translation maps into ASCII, as the matcher
-        /// and the per-character scans read it NOW.
-        ///
-        /// A char-table translation reads its codes below 256 through the byte
-        /// memo, which freezes a slot at first use, and the rest through the wide
-        /// memo, which follows the char-table write tick; the table itself can be
-        /// edited in place.  So the answer holds until the next char-table write:
-        /// it is memoized by the write tick, and every search asks again.  Asking
-        /// fills the ASCII slots of the byte memo.
-        #[inline]
-        fn ascii_preimage(&self) -> AsciiPreimage {
-            self.ascii_preimage_for(CharTableWalk::Allowed)
-        }
+    /// Which characters this translation maps into ASCII, as the matcher
+    /// and the per-character scans read it NOW.
+    ///
+    /// A char-table translation reads its codes below 256 through the byte
+    /// memo, which freezes a slot at first use, and the rest through the wide
+    /// memo, which follows the char-table write tick; the table itself can be
+    /// edited in place.  So the answer holds until the next char-table write:
+    /// it is memoized by the write tick, and every search asks again.  Asking
+    /// fills the ASCII slots of the byte memo.
+    #[inline]
+    pub(crate) fn ascii_preimage(&self) -> AsciiPreimage {
+        self.ascii_preimage_for(CharTableWalk::Allowed)
     }
 
     /// [`Self::ascii_preimage`] for a search that only repays walking the

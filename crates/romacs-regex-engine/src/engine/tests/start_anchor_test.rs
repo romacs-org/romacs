@@ -1,8 +1,12 @@
 //! P3.3 Stage 0 (`ROMACS_REGEX_ANCHOR_ALT`): a pattern whose every
 //! alternative begins with `^` searches line starts only.
 
-use super::*;
-
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa;
+use crate::engine::matcher::route::matcher_entry_count;
+use crate::engine::pattern::MatchRegisters;
+use crate::engine::search::{StartAnchor, re_search, with_anchor_alt, with_fastmap_disabled};
+use crate::engine::syntax::DefaultSyntaxLookup;
 fn anchor_of(pattern: &str) -> StartAnchor {
     let compiled =
         with_anchor_alt(true, || regex_compile(pattern, false, false)).expect("pattern compiles");
@@ -52,7 +56,10 @@ fn start_anchor_is_not_computed_with_the_knob_off() {
 /// (The existence DFA's filter stays off: entries count the scan.)
 #[test]
 fn alternation_anchored_search_tries_line_starts_only() {
-    dfa::with_dfa_mode(dfa::DfaMode::Off, alternation_anchored_search_entries);
+    dfa::filter::with_dfa_mode(
+        dfa::filter::DfaMode::Off,
+        alternation_anchored_search_entries,
+    );
 }
 
 fn alternation_anchored_search_entries() {

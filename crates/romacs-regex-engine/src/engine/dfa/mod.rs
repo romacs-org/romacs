@@ -41,50 +41,10 @@
 //! | `ROMACS_REGEX_DFA_STATS` | unset (default), `1` | Print this thread's [`DfaStats`](filter::DfaStats) on stderr at exit with the filter on. |
 //! | `ROMACS_REGEX_DFA_FIRST_STEP` | `on` (default), `off` | Reject cached prefixes of at most eight bytes inline; verify also checks the predicate against the matcher ([`first_step_enabled`](filter::first_step_enabled)). |
 
-mod class;
-mod filter;
-mod lazy;
-mod nfa;
-
-// What `re_search` and the compiled pattern use.
-pub use self::filter::{ColdSearchHeat, DfaCell, DfaLease, DfaMode, cold_path_enabled, dfa_mode};
-
-#[cfg(any(test, feature = "test-hooks"))]
-pub use self::filter::reset_dfa_stats;
-// The layers, for the test and fuzzing seams.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
-pub use self::{
-    class::{
-        BaseTableView, CharClasses, ClassContext, ClassKey, Facts, MAX_CLASSES, NO_FACTS,
-        TooManyClasses, UNKNOWN_CLASS,
-    },
-    filter::{
-        COLD_THRESHOLD, DfaSlot, DfaStats, LiveDfa, dfa_stats, first_step_enabled, prime,
-        with_cold_path, with_dfa_mode, with_first_step,
-    },
-    lazy::{DfaCounters, DfaGaveUp, ExistenceDfa, Exists, SearchSyntax},
-    nfa::{
-        Assertions, ClosureScratch, DfaIneligible, KernelItem, Nfa, Place, Position, Predicate,
-        dfa_eligibility, kernel_item,
-    },
-};
-
-#[cfg(test)]
-use self::lazy::{MATCH, MEMORY_CAP, SLOW, UNKNOWN};
-#[cfg(test)]
-use crate::SyntaxClass;
-#[cfg(test)]
-use crate::emacs_char;
-#[cfg(test)]
-use crate::engine::matcher::fail::fail_stack_overflow_free_span;
-#[cfg(test)]
-use crate::engine::matcher::step::re_text_char;
-#[cfg(test)]
-use crate::engine::opcode::RegexOp;
-#[cfg(test)]
-use crate::engine::pattern::CompiledPattern;
-#[cfg(test)]
-use crate::engine::syntax::{SyntaxCacheKey, SyntaxLookup};
+pub(crate) mod class;
+pub(crate) mod filter;
+pub(crate) mod lazy;
+pub(crate) mod nfa;
 
 #[cfg(test)]
 // Moved unchanged from romacs-core, which does not run Clippy on its tests.

@@ -5,10 +5,10 @@
 //! GNU: `re_match_2` and the entry of `re_match_2_internal` in
 //! regex-emacs.c.
 
-pub(super) mod exec;
-pub(super) mod fail;
-pub(super) mod route;
-pub(super) mod step;
+pub(crate) mod exec;
+pub(crate) mod fail;
+pub(crate) mod route;
+pub(crate) mod step;
 
 use crate::engine::linear;
 use crate::engine::matcher::exec::re_match_loop;

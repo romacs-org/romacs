@@ -6,23 +6,6 @@
 use crate::engine::opcode::{RegexOp, extract_number, opcode_len, store_number, store_number_u16};
 use crate::engine::pattern::CompiledPattern;
 
-#[cfg(any(test, feature = "test-hooks"))]
-thread_local! {
-    /// Test-only switch to compile WITHOUT the syntax-class fusion peephole,
-    /// so an A/B benchmark can time the exact same pattern fused vs unfused
-    /// interleaved in one process (immune to whole-machine timing noise).
-    static SYNTAX_FUSION_DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Run `f` with the syntax-class fusion peephole disabled (test only).
-#[cfg(any(test, feature = "test-hooks"))]
-pub fn with_syntax_fusion_disabled<R>(f: impl FnOnce() -> R) -> R {
-    SYNTAX_FUSION_DISABLED.with(|flag| flag.set(true));
-    let r = f();
-    SYNTAX_FUSION_DISABLED.with(|flag| flag.set(false));
-    r
-}
-
 /// A fusible alternation branch of the exact 8-byte "triple" shape
 /// `on_failure_jump(+5); syntaxspec(c); jump(->…->END)` that the alternation
 /// compiler emits for a branch whose body is a single positive `\sC` / `\w`.
@@ -229,10 +212,6 @@ fn any_target_inside(bytecode: &[u8], p: usize, region_end: usize) -> bool {
 /// HashMap-keyed position, and the fastmap walk stay valid without
 /// relocation.  See `RegexOp::SyntaxSpecSet` for the correctness argument.
 pub(crate) fn fuse_syntaxspec_alternations(buf: &mut CompiledPattern) {
-    #[cfg(any(test, feature = "test-hooks"))]
-    if SYNTAX_FUSION_DISABLED.with(std::cell::Cell::get) {
-        return;
-    }
     let mut p = 0usize;
     while p < buf.buffer.len() {
         if let Some(run) = detect_fusible_run(&buf.buffer, p)

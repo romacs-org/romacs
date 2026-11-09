@@ -164,7 +164,7 @@ impl ExistenceDfa {
         &self.nfa
     }
 
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     pub fn classes_mut(&mut self) -> &mut CharClasses {
         &mut self.classes
     }
@@ -535,7 +535,7 @@ impl ExistenceDfa {
     }
 
     /// The one-step subset is kept explicit in the cache guard tests.
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     pub fn cached_first_step_dead(
         &self,
         pattern: &CompiledPattern,

@@ -6,8 +6,18 @@
 //! `(and (string-match RE S) (match-data t))` under the standard syntax
 //! table; `tools/regex_oracle.py` records them live.
 
-use super::*;
-
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa;
+use crate::engine::linear;
+use crate::engine::matcher::fail::take_matcher_overflow;
+use crate::engine::matcher::re_match;
+use crate::engine::matcher::route::{
+    RegexEngineOverride, matcher_entry_count, pike_fallback_count, with_backtracker_forced,
+    with_pike_forced, with_regex_engine_override,
+};
+use crate::engine::pattern::{CompiledPattern, MatchRegisters};
+use crate::engine::search::re_search;
+use crate::engine::syntax::DefaultSyntaxLookup;
 fn compile(pattern: &str) -> CompiledPattern {
     regex_compile(pattern, false, false).expect("pattern compiles")
 }
@@ -335,7 +345,7 @@ fn a_search_from_inside_a_character_starts_at_the_next_one() {
 /// find the match after the run.
 #[test]
 fn a_failing_scan_does_linear_anchored_work() {
-    dfa::reset_dfa_stats();
+    dfa::filter::reset_dfa_stats();
     let n = 20_000usize;
     let mut text = "a".repeat(n);
     text.push_str("!aab");
@@ -343,7 +353,7 @@ fn a_failing_scan_does_linear_anchored_work() {
     let entries = matcher_entry_count();
     let (found, overflow) = search_from(&compiled, text.as_bytes(), 0, 0);
     let entries = matcher_entry_count() - entries;
-    let bytes = dfa::dfa_stats().bytes;
+    let bytes = dfa::filter::dfa_stats().bytes;
     assert!(!overflow);
     assert_eq!(found, Some((n + 1, vec![n as i64 + 1, n as i64 + 4])));
     assert!(

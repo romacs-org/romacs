@@ -2,7 +2,16 @@
 //! `SyntaxLookup::table_write_tick`, and `CaseTable`.  New with the
 //! extraction; everything else in `tests/` moved from romacs-core unchanged.
 
-use super::*;
+use crate::CaseTable;
+use crate::SyntaxClass;
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa;
+use crate::engine::matcher::route::with_backtracker_forced;
+use crate::engine::search::re_search;
+use crate::engine::syntax::{
+    DefaultSyntaxLookup, LookupClassKey, SyntaxCacheKey, SyntaxLookup, default_char_has_category,
+};
+use crate::engine::translate::CaseTranslation;
 use crate::host;
 use std::cell::Cell;
 
@@ -14,7 +23,7 @@ fn installed_quit_probe_aborts_a_backtracking_match() {
     let text = b"aaab";
     let run = || {
         with_backtracker_forced(|| {
-            dfa::with_dfa_mode(dfa::DfaMode::Off, || {
+            dfa::filter::with_dfa_mode(dfa::filter::DfaMode::Off, || {
                 re_search(
                     &compiled,
                     text,
@@ -105,13 +114,13 @@ fn dfa_class_memo_follows_the_lookup_table_write_tick() {
     let compiled = regex_compile("\\sw+;", false, false).unwrap();
     let text = b"x;";
     let run = || {
-        dfa::with_dfa_mode(dfa::DfaMode::On, || {
-            dfa::with_cold_path(false, || {
+        dfa::filter::with_dfa_mode(dfa::filter::DfaMode::On, || {
+            dfa::filter::with_cold_path(false, || {
                 re_search(&compiled, text, 0, text.len() as isize, &lookup, 0).map(|(at, _)| at)
             })
         })
     };
-    dfa::prime(&compiled, &lookup).expect("the pattern is DFA-eligible");
+    dfa::filter::prime(&compiled, &lookup).expect("the pattern is DFA-eligible");
     assert_eq!(run(), None, "x is punctuation: no word run");
     lookup.set_x_is_word(true);
     assert_eq!(run(), Some(0), "the memo must not outlive the tick");

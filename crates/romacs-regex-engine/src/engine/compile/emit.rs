@@ -14,36 +14,33 @@ use crate::engine::search::StartAnchor;
 use rustc_hash::FxHashMap;
 
 impl CompiledPattern {
-    seam! {
-        // Not a `Default`: an empty pattern is only a compiler starting point.
-        #[allow(clippy::new_without_default)]
-        fn new() -> Self {
-            Self {
-                buffer: Vec::with_capacity(256),
-                re_nsub: 0,
-                fastmap: [false; 256],
-                fastmap_translated: [false; 256],
-                fastmap_accurate: false,
-                sparse_ascii_fastmap: std::cell::OnceCell::new(),
-                folded_scans: FoldedScans::default(),
-                posix: false,
-                multibyte: true,
-                target_multibyte: true,
-                can_be_null: false,
-                uses_syntax: false,
-                used_syntax: false,
-                translate: None,
-                multibyte_charsets: FxHashMap::default(),
-                charset_class_bits: FxHashMap::default(),
-                has_nongreedy_optional: false,
-                pike_eligible: false,
-                linear: linear::Linear::Ineligible,
-                buffer_sealed: false,
-                rewind: RewindView::Buffer,
-                prefilter: std::cell::OnceCell::new(),
-                start_anchor: StartAnchor::None,
-                dfa: dfa::DfaCell::default(),
-            }
+    // Not a `Default`: an empty pattern is only a compiler starting point.
+    pub(crate) fn new() -> Self {
+        Self {
+            buffer: Vec::with_capacity(256),
+            re_nsub: 0,
+            fastmap: [false; 256],
+            fastmap_translated: [false; 256],
+            fastmap_accurate: false,
+            sparse_ascii_fastmap: std::cell::OnceCell::new(),
+            folded_scans: FoldedScans::default(),
+            posix: false,
+            multibyte: true,
+            target_multibyte: true,
+            can_be_null: false,
+            uses_syntax: false,
+            used_syntax: false,
+            translate: None,
+            multibyte_charsets: FxHashMap::default(),
+            charset_class_bits: FxHashMap::default(),
+            has_nongreedy_optional: false,
+            pike_eligible: false,
+            linear: linear::Linear::Ineligible,
+            buffer_sealed: false,
+            rewind: RewindView::Buffer,
+            prefilter: std::cell::OnceCell::new(),
+            start_anchor: StartAnchor::None,
+            dfa: dfa::filter::DfaCell::default(),
         }
     }
 

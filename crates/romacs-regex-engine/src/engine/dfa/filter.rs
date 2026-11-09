@@ -42,14 +42,14 @@ impl DfaMode {
     }
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     static DFA_MODE_OVERRIDE: std::cell::Cell<Option<DfaMode>> =
         const { std::cell::Cell::new(None) };
 }
 
 /// Run `f` with `ROMACS_REGEX_DFA` forced to `mode` on this thread.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_dfa_mode<R>(mode: DfaMode, f: impl FnOnce() -> R) -> R {
     struct Guard(Option<DfaMode>);
     impl Drop for Guard {
@@ -61,7 +61,7 @@ pub fn with_dfa_mode<R>(mode: DfaMode, f: impl FnOnce() -> R) -> R {
     f()
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     // A test-only knob override, not a cache of Lisp state.
     static DFA_COLD_OVERRIDE: std::cell::Cell<Option<bool>> =
@@ -69,7 +69,7 @@ thread_local! {
 }
 
 /// Run `f` with the cold-path knob forced to `on` on this thread.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_cold_path<R>(on: bool, f: impl FnOnce() -> R) -> R {
     struct Guard(Option<bool>);
     impl Drop for Guard {
@@ -92,7 +92,7 @@ pub fn with_cold_path<R>(on: bool, f: impl FnOnce() -> R) -> R {
 /// process.
 #[inline]
 pub fn cold_path_enabled() -> bool {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     if let Some(on) = DFA_COLD_OVERRIDE.with(|slot| slot.get()) {
         return on;
     }
@@ -109,7 +109,7 @@ pub fn cold_path_enabled() -> bool {
 /// The `ROMACS_REGEX_DFA` mode, read once per process.
 #[inline]
 pub fn dfa_mode() -> DfaMode {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     if let Some(mode) = DFA_MODE_OVERRIDE.with(|slot| slot.get()) {
         return mode;
     }
@@ -135,7 +135,7 @@ fn read_dfa_mode() -> DfaMode {
     mode
 }
 
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 thread_local! {
     // A test-only knob override; the runtime has no additional TLS cache.
     static DFA_FIRST_STEP_OVERRIDE: std::cell::Cell<Option<bool>> =
@@ -143,7 +143,7 @@ thread_local! {
 }
 
 /// Run `f` with the cached first-step knob forced to `on` on this thread.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn with_first_step<R>(on: bool, f: impl FnOnce() -> R) -> R {
     struct Guard(Option<bool>);
     impl Drop for Guard {
@@ -159,7 +159,7 @@ pub fn with_first_step<R>(on: bool, f: impl FnOnce() -> R) -> R {
 /// transition within an eight-byte cached prefix before the general loop.
 #[inline]
 pub fn first_step_enabled() -> bool {
-    #[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+    #[cfg(test)]
     if let Some(on) = DFA_FIRST_STEP_OVERRIDE.with(|slot| slot.get()) {
         return on;
     }
@@ -174,15 +174,14 @@ pub fn first_step_enabled() -> bool {
 }
 
 /// Whether the filter keeps its counters: under `ROMACS_REGEX_DFA_STATS=1`,
-/// in verify mode (its contradicted verdicts are counted), and in tests (a
-/// host's, through `test-hooks`, as well as this crate's).
+/// in verify mode (its contradicted verdicts are counted), and in this
+/// crate's tests.
 /// Otherwise a search pays for none of them.
 static STATS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[inline]
 fn stats_on() -> bool {
-    cfg!(any(test, feature = "test-hooks", feature = "fuzzing"))
-        || STATS_ON.load(std::sync::atomic::Ordering::Relaxed)
+    cfg!(test) || STATS_ON.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Counters of the candidate filter on this thread (the regexp engine runs
@@ -266,13 +265,13 @@ fn stat(update: impl FnOnce(&mut DfaStats)) {
 }
 
 /// This thread's filter counters.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn dfa_stats() -> DfaStats {
     STATS.with(|cell| *cell.borrow())
 }
 
 /// Reset this thread's filter counters (tests).
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(test)]
 pub fn reset_dfa_stats() {
     STATS.with(|cell| *cell.borrow_mut() = DfaStats::default());
 }
@@ -384,7 +383,7 @@ impl Clone for DfaCell {
 
 impl DfaCell {
     /// The slot, for tests.
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     pub fn slot(&self) -> std::cell::Ref<'_, DfaSlot> {
         self.slot.borrow()
     }
@@ -502,7 +501,7 @@ fn classic_candidate(
     point: usize,
     regs: &mut MatchRegisters,
 ) -> Option<usize> {
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     crate::engine::matcher::route::MATCHER_ENTRY_COUNT.with(|c| c.set(c.get() + 1));
     re_match_candidate_in(scratch, pattern, text, pos, stop, syntax, point, regs)
 }
@@ -794,7 +793,7 @@ impl<'p> DfaLease<'p> {
                             stop,
                             "existence DFA rejected a candidate the matcher matched"
                         );
-                        #[cfg(any(test, feature = "test-hooks"))]
+                        #[cfg(test)]
                         panic!("ROMACS_REGEX_DFA=verify: a rejected candidate matched at {pos}");
                     }
                     Exists::Yes if found.is_none() && !overflow => {
@@ -805,7 +804,7 @@ impl<'p> DfaLease<'p> {
                             stop,
                             "existence DFA accepted a candidate the matcher failed"
                         );
-                        #[cfg(any(test, feature = "test-hooks"))]
+                        #[cfg(test)]
                         panic!("ROMACS_REGEX_DFA=verify: an accepted candidate failed at {pos}");
                     }
                     _ => {}
@@ -861,7 +860,7 @@ impl<'p> DfaLease<'p> {
 
 /// Build `pattern`'s DFA now, skipping the cold phase, so a short
 /// differential case exercises the filter.
-#[cfg(any(test, feature = "test-hooks", feature = "fuzzing"))]
+#[cfg(test)]
 pub fn prime(pattern: &CompiledPattern, syntax: &dyn SyntaxLookup) -> Result<(), DfaIneligible> {
     let nfa = Nfa::build(pattern)?;
     let mut dfa = ExistenceDfa::new(nfa);

@@ -26,7 +26,7 @@ pub enum SyntaxCacheKey {
     /// syntax-table mutation epoch.  Opaque to the engine.
     Table { id: usize, epoch: u64 },
     /// Identity supplied by a Rust-owned synthetic lookup, with no Lisp object.
-    #[cfg(any(test, feature = "test-hooks"))]
+    #[cfg(test)]
     External { id: usize, epoch: u64 },
 }
 

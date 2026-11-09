@@ -4,10 +4,10 @@
 //! `at_begline_loc_p` and `at_endline_loc_p`.  Bracket expressions,
 //! repetition and buffer editing live in the submodules.
 
-pub(super) mod charset;
-pub(super) mod emit;
-pub(super) mod repeat;
-pub(super) mod seal;
+pub(crate) mod charset;
+pub(crate) mod emit;
+pub(crate) mod repeat;
+pub(crate) mod seal;
 
 use crate::case_table::EmacsText;
 use crate::engine::class::{regex_char_to_unibyte, regex_unibyte_to_char};

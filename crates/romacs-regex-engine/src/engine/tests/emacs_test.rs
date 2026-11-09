@@ -1,5 +1,15 @@
-use super::*;
-
+use crate::engine::compile::{RegexCompileError, regex_compile};
+use crate::engine::fastmap::recompute_fastmap;
+use crate::engine::matcher::re_match;
+use crate::engine::matcher::route::{
+    RegexEngineOverride, force_backtrack, force_pike, pike_fallback_count,
+    with_regex_engine_override,
+};
+use crate::engine::opcode::RegexOp;
+use crate::engine::optimize::pattern_max_match_chars;
+use crate::engine::pattern::{CompiledPattern, MatchRegisters, RewindView};
+use crate::engine::search::{fastmap_force_disabled, re_search, with_fastmap_disabled};
+use crate::engine::syntax::{DefaultSyntaxLookup, SyntaxLookup};
 // Compile + search, and compile + match, in one call.
 
 /// Compile a pattern and search for it in text.
