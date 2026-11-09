@@ -1419,9 +1419,8 @@ mod leaf {
         }
         pub fn symbol_name_value(&mut self, symbol: Value) -> super::Out {
             if let Some(&name) = self.vm.permanent_symbol_names.get(&symbol.0) { return Ok(name); }
-            if let Ok(slot) = self.symbol_slot(symbol) {
-                if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
-            }
+            if let Ok(slot) = self.symbol_slot(symbol)
+                && let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             let name = self.symbol_name(symbol)?;
             let value = match crate::symkey::to_internal(&name) {
                 Some(internal) => self.make_string(internal, true),
