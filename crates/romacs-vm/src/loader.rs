@@ -838,8 +838,11 @@ impl Vm {
         self.assign_variable(slot, history)
     }
     /// fns.c Frequire: the file's dependency is recorded even when FEATURE
-    /// is present, once per file, and only while a file loads or reads.
+    /// is present, once per file, and only while a file loads or reads.  A
+    /// `require' run by a macro's expansion, as `eval-when-compile' runs it,
+    /// is no dependency of the file: GNU's `.elc' does not make that call.
     fn attach_require(&mut self, feature: Value) -> Result<()> {
+        if !self.expanding.is_empty() { return Ok(()); }
         let require = self.intern("require");
         let (progress, history) = (self.slot("load-in-progress"), self.slot("current-load-list"));
         let mut from_file = self.variable_value(progress)? != Value::NIL;

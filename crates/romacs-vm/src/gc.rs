@@ -128,9 +128,9 @@ romacs_snapshot::snapshot_struct!(CollectionLog { records, dropped, explicit });
 
 /// What a collection does, in order.
 #[derive(Clone, Copy)]
-pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep, Shrink, Settle, Rewrite, Trim }
+pub(crate) enum Phase { Setup, Roots, Mark, Weak, Retire, Census, Obarray, Sweep, Shrink, Settle, Rewrite }
 /// The names `romacs--gc-phases' answers, by `Phase'.
-const PHASES: [&str; 12] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite", "trim"];
+const PHASES: [&str; 11] = ["setup", "roots", "mark", "weak", "retire", "census", "obarray", "sweep", "shrink", "settle", "rewrite"];
 /// Where the last completed collection's time went, in nanoseconds by
 /// `Phase': zero in a world build, whose heap never depends on a clock.
 #[derive(Clone, Copy, Debug, Default)]
@@ -1057,8 +1057,7 @@ impl Vm {
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
         let local_binding = self.slot_set(self.local_binding_slots.iter());
         lap.lap(&mut self.gc_times, Phase::Setup);
-        // A key poll needs the host, so an idle collection marks on this thread.
-        let n = gc_mark::threads(self.gc_stress.threads, until_key);
+        let n = gc_mark::threads(self.gc_stress.threads);
         let Some(mut marked) = self.mark_heap(roots, &in_obarray, &local_binding, until_key, n, &mut lap) else { return false };
         if self.gc_stress.verify {
             if n > 1 {
@@ -1383,8 +1382,8 @@ impl Vm {
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
     }
     /// Mark from ROOTS and everything the VM holds, on N threads: what it
-    /// reached, or None when a key press ended it (UNTIL_KEY), with the marks
-    /// gone. Writes nothing but colours and its own state.
+    /// reached, or None when a key press ended it (UNTIL_KEY), its marks left
+    /// for the next mark to clear. Writes nothing but colours and its own state.
     fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], local_binding: &[bool], until_key: bool, n: usize, lap: &mut Lap) -> Option<Marked> {
         let keep = |v: &Value| traced(*v, in_obarray);
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
@@ -1921,14 +1920,17 @@ mod tests {
     }
 
     /// A burst swept while its last entry survives, then released: tables
-    /// shrink back whatever the burst's size.
+    /// shrink back whatever the burst's size. Each burst is past what a table
+    /// that took its reservation keeps for the next collection's allocations
+    /// (`Table::shrink'), which is the path of a process with no address-space
+    /// limit, a session's; one with a limit takes the other.
     #[test]
     fn a_collapsed_burst_leaves_no_capacity_behind() {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         vm.set_gc_verify(false);
         let mut after = vec![];
-        for n in [40_000, 80_000, 160_000] {
+        for n in [160_000, 320_000, 640_000] {
             let list = conses(&mut vm, n);
             let mut roots = [list[n as usize - 1]];
             vm.collect(&mut roots);

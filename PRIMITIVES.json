@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9f503cbc82aa23057e588e0e6bba97e640fa11a929df23a4073094cfcee2e71c",
+  "source_fingerprint": "a5bb8e82a4b6f6f06f0ded4010ab592a2151d8b278895f7187f0d62c010e4d29",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1439,
-  "parsed_vm2_only": 1439
+  "parsed_total": 1440,
+  "parsed_vm2_only": 1440
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -637,7 +637,7 @@
   "byte-code-function-p": {
    "name": "byte-code-function-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:51"
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:59"
   },
   "byte-to-position": {
    "name": "byte-to-position",
@@ -3474,6 +3474,11 @@
    "variant": "Primitive::ModifySyntaxEntry",
    "registered_at": "crates/romacs-vm/src/lib.rs:795"
   },
+  "module-function-p": {
+   "name": "module-function-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:49"
+  },
   "move-overlay": {
    "name": "move-overlay",
    "implementation": "vm2",
@@ -3510,7 +3515,7 @@
   "native-comp-available-p": {
    "name": "native-comp-available-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/symbol.rs:66"
   },
   "native-comp-function-p": {
    "name": "native-comp-function-p",

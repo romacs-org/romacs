@@ -48,12 +48,13 @@ pub fn forbid_threads() {
     FORBIDDEN.store(true, Ordering::Release);
 }
 
-/// The threads a collection uses, ASKED being a test mode's (0: none): one
-/// where it polls for a key (ALONE), which needs the host, in a build, in a
-/// process that may fork, and in a builder, whose pool would land in the heap
-/// that becomes its image.
-pub(super) fn threads(asked: usize, alone: bool) -> usize {
-    if alone || crate::host::mode() != crate::host::Mode::Off || FORBIDDEN.load(Ordering::Acquire) || crate::world::arena::heap_is_image() {
+/// The threads a collection uses, ASKED being a test mode's (0: none): one in
+/// a build, in a process that may fork, and in a builder, whose pool would
+/// land in the heap that becomes its image. An idle collection's look for a
+/// key stays on the calling thread, which holds the host; the others stop
+/// when it finds one.
+pub(super) fn threads(asked: usize) -> usize {
+    if crate::host::mode() != crate::host::Mode::Off || FORBIDDEN.load(Ordering::Acquire) || crate::world::arena::heap_is_image() {
         return 1;
     }
     match asked {
@@ -89,6 +90,18 @@ pub(crate) fn dropping() -> bool {
 fn undertaker() -> &'static rayon::ThreadPool {
     static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
     POOL.get_or_init(|| threads_named("romacs-gc-graves", 1))
+}
+
+/// Give back what an idle collection freed: behind its graves on the thread
+/// that drops them, so that their storage is free by then and nobody waits.
+/// Where a collection has no threads, here.
+pub(super) fn trim_after_graves(asked: usize) {
+    if threads(asked) == 1 { return crate::world::arena::trim(); }
+    undertaker().spawn(|| {
+        crate::world::arena::trim();
+        #[cfg(test)]
+        test::TRIMS.fetch_add(1, Ordering::AcqRel);
+    });
 }
 
 fn threads_named(name: &'static str, n: usize) -> rayon::ThreadPool {
@@ -279,7 +292,6 @@ struct Leaving<'a>(&'a Marking);
 
 impl Drop for Leaving<'_> {
     fn drop(&mut self) {
-        while let Some(work) = self.0.take() { drop((work, Holding(self.0))); }
         self.0.stop.store(true, Ordering::Release);
         self.0.wake_parked();
     }
@@ -521,23 +533,27 @@ impl Marking {
     fn serve(&self, view: &MarkView<'_>) {
         let mut w = Worker::default();
         let mut waits = 0;
-        loop {
-            if let Some(work) = self.take() {
-                let holding = Holding(self);
-                #[cfg(test)]
-                if self.worker_panics.swap(false, Ordering::AcqRel) { test::worker_panics(); }
-                let _ = self.adopt(view, &mut w, work);
-                self.drain(view, &mut w, usize::MAX);
-                self.hand_over(&mut w);
-                // Before it ends: the coordinator reads them once none is held.
-                self.census.lock().unwrap().add(&std::mem::take(&mut w.census));
-                drop(holding);
-                waits = 0;
+        while !self.stop.load(Ordering::Acquire) {
+            let Some(work) = self.take() else {
+                self.wait(&mut waits, || !self.queue.is_empty());
                 continue;
-            }
-            if self.stop.load(Ordering::Acquire) { return; }
-            self.wait(&mut waits, || !self.queue.is_empty());
+            };
+            let holding = Holding(self);
+            #[cfg(test)]
+            if self.worker_panics.swap(false, Ordering::AcqRel) { test::worker_panics(); }
+            let _ = self.adopt(view, &mut w, work);
+            self.drain_until_stopped(view, &mut w);
+            self.hand_over(&mut w);
+            // Before it ends: the coordinator reads them once none is held.
+            self.census.lock().unwrap().add(&std::mem::take(&mut w.census));
+            drop(holding);
+            waits = 0;
         }
+    }
+    /// All of W's work, or as far as a stop: one before the work is done is a
+    /// key press, the mark is not wanted, and a long list must not hold it up.
+    fn drain_until_stopped(&self, view: &MarkView<'_>, w: &mut Worker) {
+        while self.drain(view, w, CHUNK) == 0 && !self.stop.load(Ordering::Relaxed) {}
     }
     /// Trace all there is, the coordinator's part, running SERIAL on each
     /// entry handed to it, and asking KEY after each POLL units of its work.
@@ -563,6 +579,8 @@ impl Marking {
                 // Finished, and a hand-over comes before its chunk's end, so
                 // what is in the queue now is all there will be.
                 if !handed && self.drained() && self.serial.lock().unwrap().is_empty() { return true; }
+                // A key press is looked for while the other threads work too.
+                if self.n > 1 && key() { return false; }
                 // What it waits for: a chunk, a hand-over, or the last chunk's end.
                 self.wait(&mut waits, || !self.queue.is_empty() || !self.serial.lock().unwrap().is_empty() || self.drained());
                 continue;
@@ -843,6 +861,8 @@ pub(crate) mod test {
     /// The dropper waits while this is set, having counted the drops begun.
     pub(super) static SLOW_DROPS: AtomicBool = AtomicBool::new(false);
     pub(super) static DROPS_STARTED: AtomicUsize = AtomicUsize::new(0);
+    /// The trims the dropper has finished.
+    pub(super) static TRIMS: AtomicUsize = AtomicUsize::new(0);
     /// Which thread a planted worker panic happened on.
     pub(super) static PANICKED_ON: Mutex<Option<String>> = Mutex::new(None);
     /// One test at a time of those that set the statics above.
@@ -889,8 +909,7 @@ mod tests {
         let in_obarray = vec![false; vm.slots.len()];
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
-        // SAFETY: the tables are left alone until the marking is dropped.
-        let marking = unsafe { Marking::new(&mut vm, 1) };
+        let marking = marking_of(&mut vm, 1);
         let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
         let mut own = Worker::default();
         own.serial.push(first);
@@ -903,6 +922,87 @@ mod tests {
         let mut seen = Vec::new();
         assert!(marking.round(&view, &mut own, usize::MAX, &mut |v, _| seen.push(v), &mut || false));
         assert_eq!(seen, [first, second], "every entry handed over reached the coordinator");
+    }
+
+    /// A marking of VM's tables for a test that leaves them to it.
+    fn marking_of(vm: &mut Vm, n: usize) -> Marking {
+        // SAFETY: each test leaves the tables alone until the marking is dropped.
+        unsafe { Marking::new(vm, n) }
+    }
+
+    /// A stop ends a thread's walk down a long list at its next chunk.
+    #[test]
+    fn a_stop_ends_a_threads_walk_at_its_next_chunk() {
+        const LENGTH: usize = 200_000;
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        let list = vm.eval_source_raw(&format!("(setq pk-kept (make-list {LENGTH} 0))")).unwrap();
+        let in_obarray = vec![false; vm.slots.len()];
+        let local_binding = vec![false; vm.slots.len()];
+        let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
+        let marking = marking_of(&mut vm, 2);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        let mut w = Worker::default();
+        w.stack.push(list);
+        marking.stop.store(true, Ordering::Release);
+        marking.drain_until_stopped(&view, &mut w);
+        let marked = (0..vm.conses.len()).filter(|&i| vm.conses.marked(i)).count();
+        assert!(marked <= 2 * CHUNK, "{marked} conses marked past a stop");
+    }
+
+    /// The looking thread finds a key press while it only waits for the
+    /// others, with work still out; it would otherwise wait for them all.
+    #[test]
+    fn a_key_press_is_found_while_waiting_for_the_other_threads() {
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        let in_obarray = vec![false; vm.slots.len()];
+        let local_binding = vec![false; vm.slots.len()];
+        let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
+        let marking = marking_of(&mut vm, 2);
+        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
+        marking.outstanding.fetch_add(1, Ordering::AcqRel);
+        let (ended, wait) = std::sync::mpsc::channel::<()>();
+        let found = std::thread::scope(|scope| {
+            // What a mark that never looked would finish on, to say so.
+            let outstanding = &marking.outstanding;
+            scope.spawn(move || {
+                let _ = wait.recv_timeout(Duration::from_secs(5));
+                outstanding.fetch_sub(1, Ordering::AcqRel);
+            });
+            let mut own = Worker::default();
+            let found = !marking.round(&view, &mut own, usize::MAX, &mut |_, _| {}, &mut || true);
+            let _ = ended.send(());
+            found
+        });
+        assert!(found, "the mark ended without a look for the key");
+    }
+
+    /// An idle collection's trim waits behind its graves: their storage is what
+    /// it gives back, and a trim that ran first would find it still held.
+    #[test]
+    fn an_idle_collections_trim_follows_its_graves() {
+        let _alone = test::alone();
+        let mut vm = Vm::new();
+        vm.set_gc_stress(0);
+        vm.set_gc_verify(false);
+        vm.set_gc_threads(4);
+        vm.eval_source_raw("(dotimes (_ 2000) (make-string 64 ?x))").unwrap();
+        let settle = |done: &dyn Fn() -> bool| {
+            let start = std::time::Instant::now();
+            while !done() && start.elapsed() < Duration::from_secs(20) { std::thread::yield_now(); }
+            done()
+        };
+        test::DROPS_STARTED.store(0, Ordering::Release);
+        test::SLOW_DROPS.store(true, Ordering::Release);
+        let before = test::TRIMS.load(Ordering::Acquire);
+        let collected = vm.collect_garbage_until_key();
+        let dropping = settle(&|| test::DROPS_STARTED.load(Ordering::Acquire) > 0);
+        let early = test::TRIMS.load(Ordering::Acquire);
+        test::SLOW_DROPS.store(false, Ordering::Release);
+        assert!(collected && dropping, "no graves went to the dropper");
+        assert_eq!(early, before, "the trim ran ahead of the graves");
+        assert!(settle(&|| test::TRIMS.load(Ordering::Acquire) > before), "no trim followed the graves");
     }
 
     /// Every kind the collector knows, reachable through the ones workers
@@ -1266,8 +1366,7 @@ mod tests {
         let in_obarray = vec![false; vm.slots.len()];
         let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
-        // SAFETY: the tables are left alone until the marking is dropped.
-        let marking = unsafe { Marking::new(&mut vm, 1) };
+        let marking = marking_of(&mut vm, 1);
         let view = vm.mark_view(&in_obarray, &local_binding, &code_marks);
         let mut own = Worker::default();
         own.code = (0..vm.functions.len()).collect();

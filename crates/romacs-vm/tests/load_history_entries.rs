@@ -55,3 +55,28 @@ fn a_load_records_what_gnu_records() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(actual.trim_matches('"').replace("\\\"", "\""), expected);
 }
+
+/// Romacs loads source where GNU loads `.elc`: a `require` an expansion runs
+/// is not the file's (loadhist-tests-file-requires), and one `eval-and-compile`
+/// keeps is.
+#[test]
+fn a_compile_time_require_is_not_a_dependency() {
+    let dir = std::env::temp_dir().join(format!("romacs-load-history-compile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = std::fs::canonicalize(&dir).unwrap().join("rt-lhe-compile.el");
+    std::fs::write(&path, ";;; -*- lexical-binding: t -*-
+(defmacro lhe-now (&rest body) (eval (cons 'progn body) t) nil)
+(lhe-now (require 'lhe-dep-a))
+(require 'lhe-dep-b)
+").unwrap();
+    let file = path.to_str().unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.eval_source("(progn (provide 'lhe-dep-a) (provide 'lhe-dep-b))").unwrap();
+    vm.load_file(&path).unwrap();
+    let requires = vm.eval_source(&format!(
+        "(let ((out nil)) (dolist (x (cdr (assoc {file:?} load-history)) (nreverse out)) (if (eq (car-safe x) 'require) (setq out (cons (cdr x) out)))))"))
+        .and_then(|v| v.display()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(requires, "(lhe-dep-b)");
+}

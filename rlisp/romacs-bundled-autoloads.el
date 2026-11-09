@@ -522,6 +522,11 @@ a value in `ivy-re-builders-alist'.
 (register-definition-prefixes "romacs-orderless" '("orderless-"))
 
 
+;;; Generated autoloads from romacs-package.el
+
+(register-definition-prefixes "romacs-package" '("romacs-package--"))
+
+
 ;;; Generated autoloads from romacs-pgtk.el
 
 (register-definition-prefixes "romacs-pgtk" '("pgtk-" "romacs-pgtk--" "x-g"))
