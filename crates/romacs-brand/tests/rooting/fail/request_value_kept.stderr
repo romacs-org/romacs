@@ -15,9 +15,9 @@ help: the trait `romacs_brand::Plain` is not implemented for `Word`
             (A, B)
             (A, B, C)
             (A, B, C, D)
+            Arc<T>
             Box<T>
             Option<T>
-            Result<T, E>
           and $N others
 note: required by a bound in `standin::request`
  --> tests/rooting/fail/../standin.rs

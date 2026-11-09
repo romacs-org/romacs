@@ -21,21 +21,24 @@
 //! re-reads the previous definition from that symbol property when it undoes.
 //!
 //! Every Value retained across the load is collector-visible: the queue lives
-//! in the hidden variable `#:vm2-autoload-queue`, the outer queue, FUNDEF and
-//! the saved match data are held as dynamic-binding records of hidden
-//! variables (the same rooting `load_file` uses for `load-file-name`), so a
-//! collection inside the load traces and forwards them all.
+//! in the hidden variable `#:vm2-autoload-queue`, the outer queue in its binding
+//! record, FUNDEF and the saved match data in root frames, so a collection inside
+//! the load traces and forwards them all.
 use super::*;
+use crate::brand::{Gc, Mx};
+use crate::gc::RootFrame;
 
 pub(super) const QUEUE: &str = "#:vm2-autoload-queue";
-const PENDING: &str = "#:vm2-autoload-fundef";
-const MATCH: &str = "#:vm2-autoload-match-data";
+/// `Vm::autoload_args`'s frame: the arguments, rooted across the load, then the
+/// file and at last the value.
+const FUNDEF: usize = 0;
+const FUNNAME: usize = 1;
+const MACRO_ONLY: usize = 2;
+const OUT: usize = 3;
 
 impl Vm {
     pub(super) fn initialize_autoload(&mut self) {
-        for name in [QUEUE, PENDING, MATCH] {
-            self.declare_special_raw(name, Value::NIL);
-        }
+        self.declare_special_raw(QUEUE, Value::NIL);
     }
     fn symbol_named(&self, v: Value, name: &str) -> bool {
         v.tag() == 7
@@ -99,21 +102,41 @@ impl Vm {
         }
         Ok(v)
     }
-    /// GNU `Fautoload_do_load (FUNDEF, FUNNAME, MACRO-ONLY)`.
+    /// `autoload_do_load`'s frame.
+    pub(crate) fn autoload_args(&mut self, fundef: Value, funname: Value, macro_only: Value) -> RootFrame {
+        self.root_frame(&[fundef, funname, macro_only, Value::NIL])
+    }
+    /// `do_load`'s OUTCOME, and FRAME released: the value it left there.
+    pub(crate) fn autoload_result(&mut self, frame: RootFrame, outcome: Result<()>) -> Result<Value> {
+        let [_, _, _, value] = self.release_frame(frame);
+        outcome.map(|()| value)
+    }
+    /// GNU `Fautoload_do_load (FUNDEF, FUNNAME, MACRO-ONLY)`, for a caller not
+    /// yet converted, which keeps its own Values rooted across it.
     pub(super) fn autoload_do_load(&mut self, fundef: Value, funname: Value, macro_only: Value) -> Result<Value> {
+        let args = self.autoload_args(fundef, funname, macro_only);
+        let outcome = threaded::toplevel(self, &args, |mut m, gc, args| do_load(&mut m, gc, args));
+        self.autoload_result(args, outcome)
+    }
+    /// `Fautoload_do_load` up to its load: whether a load's errors are ignored,
+    /// with the file to load in the frame, or None and the value there.
+    fn autoload_prepared(&mut self, args: &RootFrame) -> Result<Option<bool>> {
+        let (fundef, funname, macro_only) = (self.rooted(args, FUNDEF), self.rooted(args, FUNNAME), self.rooted(args, MACRO_ONLY));
         if !self.autoload_object(fundef) {
-            return Ok(fundef);
+            self.set_rooted(args, OUT, fundef);
+            return Ok(None);
         }
         let kind = match self.autoload_type(fundef) {
             Ok(kind) => kind,
-            Err(e) => {
+            Err(error) => {
                 let listp = self.intern("listp");
-                return Err(self.signal_error("wrong-type-argument", &[listp, fundef], e));
+                return Err(self.signal_error("wrong-type-argument", &[listp, fundef], error));
             }
         };
         let is_macro = kind == Value::TRUE || self.symbol_named(kind, "macro");
         if self.symbol_named(macro_only, "macro") && !is_macro {
-            return Ok(fundef);
+            self.set_rooted(args, OUT, fundef);
+            return Ok(None);
         }
         // `will_dump_p ()' is never true for a VM2 session: no dump exists.
         if !(funname == Value::NIL || funname == Value::TRUE || (funname.tag() == 7 && funname != Value::UNBOUND)) {
@@ -121,28 +144,27 @@ impl Vm {
             return Err(self.signal_error("wrong-type-argument", &[symbolp, funname], "wrong type argument: symbolp".into()));
         }
         // A best-effort load (MACRO-ONLY on a non-macro) ignores load errors.
-        let ignore_errors = if is_macro { Value::NIL } else { macro_only };
+        let ignore_errors = !is_macro && macro_only != Value::NIL;
         let file = match self.autoload_cdr(fundef).and_then(|d| self.autoload_car(d)) {
             Ok(file) => file,
-            Err(e) => {
+            Err(error) => {
                 let listp = self.intern("listp");
-                return Err(self.signal_error("wrong-type-argument", &[listp, fundef], e));
+                return Err(self.signal_error("wrong-type-argument", &[listp, fundef], error));
             }
         };
         if self.loader.recording.is_some() && let Some(name) = self.source_string_if(file).map(str::to_owned) {
-            self.note_init_load(crate::world::layer::Kind::Autoload, name, None, ignore_errors != Value::NIL);
+            self.note_init_load(crate::world::layer::Kind::Autoload, name, None, ignore_errors);
         }
-        // Root FUNDEF for the duration of the load; it is compared afterwards.
-        let pending = self.slot(PENDING);
-        let mark = self.dynamic.len();
-        let buffer = self.slots[self.buffer_slot].value;
-        self.dynamic.push((pending, self.slots[pending].value, buffer, false));
-        self.slots[pending].value = fundef;
-        let loaded = self.load_with_autoload_queue(file, ignore_errors != Value::NIL, true);
-        let fundef = self.slots[pending].value;
-        let loaded = self.unbind_after(self.dynamic.len() - mark, loaded)?;
-        if funname == Value::NIL || ignore_errors != Value::NIL {
-            return Ok(Value::NIL);
+        self.set_rooted(args, OUT, file);
+        Ok(Some(ignore_errors))
+    }
+    /// `Fautoload_do_load` after its load of the file LOADED: the definition it
+    /// must have replaced, or nil when none was asked for.
+    fn autoload_finished(&mut self, args: &RootFrame, ignore_errors: bool, loaded: &std::path::Path) -> Result<()> {
+        let (fundef, funname) = (self.rooted(args, FUNDEF), self.rooted(args, FUNNAME));
+        if funname == Value::NIL || ignore_errors {
+            self.set_rooted(args, OUT, Value::NIL);
+            return Ok(());
         }
         let fun = self.autoload_indirect(funname)?;
         if self.equal(fun, fundef).map_err(|_| "equal failed comparing an autoload")? {
@@ -151,43 +173,44 @@ impl Vm {
             let text = self.literal(&Form::String(message.clone()))?;
             return Err(self.signal_error("error", &[text], message));
         }
-        Ok(fun)
+        self.set_rooted(args, OUT, fun);
+        Ok(())
     }
-    /// GNU `load_with_autoload_queue (FILE, NOERROR, Qt, Qnil, MUST-SUFFIX)`
-    /// over `save_match_data_load`. Returns the file that was loaded, or the
-    /// empty path when NOERROR found no file (GNU's `load' returned nil).
-    pub(super) fn load_with_autoload_queue(&mut self, file: Value, noerror: bool, must_suffix: bool) -> Result<std::path::PathBuf> {
+    /// Bind the queue as GNU's `load_with_autoload_queue` does, the match data
+    /// saved: the binding mark and the data's frame.
+    fn enter_autoload_queue(&mut self) -> Result<(usize, RootFrame)> {
+        // record_unwind_save_match_data (): Fmatch_data (Qnil, Qnil, Qnil).
+        let match_data = self.save_match_data_for_load()?;
+        let saved = self.root_frame(&[match_data]);
         let queue = self.slot(QUEUE);
-        let saved_match = self.slot(MATCH);
         let mark = self.dynamic.len();
         let buffer = self.slots[self.buffer_slot].value;
         // record_unwind_protect (un_autoload, Vautoload_queue); Vautoload_queue = Qt;
         self.dynamic.push((queue, self.slots[queue].value, buffer, false));
         self.slots[queue].value = Value::TRUE;
-        // record_unwind_save_match_data (): Fmatch_data (Qnil, Qnil, Qnil).
-        let match_data = self.save_match_data_for_load()?;
-        self.dynamic.push((saved_match, self.slots[saved_match].value, buffer, false));
-        self.slots[saved_match].value = match_data;
-        let result = self.load_source_named(file, noerror, must_suffix);
-        // Restore match data (Fset_match_data (saved, Qt)), then the queue.
-        let saved = self.slots[saved_match].value;
-        let restored = self.regexp_set_match_data(saved, Value::TRUE);
-        if result.is_err() {
+        Ok((mark, saved))
+    }
+    /// Restore the match data (`Fset_match_data (saved, Qt)`) and undo what a
+    /// FAILED load recorded: whether the match data went back.
+    fn leave_autoload_queue(&mut self, saved: RootFrame, failed: bool) -> bool {
+        let [match_data] = self.release_frame(saved);
+        let restored = self.regexp_set_match_data(match_data, Value::TRUE).is_ok();
+        if failed {
+            let queue = self.slot(QUEUE);
             self.un_autoload(queue);
         }
-        let path = self.unbind_after(self.dynamic.len() - mark, result)?;
-        restored.map_err(|_| "set-match-data failed restoring an autoload's match data")?;
-        Ok(path)
+        restored
     }
     fn save_match_data_for_load(&mut self) -> Result<Value> {
         self.regexp_match_data_saved().ok_or_else(|| "match-data failed saving an autoload's match data".into())
     }
-    /// `Fload (FILE, NOERROR, Qt, Qnil, MUST-SUFFIX)`, VM2's source loader.
-    fn load_source_named(&mut self, file: Value, noerror: bool, must_suffix: bool) -> Result<std::path::PathBuf> {
+    /// The file `Fload` finds for FILE, and whether a suffix was added to its
+    /// name; None when NOERROR found none.
+    fn queued_source(&mut self, file: Value, noerror: bool, must_suffix: bool) -> Result<Option<(std::path::PathBuf, bool)>> {
         let name = self.source_string(file)?.to_owned();
         let Some((path, suffixed)) = self.source_path(&name, false)? else {
             if noerror {
-                return Ok(std::path::PathBuf::new());
+                return Ok(None);
             }
             let text = self.literal(&Form::String("Cannot open load file".into()))?;
             let reason = self.literal(&Form::String("No such file or directory".into()))?;
@@ -196,8 +219,7 @@ impl Vm {
         if must_suffix && path.extension().is_none() {
             return Err("load mustsuffix requires a source suffix".into());
         }
-        self.load_file_kind(&path, suffixed)?;
-        Ok(crate::host::canonicalize(&path).unwrap_or(path))
+        Ok(Some((path, suffixed)))
     }
     /// GNU `un_autoload`: undo the current level's records, newest first.
     fn un_autoload(&mut self, queue: usize) {
@@ -260,6 +282,37 @@ impl Vm {
     }
 }
 
+/// GNU `Fautoload_do_load` on the arguments in ARGS (`Vm::autoload_args`), the
+/// value left there. It holds the permission and no Value (`crate::brand`).
+pub(crate) fn do_load<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame) -> Result<()> {
+    let Some(ignore_errors) = m.leaf(args, Vm::autoload_prepared)? else { return Ok(()) };
+    let loaded = queued_load(m, gc.by_ref(), (args, OUT), ignore_errors, true)?;
+    m.leaf((args, ignore_errors, loaded.as_path()), |vm, (args, ignore_errors, loaded)| vm.autoload_finished(args, ignore_errors, loaded))
+}
+/// GNU `load_with_autoload_queue (FILE, NOERROR, Qt, Qnil, MUST-SUFFIX)` over
+/// `save_match_data_load`, FILE rooted. Returns the file that was loaded, or the
+/// empty path when NOERROR found no file (GNU's `load` returned nil).
+pub(crate) fn queued_load<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, file: crate::loader::Out<'_>, noerror: bool, must_suffix: bool) -> Result<std::path::PathBuf> {
+    let (mark, saved) = m.leaf((), |vm, ()| vm.enter_autoload_queue())?;
+    let result = load_queued_source(m, gc.by_ref(), file, noerror, must_suffix);
+    let restored = m.leaf((saved, result.is_err()), |vm, (saved, failed)| vm.leave_autoload_queue(saved, failed));
+    let path = crate::loader::leave_bindings(m, gc, mark, result)?;
+    if !restored {
+        return Err("set-match-data failed restoring an autoload's match data".into());
+    }
+    Ok(path)
+}
+/// `Fload (FILE, NOERROR, Qt, Qnil, MUST-SUFFIX)`, VM2's source loader.
+fn load_queued_source<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, file: crate::loader::Out<'_>, noerror: bool, must_suffix: bool) -> Result<std::path::PathBuf> {
+    let found = m.leaf((file, noerror, must_suffix), |vm, ((frame, i), noerror, must_suffix)| {
+        let file = vm.rooted(frame, i);
+        vm.queued_source(file, noerror, must_suffix)
+    })?;
+    let Some((path, suffixed)) = found else { return Ok(std::path::PathBuf::new()) };
+    crate::loader::load_discarding(m, gc, &path, suffixed)?;
+    Ok(crate::host::canonicalize(&path).unwrap_or(path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +358,29 @@ mod tests {
         assert_eq!(vm.display(cell).unwrap(), "(autoload \"al-gc-nodef\" nil nil nil)");
     }
 
+    /// A load's bindings are made with what they bind rooted, so a watcher on one
+    /// may collect, and the load goes on with what moved. A watcher's signal ends
+    /// the load, and every binding it made unwinds.
+    #[test]
+    fn a_watcher_on_a_load_binding_collects_and_can_end_the_load() {
+        let d = dir("watched");
+        std::fs::write(d.join("al-watched.el"), "(setq al-name load-file-name)\n(setq al-history (nth (- (length current-load-list) 1) current-load-list))\n").unwrap();
+        let mut vm = Vm::new();
+        vm.set_gc_moving(true);
+        vm.set_load_path(std::slice::from_ref(&d)).unwrap();
+        vm.set_collection_floor(usize::MAX / 4);
+        vm.eval_source_raw(&format!("{GARBAGE} (defvar al-name nil) (defvar al-history nil) (defvar al-fail nil) \
+            (add-variable-watcher 'load-file-name (lambda (_symbol _new _operation _where) (garbage-collect) (when al-fail (error \"al-watcher\"))))")).unwrap();
+        let before = vm.heap_stats().collections;
+        vm.eval_source_raw("(load \"al-watched\")").unwrap();
+        assert!(vm.heap_stats().collections > before, "the watcher must collect for this proof to mean anything");
+        let expected = d.join("al-watched.el").to_string_lossy().into_owned();
+        let shown = vm.eval_source_raw("(list al-name al-history (car (car load-history)) load-file-name)").unwrap();
+        assert_eq!(vm.display(shown).unwrap(), format!("({expected:?} {expected:?} {expected:?} nil)"));
+        let shown = vm.eval_source_raw("(setq al-fail t) (setq al-name nil) (list (condition-case err (load \"al-watched\") (error (car (cdr err)))) al-name load-in-progress load-file-name)").unwrap();
+        assert_eq!(vm.display(shown).unwrap(), "(\"al-watcher\" nil nil nil)");
+        assert!(!vm.source_load_active(), "the failed load has left the loads in progress");
+    }
     /// The undo records live in the queue variable. Collections inside the
     /// failing load move the old definition; the undo must reinstall it.
     #[test]
