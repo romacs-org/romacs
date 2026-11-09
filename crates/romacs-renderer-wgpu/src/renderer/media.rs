@@ -1,13 +1,11 @@
 //! Media methods for WgpuRenderer.
 
-use super::super::image_cache::ImageCache;
 use super::WgpuRenderer;
 #[cfg(feature = "video")]
 use romacs_display_protocol::VideoId;
 use romacs_display_protocol::{
     ImageAnimationPolicy, ImageColorContext, ImageFrameIndex, ImageId, ImageLoadToken,
-    ImageMaskPolicy, ImageRealization, ImageRotation, ImageSequenceId, ImageSequenceRetirement,
-    ImageSizeSpec,
+    ImageMaskPolicy, ImageRealization, ImageRotation, ImageSequenceId, ImageSizeSpec,
 };
 #[cfg(feature = "video")]
 use romacs_video::{PlaybackAction, VideoOpenRequest};

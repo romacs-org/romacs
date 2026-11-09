@@ -39,6 +39,7 @@ impl ModelBudget {
         self.used
     }
 
+    #[cfg(test)]
     pub fn reserved(&self, id: u32) -> u64 {
         self.reserved.get(&id).copied().unwrap_or(0)
     }

@@ -467,6 +467,7 @@ impl ShaderSurfaceCache {
 
     /// Create a static surface from raw RGBA8 pixels (stage 1: GPU texture
     /// from Lisp data, no shader).
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create_pixels(
         &mut self,

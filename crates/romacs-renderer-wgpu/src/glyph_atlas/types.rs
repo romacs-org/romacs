@@ -558,20 +558,6 @@ impl Default for GlyphAtlasConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Page allocation result
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PageAllocationResult<M: GlyphMaterial> {
-    Allocated {
-        page: PageId<M>,
-        rect: AtlasContentRect,
-    },
-    NeedNewPage,
-    GlyphTooLarge,
-}
-
-// ---------------------------------------------------------------------------
 // Glyph atlas handle (copyable metadata from cache lookup)
 // ---------------------------------------------------------------------------
 

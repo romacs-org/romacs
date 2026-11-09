@@ -8,9 +8,7 @@
 
 pub mod animated_visual;
 pub(crate) mod child_frame_animation;
-pub mod clipboard;
 pub mod cursor;
-pub(crate) mod display_scale;
 pub mod dma_buf;
 pub(crate) mod effect_command;
 pub mod effect_config;
@@ -58,8 +56,6 @@ pub(crate) mod xterm_palette;
 pub(crate) mod xwidget_extent;
 pub use glyph_matrix::*;
 
-pub use clipboard::*;
-pub use display_scale::*;
 pub use dma_buf::*;
 pub use effect_command::*;
 pub use effect_config::*;

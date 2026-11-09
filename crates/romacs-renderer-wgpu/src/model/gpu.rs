@@ -653,6 +653,7 @@ impl ModelGpu {
         (self.targets.texture.clone(), self.targets.view.clone())
     }
 
+    #[cfg(test)]
     /// Replace the render targets with `size_px` ones. The old targets stay
     /// until the new ones exist, so a failure leaves the model as it was.
     pub fn resize(&mut self, device: &wgpu::Device, size_px: (u32, u32)) -> Result<(), String> {

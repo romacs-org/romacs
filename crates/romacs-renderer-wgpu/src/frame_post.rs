@@ -16,15 +16,13 @@
 //! composes the accessor functions into the module, this side only keeps the
 //! name -> slot table so [`FramePost::set_uniform`] can update values live.
 
-use std::collections::HashMap;
-
 use romacs_display_protocol::frame_time::{EventTime, FrameSample, observe_platform_now};
 
 use bytemuck::Zeroable;
 
 use crate::shader_surface::{
     SURFACE_UNIFORM_BYTES, SURFACE_USER_UNIFORM_SLOTS, SurfaceShaderLanguage, SurfaceUniformInit,
-    SurfaceUniforms, uniform_accessor_name,
+    SurfaceUniforms,
 };
 use crate::shader_surface_cache::build_surface_pipeline;
 
@@ -33,8 +31,6 @@ pub(crate) struct FramePost {
     uniform_buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// name -> (slot, components) for `set_uniform` by Lisp name.
-    uniform_slots: HashMap<String, (usize, u8)>,
     custom: [[f32; 4]; SURFACE_USER_UNIFORM_SLOTS],
     /// `iTime` epoch. Dated to the frame sample, not the wall clock: the
     /// shader's animation is a visual phase, so it must be correct when the
@@ -117,10 +113,8 @@ impl FramePost {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let mut uniform_slots = HashMap::new();
         let mut custom = [[0.0f32; 4]; SURFACE_USER_UNIFORM_SLOTS];
         for (slot, init) in uniforms.iter().enumerate().take(SURFACE_USER_UNIFORM_SLOTS) {
-            uniform_slots.insert(init.name.clone(), (slot, init.components));
             custom[slot] = init.value;
         }
         Ok(Self {
@@ -128,7 +122,6 @@ impl FramePost {
             uniform_buffer,
             bind_group_layout,
             sampler,
-            uniform_slots,
             custom,
             // Adapter read: the epoch is minted at install time, outside any
             // frame. Every later read of it goes through the frame sample.

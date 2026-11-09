@@ -361,11 +361,13 @@ impl IndexWord {
     }
 }
 
+#[cfg(test)]
 /// Parse OBJ `bytes` within `limits`.
 pub(crate) fn parse_obj(bytes: &[u8], limits: ObjLimits) -> Result<ObjMesh, ObjError> {
     parse_obj_cancellable(bytes, limits, &|| false)
 }
 
+#[cfg(test)]
 /// [`parse_obj`], polling `cancelled` at bounded intervals.
 pub(crate) fn parse_obj_cancellable(
     bytes: &[u8],
@@ -675,6 +677,7 @@ impl ObjParser {
     }
 }
 
+#[cfg(test)]
 /// Read and parse the OBJ file at `path`.
 ///
 /// Only a regular file is read (others are [`ObjError::NotRegular`], found

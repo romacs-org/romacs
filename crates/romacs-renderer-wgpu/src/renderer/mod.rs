@@ -32,11 +32,9 @@ mod deform;
 mod draw;
 mod dynamic_buffer;
 mod frame_submission;
-pub(crate) use draw::DrawContext;
 mod paint;
 mod panes;
 mod target;
-pub(crate) use target::NativePlacementError;
 pub use target::{NativeContentPlacement, RenderTarget, SnapshotRegion};
 mod effect_common;
 mod effects_state;
@@ -64,7 +62,7 @@ mod row_reuse;
 mod scene_placements;
 mod scissor;
 mod snapshot_pool;
-pub(crate) use snapshot_pool::{SnapshotId, SnapshotPool, SnapshotResources};
+pub(crate) use snapshot_pool::{SnapshotPool, SnapshotResources};
 pub use snapshot_pool::{SnapshotLease, SnapshotSize, texture_bytes};
 mod stats;
 mod tooltip;
@@ -76,7 +74,6 @@ pub use fx_state::RendererFrameEffects;
 pub(crate) use fx_state::*;
 pub(crate) use resources::*;
 pub use row_reuse::FrameRowDamage;
-pub(crate) use row_reuse::{RowDamageInfo, RowReuseStats, WindowRowDamage};
 pub use stats::*;
 
 #[cfg(feature = "video")]
@@ -202,7 +199,6 @@ pub struct WgpuRenderer {
     pub(super) pipelines: Pipelines,
     /// Stencil texture/view for child frame rounded-corner clipping
     pub(super) stencil: StencilTargets,
-    pub(super) glyph_bind_group_layout: wgpu::BindGroupLayout,
     draw_parameters: draw::DrawParameterCache,
     submissions: frame_submission::FrameSubmissions,
     /// Texture/media caches
@@ -1181,7 +1177,6 @@ impl WgpuRenderer {
                 stencil_write: stencil_write_pipeline,
             },
             stencil,
-            glyph_bind_group_layout,
             draw_parameters: draw::DrawParameterCache::new(bind_group_layout),
             submissions: Default::default(),
             caches: RenderCaches {

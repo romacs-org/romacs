@@ -251,6 +251,7 @@ impl<R> SnapshotPool<R> {
         &mut self.budget
     }
 
+    #[cfg(test)]
     pub fn slot_count(&self) -> usize {
         self.slots.len()
     }

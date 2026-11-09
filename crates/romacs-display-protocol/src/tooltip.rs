@@ -1,6 +1,5 @@
 //! Owned tooltip presentation requests. Scheduling belongs to the producer.
 mod lifetime;
-pub(crate) use lifetime::TooltipClient;
 pub(crate) use lifetime::TooltipGeneration;
 pub use lifetime::{TooltipContext, TooltipTicket};
 

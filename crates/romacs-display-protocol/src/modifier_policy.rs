@@ -341,6 +341,7 @@ impl ModifierPolicy {
             || self.family_bits_for_option(Some(ModifierSideState::RightOnly), kind) != 0
     }
 
+    #[cfg(test)]
     fn family_bits_for_option(
         &self,
         side: Option<ModifierSideState>,
@@ -411,14 +412,17 @@ impl ModifierPolicy {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_option(self, value: EmacsModifierKey) -> Self {
         self.with_option_assignment(Some(value), Some(value), Some(value))
     }
 
+    #[cfg(test)]
     pub(crate) fn with_option_none(self) -> Self {
         self.with_option_assignment(None, None, None)
     }
 
+    #[cfg(test)]
     /// Replace BOTH sides of the Option family with per-kind assignments.
     pub(crate) fn with_option_assignment(
         self,

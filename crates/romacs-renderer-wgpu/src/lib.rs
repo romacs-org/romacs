@@ -52,9 +52,7 @@ pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
 #[cfg(target_os = "linux")]
 pub use external_buffer::DmaBufBuffer;
 pub use external_buffer::{BufferFormat, ExternalBuffer, PlatformBuffer, SharedMemoryBuffer};
-pub(crate) use glyph_atlas::{ComposedGlyphKey, GlyphAtlasHandle, GlyphPixelKind, RasterizeResult};
 pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
-pub(crate) use image_cache::{CachedImage};
 pub use image_probe::{ImageProbeSource, admit, probe_image_layout};
 pub use renderer::{
     BudgetExceeded, CompositionRing, FrameRowDamage, FullFrameTexture, GpuBudgetOwner, PaneBlit,
@@ -67,7 +65,6 @@ pub use shader_surface::{
 };
 pub use tooltip_layout::TooltipLayout;
 pub use vertex::{Uniforms};
-pub(crate) use vertex::{GlyphVertex};
 #[cfg(feature = "video")]
 pub use video_cache::{VideoRecoveryManifest};
 #[cfg(feature = "video")]
@@ -75,16 +72,7 @@ pub(crate) use video_cache::{CachedVideo, VideoCache, VideoState};
 #[cfg(all(feature = "webview", target_os = "linux"))]
 pub use webview_cache::{CachedWebView, WgpuWebViewCache};
 pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
-pub(crate) use glyph_atlas::{GlyphKey};
-pub(crate) use gpu_policy::power_preference;
-pub(crate) use renderer::{
-    GpuBudget, RowDamageInfo, RowReuseStats, SnapshotId, SnapshotPool, SnapshotResources,
-    WindowRowDamage,
-};
-pub(crate) use shader_surface::SURFACE_USER_UNIFORM_SLOTS;
-pub(crate) use shader_surface_cache::MAX_SURFACE_SIZE;
 pub use shader_surface_cache::ShaderSurfaceCache;
-pub(crate) use vertex::{RectVertex, RoundedRectVertex, TextureVertex};
 
 /// Whether the WGPU backend has a concrete rendering path for a graphical
 /// face feature.

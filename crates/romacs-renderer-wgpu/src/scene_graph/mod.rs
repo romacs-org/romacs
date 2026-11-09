@@ -33,8 +33,9 @@ mod timing;
 mod fixtures_test;
 
 pub use romacs_scene::draw;
-pub(crate) use targets::{SAMPLE_COUNT, TARGET_FORMAT};
-pub(crate) use text::{FontLookup, SceneFont};
+pub(crate) use text::FontLookup;
+#[cfg(test)]
+pub(crate) use text::SceneFont;
 pub(crate) use timing::TargetTiming;
 
 use crate::glyph_atlas::WgpuGlyphAtlas;
@@ -233,6 +234,7 @@ impl ScenePass {
         self.timer.as_ref()?.take()
     }
 
+    #[cfg(test)]
     pub(crate) fn timing_available(&self) -> bool {
         self.timer.is_some()
     }

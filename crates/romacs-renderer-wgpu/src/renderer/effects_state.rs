@@ -3,9 +3,11 @@
 #[cfg(test)]
 use super::ModeLineFadeEntry;
 use super::{
-    ClickHaloEntry, EdgeGlowEntry, EdgeSnapEntry, LineAnimEntry, ScrollMomentumEntry,
-    ScrollSpacingEntry, ScrollVelocityFadeEntry, SonarPingEntry, TextFadeEntry, WindowFadeEntry,
+    ClickHaloEntry, LineAnimEntry, ScrollMomentumEntry, ScrollSpacingEntry,
+    ScrollVelocityFadeEntry, TextFadeEntry, WindowFadeEntry,
 };
+#[cfg(test)]
+use super::{EdgeGlowEntry, EdgeSnapEntry, SonarPingEntry};
 use super::{RendererFrameEffects, WgpuRenderer};
 use romacs_display_protocol::frame_time::{EventTime, observe_platform_now};
 use romacs_display_protocol::types::{Color, Rect};

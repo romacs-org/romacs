@@ -11,10 +11,11 @@ use romacs_display_protocol::image_diagnostic::{ImageDiagnostic, ImageLoadIdenti
 use romacs_display_protocol::{
     ImageAnimationPolicy, ImageCacheUsage, ImageColorContext,
     ImageFrameIndex, ImageId, ImageIntrinsicExtent, ImageLayoutExtent,
-    ImageLoadAttempt, ImageLoadToken, ImageMaskPolicy, ImageNativeExtent,
-    ImageRasterExtent, ImageRealization, ImageRotation, ImageSequenceId,
-    ImageSequenceRetirement, ImageSizeSpec, ResolvedImageGeometry, RetainedImageSet,
+    ImageLoadAttempt, ImageLoadToken, ImageMaskPolicy,
+    ImageRasterExtent, ImageRealization, ImageRotation, ImageSequenceId, ImageSizeSpec, ResolvedImageGeometry, RetainedImageSet,
 };
+#[cfg(test)]
+use romacs_display_protocol::{ImageNativeExtent, ImageSequenceRetirement};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -444,7 +445,7 @@ fn failure_source_of(source: &ImageSource) -> DecodeFailureSource {
     match source {
         ImageSource::File { path, .. } => DecodeFailureSource::File { path: path.clone() },
         ImageSource::Data { data, .. } => DecodeFailureSource::Bytes { data: data.clone() },
-        ImageSource::RawArgb32 { .. } | ImageSource::RawRgb24 { .. } => DecodeFailureSource::Raw,
+        ImageSource::RawArgb32 { .. } => DecodeFailureSource::Raw,
         #[cfg(test)]
         ImageSource::Panic => DecodeFailureSource::Raw,
     }
@@ -465,13 +466,6 @@ enum ImageSource {
     Panic,
     /// Raw ARGB32 pixel data (A,R,G,B byte order, 4 bytes per pixel)
     RawArgb32 {
-        data: Vec<u8>,
-        width: u32,
-        height: u32,
-        stride: u32,
-    },
-    /// Raw RGB24 pixel data (R,G,B byte order, 3 bytes per pixel)
-    RawRgb24 {
         data: Vec<u8>,
         width: u32,
         height: u32,
@@ -745,16 +739,6 @@ impl ImageCache {
                             .and_then(|pixels| {
                                 pixels.realize_bitmap(size, rotation, realization, mask)
                             }),
-                        ImageSource::RawRgb24 {
-                            data,
-                            width,
-                            height,
-                            stride,
-                        } => Decode::convert_rgb24_to_rgba(&data, width, height, stride)
-                            .map(NativePixels::from_raster_tuple)
-                            .and_then(|pixels| {
-                                pixels.realize_bitmap(size, rotation, realization, mask)
-                            }),
                     }));
 
                     let outcome = match result {
@@ -927,6 +911,7 @@ impl ImageCache {
         crate::svg::query_intrinsic_extent(&data)
     }
 
+    #[cfg(test)]
     /// Query image data dimensions.
     ///
     /// Raster formats read only their header; SVG requires document parsing.
@@ -939,6 +924,7 @@ impl ImageCache {
             .or_else(|| crate::svg::query_intrinsic_extent(data))
     }
 
+    #[cfg(test)]
     /// Preserve the pixel-query contract: return a bounding integer extent.
     /// Pending-image sizing must instead retain the fractional source extent.
     fn unscaled_dimensions(intrinsic: ImageIntrinsicExtent) -> ImageNativeExtent {
@@ -1097,39 +1083,6 @@ impl ImageCache {
             rotation: ImageRotation::None,
             load,
             source: ImageSource::RawArgb32 {
-                data: data.to_vec(),
-                width,
-                height,
-                stride,
-            },
-            size: ImageSizeSpec::default(),
-            realization: ImageRealization::default(),
-            colors: ImageColorContext::default(),
-            mask: ImageMaskPolicy::default(),
-            animation: ImageAnimationPolicy::disabled(),
-            frame: ImageFrameIndex::default(),
-            identity: ImageLoadIdentity::unspecified(),
-        });
-    }
-
-    /// Load image from raw RGB24 pixel data with a pre-allocated ID (for threaded mode)
-    pub(crate) fn load_raw_rgb24_with_id(
-        &mut self,
-        load: ImageLoadToken,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) {
-        let load = self.begin_load(load);
-        let image = load.image();
-        self.pending_dimensions
-            .insert(image, ImageLayoutExtent::new(width, height));
-        self.states.insert(image, ImageState::Pending);
-        let _ = self.decode_tx.send(DecodeRequest {
-            rotation: ImageRotation::None,
-            load,
-            source: ImageSource::RawRgb24 {
                 data: data.to_vec(),
                 width,
                 height,

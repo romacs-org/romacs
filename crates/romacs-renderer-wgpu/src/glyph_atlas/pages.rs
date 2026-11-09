@@ -55,6 +55,7 @@ impl GlyphAtlasPages {
         id
     }
 
+    #[cfg(test)]
     pub(crate) fn page_counts(&self) -> (usize, usize, usize) {
         (self.alpha.len(), self.subpixel.len(), self.color.len())
     }
