@@ -1929,6 +1929,11 @@ pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64)
     Leaf::new(vm).hosted_rows_end(window, start, rows)
 }
 
+/// The effective `text-quoting-style' (Leaf::text_quoting_style).
+pub(crate) fn text_quoting_style(vm: &mut Vm) -> std::result::Result<&'static str, Fault> {
+    Leaf::new(vm).text_quoting_style()
+}
+
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
 pub(crate) fn initialize_coding_slot(vm: &mut Vm, name: &str) {
