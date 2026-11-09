@@ -36,14 +36,8 @@ pub mod vertex;
 #[cfg(feature = "video")]
 pub(crate) mod video_cache;
 
-#[cfg(all(feature = "webview", target_os = "linux"))]
-pub(crate) mod webview_cache;
-
-#[cfg(all(feature = "webview", target_os = "linux"))]
-mod submission_retirement;
-
 #[cfg(all(
-    any(feature = "video-dmabuf", feature = "webview"),
+    feature = "video-dmabuf",
     target_os = "linux"
 ))]
 pub(crate) mod vulkan_dmabuf;
@@ -66,11 +60,9 @@ pub use shader_surface::{
 pub use tooltip_layout::TooltipLayout;
 pub use vertex::{Uniforms};
 #[cfg(feature = "video")]
-pub use video_cache::{VideoRecoveryManifest};
+pub use video_cache::VideoRecoveryManifest;
 #[cfg(feature = "video")]
 pub(crate) use video_cache::{CachedVideo, VideoCache, VideoState};
-#[cfg(all(feature = "webview", target_os = "linux"))]
-pub use webview_cache::{CachedWebView, WgpuWebViewCache};
 pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
 pub use shader_surface_cache::ShaderSurfaceCache;
 
@@ -109,4 +101,3 @@ pub const fn supports_graphical_face_attribute(
 pub mod effect_config {
     pub use romacs_display_protocol::effect_config::*;
 }
-

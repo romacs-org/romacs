@@ -39,6 +39,15 @@ possible; say so where you do.
   each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
   deleting unsafe, run `python3 tools/unsafe_census.py lower` and commit the
   lowered floors with the change. Raising a floor is a deliberate commit.
+- `tools/smells.py` (also run by `scripts/check-derived`) holds the other smells
+  to `SMELL-FLOORS.json`: `allow(dead_code|unused*)`, TODO/FIXME, files over
+  1,500 lines, every rustc and Clippy pedantic warning by lint, the tree's
+  top-level entries, and primitives declared outside `src/prims/` or through
+  lib.rs's own enum. Like the unsafe census, a rise fails and a dropped crate
+  smell or layout count is recorded with `lower` in the same change. Lint
+  counts are ceilings instead: a drop passes, and `lower` records it at
+  checkpoints. A new top-level entry or a raised floor is a deliberate commit
+  with its reason.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised
@@ -122,6 +131,18 @@ writers need isolation; ordinary development does not need a lane registry.
 Use the configured pinned GNU oracle and mirror. Retain an explicit
 `ROMACS_GNU_SOURCE` when tests isolate HOME, and never substitute PATH's Emacs for
 the pinned oracle.
+
+The gates, small and whole for each side:
+
+- Rust, small: `make gate-small`. Tests named after the Rust modules changed since
+  master, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
+  in `scripts/gate`). A change it cannot map, such as Lisp or a crate root, runs
+  everything, so give a branch of a branch its real base.
+- Rust, whole: `make gate-full`, for the final combined candidate.
+- Lisp, one module: `make check-MODULE`.
+- Lisp, whole: `make check`.
+
+The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
 - Fast development checks: `python3 scripts/dev-loop PACKAGE --test TARGET`,

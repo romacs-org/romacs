@@ -97,12 +97,7 @@ impl Vm {
             if c != b'%' as u32 {
                 // Only literal template characters are requoted (GNU editfns.c).
                 // Text produced by %s/%S is never passed through this branch.
-                let c = match (quoting_style, c) {
-                    (Some("curve"), 96) => 0x2018,
-                    (Some("curve"), 39) => 0x2019,
-                    (Some("straight"), 96) => 39,
-                    _ => c,
-                };
+                let c = quoting_style.map_or(c, |style| requoted(style, c));
                 if byte_template && c < 256 {
                     raw_high |= c >= 128;
                     if quoting_style.is_some() && c >= 128 {
@@ -300,5 +295,17 @@ impl Vm {
         let object = if string.is_utf8() { crate::data::Object::String(Box::new(string)) }
             else { crate::data::Object::RawString(Box::new(string)) };
         self.allocate_object(object)
+    }
+}
+
+/// Character C of a message template in text-quoting STYLE (GNU
+/// `substitute-quotes', help.el): curve turns ` and ' into ‘ and ’,
+/// straight turns ` into ', and grave keeps both.
+pub(crate) fn requoted(style: &str, c: u32) -> u32 {
+    match (style, c) {
+        ("curve", 96) => 0x2018,
+        ("curve", 39) => 0x2019,
+        ("straight", 96) => 39,
+        _ => c,
     }
 }

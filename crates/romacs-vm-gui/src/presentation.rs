@@ -272,7 +272,7 @@ mod tests {
         assert!(vm.heap_stats().collections > collections);
         presentation.completed(1, Instant::now());
         assert!(presentation.ready());
-        let snapshot = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
+        let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "aλΔ");
         assert_eq!(snapshot.windows[0].snapshot.point_byte, 3);
     }
@@ -285,7 +285,7 @@ mod tests {
         for code in ['a' as i64, 'Δ' as i64, 2, 'λ' as i64] {
             presentation.command(&mut vm, &mut commands, key(code)).unwrap();
         }
-        let snapshot = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
+        let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         let mut engine = romacs_layout2::LayoutEngine::new().unwrap();
         let (before, _) = engine.layout_frame(&snapshot, 2, None).unwrap();
         presentation.submitted(2, Instant::now());
@@ -296,7 +296,7 @@ mod tests {
         let (after, _) = engine.layout_frame(&snapshot, 2, None).unwrap();
         assert_eq!(format!("{:?}", before.window_cursors), format!("{:?}", after.window_cursors));
         assert_eq!(format!("{:?}", before.glyphs), format!("{:?}", after.glyphs));
-        let next = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
+        let next = vm.frame_snapshot(1200, 800).unwrap();
         assert_eq!(next.windows[0].snapshot.text.utf8, "aλ!Δ");
         assert_eq!(next.windows[0].snapshot.point_byte, 4);
         assert_ne!(snapshot, next);
@@ -313,7 +313,7 @@ mod tests {
         let outcome = presentation.command(&mut vm, &mut commands, key(102)).unwrap().unwrap();
         assert_eq!(outcome.signal.unwrap().condition, "error");
         assert!(presentation.ready());
-        let snapshot = crate::snapshot(&mut vm, false, 1200, 800).unwrap();
+        let snapshot = vm.frame_snapshot(1200, 800).unwrap();
         assert_eq!(snapshot.windows[0].snapshot.text.utf8, "!");
         assert_eq!(snapshot.windows[0].snapshot.point_byte, 1);
     }

@@ -58,20 +58,6 @@ pub fn unicode_boundaries<T: Coordinates>(make: impl Fn(&[u8], Mode) -> T) {
     }
 }
 
-pub fn boundaries<T: Coordinates>(make: impl Fn(&[u8], Mode) -> T) {
-    for bytes in [
-        b"".as_slice(),
-        b"abcdef",
-        "aλβЖ🙂z".as_bytes(),
-        &[0xc0, 0x80, b'a', 0xf8, 0x88, 0x80, 0x80, 0x80],
-    ] {
-        let text = make(bytes, Mode::Multibyte);
-        assert_coordinates(&text, bytes, Mode::Multibyte);
-    }
-    let raw = [0x00, 0x7f, 0x80, 0xc0, 0xff, b'z'];
-    assert_coordinates(&make(&raw, Mode::Unibyte), &raw, Mode::Unibyte);
-}
-
 pub fn edits<T: Coordinates>(make: impl Fn(&[u8], Mode) -> T) {
     let mut expected = "aλβЖ🙂z".as_bytes().to_vec();
     let mut text = make(&expected, Mode::Multibyte);
@@ -130,16 +116,6 @@ pub fn rejected_edits<T: Coordinates>(make: impl Fn(&[u8], Mode) -> T) {
         assert_eq!(text.replace(range, b"x"), Err(InvalidPosition));
         assert_coordinates(&text, bytes, Mode::Multibyte);
     }
-}
-
-pub fn reinterpretation<T: Coordinates>(make: impl Fn(&[u8], Mode) -> T) {
-    let bytes = "aλЖ🙂z".as_bytes();
-    let mut text = make(bytes, Mode::Multibyte);
-    assert_coordinates(&text, bytes, Mode::Multibyte);
-    text.set_mode(Mode::Unibyte);
-    assert_coordinates(&text, bytes, Mode::Unibyte);
-    text.set_mode(Mode::Multibyte);
-    assert_coordinates(&text, bytes, Mode::Multibyte);
 }
 
 /// Restriction belongs to the buffer owner: it must not rebase text coordinates.
@@ -214,16 +190,6 @@ pub fn unicode_editor_semantics<T: EditorCoordinates>(make: impl Fn(&[u8], Mode)
     assert_eq!(text.property_at(3, "probe"), Ok(Some(7)));
 }
 
-pub fn editor_semantics<T: EditorCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
-    unicode_editor_semantics(&make);
-    let raw = [b'a', 0xe9, 0xff];
-    let text = make(&raw, Mode::Unibyte);
-    assert_eq!(text.mode(), Mode::Unibyte);
-    assert_eq!(text.character_at(1), Ok(Some(233)));
-    assert_eq!(text.character_at(2), Ok(Some(255)));
-    assert_eq!(text.slice_chars(1..3), Ok(vec![0xe9, 0xff]));
-}
-
 /// Test-only work accounting supplied by the text owner, not by a benchmark's
 /// estimate. Counters are monotonic and exclude the independent test oracle.
 #[derive(Clone, Copy, Debug, Default)]
@@ -272,27 +238,6 @@ pub fn bounded_mixed_conversion_work<T: MeasuredCoordinates>(make: impl Fn(&[u8]
     }
 }
 
-/// Legacy counted-ASCII contract, retained unchanged for its original owner.
-pub fn bounded_conversion_work<T: MeasuredCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
-    bounded_mixed_conversion_work(&make);
-    let ascii = vec![b'a'; 65536];
-    let text = make(&ascii, Mode::Multibyte);
-    let before = text.coordinate_work();
-    for c in [0, 16383, 32768, 65536, 1, 65535] {
-        assert_eq!(text.byte_of_char(c), Ok(c));
-        assert_eq!(text.char_of_byte(c), Ok(c));
-    }
-    let after = text.coordinate_work();
-    assert_eq!(
-        after.scanned_bytes, before.scanned_bytes,
-        "ASCII conversion scanned text"
-    );
-    assert_eq!(
-        after.tree_steps, before.tree_steps,
-        "ASCII conversion descended summaries"
-    );
-}
-
 /// Uniform directory: ASCII has the same zero-scan logarithmic bound as Unicode.
 pub fn bounded_unicode_conversion_work<T: MeasuredCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
     bounded_mixed_conversion_work(&make);
@@ -331,4 +276,48 @@ pub fn narrowing<T: RestrictedCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
     text.widen();
     assert_eq!(text.accessible_chars(), 0..6);
     assert_coordinates(&text, bytes, Mode::Multibyte);
+}
+
+/// A controlled fault for checking the suite itself: INNER with one answer,
+/// char 3's byte, cached forever across edits. [`edits`] must catch it at a
+/// coordinate assertion ("char-to-byte at 3").
+pub struct Stale<T> {
+    inner: T,
+    anchor: std::cell::Cell<Option<usize>>,
+}
+
+impl<T> Stale<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner, anchor: std::cell::Cell::new(None) }
+    }
+}
+
+impl<T: Coordinates> Coordinates for Stale<T> {
+    fn len_bytes(&self) -> usize {
+        self.inner.len_bytes()
+    }
+    fn len_chars(&self) -> usize {
+        self.inner.len_chars()
+    }
+    fn byte_of_char(&self, c: usize) -> Result<usize, InvalidPosition> {
+        if c == 3
+            && let Some(b) = self.anchor.get()
+        {
+            return Ok(b);
+        }
+        let b = self.inner.byte_of_char(c)?;
+        if c == 3 {
+            self.anchor.set(Some(b));
+        }
+        Ok(b)
+    }
+    fn char_of_byte(&self, b: usize) -> Result<usize, InvalidPosition> {
+        self.inner.char_of_byte(b)
+    }
+    fn replace(&mut self, r: Range<usize>, b: &[u8]) -> Result<(), InvalidPosition> {
+        self.inner.replace(r, b)
+    }
+    fn set_mode(&mut self, mode: Mode) {
+        self.inner.set_mode(mode);
+    }
 }

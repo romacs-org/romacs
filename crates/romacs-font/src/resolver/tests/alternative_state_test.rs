@@ -7,7 +7,6 @@ fn family_rows(alternative: &str) -> Vec<Vec<String>> {
     ]]
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn alternative_family_setter_invalidates_both_warm_caches_even_unchanged_or_round_trip() {
     assert!(crate::register_font_file(

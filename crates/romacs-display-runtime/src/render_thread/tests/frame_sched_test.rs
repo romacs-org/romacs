@@ -907,7 +907,6 @@ fn demand_reason_names_are_an_explicit_golden_in_index_order() {
             "pane_motion",
             "child_frame_motion",
             "video",
-            "webkit",
             "shader_surface",
             "frame_shader",
             "terminal",
@@ -923,7 +922,7 @@ fn demand_reason_names_are_an_explicit_golden_in_index_order() {
             "transient_effect",
         ]
     );
-    assert_eq!(DemandReason::COUNT, 22);
+    assert_eq!(DemandReason::COUNT, 21);
 }
 
 #[test]
@@ -948,7 +947,6 @@ fn plan_attributes_the_frame_to_its_driving_reasons() {
     let plan = c.begin_frame(win(1), tick_at(now.plus(ms(1))));
     assert!(plan.reasons.contains(DemandReason::CursorAnimation));
     assert!(plan.reasons.contains(DemandReason::EditorCommit));
-    assert!(!plan.reasons.contains(DemandReason::Webkit));
     assert_eq!(
         plan.reasons.iter().collect::<Vec<_>>(),
         vec![DemandReason::EditorCommit, DemandReason::CursorAnimation]

@@ -7,6 +7,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +27,16 @@ def select(package, tests=(), library=False):
     for test in dict.fromkeys(tests):
         flags.extend(["--test", test])
     return flags
+
+
+def private_tmpdir(env):
+    """A fresh TMPDIR for one run, removed after it: tests share nothing a
+    run before left, and it is short, as a socket path under it is capped at
+    108 bytes. It is under the cache directory, on disk: a tmpfs /tmp fills
+    with the worlds tests build."""
+    base = Path(env.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    base.mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(prefix="rdl-", dir=base)
 
 
 def positive(value):
@@ -76,7 +87,9 @@ def main():
             if overrides and args.profile == "dev-fast":
                 raise ValueError("unset rustflag overrides so the dev linker config is effective: "
                                  + ", ".join(sorted(overrides)))
-            subprocess.run(command, cwd=ROOT, env=env, check=True)
+            with private_tmpdir(env) as tmpdir:
+                print(f"dev-loop: TMPDIR={tmpdir}", flush=True)
+                subprocess.run(command, cwd=ROOT, env={**env, "TMPDIR": tmpdir}, check=True)
         status = 0
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"dev-loop: {error}", file=sys.stderr)

@@ -39,11 +39,12 @@ substitute for these tools on the **test process's** `PATH`:
 The live-font assertions require the real **Ubuntu Mono**, **Ubuntu**,
 **DejaVu Sans Mono**, and **DejaVu Sans** fonts. Installing font files alone is
 not enough: the isolated test environment must expose them through fontconfig.
-Set `ROMACS_GNU_GUI_FONTCONFIG` to a private fontconfig file listing the chosen
-font directories and a writable private cache directory; the desktop-font tests
-apply it as `FONTCONFIG_FILE` only to their GNU GUI subprocesses. The gate uses
-`ROMACS_GATE_FONTCONFIG`, defaulting to `/etc/fonts/fonts.conf`. Other tests
-retain their normal font environment.
+The desktop-font tests require `ROMACS_GNU_GUI_FONTCONFIG`, a private
+fontconfig file listing the chosen font directories and a writable private
+cache directory, and apply it as `FONTCONFIG_FILE` only to their GNU GUI
+subprocesses; without it they refuse rather than read the host's fonts. The
+gate sets it from `ROMACS_GATE_FONTCONFIG`. Xvfb, xauth, xdpyinfo and weston
+come from `ROMACS_DISPLAY_TOOLS` when it is set, as in the gate, else from PATH.
 Do not inherit personal font substitutions. Check both
 `fc-match 'Ubuntu Mono'` and `fc-match 'DejaVu Sans Mono'` with the chosen
 `FONTCONFIG_FILE`. The expected metrics use 96 DPI, set by the test's X resource

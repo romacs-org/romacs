@@ -276,29 +276,6 @@ impl RenderApp {
 
         self.synchronize_toolbar_resources();
 
-        #[cfg(feature = "webview")]
-        {
-            #[allow(unused_mut)]
-            let mut config = romacs_webview::WebViewSystemConfig::default();
-            #[cfg(target_os = "linux")]
-            if let Some(renderer) = self.renderer.as_ref() {
-                config.dma_buf_import_formats = renderer.webview_import_formats();
-            }
-            if let Some(system) = self.webview_system.as_mut() {
-                if let Err(error) = system.set_dma_buf_import_formats(config.dma_buf_import_formats)
-                {
-                    tracing::warn!(%error, "failed to update WebView renderer capabilities");
-                }
-            } else {
-                match romacs_webview::WebViewSystem::new(config, self.webview_wake.clone()) {
-                    Ok(system) => self.webview_system = Some(system),
-                    Err(error) => {
-                        tracing::warn!(?error, "failed to initialize the WebView system");
-                    }
-                }
-            }
-        }
-
         #[cfg(feature = "video")]
         tracing::info!("Video cache initialized");
     }
@@ -307,7 +284,7 @@ impl RenderApp {
     /// shader hang / TDR, or a simulated loss via
     /// `AssetCommand::DebugSimulateDeviceLoss`).
     ///
-    /// Everything renderer-owned (pipelines and the image/video/webkit/
+    /// Everything renderer-owned (pipelines and the image/video/
     /// shader-surface caches) dies with the old device and is recreated
     /// empty; each window's committed `current_frame` is CPU data and is
     /// kept, so the next redraw re-renders the same scene (media quads stay
@@ -320,7 +297,7 @@ impl RenderApp {
         );
 
         // Renderer first: pipelines and every media cache (image, video,
-        // webkit, shader surfaces, frame post shader) hold old-device
+        // shader surfaces, frame post shader) hold old-device
         // objects.
         self.comms.capabilities.begin_renderer_reset();
         #[cfg(feature = "video")]
@@ -399,7 +376,7 @@ impl RenderApp {
         self.frame_windows
             .for_each_top_level_window(|window_state| window_state.request_redraw());
 
-        // Tell the evaluator: declarative surfaces/webkits re-create on the
+        // Tell the evaluator: declarative surfaces re-create on the
         // next redisplay walk, video memo IDs remain stable for the restored
         // native sessions, the frame shader/images are re-uploaded, and a
         // full redisplay is forced.
@@ -485,13 +462,6 @@ fn run_render_loop_with_startup(
             proxy.wake_up();
         })
     };
-    #[cfg(feature = "webview")]
-    let webview_wake = {
-        let proxy = event_loop.create_proxy();
-        romacs_webview::WebViewWake::new(move || {
-            proxy.wake_up();
-        })
-    };
 
     tracing::info!("Render thread entering winit event loop");
     let preparation_proxy = event_loop.create_proxy();
@@ -517,10 +487,6 @@ fn run_render_loop_with_startup(
         #[cfg(feature = "video")]
         {
             app.video_wake = video_wake;
-        }
-        #[cfg(feature = "webview")]
-        {
-            app.webview_wake = webview_wake;
         }
         app
     });

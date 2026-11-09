@@ -1781,6 +1781,11 @@ mod tests {
         contract::edit_invalidation(make)
     }
     #[test]
+    #[should_panic(expected = "char-to-byte at 3")]
+    fn the_contract_catches_a_stale_coordinate() {
+        contract::edits(|bytes, mode| contract::Stale::new(make(bytes, mode)))
+    }
+    #[test]
     fn rejected() {
         contract::rejected_edits(make)
     }

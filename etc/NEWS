@@ -92,9 +92,7 @@ other directory on your system.  You can also invoke the
 
 ---
 ** Romacs can composite native bi-planar video without a CPU upload.
-On supported GPUs, Linux imports NV12 or P010 DMA-BUF surfaces, macOS
-selects CoreVideo NV12/P010 and limited/full-range planes from source
-metadata, and Windows keeps Media Foundation NV12 output in GPU memory.
+On supported GPUs, Romacs imports NV12 or P010 DMA-BUF surfaces.
 The renderer samples the luma and chroma planes
 directly and applies the frame's range, matrix, primaries, transfer
 function, and chroma location.  Packed GPU surfaces and CPU upload remain

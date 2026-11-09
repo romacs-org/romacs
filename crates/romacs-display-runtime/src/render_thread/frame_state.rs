@@ -295,7 +295,6 @@ fn build_face_conflict_details(
 
 impl RenderApp {
     pub(super) fn prepare_frame_state_for_render(&mut self) {
-        self.process_webkit_frames();
         self.render_dirty_models();
         self.prepare_page_scenes();
         self.process_shader_surfaces();

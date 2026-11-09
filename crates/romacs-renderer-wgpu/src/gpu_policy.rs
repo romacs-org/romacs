@@ -135,7 +135,7 @@ mod linux {
     use wgpu::hal::api::Vulkan;
 
     pub(super) fn supports_dma_buf_extensions(adapter: &wgpu::Adapter) -> bool {
-        if !cfg!(any(feature = "video", feature = "webview")) {
+        if !cfg!(feature = "video") {
             return false;
         }
         // SAFETY: the guard is used only for immutable capability inspection

@@ -38,7 +38,7 @@ const ASSETS_THE_INDEPENDENT_DECODER_REFUSES: [&str; 2] = ["letter.xpm", "separa
 /// Every `etc/images/*.xpm` asset -- the corpus GNU ships for its own toolbars,
 /// which the other tests in this module already pin by name.
 fn shipped_xpm_assets() -> Vec<std::path::PathBuf> {
-    let dir = romacs_infra::workspace_root().join("etc/images");
+    let dir = romacs_test_fonts::workspace_root().join("etc/images");
     let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
