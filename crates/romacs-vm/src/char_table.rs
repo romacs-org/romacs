@@ -24,6 +24,30 @@ mod tests {
         WROTE.with(std::cell::Cell::get) - before
     }
 
+    /// A read of the entries sees what a map would, in its order, once for a
+    /// node two slots share, and passes nothing to the funnel nor counts an edit.
+    #[test]
+    fn a_read_of_the_entries_is_a_maps_walk_and_writes_nothing() {
+        let int = |n| Value::integer(n).unwrap();
+        let mut table = CharTable::new(Value::NIL);
+        table.set(200, int(1)).unwrap();
+        table.set(300, int(2)).unwrap();
+        table.set(0x10005, int(3)).unwrap();
+        table.set_range(0x20000, 0x2ffff, int(4)).unwrap();
+        // A node two root slots share: the walk visits it once.
+        let shared = table.root.lock().unwrap().slots[0].clone();
+        table.root.lock().unwrap().slots[5] = shared;
+        let edits = table.edits;
+        let mut read = vec![];
+        assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
+        assert_eq!(table.edits, edits, "a read counts no edit");
+        let mut order = vec![];
+        table.map_entries(&mut |value| order.push(*value));
+        assert_eq!(read, order, "a read sees what a map would, in its order");
+        assert!(read.contains(&int(1)) && read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
+        assert_eq!(read.iter().filter(|&&v| v == int(1)).count(), 1, "the shared node once");
+    }
+
     /// Each way to write a table's contents tells the funnel what it stores.
     #[test]
     fn every_content_write_passes_the_funnel() {
@@ -48,12 +72,8 @@ mod tests {
         let lifted = funnelled(|| optimize(&table.root, &mut |a, b| Ok::<bool, ()>(a == b)).unwrap());
         assert_eq!(lifted, 3, "a Value lifted into each of three parents");
         assert!(matches!(table.root.lock().unwrap().slots[0], CharTableSlot::Value(v) if v == one));
-        let mut read = vec![];
-        assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
-        let mut mapped_order = vec![];
-        let mapped = funnelled(|| table.map_entries(&mut |value| { mapped_order.push(*value); *value = Value::NIL }));
+        let mapped = funnelled(|| table.map_entries(&mut |value| *value = Value::NIL));
         assert_eq!(mapped, 65, "each root Value written back, then the ASCII slot");
-        assert_eq!(read, mapped_order, "a read sees what a map would, in its order");
         let mut extra = CharTable::new(Value::NIL);
         extra.initialize(2, Value::NIL).unwrap();
         assert_eq!(funnelled(|| extra.set_extra(0, one)), 1, "an extra slot");
@@ -970,21 +990,11 @@ impl CharTable {
         self.reset_ascii();
         expanded
     }
-    /// Every character entry's Value, in `map_entries`' order: a read, so
-    /// nothing passes the funnel.
+    /// Every character entry's Value, by `map_entries`' own walk: a read,
+    /// whose visitor writes nothing, so nothing passes the funnel.
     pub(crate) fn entry_values(&self) -> Vec<Value> {
-        fn read(handle: &CharTableNodeHandle, seen: &mut HashSet<usize>, out: &mut Vec<Value>) {
-            if !seen.insert(char_table_node_id(handle)) { return; }
-            let node = handle.lock().unwrap();
-            for slot in &node.slots {
-                match slot {
-                    CharTableSlot::Value(value) => out.push(*value),
-                    CharTableSlot::Node(child) => read(child, seen, out),
-                }
-            }
-        }
         let mut out = Vec::new();
-        read(&self.root, &mut HashSet::default(), &mut out);
+        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| out.push(*value));
         out
     }
     /// Rewrite every character entry (not purpose, default, parent or
