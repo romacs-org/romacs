@@ -18,26 +18,18 @@ romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaime
 /// Values a native frame keeps across a call that can run Lisp: a span of
 /// `external_roots`, pushed before the call and read back by index after it,
 /// so only the forwarded copy is used. Frames nest; release each in reverse
-/// order on every exit, the failing ones included. A panic unwinding the
-/// owning frame drops the span.
+/// order on every exit, the failing ones included. A panic leaves them to
+/// whatever catches it (`Vm::catching').
 #[must_use = "a root frame is released on every exit"]
 pub(crate) struct RootFrame {
     base: usize,
     len: usize,
-    vm: *mut Vm,
+    /// Only compared, to refuse a frame of another VM.
+    vm: *const Vm,
 }
 // SAFETY: a frame holds indices into its VM's traced `external_roots`, never a
 // Value; every read, write and release checks the VM is the frame's.
 unsafe impl crate::brand::Plain for RootFrame {}
-
-impl Drop for RootFrame {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            // SAFETY: as for `UnwindMark`.
-            unsafe { (*self.vm).external_roots.truncate(self.base) };
-        }
-    }
-}
 
 /// Test mode: every Nth Lisp entry (`threaded::execute_args`) collects and
 /// moves every live object, so a heap Value a native frame kept in a Rust
@@ -240,27 +232,17 @@ romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_
 /// index no table has, which no operation accepts.
 pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
-/// The state nested Lisp runs push and pop on the VM: suspended engines and
-/// their register stacks, root frames, collection holds, the running-engine
-/// count, the hold on aftermath and its runs (`Vm::aftermath_held'), dynamic bindings,
-/// handler and backtrace marks. A panic unwinding a frame that took this mark
-/// restores it, so no entry outlives the engine or frame it describes (a
-/// suspended engine's code pointers would dangle) and the VM stays usable
-/// once the panic is caught: the bindings and handlers made since are popped,
-/// without their watchers, and no cleanup runs; what they owned
-/// (`romacs--post-gc-owned', `inhibit-quit', a job's claim) ends with them,
-/// and a variable whose watchers were running is trapped again (`Vm::retrap').
-/// An unbind that panics again during recovery aborts the process: a second
-/// panic in a drop.
-#[must_use = "the mark restores on unwinding only while it lives"]
-pub(crate) struct UnwindMark {
-    vm: *mut Vm,
-    code: usize,
+/// The state nested Lisp pushes and pops on the VM, as it stood when
+/// `Vm::catching' was called: suspended engines and their register stacks,
+/// root frames, collection holds, the running-engine count, the holds on
+/// aftermath, dynamic bindings, handler and backtrace marks.
+struct NestingMark {
+    suspended: usize,
     stacks: usize,
     roots: usize,
     engines: usize,
     holds: usize,
-    aftermath_held: usize,
+    unwinding: usize,
     aftermath_runs: usize,
     dynamic: usize,
     retrap: usize,
@@ -270,39 +252,6 @@ pub(crate) struct UnwindMark {
     backtrace: usize,
     eval_depth: usize,
     site_leaf: (usize, usize),
-}
-
-impl Drop for UnwindMark {
-    fn drop(&mut self) {
-        if !std::thread::panicking() {
-            return;
-        }
-        // SAFETY: the mark lives in a frame of the borrow it was taken from,
-        // and an unwinding frame no longer uses that borrow.
-        let vm = unsafe { &mut *self.vm };
-        // The bindings made since end as an error's teardown ends them
-        // (`Vm::unwind'), but no watcher runs: no Lisp runs while a panic
-        // unwinds. First, while the backtrace still names them.
-        let trapped = std::mem::take(&mut vm.trapped);
-        vm.unwind(vm.dynamic.len().saturating_sub(self.dynamic));
-        vm.trapped = trapped;
-        for base in vm.retrap.drain(self.retrap.min(vm.retrap.len())..) { vm.trapped.insert(base); }
-        vm.suspended.truncate(self.code);
-        vm.suspended_stacks.truncate(self.stacks);
-        vm.external_roots.truncate(self.roots);
-        vm.running_engines = self.engines;
-        vm.gc_holds = self.holds;
-        vm.aftermath_held = self.aftermath_held;
-        vm.aftermath_runs = self.aftermath_runs;
-        vm.rooted_write = self.rooted_write;
-        vm.site_leaf = self.site_leaf;
-        if self.stack_empty {
-            vm.stack = Vec::new();
-        }
-        vm.signal_handlers.truncate(self.handlers);
-        vm.backtrace.leave(self.backtrace);
-        vm.eval_depth = self.eval_depth;
-    }
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -456,16 +405,24 @@ pub fn assert_no_retention_growth(
 }
 
 impl Vm {
-    /// Mark the nested-run state for restoration should a panic unwind the
-    /// caller's frame ([`UnwindMark`]).
-    pub(crate) fn unwind_mark(&mut self) -> UnwindMark {
-        UnwindMark {
-            code: self.suspended.len(),
+    /// Run BODY outside any engine and, if it panics, put the VM back as it
+    /// was, for a caller that goes on using it: a tool scoring a file, a test.
+    /// A session never does (a panic or `kill-emacs' ends it, and its VM with
+    /// it), so nothing on the way in pays for this. What a panic left is
+    /// dropped: suspended engines' state, root frames, holds; the bindings and
+    /// handlers made since are popped, without their watchers, and no cleanup
+    /// runs; what they owned (`romacs--post-gc-owned', `inhibit-quit', a job's
+    /// claim) ends with them, and a variable whose watchers were running is
+    /// trapped again (`Vm::retrap').
+    pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
+        assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
+        let mark = NestingMark {
+            suspended: self.suspended.len(),
             stacks: self.suspended_stacks.len(),
             roots: self.external_roots.len(),
             engines: self.running_engines,
             holds: self.gc_holds,
-            aftermath_held: self.aftermath_held,
+            unwinding: self.unwinding,
             aftermath_runs: self.aftermath_runs,
             dynamic: self.dynamic.len(),
             retrap: self.retrap.len(),
@@ -475,13 +432,39 @@ impl Vm {
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
             site_leaf: self.site_leaf,
-            vm: self,
+        };
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
+        if caught.is_err() {
+            self.restore_nesting(&mark);
         }
+        caught
+    }
+    fn restore_nesting(&mut self, mark: &NestingMark) {
+        // First, while the backtrace still names them.
+        let trapped = std::mem::take(&mut self.trapped);
+        self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
+        self.trapped = trapped;
+        for base in self.retrap.drain(mark.retrap.min(self.retrap.len())..) { self.trapped.insert(base); }
+        self.suspended.truncate(mark.suspended);
+        self.suspended_stacks.truncate(mark.stacks);
+        self.external_roots.truncate(mark.roots);
+        self.running_engines = mark.engines;
+        self.gc_holds = mark.holds;
+        self.unwinding = mark.unwinding;
+        self.aftermath_runs = mark.aftermath_runs;
+        self.rooted_write = mark.rooted_write;
+        self.site_leaf = mark.site_leaf;
+        if mark.stack_empty {
+            self.stack = Vec::new();
+        }
+        self.signal_handlers.truncate(mark.handlers);
+        self.backtrace.leave(mark.backtrace);
+        self.eval_depth = mark.eval_depth;
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
         self.external_roots.extend_from_slice(values);
-        RootFrame { base, len: values.len(), vm: self }
+        RootFrame { base, len: values.len(), vm: std::ptr::from_ref(self) }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
@@ -757,8 +740,15 @@ impl Vm {
     /// heap may be collected (VM2-GC-FINALIZER). An explicit `garbage-collect'
     /// asks `finalizer_runner' itself.
     pub(crate) fn safe_runner(&mut self, own: usize) -> Option<Value> {
-        if self.aftermath_held != 0 || !self.may_collect(own) { return None; }
+        if self.aftermath_held() || !self.may_collect(own) { return None; }
         self.finalizer_runner()
+    }
+    /// Whether anything in progress holds aftermath back: an escape being
+    /// unwound, a run of aftermath, or a suspended engine's cleanup. A running
+    /// engine answers for its own cleanups (`Engine::safe_runner'), and an
+    /// engine that is neither fails `may_collect'.
+    pub(crate) fn aftermath_held(&self) -> bool {
+        self.unwinding != 0 || self.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
     }
     /// alloc.c queue_doomed_finalizers and mark_finalizer_list: the
     /// finalizers marking has not reached are marked, with their functions,

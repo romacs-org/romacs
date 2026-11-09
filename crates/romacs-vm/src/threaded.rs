@@ -792,6 +792,11 @@ impl Suspended {
             value(entry.target);
         }
     }
+    /// Whether a cleanup of this engine is running: an escape's or a normal
+    /// exit's, its record not yet popped (`Op::ResumeExit').
+    pub(super) fn in_cleanup(&self) -> bool {
+        self.controls.iter().any(Control::is_cleanup)
+    }
     /// Every Value but its code's and entry caches'.
     pub(super) fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.rest.visit_values(visit);
@@ -911,6 +916,11 @@ enum ControlKind {
         exit: Escape,
         diagnostic: Option<String>,
     },
+}
+impl Control {
+    fn is_cleanup(&self) -> bool {
+        matches!(self.kind, ControlKind::Resume { .. })
+    }
 }
 struct Control {
     kind: ControlKind,
@@ -1095,8 +1105,6 @@ fn unrouted(e: &mut Engine<'_>, original: Option<&str>) -> Escape {
 #[inline]
 fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> {
     let control = e.controls.pop().unwrap();
-    // A cleanup an escape from it leaves unfinished.
-    if matches!(control.kind, ControlKind::Resume { .. }) { e.vm.aftermath_held -= 1; }
     let matches = match (&control.kind, e.escape.as_ref().expect("a routed escape")) {
         (ControlKind::Protect { .. }, _) => true,
         (ControlKind::Catch(tag), Escape::Throw(wanted, _)) => {
@@ -1114,7 +1122,6 @@ fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> 
     match control.kind {
         ControlKind::Protect { end } => {
             // Its cleanup runs until `Op::ResumeExit' pops the record.
-            e.vm.aftermath_held += 1;
             e.controls.push(Control {
                 kind: ControlKind::Resume {
                     exit: escape,
@@ -1234,13 +1241,13 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
     if m.leaf((), |e, ()| no_catch(e)) && !prepare_signal(&mut m, gc.by_ref(), false, None) {
         m.leaf((), |e, ()| if let Some(Escape::Error { object, .. }) = e.escape { e.vm.thrown_no_catch.push(object) });
     }
-    // From here routing holds aftermath (`Vm::aftermath_held'; the driver
+    // From here routing holds aftermath (`Vm::unwinding'; the driver
     // gives it back): the watchers its restores run, and the hooks and
     // handlers it calls while unwinding, start none. The signal-time calls
     // above come before any control is popped, so an escape from them only
     // replaces the signal, and a debugger they enter holds nothing back.
     m.leaf((), |e, ()| {
-        e.vm.aftermath_held += 1;
+        e.vm.unwinding += 1;
         leave_native(e);
         e.apply_function = None;
         if let Some(mark) = e.apply_mark.take() { e.vm.trace_leave(mark); }
@@ -1393,6 +1400,13 @@ pub(super) struct Engine<'a> {
     resume: Option<(*mut Value, *const Inst)>,
 }
 impl Engine<'_> {
+    fn in_cleanup(&self) -> bool {
+        self.controls.iter().any(Control::is_cleanup)
+    }
+    /// `Vm::safe_runner' from this running engine, its own cleanups included.
+    fn safe_runner(&mut self) -> Option<Value> {
+        if self.in_cleanup() { None } else { self.vm.safe_runner(1) }
+    }
     #[cfg(test)]
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit_code(&mut self.code, visit);
@@ -1490,7 +1504,6 @@ impl Vm {
     /// pointers). FUNCTION and ARGS are rooted in the trampoline's registers;
     /// the caller keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
-        let _unwind = self.unwind_mark();
         // Compiling a trampoline allocates nothing that can collect.
         let trampoline = self.reader_trampoline(args.len())?;
         let registers: Vec<Value> = if args.len() <= TRAMPOLINE_ARITY {
@@ -1608,7 +1621,6 @@ pub(super) fn execute(vm: &mut Vm, function: usize) -> Result<Value> {
     execute_args(vm, function, &[])
 }
 pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
-    let _unwind = vm.unwind_mark();
     // Native reentry (eval/load/macro expansion) shares the Lisp budget, but
     // receives another native stack segment before Rust can exhaust it.
     stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
@@ -1716,7 +1728,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // This engine holds collection until it suspends; a writer's rooted
     // watcher notification does not extend into it.
     engine.vm.running_engines += 1;
-    let held = engine.vm.aftermath_held;
     let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), stress_collect, done);
@@ -1747,7 +1758,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         // Routing holds aftermath once it starts unwinding (`route_escape'
         // takes the hold, this gives it back).
         let routed = orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), route_escape, routed);
-        engine.vm.aftermath_held -= 1;
+        engine.vm.unwinding -= 1;
         let Some((regs, pc, cleanup)) = routed else { break };
         // Region exits are strand wait points too: suspended payloads are
         // activation-owned roots before any cleanup instruction can allocate.
@@ -1786,11 +1797,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
     engine.vm.rooted_write = rooted_write;
-    // What this engine still held ends with it (an image failure, a normal
-    // exit crossing its activation). Aftermath it left pending is polled for
-    // soon by the engine it returns to.
-    debug_assert!(engine.error.is_some() || engine.fatal_image_failure || engine.vm.aftermath_held == held);
-    engine.vm.aftermath_held = held;
+    // Aftermath it left pending is polled for soon by the engine it returns to.
     engine.vm.collect_poll |= engine.vm.aftermath_pending();
     engine.vm.running_engines -= 1;
     match engine.error {
@@ -2279,7 +2286,7 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // test first: most polls find neither, and a handler landing is one.
     let runner = m.leaf((), |e, ()| {
         if !e.vm.aftermath_flagged() { return None; }
-        let runner = e.vm.safe_runner(1);
+        let runner = e.safe_runner();
         plain_runner(e.vm, runner)
     });
     if let Some(runner) = runner && !aftermath(&mut m, gc.by_ref(), runner) {
@@ -4851,7 +4858,7 @@ fn collect_idle<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<
     let collected = lend::collect(&mut m, gc.by_ref(), true);
     let runner = m.leaf((pc.a(), collected), |e, (dest, collected)| {
         e.set_reg(dest, if collected { Value::TRUE } else { Value::NIL });
-        let runner = if collected { e.vm.safe_runner(1) } else { None };
+        let runner = if collected { e.safe_runner() } else { None };
         plain_runner(e.vm, runner)
     });
     collected_then(&mut m, gc, pc, runner)
@@ -4869,17 +4876,15 @@ impl Vm {
     /// One run of a collection's aftermath: RUNNER (`romacs--run-finalizers')
     /// through the trampoline, holding aftermath until it returns, so that an
     /// automatic collection inside it defers to its loop or a later safe
-    /// point, never nesting (a panic's hold: the caller's `UnwindMark'). With
+    /// point, never nesting. With
     /// PROPAGATE its escape is the caller's.
     pub(super) fn run_aftermath(&mut self, runner: Value, propagate: bool) -> Result<Value> {
         let trampoline = self.reader_trampoline(0)?;
-        self.aftermath_held += 1;
         self.aftermath_runs += 1;
         self.propagate_next = propagate;
         let outcome = execute_args(self, trampoline, &[runner]);
         self.propagate_next = false;
         self.aftermath_runs -= 1;
-        self.aftermath_held -= 1;
         outcome
     }
 }
@@ -5716,13 +5721,12 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Optio
                     let ControlKind::Resume { exit, diagnostic } = control.kind else {
                         return Err("invalid image resume region".into());
                     };
-                    e.vm.aftermath_held -= 1;
                     match exit {
                         Escape::Normal(value) => {
                             *r.add(control.dest) = value;
                             // The protected form is done: aftermath its cleanup
                             // or body left pending is the next poll's, soon.
-                            if e.vm.aftermath_held == 0 && e.vm.aftermath_pending() { e.budget = 0; }
+                            if e.vm.aftermath_pending() && !e.in_cleanup() && !e.vm.aftermath_held() { e.budget = 0; }
                             return Ok(());
                         }
                         exit => {

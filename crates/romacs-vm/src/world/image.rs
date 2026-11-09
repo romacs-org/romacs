@@ -64,7 +64,7 @@ impl Vm {
             ("suspended_stacks", self.suspended_stacks.is_empty()),
             ("running_engines", self.running_engines == 0),
             ("gc_holds", self.gc_holds == 0),
-            ("aftermath_held", self.aftermath_held == 0),
+            ("unwinding", self.unwinding == 0),
             ("rooted_write", !self.rooted_write),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
         ];

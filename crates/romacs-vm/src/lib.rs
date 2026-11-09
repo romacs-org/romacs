@@ -1411,8 +1411,7 @@ pub struct Vm {
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
     /// Variables whose watchers run now, each trapped again as its call ends
-    /// (`Vm::notify_watchers_at'), or as a panic unwinds past it
-    /// (`UnwindMark').
+    /// (`Vm::notify_watchers_at'), or as a panic is caught (`Vm::catching').
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
@@ -1636,12 +1635,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
-    /// What holds a collection's automatic aftermath back, over every engine:
-    /// each escape `threaded::route_escape' is unwinding, each live resume
-    /// record (a cleanup running) and each run of aftermath in progress
-    /// (`Vm::run_aftermath'). While nonzero none starts (`Vm::safe_runner');
-    /// zero whenever no engine runs.
-    aftermath_held: usize,
+    /// Escapes being unwound, in any engine: routing takes it, the driver gives
+    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held').
+    unwinding: usize,
     /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
     /// interrupt naming the job waits (`threaded::isolate_quit'), so
     /// finalizers and `post-gc-hook' never take it.
@@ -1796,7 +1792,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
-    aftermath_held,
+    unwinding,
     aftermath_runs,
     keymap_filters,
     keymap_pending_filter,
@@ -2033,7 +2029,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
-            aftermath_held: 0,
+            unwinding: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],
             suspended: vec![],
@@ -2302,7 +2298,6 @@ impl Vm {
         outer: &NameMap<Name, Binding>,
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
-        let _unwind = self.unwind_mark();
         self.gc_holds += 1;
         let result = self.build_function(args, body, outer, local_specials);
         self.gc_holds -= 1;

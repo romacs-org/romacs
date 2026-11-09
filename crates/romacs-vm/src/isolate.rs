@@ -501,7 +501,7 @@ impl Vm {
     /// the signal-handler stack, above the job's handler. Whatever removes that
     /// entry ends the claim with no code of its own: the handler's normal exit
     /// or landing (truncation to its mark), its engine's end, a caught panic
-    /// (`UnwindMark'). O(1).
+    /// (`Vm::catching'). O(1).
     pub(crate) fn isolate_claim(&self) -> Option<u64> {
         let (index, generation) = self.isolates.claim?;
         matches!(self.signal_handlers.get(index), Some(&crate::threaded::SignalHandler::Job(g)) if g == generation)
