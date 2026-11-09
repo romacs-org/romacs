@@ -426,6 +426,8 @@ fn trim() {
     let census = arena::census().unwrap();
     let (returned, slack) = (touched - resident() >= 48 << 20, census.above_top <= 4 << 20);
     let mut vm = Vm::new();
+    // On threads the trim follows the graves, later than the census below.
+    vm.set_gc_threads(1);
     vm.collect_garbage();
     // 64 runs of 32 pages, each held apart by a live 10-page run.
     let (mut runs, mut apart) = (Vec::new(), Vec::new());
@@ -461,8 +463,8 @@ const ALONE: &str = "only_a_builders_heap_is_an_image_and_only_it_collects_alone
 /// Whether this process's heap will be an image, and whether a collection
 /// asked to use threads stayed on this one.
 fn alone() {
-    romacs_vm::set_gc_workers(4);
     let mut vm = Vm::new();
+    vm.set_gc_threads(4);
     vm.collect_garbage();
     println!("WORLD-IMAGE {}", json!({"image": arena::heap_is_image(), "alone": collector_threads() == 0}));
 }
