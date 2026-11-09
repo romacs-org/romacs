@@ -27,6 +27,7 @@ no .git is needed (the gate's frozen mirror has none).
 import os as _portable_os
 from pathlib import Path as _PortablePath
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -148,11 +149,25 @@ def generated_support(root, gnu, pin, pinned, required):
     return support, problems
 
 
+def excluded_paths(upstream, patterns):
+    """The GNU paths PATTERNS (fnmatch over GNU's own names, `*` crossing
+    directories) deliberately drop, and the patterns that drop nothing."""
+    dropped = {p for p in upstream if any(fnmatch.fnmatchcase(p, pat) for pat in patterns)}
+    stale = [pat for pat in patterns if not any(fnmatch.fnmatchcase(p, pat) for p in upstream)]
+    return dropped, stale
+
+
 def check(root, gnu, pin):
     root = pathlib.Path(root).resolve()
     upstream = pin_tree(gnu, pin)
-    pinned = {local_path(p): blob for p, blob in upstream.items()}
-    problems = []
+    pin_file = root / PIN_FILE
+    rec = json.loads(pin_file.read_text()) if pin_file.exists() else {}
+    dropped, stale = excluded_paths(upstream, rec.get('excluded', []))
+    pinned = {local_path(p): blob for p, blob in upstream.items() if p not in dropped}
+    problems = [f'{PIN_FILE}: excluded pattern {pat!r} matches no GNU path at the pin' for pat in stale]
+    for p in sorted(map(local_path, dropped)):
+        if (root / p).exists() or (root / p).is_symlink():
+            problems.append(f'EXCLUDED {p}: {PIN_FILE} drops it deliberately; delete it')
 
     present = [p for p in sorted(pinned) if (root / p).is_file() and not (root / p).is_symlink()]
     absent = sorted(set(pinned) - set(present))
@@ -167,10 +182,7 @@ def check(root, gnu, pin):
 
     # LISP-PIN.json records the pin and GNU's own tree id for lisp/; both must
     # agree with GNU's object store, so the record cannot drift from the pin.
-    pin_file = root / PIN_FILE
-    rec = {}
     if pin_file.exists():
-        rec = json.loads(pin_file.read_text())
         want_tree = git('rev-parse', pin + ':lisp', cwd=gnu).strip()
         if rec.get('gnu_commit') != pin:
             problems.append(f'{PIN_FILE}: gnu_commit {rec.get("gnu_commit")} is not the pin {pin}')
@@ -192,7 +204,8 @@ def check(root, gnu, pin):
               if not p.is_dir()}
     if (root / '.git').exists():
         listed.update(git('ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', LOCAL_LISP, cwd=root).split('\0'))
-    extras = sorted(p for p in listed if p and p not in pinned and p not in support
+    gone = set(map(local_path, dropped))
+    extras = sorted(p for p in listed if p and p not in pinned and p not in support and p not in gone
                     and ((root / p).exists() or (root / p).is_symlink()))
     for p in extras:
         problems.append(f'EXTRA {p}: neither a GNU Git path at the pin nor declared generated support; '
@@ -233,6 +246,7 @@ def check(root, gnu, pin):
 
     print(f'lisp_oracle: pin {pin[:11]}: {len(pinned)} GNU paths, {len(present)} present '
           f'({len(present) - len(differ)} identical, {len(differ)} modified), {len(absent)} absent, '
+          f'{len(dropped)} excluded, '
           f'{len(support)} declared generated support, {len(extras)} extra; overlay {len(files)} files')
     if problems:
         print(f'lisp_oracle: FAIL, {len(problems)} violation(s) of R221 (pristine GNU paths / generated support):', file=sys.stderr)
