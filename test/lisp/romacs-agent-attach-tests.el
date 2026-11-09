@@ -567,11 +567,11 @@ size hook firing as `read-key' waits: the result and the layouts shown."
     (let ((image (expand-file-name "a.png" dir)))
       (write-region "PNG" nil image nil 'silent)
       ;; Plain text, however it reads, stays a string.
-      (let* ((line (romacs-agent--claude-user session (format "see [image: %s]" image)))
+      (let* ((line (romacs-agent--claude-user session (format "see [image: %s]" image) 1))
              (content (gethash "content" (gethash "message" line))))
         (should (stringp content)))
       (let* ((romacs-agent--message-images (list image))
-             (line (romacs-agent--claude-user session "see"))
+             (line (romacs-agent--claude-user session "see" 1))
              (content (gethash "content" (gethash "message" line)))
              (block (aref content 2)))
         (should (equal (gethash "text" (aref content 0)) "see"))
@@ -583,42 +583,34 @@ size hook firing as `read-key' waits: the result and the layouts shown."
         ;; What the journal shows of it is the text alone.
         (should (equal (romacs-agent--text-of content) "see"))))))
 
-(defun romacs-agent-attach-tests--turn-argv (session send)
-  "The command line SEND makes SESSION's per-turn harness run."
-  (let ((argv nil))
-    (cl-letf (((symbol-function 'romacs-agent--instance) (lambda (&rest _) (list :program "codex")))
-              ((symbol-function 'romacs-agent--environment-words) #'ignore)
-              ((symbol-function 'romacs-agent--codex-mcp-words) #'ignore)
-              ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
-              ((symbol-function 'romacs-agent--attach) #'ignore)
-              ((symbol-function 'romacs-agent--launch) (lambda (_ words &rest _) (setq argv words))))
+(defun romacs-agent-attach-tests--codex-images (session send)
+  "The image paths of the message SEND makes SESSION write to Codex."
+  (let ((written nil))
+    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (setq written object))))
       (funcall send))
-    argv))
+    (cl-loop for item across (gethash "input" (gethash "params" written))
+             when (equal (gethash "type" item) "localImage") collect (gethash "path" item))))
 
 (ert-deftest romacs-agent-only-attached-images-reach-codex ()
   (romacs-agent-attach-tests--with-chat session
     (let ((image (expand-file-name "secret.png" dir))
           (codex (romacs-agent--make :id "22222222-2222-4333-8444-666666666666" :harness 'codex :state 'idle
-                                     :title "codex" :dir dir :harness-session "thread")))
+                                     :title "codex" :dir dir :harness-session "thread"
+                                     :driver-state (list :ready t))))
       (write-region "x" nil image nil 'silent)
       ;; A child's result quoting a file uploads nothing.
-      (let ((argv (romacs-agent-attach-tests--turn-argv
-                   codex (lambda () (romacs-agent-send codex (format "Delegated result: [image: %s]" image))))))
-        (should argv)
-        (should-not (member "--image" argv)))
-      (setf (romacs-agent-state codex) 'idle)
-      ;; Attached, it goes; before --json, so the prompt stays the last word.
-      (let ((argv (romacs-agent-attach-tests--turn-argv
-                   codex (lambda () (romacs-agent-send codex "see" nil nil (list image))))))
-        (should (equal (seq-take argv 6) (list "codex" "exec" "resume" "thread" "--image" image)))
-        (should (equal (nth 6 argv) "--json"))
-        (should (equal (car (last argv)) "-")))
+      (should-not (romacs-agent-attach-tests--codex-images
+                   codex (lambda () (romacs-agent-send codex (format "Delegated result: [image: %s]" image)))))
+      ;; Attached, it goes.
+      (should (equal (romacs-agent-attach-tests--codex-images
+                      codex (lambda () (romacs-agent-send codex "see" nil nil (list image))))
+                     (list image)))
       ;; Queued, it waits with its message.
       (setf (romacs-agent-state codex) 'running)
       (romacs-agent-send-later codex "later" nil (list image))
       (setf (romacs-agent-state codex) 'idle)
-      (let ((argv (romacs-agent-attach-tests--turn-argv codex (lambda () (romacs-agent--send-next codex)))))
-        (should (member image argv))))))
+      (should (equal (romacs-agent-attach-tests--codex-images codex (lambda () (romacs-agent--send-next codex)))
+                     (list image))))))
 
 (ert-deftest romacs-agent-attach-loads-the-tray ()
   ;; The clipboard's way in reads no file: attaching alone must bring it.

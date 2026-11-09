@@ -8,6 +8,11 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 
+;; Codex's app-server driver is persistent: a per-turn harness is a test
+;; harness's.
+(romacs-agent-define-harness 'perturn :lifetime 'per-turn :config-variable "PERTURN_HOME"
+                             :config-default "~/.perturn")
+
 (ert-deftest romacs-agent-queued-message-stays-until-sent ()
   ;; The harness went between the turn's end and the send: the send fails,
   ;; and the message is still first, counted, for the next end or a resume.
@@ -33,7 +38,7 @@
 (ert-deftest romacs-agent-queue-dispatch-is-one-at-a-time ()
   ;; A per-turn harness's run that ends before it is attached ends the turn
   ;; while its message is being sent: the next is sent after, once each.
-  (let ((session (romacs-agent--make :id "66666666-7777-4888-8999-aaaaaaaaaaaa" :harness 'codex
+  (let ((session (romacs-agent--make :id "66666666-7777-4888-8999-aaaaaaaaaaaa" :harness 'perturn
                                      :state 'running))
         (turns nil))
     (romacs-agent-send-later session "first")

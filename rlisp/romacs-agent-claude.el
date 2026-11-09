@@ -54,7 +54,7 @@ RESUME is non-nil."
                       (base64-encode-region (point-min) (point-max) t)
                       (buffer-string)))))
 
-(defun romacs-agent--claude-user (_session text)
+(defun romacs-agent--claude-user (_session text _id)
   "The harness's message of TEXT, with the images attached to it as content,
 each after a line naming where it is saved: the model can refer to it."
   (let ((images (seq-filter #'romacs-agent-image-file-p romacs-agent--message-images)))
