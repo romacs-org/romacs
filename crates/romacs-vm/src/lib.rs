@@ -103,6 +103,10 @@ mod tzfile;
 mod undo;
 mod insdel;
 mod indirect;
+// Rooting as a type; public, hidden, so tests/rooting_brand.rs compiles
+// against it.
+#[doc(hidden)]
+pub mod brand;
 mod gc;
 mod gc_check;
 mod gc_mark;
@@ -208,6 +212,8 @@ pub enum Form {
     #[doc(hidden)]
     Object(handle::FormObject),
 }
+// SAFETY: a form's objects are rooted handles (`FormObject`), never raw Values.
+unsafe impl crate::brand::Plain for Form {}
 romacs_snapshot::snapshot_enum!(Form {
     Form::Int(f0) => (f0),
     Form::Float(f0) => (f0),
@@ -283,6 +289,27 @@ impl Form {
 /// Two-bit fixnums and three-bit reference tags; private indices move at collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Value(u64);
+/// A Value no collection frees or moves: nil, t, unbound, a fixnum, a
+/// primitive, or a symbol that is not an obarray's (`reclaim_obarray_symbols`
+/// frees those and reuses their slots). Plain data, so orchestration may carry
+/// one across a collection point (`brand`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Imm(Value);
+// SAFETY: `Imm::new` admits only values no collection frees or moves.
+unsafe impl brand::Plain for Imm {}
+impl Imm {
+    pub(crate) fn new(vm: &Vm, value: Value) -> Option<Self> {
+        let fixed = match value.tag() {
+            1 | 6 => true,
+            7 => value.payload() == 0 || !vm.obarray_symbol_names.contains_key(&(value.payload() as usize - 1)),
+            _ => value == Value::NIL || value == Value::TRUE,
+        };
+        fixed.then_some(Imm(value))
+    }
+    pub(crate) fn get(self) -> Value {
+        self.0
+    }
+}
 romacs_snapshot::snapshot_tuple!(Value(f0));
 impl Value {
     pub const NIL: Self = Self(0);

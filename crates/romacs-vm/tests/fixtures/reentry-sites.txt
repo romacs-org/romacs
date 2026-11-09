@@ -16,7 +16,7 @@
 #              writer that has not rooted its frame.
 #   boundary   an embedder or top-level request: the caller keeps no raw Value.
 #   collector  a collection point; its caller passes every root.
-autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is a symbol
+autoload.rs autoload_do_load load_with_autoload_queue 1 rooted  # FUNDEF is rooted in the PENDING binding and read back; FUNNAME is its caller's: a register, a root frame, or a form's under its row
 autoload.rs autoload_do_load unbind_after 1 held  # native unbinding: watchers hold collection (rooted_write unset)
 autoload.rs load_source_named load_file_kind 1 clean  # FILE is read before the load
 autoload.rs load_with_autoload_queue load_source_named 1 rooted  # the queue and saved match data are bindings, read back from their slots
@@ -26,8 +26,8 @@ command.rs command_event eval_form_raw 6 clean  # events become forms and the bi
 command.rs command_event set_variable_value 1 held  # this-command := the binding: a native writer, its watchers hold collection (rooted_write unset)
 compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
 compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
-compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is a symbol, which never moves
-compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is a symbol, which never moves
+compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is in the initial obarray, whose symbols are never reclaimed
+compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is in the initial obarray, whose symbols are never reclaimed
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
 eval_buffer.rs eval_buffer_primitive set_variable_value 2 held  # a native writer: its watchers hold collection (rooted_write unset)
@@ -87,7 +87,7 @@ loader.rs load_file_as unwind 1 held  # native unbinding: watchers hold collecti
 loader.rs loader_primitive autoload_do_load 1 clean  # ARGS are not used after the load
 loader.rs loader_primitive eval_primitive 1 clean  # ARGS are not used after the evaluation
 loader.rs loader_primitive load_file_kind 1 clean  # ARGS are read before the load
-loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is a symbol, which never moves
+loader.rs loader_primitive load_with_autoload_queue 1 clean  # FEATURE, used after, is the primitive's argument, live in its caller's registers or root frame across the load
 loader.rs loader_primitive macroexpand_primitive 1 clean  # ARGS are not used after the expansion
 loader.rs loader_primitive read_host_event 1 clean  # SECONDS is read before the wait
 macroexpand.rs call_macro_expander compile_request 1 held  # an open compiler builder holds collection
@@ -176,75 +176,13 @@ source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open 
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
 tab_bar.rs tab_bar_snapshot call_prepared_source_raw 1 clean  # no arguments; only the returned row is read after it, by reads that do not allocate
 terminal_host.rs declare_terminal_errors eval_source_raw 1 boundary  # a world build or host setup declaring a constant error: no caller Values
-threaded.rs autoload_then autoload_do_load 1 suspended  # inside call_suspended
-threaded.rs autoload_then nested_then 1 suspended  # FUNCTION and FUNDEF are rooted by the load
-threaded.rs bind_special bind_variable 1 suspended  # inside watched_write; bind_variable roots the value across its watchers
-threaded.rs bind_special watched_write 1 rooted  # VALUE is a frame while watched, read back for the fault's data
-threaded.rs call_debugger call_in_signal 1 suspended  # CONDITIONS and OBJECT are the pending escape's, quoted into the form
-threaded.rs run_in_signal call_suspended 1 suspended  # the form's objects are the pending escape's and quoted objects
-threaded.rs run_in_signal compile 1 held  # an open compiler builder holds collection
-threaded.rs run_in_signal execute_raw 1 clean  # inside call_suspended; nothing held
-threaded.rs hook_debugger compile 1 held  # an open compiler builder holds collection
-threaded.rs hook_debugger execute_raw 1 clean  # inside nested_then's call_suspended; nothing held
-threaded.rs checked_unbind unbind_one 1 suspended  # inside watched_write
-threaded.rs checked_unbind watched_write 1 suspended  # the engine is suspended when any variable is watched
-threaded.rs bind_step bind_special 1 suspended  # the value is read from its register; nothing is reused after
-threaded.rs unbind_step checked_unbind 1 suspended  # see checked_unbind
-threaded.rs cold_step bind_special 1 suspended  # a late binding (BindLate): the value is read from its cell, which is written again after, through the engine
-threaded.rs cold_step checked_unbind 1 suspended  # see checked_unbind; a late binding (UnbindLate) the same way
-threaded.rs set_global set_variable_value 1 suspended  # inside watched_write; the value is read again from its register
-threaded.rs set_global watched_write 1 suspended  # the engine is suspended when the variable is watched
-threaded.rs execute execute_args 1 clean  # no arguments
-threaded.rs execute_args_inner force_lazy 1 held  # an open compiler builder holds collection
-threaded.rs execute_args_inner poll_collect 1 collector  # the stress collection; the arguments are registers
-threaded.rs execute_args_inner unwind 1 held  # the engine still runs: its registers are untraced
-threaded.rs force_lazy call_suspended 1 suspended  # the caller's registers are rebased from the result
-threaded.rs force_lazy force_lazy 1 held  # an open compiler builder holds collection
-threaded.rs invoke_full autoload_then 1 suspended  # registers are rebased from the result
-threaded.rs invoke_full lambda_list_raise 1 rooted  # the walk's bindings and data are external roots, read back per binding
-threaded.rs invoke_full lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
-threaded.rs lambda_list_raise bind_special 1 rooted  # each parameter and argument is read from the external roots before its binding
-threaded.rs lambda_list_then lambda_list_closure 1 suspended  # inside nested_then; LIST is an argument read before any Lisp
-threaded.rs lambda_list_then nested_then 1 suspended  # registers are rebased from the result
-threaded.rs nested_then call_suspended 1 suspended  # the caller's registers are rebased from the result
-threaded.rs poll_collect poll_collect_unless_key 1 collector  # the engine is suspended first
-threaded.rs poll_collect_unless_key collect_until_key 1 collector  # the engine is suspended first
-threaded.rs finish_collection run_aftermath 1 clean  # inside nested_then's call_suspended; the runner is a symbol
-threaded.rs run_aftermath execute_args 1 clean  # the runner is a symbol; nothing else is held
-threaded.rs finish_collection nested_with_room 1 suspended  # the runner is the call's own; registers are rebased from the result
-threaded.rs hook_debugger nested_with_room 1 suspended  # the engine is suspended; ARGS are quoted into the form, the result is read from the return
-threaded.rs nested_with_room nested_then 1 suspended  # the caller's registers are rebased from the result
-threaded.rs take_step finish_collection 2 suspended  # the statistics or t are in a register; registers are rebased from the result
-threaded.rs poll_resume finish_collection 1 suspended  # when safe_runner(1) gives a runner; registers are rebased from the result, an escape returns
-threaded.rs cleanup_entry poll_collect 1 collector  # when may_collect(1); the exit is the resume record's, traced
-threaded.rs poll_resume poll_collect 1 collector  # when may_collect(1)
-threaded.rs primitive reentrant_load 1 suspended  # see reentrant_load
-threaded.rs primitive_target loader_primitive 1 held  # a cached legacy primitive call: its engine is not suspended
-threaded.rs reader_call execute_args 1 rooted  # FUNCTION and ARGS are the trampoline's registers; the caller's registers are set aside
-threaded.rs reentrant_load reentrant_step 1 suspended  # the step does the call; the handler only dispatches its Continue
-threaded.rs reentrant_step call_suspended 1 suspended  # ARGS are a copy; the primitive's condition reads the restored registers
-threaded.rs reentrant_step loader_primitive 1 suspended  # inside call_suspended
-threaded.rs resolve_entry force_lazy 1 suspended  # registers are rebased from the result
-threaded.rs return_unbind checked_unbind 1 suspended  # the return value is read from its register after
-threaded.rs route_escape checked_unbind 2 suspended  # the exit and its control stay engine state across the restores
-threaded.rs signal_hook call_in_signal 1 suspended  # CONDITION and DATA are the pending escape's, quoted into the form
-threaded.rs t2_dispatch autoload_then 1 suspended  # registers are rebased from the result
-threaded.rs t2_dispatch lambda_list_raise 1 rooted  # the walk's bindings and data are external roots, read back per binding
-threaded.rs t2_dispatch lambda_list_then 1 suspended  # registers are rebased from the result; the closure is fresh
-threaded.rs t2_enter_closure force_lazy 1 suspended  # registers are rebased from the result
-threaded.rs take_step poll_collect 1 collector  # garbage-collect, when may_collect(1)
-threaded.rs take_step poll_collect_unless_key 1 collector  # romacs--collect-idle, when may_collect(1)
-threaded_signal.rs handler_callback reader_call 1 suspended  # the engine is suspended; OBJECT and FUNCTION are the call's own
-threaded_signal.rs prepare_signal call_debugger 1 suspended  # the error stays the engine's pending escape; its replacement is read from the result
-threaded_signal.rs prepare_signal signal_hook 1 suspended  # the condition stays the engine's pending escape
-threaded_signal.rs search handler_callback 1 suspended  # each step reads the escape and handler again
 variable_runtime.rs bind_variable bind_variable 1 clean  # a fenced variable's binding, again through the fence: VALUE is passed on and nothing is used after
 variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended; the file-local defvar returns its symbol, which never moves
+variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended, so nothing collects; the file-local defvar returns its symbol
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher

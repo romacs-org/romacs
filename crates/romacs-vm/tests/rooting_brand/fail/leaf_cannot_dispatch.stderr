@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/rooting_brand/fail/leaf_cannot_dispatch.rs:9:38
+  |
+9 |     m.leaf((), |e, ()| { orchestrate(e, (), body, then); });
+  |                          ----------- ^ expected `Eng<'_, Engine>`, found `&mut Engine`
+  |                          |
+  |                          arguments to this function are incorrect
+  |
+  = note:         expected struct `romacs_vm::brand::Eng<'_, standin::Engine>`
+          found mutable reference `&mut standin::Engine`
+note: function defined here
+ --> src/brand.rs
+  |
+  | pub fn orchestrate<'x, E, A: Plain, N: Plain, R: 'static>(e: Eng<'x, E>, a: A,
+  |        ^^^^^^^^^^^

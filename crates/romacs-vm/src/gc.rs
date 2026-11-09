@@ -26,6 +26,9 @@ pub(crate) struct RootFrame {
     len: usize,
     vm: *mut Vm,
 }
+// SAFETY: a frame holds indices into its VM's traced `external_roots`, never a
+// Value; every read, write and release checks the VM is the frame's.
+unsafe impl crate::brand::Plain for RootFrame {}
 
 impl Drop for RootFrame {
     fn drop(&mut self) {
@@ -481,12 +484,29 @@ impl Vm {
         RootFrame { base, len: values.len(), vm: self }
     }
     pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
+        assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
         self.external_roots[frame.base + i]
     }
     pub(crate) fn set_rooted(&mut self, frame: &RootFrame, i: usize, value: Value) {
+        assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert!(i < frame.len, "root frame index");
         self.external_roots[frame.base + i] = value;
+    }
+    /// FRAME's values, forwarded.
+    pub(crate) fn rooted_values(&self, frame: &RootFrame) -> &[Value] {
+        assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
+        &self.external_roots[frame.base..frame.base + frame.len]
+    }
+    /// Run Lisp that must not collect: BODY's collections are refused (the
+    /// funnel sees the hold), so its caller may keep Values in Rust locals
+    /// across it. Named so each one is counted: a deferred collection is
+    /// latency debt.
+    pub(crate) fn defer<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> T {
+        self.gc_holds += 1;
+        let out = body(self);
+        self.gc_holds -= 1;
+        out
     }
     /// Release FRAME, returning its forwarded values.
     pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
@@ -496,6 +516,7 @@ impl Vm {
         values
     }
     pub(crate) fn drop_frame(&mut self, frame: RootFrame) {
+        assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         assert_eq!(self.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
         self.external_roots.truncate(frame.base);
     }
@@ -1008,6 +1029,13 @@ impl Vm {
     /// collected, and the heap is as it was (marking writes only caches and
     /// local marks). Whether it collected.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        // The one funnel: no collection while a hold is open or an engine runs
+        // unsuspended, whatever reached here. Raw code cannot suspend its own
+        // engine (only the engine's lends do), so it cannot make this pass.
+        debug_assert!(self.suspended_code.len() <= self.running_engines, "suspended engines outnumber running ones");
+        if !self.may_collect(0) {
+            return false;
+        }
         let mut lap = Lap::start();
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
