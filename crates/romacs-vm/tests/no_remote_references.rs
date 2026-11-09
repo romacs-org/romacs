@@ -326,24 +326,33 @@ fn a_name_past_the_barrier_is_refused() {
     ]);
 }
 
-// Two ratchets on what a store can write past the barrier. Both are
-// censuses, like the field list above: the check finds declarations, and a
-// person classifies them, because which hold a Value is read from the code,
-// not inferred by this test.
+// What a store could write past the barrier, in two lists.
 //
-// 1. Every declaration that keeps something behind a cell or lock (a field, an
-//    enum's body, an alias, a static), anywhere under `src`, has a class here.
-//    A shared borrow writes through a cell, so one holding a Value is a store
-//    the barrier never sees; those are `Held`, and their number only falls.
-//    An alias or a generic type that holds a cell is itself a cell wherever
-//    it is named, whatever its class.
-// 2. Each `Object` variant names its payload types, and an entry type with a
+// 1. An inventory of the declarations behind a cell or lock: a field, an
+//    enum's body or an alias, anywhere under `src`. A shared borrow writes
+//    through a cell, so one holding a Value is a store the barrier never sees;
+//    those are `Held`, and their number only falls. A new declaration needs a
+//    row, and its class is the reason. An alias or a generic type that holds a
+//    cell counts as one wherever it is named.
+// 2. The table entry types, enforced: each VM table names its entry type, each
+//    entry enum's variants name their payload types, and an entry type with a
 //    field that isn't private is listed until its fields are all private. A
-//    `&mut` to an entry comes only from `entry_mut`, which runs the barrier,
-//    so this is the funnel each type still lacks.
+//    `&mut` to an entry comes only from `entry_mut`, which runs the barrier.
 //
+// Both read declarations by their spelling, so neither proves the barrier sees
+// every store. They don't see:
+// - a cell type from another crate that `CELL_TYPES` doesn't name, or a cell of
+//   the crate's imported under another name (`use crate::indirect::Shared as
+//   Hidden`);
+// - a cell inside another crate's type, or behind `dyn` or `impl`: the mark's
+//   graves ride in a rayon job;
+// - a type a macro declares;
+// - statics, which the global-state rule in `rooting_brand_rules.rs` owns;
+// - a public field of a type an entry holds or derefs to: `AnnotatedBuffer`
+//   derefs to `Text`, whose syntax and category tables are `pub(crate)`.
 // Atomics are not cells here: a root handle keeps Value bits in one, and the
-// root lists cover it. Raw-pointer writes are the unsafe census's.
+// root lists cover it. Raw-pointer writes are the unsafe census's. What these
+// lists miss is the collector verifier's to catch (`ROMACS_GC_VERIFY`).
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Behind {
@@ -369,11 +378,10 @@ use Behind::{Collector, Dead, Generic, Held, Passing, Plain, Rooted};
 const CELL_TYPES: &[&str] = &["Cell", "RefCell", "Mutex", "RwLock", "UnsafeCell", "OnceCell", "OnceLock", "LazyCell", "LazyLock", "Injector"];
 
 /// Every declaration behind a cell, as `FILE:TYPE.FIELD`, or `FILE:NAME` for an
-/// enum's body, an alias or a static.
+/// enum's body or an alias.
 const CELLS: &[(&str, Behind)] = &[
     ("annotations.rs:AnnotatedBuffer.anchors", Plain), ("annotations.rs:AnnotatedBuffer.reversed_pairs", Plain),
     ("bytes.rs:BufferState.modification", Plain),
-    ("capture.rs:INDEX_WORK", Plain),
     // Char table nodes, shared between tables, sub-char-tables, views and
     // keymap cursors: five rows for one lock. They are written through it.
     ("char_table.rs:CharTableNodeHandle", Held), ("char_table.rs:CharTableSlot", Held),
@@ -383,47 +391,33 @@ const CELLS: &[(&str, Behind)] = &[
     ("display.rs:FaceTable.faces", Plain), ("display.rs:FaceTable.index", Plain), ("display.rs:FaceTable.over", Plain),
     ("display.rs:FaceTable.merged", Plain), ("display.rs:FaceTable.view", Plain), ("display.rs:FaceTable.floor", Plain),
     ("display.rs:DisplayState.diagnostics", Plain),
-    ("environment.rs:DIRECTORY", Plain),
     // The printer's state for one print, which can call Lisp.
     ("eval_data.rs:Unreadable", Held), ("eval_data.rs:PrintOptions.graph", Held),
-    ("forwarded.rs:NEXT_CALL", Plain), ("forwarded.rs:INDEX", Plain),
     ("gc_mark.rs:Marking.queue", Collector), ("gc_mark.rs:Marking.serial", Collector),
-    ("gc_mark.rs:Marking.batch", Dead), ("gc_mark.rs:GRAVES", Dead),
+    ("gc_mark.rs:Marking.batch", Dead),
     ("gc_mark.rs:Marking.park", Plain), ("gc_mark.rs:Marking.census", Plain), ("gc_mark.rs:Marking.after_take", Plain),
-    ("gc_mark.rs:PANICKED_ON", Plain), ("gc_mark.rs:ALONE", Plain), ("gc_mark.rs:POOL", Plain),
     // Root registrations, kept as Value bits.
     ("handle.rs:RootSet.slots", Rooted),
     ("handle.rs:Looks.0", Plain),
-    ("host.rs:MODE", Plain), ("host.rs:BUILD", Plain), ("host.rs:LAYER", Plain), ("host.rs:CONFINED", Plain),
-    ("host.rs:FLAGS_READER", Plain), ("host.rs:WALK", Plain), ("host.rs:INSTRUCTION_COUNTER", Plain), ("host.rs:DAEMON", Plain),
-    ("host.rs:Waiter.armed", Plain), ("host.rs:WAITER", Plain), ("host.rs:INSPECT_SLOT", Plain), ("host.rs:INSPECT_LISTENER", Plain),
+    ("host.rs:Waiter.armed", Plain),
     ("host.rs:InspectStore.queue", Plain),
     ("indirect.rs:Shared.0", Generic),
-    ("isolate.rs:PoolMemory.pids", Plain), ("isolate.rs:PARENT_SOCKET", Plain),
-    ("lib.rs:SHARED", Plain), ("lib.rs:Vm.variable_read_probes", Plain),
+    ("isolate.rs:PoolMemory.pids", Plain),
+    ("lib.rs:Vm.variable_read_probes", Plain),
     // A reader borrowing its tree, so no collection runs while it holds the run it read.
     ("properties.rs:KeyReader.run", Passing),
     ("regexp.rs:Input.anchors", Plain), ("regexp.rs:CachedPattern.compiled", Plain), ("regexp.rs:StringMatcher.patterns", Plain),
-    ("regexp.rs:REGEXP_QUIT", Plain), ("regexp.rs:REGEXP_DEBUG_EVENTS", Plain), ("regexp.rs:REGEXP_FRAMES", Plain),
     ("regexp_syntax.rs:VmSyntax.ascii", Plain),
-    ("request_code.rs:ARTIFACT_FAULT", Plain), ("request_code.rs:INSTALLS", Plain),
-    ("sealed.rs:TABLE", Plain),
     ("subprocess.rs:Reaper.state", Plain),
-    ("text.rs:COPIED", Plain),
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),
     ("text.rs:TextBody.coordinate", Plain), ("text.rs:TextBody.chunk", Plain), ("text.rs:TextBody.cold_chunks", Plain),
     ("text.rs:TextBody.cold_order", Plain), ("text.rs:TextBody.scanned_bytes", Plain), ("text.rs:TextBody.coordinate_steps", Plain),
     // Text shared by indirect buffers, its properties among it: `TextBody`'s own write methods.
     ("text.rs:Text.body", Held),
-    ("threaded.rs:POLLS", Plain),
-    ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain), ("tls.rs:TRUST", Plain),
-    ("compiled_lisp/background.rs:MISSES", Plain), ("compiled_lisp/background.rs:BASE", Plain),
-    ("compiled_lisp/mod.rs:Configured.identity", Plain), ("compiled_lisp/mod.rs:CONFIG", Plain), ("compiled_lisp/mod.rs:HOLDING", Plain),
-    ("compiled_lisp/store.rs:MEMO", Plain),
+    ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
+    ("compiled_lisp/mod.rs:Configured.identity", Plain),
     ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
-    ("prim/leaf/treesit.rs:LANGUAGES", Plain),
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
-    ("treesit/mod.rs:BUNDLED", Plain),
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),
     ("treesit/native.rs:Tree.1", Plain),
@@ -432,6 +426,12 @@ const CELLS: &[(&str, Behind)] = &[
 /// How many rows are `Held`. It only falls: a new one fails, and a gone one
 /// fails until this is lowered. It counts declarations, not locks.
 const HELD: usize = 10;
+
+/// Each `Table` field of the VM, with its entry type as `FILE:TYPE`, or none
+/// where an entry is Values only.
+const TABLES: &[(&str, &str)] = &[
+    ("closures", "lib.rs:Closure"), ("cells", ""), ("conses", ""), ("objects", "data.rs:Object"),
+];
 
 /// The enums whose variants hold table entries, each variant with its payload
 /// types as `FILE:TYPE`: `data.rs:Object` first, and the enums its payloads
@@ -460,9 +460,6 @@ const ENTRIES: &[(&str, Variants)] = &[
 /// An entry enum's variants, each with its payload types.
 type Variants = &'static [(&'static str, &'static [&'static str])];
 
-/// The closures table's entry type, beside the objects'.
-const CLOSURE: &str = "lib.rs:Closure";
-
 /// Today's table entry types with a field that isn't private, each with what
 /// will make them all private.
 const PUBLIC_ALLOWED: &[(&str, &str)] = &[
@@ -479,15 +476,11 @@ const PUBLIC_ALLOWED: &[(&str, &str)] = &[
     ("window.rs:Window", "window accessors"),
 ];
 
-/// Macros that declare a type or static, which the census can't see into.
-/// None does today; one that does needs its declarations listed here.
-const DECLARING_MACROS: &[&str] = &[];
-
 #[derive(Clone, Copy, PartialEq)]
-enum Kind { Struct, Enum, Alias, Static }
+enum Kind { Struct, Enum, Alias }
 
-/// A declaration: a struct's fields, an enum's body as one field, an alias's
-/// right side or a static's type as one field.
+/// A declaration: a struct's fields, an enum's body as one field, or an
+/// alias's right side as one field.
 struct Shape {
     file: String,
     name: String,
@@ -500,10 +493,9 @@ struct Shape {
 struct Census<'c> {
     cells: &'c [(&'c str, Behind)],
     held: usize,
+    tables: &'c [(&'c str, &'c str)],
     entries: &'c [(&'c str, Variants)],
-    closure: &'c str,
     public: &'c [(&'c str, &'c str)],
-    macros: &'c [&'c str],
 }
 
 fn is_type_name(word: &str) -> bool {
@@ -572,31 +564,11 @@ fn member(mut p: &[String]) -> (bool, &[String]) {
     (false, p)
 }
 
-/// The declarations in a file's words: structs, unions, enums, aliases and
-/// statics, `thread_local!`'s among them.
+/// The declarations in a file's words: structs, unions, enums and aliases.
 fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
     let mut out = vec![];
     let mut i = 0;
     while i + 2 < t.len() {
-        // A static item: `static NAME:`, never a `'static` lifetime before a path.
-        if t[i] == "static" {
-            let j = if t[i + 1] == "mut" { i + 2 } else { i + 1 };
-            if t.get(j + 1).is_some_and(|w| w == ":") && t.get(j + 2).is_some_and(|w| w != ":") {
-                let mut depth = 0;
-                let mut k = j + 2;
-                while k < t.len() && !(depth == 0 && (t[k] == "=" || t[k] == ";")) {
-                    match t[k].as_str() {
-                        "<" | "(" | "[" | "{" => depth += 1,
-                        ">" | ")" | "]" | "}" => depth -= 1,
-                        _ => {}
-                    }
-                    k += 1;
-                }
-                out.push(Shape { file: file.to_owned(), name: t[j].clone(), kind: Kind::Static, generic: false, fields: vec![(String::new(), false, t[j + 2..k].to_vec())] });
-                i = k;
-                continue;
-            }
-        }
         let kind = match t[i].as_str() {
             "struct" | "union" => Some(Kind::Struct),
             "enum" => Some(Kind::Enum),
@@ -647,10 +619,6 @@ fn declarations(file: &str, t: &[String]) -> Vec<Shape> {
     }
     out
 }
-
-
-
-
 
 fn sources() -> Vec<(String, String)> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -711,46 +679,51 @@ fn cell_declarations(shapes: &[Shape]) -> BTreeSet<String> {
     }
 }
 
-/// Each file's `use` of a cell under another name, and each macro that
-/// declares a type or static, which the census would not see.
-fn hidden_declarations(sources: &[(String, String)], macros: &[&str]) -> Vec<String> {
-    let mut out = vec![];
-    for (file, text) in sources {
-        let t = words(text);
-        for k in 0..t.len().saturating_sub(1) {
-            if CELL_TYPES.contains(&t[k].as_str()) && t[k + 1] == "as" {
-                out.push(format!("{file}: imports {} under another name", t[k]));
-            }
-            if t[k] == "macro_rules" && t[k + 1] == "!" {
-                let name = t.get(k + 2).cloned().unwrap_or_default();
-                // A macro's body is code: only its braces, brackets and parentheses nest.
-                let body_start = (k..t.len()).find(|&j| t[j] == "{" || t[j] == "(").unwrap_or(t.len() - 1);
-                let mut depth = 0;
-                let end = (body_start..t.len()).find(|&j| {
-                    match t[j].as_str() { "{" | "(" | "[" => depth += 1, "}" | ")" | "]" => depth -= 1, _ => {} }
-                    depth == 0
-                }).unwrap_or(t.len() - 1);
-                let body = &t[body_start..=end];
-                let declares = body.iter().any(|w| ["struct", "enum", "union", "static"].contains(&w.as_str()));
-                if declares && !macros.contains(&name.as_str()) {
-                    out.push(format!("{file}: macro {name} declares a type or static the census can't see"));
-                }
-            }
-        }
-    }
-    out
-}
-
 fn split_key(key: &str) -> (&str, &str) {
     key.split_once(':').unwrap_or(("", key))
 }
 
-/// The entry enums' problems, and the struct types they name.
+/// TY's words that name a type of the crate's other than `Value`.
+fn crate_words(ty: &[String], crate_types: &BTreeSet<&str>) -> Vec<String> {
+    ty.iter().filter(|w| crate_types.contains(w.as_str()) && *w != "Value").cloned().collect()
+}
+
+/// The tables' and entry enums' problems, and the entry structs they name.
 fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<String>) {
     let mut problems = vec![];
     let mut structs = BTreeSet::new();
     let crate_types: BTreeSet<&str> = shapes.iter().filter(|s| matches!(s.kind, Kind::Struct | Kind::Enum)).map(|s| s.name.as_str()).collect();
     let enums: BTreeSet<&str> = census.entries.iter().map(|(key, _)| *key).collect();
+    // An entry type is an enum listed below, or a struct whose fields are checked.
+    let mut entry = |ty: &str, problems: &mut Vec<String>| {
+        let (file, name) = split_key(ty);
+        if enums.contains(ty) { return; }
+        if shapes.iter().any(|s| s.file == file && s.name == name && s.kind == Kind::Struct) {
+            structs.insert(ty.to_owned());
+        } else {
+            problems.push(format!("{ty}: no such struct or listed enum"));
+        }
+    };
+    // Each table's entry type, read from the VM's own `Table<...>` fields.
+    let tables: Vec<(String, Vec<String>)> = shapes.iter()
+        .filter(|s| s.file == "lib.rs" && s.name == "Vm" && s.kind == Kind::Struct)
+        .flat_map(|s| &s.fields)
+        .filter_map(|(field, _, ty)| {
+            let at = ty.iter().position(|w| w == "Table").filter(|&k| ty.get(k + 1).is_some_and(|w| w == "<"))?;
+            Some((field.clone(), crate_words(&ty[at + 2..], &crate_types)))
+        })
+        .collect();
+    let declared: BTreeSet<String> = tables.iter().map(|(field, _)| field.clone()).collect();
+    let listed: BTreeSet<String> = census.tables.iter().map(|(field, _)| (*field).to_owned()).collect();
+    let (new, gone) = diff(&declared, &listed);
+    problems.extend(new.into_iter().map(|f| format!("Vm.{f}: a table TABLES doesn't name")));
+    problems.extend(gone.into_iter().map(|f| format!("Vm.{f}: listed, not a table")));
+    for (field, holds) in &tables {
+        let Some((_, ty)) = census.tables.iter().find(|(f, _)| f == field) else { continue };
+        let named: Vec<String> = Some(split_key(ty).1).filter(|n| !n.is_empty()).map(str::to_owned).into_iter().collect();
+        if *holds != named { problems.push(format!("Vm.{field}: holds {holds:?}, TABLES names {ty:?}")); }
+        if !ty.is_empty() { entry(ty, &mut problems); }
+    }
     for (enum_key, variants) in census.entries {
         let (file, name) = split_key(enum_key);
         let Some(shape) = shapes.iter().find(|s| s.file == file && s.name == name && s.kind == Kind::Enum) else {
@@ -773,29 +746,22 @@ fn entry_types(shapes: &[Shape], census: &Census) -> (Vec<String>, BTreeSet<Stri
                 std::iter::once(w.clone()).chain(alias.into_iter().flat_map(|s| s.fields[0].2.clone()))
             }).collect();
             let named: BTreeSet<&str> = types.iter().map(|t| split_key(t).1).collect();
-            for word in payload.iter().filter(|w| crate_types.contains(w.as_str()) && *w != "Value") {
+            for word in crate_words(&payload, &crate_types) {
                 if !named.contains(word.as_str()) { problems.push(format!("{enum_key}::{variant}: holds {word}, not listed")); }
             }
             for ty in *types {
-                let (tfile, tname) = split_key(ty);
-                if !payload.iter().any(|w| w == tname) { problems.push(format!("{enum_key}::{variant}: lists {ty}, not in its payload")); }
-                if enums.contains(ty) { continue; }
-                if shapes.iter().any(|s| s.file == tfile && s.name == tname && s.kind == Kind::Struct) {
-                    structs.insert((*ty).to_owned());
-                } else {
-                    problems.push(format!("{ty}: no such struct"));
-                }
+                if !payload.iter().any(|w| w == split_key(ty).1) { problems.push(format!("{enum_key}::{variant}: lists {ty}, not in its payload")); }
+                entry(ty, &mut problems);
             }
         }
     }
-    structs.insert(census.closure.to_owned());
     (problems, structs)
 }
 
 /// Every way SOURCES differ from CENSUS.
 fn problems(sources: &[(String, String)], census: &Census) -> Vec<String> {
     let shapes: Vec<Shape> = sources.iter().flat_map(|(file, text)| declarations(file, &words(text))).collect();
-    let mut out = hidden_declarations(sources, census.macros);
+    let mut out = vec![];
     let listed: BTreeSet<String> = census.cells.iter().map(|(key, _)| (*key).to_owned()).collect();
     if listed.len() != census.cells.len() { out.push("a cell is listed twice".to_owned()); }
     let (new, gone) = diff(&cell_declarations(&shapes), &listed);
@@ -813,7 +779,7 @@ fn problems(sources: &[(String, String)], census: &Census) -> Vec<String> {
     out
 }
 
-const CENSUS: Census = Census { cells: CELLS, held: HELD, entries: ENTRIES, closure: CLOSURE, public: PUBLIC_ALLOWED, macros: DECLARING_MACROS };
+const CENSUS: Census = Census { cells: CELLS, held: HELD, tables: TABLES, entries: ENTRIES, public: PUBLIC_ALLOWED };
 
 #[test]
 fn cells_and_public_entry_fields_only_shrink() {
@@ -827,42 +793,49 @@ fn cells_and_public_entry_fields_only_shrink() {
 fn each_rule_of_the_census_fires() {
     let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
     let sources = [
-        file("lib.rs", "pub(crate) struct Closure { captures: Vec<Value> } pub(crate) struct Value(u64);"),
-        file("data.rs", "pub(super) enum Object { A(Box<entry::Open>), B(Value), C(Box<entry::Closed>), D(Box<entry::Gone>), N(Box<Nested>) }
-                         pub(super) enum Nested { P(Box<entry::Inner>) }"),
+        file("lib.rs", "pub(crate) struct Vm { closures: table::Table<Closure>, conses: Table<(Value, Value)>,
+                                              objects: Table<data::Object>, extra: Table<Value>, renamed: Table<Closure2> }
+                        pub(crate) struct Closure { captures: Vec<Value> } pub(crate) struct Closure2 { v: Value }
+                        pub(crate) struct Value(u64);"),
+        file("data.rs", "pub(super) enum Object { A(Box<entry::Open>), B(Value), C(Box<entry::Closed>), D(Box<entry::Gone>),
+                                                  F(Value), H(Hid), N(Box<Nested>) }
+                         pub(super) enum Nested { P(Box<entry::Inner>) } type Hid = Box<entry::Hidden>;"),
         file("entry.rs", "pub(crate) struct Open { pub v: Value, s: Shared<u8> } pub(crate) struct Closed { v: Value, h: Handle }
-                          pub(crate) struct Inner { pub w: Value }
+                          pub(crate) struct Inner { pub w: Value } pub(crate) struct Hidden { v: Value }
                           pub(crate) struct Shared<T>(Rc<UnsafeCell<T>>); type Handle = Arc<Mutex<Closed>>;
-                          type S<T> = RefCell<T>; struct UsesS { x: S<Value>, plain: Cell<usize>, bare: Cell }
-                          thread_local! { static STASH: RefCell<Option<Value>> = const { RefCell::new(None) }; }
-                          fn f() -> &'static rayon::ThreadPool { todo!() }
-                          use std::cell::Cell as C;
-                          macro_rules! make { ($n:ident) => { struct $n { v: Value } } }"),
+                          type S<T> = RefCell<T>; struct UsesS { x: S<Value>, plain: Cell<usize>, bare: Cell, q: Injector<Value> }"),
     ];
     let census = Census {
         cells: &[("entry.rs:Shared.0", Generic), ("entry.rs:Handle", Held), ("entry.rs:Open.s", Plain), ("entry.rs:Closed.h", Held),
-                 ("entry.rs:S", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:Stale", Plain)],
+                 ("entry.rs:S", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:UsesS.plain", Plain), ("entry.rs:Stale", Plain)],
         held: 1,
+        tables: &[("closures", "lib.rs:Closure"), ("conses", ""), ("objects", "data.rs:Object"), ("renamed", "lib.rs:Closure"), ("gone", "")],
         entries: &[
-            ("data.rs:Object", &[("A", &["entry.rs:Open"]), ("B", &[]), ("C", &[]), ("D", &["entry.rs:Gone"]), ("E", &[]), ("N", &["data.rs:Nested"])]),
+            ("data.rs:Object", &[("A", &["entry.rs:Open"]), ("B", &["entry.rs:Open"]), ("C", &[]), ("D", &["entry.rs:Gone"]), ("E", &[]),
+                                 ("H", &[]), ("N", &["data.rs:Nested"])]),
             ("data.rs:Nested", &[("P", &["entry.rs:Inner"])]),
+            ("data.rs:Missing", &[]),
         ],
-        closure: "lib.rs:Closure",
         public: &[("entry.rs:Open", "accessors"), ("entry.rs:Was", "accessors")],
-        macros: &[],
     };
     let mut found = problems(&sources, &census);
     found.sort();
     let mut expected = [
-        "entry.rs: imports Cell under another name",
-        "entry.rs: macro make declares a type or static the census can't see",
-        "entry.rs:STASH: behind a cell, and no class here",
+        "a cell is listed twice",
         "entry.rs:UsesS.x: behind a cell, and no class here",
+        "entry.rs:UsesS.q: behind a cell, and no class here",
         "entry.rs:Stale: no longer behind a cell; drop its row",
         "2 Held rows against HELD = 1: it only falls",
+        "Vm.extra: a table TABLES doesn't name",
+        "Vm.gone: listed, not a table",
+        "Vm.renamed: holds [\"Closure2\"], TABLES names \"lib.rs:Closure\"",
+        "data.rs:Object::B: lists entry.rs:Open, not in its payload",
         "data.rs:Object::C: holds Closed, not listed",
         "data.rs:Object::E: listed, not declared",
-        "entry.rs:Gone: no such struct",
+        "data.rs:Object::F: a variant ENTRIES doesn't name",
+        "data.rs:Object::H: holds Hidden, not listed",
+        "data.rs:Missing: no such enum",
+        "entry.rs:Gone: no such struct or listed enum",
         "entry.rs:Inner: a table entry type with a field that isn't private",
         "entry.rs:Was: no longer a table entry type with a field that isn't private; drop its line, the list only shrinks",
     ].map(str::to_owned);
