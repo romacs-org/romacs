@@ -39,7 +39,11 @@
 //!   diverge. Nor is the inode and device of a file the session makes,
 //!   which is new in each run. Lisp sees those live (`file-attributes`);
 //!   a later loggable stat would carry them.
-//! - A collection's phase times (`romacs--gc-phases`) are not logged.
+//! - The collector's clock is not logged: a collection's start, its
+//!   elapsed time (`gc-elapsed`) and its phase times (`romacs--gc-phases`)
+//!   are live in a replay. A run whose collections fall elsewhere, a twin
+//!   that collects or one with a stress setting, then logs the same host
+//!   calls, and two runs' logs line up call for call.
 //! - A step looks at every live buffer's tick, O(buffers) per step (probe
 //!   `flight-buffer-steps`, ticket flight-steps), and hashes only the texts
 //!   that changed. A set of dirty buffers kept by the text layer would

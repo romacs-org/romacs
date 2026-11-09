@@ -1915,7 +1915,7 @@ pub fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
 /// a builder whose recording has ended (its capture collects), so a world's
 /// heap never depends on how long its collections took.
 pub fn collection_clock() -> Option<Instant> {
-    crate::flight::value("collection-clock", || (!building() && !crate::world::arena::heap_is_image()).then(Instant::now))
+    (!building() && !crate::world::arena::heap_is_image()).then(Instant::now)
 }
 
 // Effects.
@@ -2862,12 +2862,6 @@ pub fn umask() -> io::Result<u32> {
     let mask = status.lines().find_map(|line| line.strip_prefix("Umask:")).and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
         .ok_or_else(|| io::Error::other("no Umask in /proc/self/status"));
     crate::flight::checked("umask", String::new, || mask, |r| crate::flight::outcome(r, |&m| u64::from(m)))
-}
-
-/// How long since START, a collection's (`collection_clock`): logged by a
-/// flight, as `gc-elapsed' and the collection records read it.
-pub(crate) fn collection_elapsed(start: Instant) -> std::time::Duration {
-    crate::flight::value("collection-elapsed", || start.elapsed())
 }
 
 /// Name this process NAME (the kernel keeps 15 bytes): its thread-group

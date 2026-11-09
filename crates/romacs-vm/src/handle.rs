@@ -370,7 +370,7 @@ impl Vm {
             if until_key {
                 crate::gc_mark::trim_after_graves(self.gc_stress.threads);
             }
-            let elapsed = start.map_or(0, |start| crate::host::collection_elapsed(start).as_nanos() as u64);
+            let elapsed = start.map_or(0, |start| start.elapsed().as_nanos() as u64);
             self.count_collection(elapsed);
             self.note_collection(elapsed, until_key);
         }
