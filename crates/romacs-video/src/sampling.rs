@@ -571,6 +571,9 @@ pub fn linux_render_device_numbers(device: &wgpu::Device) -> Option<(u32, u32)> 
     use ash::vk;
     use wgpu::hal::api::Vulkan;
 
+    // SAFETY: the instance and physical device are wgpu's, alive while
+    // `device` is; extension names are NUL-terminated arrays Vulkan filled;
+    // the properties chain points at the live local `drm`.
     unsafe {
         device.as_hal::<Vulkan>().and_then(|hal| {
             let instance = hal.shared_instance().raw_instance();
