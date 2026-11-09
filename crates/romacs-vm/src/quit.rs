@@ -21,7 +21,7 @@
 //! `inhibit-quit' first, GNU's forced quit for a graphical frame.
 use crate::{Value, Vm, threaded::Escape};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The evaluator's half of the host's `C-g': whether it is busy and how
 /// many presses it has not taken, in one word, and when its busy span
@@ -47,11 +47,12 @@ const BUSY: u32 = 1 << 31;
 const DEADLINE: u32 = 1 << 30;
 const PRESSES: u32 = 0xffff;
 
-/// Nanoseconds since this process first asked: the clock a busy span's
-/// start is kept in, as one atomic word.
+/// Nanoseconds of the host's monotonic clock since this process first
+/// asked: a busy span's start, kept as one atomic word.
 fn clock() -> u64 {
-    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    u64::try_from(EPOCH.get_or_init(Instant::now).elapsed().as_nanos()).unwrap_or(u64::MAX)
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let now = crate::host::monotonic();
+    u64::try_from(now.saturating_duration_since(*EPOCH.get_or_init(|| now)).as_nanos()).unwrap_or(u64::MAX)
 }
 
 impl QuitSignal {
