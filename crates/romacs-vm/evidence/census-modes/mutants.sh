@@ -10,7 +10,7 @@ run() { # name file old new
 import sys; p,o,n=sys.argv[1:]; s=open(p).read(); assert o in s, o; open(p,'w').write(s.replace(o,n,1))
 EOF
   if [ "$file" = "$B" ]; then cbuild > $EV/mutant-$name-build.log 2>&1; fi
-  python3 -m unittest discover -s scripts -p 'test_lisp_census_modes.py' -v > $EV/census-mutant-$name.log 2>&1
+  python3 -m unittest discover -s tools/tests -p 'test_lisp_census_modes.py' -v > $EV/census-mutant-$name.log 2>&1
   local rc=$?
   mv "$file.orig" "$file"
   echo "$name rc=$rc $(grep -cE '^FAIL:' $EV/census-mutant-$name.log) FAIL $(grep -cE '^ERROR:' $EV/census-mutant-$name.log) ERROR"
@@ -20,4 +20,4 @@ run nostop "$B" $'if failed {\n                    break;\n                }' 'l
 run consensus "$P" "    if len(chains) != 1:" "    if False:"
 run order "$P" "BOOTSTRAP_CHAIN = ['emacs-lisp/debug-early', 'emacs-lisp/byte-run'," "BOOTSTRAP_CHAIN = ['emacs-lisp/byte-run',"
 cbuild > $EV/mutant-restore-build.log 2>&1
-python3 -m unittest discover -s scripts -p 'test_lisp_census_modes.py' > $EV/census-modes-restored.log 2>&1; echo restored rc=$?
+python3 -m unittest discover -s tools/tests -p 'test_lisp_census_modes.py' > $EV/census-modes-restored.log 2>&1; echo restored rc=$?
