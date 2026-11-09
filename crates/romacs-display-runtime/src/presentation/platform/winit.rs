@@ -24,9 +24,6 @@ impl PopupSurface {
         format: wgpu::TextureFormat,
         role: super::super::PopupRole,
     ) -> Result<Self, String> {
-        if cfg!(any(target_os = "android", target_arch = "wasm32")) {
-            return Err("native popup presentation is not implemented on this platform".into());
-        }
         let scale = parent.scale_factor().max(f64::EPSILON) as f32;
         let gpu_limit = device.limits().max_texture_dimension_2d as f32 / scale;
         let screen_height = parent

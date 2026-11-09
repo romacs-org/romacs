@@ -642,11 +642,8 @@ impl RenderApp {
                     if !handled_via_text {
                         // `logical_key` is the layout's key with Shift applied
                         // and no command modifier folded in, which is what GNU
-                        // reads for a command chord. macOS is the one window
-                        // system that would compose an Option chord into
-                        // another character first, and the frame window asks
-                        // it not to (`apply_option_key_policy`), so no
-                        // per-event substitution is needed here.
+                        // reads for a command chord, so no per-event
+                        // substitution is needed here.
                         let key = Self::translate_key_input(&logical_key);
                         if let Some(key) = key {
                             let key_modifiers = match key {

@@ -228,72 +228,14 @@ pub(crate) fn reject_command(command: ClipboardCommand, error: String) {
     }
 }
 
-/// Process-local stand-in for a selection the platform clipboard does not
-/// expose.
-///
-/// GNU Emacs never rejects PRIMARY on a non-X platform.  Its w32 port keeps
-/// PRIMARY as a Lisp property (lisp/term/w32-win.el:364-367, :417-451), so
-/// another process cannot take it.  This typed state reproduces that contract
-/// for Romacs on every platform whose native clipboard API lacks PRIMARY.
-///
-/// Ledgered macOS divergence: GNU NS maps PRIMARY to a named NSPasteboard
-/// (`src/nsselect.m:56,397-466,494-547`) and observes foreign takeover through
-/// pasteboard change counts.  Arboard exposes only the conventional system
-/// pasteboard, so Romacs deliberately uses the process-local w32 model rather
-/// than aliasing PRIMARY to CLIPBOARD.  Consequently `OtherProcess` cannot
-/// arise for this state.  `ns-sent-selection-hooks` is also not run.
-#[cfg(not(target_os = "linux"))]
-#[derive(Debug, Default, PartialEq, Eq)]
-enum PrivateSelection {
-    /// Nobody owns the selection: `ns-get-selection` returns nil.
-    #[default]
-    Vacant,
-    /// This process owns the selection with the given text.
-    Owned(String),
-}
-
-#[cfg(not(target_os = "linux"))]
-impl PrivateSelection {
-    /// Own the selection with `text`, or disown it with `None`.
-    fn store(&mut self, text: Option<&str>) {
-        *self = match text {
-            Some(text) => Self::Owned(text.to_owned()),
-            None => Self::Vacant,
-        };
-    }
-
-    /// The stored text, or the absence a vacant selection reports; going
-    /// through the policy keeps every "no owner" answer one vocabulary.
-    fn load(&self) -> text_policy::TextRead {
-        match self {
-            Self::Owned(text) => text_policy::TextRead::Text(text.clone()),
-            Self::Vacant => text_policy::TextAbsence::NoSelection.into(),
-        }
-    }
-
-    fn owner(&self) -> SelectionOwner {
-        match self {
-            Self::Owned(_) => SelectionOwner::ThisProcess,
-            Self::Vacant => SelectionOwner::None,
-        }
-    }
-}
-
 struct ArboardClipboard {
     clipboard: Clipboard,
-    /// PRIMARY on platforms whose clipboard API has no such selection.
-    #[cfg(not(target_os = "linux"))]
-    primary: PrivateSelection,
 }
 
 impl ArboardClipboard {
     fn new() -> Result<Self, String> {
         Clipboard::new()
-            .map(|clipboard| Self {
-                clipboard,
-                #[cfg(not(target_os = "linux"))]
-                primary: PrivateSelection::default(),
-            })
+            .map(|clipboard| Self { clipboard })
             .map_err(|err| format!("failed to initialize the system clipboard: {err}"))
     }
 

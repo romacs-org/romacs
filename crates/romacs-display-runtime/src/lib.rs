@@ -18,7 +18,6 @@ pub(crate) mod clipboard;
 pub mod core;
 pub mod display_scale;
 pub mod host_types;
-pub(crate) mod macos_bundle_runtime;
 mod menus;
 pub(crate) mod native_window_wait;
 pub mod paint_host;

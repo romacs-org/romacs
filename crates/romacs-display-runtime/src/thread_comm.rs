@@ -30,11 +30,8 @@ use romacs_video_model::{PlaybackAction, VideoDiagnostics, VideoOpenRequest};
 
 /// Selection addressed by a clipboard request.
 ///
-/// `Clipboard` is always the system clipboard.  `Primary` is the X11 or
-/// Wayland primary selection on Linux and a process-local store elsewhere,
-/// matching GNU w32's Lisp property.  GNU NS instead uses a named pasteboard
-/// and can observe foreign ownership; the clipboard runtime documents that
-/// explicit divergence beside its process-local state.
+/// `Clipboard` is the system clipboard; `Primary` is the X11 or Wayland
+/// primary selection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ClipboardSelection {
     Clipboard,

@@ -223,12 +223,6 @@ impl RenderApp {
                     policy.assignment(romacs_display_protocol::PhysicalModifierKey::Function),
                 );
                 self.modifier_policy = policy;
-                // Option's command-like-ness decides whether winit rewrites
-                // Option chords as alt (GNU's shift-like vs control-like
-                // split, src/nsterm.m:7306-7316); a new policy re-applies it
-                // to every live window and to windows opened later.
-                self.frame_windows
-                    .apply_option_key_policy(policy.option_as_alt_shape());
             }
             ConfigCommand::SetScrollIndicators { enabled } => {
                 self.scroll_indicators_enabled = enabled;

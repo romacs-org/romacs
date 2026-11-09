@@ -2741,26 +2741,13 @@ fn translate_key_xf86_band() {
 }
 
 /// A key no table names still carries an identity, so it stays bindable:
-/// X11/Wayland hand over the raw keysym, and the platforms that have no
-/// keysym get a reserved band of their own instead of a zero.
+/// X11/Wayland hand over the raw keysym.
 #[test]
 fn translate_key_keeps_unmapped_native_keys() {
     assert_eq!(
         RenderApp::translate_keysym(&Key::Unidentified(NativeKey::Xkb(0x1008ff50))),
         0x1008ff50,
         "the raw keysym is the identity"
-    );
-    assert_eq!(
-        RenderApp::translate_keysym(&Key::Unidentified(NativeKey::MacOS(0x24))),
-        crate::host_types::native_key_macos(0x24),
-    );
-    assert_eq!(
-        RenderApp::translate_keysym(&Key::Unidentified(NativeKey::Windows(0x5d))),
-        crate::host_types::native_key_windows(0x5d),
-    );
-    assert_eq!(
-        RenderApp::translate_keysym(&Key::Unidentified(NativeKey::Android(4))),
-        crate::host_types::native_key_android(4),
     );
 }
 

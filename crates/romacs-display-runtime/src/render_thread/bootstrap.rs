@@ -539,7 +539,7 @@ fn run_render_loop_with_startup(
 }
 
 /// Run the render loop on the current OS thread. Product GUI startup uses
-/// this path so winit/AppKit/Windows ownership stays on the process main
+/// this path so winit ownership stays on the process main
 /// thread; evaluator-to-render traffic must wake it via EventLoopProxy.
 pub(crate) fn run_render_loop_current_thread(
     event_loop: EventLoop,

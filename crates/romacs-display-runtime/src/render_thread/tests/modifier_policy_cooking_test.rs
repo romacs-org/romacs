@@ -10,8 +10,8 @@ use super::RenderApp;
 use super::tests::make_test_app;
 use crate::thread_comm::ConfigCommand;
 use romacs_display_protocol::{
-    EmacsModifierKey, ModifierEventKind, ModifierPolicy, ModifierSideState, OptionAsAltShape,
-    PhysicalModifierKey, RawModifiers, TransportModifierBit,
+    EmacsModifierKey, ModifierEventKind, ModifierPolicy, ModifierSideState, PhysicalModifierKey,
+    RawModifiers, TransportModifierBit,
 };
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 
@@ -83,10 +83,6 @@ fn option_none_cooks_no_option_bits() {
     let bits = app.cook_modifiers(ModifierEventKind::Ordinary);
     assert!(!bits.get(TransportModifierBit::Meta));
     assert!(!bits.get(TransportModifierBit::Alt));
-    assert_eq!(
-        app.modifier_policy.option_as_alt_shape(),
-        OptionAsAltShape::None
-    );
 }
 
 /// nsterm.m:7322: function keys consult the :function slots, ordinary keys
@@ -159,16 +155,6 @@ fn committed_text_gate_includes_cooked_alt_bits() {
     );
     // Plain text still passes with no command modifiers.
     assert!(super::RenderApp::translate_committed_text("x", 0).is_some());
-}
-
-/// A policy is applied to windows opened after the push too: the manager
-/// remembers the shape.
-#[test]
-fn policy_reaches_future_windows() {
-    let mut app = make_test_app();
-    let policy = ModifierPolicy::gnu_ns_default().with_option_none();
-    app.handle_config(ConfigCommand::SetModifierPolicy(policy));
-    assert_eq!(app.frame_windows.option_as_alt, OptionAsAltShape::None);
 }
 
 /// GNU's arithmetic, restated through the raw facts the transport types:

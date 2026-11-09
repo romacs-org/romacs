@@ -13,16 +13,6 @@ mod independent {
         Keysym(u32),
     }
 
-    pub(crate) fn native_key_macos(key: u16) -> u32 {
-        0x2000_0000 | u32::from(key)
-    }
-    pub(crate) fn native_key_windows(key: u16) -> u32 {
-        0x2100_0000 | u32::from(key)
-    }
-    pub(crate) fn native_key_android(key: u32) -> u32 {
-        0x2200_0000 | (key & 0xffff)
-    }
-
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(crate) struct GuiFrameGeometryHints {
         pub base_width: u32,

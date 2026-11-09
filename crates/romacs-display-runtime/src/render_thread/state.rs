@@ -224,22 +224,15 @@ pub(crate) type SharedImageRenderState = Arc<ImageRenderState>;
 pub(crate) type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
 
 pub(super) fn backend_uses_winit_logical_pixels() -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        crate::display_scale::active_window_coordinate_system().map_or_else(
-            || std::env::var_os("WAYLAND_DISPLAY").is_some(),
-            |system| {
-                matches!(
-                    system,
-                    crate::display_scale::WindowCoordinateSystem::WinitLogical
-                )
-            },
-        )
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        true
-    }
+    crate::display_scale::active_window_coordinate_system().map_or_else(
+        || std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        |system| {
+            matches!(
+                system,
+                crate::display_scale::WindowCoordinateSystem::WinitLogical
+            )
+        },
+    )
 }
 
 pub(super) fn effective_window_scale_factor(raw_scale_factor: f64) -> f64 {

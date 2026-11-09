@@ -21,10 +21,7 @@ impl WindowChromeController {
 
     fn policy(decorated: bool) -> WindowChromePolicy {
         if decorated {
-            WindowChromePolicy::Native(std::cfg_select! {
-                target_os = "macos" => { NativeTitlebarStyle::Overlay }
-                _ => { NativeTitlebarStyle::System }
-            })
+            WindowChromePolicy::Native(NativeTitlebarStyle::System)
         } else {
             WindowChromePolicy::ClientDecorated
         }

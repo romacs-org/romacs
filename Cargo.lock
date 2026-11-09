@@ -4280,9 +4280,6 @@ dependencies = [
  "kurbo",
  "libc",
  "num_enum",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
  "png",
  "pollster",
  "raw-window-handle",
@@ -4310,7 +4307,6 @@ dependencies = [
  "wayland-protocols",
  "wgpu",
  "wgpu-hal",
- "windows-sys 0.61.2",
  "winit",
  "x11-dl",
 ]

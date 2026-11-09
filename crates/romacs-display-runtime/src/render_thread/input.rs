@@ -264,17 +264,10 @@ impl RenderApp {
             // Text is handled by translate_key_input, never interpreted as a keysym.
             Key::Character(_) => 0,
             // A key winit could not name at all.  X11 and Wayland hand over
-            // the raw keysym, which is already this port's identity; the
-            // platforms whose native key is a scancode or a virtual-key code
-            // get a reserved band, so the key keeps an identity and stays
-            // bindable instead of being dropped.
+            // the raw keysym, which is already this port's identity, so the
+            // key stays bindable instead of being dropped.
             Key::Unidentified(native) => match native {
                 NativeKey::Xkb(keysym) => *keysym,
-                NativeKey::MacOS(scancode) => crate::host_types::native_key_macos(*scancode),
-                NativeKey::Windows(virtual_key) => {
-                    crate::host_types::native_key_windows(*virtual_key)
-                }
-                NativeKey::Android(keycode) => crate::host_types::native_key_android(*keycode),
                 NativeKey::Unidentified => {
                     tracing::debug!("unidentified native key carries no identity");
                     0
