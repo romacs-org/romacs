@@ -1391,6 +1391,68 @@ fn mask_glyph_identities_ignore_the_foreground() {
     );
 }
 
+/// The renderer's own text (the busy indicator, the FPS readout) asks for
+/// glyphs with no face. It draws in the frame's default face, from the font
+/// layout resolved: choosing a font on the render thread opens every font
+/// in the catalog the first time, a stall of hundreds of milliseconds.
+#[test]
+fn faceless_text_draws_in_the_frames_default_face() {
+    use romacs_display_protocol::font::FontSlantKind;
+
+    let Some((device, queue, mut atlas)) = try_test_device_and_atlas() else {
+        return;
+    };
+    let faceless = |ch: char| GlyphKey {
+        charcode: ch as u32,
+        face_id: FaceId::new(0),
+        font_size_bits: 0.0f32.to_bits(),
+        font_identity: glyph_font_identity(None),
+        x_bin: SubpixelBin::Zero,
+        y_bin: SubpixelBin::Zero,
+    };
+    let mut frame = romacs_display_protocol::FrameGlyphBuffer::default();
+    atlas.set_current_frame_fonts(frame.font_bindings());
+    // With no default face yet, the font is chosen here: counted.
+    let _ = atlas.get_or_create_atlas(&device, &queue, &faceless('E'), None, SubpixelRequest::Disabled);
+    assert_eq!(atlas.unresolved_face_text_total(), 1);
+
+    let identity = ResolvedFontIdentity::from_file(
+        &test_font_path(romacs_test_fonts::mplus_1_code_thin().to_path_buf()),
+        0,
+        None,
+    );
+    let id = ResolvedFontId(611);
+    frame.fonts.insert(id, ResolvedFont { underline: Default::default(),
+        id,
+        replay: file_replay_for(&identity),
+        identity,
+        family: "M PLUS 1 Code".to_owned(),
+        full_name: None,
+        postscript_name: None,
+        weight: 400,
+        slant: FontSlantKind::Normal,
+        width: 5,
+        pixel_size: 16.0,
+        ascent_px: 12.0,
+        descent_px: 4.0,
+        space_advance_px: 8.0,
+        glyph_advance: Default::default(),
+    });
+    let mut face = Face::new(FaceId::new(0));
+    face.font_family = "M PLUS 1 Code".to_owned();
+    face.font_size = 16.0;
+    face.default_resolved_font_id = Some(id);
+    frame.faces.insert(FaceId::new(0), face);
+    atlas.set_current_frame_fonts(frame.font_bindings());
+    for ch in "Evaluating C-g to quit".chars().filter(|ch| !ch.is_whitespace()) {
+        assert!(
+            atlas.get_or_create_atlas(&device, &queue, &faceless(ch), None, SubpixelRequest::Disabled).is_some(),
+            "{ch} draws"
+        );
+    }
+    assert_eq!(atlas.unresolved_face_text_total(), 1, "no font chosen on the render thread");
+}
+
 /// Resolved coordinates win over the weight fallback; an instance without
 /// coordinates keeps the one axis Swash scaling applies.
 #[test]
