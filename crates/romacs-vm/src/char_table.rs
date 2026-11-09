@@ -34,16 +34,20 @@ mod tests {
         table.set(300, int(2)).unwrap();
         table.set(0x10005, int(3)).unwrap();
         table.set_range(0x20000, 0x2ffff, int(4)).unwrap();
-        // A node two root slots share: the walk visits it once.
+        // A node two root slots share, a shape no write makes (cursors and
+        // sub-char-tables share nodes): the walk visits it once.
         let shared = table.root.lock().unwrap().slots[0].clone();
         table.root.lock().unwrap().slots[5] = shared;
+        let mut before = vec![];
+        table.map_entries(&mut |value| before.push(*value));
         let edits = table.edits;
         let mut read = vec![];
         assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
         assert_eq!(table.edits, edits, "a read counts no edit");
-        let mut order = vec![];
-        table.map_entries(&mut |value| order.push(*value));
-        assert_eq!(read, order, "a read sees what a map would, in its order");
+        let mut after = vec![];
+        table.map_entries(&mut |value| after.push(*value));
+        assert_eq!(read, before, "a read sees what a map would, in its order");
+        assert_eq!(after, before, "a read leaves the entries as they were");
         assert!(read.contains(&int(1)) && read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
         assert_eq!(read.iter().filter(|&&v| v == int(1)).count(), 1, "the shared node once");
     }
@@ -720,6 +724,7 @@ fn wrote(_stored: &CharTableSlot) {
 
 /// The collector's own visit of HANDLE's Values, which forwarding rewrites in
 /// place past the funnel (`tests/no_remote_references.rs` keeps it there).
+/// `map_entries` and `entry_values` walk by it too, so their orders match.
 /// Callers may share SEEN across table and cursor roots during a collection.
 /// The visitor must not reenter these node locks or run Lisp callbacks.
 pub(super) fn collector_visit_node(
