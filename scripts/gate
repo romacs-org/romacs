@@ -69,7 +69,7 @@ DISPLAY_PACKAGES = {
     'romacs-display-runtime', 'romacs-renderer-wgpu',
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
     'romacs-font-materializer', 'romacs-test-fonts', 'romacs-video',
-    'romacs-video-model', 'romacs-webview', 'romacs-layout-input',
+    'romacs-video-model', 'romacs-layout-input',
     'romacs-layout2', 'romacs-vm-gui',
 }
 GATE_PROFILE = ['--config', 'profile.gate.inherits="release"', '--config', 'profile.gate.lto="off"',
