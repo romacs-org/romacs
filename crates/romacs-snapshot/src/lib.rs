@@ -46,9 +46,11 @@ pub fn require<T: SnapshotSafe + ?Sized>(_value: &T) {}
 #[macro_export]
 macro_rules! snapshot_struct {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
+        // SAFETY: `fields` below names every field and requires each listed
+        // one SnapshotSafe; at-rest fields are `world_quiescent`'s to check.
         unsafe impl $crate::SnapshotSafe for $name {}
         const _: () = {
-            #[allow(dead_code, unused_variables)]
+            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
             fn fields(value: &$name) {
                 let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
                 $($(#[$m])* $crate::require($field);)*
@@ -67,7 +69,7 @@ macro_rules! snapshot_struct {
 macro_rules! snapshot_fields {
     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
         const _: () = {
-            #[allow(dead_code, unused_variables)]
+            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
             fn fields(value: &$name) {
                 let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = value;
                 $($(#[$m])* $crate::require($field);)*
@@ -80,9 +82,11 @@ macro_rules! snapshot_fields {
 #[macro_export]
 macro_rules! snapshot_tuple {
     ($name:ident ( $($field:ident),* $(,)? )) => {
+        // SAFETY: `fields` below names every field and requires each one
+        // SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
         const _: () = {
-            #[allow(dead_code, unused_variables)]
+            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
             fn fields(value: &$name) {
                 let $name($($field),*) = value;
                 $($crate::require($field);)*
@@ -97,9 +101,11 @@ macro_rules! snapshot_tuple {
 #[macro_export]
 macro_rules! snapshot_enum {
     ($name:ty { $($pat:pat => ($($bind:ident),*)),* $(,)? }) => {
+        // SAFETY: `fields` below matches every variant, exhaustively, and
+        // requires each binding SnapshotSafe.
         unsafe impl $crate::SnapshotSafe for $name {}
         const _: () = {
-            #[allow(dead_code, unused_variables)]
+            #[allow(dead_code, unused_variables, reason = "never called: it exists to be type-checked")]
             fn fields(value: &$name) {
                 match value { $($pat => { $($crate::require($bind);)* })* }
             }
@@ -110,7 +116,13 @@ macro_rules! snapshot_enum {
 // The standard library's data types: their representations hold no
 // pointer but into the global allocator's heap, which is the arena.
 macro_rules! plain {
-    ($($t:ty),* $(,)?) => { $(unsafe impl SnapshotSafe for $t {})* };
+    ($($t:ty),* $(,)?) => {
+        $(
+            // SAFETY: each type the invocations list, on the grounds their
+            // comments give.
+            unsafe impl SnapshotSafe for $t {}
+        )*
+    };
 }
 plain!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, bool, char, (), str, String,
        std::path::PathBuf, std::path::Path, std::ffi::OsString, std::ffi::OsStr, std::time::Duration, std::time::SystemTime,
@@ -126,42 +138,65 @@ plain!(ropey::Rope, num_bigint::BigInt, num_bigint::BigUint, serde_json::Value, 
 // by default, foldhash's process-global one, in writable static storage
 // each process draws anew. A builder that leaks its own seed to the heap
 // vouches for that itself (romacs-vm's NameState).
+// SAFETY: a JSON map is a heap tree of its keys and values.
 unsafe impl<K: SnapshotSafe, V: SnapshotSafe> SnapshotSafe for serde_json::Map<K, V> {}
 
-/// A literal: in the executable's read-only data.
+// SAFETY: a `'static` string is a literal, in the executable's read-only
+// data, which a restore maps where the builder had it.
 unsafe impl SnapshotSafe for &'static str {}
 
-unsafe impl<T: SnapshotSafe> SnapshotSafe for [T] {}
+// Containers: their own storage is the global allocator's heap or inline,
+// and every pointer they hold beyond that is one of their elements'.
+macro_rules! containers {
+    ($(<$($param:ident),+> $t:ty;)*) => {
+        $(
+            // SAFETY: as above, given that each element type is SnapshotSafe.
+            unsafe impl<$($param: SnapshotSafe),+> SnapshotSafe for $t {}
+        )*
+    };
+}
+containers! {
+    <T> [T]; <T> Vec<T>; <T> std::collections::VecDeque<T>; <T> std::collections::BinaryHeap<T>;
+    <T> std::cell::OnceCell<T>; <T> std::sync::OnceLock<T>; <T> Option<T>;
+    <T> std::ops::Range<T>; <T> std::ops::RangeInclusive<T>;
+    <T, E> Result<T, E>;
+    <K, V, S> std::collections::HashMap<K, V, S>; <K, S> std::collections::HashSet<K, S>;
+    <K, V> std::collections::BTreeMap<K, V>; <K> std::collections::BTreeSet<K>;
+}
+// SAFETY: an array holds its elements inline.
 unsafe impl<T: SnapshotSafe, const N: usize> SnapshotSafe for [T; N] {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for Vec<T> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::collections::VecDeque<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for Box<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::rc::Rc<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::rc::Weak<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::sync::Arc<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::sync::Weak<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::cell::Cell<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::cell::RefCell<T> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::cell::OnceCell<T> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::sync::OnceLock<T> {}
-/// A futex word and a poison flag: no resource of the process. A VM at
-/// rest holds none locked, since no other thread runs in it.
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::sync::Mutex<T> {}
-unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for std::sync::RwLock<T> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for Option<T> {}
-unsafe impl<T: SnapshotSafe, E: SnapshotSafe> SnapshotSafe for Result<T, E> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::ops::Range<T> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::ops::RangeInclusive<T> {}
+
+// Owning and shared pointers and cells, of possibly unsized values: they
+// point into the global allocator's heap, or hold the value inline.
+macro_rules! pointers {
+    ($($t:ident)::+; $($rest:tt)*) => {
+        // SAFETY: as above, given that the pointee type is SnapshotSafe.
+        unsafe impl<T: SnapshotSafe + ?Sized> SnapshotSafe for $($t)::+<T> {}
+        pointers!($($rest)*);
+    };
+    () => {};
+}
+pointers! {
+    Box; std::rc::Rc; std::rc::Weak; std::sync::Arc; std::sync::Weak;
+    std::cell::Cell; std::cell::RefCell;
+    // A futex word and a poison flag: no resource of the process. A VM at
+    // rest holds none locked, since no other thread runs in it.
+    std::sync::Mutex; std::sync::RwLock;
+}
+// SAFETY: no value at all.
 unsafe impl<T: ?Sized> SnapshotSafe for std::marker::PhantomData<T> {}
+// SAFETY: a borrowed Cow borrows `'static` data, read-only data of the
+// executable; an owned one is its owned type, required SnapshotSafe.
 unsafe impl<T: SnapshotSafe + ToOwned + ?Sized> SnapshotSafe for std::borrow::Cow<'static, T> where T::Owned: SnapshotSafe {}
+// SAFETY: a zero-sized marker for a hasher type.
 unsafe impl<H> SnapshotSafe for std::hash::BuildHasherDefault<H> {}
-unsafe impl<K: SnapshotSafe, V: SnapshotSafe, S: SnapshotSafe> SnapshotSafe for std::collections::HashMap<K, V, S> {}
-unsafe impl<K: SnapshotSafe, S: SnapshotSafe> SnapshotSafe for std::collections::HashSet<K, S> {}
-unsafe impl<K: SnapshotSafe, V: SnapshotSafe> SnapshotSafe for std::collections::BTreeMap<K, V> {}
-unsafe impl<K: SnapshotSafe> SnapshotSafe for std::collections::BTreeSet<K> {}
-unsafe impl<T: SnapshotSafe> SnapshotSafe for std::collections::BinaryHeap<T> {}
 
 macro_rules! tuples {
-    ($(($($t:ident),+)),* $(,)?) => { $(unsafe impl<$($t: SnapshotSafe),+> SnapshotSafe for ($($t,)+) {})* };
+    ($(($($t:ident),+)),* $(,)?) => {
+        $(
+            // SAFETY: a tuple holds its SnapshotSafe fields inline.
+            unsafe impl<$($t: SnapshotSafe),+> SnapshotSafe for ($($t,)+) {}
+        )*
+    };
 }
 tuples!((A), (A, B), (A, B, C), (A, B, C, D), (A, B, C, D, E), (A, B, C, D, E, F), (A, B, C, D, E, F, G));
