@@ -1,10 +1,359 @@
-//! undo.c: what text edits record in `buffer-undo-list' (`primitive-undo'
-//! and the undo commands themselves are GNU's simple.el).
+//! undo.c: what text edits record in `buffer-undo-list` (`primitive-undo`
+//! and the undo commands themselves are GNU's simple.el), and what a
+//! collection does to the list.
+//!
+//! A live buffer's undo list is weak, as alloc.c's `mark_buffer` and
+//! `compact_undo_list` have it: a mark passes over it, and once what everything
+//! else holds is marked `Vm::undo_round` marks what stays. An entry
+//! (MARKER . ADJUSTMENT) whose marker is unmarked does not stay, and nor does
+//! what `truncate_undo_list` cuts. All of that is decided in the mark and written
+//! after the last point a key press can end the collection (`UndoEdit`), so
+//! that an abandoned mark leaves the lists as they were: GNU truncates first.
 use super::*;
 use data::Object;
 use crate::coordinates::{ByteOffset, CharOffset};
 
+/// undo.c's sizes, those of GNU on a 64-bit build, as the limits are in them.
+const CONS_BYTES: i64 = 16;
+const STRING_BYTES: i64 = 32;
+
+/// The variables `truncate_undo_list` reads.
+const UNDO_LIMITS: [&str; 4] = ["undo-limit", "undo-strong-limit", "undo-outer-limit", "undo-outer-limit-function"];
+
+/// What `truncate_undo_list` reads from the buffer it makes current.
+#[derive(Clone, Copy)]
+pub(crate) struct UndoLimits {
+    limit: i64,
+    strong: i64,
+    /// `undo-outer-limit` when it can be passed: not when it is no integer or
+    /// a positive bignum, and always when a negative one (`Fnatnump`).
+    outer: Option<i64>,
+    /// `undo-outer-limit-function` is non-nil.
+    offers: bool,
+}
+
+/// A collection's reading of those limits, taken once before it marks: what
+/// every buffer sees, and what a buffer with a local value of one of them does.
+/// Most collections find no local value, and so look at no table but to see
+/// that it is not there.
+pub(crate) struct UndoView {
+    default: UndoLimits,
+    local: HashMap<usize, UndoLimits>,
+}
+
+impl UndoView {
+    fn of(&self, buffer: usize) -> UndoLimits {
+        self.local.get(&buffer).copied().unwrap_or(self.default)
+    }
+}
+
+/// `truncate_undo_list`'s decision on one list.
+enum UndoCut {
+    /// The whole list fits, or is not this collection's to cut.
+    Keep,
+    /// All after this cons goes.
+    After(usize),
+    /// Nothing is kept.
+    Clear,
+    /// The first record is past `undo-outer-limit`: the list is left to
+    /// `undo-outer-limit-function`.
+    Offer,
+}
+
+impl UndoCut {
+    /// Cut at BOUNDARY, `truncate_undo_list`'s `last_boundary`.
+    fn at(boundary: Option<usize>) -> Self {
+        boundary.map_or(Self::Clear, Self::After)
+    }
+}
+
+/// A change to an undo list a mark decided on, for after its last key poll.
+#[derive(Debug, PartialEq)]
+pub(crate) enum UndoEdit {
+    /// This cons's cdr becomes the value.
+    Cdr(usize, Value),
+    /// This buffer's list becomes the value.
+    List(usize, Value),
+    /// `BUF_COMPACT` catches up with MODIFF.
+    Compacted(usize),
+    /// `undo-outer-limit-function` is to be asked: `Vm::take_undo_offers`
+    /// finds which buffers. Until one answers, its `BUF_COMPACT` stays behind,
+    /// so that a quit from the function leaves it to the next collection, as
+    /// one out of GNU's `compact_buffer` does.
+    Offer,
+}
+
+/// `truncate_undo_list`'s walk down a list: what it has passed, and its size.
+struct UndoScan<'a> {
+    vm: &'a Vm,
+    size: i64,
+    prev: Option<usize>,
+    next: Value,
+    /// How many more conses: a circular list comes to an end.
+    fuel: usize,
+}
+
+impl<'a> UndoScan<'a> {
+    fn new(vm: &'a Vm, list: Value) -> Self {
+        Self { vm, size: 0, prev: None, next: list, fuel: vm.conses.len() }
+    }
+    /// The entry at NEXT, while there is a cons there to look at.
+    fn entry(&self) -> Option<Value> {
+        self.vm.plain_cons(self.next).filter(|_| self.fuel > 0).map(|(_, car, _)| car)
+    }
+    /// Count the entry at NEXT and move past it.
+    fn pass(&mut self) {
+        let (i, car, cdr) = self.vm.plain_cons(self.next).expect("a cons, as `entry` found");
+        self.size += self.vm.undo_entry_bytes(car);
+        self.prev = Some(i);
+        self.next = cdr;
+        self.fuel -= 1;
+    }
+    /// Past a leading boundary and the first record.
+    fn first_record(mut self) -> Self {
+        if self.entry() == Some(Value::NIL) { self.pass(); }
+        while self.entry().is_some_and(|entry| entry != Value::NIL) { self.pass(); }
+        self
+    }
+    /// The list ended in something other than nil. An image cons is an end,
+    /// not this: a collection reads no image page.
+    fn dotted(&self) -> bool {
+        self.next != Value::NIL && self.next.tag() != 3
+    }
+}
+
 impl Vm {
+    /// V's index and halves if it is a cons of the table: what an undo list's
+    /// walk reads, a collection's among them, which reads no image page.
+    fn plain_cons(&self, v: Value) -> Option<(usize, Value, Value)> {
+        if Self::image_value(v) { return None; }
+        let i = v.index_if(3)?;
+        let (car, cdr) = self.conses[i];
+        Some((i, car, cdr))
+    }
+
+    /// What ENTRY and its link count for, as undo.c adds them up.
+    fn undo_entry_bytes(&self, entry: Value) -> i64 {
+        let Some((_, car, _)) = self.plain_cons(entry) else {
+            return CONS_BYTES + if entry.tag() == 3 { CONS_BYTES } else { 0 };
+        };
+        let text = if Self::image_value(car) { None } else { self.str_view(car) };
+        2 * CONS_BYTES + text.map_or(0, |text| STRING_BYTES - 1 + i64::try_from(text.chars).unwrap_or(0))
+    }
+
+    /// `truncate_undo_list`'s decision on LIST under LIMITS.
+    fn undo_cut(&self, list: Value, limits: UndoLimits) -> UndoCut {
+        let mut scan = UndoScan::new(self, list).first_record();
+        if limits.offers && limits.outer.is_some_and(|outer| outer < scan.size) {
+            return UndoCut::Offer;
+        }
+        let mut boundary = scan.entry().and(scan.prev);
+        while let Some(entry) = scan.entry() {
+            // Past the higher limit the cut comes before this record; past
+            // the lower one, after it.
+            if entry == Value::NIL {
+                if scan.size > limits.strong { return UndoCut::at(boundary); }
+                boundary = scan.prev;
+                if scan.size > limits.limit { return UndoCut::at(boundary); }
+            }
+            scan.pass();
+        }
+        if scan.dotted() { UndoCut::at(boundary) } else { UndoCut::Keep }
+    }
+
+    /// Whether ENTRY is (MARKER . ADJUSTMENT) with a marker the mark has not
+    /// reached (`compact_undo_list`).
+    fn undo_entry_dead(&self, entry: Value) -> bool {
+        let Some((_, marker, _)) = self.plain_cons(entry) else { return false };
+        let Some(i) = marker.index_if(0).filter(|_| !Self::image_value(marker)).and_then(|i| i.checked_sub(1)) else { return false };
+        matches!(self.objects[i], Object::Marker(_)) && !self.objects.marked(i)
+    }
+
+    /// `compact_buffer`'s truncation and `compact_undo_list`, as decisions: the
+    /// mark has drained, and OWNERS are the buffers it reached that own an undo
+    /// list of their own (`owns_undo_list`). What stays goes to PENDING and the
+    /// changes to EDITS. Marks of objects do not change here, so what one
+    /// buffer's walk finds does not depend on another's, and the threads' mark
+    /// and a verifying one agree.
+    pub(super) fn undo_round(&self, mut owners: Vec<usize>, view: &UndoView, marking: &gc_mark::Marking, pending: &mut Vec<Value>, edits: &mut Vec<UndoEdit>) {
+        owners.sort_unstable();
+        let mut cuts = HashSet::default();
+        let lists: Vec<(usize, Value)> = owners.into_iter()
+            .filter_map(|buffer| self.undo_decide(buffer, view, &mut cuts, edits))
+            .collect();
+        for (buffer, list) in lists {
+            self.undo_walk(buffer, list, &cuts, marking, pending, edits);
+        }
+    }
+
+    /// `compact_buffer` on BUFFER: its cut, if it changed since the last, into
+    /// EDITS and CUTS; its list if any of it stays.
+    fn undo_decide(&self, buffer: usize, view: &UndoView, cuts: &mut HashSet<usize>, edits: &mut Vec<UndoEdit>) -> Option<(usize, Value)> {
+        let list = self.own_undo_list(buffer);
+        let state = self.buffer_state(Value::reference(buffer + 1, 0)).ok()?;
+        let changed = state.compact != state.modiff;
+        if list == Value::TRUE {
+            if changed { edits.push(UndoEdit::Compacted(buffer)); }
+            return None;
+        }
+        if !changed { return Some((buffer, list)); }
+        let cut = self.undo_cut(list, view.of(buffer));
+        edits.push(if matches!(cut, UndoCut::Offer) { UndoEdit::Offer } else { UndoEdit::Compacted(buffer) });
+        match cut {
+            UndoCut::Keep | UndoCut::Offer => {}
+            UndoCut::After(i) => {
+                cuts.insert(i);
+                edits.push(UndoEdit::Cdr(i, Value::NIL));
+            }
+            UndoCut::Clear => {
+                edits.push(UndoEdit::List(buffer, Value::NIL));
+                return None;
+            }
+        }
+        Some((buffer, list))
+    }
+
+    /// `compact_undo_list` on BUFFER's LIST, as far as CUTS, and the marking that
+    /// follows it: each link that stays is marked and its entry is for PENDING;
+    /// the others are unlinked in EDITS, unmarked. At a cons already marked the
+    /// rest of the list is too. What it ends in is traced as it is, and so is
+    /// what is left of a circle of dead entries.
+    fn undo_walk(&self, buffer: usize, list: Value, cuts: &HashSet<usize>, marking: &gc_mark::Marking, pending: &mut Vec<Value>, edits: &mut Vec<UndoEdit>) {
+        let (mut tail, mut kept) = (list, None);
+        for _ in 0..self.conses.len() {
+            let Some((i, car, cdr)) = self.plain_cons(tail) else { break };
+            let next = if cuts.contains(&i) { Value::NIL } else { cdr };
+            if self.undo_entry_dead(car) {
+                edits.push(kept.map_or(UndoEdit::List(buffer, next), |cons| UndoEdit::Cdr(cons, next)));
+            } else {
+                if !marking.conses.claim(i) { return; }
+                if car != Value::NIL { pending.push(car); }
+                kept = Some(i);
+            }
+            tail = next;
+        }
+        pending.push(tail);
+    }
+
+    /// The changes a mark decided on, now that it is sure to collect.
+    pub(super) fn apply_undo_edits(&mut self, edits: Vec<UndoEdit>) {
+        for edit in edits {
+            match edit {
+                UndoEdit::Cdr(i, next) => self.conses[i].1 = next,
+                UndoEdit::List(buffer, list) => self.set_undo_list_of(buffer, list),
+                UndoEdit::Compacted(buffer) => self.note_undo_compacted(Value::reference(buffer + 1, 0)),
+                UndoEdit::Offer => self.undo_offers_due = true,
+            }
+        }
+    }
+
+    /// `BUF_COMPACT` (BUFFER) = `BUF_MODIFF` (BUFFER).
+    fn note_undo_compacted(&mut self, buffer: Value) {
+        let state = self.buffer_state_mut(buffer).expect("a buffer");
+        state.compact = state.modiff;
+    }
+
+    /// The limits as every buffer sees them, and as those with a local value
+    /// of one do, read from where they are kept: a mark can run no Lisp.
+    pub(super) fn undo_view(&mut self) -> UndoView {
+        let object = |vm: &mut Vm, name: &str| {
+            let fwd = vm.forwarded.lookup(name).expect("declared");
+            vm.forwarded_value(fwd).expect("a global object")
+        };
+        let (outer, function) = (object(self, "undo-outer-limit"), object(self, "undo-outer-limit-function"));
+        let default = UndoLimits {
+            limit: self.forwarded.integer("undo-limit"),
+            strong: self.forwarded.integer("undo-strong-limit"),
+            outer: self.undo_outer_limit(outer),
+            offers: function != Value::NIL,
+        };
+        let mut local = HashMap::default();
+        for name in UNDO_LIMITS {
+            let table = self.names.get(name).map_or(Value::NIL, |&slot| self.slots[slot].local);
+            let Some(Object::HashTable(table)) = self.object_if(table) else { continue };
+            for (_, buffer, binding) in table.entries() {
+                let (Ok(buffer), Ok(binding)) = (buffer.index(0), binding.index(7)) else { continue };
+                let limits = local.entry(buffer - 1).or_insert(default);
+                self.set_undo_limit(limits, name, self.slots[binding - 1].value);
+            }
+        }
+        UndoView { default, local }
+    }
+
+    fn undo_outer_limit(&self, value: Value) -> Option<i64> {
+        match self.object_if(value) {
+            Some(Object::Bignum(n)) => (n.sign() == num_bigint::Sign::Minus).then_some(i64::MIN),
+            _ => value.integer_value(),
+        }
+    }
+
+    /// LIMITS with VALUE for variable NAME; a locally void one stays as it is.
+    fn set_undo_limit(&self, limits: &mut UndoLimits, name: &str, value: Value) {
+        if value == Value::UNBOUND { return; }
+        match name {
+            "undo-limit" => limits.limit = value.integer_value().unwrap_or(limits.limit),
+            "undo-strong-limit" => limits.strong = value.integer_value().unwrap_or(limits.strong),
+            "undo-outer-limit" => limits.outer = self.undo_outer_limit(value),
+            _ => limits.offers = value != Value::NIL,
+        }
+    }
+
+    /// The limits BUFFER sees, outside a collection.
+    fn undo_limits_in(&mut self, buffer: Value) -> Result<UndoLimits> {
+        let mut limits = UndoLimits { limit: 0, strong: 0, outer: None, offers: false };
+        for name in UNDO_LIMITS {
+            let slot = self.slot(name);
+            let value = self.value_in_buffer(slot, buffer)?;
+            self.set_undo_limit(&mut limits, name, value);
+        }
+        Ok(limits)
+    }
+
+    /// What `undo-outer-limit-function` is to be asked since a collection last
+    /// noted any: ((BUFFER . SIZE)...), each live buffer changed since it was
+    /// last compacted whose first record is past the limit. Nil at once when
+    /// no collection noted any.
+    pub(crate) fn take_undo_offers(&mut self) -> Result<Value> {
+        if !std::mem::take(&mut self.undo_offers_due) { return Ok(Value::NIL); }
+        let mut offers = Value::NIL;
+        for buffer in self.buffer_order().into_iter().rev() {
+            let Some(size) = self.undo_offer_size(buffer)? else { continue };
+            let offer = self.alloc_cons(buffer, Value::integer(size)?);
+            offers = self.alloc_cons(offer, offers);
+        }
+        Ok(offers)
+    }
+
+    /// The first record's size if the function is to be asked about BUFFER.
+    fn undo_offer_size(&mut self, buffer: Value) -> Result<Option<i64>> {
+        let index = buffer.index(0)? - 1;
+        let state = self.buffer_state(buffer)?;
+        let indirect = matches!(&self.objects[index], Object::Buffer(b) if !b.owns_undo_list());
+        let list = self.own_undo_list(index);
+        if state.compact == state.modiff || indirect || list == Value::TRUE { return Ok(None); }
+        let limits = self.undo_limits_in(buffer)?;
+        let size = UndoScan::new(self, list).first_record().size;
+        Ok((limits.offers && limits.outer.is_some_and(|outer| outer < size)).then_some(size))
+    }
+
+    /// The rest of `truncate_undo_list` and `compact_buffer` once the function
+    /// has answered about BUFFER: nil makes the cut, under the limits it sees.
+    pub(crate) fn answer_undo_offer(&mut self, buffer: Value, answer: Value) -> Result<()> {
+        self.buffer_state(buffer)?;
+        let index = buffer.index(0)? - 1;
+        let list = self.undo_list_of(index);
+        if answer == Value::NIL && list != Value::TRUE {
+            let limits = UndoLimits { offers: false, ..self.undo_limits_in(buffer)? };
+            match self.undo_cut(list, limits) {
+                UndoCut::After(i) => self.conses[i].1 = Value::NIL,
+                UndoCut::Clear => self.set_undo_list_of(index, Value::NIL),
+                UndoCut::Keep | UndoCut::Offer => {}
+            }
+        }
+        self.note_undo_compacted(buffer);
+        Ok(())
+    }
+
     fn current_undo_buffer(&mut self) -> Result<usize> {
         self.buffer_index()
     }

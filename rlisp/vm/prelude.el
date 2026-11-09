@@ -942,6 +942,38 @@ CONDITIONS or has a regexp matching ERROR's message."
 
 ;;; Finalizers
 
+(defvar romacs--undo-offering nil
+  "Non-nil while `romacs--offer-undo-lists' asks: a collection inside the
+function, which GNU's has inhibited, asks nothing more of it.")
+
+(defun romacs--offer-undo-lists ()
+  "undo.c truncate_undo_list's call of `undo-outer-limit-function', for each
+buffer whose first undo record a collection found past `undo-outer-limit'.
+A collection runs no Lisp, so this comes after it (VM2-UNDO-OUTER), with that
+buffer current.  A nil answer truncates the list as without the function; any
+other leaves it to the function, and so does an error, logged to *Messages*.
+A quit leaves this buffer and the rest to the next collection."
+  (unless romacs--undo-offering
+    (let ((offers (romacs--take-undo-offers)))
+      (when offers
+        (let ((romacs--undo-offering t)
+              (match-data (match-data)))
+          (save-current-buffer
+            (unwind-protect
+                (while offers
+                  (let ((buffer (car (car offers))))
+                    (when (buffer-live-p buffer)
+                      (set-buffer buffer)
+                      (romacs--answer-undo-offer
+                       buffer
+                       (condition-case err
+                           (funcall undo-outer-limit-function (cdr (car offers)))
+                         (error (let ((inhibit-message t))
+                                  (message "undo-outer-limit-function failed: %S" err))
+                                t)))))
+                  (setq offers (cdr offers)))
+              (set-match-data match-data t))))))))
+
 (defvar romacs--post-gc-owned nil
   "Non-nil while a `romacs--run-finalizers' that took a collection's
 `post-gc-hook' is active: a run started by a collection inside it leaves
@@ -962,6 +994,9 @@ hook is this run's, which runs once.  The run takes its work before it
 allocates, and a run with nothing to do returns at once.  It runs at a safe
 point after the collection, inside whatever code runs there, and keeps that
 code's match data and current buffer, as for a process filter."
+  ;; As garbage_collect, the undo lists come first.  Theirs is no finalizer's
+  ;; work: quits are not held off from a function that may ask a question.
+  (romacs--offer-undo-lists)
   ;; Quits wait from before anything is taken: a finalizer taken is emptied.
   (let* ((inhibit-quit t)
          (collected (and (not romacs--post-gc-owned) (romacs--take-post-gc)))

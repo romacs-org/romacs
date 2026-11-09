@@ -1636,6 +1636,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// A collection found a list for `undo-outer-limit-function`, and the
+    /// aftermath has not looked (`Vm::take_undo_offers`).
+    undo_offers_due: bool,
     /// What holds a collection's automatic aftermath back, over every engine:
     /// each escape `threaded::route_escape' is unwinding, each live resume
     /// record (a cleanup running) and each run of aftermath in progress
@@ -1795,6 +1798,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     finalizers,
     doomed_finalizers,
     post_gc_due,
+    undo_offers_due,
     aftermath_held,
     aftermath_runs,
     keymap_filters,
@@ -2032,6 +2036,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
+            undo_offers_due: false,
             aftermath_held: 0,
             aftermath_runs: 0,
             suspended_stacks: vec![],

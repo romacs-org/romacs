@@ -306,7 +306,8 @@ impl Marking {
     /// and change only in place: no entry allocated, no growth,
     /// sweep, compaction or cut, and no mark begun or cleared but through
     /// this. The collector writes entries in place meanwhile (a dead object
-    /// made `Free', a cell given its value, a weak table pruned), which is
+    /// made `Free', a cell given its value, a weak table pruned, an undo list
+    /// cut), which is
     /// why the borrow is not in the type; `dead_objects' and `sweep' check
     /// shape and marks (`holds') before they read, where a violation would
     /// otherwise become a sweep through freed memory or of the live heap.

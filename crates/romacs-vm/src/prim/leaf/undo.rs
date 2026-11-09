@@ -15,6 +15,17 @@ impl Leaf<'_> {
         Ok(Value::NIL)
     }
 
+    /// `Vm::take_undo_offers`.
+    pub(crate) fn take_undo_offers(&mut self) -> super::super::Out {
+        self.vm.take_undo_offers().map_err(Fault::Error)
+    }
+
+    /// `Vm::answer_undo_offer`.
+    pub(crate) fn answer_undo_offer(&mut self, buffer: Value, answer: Value) -> super::super::Out {
+        self.vm.answer_undo_offer(buffer, answer).map_err(Fault::Error)?;
+        Ok(Value::NIL)
+    }
+
     /// Fbuffer_enable_undo: Fget_buffer's BUFFER, nil meaning the current
     /// one; a t undo list becomes nil.
     pub(crate) fn buffer_enable_undo(&mut self, buffer: Value) -> super::super::Out {

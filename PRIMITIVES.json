@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "12ca5c13dfed9f602c5159bf5ffad0c65cf7623d047117d8ddab3024d47d83b3",
+  "source_fingerprint": "b5374a396aeca12e26e678748dde930870846e3b0de53b2157fcc9a285097299",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1440,
-  "parsed_vm2_only": 1440
+  "parsed_total": 1442,
+  "parsed_vm2_only": 1442
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4348,6 +4348,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
   },
+  "romacs--answer-undo-offer": {
+   "name": "romacs--answer-undo-offer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/undo.rs:32"
+  },
   "romacs--arena-census": {
    "name": "romacs--arena-census",
    "implementation": "vm2",
@@ -5263,6 +5268,11 @@
    "name": "romacs--take-post-gc",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/garbage_collect.rs:93"
+  },
+  "romacs--take-undo-offers": {
+   "name": "romacs--take-undo-offers",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/undo.rs:25"
   },
   "romacs--take-user-signal": {
    "name": "romacs--take-user-signal",

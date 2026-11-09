@@ -167,6 +167,10 @@ struct MarkState {
     /// Frozen regions reached (`frozen.rs'); region 0 is the executable
     /// image, always live.
     region_marks: Vec<bool>,
+    /// Buffers reached whose undo list `Vm::undo_round` has yet to look at.
+    undo_owners: Vec<usize>,
+    /// What it decided, for once the mark can no longer be abandoned.
+    undo_edits: Vec<undo::UndoEdit>,
 }
 
 /// A running phase clock (`GcTimes').
@@ -735,20 +739,21 @@ impl Vm {
         let function = self.slots[slot].function;
         (function != Value::NIL && function != Value::UNBOUND).then(|| Value::reference(slot + 1, 7))
     }
-    /// The cheap test of a collection's aftermath: doomed finalizers, or a
-    /// collection whose `post-gc-hook' is not yet looked at. Most polls find
-    /// neither.
+    /// The cheap test of a collection's aftermath: doomed finalizers, an undo
+    /// list to offer, or a collection whose `post-gc-hook` is not yet looked
+    /// at. Most polls find none.
     #[inline]
     pub(crate) fn aftermath_flagged(&self) -> bool {
-        !self.doomed_finalizers.is_empty() || self.post_gc_due
+        !self.doomed_finalizers.is_empty() || self.undo_offers_due || self.post_gc_due
     }
     /// A collection's aftermath waits: doomed finalizers (one may yet add to
-    /// the hook), or a collection ended with a `post-gc-hook' to run. Cheap,
+    /// the hook), `undo-outer-limit-function' to ask, or a collection ended
+    /// with a `post-gc-hook' to run. Cheap,
     /// for the places that make a poll come soon (a cleanup's end, an
     /// engine's): the hook is read once per collection, the flag clearing
     /// when it is nil (`post_gc_hook_due').
     pub(crate) fn aftermath_pending(&mut self) -> bool {
-        !self.doomed_finalizers.is_empty() || self.post_gc_hook_due()
+        !self.doomed_finalizers.is_empty() || self.undo_offers_due || self.post_gc_hook_due()
     }
     /// The gate for every automatic path, with OWN engines of its own running
     /// (1 at an engine's poll or wait, 0 at a request's end): the runner, when
@@ -1027,7 +1032,8 @@ impl Vm {
     /// Runtime register, global, binding and inline-cache roots are added here.
     /// With UNTIL_KEY, a key press queued while it marks ends it: nothing is
     /// collected, and the heap is as it was (marking writes only caches and
-    /// local marks). Whether it collected.
+    /// local marks, and an undo list's cut waits for the end of the mark).
+    /// Whether it collected.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
@@ -1055,17 +1061,19 @@ impl Vm {
         lap.lap(&mut self.gc_times, Phase::Setup);
         let n = gc_mark::threads(self.gc_stress.threads);
         let Some(mut marked) = self.mark_heap(roots, &in_obarray, &local_binding, until_key, n, &mut lap) else { return false };
-        if self.gc_stress.verify {
-            if n > 1 {
-                marked = self.verify_mark(marked, n, roots, &in_obarray, &local_binding);
-            }
-            self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
-        }
-        let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks } = state;
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
+        if self.gc_stress.verify && n > 1 {
+            marked = self.verify_mark(marked, n, roots, &in_obarray, &local_binding);
+        }
+        // Before the reference walk, which follows the lists this leaves.
+        self.apply_undo_edits(std::mem::take(&mut marked.state.undo_edits));
+        if self.gc_stress.verify {
+            self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
+        }
+        let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
+        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, .. } = state;
         lap.lap(&mut self.gc_times, Phase::Mark);
         self.gc_census = census;
         // A lexical pair's cell takes its value, which marking only read.
@@ -1382,6 +1390,8 @@ impl Vm {
     /// for the next mark to clear. Writes nothing but colours and its own state.
     fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], local_binding: &[bool], until_key: bool, n: usize, lap: &mut Lap) -> Option<Marked> {
         let keep = |v: &Value| traced(*v, in_obarray);
+        self.undo_list_index();
+        let undo_limits = self.undo_view();
         let mut pending: Vec<Value> = roots.iter().copied().filter(keep).collect();
         pending.extend_from_slice(&self.external_roots);
         pending.extend(self.doomed_finalizers.iter().copied());
@@ -1460,6 +1470,14 @@ impl Vm {
                     &mut |v, pending| this.mark_serial(&marking, v, in_obarray, pending, &mut state),
                     &mut || host.as_mut().is_some_and(|host| host.key_pending()));
                 if !drained { return false; }
+                // As garbage_collect: undo lists, then finalizers, then weak
+                // tables. A buffer one of those reaches comes back here.
+                if !state.undo_owners.is_empty() {
+                    let owners = std::mem::take(&mut state.undo_owners);
+                    this.undo_round(owners, &undo_limits, &marking, &mut pending, &mut state.undo_edits);
+                    marking.add(&mut own, &mut pending);
+                    continue;
+                }
                 if !std::mem::replace(&mut finalizers_doomed, true) && this.doom_finalizers(&mut pending, &mut doomed) {
                     marking.add(&mut own, &mut pending);
                     continue;
@@ -1498,6 +1516,7 @@ impl Vm {
                 panic!("threads and one thread disagree on {table} entry {i}: {} against {}", colors[i], again[i]);
             }
         }
+        assert_eq!(threads.state.undo_edits, alone.state.undo_edits, "threads and one thread decided different undo edits");
         assert_eq!(threads.code_marks, alone.code_marks, "threads and one thread reached different code");
         assert_eq!(threads.census, alone.census, "threads and one thread counted different objects");
         assert_eq!(threads.doomed, alone.doomed, "threads and one thread doomed different finalizers");
@@ -1556,8 +1575,16 @@ impl Vm {
             data::Object::CharTable(t) => t.visit_values_seen(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::MapKeymapCursor(c) => c.visit_values(native_nodes, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::Buffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::ByteBuffer(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::Buffer(t) => {
+                let weak = t.owns_undo_list().then_some(self.undo_list_slot);
+                if weak.is_some() { state.undo_owners.push(i); }
+                t.visit_values_but(weak, &mut |v| if keep(v) { pending.push(*v) });
+            }
+            data::Object::ByteBuffer(t) => {
+                let weak = t.owns_undo_list().then_some(self.undo_list_slot);
+                if weak.is_some() { state.undo_owners.push(i); }
+                t.visit_values_but(weak, &mut |v| if keep(v) { pending.push(*v) });
+            }
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Overlay(o) => o.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::String(s) | data::Object::RawString(s) => s.properties.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
