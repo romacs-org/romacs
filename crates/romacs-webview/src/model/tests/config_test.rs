@@ -2,10 +2,8 @@ use std::path::{Path, PathBuf};
 
 use super::{WebViewFrameTransport, frame_transport_from_source, profile_root_from_sources};
 
-#[cfg(target_os = "linux")]
 struct TestDmaBufLease;
 
-#[cfg(target_os = "linux")]
 impl super::DmaBufLease for TestDmaBufLease {
     fn request_pixels(&self) {}
 }
@@ -84,7 +82,6 @@ fn frame_transport_configuration_is_parsed_into_a_closed_enum() {
     );
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn dma_buf_readiness_is_gated_by_the_producer_fence() {
     use std::fs::File;

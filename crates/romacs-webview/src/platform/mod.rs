@@ -1,25 +1,10 @@
-#[cfg(all(feature = "webview", target_os = "linux"))]
+// The WPE WebKit adapter with the `webview` feature, else a backend that
+// reports the feature missing.
+#[cfg(feature = "webview")]
 mod linux;
-#[cfg(all(feature = "webview", target_os = "macos"))]
-mod macos;
-#[cfg(not(any(
-    all(feature = "webview", target_os = "linux"),
-    all(feature = "webview", target_os = "macos"),
-    all(feature = "webview", target_os = "windows")
-)))]
-mod unsupported;
-#[cfg(all(feature = "webview", target_os = "windows"))]
-mod windows;
-
-#[cfg(all(feature = "webview", target_os = "linux"))]
+#[cfg(feature = "webview")]
 pub(crate) use linux::LinuxPlatform as CurrentPlatform;
-#[cfg(all(feature = "webview", target_os = "macos"))]
-pub(crate) use macos::MacPlatform as CurrentPlatform;
-#[cfg(not(any(
-    all(feature = "webview", target_os = "linux"),
-    all(feature = "webview", target_os = "macos"),
-    all(feature = "webview", target_os = "windows")
-)))]
+#[cfg(not(feature = "webview"))]
+mod unsupported;
+#[cfg(not(feature = "webview"))]
 pub(crate) use unsupported::UnsupportedPlatform as CurrentPlatform;
-#[cfg(all(feature = "webview", target_os = "windows"))]
-pub(crate) use windows::WindowsPlatform as CurrentPlatform;

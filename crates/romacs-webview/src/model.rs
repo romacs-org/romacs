@@ -2,7 +2,6 @@ use std::fs::File;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{collections::BTreeMap, fmt};
 
@@ -576,7 +575,6 @@ pub struct DmaBufPlane {
 }
 
 impl DmaBufPlane {
-    #[cfg(any(test, target_os = "linux"))]
     pub(crate) const fn new(file: File, stride: u32, offset: u32) -> Self {
         Self {
             file,
@@ -616,7 +614,6 @@ pub(crate) struct DmaBufFrameLease {
 }
 
 impl DmaBufFrameLease {
-    #[cfg(any(test, target_os = "linux"))]
     pub(crate) fn new(lease: impl DmaBufLease) -> Self {
         Self {
             _lease: Box::new(lease),
@@ -639,7 +636,6 @@ pub enum DmaBufReadiness {
 #[derive(Debug)]
 pub struct DmaBufFrame {
     planes: Vec<DmaBufPlane>,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     rendering_fence: Option<File>,
     fourcc: u32,
     modifier: u64,
@@ -655,7 +651,6 @@ impl DmaBufFrame {
         self._lease._lease.request_pixels();
     }
 
-    #[cfg(any(test, target_os = "linux"))]
     pub(crate) fn new(
         planes: Vec<DmaBufPlane>,
         rendering_fence: Option<File>,
@@ -706,7 +701,6 @@ impl DmaBufFrame {
     /// A missing fence means the producer declared the frame immediately
     /// readable. `TimedOut` is distinct from an I/O error; neither result grants
     /// the consumer permission to read pixels or submit the unfinished buffer.
-    #[cfg(target_os = "linux")]
     pub fn wait_until_ready(&self, timeout: Duration) -> std::io::Result<DmaBufReadiness> {
         use std::os::fd::AsRawFd;
 
@@ -745,7 +739,6 @@ pub struct PixelFrame {
 }
 
 impl PixelFrame {
-    #[cfg(any(test, target_os = "linux"))]
     pub(crate) fn new(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         Self {
             pixels: pixels.into(),
@@ -889,19 +882,6 @@ fn profile_root_from_sources(
 fn current_user_profile_root() -> Option<PathBuf> {
     let explicit = std::env::var_os("ROMACS_WEBVIEW_PROFILE_ROOT").map(PathBuf::from);
 
-    #[cfg(target_os = "windows")]
-    let sources = (
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
-        std::env::var_os("USERPROFILE").map(PathBuf::from),
-        std::path::Path::new("AppData/Local/romacs/webview"),
-    );
-    #[cfg(target_os = "macos")]
-    let sources = (
-        None,
-        std::env::var_os("HOME").map(PathBuf::from),
-        std::path::Path::new("Library/Application Support/Romacs/WebView"),
-    );
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let sources = (
         std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
         std::env::var_os("HOME").map(PathBuf::from),

@@ -18,7 +18,7 @@
     "romacs-video": {"sites": 39, "undocumented": 35},
     "romacs-vm": {"sites": 882, "undocumented": 493},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2},
-    "romacs-webview": {"sites": 219, "undocumented": 197}
+    "romacs-webview": {"sites": 110, "undocumented": 98}
   },
   "unsafe_op_in_unsafe_fn_pending": {
     "romacs-renderer-wgpu": "src/vulkan_dmabuf.rs hal_import allows it: 29 unsafe calls in nine unsafe fn bodies need their own SAFETY review, proven on the dma-buf import path on a real GPU.",

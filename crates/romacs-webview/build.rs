@@ -13,9 +13,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(wpe_buffer_formats_api_v2)");
 
     #[cfg(feature = "webview")]
-    if env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "linux" {
-        generate_wpe_bindings(&PathBuf::from(env::var("OUT_DIR").unwrap()));
-    }
+    generate_wpe_bindings(&PathBuf::from(env::var("OUT_DIR").unwrap()));
 }
 
 #[cfg(feature = "webview")]

@@ -258,12 +258,11 @@ wgpu-hal = { version = "30", features = ["vulkan"] }
 naga = { version = "30", features = ["wgsl-in", "glsl-in"] }
 raw-window-handle = "0.6"
 
-# macOS-only: native WKWebView inline backend (`romacs-webview`).
+# macOS-only: the display runtime's window glue.
 # Versions track the objc2 0.6 generation winit already pulls in, so the
 # dependency graph keeps a single objc2 major.
 objc2 = "0.6"
 winreg = "0.56"
-block2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSView", "NSResponder", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = [
     "NSData",
@@ -277,21 +276,6 @@ objc2-foundation = { version = "0.3", features = [
     "NSURL",
     "NSURLRequest",
     "NSValue",
-] }
-objc2-web-kit = { version = "0.3", features = [
-    "block2",
-    "WKContentWorld",
-    "WKFrameInfo",
-    "WKNavigation",
-    "WKNavigationDelegate",
-    "WKPreferences",
-    "WKScriptMessage",
-    "WKScriptMessageHandler",
-    "WKUserContentController",
-    "WKUserScript",
-    "WKWebView",
-    "WKWebViewConfiguration",
-    "WKWebsiteDataStore",
 ] }
 wayland-backend = { version = "0.3.15", features = ["client_system", "dlopen"] }
 wayland-client = { version = "0.31.14", features = ["system", "dlopen"] }
@@ -327,11 +311,8 @@ gstreamer-video = "0.25"
 gstreamer-app = "0.25"
 gstreamer-allocators = "0.25"
 gstreamer-pbutils = "0.25"
-objc2-core-foundation = "0.3.2"
 objc2-core-text = "0.3.2"
 windows = "0.62.2"
-windows-core = "0.62.2"
-webview2-com = "0.39.1"
 url = "2"
 
 # Terminal support

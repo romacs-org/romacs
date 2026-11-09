@@ -1,7 +1,5 @@
 use romacs_display_protocol::WebViewId;
 
-#[cfg(any(test, target_os = "macos", target_os = "windows"))]
-use crate::LoadPhase;
 use crate::{
     BrowsingRelationship, FocusIntent, HistoryAction, HostWindowId, NavigationTarget,
     ResolvedWebViewPlacement, ScriptRequest, StoragePartition, WebContentSize, WebViewEvent,
@@ -55,12 +53,10 @@ impl PlatformCreateRequest {
         self.id
     }
 
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub(crate) const fn generation(&self) -> WebViewGeneration {
         self.generation
     }
 
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub(crate) const fn size(&self) -> WebContentSize {
         self.size
     }
@@ -82,9 +78,7 @@ impl PlatformCreateRequest {
     }
 }
 
-// Linux and Windows create asynchronously; macOS currently creates inline.
-// Windows may additionally wait for a host placement that supplies the HWND
-// required by its composition controller.
+// The WPE adapter creates asynchronously; the test platform also creates inline.
 #[allow(dead_code)]
 pub(crate) enum CreateOutcome<V, C> {
     Ready(V),
@@ -112,80 +106,8 @@ pub(crate) enum PlatformUpdate<'a> {
     Focus(FocusIntent),
 }
 
-/// The lifecycle points that every native browser can report without
-/// inventing a polling clock.
-///
-/// A backend may publish finer-grained progress independently, but these
-/// milestones give callers deterministic start/finish events even when native
-/// wakeups coalesce before the frontend services them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(any(test, target_os = "macos", target_os = "windows"))]
-#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
-pub(crate) enum NavigationMilestone {
-    Started,
-    Redirected,
-    Committed,
-    Finished,
-}
-
-#[cfg(any(test, target_os = "macos", target_os = "windows"))]
-impl NavigationMilestone {
-    /// The GNU `load-changed` phase this milestone is delivered as.
-    pub(crate) fn phase(self) -> LoadPhase {
-        match self {
-            Self::Started => LoadPhase::Started,
-            Self::Redirected => LoadPhase::Redirected,
-            Self::Committed => LoadPhase::Committed,
-            Self::Finished => LoadPhase::Finished,
-        }
-    }
-
-    /// The progress a milestone pins by itself: the two ends of a load.
-    /// The middle comes from the browser's own progress property.
-    pub(crate) fn progress_marker(self) -> Option<f64> {
-        match self {
-            Self::Started => Some(0.0),
-            Self::Redirected | Self::Committed => None,
-            Self::Finished => Some(1.0),
-        }
-    }
-
-    /// The events a milestone implies with no other progress source.  A
-    /// backend that also observes progress must not use this directly:
-    /// `crate::load_state::PageLoadState` owns the deduplication then.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub(crate) fn normalized_events(
-        self,
-        id: WebViewId,
-        generation: WebViewGeneration,
-    ) -> Vec<WebViewEvent> {
-        let mut events = Vec::new();
-        if let Some(progress) = self.progress_marker() {
-            events.push(WebViewEvent::LoadProgressChanged {
-                id,
-                generation,
-                progress,
-            });
-        }
-        events.push(WebViewEvent::LoadChanged {
-            id,
-            generation,
-            phase: self.phase(),
-        });
-        if self == Self::Finished {
-            events.push(WebViewEvent::LoadFinished {
-                id,
-                generation,
-                navigation: None,
-            });
-        }
-        events
-    }
-}
-
-// Composited Linux views do not consume native host placement; native-overlay
-// adapters on macOS and Windows do.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+// Native host placement, for an adapter that overlays a native view. The WPE
+// adapter composites, so it ignores it.
 pub(crate) enum PlatformPresentation<'a> {
     Hidden,
     Visible {
@@ -202,10 +124,8 @@ pub(crate) enum PlatformPresentation<'a> {
 /// revision; otherwise native-overlay views remain attached to the dead host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
-// Native-overlay adapters use every outcome.  Composited/unsupported target
-// builds intentionally collapse the host capability and therefore construct
-// only a subset.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+// A native-overlay adapter would use every outcome; the WPE and unsupported
+// adapters construct only a subset.
 pub(crate) enum HostRegistration {
     Added,
     Unchanged,
@@ -231,8 +151,8 @@ pub(crate) trait Platform {
     fn drain_events(&mut self) -> Vec<BackendEvent<Self::View>>;
 
     /// Give a platform-owned pending creation the presentation capability it
-    /// needs to finish. Native-overlay platforms such as WebView2 cannot
-    /// create their controller until a concrete host window is known.
+    /// needs to finish: a native-overlay adapter could not create its view
+    /// until a concrete host window is known. The WPE adapter needs none.
     fn activate_pending(
         &mut self,
         _generation: WebViewGeneration,

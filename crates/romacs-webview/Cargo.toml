@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Cross-platform embedded web content for Romacs"
+description = "Embedded web content for Romacs"
 
 [features]
 default = []
@@ -20,31 +20,8 @@ thiserror.workspace = true
 tracing.workspace = true
 url.workspace = true
 winit.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-block2.workspace = true
-objc2.workspace = true
-objc2-app-kit.workspace = true
-objc2-core-foundation.workspace = true
-objc2-foundation.workspace = true
-objc2-web-kit.workspace = true
-raw-window-handle.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
 glib = { workspace = true, optional = true }
 udev = { version = "0.9", optional = true }
-
-[target.'cfg(windows)'.dependencies]
-raw-window-handle.workspace = true
-webview2-com.workspace = true
-windows = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Graphics_DirectComposition",
-    "Win32_System_Com",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
-windows-core.workspace = true
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }

@@ -1,4 +1,4 @@
-//! Cross-platform embedded web content for Romacs.
+//! Embedded web content for Romacs: WPE WebKit with the `webview` feature.
 
 // Without the optional feature, this crate intentionally retains the complete
 // public protocol while selecting an unsupported backend. Native adapter-only
@@ -6,9 +6,6 @@
 #![cfg_attr(not(feature = "webview"), allow(dead_code))]
 
 mod backend;
-#[cfg(any(test, target_os = "macos", target_os = "windows"))]
-#[cfg_attr(target_os = "windows", allow(dead_code))]
-mod load_state;
 mod model;
 mod platform;
 mod presentation;
