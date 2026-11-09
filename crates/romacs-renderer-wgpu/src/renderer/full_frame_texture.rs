@@ -102,7 +102,7 @@ impl FullFrameTexture {
 
     /// What it costs the GPU budget, measured from the descriptor it was
     /// allocated with.
-    pub fn budget_bytes(&self) -> u64 {
+    pub(crate) fn budget_bytes(&self) -> u64 {
         self.budget_bytes
     }
 

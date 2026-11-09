@@ -990,7 +990,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                         let [r, g, b] = snapshot.faces[index].background;
                         u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
                     });
-                    for (sx, sy, sw, sh, pixel) in relief_strips(&image, ox + x, oy + y, base) {
+                    for (sx, sy, sw, sh, pixel) in relief_strips(image, ox + x, oy + y, base) {
                         frame.add_stretch(sx, sy, sw, sh, Color::from_pixel(pixel), id, false);
                         row_images.push((frame.glyphs.len() - 1, ascent));
                     }
@@ -1276,7 +1276,7 @@ fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &Te
     }
     // One baseline for the band, a box's top included.
     if boxed_top {
-        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &[], &metrics, face_base + offset, (&mut None, 0.0));
+        settle_row(frame, first_glyph, bounds.y, bounds.height, true, &[], metrics, face_base + offset, (&mut None, 0.0));
     }
     Ok(())
 }
@@ -1325,14 +1325,20 @@ fn shows_box(faces: &[Face], text: &TextSlice) -> bool {
     boxed(0) || text.face_runs.iter().any(|run| boxed(run.face.0 as usize))
 }
 
+/// One face's font metrics as the row loop collects them.
+type FaceMetrics = (f32, f32, f32, f32);
+/// The point's cursor rectangle as the row loop tracks it.
+type CursorRect = (f32, f32, f32, f32, f32);
+
 /// Settle the row at TOP, HEIGHT tall, whose glyphs start at FROM, on one
 /// baseline, as produce_glyphs's row ascent is the largest of its glyphs'
 /// (a boxed glyph's grown by its box's top): each character and each
 /// stretch shorter than the row moves down by that ascent less its own
 /// (the ascent METRICS[face - FACE_BASE] gives a stretch); the row's new height.  Only a
 /// row with a box or characters of another font's metrics (BOXED) is settled.
+#[allow(clippy::too_many_arguments, reason = "one row's settling inputs; the callers pass them straight from the row loop")]
 fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, boxed: bool, images: &[(usize, f32)],
-              metrics: &[(f32, f32, f32, f32)], face_base: u32, (cursor, row_y): (&mut Option<(f32, f32, f32, f32, f32)>, f32)) -> f32 {
+              metrics: &[FaceMetrics], face_base: u32, (cursor, row_y): (&mut Option<CursorRect>, f32)) -> f32 {
     use romacs_display_protocol::FrameGlyph;
     if !boxed && images.is_empty() { return height; }
     // An image's slot and the image in it rise to its own ascent.
@@ -1806,8 +1812,8 @@ fn realize_face(face: &Face, default: Option<&Face>, id: FaceId, text: &str, fra
     for icon in text.chars().filter(|&c| is_icon(c)) {
         match resolver.resolve_sole(&request, icon) {
             Ok(resolution) => {
-                if !frame.fonts.contains_key(&resolution.font.id) { frame.fonts.insert(resolution.font.id, resolution.font.clone()); }
-                frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph.clone());
+                frame.fonts.entry(resolution.font.id).or_insert_with(|| resolution.font.clone());
+                frame.char_fonts.entry(id).or_default().insert(icon, resolution.glyph);
             }
             Err(error) => {
                 warn_once(format!("icon U+{:04X} shows glyphless: {error}", icon as u32));

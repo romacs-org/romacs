@@ -32,7 +32,10 @@ fn window(text: &str, point: usize, (hscroll, point_row): (u32, u32), fringes: b
 /// SNAPSHOT laid out at the frame's origin with its cursor: the text
 /// rows' characters by row, the cursor's rectangle, the fringe bitmaps and
 /// what the layout reported.
-fn lay_out(snapshot: WindowSnapshot) -> (Vec<String>, Option<(f32, f32)>, Vec<(u16, FringeSide)>, WindowEnd) {
+/// Rows' text, the cursor, the fringe bitmaps and the window end.
+type LaidOut = (Vec<String>, Option<(f32, f32)>, Vec<(u16, FringeSide)>, WindowEnd);
+
+fn lay_out(snapshot: WindowSnapshot) -> LaidOut {
     let width = snapshot.width + snapshot.chrome.left_fringe + snapshot.chrome.right_fringe;
     let x = snapshot.chrome.left_fringe;
     let frame = FrameSnapshot { font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width, height: 200,

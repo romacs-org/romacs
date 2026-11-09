@@ -61,6 +61,7 @@ pub(crate) struct SparkleBurstEntry {
 
 /// Entry for window edge glow (scroll boundary indicator)
 pub(crate) struct EdgeGlowEntry {
+    #[cfg(test)]
     pub(crate) window_id: i64,
     pub(crate) bounds: Rect,
     pub(crate) at_top: bool,
@@ -645,7 +646,7 @@ impl RendererFrameEffects {
         self.has_transient_effects()
     }
 
-    pub fn has_transient_effects(&self) -> bool {
+    pub(crate) fn has_transient_effects(&self) -> bool {
         !self.fx.click_halo.halos.is_empty()
             || !self.fx.edge_snap.snaps.is_empty()
             || self.fx.error_pulse.started.is_some()
@@ -674,15 +675,7 @@ impl RendererFrameEffects {
     // raw `Instant` only because `romacs-display-runtime` bridges its own
     // `EventTime` through `into_instant()` at the call site; once that crate
     // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_cursor_wake(&mut self, now: std::time::Instant) {
-        self.fx.cursor_wake.started = Some(EventTime::from_observed_instant(now));
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`. It still takes a
-    // raw `Instant` only because `romacs-display-runtime` bridges its own
-    // `EventTime` through `into_instant()` at the call site; once that crate
-    // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_resize_padding(&mut self, now: std::time::Instant) {
+    pub(crate) fn trigger_resize_padding(&mut self, now: std::time::Instant) {
         self.fx.resize_padding.started = Some(EventTime::from_observed_instant(now));
     }
 
@@ -700,7 +693,7 @@ impl RendererFrameEffects {
 
     /// TRIGGER SIGNATURE: this should take an `EventTime` for when the cursor
     /// reached this position; with no time parameter it mints its own.
-    pub fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32, length: usize) {
+    pub(crate) fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32, length: usize) {
         let dist = ((x - self.fx.cursor_trail.last_pos.0).powi(2)
             + (y - self.fx.cursor_trail.last_pos.1).powi(2))
         .sqrt();
@@ -715,37 +708,6 @@ impl RendererFrameEffects {
         while self.fx.cursor_trail.positions.len() > length {
             self.fx.cursor_trail.positions.remove(0);
         }
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`. It still takes a
-    // raw `Instant` only because `romacs-display-runtime` bridges its own
-    // `EventTime` through `into_instant()` at the call site; once that crate
-    // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_edge_snap(
-        &mut self,
-        bounds: Rect,
-        mode_line_height: f32,
-        at_top: bool,
-        at_bottom: bool,
-        now: std::time::Instant,
-        duration_ms: u32,
-    ) {
-        self.fx.edge_snap.snaps.push(EdgeSnapEntry {
-            bounds,
-            mode_line_height,
-            at_top,
-            at_bottom,
-            started: EventTime::from_observed_instant(now),
-            duration: std::time::Duration::from_millis(duration_ms as u64),
-        });
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`. It still takes a
-    // raw `Instant` only because `romacs-display-runtime` bridges its own
-    // `EventTime` through `into_instant()` at the call site; once that crate
-    // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_cursor_error_pulse(&mut self, now: std::time::Instant) {
-        self.fx.error_pulse.started = Some(EventTime::from_observed_instant(now));
     }
 }
 

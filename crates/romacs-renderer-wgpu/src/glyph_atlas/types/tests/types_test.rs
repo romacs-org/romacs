@@ -184,9 +184,3 @@ fn glyph_atlas_config_rejects_content_larger_than_padded_page() {
     assert!(!config.can_fit(PixelSize::new(63, 62).unwrap()));
     assert!(!config.can_fit(PixelSize::new(62, 63).unwrap()));
 }
-
-#[test]
-fn page_allocation_result_need_new_page() {
-    let result: PageAllocationResult<AlphaMask> = PageAllocationResult::NeedNewPage;
-    assert_eq!(result, PageAllocationResult::NeedNewPage);
-}

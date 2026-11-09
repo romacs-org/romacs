@@ -7,9 +7,9 @@
 #[cfg(feature = "video")]
 use std::collections::HashSet;
 
-#[cfg(feature = "video")]
-use crate::core::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use crate::render_thread::frame_windows::GuiFrameRenderState;
+#[cfg(feature = "video")]
+use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 #[cfg(feature = "video")]
 use romacs_display_protocol::types::VideoId;
 

@@ -53,11 +53,7 @@ pub enum ToolBarItemType {
     Toggle,
 }
 
-impl ToolBarItemType {
-    pub fn gnu_type_name(self) -> &'static str {
-        self.into()
-    }
-}
+impl ToolBarItemType {}
 
 /// A single toolbar item.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

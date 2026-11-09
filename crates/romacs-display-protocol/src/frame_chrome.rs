@@ -261,7 +261,7 @@ pub struct MenuBarContent {
 /// no colour is emitted at all.  A separate "use the default" flag beside a
 /// pixel would say the same thing twice.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TerminalMenuBarStyle {
+pub(crate) struct TerminalMenuBarStyle {
     pub fg: Option<crate::terminal_color::TerminalColor>,
     pub bg: Option<crate::terminal_color::TerminalColor>,
     pub bold: bool,
@@ -278,11 +278,6 @@ impl MenuBarContent {
         }
     }
 
-    pub fn with_terminal_style(mut self, style: TerminalMenuBarStyle) -> Self {
-        self.terminal_style = Some(style);
-        self
-    }
-
     pub fn empty() -> Self {
         Self::new(Vec::new(), Color::WHITE, Color::BLACK)
     }
@@ -297,10 +292,6 @@ impl MenuBarContent {
 
     pub fn background(&self) -> Color {
         self.background
-    }
-
-    pub fn terminal_style(&self) -> Option<TerminalMenuBarStyle> {
-        self.terminal_style
     }
 }
 
@@ -623,7 +614,7 @@ impl FrameChromeBand {
     }
 
     /// Canonical grid-row identity used by materialized chrome primitives and source maps.
-    pub fn canonical_row(&self, char_height: f32) -> u32 {
+    pub(crate) fn canonical_row(&self, char_height: f32) -> u32 {
         (self.bounds.y() / char_height.max(1.0)).round().max(0.0) as u32
     }
 
@@ -631,7 +622,7 @@ impl FrameChromeBand {
         &self.content
     }
 
-    pub fn hit_regions(&self) -> &[ChromeHitRegion] {
+    pub(crate) fn hit_regions(&self) -> &[ChromeHitRegion] {
         &self.hit_regions
     }
 

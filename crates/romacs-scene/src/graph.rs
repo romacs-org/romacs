@@ -22,7 +22,7 @@ pub struct Edge {
 
 /// The unit a node draws into: its nearest target-group ancestor, or the root.
 #[must_use]
-pub fn enclosing_target(scene: &Scene, id: NodeId) -> NodeId {
+pub(crate) fn enclosing_target(scene: &Scene, id: NodeId) -> NodeId {
     let start = scene
         .node(id)
         .and_then(|n| n.parent)
@@ -33,7 +33,7 @@ pub fn enclosing_target(scene: &Scene, id: NodeId) -> NodeId {
 }
 
 /// Cross-scene references made by a node.
-pub fn scene_refs(kind: &Kind) -> impl Iterator<Item = SceneRef> + '_ {
+pub(crate) fn scene_refs(kind: &Kind) -> impl Iterator<Item = SceneRef> + '_ {
     let channels = match kind {
         Kind::Shader(s) => s.channels.as_slice(),
         _ => &[],

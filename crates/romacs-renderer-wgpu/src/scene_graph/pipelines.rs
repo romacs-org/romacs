@@ -89,7 +89,7 @@ impl Pipelines {
         }
     }
 
-    pub fn texture_bind_group(
+    pub(crate) fn texture_bind_group(
         &self,
         device: &wgpu::Device,
         view: &wgpu::TextureView,

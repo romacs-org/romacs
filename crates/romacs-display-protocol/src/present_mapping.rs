@@ -14,7 +14,7 @@ use crate::geometry::{
 
 /// Device-pixel coordinates on the live native surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DevicePixels(f32);
+pub(crate) struct DevicePixels(f32);
 
 impl DevicePixels {
     pub fn new(value: f32) -> Result<Self, GeometryError> {
@@ -43,9 +43,9 @@ impl GeometryUnit for DevicePixels {
 
 /// The coordinate space of a winit/wgpu surface, before conversion to logical pixels.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DeviceSurfaceSpace {}
+pub(crate) enum DeviceSurfaceSpace {}
 
-pub type DeviceSurfacePoint = GeometryPoint<DeviceSurfaceSpace, DevicePixels>;
+pub(crate) type DeviceSurfacePoint = GeometryPoint<DeviceSurfaceSpace, DevicePixels>;
 pub type PresentedFramePoint = GeometryPoint<FrameSpace, LogicalPixels>;
 
 /// Native occupied space, in physical pixels. Insets are clamped to each
@@ -300,7 +300,7 @@ impl PresentMapping {
         self.visible_content
     }
 
-    pub fn device_from_frame(
+    pub(crate) fn device_from_frame(
         self,
         point: PresentedFramePoint,
     ) -> Result<DeviceSurfacePoint, GeometryError> {
@@ -311,8 +311,12 @@ impl PresentMapping {
         )
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn frame_from_device(self, point: DeviceSurfacePoint) -> Option<PresentedFramePoint> {
+    pub(crate) fn frame_from_device(
+        self,
+        point: DeviceSurfacePoint,
+    ) -> Option<PresentedFramePoint> {
         let scale = self.surface.device_scale().get();
         let surface_point = GeometryPoint::<RootSurfaceSpace, LogicalPixels>::from_px(
             point.x() / scale,

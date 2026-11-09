@@ -35,7 +35,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rustc_hash::FxHashMap as HashMap;
 
 mod text_geometry;
-pub use text_geometry::{TextRowGeometry, TextSlotColumn, VisualTextGlyphIndex};
+pub(crate) use text_geometry::text_origin_x;
 
 /// One terminal cell produced by GNU's `compose-gstring-for-terminal`.
 ///
@@ -61,20 +61,7 @@ pub struct TerminalComposition {
     pub width_cols: u16,
 }
 
-impl TerminalComposition {
-    /// Return the terminal cell at one visual offset without changing the
-    /// cached logical-order lowering.
-    #[must_use]
-    pub fn visual_cell(
-        &self,
-        direction: ResolvedBidiDirection,
-        visual_offset: usize,
-    ) -> Option<&TerminalCompositionCell> {
-        let logical_index =
-            direction.logical_index_at_visual_offset(visual_offset, self.cells.len())?;
-        self.cells.get(logical_index)
-    }
-}
+impl TerminalComposition {}
 
 /// What kind of content this glyph represents.
 /// Matches GNU's `enum glyph_type` in `dispextern.h`.
@@ -159,7 +146,7 @@ pub enum GlyphlessPresentation {
 /// GNU `enum glyph_type` discriminants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-pub enum GlyphTypeKind {
+pub(crate) enum GlyphTypeKind {
     Char = 0,
     Composite = 1,
     Glyphless = 2,
@@ -173,19 +160,22 @@ pub enum GlyphTypeKind {
 }
 
 impl GlyphTypeKind {
+    #[cfg(test)]
     pub fn from_gnu_code(code: u8) -> Option<Self> {
         (code <= Self::Xwidget as u8)
             .then(|| Self::try_from(code).ok())
             .flatten()
     }
 
+    #[cfg(test)]
     pub fn gnu_code(self) -> u8 {
         self.into()
     }
 }
 
 impl GlyphType {
-    pub fn gnu_kind(&self) -> GlyphTypeKind {
+    #[cfg(test)]
+    pub(crate) fn gnu_kind(&self) -> GlyphTypeKind {
         match self {
             GlyphType::Char { .. } => GlyphTypeKind::Char,
             GlyphType::Composite { .. } | GlyphType::AutomaticComposite { .. } => {
@@ -233,7 +223,7 @@ impl GlyphArea {
 /// preserves the presentation's vertical body band (including vscroll
 /// clipping) independently of that origin.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GlyphAreaGeometry {
+pub(crate) struct GlyphAreaGeometry {
     bounds: Rect,
     clip: Rect,
 }
@@ -260,7 +250,7 @@ impl GlyphAreaGeometry {
 /// area a structural origin: a configured margin when present, otherwise the
 /// final matrix cell GNU reserves for a TTY vertical-border glyph.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum GlyphAreaPlacement {
+pub(crate) enum GlyphAreaPlacement {
     FollowingPreviousArea,
     Structural(GlyphAreaGeometry),
 }
@@ -271,7 +261,7 @@ pub enum GlyphAreaPlacement {
 /// exhaustive area match here prevents either backend from silently flattening
 /// a newly routed margin area back into ordinary text flow.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GlyphRowAreaLayout {
+pub(crate) struct GlyphRowAreaLayout {
     left_margin: GlyphAreaPlacement,
     text: GlyphAreaPlacement,
     right_margin: GlyphAreaPlacement,
@@ -340,33 +330,6 @@ impl GlyphRowAreaLayout {
             GlyphArea::RightMargin => self.right_margin,
         }
     }
-
-    /// Smallest rectangle covering every independently placed area.
-    ///
-    /// Incremental consumers use this to carry the complete row presentation,
-    /// not just TEXT_AREA. Gaps such as a fringe are intentionally included:
-    /// subsequent structural painters can overwrite them, while omitting a
-    /// margin here would erase reused marginal content before diffing.
-    pub fn structural_coverage(self) -> Option<Rect> {
-        let mut coverage: Option<Rect> = None;
-        for area in GlyphArea::ALL {
-            let GlyphAreaPlacement::Structural(geometry) = self.placement(area) else {
-                continue;
-            };
-            let bounds = geometry.bounds();
-            coverage = Some(match coverage {
-                None => bounds,
-                Some(current) => {
-                    let left = current.x.min(bounds.x);
-                    let top = current.y.min(bounds.y);
-                    let right = current.right().max(bounds.right());
-                    let bottom = current.bottom().max(bounds.bottom());
-                    Rect::new(left, top, right - left, bottom - top)
-                }
-            });
-        }
-        coverage
-    }
 }
 
 /// Sentinel `charpos` for synthetic glyphs that map to no buffer position.
@@ -408,12 +371,13 @@ impl GlyphStringId {
 /// covered range, so transporting it avoids a bounded heuristic rescan while
 /// retaining GNU's separate string-index and buffer-coverage tracks.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GlyphStringBufferRange {
+pub(crate) struct GlyphStringBufferRange {
     start: usize,
     end: usize,
 }
 
 impl GlyphStringBufferRange {
+    #[cfg(test)]
     pub const fn new(start: usize, end: usize) -> Self {
         Self {
             start,
@@ -421,18 +385,12 @@ impl GlyphStringBufferRange {
         }
     }
 
-    pub const fn start(self) -> usize {
-        self.start
-    }
-
-    pub const fn end(self) -> usize {
-        self.end
-    }
-
+    #[cfg(test)]
     pub const fn contains(self, charpos: usize) -> bool {
         self.start <= charpos && charpos < self.end
     }
 
+    #[cfg(test)]
     fn shifted(self, from: usize, delta: i64) -> Self {
         Self::new(
             shifted_buffer_position(self.start, from, delta),
@@ -449,19 +407,13 @@ impl GlyphStringBufferRange {
 /// occurrence in a side table avoids duplicating two buffer positions in every
 /// glyph while preserving exact cursor and incremental-redisplay semantics.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GlyphStringSource {
+pub(crate) struct GlyphStringSource {
     string: GlyphStringId,
     covered_buffer: Option<GlyphStringBufferRange>,
 }
 
 impl GlyphStringSource {
-    pub const fn new(string: GlyphStringId) -> Self {
-        Self {
-            string,
-            covered_buffer: None,
-        }
-    }
-
+    #[cfg(test)]
     pub const fn replacement(
         string: GlyphStringId,
         covered_buffer: GlyphStringBufferRange,
@@ -472,14 +424,17 @@ impl GlyphStringSource {
         }
     }
 
+    #[cfg(test)]
     pub const fn string(self) -> GlyphStringId {
         self.string
     }
 
+    #[cfg(test)]
     pub const fn covered_buffer_range(self) -> Option<GlyphStringBufferRange> {
         self.covered_buffer
     }
 
+    #[cfg(test)]
     pub const fn covers_buffer_charpos(self, charpos: usize) -> bool {
         match self.covered_buffer {
             Some(range) => range.contains(charpos),
@@ -487,6 +442,7 @@ impl GlyphStringSource {
         }
     }
 
+    #[cfg(test)]
     fn shift_buffer_positions(&mut self, from: usize, delta: i64) {
         if let Some(range) = self.covered_buffer {
             self.covered_buffer = Some(range.shifted(from, delta));
@@ -643,16 +599,6 @@ impl GlyphProvenance {
         }
     }
 
-    pub fn shifted_buffer_positions(self, from: usize, delta: i64) -> Self {
-        match self {
-            Self::Buffer { charpos } => Self::buffer(shifted_buffer_position(charpos, from, delta)),
-            Self::EmptyLineNewline { charpos } => {
-                Self::empty_line_newline(shifted_buffer_position(charpos, from, delta))
-            }
-            Self::Str { .. } | Self::LineEnd | Self::Mark | Self::LeftTruncation => self,
-        }
-    }
-
     pub const fn advanced_by(self, char_offset: usize) -> Self {
         match self {
             Self::Buffer { charpos } => Self::buffer(charpos.saturating_add(char_offset)),
@@ -678,6 +624,7 @@ impl GlyphProvenance {
     }
 }
 
+#[cfg(test)]
 fn shifted_buffer_position(value: usize, from: usize, delta: i64) -> usize {
     if value < from {
         return value;
@@ -769,6 +716,7 @@ impl GlyphPointerAppearanceId {
 pub struct GlyphImageMarginsId(std::num::NonZeroU16);
 
 impl GlyphImageMarginsId {
+    #[cfg(test)]
     fn from_index(index: usize) -> Option<Self> {
         let value = u16::try_from(index.checked_add(1)?).ok()?;
         std::num::NonZeroU16::new(value).map(Self)
@@ -821,7 +769,11 @@ impl Glyph {
     }
 
     /// Create a simple character glyph with typed source provenance.
-    pub fn char_with_provenance(ch: char, face_id: FaceId, provenance: GlyphProvenance) -> Self {
+    pub(crate) fn char_with_provenance(
+        ch: char,
+        face_id: FaceId,
+        provenance: GlyphProvenance,
+    ) -> Self {
         Self {
             glyph_type: GlyphType::Char { ch },
             face_id,
@@ -865,13 +817,15 @@ impl Glyph {
         }
     }
 
+    #[cfg(test)]
     /// Create a padding glyph (second cell of a wide character).
-    pub fn padding_for(face_id: FaceId, charpos: usize) -> Self {
+    pub(crate) fn padding_for(face_id: FaceId, charpos: usize) -> Self {
         Self::padding_with_provenance(face_id, GlyphProvenance::buffer(charpos))
     }
 
+    #[cfg(test)]
     /// Create a padding glyph with typed source provenance.
-    pub fn padding_with_provenance(face_id: FaceId, provenance: GlyphProvenance) -> Self {
+    pub(crate) fn padding_with_provenance(face_id: FaceId, provenance: GlyphProvenance) -> Self {
         Self {
             glyph_type: GlyphType::Char { ch: ' ' },
             face_id,
@@ -888,8 +842,9 @@ impl Glyph {
         }
     }
 
+    #[cfg(test)]
     /// Return a copy with explicit GUI pixel advance.
-    pub fn with_pixel_width(mut self, pixel_width: f32) -> Self {
+    pub(crate) fn with_pixel_width(mut self, pixel_width: f32) -> Self {
         self.pixel_width = if pixel_width.is_finite() && pixel_width > 0.0 {
             pixel_width
         } else {
@@ -905,8 +860,9 @@ impl Glyph {
         self
     }
 
+    #[cfg(test)]
     /// Return a copy with explicit GUI stretch geometry.
-    pub fn with_pixel_geometry(
+    pub(crate) fn with_pixel_geometry(
         mut self,
         pixel_width: f32,
         pixel_height: f32,
@@ -930,7 +886,8 @@ impl Glyph {
         self
     }
 
-    pub fn with_vertical_offset(mut self, vertical_offset_px: f32) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_vertical_offset(mut self, vertical_offset_px: f32) -> Self {
         self.vertical_offset_px = if vertical_offset_px.is_finite() {
             vertical_offset_px
         } else {
@@ -960,7 +917,7 @@ impl Glyph {
     /// slot; otherwise the following glyph would receive the same
     /// [`DisplaySlotId`].  Keep every consumer of visual columns on this one
     /// rule so rendering, pointer paint, and cursor lookup cannot diverge.
-    pub fn materialized_slot_span(&self) -> u16 {
+    pub(crate) fn materialized_slot_span(&self) -> u16 {
         if self.padding {
             return 0;
         }
@@ -981,7 +938,7 @@ impl Glyph {
     /// This is the measured counterpart of [`Self::materialized_slot_span`].
     /// Keeping both on `Glyph` lets cursor placement and presentation walk the
     /// same geometry instead of reconstructing advances from a column delta.
-    pub fn materialized_pixel_advance(&self, char_width: f32) -> f32 {
+    pub(crate) fn materialized_pixel_advance(&self, char_width: f32) -> f32 {
         if self.pixel_width > 0.0 {
             self.pixel_width
         } else {
@@ -1120,57 +1077,6 @@ pub struct GlyphRow {
     /// `if (left_p && row->overlay_arrow_bitmap != NO_FRINGE_BITMAP)`), and
     /// `fringe-bitmaps-at-pos` reports the two independently.
     pub overlay_arrow_bitmap: Option<FringeBitmapInfo>,
-    /// What the row draws, as an identity (see [`RowAppearance`]). Not part
-    /// of the row's content: rows compare and serialize without it.
-    #[serde(skip)]
-    appearance: RowAppearance,
-}
-
-/// The identity of what a [`GlyphRow`] DRAWS: its glyphs and every other
-/// field a renderer reads. Two rows with the same appearance draw the same
-/// thing wherever they are placed.
-///
-/// Each new row, and each copy of a row, gets a fresh appearance, so a copy
-/// that is then changed can never be mistaken for its original. Only code
-/// that changes nothing a renderer draws -- the row's placement (`pixel_y`),
-/// its buffer positions (row and glyph charpos, string-source and pointer
-/// ranges) or the layout-only cursor decoration (`cursor_col`,
-/// `cursor_type`) -- may declare the copy the same appearance, with
-/// [`GlyphRow::keep_appearance_of`]. Ids are never reused.
-///
-/// This is what lets a renderer key a row by content identity across the
-/// copies incremental layout makes: the rows below an edit are copied to
-/// shift their buffer positions, and the rows of a scroll to move them, yet
-/// they draw exactly what they drew.
-#[derive(Debug)]
-pub struct RowAppearance(u64);
-
-impl RowAppearance {
-    fn fresh() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-}
-
-impl Default for RowAppearance {
-    fn default() -> Self {
-        Self::fresh()
-    }
-}
-
-impl Clone for RowAppearance {
-    /// A copy is a new appearance until declared otherwise.
-    fn clone(&self) -> Self {
-        Self::fresh()
-    }
-}
-
-impl PartialEq for RowAppearance {
-    /// An identity, not content: two rows with equal fields are equal rows
-    /// whatever their appearance ids.
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
 }
 
 /// Per-row fringe-bitmap reference: the resolved registry index and the face id
@@ -1192,7 +1098,8 @@ pub enum RowFringeProducer {
 }
 
 impl RowFringeProducer {
-    pub fn certifies(self, bitmap: FringeBitmapInfo) -> bool {
+    #[cfg(test)]
+    pub(crate) fn certifies(self, bitmap: FringeBitmapInfo) -> bool {
         match self {
             Self::SourceDisplay(value) | Self::RowIndicator(value) => value == bitmap,
         }
@@ -1200,9 +1107,10 @@ impl RowFringeProducer {
 }
 
 impl GlyphRow {
+    #[cfg(test)]
     /// Both occupied sides must come from known row-local producers. Recheck
     /// the certified value so an untracked slot overwrite cannot retain proof.
-    pub fn fringes_are_row_local(&self) -> bool {
+    pub(crate) fn fringes_are_row_local(&self) -> bool {
         [
             (self.left_fringe_bitmap, self.left_fringe_producer),
             (self.right_fringe_bitmap, self.right_fringe_producer),
@@ -1216,17 +1124,12 @@ impl GlyphRow {
 
     /// The next natural buffer row begins at the same boundary after a visual
     /// wrap; a physical line end additionally consumes its newline.
-    pub fn next_buffer_row_start(&self) -> Option<usize> {
+    pub(crate) fn next_buffer_row_start(&self) -> Option<usize> {
         if self.continued {
             Some(self.end_charpos)
         } else {
             self.end_charpos.checked_add(1)
         }
-    }
-
-    /// Height produced by the row before adding inter-line spacing.
-    pub fn height_without_line_spacing(&self) -> f32 {
-        (self.height_px - self.line_spacing_px).max(0.0)
     }
 
     pub fn new(role: GlyphRowRole) -> Self {
@@ -1260,30 +1163,13 @@ impl GlyphRow {
             left_fringe_producer: None,
             right_fringe_producer: None,
             overlay_arrow_bitmap: None,
-            appearance: RowAppearance::fresh(),
         }
     }
 
-    /// The row's appearance id (see [`RowAppearance`]).
-    #[inline]
-    pub fn appearance_id(&self) -> u64 {
-        self.appearance.0
-    }
-
-    /// Declare that this row draws exactly what SOURCE draws.
-    ///
-    /// Only for a copy of SOURCE whose changes since are confined to its
-    /// placement (`pixel_y`), its buffer positions and the layout-only cursor
-    /// decoration; anything else makes a renderer keyed on the appearance
-    /// show a stale row.
-    #[inline]
-    pub fn keep_appearance_of(&mut self, source: &GlyphRow) {
-        self.appearance = RowAppearance(source.appearance.0);
-    }
-
+    #[cfg(test)]
     /// Compute FNV-1a hash over all glyph areas.
     /// Returns 0 for empty rows (sentinel meaning "not computed").
-    pub fn compute_hash(&self) -> u64 {
+    pub(crate) fn compute_hash(&self) -> u64 {
         let total: usize = self.glyphs.iter().map(|a| a.len()).sum();
         if total == 0 {
             return 0;
@@ -1404,7 +1290,8 @@ impl GlyphRow {
         hash
     }
 
-    pub fn row_equal(&self, other: &GlyphRow) -> bool {
+    #[cfg(test)]
+    pub(crate) fn row_equal(&self, other: &GlyphRow) -> bool {
         if self.hash != 0 && other.hash != 0 && self.hash != other.hash {
             return false;
         }
@@ -1446,11 +1333,13 @@ impl GlyphRow {
         self.glyphs[area.index()].len()
     }
 
-    pub fn total_glyphs(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn total_glyphs(&self) -> usize {
         self.glyphs.iter().map(Vec::len).sum()
     }
 
-    pub fn intern_pointer_appearance(
+    #[cfg(test)]
+    pub(crate) fn intern_pointer_appearance(
         &mut self,
         appearance: GlyphPointerAppearance,
     ) -> Option<GlyphPointerAppearanceId> {
@@ -1473,16 +1362,21 @@ impl GlyphRow {
         self.pointer_appearances.get(id.index())
     }
 
-    pub fn pointer_appearances(&self) -> &[GlyphPointerAppearance] {
+    #[cfg(test)]
+    pub(crate) fn pointer_appearances(&self) -> &[GlyphPointerAppearance] {
         &self.pointer_appearances
     }
 
+    #[cfg(test)]
     /// Intern one image's asymmetric margins in this row.
     ///
     /// The returned token cannot outlive or be interpreted without this row.
     /// A row can contain at most `u16::MAX` distinct margin tuples; exceeding
     /// that bound makes the caller reject the image rather than truncate it.
-    pub fn intern_image_margins(&mut self, margins: ImageMargins) -> Option<GlyphImageMarginsId> {
+    pub(crate) fn intern_image_margins(
+        &mut self,
+        margins: ImageMargins,
+    ) -> Option<GlyphImageMarginsId> {
         if let Some(index) = self
             .image_margins
             .iter()
@@ -1499,60 +1393,51 @@ impl GlyphRow {
         self.image_margins.get(id.index())
     }
 
-    pub fn image_margins_table(&self) -> &[ImageMargins] {
+    #[cfg(test)]
+    pub(crate) fn image_margins_table(&self) -> &[ImageMargins] {
         &self.image_margins
     }
 
+    #[cfg(test)]
     /// Register one displayed string occurrence in this row.
     ///
     /// Entries are intentionally not interned: the same Lisp string object may
     /// be displayed more than once with different replacement coverage, and a
     /// token denotes the occurrence rather than merely the object.
-    pub fn push_string_source(&mut self, source: GlyphStringSource) -> Option<GlyphStringSourceId> {
+    pub(crate) fn push_string_source(
+        &mut self,
+        source: GlyphStringSource,
+    ) -> Option<GlyphStringSourceId> {
         let id = GlyphStringSourceId::from_index(self.string_sources.len())?;
         self.string_sources.push(source);
         Some(id)
     }
 
-    pub fn string_source(&self, id: GlyphStringSourceId) -> Option<&GlyphStringSource> {
+    #[cfg(test)]
+    pub(crate) fn string_source(&self, id: GlyphStringSourceId) -> Option<&GlyphStringSource> {
         self.string_sources.get(id.index())
     }
 
-    pub fn string_sources(&self) -> &[GlyphStringSource] {
+    #[cfg(test)]
+    pub(crate) fn string_sources(&self) -> &[GlyphStringSource] {
         &self.string_sources
     }
 
-    /// Whether this row maps `glyph` to the requested buffer character.
-    ///
-    /// String indices are deliberately never compared with buffer positions;
-    /// their optional replacement coverage is resolved through the row-local
-    /// source table instead.
-    pub fn glyph_covers_buffer_charpos(&self, glyph: &Glyph, charpos: usize) -> bool {
-        match glyph.provenance {
-            GlyphProvenance::Buffer { charpos: source } => source == charpos,
-            GlyphProvenance::Str { source, .. } => self
-                .string_source(source)
-                .is_some_and(|source| source.covers_buffer_charpos(charpos)),
-            GlyphProvenance::LineEnd
-            | GlyphProvenance::Mark
-            | GlyphProvenance::LeftTruncation
-            | GlyphProvenance::EmptyLineNewline { .. } => false,
-        }
-    }
-
-    pub fn shift_string_source_buffer_positions(&mut self, from: usize, delta: i64) {
+    #[cfg(test)]
+    pub(crate) fn shift_string_source_buffer_positions(&mut self, from: usize, delta: i64) {
         for source in &mut self.string_sources {
             source.shift_buffer_positions(from, delta);
         }
     }
 
+    #[cfg(test)]
     /// Every face definition required to replay this row faithfully.
     ///
     /// Pointer appearances are render dependencies even when none of the row's
     /// glyphs use their hover/pressed face as their normal paint face.
     /// Left/right fringe and overlay-arrow bitmaps also need their own faces,
     /// including rows with no text glyphs.
-    pub fn referenced_face_ids(&self) -> impl Iterator<Item = FaceId> + '_ {
+    pub(crate) fn referenced_face_ids(&self) -> impl Iterator<Item = FaceId> + '_ {
         self.glyphs
             .iter()
             .flatten()
@@ -1574,101 +1459,7 @@ impl GlyphRow {
             )
     }
 
-    pub fn pointer_runs(&self) -> &[GlyphPointerRun] {
-        &self.pointer_runs
-    }
-
-    pub fn rebuild_pointer_runs(&mut self, char_width: f32, row_width: f32) {
-        self.pointer_runs.clear();
-        let used_width = self.glyphs[GlyphArea::Text.index()]
-            .iter()
-            .filter(|glyph| !glyph.padding)
-            .map(|glyph| glyph.materialized_pixel_advance(char_width))
-            .sum::<f32>();
-        let mut x = if self.reversed_p {
-            (row_width - used_width).max(0.0)
-        } else {
-            0.0
-        };
-        let mut col = 0u32;
-        for area in &self.glyphs {
-            for glyph in area {
-                if glyph.padding {
-                    continue;
-                }
-                let width = glyph.materialized_pixel_advance(char_width);
-                let col_width = u32::from(glyph.materialized_slot_span());
-                if let Some(appearance) = glyph.pointer_appearance
-                    && let Some(kind) = glyph.pointer_primitive_kind()
-                {
-                    if let Some(previous) = self.pointer_runs.last_mut()
-                        && previous.appearance == appearance
-                        && previous.kind == kind
-                        && previous.first_col + previous.col_len == col
-                    {
-                        previous.col_len = previous.col_len.saturating_add(col_width);
-                        previous.glyph_len = previous.glyph_len.saturating_add(1);
-                        previous.width += width;
-                    } else {
-                        self.pointer_runs.push(GlyphPointerRun {
-                            appearance,
-                            kind,
-                            first_col: col,
-                            col_len: col_width,
-                            glyph_len: 1,
-                            x,
-                            width,
-                        });
-                    }
-                }
-                x += width;
-                col = col.saturating_add(col_width);
-            }
-        }
-    }
-
-    /// Adjust the buffer positions carried by this row's pointer appearances
-    /// for an insertion of `delta` characters at `from` (0-based charpos, the
-    /// same space as glyph `charpos`): endpoints at or past the insertion
-    /// point move; endpoints before it stay. Buffer-kind source ranges and
-    /// buffer display-replacement anchors are positional; Lisp-string ranges
-    /// are string-internal offsets and synthetic sources carry ids, so both
-    /// are left untouched. Used by the edit fast path's below-reuse so reused
-    /// rows report the same pointer identities a full rebuild produces.
-    pub fn shift_pointer_appearance_buffer_positions(&mut self, from: u64, delta: u64) {
-        for appearance in &mut self.pointer_appearances {
-            let identity = &mut appearance.source;
-            if identity.kind == GlyphPointerSourceKind::Buffer {
-                if identity.range_start >= from {
-                    identity.range_start += delta;
-                }
-                if identity.range_end >= from {
-                    identity.range_end += delta;
-                }
-            }
-            if let GlyphPointerOccurrenceIdentity::BufferDisplayReplacement { anchor, .. } =
-                &mut identity.occurrence
-                && *anchor >= from
-            {
-                *anchor += delta;
-            }
-        }
-    }
-
-    pub fn truncate_pointer_appearances(&mut self, len: usize) {
-        self.pointer_appearances.truncate(len);
-    }
-
-    pub fn truncate_image_margins(&mut self, len: usize) {
-        self.image_margins.truncate(len);
-    }
-
-    pub fn truncate_string_sources(&mut self, len: usize) {
-        self.string_sources.truncate(len);
-    }
-
     pub fn clear(&mut self) {
-        self.appearance = RowAppearance::fresh();
         for area in &mut self.glyphs {
             area.clear();
         }
@@ -1694,7 +1485,7 @@ impl GlyphRow {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GlyphPointerRun {
+pub(crate) struct GlyphPointerRun {
     pub appearance: GlyphPointerAppearanceId,
     pub kind: PresentedPrimitiveKind,
     pub first_col: u32,
@@ -1832,15 +1623,6 @@ impl GlyphMatrix {
             *slot = damage;
         }
     }
-
-    pub fn ensure_hashes(&mut self) {
-        for row in &mut self.rows {
-            if row.hash == 0 && row.total_glyphs() > 0 {
-                let row = MatrixRow::make_mut(row);
-                row.hash = row.compute_hash();
-            }
-        }
-    }
 }
 
 /// Per-row layout provenance for incremental redisplay (spec §4.6).
@@ -1857,12 +1639,7 @@ pub enum RowDamage {
     ReusedShifted { dvpos: Px },
 }
 
-impl RowDamage {
-    /// Whether this row had to be laid out from scratch this cycle.
-    pub fn is_relaid(self) -> bool {
-        matches!(self, RowDamage::New)
-    }
-}
+impl RowDamage {}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WindowMatrixEntry {
@@ -2110,13 +1887,15 @@ thread_local! {
     static MATERIALIZE_CALL_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
 #[cfg(debug_assertions)]
-pub fn reset_materialize_call_count_for_current_thread() {
+pub(crate) fn reset_materialize_call_count_for_current_thread() {
     MATERIALIZE_CALL_COUNT.with(|count| count.set(0));
 }
 
+#[cfg(test)]
 #[cfg(debug_assertions)]
-pub fn materialize_call_count_for_current_thread() -> u32 {
+pub(crate) fn materialize_call_count_for_current_thread() -> u32 {
     MATERIALIZE_CALL_COUNT.with(std::cell::Cell::get)
 }
 
@@ -2202,7 +1981,7 @@ impl FrameDisplayState {
     /// specific pixel/cell coordinates. This is the single boundary that joins
     /// those two models. A configured margin receives its own structural origin;
     /// window-wide chrome reserves only GNU's final LAST_AREA cell.
-    pub fn glyph_row_area_layout(
+    pub(crate) fn glyph_row_area_layout(
         &self,
         entry: &WindowMatrixEntry,
         role: GlyphRowRole,
@@ -2250,7 +2029,7 @@ impl FrameDisplayState {
     /// The layout producer calls this while sealing a presentation. It lives
     /// at the protocol boundary so another producer cannot publish internally
     /// coherent, but mutually divergent, spatial products.
-    pub fn validate_spatial_projections(&self) -> Result<(), crate::PresentedHitError> {
+    pub(crate) fn validate_spatial_projections(&self) -> Result<(), crate::PresentedHitError> {
         use crate::frame_glyphs::PresentedWindowGeometry;
         use crate::{PresentedHitError, PresentedRegionKind};
 
@@ -2627,13 +2406,17 @@ impl FrameDisplayState {
         }
     }
 
+    #[cfg(test)]
     /// Return one window's exact accepted cursor presentation, independent of
     /// whether that window is active or inactive.
     ///
     /// Active/inactive is a transport choice in this state (`phys_cursor` vs
     /// `cursors`), not a placement choice. Incremental redisplay consumes this
     /// unified view so both roles retain identical semantic and pixel geometry.
-    pub fn presented_cursor_for_window(&self, window_id: DisplayWindowId) -> Option<PhysCursor> {
+    pub(crate) fn presented_cursor_for_window(
+        &self,
+        window_id: DisplayWindowId,
+    ) -> Option<PhysCursor> {
         if let Some(cursor) = self
             .phys_cursor
             .as_ref()
@@ -2941,7 +2724,7 @@ impl FrameDisplayState {
     /// rows, window-matrix grid rows, borders, and scroll bars. Images, videos,
     /// and xwidgets are emitted by their owning rows. It does NOT emit cursors
     /// or write any `FrameGlyphBuffer` metadata.
-    pub fn for_each_glyph(&self, mut push: impl FnMut(FrameGlyph)) {
+    pub(crate) fn for_each_glyph(&self, mut push: impl FnMut(FrameGlyph)) {
         // --- Materialize backgrounds ---
         for bg in &self.backgrounds {
             push(FrameGlyph::Background {
@@ -3156,23 +2939,6 @@ impl FrameDisplayState {
         }
     }
 
-    /// The glyphs [`Self::for_each_glyph`] materializes for the window-matrix
-    /// rows ACCEPT keeps, and nothing else, in the same order and with the
-    /// same geometry (the same per-row code runs).
-    pub fn for_each_window_matrix_row_glyph(
-        &self,
-        mut accept: impl FnMut(&WindowMatrixEntry, usize, &GlyphRow) -> bool,
-        mut push: impl FnMut(FrameGlyph),
-    ) {
-        for entry in &self.window_matrices {
-            for (row_idx, glyph_row) in entry.matrix.rows.iter().enumerate() {
-                if accept(entry, row_idx, glyph_row) {
-                    self.for_each_window_row_glyph(entry, row_idx, glyph_row, &mut push);
-                }
-            }
-        }
-    }
-
     /// One window-matrix row of [`Self::for_each_glyph`].
     fn for_each_window_row_glyph(
         &self,
@@ -3289,7 +3055,7 @@ impl FrameDisplayState {
                 if area == GlyphArea::Text {
                     // GNU's `reversed_p` applies only to TEXT_AREA. Marginal
                     // glyphs keep their own left-to-right structural origins.
-                    x_cursor = TextRowGeometry::new(glyph_row, bounds, char_w).origin_x();
+                    x_cursor = text_origin_x(glyph_row, bounds, char_w);
                 }
             }
             let area_bounds = current_geometry.bounds();
@@ -3725,7 +3491,7 @@ impl FrameDisplayState {
 }
 
 impl WindowMatrixEntry {
-    pub fn row_pixel_bounds(&self, role: GlyphRowRole) -> Rect {
+    pub(crate) fn row_pixel_bounds(&self, role: GlyphRowRole) -> Rect {
         if role == GlyphRowRole::Text {
             self.text_pixel_bounds
         } else {
@@ -3749,7 +3515,7 @@ impl WindowMatrixEntry {
     /// The horizontal extent keeps `text_pixel_bounds` (the text columns), so
     /// with no chrome rows this reproduces `text_pixel_bounds` byte-for-byte —
     /// the clip only narrows vertically, and only when chrome rows are present.
-    pub fn text_area_clip_rect(&self) -> Rect {
+    pub(crate) fn text_area_clip_rect(&self) -> Rect {
         if let Some(clip) = self.text_clip_bounds {
             return clip;
         }
@@ -3774,24 +3540,6 @@ impl WindowMatrixEntry {
         }
         Rect::new(text.x, top, text.width, (bottom - top).max(0.0))
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct ScrollRun {
-    pub window_id: u64,
-    pub first_row: usize,
-    pub last_row: usize,
-    pub distance: i32,
-}
-
-pub trait RedisplayInterface {
-    fn update_window_begin(&mut self, window_id: u64);
-    fn write_glyphs(&mut self, row: &GlyphRow, area: GlyphArea, start: usize, len: usize);
-    fn clear_end_of_line(&mut self, row: &GlyphRow, area: GlyphArea);
-    fn scroll_run(&mut self, run: &ScrollRun);
-    fn update_window_end(&mut self, window_id: u64);
-    fn set_cursor(&mut self, row: u16, col: u16, style: CursorStyle);
-    fn flush(&mut self);
 }
 
 #[cfg(test)]

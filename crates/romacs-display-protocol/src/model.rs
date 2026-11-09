@@ -14,13 +14,11 @@ pub struct ModelView {
 }
 
 /// Smallest and largest supported camera zoom.
-pub const MODEL_ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+pub(crate) const MODEL_ZOOM_RANGE: std::ops::RangeInclusive<f64> = 0.25..=4.0;
 /// Largest absolute camera angle in degrees.
-pub const MODEL_MAX_ANGLE: f64 = 1_000_000.0;
+pub(crate) const MODEL_MAX_ANGLE: f64 = 1_000_000.0;
 /// Logical edge range of a model glyph (design §2).
 pub const MODEL_EDGE_RANGE: std::ops::RangeInclusive<u32> = 32..=2048;
-/// Maximum number of meshes in one model.
-pub const MODEL_MAX_MESHES: usize = 255;
 
 impl Default for ModelView {
     fn default() -> Self {
