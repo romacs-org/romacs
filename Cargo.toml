@@ -232,25 +232,7 @@ wgpu-hal = { version = "30", features = ["vulkan"] }
 naga = { version = "30", features = ["wgsl-in", "glsl-in"] }
 raw-window-handle = "0.6"
 
-# macOS-only: the display runtime's window glue.
-# Versions track the objc2 0.6 generation winit already pulls in, so the
-# dependency graph keeps a single objc2 major.
-objc2 = "0.6"
 winreg = "0.56"
-objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSView", "NSResponder", "NSWindow"] }
-objc2-foundation = { version = "0.3", features = [
-    "NSData",
-    "NSError",
-    "NSGeometry",
-    "NSJSONSerialization",
-    "NSKeyValueObserving",
-    "NSObjCRuntime",
-    "NSUUID",
-    "NSString",
-    "NSURL",
-    "NSURLRequest",
-    "NSValue",
-] }
 wayland-backend = { version = "0.3.15", features = ["client_system", "dlopen"] }
 wayland-client = { version = "0.31.14", features = ["system", "dlopen"] }
 wayland-protocols = { version = "0.32.12", features = ["client", "staging"] }
@@ -285,7 +267,6 @@ gstreamer-video = "0.25"
 gstreamer-app = "0.25"
 gstreamer-allocators = "0.25"
 gstreamer-pbutils = "0.25"
-objc2-core-text = "0.3.2"
 
 # Terminal support
 parking_lot = "0.12"
