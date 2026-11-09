@@ -27,7 +27,7 @@ def require_staged_sources(root):
     untracked = git(root, 'ls-files', '--others', '--exclude-standard').stdout
     ignored_inputs = [name for name in git(
         root, 'ls-files', '--others', '--ignored', '--exclude-standard', '--',
-        'crates/*/src', 'crates/*/GNU-DIVERGENCES.md', 'tools', 'lisp', 'test').stdout.splitlines()
+        'crates/*/src', 'tools', 'lisp', 'test').stdout.splitlines()
         if Path(name).suffix in {'.rs', '.py', '.md', '.el', '.toml'}]
     if unstaged or untracked or ignored_inputs:
         raise ValueError('stage all source resolutions and remove untracked inputs before finishing')

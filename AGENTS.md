@@ -56,9 +56,10 @@ possible; say so where you do.
   real packages observe; replace an implementation whose design is platform or era
   baggage (tty/termcap, per-window-system backend dispatch, charset-era MULE, byte
   code in data files, startup rituals) with an API-compatible one in `rlisp/`, and
-  record it in DIVERGENCES.md. Keeping a mechanism because GNU has it is
-  museum-keeping; deleting one because GNU has it is vandalism. Replace it when a
-  better mechanism exists and real packages still work.
+  record it as a file named by its ID in `ledger/divergences/`. Keeping a
+  mechanism because GNU has it is museum-keeping; deleting one because GNU has
+  it is vandalism. Replace it when a better mechanism exists and real packages
+  still work.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even

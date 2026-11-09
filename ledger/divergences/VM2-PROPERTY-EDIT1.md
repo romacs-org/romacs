@@ -1,0 +1,5 @@
+## GNU ERT batch execution
+
+| # | Mechanism | GNU | Romacs | Why |
+|---|---|---|---|---|
+| VM2-PROPERTY-EDIT1 | Bulk text-property edits and forward boundary queries | GNU supports arbitrary property keys, modification callbacks, byte buffers and raw interval traversal with `next-property-change` LIMIT t. | Bulk edits support interned symbol keys, mutable strings and annotated text buffers, with atomic validation, read-only checks and a changed-result flag. Unibyte buffers are edited too, and change hooks run as VM2-EDIT-HOOKS1 describes. Other key types and immutable image-string writes refuse explicitly. The two forward queries support strings and annotated text buffers; unibyte-buffer queries and raw interval LIMIT t refuse explicitly. Effective property queries retain the existing general property-resolution limits. | Reuse the native property runs and overlay precedence for the ERT printer's actual calls. | <!-- symbols: add-text-properties, next-property-change, next-single-char-property-change -->

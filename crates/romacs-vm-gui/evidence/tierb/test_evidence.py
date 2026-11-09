@@ -21,7 +21,8 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotEqual(nil[1], nil[2])
 
     def test_divergence_evidence_paths_are_tracked(self):
-        rows = (ROOT / 'DIVERGENCES.md').read_text().splitlines()
+        rows = [line for path in sorted((ROOT / 'ledger/divergences').glob('*.md'))
+                for line in path.read_text().splitlines()]
         refs = [ref for row in rows if row.startswith(('| VM2-G1B |', '| GUI-ML1 |'))
                 for ref in re.findall(r'`([^`]+)`', row)
                 if ref.endswith(('control-width.txt', 'default-mode-line.txt'))]

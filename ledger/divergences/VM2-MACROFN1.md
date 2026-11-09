@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-MACROFN1 | calling a symbol whose cell is a macro: `invalid-function` without data | `funcall`/`apply` of a symbol whose function cell is a macro signals `(invalid-function SYMBOL)` (`src/eval.c` `funcall_general`): `(progn (fset 'q '(macro . car)) (condition-case e (funcall 'q 1) (error e)))` and the same through `(assoc 2 '((1 . a)) 'q)` both give `(invalid-function q)` on GNU 32.0.50. | VM2 refuses the call with the text fault "invalid function: macro is not callable" (`crates/romacs-vm/src/threaded.rs` `invoke_full`, `t2_resolve`), so the condition is `invalid-function` with NO data: `(invalid-function)`. Funcalling the literal `(macro . car)` matches GNU. Pre-existing (present at `0aded923`); found by the second Sol review of `vm2/bulk1`, not changed by it. | **Package-observable data only:** handlers that dispatch on `invalid-function` still catch it; code reading `(cadr e)` to name the offending function sees nothing. | <!-- symbols: funcall, apply, invalid-function, defmacro -->

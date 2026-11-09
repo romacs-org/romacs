@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-REVERSE1 | `reverse` sequence substrate | GNU `src/fns.c:2322-2383` at `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea` copies nil/proper lists, ordinary vectors, bool-vectors and strings. | VM2 now supports bool-vector reversal as well as raw/extended character strings; the former constructor-limitation assertion now requires the exact GNU result. Bool-vector reader syntax remains unavailable. The inherited VM2-EMPTY1 gap also applies: `(eq (reverse (vector)) (reverse (vector)))` is GNU t, VM2 nil; reversing one empty vector preserves that argument's identity. | **Package-observable unresolved representation gaps**, not full GNU sequence parity or an ERT exclusion. Pinned GNU limitation witnesses and candidate assertions are in `crates/romacs-vm/tests/fixtures/reverse.json` and `tests/reverse.rs`; bool-vector and allocator canonicalization require separate substrate work. | <!-- symbols: reverse, make-bool-vector, eq -->

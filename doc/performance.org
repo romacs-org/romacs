@@ -15,7 +15,7 @@ examples.
   load, sync or search.
 - Behaviour observable from Lisp stays GNU's. Where a scheduling choice
   departs from GNU (for example a timer pass that yields to input), it is
-  recorded in DIVERGENCES.md and gated by perkey.
+  recorded in =ledger/divergences/= and gated by perkey.
 
 * Measure before changing anything
 
@@ -115,5 +115,5 @@ laziness, then parallelism. In practice:
   worst key, keys over 50 ms, and how many of those the feature caused.
 - Correctness of the handover on real-shaped data: no duplicates, nothing
   missing, compared with the plain path on the same copy.
-- Perkey and scaling through =romacs-check=, Sol review, and DIVERGENCES
-  entries for any intended departure from GNU.
+- Perkey and scaling through =romacs-check=, Sol review, and a
+  =ledger/divergences/= file for any intended departure from GNU.

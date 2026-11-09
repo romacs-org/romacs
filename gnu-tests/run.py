@@ -307,11 +307,8 @@ def divergence_rows() -> dict[str, dict]:
         import divergence_index  # the one parser of the prose ledgers
     finally:
         sys.path.pop(0)
-    rows = divergence_index.parse(ROOT / 'DIVERGENCES.md', 'DIVERGENCES.md')
-    for p in sorted(ROOT.glob('crates/*/GNU-DIVERGENCES.md')):
-        rows += divergence_index.parse(p, str(p.relative_to(ROOT)))
     out = {}
-    for r in rows:
+    for r in divergence_index.rows(ROOT):
         ident = re.sub(r'^\[([^\]]+)\]\(.*\)$', r'\1', r['id'] or '')
         if DIVERGENCE_ID.match(ident):
             out[ident] = r

@@ -26,11 +26,15 @@ Usage:
     python3 tools/divergence_index.py SYMBOL...  # the rows naming SYMBOL, as JSON
     python3 tools/divergence_index.py            # counts
     python3 tools/divergence_index.py --check    # exit 1 if any row has no symbol
+    python3 tools/divergence_index.py --names    # exit 1 if a file lacks the ID it is named by
 """
 from __future__ import annotations
 import argparse, json, pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+DIR = pathlib.Path('ledger/divergences')
+NOT_AN_ID = ('#', 'crate', 'mechanism', 'what', 'lane')
+SEPARATOR = re.compile(r'^\|[\s:|-]+\|$')
 
 # Backticked tokens that are structure, types or prose rather than Lisp symbols.
 # Kept deliberately small: a false keep is visible in the output and easy to
@@ -68,13 +72,16 @@ def symbols_in(cells: list[str], override: str | None) -> list[str]:
 def parse(path: pathlib.Path, source: str) -> list[dict]:
     rows: list[dict] = []
     section = None
-    for line in path.read_text().split('\n'):
+    lines = path.read_text().split('\n')
+    for i, line in enumerate(lines):
         h = re.match(r'^##+\s+(.*)', line)
         if h:
             section = h.group(1).strip()
             continue
-        if not line.startswith('| ') or re.match(r'^\|[\s:|-]+\|$', line):
+        if not line.startswith('| ') or SEPARATOR.match(line):
             continue
+        if i + 1 < len(lines) and SEPARATOR.match(lines[i + 1].strip()):
+            continue          # a table's header row
         override = None
         if re.search(r'<!--\s*not-a-divergence\s*-->', line):
             continue          # e.g. a table documenting where code moved
@@ -86,7 +93,7 @@ def parse(path: pathlib.Path, source: str) -> list[dict]:
         if len(cells) < 4:                      # header rows, detail tables
             continue
         ident = cells[0]
-        if ident.lower() in ('#', 'crate', 'mechanism', 'what', 'lane'):
+        if ident.lower() in NOT_AN_ID:
             continue
         rows.append({
             'id': ident if ident not in ('—', '-', '') else None,
@@ -103,24 +110,48 @@ def parse(path: pathlib.Path, source: str) -> list[dict]:
         })
     return rows
 
+def rows(root: pathlib.Path = ROOT) -> list[dict]:
+    """Every divergence row, read from one file per divergence."""
+    return [row for path in sorted((root / DIR).glob('*.md')) if path.name != 'README.md'
+            for row in parse(path, (DIR / path.name).as_posix())]
+
+
+def misnamed(root: pathlib.Path = ROOT) -> list[str]:
+    """Files named by an ID that do not hold it, as a row's first cell or a
+    `## ID` heading. A `U-` file holds an entry that never had an ID."""
+    found = []
+    for path in sorted((root / DIR).glob('*.md')):
+        ident = path.stem
+        if path.name == 'README.md' or ident.startswith('U-'):
+            continue
+        text = path.read_text()
+        if not re.search(rf'^\| {re.escape(ident)} \||^## {re.escape(ident)}\b', text, re.M):
+            found.append(f'{DIR / path.name}: holds no row or section named {ident}')
+    return found
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('symbols', nargs='*', help='print the rows that name these symbols, as JSON')
     ap.add_argument('--check', action='store_true',
                     help='exit 1 if a row yields no symbol (R99: unattached rows are invisible)')
+    ap.add_argument('--names', action='store_true', help='exit 1 if a file does not hold the ID it is named by')
     args = ap.parse_args()
+    if args.names:
+        problems = misnamed()
+        for problem in problems:
+            print(f'divergences: {problem}', file=sys.stderr)
+        return 1 if problems else 0
 
-    ledgers = ['DIVERGENCES.md'] + [p.relative_to(ROOT).as_posix()
-                                     for p in sorted(ROOT.glob('crates/*/GNU-DIVERGENCES.md'))]
-    rows = [row for source in ledgers for row in parse(ROOT / source, source)]
+    found = rows()
     for symbol in args.symbols:
-        print(json.dumps([r for r in rows if symbol in r['symbols']], ensure_ascii=False))
+        print(json.dumps([r for r in found if symbol in r['symbols']], ensure_ascii=False))
     if args.symbols:
         return 0
 
-    symbols = {s for r in rows for s in r['symbols']}
-    unattached = [r for r in rows if not r['symbols']]
-    print(f"  {len(rows)} rows, {len(symbols)} symbols, {len(unattached)} unattached")
+    symbols = {s for r in found for s in r['symbols']}
+    unattached = [r for r in found if not r['symbols']]
+    print(f"  {len(found)} rows, {len(symbols)} symbols, {len(unattached)} unattached")
     if args.check and unattached:
         print("  FAIL: a divergence with no symbol attached is invisible to an agent;")
         print("  add a `<!-- symbols: a, b -->` comment to each row below (R98/R99).")
