@@ -56,7 +56,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
             vscroll_px: 0, hscroll: Default::default(), tab_width: 8, wrap: Default::default(), cursor_off: false, cursor: Default::default(), stretches: vec![], images: vec![], wrap_flips: vec![], line_numbers: None, chrome: Default::default(), faces: vec![face.clone()],
         }
     }
-    let mut vm = Vm::new();
+    let vm = Vm::new();
     let face = vm.display_default_face().unwrap();
 
     // Two windows sharing one id: `ends` would carry two entries for the same
