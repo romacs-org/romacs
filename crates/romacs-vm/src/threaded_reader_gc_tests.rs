@@ -266,7 +266,7 @@ fn a_panic_inside_suspended_calls_unwinds_the_suspension_state() {
 }
 
 /// The same with a cleanup running and with a run of finalizers in progress
-/// as the host panics: the hold on aftermath (`Vm::unwinding', `Vm::aftermath_runs') comes
+/// as the host panics: the hold on aftermath (`Vm::unwinding`, `Vm::aftermath_runs`) comes
 /// back to zero once caught, and a collection's aftermath runs again, at the
 /// next request's end.
 #[test]
@@ -399,7 +399,7 @@ fn a_hook_at_a_safepoint_can_widen_the_registers_under_it() {
 }
 
 /// A reader function that collects, moving everything, at each character: the
-/// engine that called `read' is suspended for each call, and the records of
+/// engine that called `read` is suspended for each call, and the records of
 /// its state grow and shrink under the reader.
 #[test]
 fn a_reader_function_collects_under_a_suspended_engine() {

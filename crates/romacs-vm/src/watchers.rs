@@ -39,7 +39,7 @@ impl Vm {
         // writer may keep Values in locals, so it holds collection.
         // GNU untraps the variable while its watchers run (no recursion),
         // and traps it again as they end; a panic out of them, by whatever
-        // catches it (`Vm::catching').
+        // catches it (`Vm::catching`).
         self.trapped.remove(&base);
         self.retrap.push(base);
         let held = usize::from(!self.rooted_write);

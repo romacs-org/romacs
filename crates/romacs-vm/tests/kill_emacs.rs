@@ -6,7 +6,7 @@
 use romacs_vm::Vm;
 
 /// The exit code a session host received, by unwinding out of the VM. These
-/// tests go on using the VM, which no session does (`Vm::catching').
+/// tests go on using the VM, which no session does (`Vm::catching`).
 fn exit_code(vm: &mut Vm, source: &str) -> i32 {
     let outcome = vm.catching(|vm| vm.eval_source(source).map(|_| ()));
     *outcome.expect_err("kill-emacs returned").downcast::<i32>().expect("session host exit code")

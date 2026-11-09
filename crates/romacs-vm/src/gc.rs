@@ -19,7 +19,7 @@ romacs_snapshot::snapshot_struct!(HeapStats { collections, allocations, reclaime
 /// `external_roots`, pushed before the call and read back by index after it,
 /// so only the forwarded copy is used. Frames nest; release each in reverse
 /// order on every exit, the failing ones included. A panic leaves them to
-/// whatever catches it (`Vm::catching').
+/// whatever catches it (`Vm::catching`).
 #[must_use = "a root frame is released on every exit"]
 pub(crate) struct RootFrame {
     base: usize,
@@ -232,7 +232,7 @@ romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_
 /// index no table has, which no operation accepts.
 pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
-/// What can stand at a `Vm::catching' outside any engine, for a panic to put
+/// What can stand at a `Vm::catching` outside any engine, for a panic to put
 /// back: an embedder's root frames and holds, the bindings, handlers and
 /// backtrace entries below it, watchers already running, and the Lisp depth.
 struct NestingMark {
@@ -400,15 +400,21 @@ impl Vm {
     /// was, for a caller that goes on using it: a tool scoring a file, a test.
     ///
     /// The invariant: **a session never uses its VM after a panic.** A panic or
-    /// `kill-emacs' ends it, and its VM with it, so nothing on the way in pays
+    /// `kill-emacs` ends it, and its VM with it, so nothing on the way in pays
     /// to be recoverable, and no frame restores anything as a panic crosses it.
     /// `tests/panic_boundary.rs` lists every `catch_unwind` that could reach a
     /// VM, and fails on a new one. What a panic left is
     /// dropped: suspended engines' state, root frames, holds; the bindings and
     /// handlers made since are popped, without their watchers, and no cleanup
-    /// runs; what they owned (`romacs--post-gc-owned', `inhibit-quit', a job's
+    /// runs; what they owned (`romacs--post-gc-owned`, `inhibit-quit`, a job's
     /// claim) ends with them, and a variable whose watchers were running is
-    /// trapped again (`Vm::retrap').
+    /// trapped again (`Vm::retrap`).
+    ///
+    /// # Errors
+    /// The panic's payload, if BODY panicked.
+    ///
+    /// # Panics
+    /// If an engine is running: a panic is caught outside any.
     pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
         assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
         let mark = NestingMark {
@@ -731,8 +737,8 @@ impl Vm {
     }
     /// Whether anything in progress holds aftermath back: an escape being
     /// unwound, a run of aftermath, or a suspended engine's cleanup. A running
-    /// engine answers for its own cleanups (`Engine::safe_runner'), and an
-    /// engine that is neither fails `may_collect'.
+    /// engine answers for its own cleanups (`Engine::safe_runner`), and an
+    /// engine that is neither fails `may_collect`.
     pub(crate) fn aftermath_held(&self) -> bool {
         self.unwinding != 0 || self.aftermath_runs != 0 || self.suspended.iter().any(threaded::Suspended::in_cleanup)
     }

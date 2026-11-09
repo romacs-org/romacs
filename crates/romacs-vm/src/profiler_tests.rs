@@ -64,7 +64,7 @@ fn cpu_log_records_the_running_backtrace() {
 /// log evicts its least counted half into [Discarded\ Samples nil]. A sample
 /// lands in a collection by chance, so rounds run until one has: this shows
 /// that a sampler can see a collection, not that it sees each one, and
-/// `a_collections_ticks_are_its_entry' counts what it charges.
+/// `a_collections_ticks_are_its_entry` counts what it charges.
 #[test]
 fn special_entries_for_collection_and_eviction() {
     let mut vm = Vm::new();

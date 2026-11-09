@@ -751,7 +751,7 @@ impl Program {
 /// it for that long, so the collector reads and rewrites it in place, with no
 /// pointer into the engine's frame and no copy. The instruction and entry
 /// buffers themselves do not move, so the addresses a suspended handler holds
-/// stay good; its registers stay in `Vm::stack' or `Vm::suspended_stacks'.
+/// stay good; its registers stay in `Vm::stack` or `Vm::suspended_stacks`.
 pub(super) struct Suspended {
     code: Vec<Vec<Inst>>,
     entries: Vec<EntryCache>,
@@ -760,7 +760,7 @@ pub(super) struct Suspended {
     controls: Vec<Control>,
     escape: Option<Escape>,
     frames: Vec<Frame>,
-    /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack'
+    /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack`
     /// until something sets them aside.
     file: usize,
     function: usize,
@@ -782,7 +782,7 @@ impl Suspended {
         }
     }
     /// Whether a cleanup of this engine is running: an escape's or a normal
-    /// exit's, its record not yet popped (`Op::ResumeExit').
+    /// exit's, its record not yet popped (`Op::ResumeExit`).
     pub(super) fn in_cleanup(&self) -> bool {
         self.controls.iter().any(Control::is_cleanup)
     }
@@ -808,12 +808,12 @@ impl Suspended {
 }
 impl Vm {
     /// Every suspended engine's activations, oldest engine first, as Lisp data:
-    /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function' or
-    /// `continuation' (K_CODE) for those its frames saved; the one it was in keeps
-    /// no instruction here to say which, so it is `running', and its function is
+    /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function` or
+    /// `continuation` (`K_CODE`) for those its frames saved; the one it was in keeps
+    /// no instruction here to say which, so it is `running`, and its function is
     /// its caller's in a continuation. FILE and START say where its registers are.
     pub(crate) fn suspended_activations(&mut self) -> Value {
-        let number = |n: usize| Value::integer(n as i64).expect("an index fits a fixnum");
+        let number = |n: usize| Value::integer(i64::try_from(n).expect("an index fits i64")).expect("an index fits a fixnum");
         let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
         let mut rows = Vec::new();
         for (engine, record) in self.suspended.iter().enumerate() {
@@ -1220,7 +1220,7 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
     if m.leaf((), |e, ()| no_catch(e)) && !prepare_signal(&mut m, gc.by_ref(), false, None) {
         m.leaf((), |e, ()| if let Some(Escape::Error { object, .. }) = e.escape { e.vm.thrown_no_catch.push(object) });
     }
-    // From here routing holds aftermath (`Vm::unwinding'; the driver
+    // From here routing holds aftermath (`Vm::unwinding`; the driver
     // gives it back): the watchers its restores run, and the hooks and
     // handlers it calls while unwinding, start none. The signal-time calls
     // above come before any control is popped, so an escape from them only
@@ -1382,7 +1382,7 @@ impl Engine<'_> {
     fn in_cleanup(&self) -> bool {
         self.controls.iter().any(Control::is_cleanup)
     }
-    /// `Vm::safe_runner' from this running engine, its own cleanups included.
+    /// `Vm::safe_runner` from this running engine, its own cleanups included.
     fn safe_runner(&mut self) -> Option<Value> {
         if self.in_cleanup() { None } else { self.vm.safe_runner(1) }
     }
@@ -4852,7 +4852,7 @@ fn after_if(ok: bool, pc: Pc<'_>) -> Continue<'_> {
     if ok { Continue::After(pc) } else { Continue::Stop }
 }
 impl Vm {
-    /// One run of a collection's aftermath: RUNNER (`romacs--run-finalizers')
+    /// One run of a collection's aftermath: RUNNER (`romacs--run-finalizers`)
     /// through the trampoline, holding aftermath until it returns, so that an
     /// automatic collection inside it defers to its loop or a later safe
     /// point, never nesting. With
@@ -5000,14 +5000,14 @@ numeric!(inc, numbers::op::ADD, |x: Value, _y: Value| (x.0 as i64)
 numeric!(dec, numbers::op::SUB, |x: Value, _y: Value| (x.0 as i64)
     .checked_sub(4)
     .map(|n| Value(n as u64)), |_, _| Value(5));
-fn boolean(holds: bool) -> Option<Value> {
-    Some(if holds { Value::TRUE } else { Value::NIL })
+fn truth(holds: bool) -> Value {
+    if holds { Value::TRUE } else { Value::NIL }
 }
-numeric!(less, numbers::op::LESS, |x: Value, y: Value| boolean((x.0 as i64) < (y.0 as i64)));
-numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| boolean((x.0 as i64) > (y.0 as i64)));
-numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) <= (y.0 as i64)));
-numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) >= (y.0 as i64)));
-numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| boolean(x == y));
+numeric!(less, numbers::op::LESS, |x: Value, y: Value| Some(truth((x.0 as i64) < (y.0 as i64))));
+numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| Some(truth((x.0 as i64) > (y.0 as i64))));
+numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| Some(truth((x.0 as i64) <= (y.0 as i64))));
+numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| Some(truth((x.0 as i64) >= (y.0 as i64))));
+numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| Some(truth(x == y)));
 // A zero divisor and the one quotient past the fixnums are the primitive's.
 numeric!(divide, numbers::op::DIV, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_div((y.0 as i64) >> 2)

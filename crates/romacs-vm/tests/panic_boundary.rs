@@ -1,22 +1,22 @@
-//! A session never uses its VM after a panic (`Vm::catching' states this).
+//! A session never uses its VM after a panic (`Vm::catching` states this).
 //!
 //! No frame restores the VM's nesting state as a panic crosses it, so whatever
-//! catches a panic and then uses the VM must go through `Vm::catching'. For a VM
+//! catches a panic and then uses the VM must go through `Vm::catching`. For a VM
 //! to outlive a panic, another thread must hold it or a catch must stop the panic
-//! on its own. `Vm' is not `Send' (checked below), so no other thread can, short of
-//! an `unsafe impl Send' on what holds it, which nothing has and which would break
+//! on its own. `Vm` is not `Send` (checked below), so no other thread can, short of
+//! an `unsafe impl Send` on what holds it, which nothing has and which would break
 //! this rule. So in every package that can reach a VM (romacs-vm and whatever
-//! depends on it), this lists each `catch_unwind' with why it is safe and fails on
-//! one it does not name. A session's code may not call `catching' at all.
+//! depends on it), this lists each `catch_unwind` with why it is safe and fails on
+//! one it does not name. A session's code may not call `catching` at all.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// PATH, how many, why each is safe.
 const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm-gui/src/main.rs", 2,
-     "`main' holds no VM; the evaluator thread's top: the unwinding drops the VM, and the session ends"),
+     "`main` holds no VM; the evaluator thread's top: the unwinding drops the VM, and the session ends"),
     ("crates/romacs-vm/src/gc.rs", 2,
-     "`Vm::catching' itself, and a mark handing its host back before re-raising"),
+     "`Vm::catching` itself, and a mark handing its host back before re-raising"),
     ("crates/romacs-vm/src/gc_mark.rs", 4, "tests of a panic inside the collector, which nests no engine"),
     ("crates/romacs-vm/src/handle.rs", 1, "a test of a host panicking in an idle mark, which nests no engine"),
     ("crates/romacs-vm/src/prim.rs", 2, "tests of the declaration parser, with no VM"),
@@ -27,7 +27,7 @@ const SITES: &[(&str, usize, &str)] = &[
     ("crates/romacs-vm/tests/gnutls.rs", 1, "the VM is on the thread the bound gave up on"),
     ("crates/romacs-vm/tests/support/bulk.rs", 1, "a VM made in the closure, which the unwinding drops"),
     ("gnu-tests/runner/src/main.rs", 7,
-     "its import, and six that each report the panic and exit (`panic_exit'); what goes on after one uses `catching'"),
+     "its import, and six that each report the panic and exit (`panic_exit`); what goes on after one uses `catching`"),
 ];
 
 /// The primh tests' one form, repeated in each: a declaration, with no VM.
@@ -36,7 +36,7 @@ const VM_FREE: &str = "catch_unwind(|| validate_declaration(";
 /// Packages a session's code lives in.
 const SESSION: &[&str] = &["crates/romacs-vm-gui", "crates/romacs-layout2", "crates/romacs-introspect-live"];
 
-/// Compiles only while `Vm' is not `Send': were it, both impls would apply and
+/// Compiles only while `Vm` is not `Send`: were it, both impls would apply and
 /// the call would be ambiguous.
 trait AmbiguousIfSend<Which> {
     fn check() {}
@@ -120,8 +120,8 @@ fn every_catch_is_named() {
         .filter(|&(_, n)| n > 0)
         .collect();
     let listed: BTreeMap<String, usize> = SITES.iter().map(|&(path, n, _)| (path.to_owned(), n)).collect();
-    assert_eq!(found, listed, "a session never uses its VM after a panic (`Vm::catching'): \
-        name each `catch_unwind' here with why it is safe, or go through `Vm::catching'");
+    assert_eq!(found, listed, "a session never uses its VM after a panic (`Vm::catching`): \
+        name each `catch_unwind` here with why it is safe, or go through `Vm::catching`");
 }
 
 #[test]
@@ -132,5 +132,5 @@ fn a_session_does_not_recover_from_a_panic() {
         .filter(|(_, code)| code.contains("catching("))
         .map(|(path, _)| path)
         .collect();
-    assert!(found.is_empty(), "a session ends at a panic, and has no use for `Vm::catching': {found:?}");
+    assert!(found.is_empty(), "a session ends at a panic, and has no use for `Vm::catching`: {found:?}");
 }

@@ -1411,7 +1411,7 @@ pub struct Vm {
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
     /// Variables whose watchers run now, each trapped again as its call ends
-    /// (`Vm::notify_watchers_at'), or as a panic is caught (`Vm::catching').
+    /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
@@ -1636,7 +1636,7 @@ pub struct Vm {
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
     /// Escapes being unwound, in any engine: routing takes it, the driver gives
-    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held').
+    /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
     unwinding: usize,
     /// Runs of aftermath in progress (`Vm::run_aftermath'): while nonzero an
     /// interrupt naming the job waits (`threaded::isolate_quit'), so
