@@ -246,7 +246,7 @@ nobody re-litigates them.
   candidates cost more than the text justifies, and for any catastrophic
   candidate; backreferences, intervals, `??`, nullable non-greedy loops and
   POSIX patterns stay on the backtracker.  Same matches and registers as GNU's
-  backtracker (`crates/romacs-regex-engine/GNU-DIVERGENCES.md`).
+  backtracker ([RX1](RX1.md)).
 
 ---
 
@@ -294,15 +294,9 @@ deleted one.
 
 ## Detail
 
-| crate | file | entries |
-|---|---|---|
-| `romacs-vm` | [`crates/romacs-vm/GNU-DIVERGENCES.md`](crates/romacs-vm/GNU-DIVERGENCES.md) | 26 |
-| `romacs-face` | [`crates/romacs-face/GNU-DIVERGENCES.md`](crates/romacs-face/GNU-DIVERGENCES.md) | 12, with measured parity |
-| `romacs-layout-engine` | [`crates/romacs-layout-engine/GNU-DIVERGENCES.md`](crates/romacs-layout-engine/GNU-DIVERGENCES.md) | 4 |
-| `romacs-regex-engine` | [`crates/romacs-regex-engine/GNU-DIVERGENCES.md`](crates/romacs-regex-engine/GNU-DIVERGENCES.md) | 1 (RX1, the linear-time matcher); the extraction itself changed no behaviour, and the file records which host reads moved behind the trait |
-
-Each detail entry carries a live-GNU transcript. Adding a divergence to a
-crate file **without** adding a row here is the one thing that is not allowed.
+The longer explanations, each with its live-GNU transcript, follow the row in
+the entry's own file. A divergence with no row of its own (the crate ledgers'
+sections without an ID) is a `U-` file.
 
 ## VM2 format-message boundary
 
@@ -337,3 +331,15 @@ Everything else the matcher returns is GNU's: the linear matcher reproduces
 the backtracker's leftmost-first priority and registers, including GNU's
 empty-loop rule, and `tools/regex_oracle.py` checks it against live GNU
 (106 cases, fresh process each, byte-compiled).
+
+## romacs-vm
+
+## Deliberate annotation differences from GNU Emacs
+
+The annotation layer implements per-key runs, raw presence/value lookup,
+category/alias/default resolution, insertion stickiness and property-bearing
+kill/yank strings. Markers and the overlay interval index are described in
+ANCHORS.md. Provider extents, dependent invalidation and a Lisp
+`object-intervals` entry point remain later milestones. The first two rules below
+are **planned contracts, not implemented-feature claims**. They do not authorize
+ignoring other GNU mismatches.

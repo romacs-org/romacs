@@ -116,17 +116,36 @@ def rows(root: pathlib.Path = ROOT) -> list[dict]:
             for row in parse(path, (DIR / path.name).as_posix())]
 
 
+def owned_ids(text: str) -> set[str]:
+    """The IDs TEXT gives: each row's first cell and each `## ID` heading's first word."""
+    rows = {m[1].strip() for m in re.finditer(r'^\| ([^|]+?) \|', text, re.M)}
+    heads = {m[1] for m in re.finditer(r'^## (\S+)', text, re.M)}
+    return rows | heads
+
+
 def misnamed(root: pathlib.Path = ROOT) -> list[str]:
-    """Files named by an ID that do not hold it, as a row's first cell or a
-    `## ID` heading. A `U-` file holds an entry that never had an ID."""
-    found = []
-    for path in sorted((root / DIR).glob('*.md')):
-        ident = path.stem
-        if path.name == 'README.md' or ident.startswith('U-'):
-            continue
+    """Why the files break the rule of one file per divergence: a file named
+    by an ID that does not hold it (as a row's first cell or a `## ID`
+    heading), an ID that another file holds too, or conflict markers. A `U-`
+    file holds an entry that never had an ID."""
+    found, owners = [], {}
+    paths = [p for p in sorted((root / DIR).glob('*.md')) if p.name != 'README.md']
+    for path in paths:
         text = path.read_text()
-        if not re.search(rf'^\| {re.escape(ident)} \||^## {re.escape(ident)}\b', text, re.M):
+        if re.search(r'^(<{7}|={7}|>{7})( |$)', text, re.M):
+            found.append(f'{DIR / path.name}: unresolved conflict markers')
+        for ident in owned_ids(text):
+            owners.setdefault(ident, []).append(path.stem)
+    for path in paths:
+        ident = path.stem
+        if ident.startswith('U-'):
+            continue
+        holders = owners.get(ident, [])
+        if ident not in holders:
             found.append(f'{DIR / path.name}: holds no row or section named {ident}')
+        others = [h for h in holders if h != ident]
+        if others:
+            found.append(f'{ident}: also held by ' + ', '.join(f'{DIR / h}.md' for h in others))
     return found
 
 

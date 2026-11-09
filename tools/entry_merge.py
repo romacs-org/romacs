@@ -33,12 +33,32 @@ def show(root, rev):
     return read
 
 
-def merge(root, split, paths, out, label):
+def conflict(root, rel, was, now, trunk):
+    """Leave REL unmerged: conflict markers in the tree and the three
+    versions in the index, so nothing commits until a person resolves it."""
+    path = Path(root) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'<<<<<<< branch\n{now or ""}=======\n{trunk or ""}>>>>>>> trunk\n')
+    stages = []
+    for stage, text in ((1, was), (2, now), (3, trunk)):
+        if text is not None:
+            blob = subprocess.run(['git', '-C', str(root), 'hash-object', '-w', '--stdin'], input=text,
+                                  check=True, capture_output=True, text=True).stdout.strip()
+            stages.append(f'100644 {blob} {stage}\t{rel}')
+    git(root, 'update-index', '--force-remove', '--', rel)
+    subprocess.run(['git', '-C', str(root), 'update-index', '--index-info'], input='\n'.join(stages) + '\n',
+                   check=True, capture_output=True, text=True)
+
+
+def merge(root, split, paths, out, label, unstable=lambda name: False):
     """Apply HEAD's changes since the merge base with MERGE_HEAD to OUT.
 
     SPLIT maps {old path: text} to {path under OUT: content}; PATHS(*revs)
-    names the old files that may exist at those revisions. Returns the exit
-    status: 0 applied, 1 entries left in conflict, 2 no merge in progress."""
+    names the old files that may exist at those revisions. An entry whose name
+    UNSTABLE says is derived from its content cannot be told apart from a
+    rename, so the branch adding or deleting one is left for a person.
+    Returns the exit status: 0 applied, 1 entries left in conflict, 2 no
+    merge in progress."""
     if git(root, 'rev-parse', '--verify', '-q', 'MERGE_HEAD', check=False).returncode:
         print(f'{label}: no merge in progress; run `git merge --no-commit -X no-renames <trunk>` first',
               file=sys.stderr)
@@ -64,17 +84,18 @@ def merge(root, split, paths, out, label):
             continue
         path = Path(root) / out / name
         trunk = path.read_text() if path.exists() else None
-        if trunk in (was, now):
+        if trunk in (was, now) and not (unstable(name) and None in (was, now)):
             if now is None:
                 path.unlink(missing_ok=True)
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(now)
             continue
-        conflicts.append(name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f'<<<<<<< branch\n{now or ""}=======\n{trunk or ""}>>>>>>> trunk\n')
+        conflicts.append((name, was, now, trunk))
     git(root, 'add', '-A', '--', str(out))
+    for name, was, now, trunk in conflicts:
+        conflict(root, (Path(out) / name).as_posix(), was, now, trunk)
+    conflicts = [name for name, *_ in conflicts]
     if conflicts:
         print(f'{label}: resolve these entries, then git add them:', *conflicts, sep='\n  ', file=sys.stderr)
         return 1

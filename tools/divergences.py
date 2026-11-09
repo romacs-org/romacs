@@ -23,13 +23,12 @@ usage: divergences.py split [--root ROOT]
 """
 import argparse
 import re
-import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import divergence_index  # noqa: E402
+import entry_merge  # noqa: E402
 
 DIR = divergence_index.DIR
 ROOT_LEDGER = 'DIVERGENCES.md'
@@ -103,15 +102,21 @@ def split_root(text):
 
 
 def split_crate(text, crate):
-    """({key: section text}, preamble lines) for a crate ledger of `## ...` sections."""
-    blocks, preamble, current = [], [], None
+    """({key: section text}, preamble lines) for a crate ledger of `## ...`
+    sections. A later `# ...` heading ends the section before it: the heading
+    and its preamble belong to no entry."""
+    blocks, preamble, current, titled = [], [], None, False
     for line in text.split('\n'):
         if line.startswith('## '):
             current = [line]
             blocks.append(current)
+        elif line.startswith('# '):
+            current = None
+            if titled:
+                preamble += ['', '#' + line]
+            titled = True
         elif current is None:
-            if not line.startswith('# '):
-                preamble.append(line)
+            preamble.append(line)
         else:
             current.append(line)
     entries = {}
@@ -137,7 +142,18 @@ def split(ledgers):
             readme += ['', f'## {crate}', *preamble]
     files = {f'{key}.md': text.strip('\n') + '\n' for key, text in files.items()}
     files['README.md'] = README_HEAD + '\n' + re.sub(r'\n{3,}', '\n\n', '\n'.join(readme)).strip('\n') + '\n'
-    return files
+    return {name: relinked(text, files) for name, text in files.items()}
+
+
+def relinked(text, files):
+    """TEXT with links into the old ledgers pointed at the entry files."""
+    ids = {name[:-3].lower(): name for name in files}
+
+    def target(found):
+        anchor = (found[2] or '').split('--')[0]
+        return '(' + ids.get(anchor, 'README.md') + ')'
+    return re.sub(r'\((?:\.\./)*(?:(?:crates/[^/)]+/)?GNU-)?DIVERGENCES\.md(?:#([^)]*))?\)',
+                  lambda m: target((None, None, m[1])), text)
 
 
 def old_ledgers(read, paths):
@@ -145,21 +161,10 @@ def old_ledgers(read, paths):
     return {path: text for path in paths if (text := read(path)) is not None}
 
 
-def git(root, *args, check=True):
-    return subprocess.run(['git', '-C', str(root), *args], check=check, capture_output=True, text=True)
-
-
-def show(root, rev):
-    def read(path):
-        done = git(root, 'show', f'{rev}:{path}', check=False)
-        return done.stdout if done.returncode == 0 else None
-    return read
-
-
 def ledger_paths(root, *revs):
     paths = {ROOT_LEDGER}
     for rev in revs:
-        listed = git(root, 'ls-tree', '-r', '--name-only', rev, '--', 'crates').stdout.split()
+        listed = entry_merge.git(root, 'ls-tree', '-r', '--name-only', rev, '--', 'crates').stdout.split()
         paths |= {p for p in listed if p.endswith('/GNU-DIVERGENCES.md')}
     return sorted(paths)
 
@@ -174,6 +179,12 @@ def write(root, files):
 def cmd_split(root):
     paths = [ROOT_LEDGER] + sorted(p.relative_to(root).as_posix() for p in Path(root).glob(CRATE_LEDGERS))
     ledgers = old_ledgers(lambda p: (Path(root) / p).read_text() if (Path(root) / p).exists() else None, paths)
+    if not ledgers:
+        print('divergences: no old ledger to split', file=sys.stderr)
+        return 2
+    if (Path(root) / DIR).exists() and any((Path(root) / DIR).iterdir()):
+        print(f'divergences: {DIR}/ already holds entries; merge a branch with `merge` instead', file=sys.stderr)
+        return 2
     write(root, split(ledgers))
     for path in ledgers:
         (Path(root) / path).unlink()
@@ -183,39 +194,8 @@ def cmd_split(root):
 
 def cmd_merge(root):
     """Apply the branch's own ledger edits since the merge base to the files."""
-    head, other = 'HEAD', 'MERGE_HEAD'
-    if git(root, 'rev-parse', '--verify', '-q', other, check=False).returncode:
-        print('divergences: no merge in progress; run `git merge -X no-renames <trunk>` first', file=sys.stderr)
-        return 2
-    base = git(root, 'merge-base', head, other).stdout.strip()
-    paths = ledger_paths(root, base, head)
-    before = split(old_ledgers(show(root, base), paths))
-    after = split(old_ledgers(show(root, head), paths))
-    conflicts = []
-    for name in sorted(set(before) | set(after)):
-        was, now = before.get(name), after.get(name)
-        if was == now:
-            continue
-        path = Path(root) / DIR / name
-        trunk = path.read_text() if path.exists() else None
-        if trunk == was or trunk == now:
-            if now is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(now)
-            continue
-        conflicts.append(name)
-        path.write_text(f'<<<<<<< branch\n{now or ""}=======\n{trunk or ""}>>>>>>> trunk\n')
-    git(root, 'rm', '-q', '--cached', '--ignore-unmatch', '--', *paths)
-    for path in paths:
-        (Path(root) / path).unlink(missing_ok=True)
-    git(root, 'add', '-A', '--', str(DIR))
-    if conflicts:
-        print('divergences: resolve these entries, then git add them:', *conflicts, sep='\n  ', file=sys.stderr)
-        return 1
-    print(f'divergences: applied the branch\'s ledger edits to {DIR}/')
-    return 0
+    return entry_merge.merge(root, split, lambda *revs: ledger_paths(root, *revs), DIR, 'divergences',
+                             unstable=lambda name: name.startswith('U-'))
 
 
 def main():

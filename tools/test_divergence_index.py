@@ -21,10 +21,22 @@ UNATTACHED = '## Observable by a package\n| H2 | Prose only | GNU | romacs | del
 class DivergenceIndexTests(unittest.TestCase):
     def test_a_file_must_hold_the_id_it_is_named_by(self):
         self.assertEqual(self.run_index('--names').returncode, 0)
-        (self.dir / 'H5.md').write_text(LEDGER)
+        (self.dir / 'H5.md').write_text('## H5-SUFFIX\n\nNot H5.\n')
         result = self.run_index('--names')
         self.assertEqual(result.returncode, 1)
         self.assertIn('H5.md: holds no row or section named H5', result.stderr)
+
+    def test_an_id_has_one_file(self):
+        (self.dir / 'H9.md').write_text((self.dir / 'H9.md').read_text() + LEDGER.split('\n', 1)[1])
+        result = self.run_index('--names')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('H1: also held by ledger/divergences/H9.md', result.stderr)
+
+    def test_conflict_markers_are_refused(self):
+        (self.dir / 'H1.md').write_text('<<<<<<< branch\n' + LEDGER + '=======\n>>>>>>> trunk\n')
+        result = self.run_index('--names')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('unresolved conflict markers', result.stderr)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='divergence-index-', dir=os.environ.get('TMPDIR'))

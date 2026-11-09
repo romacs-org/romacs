@@ -2,7 +2,7 @@
 
 | # | mechanism | GNU | romacs | why |
 |---|---|---|---|---|
-| VM2-G1A | VM2 one-window display subset | `window.c`/`frame.c` return window/frame objects, store per-window point/start; `xfaces.c:merge_face_ref` merges face lists | stable single-instance symbol tokens, start at 1 and buffer point, full-buffer snapshot despite narrowing; named/singleton faces (longer lists use the first), only foreground/background/family/absolute size projected, limited colour spellings | package-observable staged G1a surface, not general window/face compatibility; [details](crates/romacs-vm/GNU-DIVERGENCES.md#vm2-g1a--one-window-display-subset) | <!-- symbols: selected-window, selected-frame, window-buffer, set-window-buffer, window-start, window-point, frame-pixel-width, frame-pixel-height, defface -->
+| VM2-G1A | VM2 one-window display subset | `window.c`/`frame.c` return window/frame objects, store per-window point/start; `xfaces.c:merge_face_ref` merges face lists | stable single-instance symbol tokens, start at 1 and buffer point, full-buffer snapshot despite narrowing; named/singleton faces (longer lists use the first), only foreground/background/family/absolute size projected, limited colour spellings | package-observable staged G1a surface, not general window/face compatibility; [details](VM2-G1A.md) | <!-- symbols: selected-window, selected-frame, window-buffer, set-window-buffer, window-start, window-point, frame-pixel-width, frame-pixel-height, defface -->
 
 ## VM2-G1A — One-window display subset
 

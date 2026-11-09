@@ -47,6 +47,14 @@ More about `delta`.
 | # | Scope | GNU | Romacs |
 |---|---|---|---|
 | D4 | `epsilon` | gnu d | romacs d |
+
+# x: annotation differences
+
+Annotation preamble.
+
+## A9 — an annotation entry
+
+About `zeta`.
 """
 
 
@@ -75,14 +83,28 @@ class SplitTest(unittest.TestCase):
             self.assertEqual(set(before), set(after))
             self.assertEqual(sum(before.values()) - 1, sum(after.values()), 'only the identical B2 copy collapses')
             names = sorted(p.name for p in (root / divergences.DIR).iterdir())
-            self.assertEqual(names, ['A1.md', 'B2.md', 'C3.md', 'D4.md', 'README.md',
+            self.assertEqual(names, ['A1.md', 'A9.md', 'B2.md', 'C3.md', 'D4.md', 'README.md',
                                      'U-observable-by-a-package-gamma.md'])
+            self.assertNotIn('Annotation preamble', (root / divergences.DIR / 'D4.md').read_text())
+            self.assertIn('Annotation preamble', (root / divergences.DIR / 'README.md').read_text())
             text = '\n'.join(p.read_text() for p in (root / divergences.DIR).iterdir())
             for line in (ROOT_LEDGER + CRATE_LEDGER).split('\n'):
                 if line.strip() and not line.startswith('# '):
                     self.assertIn(divergences.unlinked(line), text)
             self.assertIn('More about `delta`.', (root / divergences.DIR / 'C3.md').read_text())
             self.assertEqual(divergence_index.misnamed(root), [])
+            self.assertIn('| C3 |', (root / divergences.DIR / 'C3.md').read_text(), 'a linked ID cell loses its link')
+
+    def test_split_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'DIVERGENCES.md').write_text(ROOT_LEDGER)
+            self.assertEqual(divergences.cmd_split(root), 0)
+            readme = (root / divergences.DIR / 'README.md').read_text()
+            self.assertEqual(divergences.cmd_split(root), 2, 'no old ledger left to split')
+            (root / 'DIVERGENCES.md').write_text(ROOT_LEDGER)
+            self.assertEqual(divergences.cmd_split(root), 2, 'entries already exist')
+            self.assertEqual((root / divergences.DIR / 'README.md').read_text(), readme)
 
 
 def git(root, *args, check=True):
@@ -123,7 +145,7 @@ class MergeTest(unittest.TestCase):
 
     def merge_trunk_into(self, branch):
         git(self.root, 'checkout', '-q', branch)
-        git(self.root, 'merge', '--no-edit', '-X', 'no-renames', 'trunk', check=False)
+        git(self.root, 'merge', '--no-commit', '-X', 'no-renames', 'trunk', check=False)
         status = divergences.cmd_merge(self.root)
         if status == 0:
             git(self.root, 'commit', '-qm', f'merge trunk into {branch}')
@@ -136,7 +158,7 @@ class MergeTest(unittest.TestCase):
 
     def entries(self):
         directory = self.root / divergences.DIR
-        return (directory / 'A1.md').read_text(), (directory / 'D4.md').read_text()
+        return (directory / 'A1.md').read_text(), (directory / 'A9.md').read_text()
 
     def test_both_branches_land_in_either_order(self):
         start = git(self.root, 'rev-parse', 'trunk').stdout.strip()
@@ -148,9 +170,9 @@ class MergeTest(unittest.TestCase):
                     git(self.root, 'branch', '-q', '-f', branch, tip)
                 self.land(first)
                 self.land(second)
-                a1, d4 = self.entries()
+                a1, a9 = self.entries()
                 self.assertIn('romacs a, edited on left', a1)
-                self.assertIn('And one more line on right.', d4)
+                self.assertIn('And one more line on right.', a9)
                 self.assertFalse((self.root / 'DIVERGENCES.md').exists())
                 self.assertEqual(divergence_index.misnamed(self.root), [])
 
@@ -163,6 +185,18 @@ class MergeTest(unittest.TestCase):
         self.assertIn('<<<<<<< branch', text)
         self.assertIn('edited on left', text)
         self.assertIn('edited on trunk', text)
+        self.assertIn('ledger/divergences/A1.md', git(self.root, 'ls-files', '-u').stdout, 'left unmerged')
+        self.assertNotEqual(git(self.root, 'commit', '-qm', 'merge', check=False).returncode, 0)
+
+    def test_an_id_less_entry_renamed_on_a_branch_is_left_for_a_person(self):
+        git(self.root, 'checkout', '-q', '-b', 'renamer', 'left~1')
+        ledger = self.root / 'DIVERGENCES.md'
+        ledger.write_text(ledger.read_text().replace('`gamma`', '`gamma-renamed`'))
+        self.commit('renames gamma')
+        self.assertEqual(self.merge_trunk_into('renamer'), 1)
+        unmerged = git(self.root, 'ls-files', '-u').stdout
+        self.assertIn('U-observable-by-a-package-gamma.md', unmerged)
+        self.assertIn('U-observable-by-a-package-gamma-renamed.md', unmerged)
 
 
 if __name__ == '__main__':
