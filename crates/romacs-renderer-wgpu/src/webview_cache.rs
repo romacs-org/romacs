@@ -93,7 +93,7 @@ impl WgpuWebViewCache {
     }
 
     /// Immutable import support belonging to this cache's receiving device.
-    pub fn import_formats(&self) -> romacs_display_protocol::DmaBufImportFormats {
+    pub(crate) fn import_formats(&self) -> romacs_display_protocol::DmaBufImportFormats {
         self.import_formats.clone()
     }
 
@@ -103,7 +103,7 @@ impl WgpuWebViewCache {
     }
 
     /// Update or create a cached view from DmaBufBuffer.
-    pub fn update_view<R: Send + 'static>(
+    pub(crate) fn update_view<R: Send + 'static>(
         &mut self,
         view_id: WebViewId,
         buffer: DmaBufBuffer,
@@ -209,7 +209,7 @@ impl WgpuWebViewCache {
 
     /// Update or create a cached view from raw pixel data (fallback path).
     /// Used when DMA-BUF import fails (e.g., incompatible modifier).
-    pub fn update_view_from_pixels(
+    pub(crate) fn update_view_from_pixels(
         &mut self,
         view_id: WebViewId,
         width: u32,
@@ -304,7 +304,7 @@ impl WgpuWebViewCache {
     }
 
     /// Get bind group for a view.
-    pub fn get_bind_group(&self, view_id: WebViewId) -> Option<&wgpu::BindGroup> {
+    pub(crate) fn get_bind_group(&self, view_id: WebViewId) -> Option<&wgpu::BindGroup> {
         self.views.get(&view_id).map(|v| &v.bind_group)
     }
 
@@ -320,7 +320,7 @@ impl WgpuWebViewCache {
     }
 
     /// Drain budget accounting events accumulated since the last call.
-    pub fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
+    pub(crate) fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
         std::mem::take(&mut self.accounting)
     }
 

@@ -32,11 +32,12 @@ mod deform;
 mod draw;
 mod dynamic_buffer;
 mod frame_submission;
-pub use draw::DrawContext;
+pub(crate) use draw::DrawContext;
 mod paint;
 mod panes;
 mod target;
-pub use target::{NativeContentPlacement, NativePlacementError, RenderTarget, SnapshotRegion};
+pub(crate) use target::NativePlacementError;
+pub use target::{NativeContentPlacement, RenderTarget, SnapshotRegion};
 mod effect_common;
 mod effects_state;
 mod frame_pass;
@@ -45,7 +46,8 @@ pub use full_frame_texture::FullFrameTexture;
 mod fx_state;
 mod glyphs;
 mod gpu_budget;
-pub use gpu_budget::{BudgetExceeded, GpuBudget, GpuBudgetOwner, UnpooledTexture};
+pub(crate) use gpu_budget::GpuBudget;
+pub use gpu_budget::{BudgetExceeded, GpuBudgetOwner, UnpooledTexture};
 mod layer_backgrounds;
 mod layout_pass;
 pub use layout_pass::{PaneBlit, PaneSource};
@@ -62,9 +64,8 @@ mod row_reuse;
 mod scene_placements;
 mod scissor;
 mod snapshot_pool;
-pub use snapshot_pool::{
-    SnapshotId, SnapshotLease, SnapshotPool, SnapshotResources, SnapshotSize, texture_bytes,
-};
+pub(crate) use snapshot_pool::{SnapshotId, SnapshotPool, SnapshotResources};
+pub use snapshot_pool::{SnapshotLease, SnapshotSize, texture_bytes};
 mod stats;
 mod tooltip;
 mod transitions;
@@ -74,7 +75,8 @@ mod window_effects;
 pub use fx_state::RendererFrameEffects;
 pub(crate) use fx_state::*;
 pub(crate) use resources::*;
-pub use row_reuse::{FrameRowDamage, RowDamageInfo, RowReuseStats, WindowRowDamage};
+pub use row_reuse::FrameRowDamage;
+pub(crate) use row_reuse::{RowDamageInfo, RowReuseStats, WindowRowDamage};
 pub use stats::*;
 
 #[cfg(feature = "video")]
@@ -1321,11 +1323,6 @@ impl WgpuRenderer {
         self.frame_seq = self.frame_seq.wrapping_add(1);
     }
 
-    /// Get the glyph bind group layout for creating glyph bind groups
-    pub fn glyph_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.glyph_bind_group_layout
-    }
-
     /// Render a scene to the configured surface.
     pub fn render(&mut self, scene: &Scene) {
         let surface = match &self.surface {
@@ -1359,7 +1356,7 @@ impl WgpuRenderer {
     }
 
     /// Render a scene to a texture view.
-    pub fn render_to_view(&self, view: &wgpu::TextureView, scene: &Scene) {
+    pub(crate) fn render_to_view(&self, view: &wgpu::TextureView, scene: &Scene) {
         // Collect all rectangles to render
         let mut vertices: Vec<RectVertex> = Vec::new();
 
@@ -2001,16 +1998,6 @@ impl WgpuRenderer {
         &self.caches.image
     }
 
-    /// Get the image bind group layout (for creating bind groups for offscreen textures)
-    pub fn image_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        self.caches.image.bind_group_layout()
-    }
-
-    /// Get the image sampler (for creating bind groups for offscreen textures)
-    pub fn image_sampler(&self) -> &wgpu::Sampler {
-        self.caches.image.sampler()
-    }
-
     fn parameters(&self, size: [f32; 2], time: f32) -> draw::DrawParameters {
         self.parameters_with_alpha(size, time, 1.0)
     }
@@ -2052,11 +2039,6 @@ impl WgpuRenderer {
             ],
             time,
         )
-    }
-
-    /// Get the image pipeline (needed for blit and scroll slide)
-    pub fn image_pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.pipelines.image
     }
 
     /// Lease a full-frame texture from the snapshot pool.

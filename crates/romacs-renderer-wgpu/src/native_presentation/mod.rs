@@ -5,7 +5,7 @@ mod clock;
 mod query;
 
 use ash::vk;
-pub use clock::Calibration;
+pub(crate) use clock::Calibration;
 pub use query::{Observation, SwapchainTiming};
 use wgpu::hal::{api::Vulkan, vulkan};
 

@@ -674,15 +674,7 @@ impl RendererFrameEffects {
     // raw `Instant` only because `romacs-display-runtime` bridges its own
     // `EventTime` through `into_instant()` at the call site; once that crate
     // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_cursor_wake(&mut self, now: std::time::Instant) {
-        self.fx.cursor_wake.started = Some(EventTime::from_observed_instant(now));
-    }
-
-    // TRIGGER SIGNATURE: `now` should widen to `EventTime`. It still takes a
-    // raw `Instant` only because `romacs-display-runtime` bridges its own
-    // `EventTime` through `into_instant()` at the call site; once that crate
-    // passes the `EventTime` straight through, drop the re-wrap below.
-    pub fn trigger_resize_padding(&mut self, now: std::time::Instant) {
+    pub(crate) fn trigger_resize_padding(&mut self, now: std::time::Instant) {
         self.fx.resize_padding.started = Some(EventTime::from_observed_instant(now));
     }
 
@@ -700,7 +692,7 @@ impl RendererFrameEffects {
 
     /// TRIGGER SIGNATURE: this should take an `EventTime` for when the cursor
     /// reached this position; with no time parameter it mints its own.
-    pub fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32, length: usize) {
+    pub(crate) fn record_cursor_trail(&mut self, x: f32, y: f32, w: f32, h: f32, length: usize) {
         let dist = ((x - self.fx.cursor_trail.last_pos.0).powi(2)
             + (y - self.fx.cursor_trail.last_pos.1).powi(2))
         .sqrt();

@@ -15,13 +15,14 @@ pub mod readiness;
 pub mod scene;
 pub mod store;
 
-pub use gpu::{
-    GpuHighlight, MAX_MODEL_EDGE_PX, MODEL_TEXTURE_FORMAT, ModelDraw, ModelGpu, ModelView,
-    PickPoll, PickRequest, model_target_px,
+pub(crate) use gpu::{
+    GpuHighlight, MAX_MODEL_EDGE_PX, MODEL_TEXTURE_FORMAT, ModelGpu, model_target_px,
 };
-pub use obj::{MAX_OBJ_FILE_BYTES, ObjError, ObjLimits, ObjMesh, parse_obj, read_obj_file};
-pub use scene::{
-    MAX_MODEL_MESHES, MAX_MODEL_TRIANGLES, MAX_MODEL_VERTICES, ModelScene, SceneError, face_normal,
+pub use gpu::{ModelDraw, ModelView, PickPoll, PickRequest};
+pub(crate) use obj::{MAX_OBJ_FILE_BYTES, ObjError, ObjLimits, ObjMesh, parse_obj, read_obj_file};
+pub use scene::ModelScene;
+pub(crate) use scene::{
+    MAX_MODEL_MESHES, MAX_MODEL_TRIANGLES, MAX_MODEL_VERTICES, SceneError, face_normal,
     remaining_limits,
 };
 pub use store::{GlyphHit, ModelGpuHost, ModelStatus, ModelStore};

@@ -78,21 +78,6 @@ impl WgpuRenderer {
         self.caches.image.memory_usage()
     }
 
-    /// Load image from file path (async - returns immediately)
-    /// Returns image ID, actual texture loads in background
-    pub fn load_image_file(
-        &mut self,
-        path: &str,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        colors: ImageColorContext,
-    ) -> ImageId {
-        let raster_scale = self.scale_factor;
-        self.caches
-            .image
-            .load_file(path, size, rotation, colors, raster_scale)
-    }
-
     /// Realize chrome using its owning window's scale, not the last drawn window.
     pub fn load_toolbar_icon(&mut self, key: &romacs_display_protocol::ToolBarIconKey) -> ImageId {
         match key.source() {
@@ -139,20 +124,6 @@ impl WgpuRenderer {
         )
     }
 
-    /// Load image from data (async - returns immediately)
-    pub fn load_image_data(
-        &mut self,
-        data: &[u8],
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        colors: ImageColorContext,
-    ) -> ImageId {
-        let raster_scale = self.scale_factor;
-        self.caches
-            .image
-            .load_data(data, size, rotation, colors, raster_scale)
-    }
-
     /// Load image from data with pre-allocated ID (for threaded mode)
     #[allow(clippy::too_many_arguments)]
     pub fn load_image_data_with_id(
@@ -192,42 +163,6 @@ impl WgpuRenderer {
         self.caches.image.retire_sequence(retirement);
     }
 
-    /// Load image from raw ARGB32 pixel data
-    pub fn load_image_argb32(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> ImageId {
-        self.caches.image.load_raw_argb32(
-            data,
-            width,
-            height,
-            stride,
-            ImageSizeSpec::default(),
-            ImageRotation::None,
-        )
-    }
-
-    /// Load image from raw RGB24 pixel data
-    pub fn load_image_rgb24(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> ImageId {
-        self.caches.image.load_raw_rgb24(
-            data,
-            width,
-            height,
-            stride,
-            ImageSizeSpec::default(),
-            ImageRotation::None,
-        )
-    }
-
     /// Load image from raw ARGB32 pixel data with pre-allocated ID (for threaded mode)
     pub fn load_image_argb32_with_id(
         &mut self,
@@ -254,16 +189,6 @@ impl WgpuRenderer {
         self.caches
             .image
             .load_raw_rgb24_with_id(load, data, width, height, stride)
-    }
-
-    /// Query image file dimensions for a pending-image placeholder.
-    pub fn query_image_file_size(path: &str) -> Option<(u32, u32)> {
-        ImageCache::query_file_dimensions(path).map(|extent| extent.dimensions())
-    }
-
-    /// Query image data dimensions for a pending-image placeholder.
-    pub fn query_image_data_size(data: &[u8]) -> Option<(u32, u32)> {
-        ImageCache::query_data_dimensions(data).map(|extent| extent.dimensions())
     }
 
     /// Get image dimensions (works for pending and loaded images)
@@ -305,13 +230,13 @@ impl WgpuRenderer {
     /// Load video from file path (async - returns immediately)
     /// Returns video ID, frames decode in background
     #[cfg(feature = "video")]
-    pub fn load_video_file(&mut self, path: &str) -> u32 {
+    pub(crate) fn load_video_file(&mut self, path: &str) -> u32 {
         self.caches.video.load_file(path)
     }
 
     /// Load video from file path with a pre-allocated ID.
     #[cfg(feature = "video")]
-    pub fn load_video_file_with_id(
+    pub(crate) fn load_video_file_with_id(
         &mut self,
         id: u32,
         path: &str,
@@ -325,7 +250,13 @@ impl WgpuRenderer {
 
     /// Load video from URI with a pre-allocated ID.
     #[cfg(feature = "video")]
-    pub fn load_video_uri_with_id(&mut self, id: u32, uri: &str, loop_count: i32, autoplay: bool) {
+    pub(crate) fn load_video_uri_with_id(
+        &mut self,
+        id: u32,
+        uri: &str,
+        loop_count: i32,
+        autoplay: bool,
+    ) {
         self.caches
             .video
             .load_uri_with_id(id, uri, loop_count, autoplay);
@@ -383,43 +314,43 @@ impl WgpuRenderer {
 
     /// Get video dimensions
     #[cfg(feature = "video")]
-    pub fn get_video_size(&self, id: u32) -> Option<(u32, u32)> {
+    pub(crate) fn get_video_size(&self, id: u32) -> Option<(u32, u32)> {
         self.caches.video.get_dimensions(id)
     }
 
     /// Get video state
     #[cfg(feature = "video")]
-    pub fn get_video_state(&self, id: u32) -> Option<super::super::video_cache::VideoState> {
+    pub(crate) fn get_video_state(&self, id: u32) -> Option<super::super::video_cache::VideoState> {
         self.caches.video.get_state(id)
     }
 
     /// Play video
     #[cfg(feature = "video")]
-    pub fn video_play(&mut self, id: u32) {
+    pub(crate) fn video_play(&mut self, id: u32) {
         self.caches.video.play(id)
     }
 
     /// Pause video
     #[cfg(feature = "video")]
-    pub fn video_pause(&mut self, id: u32) {
+    pub(crate) fn video_pause(&mut self, id: u32) {
         self.caches.video.pause(id)
     }
 
     /// Stop video
     #[cfg(feature = "video")]
-    pub fn video_stop(&mut self, id: u32) {
+    pub(crate) fn video_stop(&mut self, id: u32) {
         self.caches.video.stop(id)
     }
 
     /// Set video loop count (-1 for infinite)
     #[cfg(feature = "video")]
-    pub fn video_set_loop(&mut self, id: u32, count: i32) {
+    pub(crate) fn video_set_loop(&mut self, id: u32, count: i32) {
         self.caches.video.set_loop(id, count)
     }
 
     /// Free a video from cache
     #[cfg(feature = "video")]
-    pub fn free_video(&mut self, id: u32) {
+    pub(crate) fn free_video(&mut self, id: u32) {
         self.caches.video.remove(id)
     }
 
@@ -448,7 +379,7 @@ impl WgpuRenderer {
 
     /// Get cached video for rendering
     #[cfg(feature = "video")]
-    pub fn get_video(&self, id: u32) -> Option<&super::super::video_cache::CachedVideo> {
+    pub(crate) fn get_video(&self, id: u32) -> Option<&super::super::video_cache::CachedVideo> {
         self.caches.video.get(id)
     }
 

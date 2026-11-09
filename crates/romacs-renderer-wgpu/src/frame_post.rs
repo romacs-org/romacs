@@ -28,7 +28,7 @@ use crate::shader_surface::{
 };
 use crate::shader_surface_cache::build_surface_pipeline;
 
-pub struct FramePost {
+pub(crate) struct FramePost {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,

@@ -226,7 +226,7 @@ const IDLE_SLOT_GRACE_ACQUIRES: u64 = 64;
 
 /// The single owner of every pooled full-frame texture, and of the budget
 /// they are charged to.
-pub struct SnapshotPool<R = SnapshotResources> {
+pub(crate) struct SnapshotPool<R = SnapshotResources> {
     slots: Vec<PoolSlot<R>>,
     budget: GpuBudget,
     acquires: u64,

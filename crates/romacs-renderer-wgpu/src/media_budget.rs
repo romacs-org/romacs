@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 /// Media type for priority ordering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MediaType {
+pub(crate) enum MediaType {
     /// Static images (lowest priority - can be reloaded)
     Image,
     /// Video frames (medium priority - can be re-decoded)
@@ -40,7 +40,7 @@ pub enum MediaType {
 /// and applied to the budget. Caches stay decoupled from the budget: they
 /// only append events at texture-lifecycle points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaAccounting {
+pub(crate) enum MediaAccounting {
     /// Texture created or resized (re-registration replaces the old size).
     Registered {
         media_type: MediaType,
@@ -53,7 +53,7 @@ pub enum MediaAccounting {
 
 /// Entry in the media budget tracker
 #[derive(Debug)]
-pub struct BudgetEntry {
+pub(crate) struct BudgetEntry {
     pub media_type: MediaType,
     pub id: u32,
     pub size_bytes: usize,
@@ -61,7 +61,7 @@ pub struct BudgetEntry {
 }
 
 /// Unified media budget manager
-pub struct MediaBudget {
+pub(crate) struct MediaBudget {
     /// Maximum total memory in bytes (default: 256MB)
     max_memory: usize,
     /// Current total memory usage
@@ -160,7 +160,7 @@ impl MediaBudget {
     }
 
     /// Get items to evict to make room for new_size bytes
-    pub fn get_eviction_candidates(&self, new_size: usize) -> Vec<(MediaType, u32)> {
+    pub(crate) fn get_eviction_candidates(&self, new_size: usize) -> Vec<(MediaType, u32)> {
         let mut candidates = Vec::new();
         let target = self.current_memory + new_size;
 
@@ -183,17 +183,17 @@ impl MediaBudget {
     }
 
     /// Check if we're over budget
-    pub fn is_over_budget(&self) -> bool {
+    pub(crate) fn is_over_budget(&self) -> bool {
         self.current_memory > self.max_memory
     }
 
     /// Get current memory usage
-    pub fn current_usage(&self) -> usize {
+    pub(crate) fn current_usage(&self) -> usize {
         self.current_memory
     }
 
     /// Get max memory limit
-    pub fn max_limit(&self) -> usize {
+    pub(crate) fn max_limit(&self) -> usize {
         self.max_memory
     }
 }

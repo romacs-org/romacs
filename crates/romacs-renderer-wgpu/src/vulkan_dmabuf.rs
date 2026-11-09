@@ -23,22 +23,22 @@ use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 
 /// DRM format codes (fourcc)
 #[allow(dead_code)]
-pub mod drm_fourcc {
-    pub const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // ARGB8888
-    pub const DRM_FORMAT_XRGB8888: u32 = 0x34325258; // XRGB8888
-    pub const DRM_FORMAT_ABGR8888: u32 = 0x34324241; // ABGR8888
-    pub const DRM_FORMAT_XBGR8888: u32 = 0x34324258; // XBGR8888
-    pub const DRM_FORMAT_RGBA8888: u32 = 0x34324152; // RGBA8888
-    pub const DRM_FORMAT_RGBX8888: u32 = 0x34325852; // RGBX8888
-    pub const DRM_FORMAT_BGRA8888: u32 = 0x34324142; // BGRA8888
-    pub const DRM_FORMAT_BGRX8888: u32 = 0x34325842; // BGRX8888
-    pub const DRM_FORMAT_NV12: u32 = 0x3231564e; // NV12 (YUV 4:2:0)
-    pub const DRM_FORMAT_YUV420: u32 = 0x32315559; // YUV420
+pub(crate) mod drm_fourcc {
+    pub(crate) const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // ARGB8888
+    pub(crate) const DRM_FORMAT_XRGB8888: u32 = 0x34325258; // XRGB8888
+    pub(crate) const DRM_FORMAT_ABGR8888: u32 = 0x34324241; // ABGR8888
+    pub(crate) const DRM_FORMAT_XBGR8888: u32 = 0x34324258; // XBGR8888
+    pub(crate) const DRM_FORMAT_RGBA8888: u32 = 0x34324152; // RGBA8888
+    pub(crate) const DRM_FORMAT_RGBX8888: u32 = 0x34325852; // RGBX8888
+    pub(crate) const DRM_FORMAT_BGRA8888: u32 = 0x34324142; // BGRA8888
+    pub(crate) const DRM_FORMAT_BGRX8888: u32 = 0x34325842; // BGRX8888
+    pub(crate) const DRM_FORMAT_NV12: u32 = 0x3231564e; // NV12 (YUV 4:2:0)
+    pub(crate) const DRM_FORMAT_YUV420: u32 = 0x32315559; // YUV420
 
     /// Linear modifier (no tiling)
     pub const DRM_FORMAT_MOD_LINEAR: u64 = 0;
     /// Invalid modifier
-    pub const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
+    pub(crate) const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
 }
 
 /// Convert DRM fourcc to wgpu format
@@ -49,7 +49,7 @@ pub mod drm_fourcc {
 ///
 /// Uses sRGB formats for correct gamma handling. Video content is typically
 /// encoded with sRGB-like gamma curve (BT.709 transfer function ≈ sRGB).
-pub fn drm_fourcc_to_wgpu_format(fourcc: u32) -> Option<wgpu::TextureFormat> {
+pub(crate) fn drm_fourcc_to_wgpu_format(fourcc: u32) -> Option<wgpu::TextureFormat> {
     match fourcc {
         // ARGB8888: bytes [B, G, R, A] in memory = Bgra8UnormSrgb
         drm_fourcc::DRM_FORMAT_ARGB8888
@@ -65,7 +65,7 @@ pub fn drm_fourcc_to_wgpu_format(fourcc: u32) -> Option<wgpu::TextureFormat> {
 }
 
 /// Maximum number of DMA-BUF planes supported.
-pub const MAX_PLANES: usize = 4;
+pub(crate) const MAX_PLANES: usize = 4;
 
 /// Multi-plane DMA-BUF import parameters.
 ///
@@ -74,7 +74,7 @@ pub const MAX_PLANES: usize = 4;
 /// `'a` lifetime ties these params to the owning buffer (e.g. `DmaBufBuffer`).
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
-pub struct DmaBufImportParams<'a> {
+pub(crate) struct DmaBufImportParams<'a> {
     /// DMA-BUF file descriptors, one per plane (borrowed, not owned).
     pub fds: Vec<BorrowedFd<'a>>,
     /// Stride (bytes per row) per plane.
@@ -720,7 +720,7 @@ mod hal_import {
     /// 2. Creates a VkImage with the correct multi-plane layout
     /// 3. Detects disjoint vs non-disjoint fds and binds memory accordingly
     /// 4. Wraps as wgpu texture via HAL
-    pub fn import_dmabuf_hal(
+    pub(crate) fn import_dmabuf_hal(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         params: &DmaBufImportParams<'_>,
@@ -910,7 +910,7 @@ mod hal_import {
 /// 1. Vulkan HAL zero-copy (queries driver for modifier support)
 /// 2. mmap + CPU upload (only for linear modifiers)
 #[cfg(target_os = "linux")]
-pub fn import_dmabuf_external(
+pub(crate) fn import_dmabuf_external(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     params: &DmaBufImportParams<'_>,
@@ -942,7 +942,7 @@ pub fn import_dmabuf(
 /// Only works for linear (untiled) buffers. Tiled/compressed modifiers cannot
 /// be read as linear memory, so this will skip them.
 #[cfg(target_os = "linux")]
-pub fn import_dmabuf_via_mmap(
+pub(crate) fn import_dmabuf_via_mmap(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     params: &DmaBufImportParams<'_>,

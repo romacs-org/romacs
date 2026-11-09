@@ -23,10 +23,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
-use crate::image_bands::{
-    DecodedBand, RasterBand, RowRange,
-    TextureRows,
-};
+use crate::image_bands::{DecodedBand, RasterBand, RowRange, TextureRows};
 use crate::image_sequence::ImageSequenceCache;
 use romacs_imaging::decode::*;
 pub use romacs_imaging::decode::{
@@ -167,7 +164,7 @@ impl FilledRows {
     /// the span is uploaded: the quad must be skipped rather than drawn against
     /// rows that were never written.
     #[must_use]
-    pub fn clip_span(self, v0: f32, v1: f32, height: f32) -> Option<(f32, f32)> {
+    pub(crate) fn clip_span(self, v0: f32, v1: f32, height: f32) -> Option<(f32, f32)> {
         if v1 <= v0 {
             return None;
         }
@@ -637,11 +634,6 @@ impl ImageCache {
         self.loads.begin(load)
     }
 
-    fn begin_generated_load(&mut self, image: ImageId) -> ImageLoadToken {
-        let load = self.loads.generated_token(image);
-        self.begin_load(load)
-    }
-
     fn allocate_image_id(&self) -> ImageId {
         let raw = self
             .next_id
@@ -923,13 +915,6 @@ impl ImageCache {
         &self.sampler
     }
 
-    /// Query image file dimensions.
-    ///
-    /// Raster formats read only their header; SVG requires document parsing.
-    pub fn query_file_dimensions(path: &str) -> Option<ImageNativeExtent> {
-        Self::query_file_intrinsic_extent(path).map(Self::unscaled_dimensions)
-    }
-
     fn query_file_intrinsic_extent(path: &str) -> Option<ImageIntrinsicExtent> {
         if let Some(extent) = crate::image_probe::probe_intrinsic_extent(
             crate::image_probe::ImageProbeSource::File(path),
@@ -945,7 +930,7 @@ impl ImageCache {
     /// Query image data dimensions.
     ///
     /// Raster formats read only their header; SVG requires document parsing.
-    pub fn query_data_dimensions(data: &[u8]) -> Option<ImageNativeExtent> {
+    pub(crate) fn query_data_dimensions(data: &[u8]) -> Option<ImageNativeExtent> {
         Self::query_data_intrinsic_extent(data).map(Self::unscaled_dimensions)
     }
 
@@ -996,7 +981,7 @@ impl ImageCache {
     /// into the decode queue: the caller's buffer is the decode's buffer, which
     /// is what the catalog's own key to the same request points at too.
     #[allow(clippy::too_many_arguments)]
-    pub fn load_data_with_id(
+    pub(crate) fn load_data_with_id(
         &mut self,
         load: ImageLoadToken,
         data: EncodedBytes,
@@ -1044,7 +1029,7 @@ impl ImageCache {
     /// Load image from file with a pre-allocated ID (for threaded mode)
     /// This allows the calling code to allocate the ID before sending a command.
     #[allow(clippy::too_many_arguments)]
-    pub fn load_file_with_id(
+    pub(crate) fn load_file_with_id(
         &mut self,
         load: ImageLoadToken,
         path: &str,
@@ -1087,13 +1072,7 @@ impl ImageCache {
         });
     }
 
-    /// Allocate the next available image ID without loading anything.
-    /// Used by threaded mode to pre-allocate IDs before sending commands.
-    pub fn allocate_id(&self) -> ImageId {
-        self.allocate_image_id()
-    }
-
-    pub fn retire_sequence(&self, retirement: ImageSequenceRetirement) {
+    pub(crate) fn retire_sequence(&self, retirement: ImageSequenceRetirement) {
         self.sequence_cache.retire(retirement);
     }
 
@@ -1104,149 +1083,8 @@ impl ImageCache {
         )
     }
 
-    /// Load image from data (async)
-    ///
-    /// A caller here has a slice and no buffer of its own to hand over, so the
-    /// bytes are materialized into the handle the decode will read.
-    pub fn load_data(
-        &mut self,
-        data: &[u8],
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-        colors: ImageColorContext,
-        raster_scale: f32,
-    ) -> ImageId {
-        let image = self.allocate_image_id();
-        let load = self.begin_generated_load(image);
-        let realization = ImageRealization::with_device_scale(1.0, raster_scale);
-
-        // Query dimensions for the pending-image placeholder.
-        if let Some(dims) = Self::query_data_intrinsic_extent(data) {
-            self.pending_dimensions.insert(
-                image,
-                realization.resolve_geometry(size, dims, rotation).layout(),
-            );
-        }
-
-        // Queue for async decode
-        self.states.insert(image, ImageState::Pending);
-        let _ = self.decode_tx.send(DecodeRequest {
-            load,
-            source: ImageSource::Data {
-                data: EncodedBytes::copy_of(data),
-                resources: crate::svg::SvgResourceContext::Isolated,
-                sequence: ImageSequenceId::new(u64::from(image.get()))
-                    .expect("allocated image identity is non-zero"),
-            },
-            size,
-            rotation,
-            realization,
-            colors,
-            mask: ImageMaskPolicy::Preserve,
-            animation: ImageAnimationPolicy::disabled(),
-            frame: ImageFrameIndex::default(),
-            identity: ImageLoadIdentity::unspecified(),
-        });
-
-        image
-    }
-
-    /// Load image from raw ARGB32 pixel data (async)
-    /// Format: A,R,G,B byte order, 4 bytes per pixel
-    /// Stride is the number of bytes per row (may include padding)
-    pub fn load_raw_argb32(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-    ) -> ImageId {
-        let image = self.allocate_image_id();
-        let load = self.begin_generated_load(image);
-        let realization = ImageRealization::default();
-
-        // Store pending dimensions immediately (we know the exact size)
-        self.pending_dimensions.insert(
-            image,
-            realization
-                .resolve_geometry(size, ImageNativeExtent::new(width, height), rotation)
-                .layout(),
-        );
-
-        // Queue for async conversion
-        self.states.insert(image, ImageState::Pending);
-        let _ = self.decode_tx.send(DecodeRequest {
-            load,
-            source: ImageSource::RawArgb32 {
-                data: data.to_vec(),
-                width,
-                height,
-                stride,
-            },
-            size,
-            rotation,
-            realization,
-            colors: ImageColorContext::default(),
-            mask: ImageMaskPolicy::default(),
-            animation: ImageAnimationPolicy::disabled(),
-            frame: ImageFrameIndex::default(),
-            identity: ImageLoadIdentity::unspecified(),
-        });
-
-        image
-    }
-
-    /// Load image from raw RGB24 pixel data (async)
-    /// Format: R,G,B byte order, 3 bytes per pixel
-    /// Stride is the number of bytes per row (may include padding)
-    pub fn load_raw_rgb24(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        stride: u32,
-        size: ImageSizeSpec,
-        rotation: ImageRotation,
-    ) -> ImageId {
-        let image = self.allocate_image_id();
-        let load = self.begin_generated_load(image);
-        let realization = ImageRealization::default();
-
-        // Store pending dimensions immediately (we know the exact size)
-        self.pending_dimensions.insert(
-            image,
-            realization
-                .resolve_geometry(size, ImageNativeExtent::new(width, height), rotation)
-                .layout(),
-        );
-
-        // Queue for async conversion
-        self.states.insert(image, ImageState::Pending);
-        let _ = self.decode_tx.send(DecodeRequest {
-            load,
-            source: ImageSource::RawRgb24 {
-                data: data.to_vec(),
-                width,
-                height,
-                stride,
-            },
-            size,
-            rotation,
-            realization,
-            colors: ImageColorContext::default(),
-            mask: ImageMaskPolicy::default(),
-            animation: ImageAnimationPolicy::disabled(),
-            frame: ImageFrameIndex::default(),
-            identity: ImageLoadIdentity::unspecified(),
-        });
-
-        image
-    }
-
     /// Load image from raw ARGB32 pixel data with a pre-allocated ID (for threaded mode)
-    pub fn load_raw_argb32_with_id(
+    pub(crate) fn load_raw_argb32_with_id(
         &mut self,
         load: ImageLoadToken,
         data: &[u8],
@@ -1279,7 +1117,7 @@ impl ImageCache {
     }
 
     /// Load image from raw RGB24 pixel data with a pre-allocated ID (for threaded mode)
-    pub fn load_raw_rgb24_with_id(
+    pub(crate) fn load_raw_rgb24_with_id(
         &mut self,
         load: ImageLoadToken,
         data: &[u8],
@@ -1381,7 +1219,7 @@ impl ImageCache {
     }
 
     /// Process pending decoded images (call each frame)
-    pub fn process_pending(
+    pub(crate) fn process_pending(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -1794,7 +1632,7 @@ impl ImageCache {
     }
 
     /// Get image dimensions (pending or loaded)
-    pub fn get_dimensions(&self, image: ImageId) -> Option<ImageLayoutExtent> {
+    pub(crate) fn get_dimensions(&self, image: ImageId) -> Option<ImageLayoutExtent> {
         // A texture with metadata is a finished decode, and its layout is the
         // answer. A texture without one is the prefix a banded decode has
         // uploaded — its rows say nothing about how big the image is — so the
@@ -1821,12 +1659,12 @@ impl ImageCache {
     }
 
     /// Check if image is ready
-    pub fn is_ready(&self, image: ImageId) -> bool {
+    pub(crate) fn is_ready(&self, image: ImageId) -> bool {
         matches!(self.states.get(&image), Some(ImageState::Ready))
     }
 
     /// Whether async decode work still needs the render thread to poll its result channel.
-    pub fn has_pending(&self) -> bool {
+    pub(crate) fn has_pending(&self) -> bool {
         self.states
             .values()
             .any(|state| matches!(state, ImageState::Pending | ImageState::Decoding))
@@ -1867,7 +1705,7 @@ impl ImageCache {
     }
 
     /// Drain budget accounting events accumulated since the last call.
-    pub fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
+    pub(crate) fn drain_accounting(&mut self) -> Vec<crate::media_budget::MediaAccounting> {
         std::mem::take(&mut self.accounting)
     }
 

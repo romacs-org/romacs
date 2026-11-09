@@ -67,23 +67,6 @@ impl SharedMemoryBuffer {
         }
     }
 
-    /// Create a SharedMemoryBuffer from existing Arc<Vec<u8>>.
-    pub fn from_arc(
-        data: Arc<Vec<u8>>,
-        width: u32,
-        height: u32,
-        stride: u32,
-        format: BufferFormat,
-    ) -> Self {
-        Self {
-            data,
-            width,
-            height,
-            stride,
-            format,
-        }
-    }
-
     /// Convert pixel data to BGRA8 format (native wgpu format).
     ///
     /// Returns a new Vec with the converted data, or None if already BGRA8.
@@ -281,27 +264,6 @@ impl DmaBufBuffer {
         }
     }
 
-    /// Create a simple single-plane DmaBufBuffer, taking ownership of `fd`.
-    pub fn single_plane(
-        fd: OwnedFd,
-        width: u32,
-        height: u32,
-        stride: u32,
-        fourcc: u32,
-        modifier: u64,
-    ) -> Self {
-        Self {
-            fds: [Some(fd), None, None, None],
-            strides: [stride, 0, 0, 0],
-            offsets: [0, 0, 0, 0],
-            num_planes: 1,
-            width,
-            height,
-            fourcc,
-            modifier,
-        }
-    }
-
     #[cfg(any(feature = "video-dmabuf", feature = "webview"))]
     fn import_params(&self) -> Option<crate::vulkan_dmabuf::DmaBufImportParams<'_>> {
         use std::os::fd::AsFd;
@@ -344,7 +306,7 @@ impl DmaBufBuffer {
     ///
     /// Attempts zero-copy Vulkan import first (with driver modifier query for
     /// correct multi-plane support), falls back to mmap for linear buffers.
-    pub fn to_wgpu_texture(
+    pub(crate) fn to_wgpu_texture(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -379,7 +341,7 @@ impl DmaBufBuffer {
     /// WebView caching uses this contract so it can copy the browser allocation
     /// into cache-owned storage before the WPE frame lease is released.
     #[cfg(feature = "webview")]
-    pub fn to_external_wgpu_texture(
+    pub(crate) fn to_external_wgpu_texture(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
