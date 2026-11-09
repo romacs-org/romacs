@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Validate and explicitly regenerate the complete derived artifact set."""
+"""Validate and explicitly regenerate the derived files git still tracks.
+
+Only the bundled autoloads remain. They leave git once Romacs's package code
+makes them at build or install time; every other index is computed when asked
+(tools/primitive_index.py, tools/divergence_index.py).
+"""
 import json
 from pathlib import Path
 import re
@@ -7,16 +12,9 @@ import subprocess
 import sys
 
 ARTIFACTS = (
-    'DIVERGENCES.json',
-    'PRIMITIVES.json',
-    'crates/romacs-introspect-live/data/registry.json',
-    'crates/romacs-introspect/data/registry.json',
     json.loads((Path(__file__).resolve().parents[1] / 'LISP-BUNDLED.json').read_text())['autoloads'],
 )
 GENERATORS = (
-    (sys.executable, 'tools/divergence_index.py'),
-    (sys.executable, 'tools/primitive_index.py'),
-    ('cargo', 'run', '-q', '-p', 'romacs-introspect-live', '--', '--write'),
     (sys.executable, 'tools/bundled_autoloads.py'),
 )
 MARKER = re.compile(rb'(?m)^[ \t]*(?:<{7}|={7}|>{7}|\|{7})')
@@ -27,36 +25,13 @@ def validate(root):
         data = (root / name).read_bytes()
         if MARKER.search(data):
             raise ValueError(f'{name}: unresolved conflict marker')
-        if name.endswith('.el'):
-            stem = Path(name).name.encode()
-            if not (data.startswith(b';;; ' + stem + b' --- ') and data.endswith(b'\n;;; ' + stem + b' ends here\n')):
-                raise ValueError(f'{name}: not a complete generated Lisp file')
-            continue
-        try:
-            json.loads(data)
-        except (ValueError, UnicodeError) as exc:
-            raise ValueError(f'{name}: invalid JSON: {exc}') from exc
+        stem = Path(name).name.encode()
+        if not (data.startswith(b';;; ' + stem + b' --- ') and data.endswith(b'\n;;; ' + stem + b' ends here\n')):
+            raise ValueError(f'{name}: not a complete generated Lisp file')
 
 
 def regenerate(root):
-    """Recover indexes and bootstrap the generator from a valid committed snapshot."""
-    for name in ARTIFACTS[:2]:
-        (root / name).unlink(missing_ok=True)
-    embedded = root / ARTIFACTS[3]
-    try:
-        bootstrap = embedded.read_bytes()
-        if MARKER.search(bootstrap):
-            raise ValueError('conflicted snapshot')
-        json.loads(bootstrap)
-    except (OSError, ValueError, UnicodeError):
-        bootstrap = subprocess.run(
-            ['git', 'show', 'HEAD:' + ARTIFACTS[3]], cwd=root,
-            check=True, stdout=subprocess.PIPE).stdout
-        if MARKER.search(bootstrap):
-            raise ValueError('committed bootstrap snapshot has conflict markers')
-        json.loads(bootstrap)
-        embedded.parent.mkdir(parents=True, exist_ok=True)
-        embedded.write_bytes(bootstrap)
+    """Remake every artifact from its sources."""
     for command in GENERATORS:
         subprocess.run(command, cwd=root, check=True)
     validate(root)
