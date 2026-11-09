@@ -1,9 +1,8 @@
-;;; inline-media-test.el --- Test inline image, video, and webkit in one buffer -*- lexical-binding: t -*-
+;;; inline-media-test.el --- Test inline image and video in one buffer -*- lexical-binding: t -*-
 
-;; This test creates a buffer containing all three inline media types:
+;; This test creates a buffer containing both inline media types:
 ;; - Image (via standard Emacs create-image/insert-image)
 ;; - Video (via romacs-video-insert)
-;; - WebKit (via romacs-webkit-insert)
 
 ;;; Commentary:
 ;; Run with: ./test/romacs/run-inline-media-test.sh
@@ -11,7 +10,6 @@
 
 ;;; Code:
 
-(require 'romacs-webkit nil t)
 (require 'romacs-video nil t)
 
 (defvar inline-media-test-image-path
@@ -38,8 +36,6 @@
       nil)
   "Path to second test video, or nil if not found.")
 
-(defvar inline-media-test-url "https://www.reddit.com/"
-  "URL to load in WebKit view.")
 
 
 (defun inline-media-test-log (fmt &rest args)
@@ -60,36 +56,12 @@
   (setq buffer-read-only nil)
 
   (insert "=== Romacs Inline Media Test ===\n")
-  (insert "This buffer contains inline image, video, and webkit.\n\n")
+  (insert "This buffer contains inline image and video.\n\n")
 
   (let ((media-width 320)
-        (media-height 180)  ; 16:9 aspect, smaller to fit all 3
-        (webkit-width 320)
-        (webkit-height 180)
+        (media-height 180)  ; 16:9 aspect
         (success-count 0)
-        (total-count 3))
-
-    ;; === Section 1: Inline WebKit ===
-    (insert "--- 1. Inline WebKit ---\n")
-    (condition-case err
-        (progn
-          (romacs-webkit-init)
-          (let ((view-id (romacs-webkit-insert inline-media-test-url
-                                                webkit-width webkit-height t)))
-            (if view-id
-                (progn
-                  (insert "\n")
-                  (insert (format "WebKit ID: %d, URL: %s (%dx%d)\n"
-                                  view-id inline-media-test-url
-                                  webkit-width webkit-height))
-                  (setq success-count (1+ success-count))
-                  (inline-media-test-log "WebKit: OK (id=%d)" view-id))
-              (insert "[WebKit creation failed]\n")
-              (inline-media-test-log "WebKit: FAILED (romacs-webkit-insert returned nil)"))))
-      (error
-       (insert (format "[WebKit error: %S]\n" err))
-       (inline-media-test-log "WebKit: ERROR %S" err)))
-    (insert "\n")
+        (total-count 2))
 
     ;; === Section 2: Inline Video (display property with loop+autoplay) ===
     (insert "--- 2. Inline Video (display prop, loop+autoplay) ---\n")

@@ -963,65 +963,6 @@ fn render_command_image_sequence_retirement_preserves_generation_fence() {
 }
 
 #[test]
-fn webview_commands_and_events_cross_the_common_runtime_protocol() {
-    use romacs_display_protocol::WebViewId;
-    use romacs_webview::{
-        BrowsingRelationship, FocusIntent, HistoryAction, NavigationTarget, ScriptRequest,
-        ScriptRequestId, ScriptWorld, StoragePartition, WebContentSize, WebProfileId,
-        WebViewCommand, WebViewCreate, WebViewEvent, WebViewGeneration, WebViewPolicy,
-    };
-
-    let id = WebViewId::new(17);
-    let commands = [
-        WebViewCommand::Create(WebViewCreate {
-            id,
-            storage: StoragePartition::Persistent(WebProfileId::new(1)),
-            relationship: BrowsingRelationship::Independent,
-            initial_size: WebContentSize::new(800, 600).unwrap(),
-            policy: WebViewPolicy::default(),
-            initial_navigation: Some(NavigationTarget::Uri("https://example.test".to_owned())),
-        }),
-        WebViewCommand::SetModelSize {
-            id,
-            size: WebContentSize::new(1024, 768).unwrap(),
-        },
-        WebViewCommand::Navigate {
-            id,
-            target: NavigationTarget::Uri("https://example.test/next".to_owned()),
-        },
-        WebViewCommand::History {
-            id,
-            action: HistoryAction::Reload,
-        },
-        WebViewCommand::EvaluateScript(ScriptRequest {
-            request: ScriptRequestId::new(9),
-            view: id,
-            source: "document.title".to_owned(),
-            world: ScriptWorld::Page,
-        }),
-        WebViewCommand::Focus {
-            id,
-            intent: FocusIntent::Focus,
-        },
-        WebViewCommand::Close { id },
-    ];
-    for command in commands {
-        let command = RenderCommand::Asset(AssetCommand::WebView(command));
-        let RenderCommand::Asset(AssetCommand::WebView(command)) = command else {
-            panic!("expected nested webview command");
-        };
-        assert_eq!(command.id(), id);
-    }
-
-    let event = InputEvent::WebView(WebViewEvent::Ready {
-        id,
-        generation: WebViewGeneration::new(3),
-    });
-    assert!(!RenderComms::is_lossy_input_event(&event));
-    assert_eq!(RenderComms::event_name(&event), "webview-ready");
-}
-
-#[test]
 fn render_command_set_mouse_cursor() {
     let cmd = RenderCommand::Window(WindowCommand::SetMouseCursor { cursor_type: 2 });
     match cmd {

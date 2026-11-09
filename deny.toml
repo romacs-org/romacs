@@ -6,8 +6,8 @@ ignore = [
     # so cargo-deny still fails when a new advisory reaches the workspace.
     { id = "RUSTSEC-2024-0436", reason = "paste is pulled in by rav1e; no safe upgrade is available" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is used by the text and SVG stacks; no maintained replacement is available yet" },
-    { id = "RUSTSEC-2026-0194", reason = "affected quick-xml releases are confined to inferno profiling output and Wayland protocol generation" },
-    { id = "RUSTSEC-2026-0195", reason = "affected quick-xml releases are confined to inferno profiling output and Wayland protocol generation" },
+    { id = "RUSTSEC-2026-0194", reason = "affected quick-xml releases are confined to Wayland protocol generation" },
+    { id = "RUSTSEC-2026-0195", reason = "affected quick-xml releases are confined to Wayland protocol generation" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz is pulled in by usvg; no maintained replacement is available yet" },
 ]
 
@@ -32,12 +32,6 @@ allow = [
     "Unicode-DFS-2016",
     "Unlicense",
     "Zlib",
-]
-
-# Inferno renders developer-requested profiling flamegraphs. Keep its CDDL
-# allowance local to that tool instead of accepting CDDL for every dependency.
-exceptions = [
-    { allow = ["CDDL-1.0"], crate = "inferno" },
 ]
 
 [bans]

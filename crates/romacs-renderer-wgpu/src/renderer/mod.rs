@@ -15,8 +15,6 @@ use super::image_cache::ImageCache;
 use super::vertex::{CoverageGlyphVertex, GlyphVertex, RectVertex, RoundedRectVertex};
 #[cfg(feature = "video")]
 use super::video_cache::VideoCache;
-#[cfg(all(feature = "webview", target_os = "linux"))]
-use super::webview_cache::WgpuWebViewCache;
 
 mod box_tessellation;
 mod child_frames;
@@ -734,8 +732,6 @@ impl WgpuRenderer {
         video_cache.set_gpu_timing_status(gpu_frame_timer.status());
 
         // Create the WebView texture cache.
-        #[cfg(all(feature = "webview", target_os = "linux"))]
-        let webview_cache = WgpuWebViewCache::new(&device);
 
         // Create shader-surface cache
         let shader_surface_cache = crate::shader_surface_cache::ShaderSurfaceCache::new(&device);
@@ -1186,8 +1182,6 @@ impl WgpuRenderer {
                 image: image_cache,
                 #[cfg(feature = "video")]
                 video: video_cache,
-                #[cfg(all(feature = "webview", target_os = "linux"))]
-                webview: webview_cache,
                 surface: shader_surface_cache,
             },
             #[cfg(feature = "video")]

@@ -5,7 +5,7 @@ use std::time::Instant;
 use romacs_display_protocol::types::VideoId;
 
 use crate::backend::{
-    BackendEvent, CompletedFrameImport, DecodedFrameImport, DecoderBackend,
+    BackendEvent, CompletedFrameImport, DecoderBackend,
     DecoderOutputGeneration, DecoderReconfiguration, FrameImportOutcome, FrameImporter, Platform,
     ProductionPlatform,
 };
@@ -24,7 +24,6 @@ use crate::{
 /// Cross-thread wake callback invoked after a native adapter publishes new
 /// control state or updates its bounded decoded-frame queue.
 #[derive(Clone)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub struct VideoWake(Arc<dyn Fn() + Send + Sync>);
 
 impl VideoWake {
@@ -36,7 +35,6 @@ impl VideoWake {
         Self::new(|| {})
     }
 
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn notify(&self) {
         (self.0)();
     }
@@ -100,7 +98,6 @@ impl OutputGenerationState {
         }
     }
 
-    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
     fn announce(&mut self, generation: DecoderOutputGeneration) -> OutputGenerationObservation {
         self.observe(generation)
     }
@@ -155,16 +152,6 @@ impl SessionCounters {
                 self.import_counts.borrowed_native_frames =
                     self.import_counts.borrowed_native_frames.saturating_add(1);
             }
-            CompletedFrameImport::GpuBlit { reported_bytes } => {
-                self.import_counts.gpu_blit_frames =
-                    self.import_counts.gpu_blit_frames.saturating_add(1);
-                if let Some(bytes) = reported_bytes {
-                    self.import_counts.reported_gpu_blit_bytes = self
-                        .import_counts
-                        .reported_gpu_blit_bytes
-                        .saturating_add(bytes);
-                }
-            }
             CompletedFrameImport::CpuUpload { bytes } => {
                 self.import_counts.cpu_upload_frames =
                     self.import_counts.cpu_upload_frames.saturating_add(1);
@@ -174,15 +161,9 @@ impl SessionCounters {
         }
     }
 
-    fn record_import(
-        &mut self,
-        completed_import: CompletedFrameImport,
-        decoder_import: DecodedFrameImport,
-    ) {
+    fn record_import(&mut self, completed_import: CompletedFrameImport) {
         self.imported_frames = self.imported_frames.saturating_add(1);
-        if matches!(decoder_import, DecodedFrameImport::Deferred) {
-            self.record_compositor_import(completed_import);
-        }
+        self.record_compositor_import(completed_import);
     }
 }
 
@@ -752,7 +733,6 @@ impl<P: Platform> VideoSystemImpl<P> {
                     .take()
                     .expect("mailbox timing came from a pending frame");
                 let timing = frame.timing;
-                let decoder_import = frame.decoder_import;
                 let decode_residency = frame.decode_residency;
                 if timing.duration != MediaTime::ZERO
                     && timing.pts.saturating_add(timing.duration) <= media_now
@@ -764,9 +744,7 @@ impl<P: Platform> VideoSystemImpl<P> {
                     // service pass so a due frame cannot wait without a wake.
                     continue;
                 }
-                let planned_path = decoder_import
-                    .path()
-                    .unwrap_or_else(|| self.importer.compositor_import(&frame));
+                let planned_path = self.importer.compositor_import(&frame);
                 if !self.policy.permits(planned_path) {
                     terminal_failures.push(*id);
                     result.events.push(VideoEvent::Failed {
@@ -807,7 +785,7 @@ impl<P: Platform> VideoSystemImpl<P> {
                         session.diagnostics.frame_path = Some(frame_path);
                         session
                             .diagnostics
-                            .record_import(imported.completed_import, decoder_import);
+                            .record_import(imported.completed_import);
                         if let CompletedFrameImport::CpuUpload { bytes } = imported.completed_import
                         {
                             tracing::warn!(
@@ -1066,11 +1044,6 @@ impl<P: Platform> VideoSystemImpl<P> {
                     session.diagnostics.decoded_frames.saturating_add(1);
                 session.diagnostics.frame_format = Some(frame.format);
                 session.diagnostics.colorimetry = Some(frame.colorimetry);
-                if let Some(completed_import) = frame.decoder_import.completed() {
-                    session
-                        .diagnostics
-                        .record_compositor_import(completed_import);
-                }
                 if session.presentation == PresentationVisibility::Hidden {
                     // Native pause is asynchronous; discard a racing sample
                     // rather than reacquiring one of the bounded GPU slots.
@@ -1092,7 +1065,6 @@ impl<P: Platform> VideoSystemImpl<P> {
                 }
                 None
             }
-            #[cfg(any(target_os = "linux", test))]
             BackendEvent::FramesReplaced { id, count } => {
                 let session = self.sessions.get_mut(&id)?;
                 session.diagnostics.decoded_frames =
@@ -1101,7 +1073,6 @@ impl<P: Platform> VideoSystemImpl<P> {
                     session.diagnostics.replaced_frames.saturating_add(count);
                 None
             }
-            #[cfg(any(target_os = "linux", test))]
             BackendEvent::OutputReconfigured { id, generation } => {
                 let session = self.sessions.get_mut(&id)?;
                 match session.output_generation.announce(generation) {

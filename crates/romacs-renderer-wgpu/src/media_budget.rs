@@ -1,21 +1,19 @@
 //! Unified memory budget management for all media caches.
 //!
-//! Provides a shared memory budget across images, video frames, WebKit views,
-//! and shader surfaces. Each cache reports its usage; eviction is coordinated
+//! Provides a shared memory budget across images, video frames and shader
+//! surfaces. Each cache reports its usage; eviction is coordinated
 //! centrally.
 //!
 //! Wiring status: `WgpuRenderer` owns the instance
 //! (`ROMACS_MEDIA_BUDGET_MB` overrides the default limit at init, applied
 //! by the render thread via `set_media_budget_limit`). Every cache reports
 //! usage through `MediaAccounting` events drained per frame (images and
-//! videos at texture create/free, webkit at view create/resize/destroy,
-//! shader surfaces inline at create/free with physical bytes), and the
+//! videos at texture create/free, shader surfaces inline at create/free with physical bytes), and the
 //! inline-media draw phases `touch` what they composite so LRU order is
 //! real. The eviction driver runs on over-budget surface creates and frees
 //! *recreatable* (declarative-spec) surfaces only; other media types are
 //! accounted but never evicted by this driver (images have their own
-//! internal LRU; video/webkit are droppable only with playback/view state
-//! loss).
+//! internal LRU; video is droppable only with playback state loss).
 
 use std::collections::BTreeMap;
 
@@ -26,8 +24,6 @@ pub enum MediaType {
     Image,
     /// Video frames (medium priority - can be re-decoded)
     Video,
-    /// WebKit surfaces (highest priority - expensive to recreate)
-    WebKit,
     /// Shader surfaces (evicted last: imperative ids handed to Lisp cannot
     /// be recreated by the renderer; declarative specs re-resolve on the
     /// next redisplay walk. The budget itself cannot tell the two apart —

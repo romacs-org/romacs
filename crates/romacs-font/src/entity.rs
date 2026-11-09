@@ -23,7 +23,6 @@ pub struct Entity {
     pub index: u32,
 }
 
-#[cfg(target_os = "linux")]
 fn entity(face: crate::fontconfig_catalog::ListedFace) -> Entity {
     let (weight, slant, width) = face.fc_style;
     // ftfont.c ftfont_pattern_entity: weights from regular up to medium are
@@ -44,19 +43,11 @@ fn entity(face: crate::fontconfig_catalog::ListedFace) -> Entity {
 /// The installed faces of FAMILY, in Fontconfig's listing order; every
 /// face when FAMILY is None. A generic family lists its Fontconfig match.
 pub fn list(family: Option<&str>) -> Vec<Entity> {
-    #[cfg(target_os = "linux")]
-    {
-        let faces = match family {
-            Some(family) => list_family(family, None),
-            None => crate::fontconfig_catalog::list_faces(None, None),
-        };
-        faces.into_iter().map(entity).collect()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (family, list_family);
-        Vec::new()
-    }
+    let faces = match family {
+        Some(family) => list_family(family, None),
+        None => crate::fontconfig_catalog::list_faces(None, None),
+    };
+    faces.into_iter().map(entity).collect()
 }
 
 /// Every installed family name, as GNU's `font-family-list' reads them:

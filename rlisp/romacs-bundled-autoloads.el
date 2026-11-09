@@ -699,15 +699,6 @@ however many times `romacs-video' is loaded.")
 (register-definition-prefixes "romacs-video" '("romacs-video-"))
 
 
-;;; Generated autoloads from romacs-webkit.el
-
-(autoload 'romacs-webkit-open-url "romacs-webkit"
-"Open URL in a new WebKit browser buffer.
-
-(fn URL)" t)
-(register-definition-prefixes "romacs-webkit" '("romacs-webkit-"))
-
-
 ;;; Generated autoloads from romacs-workspace-completion.el
 
 (register-definition-prefixes "romacs-workspace-completion" '("buffer-name-history" "execute-extended-command" "extended-command-history" "read-" "romacs-"))

@@ -1837,8 +1837,6 @@ impl WgpuRenderer {
             {
                 submitted_video_ids = self.draw_inline_videos(&mut ctx);
             }
-            #[cfg(all(feature = "webview", target_os = "linux"))]
-            self.draw_inline_webkit_views(&mut ctx);
             self.draw_inline_surfaces(&mut ctx);
 
             // === Step 8: front cursors, borders, scroll bar tracks + thumbs ===

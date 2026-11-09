@@ -1,1 +1,0 @@
-((insert 3 3 t) (delete 3 3 t) (replace 4 4 t) (subst t t t t) (property t t t t) (set-clean t t nil) (set-dirty t t t) (restore-clean t t nil) (restore-dirty t t t) (chars-after-properties 1 t t t) (noops t t nil))

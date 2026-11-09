@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test inline image, video, and webkit in one buffer
+# Test inline image and video in one buffer
 # Usage: ./test/romacs/run-inline-media-test.sh
 
 set -e
@@ -18,7 +18,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo "=== Romacs Inline Media Test ==="
-echo "Testing: inline image + video + webkit in one buffer"
+echo "Testing: inline image + video in one buffer"
 echo ""
 
 # Check emacs binary
@@ -46,7 +46,6 @@ else
     echo -e "  ${YELLOW}Video: [not found - will be skipped]${NC}"
 fi
 
-echo "  WebKit: (configured in test file)"
 echo ""
 echo "Log file: $LOG_FILE"
 echo ""
@@ -97,12 +96,6 @@ else
     echo -e "${YELLOW}[SKIP] Video not loaded${NC}"
 fi
 
-if grep -q "WebKit: OK" "$LOG_FILE" 2>/dev/null; then
-    echo -e "${GREEN}[PASS] WebKit view created successfully${NC}"
-else
-    echo -e "${YELLOW}[SKIP] WebKit not loaded${NC}"
-fi
-
 # Check for errors
 if grep -qi "error\|panic" "$LOG_FILE" 2>/dev/null; then
     echo ""
@@ -112,8 +105,8 @@ fi
 
 echo ""
 echo "=== Summary ==="
-if grep -q "Result: 3/3" "$LOG_FILE" 2>/dev/null; then
-    echo -e "${GREEN}All 3 media types loaded successfully!${NC}"
+if grep -q "Result: 2/2" "$LOG_FILE" 2>/dev/null; then
+    echo -e "${GREEN}Both media types loaded successfully!${NC}"
 else
     RESULT=$(grep "Result:" "$LOG_FILE" 2>/dev/null | tail -1 || echo "Result unknown")
     echo "$RESULT"

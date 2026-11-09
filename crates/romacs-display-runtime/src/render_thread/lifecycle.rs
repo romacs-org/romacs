@@ -460,8 +460,6 @@ impl RenderApp {
 
         self.poll_frame();
         self.synchronize_toolbar_resources();
-        #[cfg(feature = "webview")]
-        self.synchronize_webview_presentations();
 
         // Frame ingestion is the ownership edge for image textures. Publish
         // the newest accepted/queued presentation fence before decode uploads,
@@ -477,8 +475,6 @@ impl RenderApp {
         // frame ingestion so visibility routing sees the newest accepted
         // root/child presentation.
         self.process_video_frames(now);
-
-        self.pump_glib();
 
         self.frame_windows.tick_top_level_cursor_animations(now);
 
@@ -507,11 +503,6 @@ impl RenderApp {
             });
         }
         self.frame_windows.mark_active_top_level_visuals_dirty();
-
-        #[cfg(feature = "webview")]
-        if self.has_webkit_needing_redraw() {
-            self.frame_windows.mark_top_level_dirty();
-        }
 
         // Stage 2 of the frame scheduling plan: legacy activity latches are
         // reconciled into the persistent frame coordinator, which owns
@@ -667,9 +658,8 @@ impl RenderApp {
             damage: Damage::FullLayer,
         };
 
-        // WebKit and shader-surface signals remain process-wide. Video is
+        // Shader-surface signals remain process-wide. Video is
         // presentation-indexed below and never wakes unrelated windows.
-        let webkit_active = self.has_webkit_needing_redraw();
         let surfaces_active = self.has_active_shader_surfaces();
         let frame_shader_installed = self
             .renderer
@@ -829,7 +819,6 @@ impl RenderApp {
             };
 
             for (active, reason, rate) in [
-                (webkit_active, DemandReason::Webkit, max_rate),
                 (surfaces_active, DemandReason::ShaderSurface, surface_rate),
             ] {
                 if active {
@@ -1139,18 +1128,8 @@ impl RenderApp {
             Err("display is shutting down".to_owned()),
         ));
 
-        // Drop the renderer first. Its WebView retirement queue waits for each
-        // exact GPU copy submission and releases the corresponding remote WPE
-        // lease. The WPE reactor must still be alive to consume those release
-        // commands and acknowledge the native buffers.
         drop(self.renderer.take());
         self.note_models_renderer_lost();
-        // Now no renderer-owned browser frame can refer back to WPE; stop the
-        // WebKit views and their reactor-local EGL/GObject state.
-        #[cfg(feature = "webview")]
-        {
-            self.webview_system = None;
-        }
         // Drop adopted primary state (surface holds wl_surface proxy if on Wayland)
         drop(self.frame_windows.take_primary_window());
         // Drop multi-window state (secondary surfaces)

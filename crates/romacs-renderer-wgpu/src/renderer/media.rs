@@ -577,10 +577,6 @@ impl WgpuRenderer {
         for event in self.caches.video.drain_accounting() {
             self.media_budget.apply(event);
         }
-        #[cfg(all(feature = "webview", target_os = "linux"))]
-        for event in self.caches.webview.drain_accounting() {
-            self.media_budget.apply(event);
-        }
     }
 
     /// Update one named uniform on a shader surface.
@@ -827,59 +823,5 @@ impl WgpuRenderer {
             );
             self.submit_commands([commands]);
         }
-    }
-
-    /// Update a WebView in the cache from a DMA-BUF buffer.
-    /// Returns the native frame on failure so its owner can capture pixels.
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn update_webview_dmabuf<R: Send + 'static>(
-        &mut self,
-        view_id: romacs_display_protocol::WebViewId,
-        buffer: super::super::external_buffer::DmaBufBuffer,
-        retained_frame: R,
-    ) -> Result<(), R> {
-        self.caches
-            .webview
-            .update_view(view_id, buffer, retained_frame, &self.device, &self.queue)
-    }
-
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn webview_import_formats(&self) -> romacs_display_protocol::DmaBufImportFormats {
-        self.caches.webview.import_formats()
-    }
-
-    /// Update a WebView in the cache from pixel data.
-    /// Returns true if successful.
-    #[cfg(all(feature = "webview", target_os = "linux"))]
-    pub fn update_webview_pixels(
-        &mut self,
-        view_id: romacs_display_protocol::WebViewId,
-        width: u32,
-        height: u32,
-        pixels: &[u8],
-    ) -> bool {
-        self.caches.webview.update_view_from_pixels(
-            view_id,
-            width,
-            height,
-            pixels,
-            &self.device,
-            &self.queue,
-        )
-    }
-
-    /// Release whatever the renderer holds for a closed WebView.
-    ///
-    /// Only the Linux WPE path composites web content through a texture
-    /// cache; the native-overlay backends on macOS and Windows own their
-    /// views outside the renderer, so there is nothing to release here.  The
-    /// method exists on every `webview` build so the display runtime's close
-    /// path is one call, not a per-target `cfg`.
-    #[cfg(feature = "webview")]
-    pub fn remove_webview(&mut self, view_id: romacs_display_protocol::WebViewId) {
-        #[cfg(target_os = "linux")]
-        self.caches.webview.remove(view_id);
-        #[cfg(not(target_os = "linux"))]
-        let _ = view_id;
     }
 }

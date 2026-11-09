@@ -26,44 +26,32 @@ impl FontconfigSubpixelOrder {
 /// Cached until [`invalidate_cache`]; the native catalog owner calls that on
 /// a catalog change, as it does for every other Fontconfig answer.
 pub fn default_subpixel_order() -> FontconfigSubpixelOrder {
-    #[cfg(target_os = "linux")]
+    let cache = subpixel_cache();
+    if let Some(order) = *cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
     {
-        let cache = subpixel_cache();
-        if let Some(order) = *cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-        {
-            return order;
-        }
-        let order = query_default_subpixel_order();
-        *cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(order);
-        order
+        return order;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        FontconfigSubpixelOrder::Unknown
-    }
+    let order = query_default_subpixel_order();
+    *cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(order);
+    order
 }
 
 /// Forget the cached order so the next query observes a new catalog.
 pub fn invalidate_cache() {
-    #[cfg(target_os = "linux")]
-    {
-        *subpixel_cache()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-    }
+    *subpixel_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
-#[cfg(target_os = "linux")]
 fn subpixel_cache() -> &'static std::sync::Mutex<Option<FontconfigSubpixelOrder>> {
     static CACHE: std::sync::Mutex<Option<FontconfigSubpixelOrder>> = std::sync::Mutex::new(None);
     &CACHE
 }
 
-#[cfg(target_os = "linux")]
 fn query_default_subpixel_order() -> FontconfigSubpixelOrder {
     use fontconfig_sys::constants::{
         FC_RGBA, FC_RGBA_BGR, FC_RGBA_NONE, FC_RGBA_RGB, FC_RGBA_VBGR, FC_RGBA_VRGB,
