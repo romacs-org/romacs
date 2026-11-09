@@ -2,7 +2,7 @@
 //! GNU subtable, even if a callback replaces its former parent's slot.
 use super::*;
 use crate::char_table::{
-    CharTableNode, CharTableNodeHandle, CharTableSlot, visit_char_table_node_values,
+    CharTableNode, CharTableNodeHandle, CharTableSlot, collector_visit_node,
 };
 use crate::prim::{Fault, Leaf};
 #[cfg(test)]
@@ -106,7 +106,7 @@ impl Chartab {
         // the slot counts the index arithmetic relies on are rechecked.
         for frame in &self.frames {
             let n = frame.node.lock().unwrap();
-            if n.depth > 3 || n.slots.len() != CharTableNode::SIZES[n.depth] {
+            if n.depth > 3 || n.slots().len() != CharTableNode::SIZES[n.depth] {
                 return Err(Fault::Error("invalid sub-char-table geometry".into()));
             }
         }
@@ -133,7 +133,7 @@ impl Chartab {
             let (c, width, len) = {
                 let node = f.node.lock().unwrap();
                 let width = CharTableNode::WIDTHS[node.depth];
-                (node.min_char + f.index * width, width, node.slots.len())
+                (node.min_char + f.index * width, width, node.slots().len())
             };
             if f.index >= len || c as i64 > f.to {
                 self.frames.pop();
@@ -283,7 +283,7 @@ impl Chartab {
                 Phase::Parent(v) | Phase::Emitted(v) => visit(v),
                 Phase::Read | Phase::Child => {}
             }
-            visit_char_table_node_values(&f.node, seen, visit);
+            collector_visit_node(&f.node, seen, visit);
         }
     }
 }
@@ -488,7 +488,7 @@ impl Cursor {
         }
         Ok(Advance::Done(self.result))
     }
-    pub(super) fn visit_values(
+    pub(super) fn collector_visit_values(
         &mut self,
         seen: &mut HashSet<usize>,
         visit: &mut impl FnMut(&mut Value),

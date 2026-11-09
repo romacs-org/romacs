@@ -143,7 +143,10 @@ const VARIANTS: &[(&str, Class)] = &[
     ("Window", Barrier), ("Frame", Barrier), ("Terminal", Barrier), ("WindowConfiguration", Barrier),
     ("Sqlite", Free), ("Treesit", Barrier), ("Process", Barrier), ("Finalizer", Barrier), ("Thread", Free),
     ("String", Barrier), ("RawString", Barrier), ("Vector", Barrier), ("BoolVector", Free), ("Record", Barrier),
-    // Their nodes are shared and locked: a node's store is its own (char_table.rs).
+    // Their nodes are shared and locked, so a node's store hooks no one entry:
+    // their contents are written only through char_table.rs's funnel (`wrote`),
+    // which every write method passes and the collector's barrier will hook.
+    // Past it only the collector's own visits write (PAST_THE_BARRIER).
     ("CharTable", Barrier), ("SubCharTable", Barrier), ("MapKeymapCursor", Barrier),
     // Text shared by indirect buffers is traced from the base alone.
     ("Buffer", Barrier),
@@ -272,6 +275,7 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
     ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
     ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
+    ("collector_visit_node", char_table_collector), ("collector_visit_values", char_table_collector),
 ];
 
 /// Whether a file under `src` may call a method.
@@ -279,6 +283,12 @@ type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
     ["table.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
+}
+
+/// The collector, and the char table and keymap cursor files that give it
+/// their visits: those write node contents past char_table.rs's funnel.
+fn char_table_collector(file: &str) -> bool {
+    collector(file) || file == "char_table.rs" || file == "map_keymap.rs"
 }
 
 /// Each file under `src` that names a method of PAST_THE_BARRIER it may not,
@@ -316,6 +326,8 @@ fn a_name_past_the_barrier_is_refused() {
         file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // collector_compact in a comment"),
         file("handle.rs", "fn f(vm: &mut Vm) { let collector_compact_count = 0; vm.hash_mut_ish(); let s = \"collector_prepend\"; }"),
         file("gcov.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); }"),
+        file("prim/leaf/casetab.rs", "fn f(t: &mut CharTable) { t.collector_visit_values(&mut seen, &mut |v| *v = NIL); char_table::collector_visit_node(t.root(), &mut seen, &mut |_| {}); }"),
+        file("map_keymap.rs", "fn f(n: &CharTableNodeHandle) { collector_visit_node(n, &mut seen, &mut |_| {}); }"),
     ];
     assert_eq!(names_past_the_barrier(&sources), [
         "window.rs: collector_compact", "window.rs: hash_mut",
@@ -323,6 +335,7 @@ fn a_name_past_the_barrier_is_refused() {
         "gc.rs: hash_mut",
         "frame.rs: hash_mut",
         "gcov.rs: collector_entries_mut",
+        "prim/leaf/casetab.rs: collector_visit_node", "prim/leaf/casetab.rs: collector_visit_values",
     ]);
 }
 
@@ -344,12 +357,12 @@ fn a_name_past_the_barrier_is_refused() {
 /// body stays behind its lock; what matters is that only its owner's write
 /// funnel writes it, which privacy, not this check, holds.
 const INTERIOR_ALLOWED: &[(&str, &str)] = &[
-    ("char_table.rs:CharTable.root", "a char table node: to be written only through char_table.rs's funnel (perf/gc-chartable)"),
-    ("char_table.rs:CharTableSlot", "a char table node: the same funnel"),
+    ("char_table.rs:CharTable.root", "a char table node, written only through char_table.rs's funnel (`wrote`)"),
+    ("char_table.rs:CharTableSlot", "a char table node, written only through char_table.rs's funnel"),
     ("char_table.rs:CharTableView.root", "a char table node, which a view only reads"),
-    ("data.rs:Object", "`SubCharTable`'s char table node: the same funnel"),
-    ("lib.rs:Vm.native_case_roots", "weak references to case tables' char table nodes: the same funnel"),
-    ("map_keymap.rs:Frame.node", "a keymap cursor's char table node: the same funnel"),
+    ("data.rs:Object", "`SubCharTable`'s char table node, written only through char_table.rs's funnel"),
+    ("lib.rs:Vm.native_case_roots", "weak references to case tables' char table nodes, written only through char_table.rs's funnel"),
+    ("map_keymap.rs:Frame.node", "a keymap cursor's char table node, written only through char_table.rs's funnel"),
     ("properties.rs:KeyReader.run", "a reader borrowed for one call, holding the last run it read"),
     ("text.rs:Text.body", "text shared by indirect buffers: to be written only through `TextBody`'s own methods"),
     ("treesit/mod.rs:Parser.native", "read as holding a Value through a shared name; holds a tree-sitter parser"),
@@ -365,8 +378,6 @@ const PUBLIC_ALLOWED: &[(&str, &str)] = &[
     ("annotations.rs:Marker", "marker accessors"),
     ("annotations.rs:Overlay", "overlay accessors"),
     ("bytes.rs:ByteBuffer", "buffer accessors"),
-    ("char_table.rs:CharTable", "the char-table write funnel (perf/gc-chartable)"),
-    ("char_table.rs:CharTableNode", "the char-table write funnel (perf/gc-chartable)"),
     ("data.rs:LispString", "string property accessors"),
     ("frame.rs:Frame", "frame accessors"),
     ("frame.rs:Terminal", "terminal accessors"),

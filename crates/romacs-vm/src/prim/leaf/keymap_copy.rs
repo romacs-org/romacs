@@ -34,7 +34,7 @@ impl Leaf<'_> {
     fn copy_keymap_char_table(&mut self, table: Value, depth: usize) -> super::super::Out {
         let Some(data::Object::CharTable(original)) = self.vm.object_if(table) else { unreachable!() };
         // map_char_table visits effective bindings, which a parent supplies too.
-        if original.parent != Value::NIL {
+        if original.parent() != Value::NIL {
             return Err(Fault::Error("VM2 copy-keymap of a char-table with a parent is unsupported".into()));
         }
         let mut copy = (**original).clone();
@@ -46,8 +46,9 @@ impl Leaf<'_> {
         let mut next = copies.into_iter();
         copy.map_entries(&mut |value| if let Some(item) = next.next() { *value = item; });
         // Characters without an entry take the default; copy it once for them.
-        if self.pair(copy.default).is_some() {
-            copy.default = self.copy_keymap_item(copy.default, depth)?;
+        if self.pair(copy.default()).is_some() {
+            let default = self.copy_keymap_item(copy.default(), depth)?;
+            copy.set_default(default);
         }
         Ok(self.vm.allocate_object(data::Object::CharTable(Box::new(copy))))
     }

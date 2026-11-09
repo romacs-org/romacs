@@ -103,7 +103,7 @@ impl Vm {
     pub(crate) fn display_table_line_slots(&mut self, table: Value) -> Option<[Value; 2]> {
         let purpose = self.display_symbol("display-table");
         let Some(crate::data::Object::CharTable(t)) = self.object_if(table) else { return None };
-        (t.purpose == purpose && t.extras.len() >= 2).then(|| [t.extras[0], t.extras[1]])
+        (t.purpose() == purpose && t.extras().len() >= 2).then(|| [t.extras()[0], t.extras()[1]])
     }
 
     /// GLYPH, a glyph code, as the character it shows when it has no face

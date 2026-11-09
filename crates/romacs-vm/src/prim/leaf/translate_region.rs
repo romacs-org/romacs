@@ -68,7 +68,7 @@ impl Leaf<'_> {
             Some(view.chars().map(|c| if raw && c >= 128 { crate::lstring::BYTE8_OFFSET + c } else { c }).collect::<Vec<u32>>())
         } else {
             let purpose = self.intern("translation-table");
-            let valid = matches!(self.vm.object_if(table), Some(data::Object::CharTable(t)) if t.purpose == purpose);
+            let valid = matches!(self.vm.object_if(table), Some(data::Object::CharTable(t)) if t.purpose() == purpose);
             if !valid { return Err(Fault::Error("Not a translation table".into())); }
             None
         };

@@ -39,7 +39,7 @@ mod tests {
             let buffer = vm.eval_source_raw(&source).unwrap();
             let down = vm.standard_case_tables[0];
             let Object::CharTable(t) = vm.object_if(down).unwrap() else { unreachable!() };
-            assert_eq!(roots(&vm, buffer), [down, t.extras[0], t.extras[1], t.extras[2]]);
+            assert_eq!(roots(&vm, buffer), [down, t.extras()[0], t.extras()[1], t.extras()[2]]);
         }
     }
 
@@ -51,7 +51,7 @@ mod tests {
             let buffer = vm.eval_source_raw(&source).unwrap();
             let down = vm.standard_case_tables[0];
             let Object::CharTable(t) = vm.object_if(down).unwrap() else { unreachable!() };
-            let expected = [down, t.extras[0], t.extras[1], t.extras[2]];
+            let expected = [down, t.extras()[0], t.extras()[1], t.extras()[2]];
             assert!(expected.iter().all(|v| matches!(vm.object_if(*v), Some(Object::CharTable(_)))));
             assert_eq!(roots(&vm, buffer), expected);
         }
@@ -107,12 +107,12 @@ impl Leaf<'_> {
             .vm
             .names
             .get("case-table")
-            .is_some_and(|slot| t.purpose == Value::reference(*slot + 1, 7))
-            || t.extras.len() < 3
+            .is_some_and(|slot| t.purpose() == Value::reference(*slot + 1, 7))
+            || t.extras().len() < 3
         {
             return false;
         }
-        let [up, canon, eqv] = [t.extras[0], t.extras[1], t.extras[2]];
+        let [up, canon, eqv] = [t.extras()[0], t.extras()[1], t.extras()[2]];
         let table = |v| matches!(self.vm.object_if(v), Some(Object::CharTable(_)));
         (up == Value::NIL || table(up))
             && ((canon == Value::NIL && eqv == Value::NIL)
@@ -123,7 +123,7 @@ impl Leaf<'_> {
     pub(crate) fn standard_case_roots(&mut self) -> std::result::Result<[Value; 4], Fault> {
         let down = self.standard_case_table()?;
         let Object::CharTable(t) = self.vm.object_if(down).unwrap() else { unreachable!() };
-        let roots = [down, t.extras[0], t.extras[1], t.extras[2]];
+        let roots = [down, t.extras()[0], t.extras()[1], t.extras()[2]];
         if roots[1..].iter().any(|v| !matches!(self.vm.object_if(*v), Some(Object::CharTable(_)))) {
             self.install_case_table(down, true)?;
             return Ok(self.vm.standard_case_tables);
@@ -198,7 +198,7 @@ impl Leaf<'_> {
 
     pub(crate) fn native_case_mapping(&self, table: Value, kind: usize) -> bool {
         let Some(Object::CharTable(table)) = self.vm.object_if(table) else { return false };
-        self.vm.native_case_roots[kind].upgrade().is_some_and(|root| std::sync::Arc::ptr_eq(&root, &table.root))
+        self.vm.native_case_roots[kind].upgrade().is_some_and(|root| std::sync::Arc::ptr_eq(&root, table.root()))
     }
 
     pub(crate) fn completion_upcase(&mut self, code: u32) -> std::result::Result<u32, Fault> {
@@ -234,7 +234,7 @@ impl Leaf<'_> {
         fn boundaries(node: &CharTableNodeHandle, out: &mut Vec<usize>) {
             let node = node.lock().unwrap();
             let width = CharTableNode::WIDTHS[node.depth];
-            for (i, slot) in node.slots.iter().enumerate() {
+            for (i, slot) in node.slots().iter().enumerate() {
                 out.push(node.min_char + i * width);
                 if let CharTableSlot::Node(child) = slot {
                     boundaries(child, out);
@@ -248,9 +248,9 @@ impl Leaf<'_> {
             if !seen.insert(at.0) {
                 return Err(Fault::Error("cyclic char-table parent".into()));
             }
-            CharTableNode::validate_traversal(&t.root, 0, 0).map_err(Fault::Error)?;
-            boundaries(&t.root, &mut points);
-            at = t.parent;
+            CharTableNode::validate_traversal(t.root(), 0, 0).map_err(Fault::Error)?;
+            boundaries(t.root(), &mut points);
+            at = t.parent();
         }
         points.sort_unstable();
         points.dedup();
@@ -298,8 +298,8 @@ impl Leaf<'_> {
         let Object::CharTable(t) = self.vm.object_if(table).unwrap() else {
             unreachable!()
         };
-        let mut roots = [table, t.extras[0], t.extras[1], t.extras[2]];
-        let purpose = t.purpose;
+        let mut roots = [table, t.extras()[0], t.extras()[1], t.extras()[2]];
+        let purpose = t.purpose();
         if roots[1] == Value::NIL {
             roots[1] = self.make_char_table(purpose, Value::NIL)?;
             self.case_inverse(table, roots[1])?;

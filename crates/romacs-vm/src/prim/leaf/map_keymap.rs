@@ -14,26 +14,7 @@ impl Leaf<'_> {
     /// then reset the ASCII cache.
     pub(crate) fn optimize_char_table(&mut self, table: Value, eq: bool) -> std::result::Result<(), Fault> {
         let root = self.map_table_root(table);
-        let slots = root.lock().unwrap().slots.clone();
-        for (i, slot) in slots.into_iter().enumerate() {
-            if let char_table::CharTableSlot::Node(child) = slot {
-                let optimized = self.optimize_node(&child, eq)?;
-                root.lock().unwrap().slots[i] = optimized;
-            }
-        }
-        self.uniprop_reset_ascii(table);
-        Ok(())
-    }
-    /// optimize_sub_char_table: NODE's slot in its parent after optimizing.
-    fn optimize_node(&self, node: &char_table::CharTableNodeHandle, eq: bool) -> std::result::Result<char_table::CharTableSlot, Fault> {
-        let mut slots = node.lock().unwrap().slots.clone();
-        for slot in &mut slots {
-            if let char_table::CharTableSlot::Node(child) = slot {
-                *slot = self.optimize_node(&child.clone(), eq)?;
-            }
-        }
-        node.lock().unwrap().slots = slots.clone();
-        let same = |a: Value, b: Value| -> std::result::Result<bool, Fault> {
+        char_table::optimize(&root, &mut |a, b| {
             if eq { return Ok(a == b); }
             self.equal(a, b).map_err(|e| match e {
                 crate::hash::HashFault::Wrong(p, v) => Fault::Wrong(p, v),
@@ -41,37 +22,27 @@ impl Leaf<'_> {
                 crate::hash::HashFault::Error(m, _) => Fault::Error(m.into()),
                 _ => Fault::Error("equal failed".into()),
             })
-        };
-        let char_table::CharTableSlot::Value(first) = slots[0] else {
-            return Ok(char_table::CharTableSlot::Node(node.clone()));
-        };
-        for slot in &slots[1..] {
-            let char_table::CharTableSlot::Value(this) = *slot else {
-                return Ok(char_table::CharTableSlot::Node(node.clone()));
-            };
-            if !same(this, first)? {
-                return Ok(char_table::CharTableSlot::Node(node.clone()));
-            }
-        }
-        Ok(char_table::CharTableSlot::Value(first))
+        })?;
+        self.uniprop_reset_ascii(table);
+        Ok(())
     }
     /// set_char_table_ascii (table, char_table_ascii (table)).
     pub(crate) fn uniprop_reset_ascii(&mut self, table: Value) {
         let index = table.index_if(0).unwrap() - 1;
         if let data::Object::CharTable(t) = self.vm.objects.entry_mut(index) {
-            t.ascii = char_table::CharTable::ascii_from_root(&t.root);
+            t.reset_ascii();
         }
     }
     pub(crate) fn map_table_has_decoder(&self, table: Value) -> bool {
         self.unicode_property_table(table)
-            .is_some_and(|table| table.extras[1].integer_value() == Some(0))
+            .is_some_and(|table| table.extras()[1].integer_value() == Some(0))
     }
     pub(crate) fn map_table_decode(&self, table: Value, value: Value) -> super::super::Out {
         let Some(data::Object::CharTable(table)) = self.vm.object_if(table) else {
             unreachable!()
         };
         let Some(data::Object::Vector(values)) =
-            table.extras.get(4).and_then(|&v| self.vm.object_if(v))
+            table.extras().get(4).and_then(|&v| self.vm.object_if(v))
         else {
             return Ok(value);
         };
@@ -90,7 +61,7 @@ impl Leaf<'_> {
         node: &char_table::CharTableNodeHandle,
         index: usize,
     ) -> std::result::Result<char_table::CharTableSlot, Fault> {
-        let slot = node.lock().unwrap().slots[index].clone();
+        let slot = node.lock().unwrap().slots()[index].clone();
         let char_table::CharTableSlot::Value(value) = slot else {
             return Ok(slot);
         };
@@ -100,37 +71,17 @@ impl Leaf<'_> {
         let Some(codes) = self.vm.uniprop_compressed(value) else {
             return Ok(slot);
         };
-        let (depth, from) = {
-            let node = node.lock().unwrap();
-            (
-                node.depth,
-                node.min_char + index * char_table::CharTableNode::WIDTHS[node.depth],
-            )
-        };
-        if depth != 2 {
+        if node.lock().unwrap().depth != 2 {
             return Err(Fault::Error(
                 "compressed Unicode property requires a 128-character block".into(),
             ));
         }
-        let slots = char_table::uniprop_block(&codes)
-            .map_err(Fault::Error)?
-            .into_iter()
-            .map(char_table::CharTableSlot::Value)
-            .collect();
-        let expanded = char_table::CharTableSlot::Node(std::sync::Arc::new(std::sync::Mutex::new(
-            char_table::CharTableNode {
-                depth: 3,
-                min_char: from,
-                slots,
-            },
-        )));
-        node.lock().unwrap().slots[index] = expanded.clone();
+        let values = char_table::uniprop_block(&codes).map_err(Fault::Error)?;
         let table = table.index_if(0).unwrap() - 1;
         let data::Object::CharTable(table) = self.vm.objects.entry_mut(table) else {
             unreachable!()
         };
-        table.ascii = char_table::CharTable::ascii_from_root(&table.root);
-        Ok(expanded)
+        Ok(table.expand(node, index, values))
     }
     /// GNU sub_char_table_set's uniprop_table_uncompress: expand C's
     /// compressed block in place before a write.
@@ -144,7 +95,7 @@ impl Leaf<'_> {
             if depth == 2 {
                 return self.map_table_slot(table, &node, at).map(|_| ());
             }
-            let slot = node.lock().unwrap().slots[at].clone();
+            let slot = node.lock().unwrap().slots()[at].clone();
             match slot {
                 char_table::CharTableSlot::Node(child) => node = child,
                 char_table::CharTableSlot::Value(_) => return Ok(()),
@@ -197,23 +148,23 @@ impl Leaf<'_> {
         let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {
             unreachable!()
         };
-        t.root.clone()
+        t.root().clone()
     }
     pub(crate) fn map_table_default(&self, value: Value) -> Value {
         let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {
             unreachable!()
         };
-        t.default
+        t.default()
     }
     pub(crate) fn map_table_parent(&self, value: Value) -> Value {
         let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {
             unreachable!()
         };
         if matches!(
-            self.vm.object_if(t.parent),
+            self.vm.object_if(t.parent()),
             Some(data::Object::CharTable(_))
         ) {
-            t.parent
+            t.parent()
         } else {
             Value::NIL
         }
