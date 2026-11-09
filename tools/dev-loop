@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run focused crate tests. Defaults to library tests; full acceptance is scripts/gate full."""
+"""Run focused crate tests. Defaults to library tests; full acceptance is tools/gate full."""
 import argparse
 import json
 import os

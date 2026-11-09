@@ -11,13 +11,13 @@ ARTIFACTS = (
     'PRIMITIVES.json',
     'crates/romacs-introspect-live/data/registry.json',
     'crates/romacs-introspect/data/registry.json',
-    json.loads((Path(__file__).resolve().parents[1] / 'LISP-BUNDLED.json').read_text())['autoloads'],
+    json.loads((Path(__file__).resolve().parents[2] / 'LISP-BUNDLED.json').read_text())['autoloads'],
 )
 GENERATORS = (
-    (sys.executable, 'tools/divergence_index.py'),
-    (sys.executable, 'tools/primitive_index.py'),
+    (sys.executable, 'tools/lib/divergence_index.py'),
+    (sys.executable, 'tools/lib/primitive_index.py'),
     ('cargo', 'run', '-q', '-p', 'romacs-introspect-live', '--', '--write'),
-    (sys.executable, 'tools/bundled_autoloads.py'),
+    (sys.executable, 'tools/lib/bundled_autoloads.py'),
 )
 MARKER = re.compile(rb'(?m)^[ \t]*(?:<{7}|={7}|>{7}|\|{7})')
 
@@ -78,7 +78,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('check', 'regenerate', 'validate'))
-    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args()
     try:
         globals()[args.action](args.root.resolve())

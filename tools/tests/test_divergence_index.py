@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 
-GENERATOR = Path(__file__).with_name('divergence_index.py')
+GENERATOR = Path(__file__).resolve().parents[1] / 'lib/divergence_index.py'
 FIXED_POINT = 'dirty-ledger regenerate/commit/regenerate must preserve the tree and exact content fingerprint'
 LEDGER = '## Observable by a package\n| H1 | `maphash` | GNU | romacs | deliberate |\n'
 
@@ -23,8 +23,8 @@ class DivergenceIndexTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='divergence-index-', dir=os.environ.get('TMPDIR', str(GENERATOR.parents[2])))
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        (self.root / 'tools').mkdir()
-        shutil.copyfile(GENERATOR, self.root / 'tools/divergence_index.py')
+        (self.root / 'tools/lib').mkdir(parents=True)
+        shutil.copyfile(GENERATOR, self.root / 'tools/lib/divergence_index.py')
         (self.root / 'DIVERGENCES.md').write_text(LEDGER)
         for crate in ('z-last', 'a-first'):
             directory = self.root / 'crates' / crate
@@ -37,11 +37,11 @@ class DivergenceIndexTests(unittest.TestCase):
         return result.stdout.strip()
 
     def generate(self):
-        self.run_command(sys.executable, 'tools/divergence_index.py')
+        self.run_command(sys.executable, 'tools/lib/divergence_index.py')
         return (self.root / 'DIVERGENCES.json').read_bytes()
 
     def expected_provenance(self):
-        paths = sorted(['DIVERGENCES.md', 'tools/divergence_index.py'] + [p.relative_to(self.root).as_posix() for p in self.root.glob('crates/*/GNU-DIVERGENCES.md')])
+        paths = sorted(['DIVERGENCES.md', 'tools/lib/divergence_index.py'] + [p.relative_to(self.root).as_posix() for p in self.root.glob('crates/*/GNU-DIVERGENCES.md')])
         digest = hashlib.sha256()
         for path in paths:
             contents = (self.root / path).read_bytes()
@@ -81,7 +81,7 @@ class DivergenceIndexTests(unittest.TestCase):
         self.assertEqual(provenance['inputs'], paths)
         self.assertNotIn('describes_commit', provenance)
         self.assertNotIn('describes_date', provenance)
-        for relative in ('DIVERGENCES.md', 'crates/a-first/GNU-DIVERGENCES.md', 'tools/divergence_index.py'):
+        for relative in ('DIVERGENCES.md', 'crates/a-first/GNU-DIVERGENCES.md', 'tools/lib/divergence_index.py'):
             with self.subTest(relative=relative):
                 path = self.root / relative
                 path.write_bytes(path.read_bytes() + b'\n# content-only change\n')
@@ -107,12 +107,12 @@ class DivergenceIndexTests(unittest.TestCase):
         self.assertEqual(canonical, self.generate(), 'regeneration must compare complete deterministic bytes')
 
     def test_check_only_reports_unattached_symbols(self):
-        result = self.run_command(sys.executable, 'tools/divergence_index.py', '--check')
+        result = self.run_command(sys.executable, 'tools/lib/divergence_index.py', '--check')
         self.assertIn('0 unattached', result)
         output = self.root / 'DIVERGENCES.json'
         self.assertFalse(output.exists())
         (self.root / 'DIVERGENCES.md').write_text('| H2 | no identifier | GNU | romacs | why |\n')
-        result = subprocess.run([sys.executable, 'tools/divergence_index.py', '--check'], cwd=self.root, text=True, capture_output=True)
+        result = subprocess.run([sys.executable, 'tools/lib/divergence_index.py', '--check'], cwd=self.root, text=True, capture_output=True)
         self.assertEqual(1, result.returncode)
         self.assertIn('1 unattached', result.stdout)
         self.assertFalse(output.exists())

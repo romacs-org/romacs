@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-loader = importlib.machinery.SourceFileLoader('gate', str(pathlib.Path(__file__).with_name('gate')))
+loader = importlib.machinery.SourceFileLoader('gate', str(pathlib.Path(__file__).resolve().parents[1] / 'gate'))
 spec = importlib.util.spec_from_loader('gate', loader)
 assert spec is not None
 gate = importlib.util.module_from_spec(spec)
@@ -179,7 +179,7 @@ class Receipts(unittest.TestCase):
         for args in [['runtime', 'build'], ['runtime-build'], ['packages'], ['oracle-live'],
                      ['baseline'], ['--lisp-source', 'focused', 'all()']]:
             with self.subTest(args=args):
-                result = subprocess.run(['python3', str(pathlib.Path(__file__).with_name('gate')), *args],
+                result = subprocess.run(['python3', str(pathlib.Path(__file__).resolve().parents[1] / 'gate'), *args],
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 2)
 

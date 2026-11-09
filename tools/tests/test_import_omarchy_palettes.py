@@ -1,9 +1,9 @@
-"""scripts/import-omarchy-palettes on a fixture Omarchy themes directory: a
+"""tools/import-omarchy-palettes on a fixture Omarchy themes directory: a
 dark palette with a Hyprland-only key and a light one without `orange' and
 `brown' make exactly the committed expected files, and --check reports a
 changed palette as drift.
 
-python3 -m unittest discover -s scripts/tests -p 'test_import_*.py'"""
+python3 -m unittest discover -s tools/tests -p 'test_import_*.py'"""
 from pathlib import Path
 import shutil
 import subprocess

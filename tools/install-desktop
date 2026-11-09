@@ -27,14 +27,14 @@ def install(prefix, applications, replace=False):
     desktop = applications.absolute() / "romacs.desktop"
     if not replace and any(p.exists() or p.is_symlink() for p in (launcher, desktop)):
         raise FileExistsError("install destinations exist; inspect them before using --replace")
-    contents = (root / "scripts/romacs.desktop").read_text()
+    contents = (root / "assets/romacs.desktop").read_text()
     command = exec_quote(launcher)
     contents = contents.replace("Exec=romacs", "Exec=" + command)
     launcher.parent.mkdir(parents=True, exist_ok=True)
     desktop.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=launcher.parent) as pending:
         link = Path(pending) / "romacs"
-        link.symlink_to(root / "scripts/romacs")
+        link.symlink_to(root / "tools/romacs")
         os.replace(link, launcher)
     with tempfile.NamedTemporaryFile(mode="w", dir=desktop.parent, delete=False) as pending:
         pending.write(contents)

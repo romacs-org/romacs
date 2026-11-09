@@ -6,4 +6,4 @@
 # Publish by new inode + rename, never edit live files in place.
 set -eu
 ROOT=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-exec python3 "$ROOT/neomacs-slot-runner.py" "$@"
+exec python3 "$ROOT/gate-slot-runner" "$@"

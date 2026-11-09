@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Focused real-pin oracle controls; all mutations are in disposable copies.
 
-Run: LISP_ORACLE_GNU=/path/to/gnu-emacs python3 tools/test_lisp_oracle.py -v
+Run: LISP_ORACLE_GNU=/path/to/gnu-emacs python3 tools/tests/test_lisp_oracle.py -v
 No commits, indexes, runtime builds or source Lisp writes are performed.
 """
 import contextlib
@@ -16,10 +16,10 @@ import subprocess
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('lisp_oracle', ROOT / 'tools/lisp_oracle.py')
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location('lisp_oracle', ROOT / 'tools/lib/lisp_oracle.py')
 if SPEC is None or SPEC.loader is None:
-    raise RuntimeError('cannot load tools/lisp_oracle.py')
+    raise RuntimeError('cannot load tools/lib/lisp_oracle.py')
 ORACLE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ORACLE)
 GNU = Path(ORACLE.GNU_SOURCE).resolve()
@@ -44,7 +44,7 @@ class RealPinControls(unittest.TestCase):
 
     def check(self, root=None):
         result = subprocess.run(
-            ['python3', '-B', str(ROOT / 'tools/lisp_oracle.py'), 'check',
+            ['python3', '-B', str(ROOT / 'tools/lib/lisp_oracle.py'), 'check',
              '--root', str(root or self.root), '--gnu', str(GNU)],
             capture_output=True, text=True, check=False)
         return result.returncode, result.stdout + result.stderr

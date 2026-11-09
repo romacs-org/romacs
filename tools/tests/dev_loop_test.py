@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-loader = importlib.machinery.SourceFileLoader("dev_loop", str(Path(__file__).with_name("dev-loop")))
+loader = importlib.machinery.SourceFileLoader("dev_loop", str(Path(__file__).resolve().parents[1] / "dev-loop"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 loop = importlib.util.module_from_spec(spec)
 loader.exec_module(loop)

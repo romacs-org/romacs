@@ -32,8 +32,8 @@ ELSEWHERE = {
     'crates/romacs-vm-gui/harness/test_fileio_live.py': 'crates/romacs-vm-gui/tests/fileio_observer.rs',
     'crates/romacs-vm-gui/harness/test_find_file_live.py': 'crates/romacs-vm-gui/tests/find_file.rs',
     'crates/romacs-vm-gui/harness/test_scaling_live.py': 'crates/romacs-vm-gui/tests/scaling.rs',
-    'tools/parity_ratchet_test.py': 'gnu-tests/runner/tests/parity_ratchet.rs',
-    'tools/honest_ratchet_test.py': 'tools/parity_ratchet_test.py',
+    'tools/tests/parity_ratchet_test.py': 'gnu-tests/runner/tests/parity_ratchet.rs',
+    'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
 }
 RAN = re.compile(r'^Ran (\d+) tests? in ', re.M)
 

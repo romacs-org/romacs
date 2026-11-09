@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Romacs's icon font as a derived artifact (scripts/build-icon-font.py).
+"""Romacs's icon font as a derived artifact (tools/build-icon-font).
 
 assets/fonts/RomacsIcons.ttf records, in its name table, the SHA-256 of
 what it was built from (name ID 256: every assets/icons/*.svg, the
@@ -27,7 +27,7 @@ def sources_digest(root):
     root = Path(root)
     digest = hashlib.sha256()
     files = sorted((root / 'assets/icons').glob('*.svg')) + [root / 'assets/icons/codepoints.txt',
-                                                              root / 'scripts/build-icon-font.py']
+                                                              root / 'tools/build-icon-font']
     for path in files:
         digest.update(path.relative_to(root).as_posix().encode() + b'\0' + path.read_bytes() + b'\0')
     return digest.hexdigest()
@@ -68,16 +68,16 @@ def recorded(data, name_id):
 def check_bytes(data, root):
     """Why the font DATA does not match ROOT's sources or itself, or None."""
     if recorded(data, SOURCES_NAME_ID) != sources_digest(root):
-        return f'{FONT} is stale: its sources changed; run scripts/build-icon-font.py'
+        return f'{FONT} is stale: its sources changed; run tools/build-icon-font'
     if recorded(data, PAYLOAD_NAME_ID) != payload_digest(data):
-        return f'{FONT} is damaged: its glyphs are not the ones it was built with; run scripts/build-icon-font.py'
+        return f'{FONT} is damaged: its glyphs are not the ones it was built with; run tools/build-icon-font'
     return None
 
 
 def check(root):
     font = Path(root) / FONT
     if not font.exists():
-        return f'{FONT} is missing: run scripts/build-icon-font.py'
+        return f'{FONT} is missing: run tools/build-icon-font'
     return check_bytes(font.read_bytes(), root)
 
 

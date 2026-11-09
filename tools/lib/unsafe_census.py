@@ -289,7 +289,7 @@ def problems(root, floors=None, counts=None):
                 found.append(f'{crate}: {have} {what}, above its floor {limit}')
             elif have < limit:
                 found.append(f'{crate}: {have} {what}, below its floor {limit}; '
-                             'record the drop with tools/unsafe_census.py lower')
+                             'record the drop with tools/lib/unsafe_census.py lower')
     return found + lint_problems(root, floors.get(PENDING, {}), counts)
 
 

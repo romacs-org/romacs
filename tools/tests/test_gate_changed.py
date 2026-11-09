@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-GATE = runpy.run_path(str(ROOT / 'scripts/gate'), run_name='gate')
+GATE = runpy.run_path(str(ROOT / 'tools/gate'), run_name='gate')
 STRUCTURAL = GATE['STRUCTURAL']
 changed_filter = GATE['changed_filter']
 
@@ -53,7 +53,7 @@ class ChangedFilter(unittest.TestCase):
         self.assert_structural(selected)
 
     def test_docs_and_test_commands_select_only_the_structural_rules(self):
-        self.write('doc/x.org', 'AGENTS.md', 'Makefile', 'scripts/tests/test_x.py')
+        self.write('doc/x.org', 'AGENTS.md', 'Makefile', 'tools/tests/test_x.py')
         selected = changed_filter(self.repo)
         self.assert_structural(selected)
         self.assertEqual(selected.count('|') + 1, len(STRUCTURAL))

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Build and test the surviving VM2 workspace inside one neomacs-slot admission.
 
-    python3 scripts/gate --lane nocore full
-    scripts/gate focused 'EXPR'
-    scripts/gate --repeat 60 focused 'EXPR'
-    scripts/gate changed [BASE]
-    scripts/gate build
-    scripts/gate reuse RUN_DIR [full|focused|changed [EXPR]]
+    python3 tools/gate --lane nocore full
+    tools/gate focused 'EXPR'
+    tools/gate --repeat 60 focused 'EXPR'
+    tools/gate changed [BASE]
+    tools/gate build
+    tools/gate reuse RUN_DIR [full|focused|changed [EXPR]]
 
 Full covers surviving workspace test targets with one feature resolution.
 All workspace suites, including VM2 oracle tests, remain included.
@@ -23,8 +23,8 @@ Build-only receipts and stress runs cannot substitute for full acceptance.
 """
 import argparse, fcntl, hashlib, json, os, pathlib, re, shlex, shutil, subprocess, sys, tempfile, time, tomllib
 
-SLOT = os.environ.get('ROMACS_SLOT', str(pathlib.Path(__file__).resolve().with_name('neomacs-slot')))
-RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve().with_name('neomacs-slot-runner.py')))
+SLOT = os.environ.get('ROMACS_SLOT', str(pathlib.Path(__file__).resolve().with_name('gate-slot')))
+RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve().with_name('gate-slot-runner')))
 
 
 def _pinned_oracle(repo):
@@ -42,7 +42,7 @@ def _pinned_oracle(repo):
     path = root / pin[1] / 'bin' / 'emacs'
     if not (path.is_file() and os.access(path, os.X_OK)):
         raise SystemExit(f'gate: no GNU oracle built at the pin {pin[1][:10]} '
-                         f'(looked for {path}); build it with scripts/build-gnu-oracle.sh. '
+                         f'(looked for {path}); build it with tools/build-gnu-oracle.sh. '
                          'There is no fallback: a different revision is not the oracle.')
     return str(path)
 
@@ -649,7 +649,7 @@ def changed_filter(wt, base='master'):
     names |= set(out('git', 'ls-files', '-mo', '--exclude-standard', cwd=wt).decode().split())
     terms = set()
     for name in names:
-        if name.startswith(('doc/', 'scripts/tests/')) or name.endswith('.md') or name in ('scripts/gate', 'Makefile'):
+        if name.startswith(('doc/', 'tools/tests/')) or name.endswith('.md') or name in ('tools/gate', 'Makefile'):
             continue
         m = re.match(r'crates/([^/]+)/tests/([^/]+)\.rs$', name)
         if m:                                   # a test binary, or a module of compat_all
@@ -683,7 +683,7 @@ def reuse(wt, args, group):
             reason = 'stress receipt is diagnostic only'
         elif receipt['tree'] != tree:
             reason = 'tree'
-        elif receipt['gate_sha'] != digest(wt / 'scripts/gate'):
+        elif receipt['gate_sha'] != digest(wt / 'tools/gate'):
             reason = 'gate implementation'
         elif receipt['runner_sha'] != digest(RUNNER):
             reason = 'slot runner'
@@ -842,17 +842,17 @@ def gate_main():
     expr = args.rest[0] if args.mode == 'focused' else changed_filter(wt, *args.rest[:1]) or 'all()' if args.mode == 'changed' else 'all()'
     (CACHE / 'runs').mkdir(parents=True, exist_ok=True)
     run_dir = pathlib.Path(tempfile.mkdtemp(prefix=f'{lane}-{time.strftime("%Y%m%d-%H%M%S")}-', dir=CACHE / 'runs'))
-    (run_dir / 'gate').write_bytes(out('git', 'show', f'{tree}:scripts/gate', cwd=wt))
-    for source, name in ((SLOT, 'neomacs-slot'), (RUNNER, 'neomacs-slot-runner.py')):
+    (run_dir / 'gate').write_bytes(out('git', 'show', f'{tree}:tools/gate', cwd=wt))
+    for source, name in ((SLOT, 'gate-slot'), (RUNNER, 'gate-slot-runner')):
         target = run_dir / name
         target.write_bytes(pathlib.Path(source).read_bytes())
         target.chmod(0o755)
-    admission_env = dict(os.environ, ROMACS_SLOT=str(run_dir / 'neomacs-slot'),
-                         ROMACS_SLOT_RUNNER=str(run_dir / 'neomacs-slot-runner.py'))
+    admission_env = dict(os.environ, ROMACS_SLOT=str(run_dir / 'gate-slot'),
+                         ROMACS_SLOT_RUNNER=str(run_dir / 'gate-slot-runner'))
     jobs = ['--jobs', str(args.jobs)] if args.jobs is not None else []
     required = [x for name in args.require for x in ('--require', name)]
     oracle = ['--oracle', ORACLE] if args.oracle else []
-    return subprocess.call([str(run_dir / 'neomacs-slot'), lane, '--group', group, *jobs, '--test-threads',
+    return subprocess.call([str(run_dir / 'gate-slot'), lane, '--group', group, *jobs, '--test-threads',
                             str(args.threads + args.display_threads), '--mem', args.mem, '--',
                             sys.executable, str(run_dir / 'gate'), '--inner', '--worktree', str(wt),
                             '--run-dir', str(run_dir), '--tree', tree, '--group', group,
@@ -877,7 +877,8 @@ def entry_main():
     try:
         if not any(arg in ('--inner', '-h', '--help') for arg in sys.argv[1:]):
             if not pathlib.Path(RUNNER).is_file() or not shutil.which(SLOT):
-                raise SystemExit('gate: missing slot tools; restore scripts/neomacs-slot and scripts/neomacs-slot-runner.py')
+                raise SystemExit('gate: missing slot tools; restore tools/gate-slot and tools/gate-slot-runner')
+            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'lib'))
             from gate_limits import run
             result = run([sys.executable, *sys.orig_argv[1:]])
             if result is not None:

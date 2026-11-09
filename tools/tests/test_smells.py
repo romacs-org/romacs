@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/smells.py: what counts as each smell, the lint census's dedup and
+"""tools/lib/smells.py: what counts as each smell, the lint census's dedup and
 attribution, and the floors ratchet in both directions."""
 import json
 import shutil
@@ -10,7 +10,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 import smells  # noqa: E402
 
 
@@ -177,7 +177,7 @@ class RatchetTest(unittest.TestCase):
 
 class TreeTest(unittest.TestCase):
     def test_the_floors_file_is_in_dump_form(self):
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         text = (root / smells.FLOORS).read_text()
         self.assertEqual(smells.dump(json.loads(text)), text)
 

@@ -7,7 +7,7 @@ the SHA-256 of every file taken from it, and its licence: the file, the
 URL it came from and its SHA-256. `check` hashes the committed
 files against that record, so a font cannot change silently, and refuses a
 font in assets/fonts that no entry and no build (RomacsIcons.ttf,
-tools/icon_font.py) accounts for, and a README that does not give each
+tools/lib/icon_font.py) accounts for, and a README that does not give each
 file's SHA-256.
 
 usage: bundled_fonts.py check [--root ROOT]

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Tests for scripts/gate: VM2 protocol, receipts, environment isolation and run cleanup.
+"""Tests for tools/gate: VM2 protocol, receipts, environment isolation and run cleanup.
 
-    python3 scripts/gate_test.py
+    python3 tools/tests/gate_test.py
 """
-import io, contextlib, importlib.machinery, importlib.util, json, multiprocessing, os, pathlib, shutil, subprocess, tempfile, time, unittest
+import io, contextlib, importlib.machinery, importlib.util, json, multiprocessing, os, pathlib, shutil, subprocess, sys, tempfile, time, unittest
 from unittest import mock
 
-loader = importlib.machinery.SourceFileLoader('gate', str(pathlib.Path(__file__).with_name('gate')))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'lib'))
+loader = importlib.machinery.SourceFileLoader('gate', str(pathlib.Path(__file__).resolve().parents[1] / 'gate'))
 gate = importlib.util.module_from_spec(importlib.util.spec_from_loader('gate', loader))
 loader.exec_module(gate)
 
@@ -62,8 +63,8 @@ class PortableToolTrust(unittest.TestCase):
             module = importlib.util.module_from_spec(importlib.util.spec_from_loader('local_gate', local_loader))
             local_loader.exec_module(module)
         root = pathlib.Path(gate.__file__).resolve().parent
-        self.assertEqual(pathlib.Path(module.SLOT), root / 'neomacs-slot')
-        self.assertEqual(pathlib.Path(module.RUNNER), root / 'neomacs-slot-runner.py')
+        self.assertEqual(pathlib.Path(module.SLOT), root / 'gate-slot')
+        self.assertEqual(pathlib.Path(module.RUNNER), root / 'gate-slot-runner')
 
     def test_mutable_usr_directory_is_not_an_immutable_tool_closure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -427,12 +428,12 @@ class OracleResolution(unittest.TestCase):
 
     def test_missing_build_refuses_with_build_action(self):
         self.oracle.unlink()
-        with self.assertRaisesRegex(SystemExit, 'no GNU oracle built.*scripts/build-gnu-oracle.sh'):
+        with self.assertRaisesRegex(SystemExit, 'no GNU oracle built.*tools/build-gnu-oracle.sh'):
             gate._pinned_oracle(self.root)
 
     def test_nonexecutable_build_refuses_with_build_action(self):
         self.oracle.chmod(0o644)
-        with self.assertRaisesRegex(SystemExit, 'no GNU oracle built.*scripts/build-gnu-oracle.sh'):
+        with self.assertRaisesRegex(SystemExit, 'no GNU oracle built.*tools/build-gnu-oracle.sh'):
             gate._pinned_oracle(self.root)
 
     def test_reference_read_failure_is_actionable(self):
@@ -458,14 +459,14 @@ class GateArguments(unittest.TestCase):
         src.mkdir(parents=True)
         (src / 'Cargo.toml').write_text('[profile.gate]\ninherits = "release"\n')
         self.oracle = pinned_fixture(self, self.root)
-        (self.root / 'scripts').mkdir()
-        (self.root / 'scripts/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
-        for source, name in ((gate.SLOT, 'neomacs-slot'), (gate.RUNNER, 'neomacs-slot-runner.py')):
-            target = self.root / 'scripts' / name
+        (self.root / 'tools').mkdir()
+        (self.root / 'tools/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
+        for source, name in ((gate.SLOT, 'gate-slot'), (gate.RUNNER, 'gate-slot-runner')):
+            target = self.root / 'tools' / name
             target.write_bytes(pathlib.Path(source).read_bytes())
             target.chmod(0o755)
-        self.enterContext(mock.patch.multiple(gate, SLOT=str(self.root / 'scripts/neomacs-slot'),
-                                             RUNNER=str(self.root / 'scripts/neomacs-slot-runner.py')))
+        self.enterContext(mock.patch.multiple(gate, SLOT=str(self.root / 'tools/gate-slot'),
+                                             RUNNER=str(self.root / 'tools/gate-slot-runner')))
         subprocess.run(['git', 'init', '-b', 'master', str(self.root)], check=True, stdout=subprocess.DEVNULL)
         for key, value in [('user.name', 'Fixture'), ('user.email', 'fixture@example.invalid'), ('commit.gpgsign', 'false')]:
             subprocess.run(['git', 'config', key, value], cwd=self.root, check=True)
@@ -488,7 +489,7 @@ class GateArguments(unittest.TestCase):
         subprocess.run(['git', 'add', 'captured-new'], cwd=self.root, check=True)
         (self.root / 'README.md').write_text('other work')
         (self.root / 'untracked').write_text('not staged')
-        path = self.root / 'scripts/gate'
+        path = self.root / 'tools/gate'
         path.write_bytes(path.read_bytes() + b'\n# unstaged fixture\n')
         before = (self.root / '.git/index').read_bytes()
         staged = gate.freeze(self.root, staged=True)
@@ -497,13 +498,13 @@ class GateArguments(unittest.TestCase):
         self.assertIn('captured-new', names)
         self.assertNotIn('README.md', names)
         self.assertNotIn('untracked', names)
-        self.assertNotIn(b'unstaged fixture', gate.out('git', 'show', staged + ':scripts/gate', cwd=self.root))
+        self.assertNotIn(b'unstaged fixture', gate.out('git', 'show', staged + ':tools/gate', cwd=self.root))
         total = gate.freeze(self.root)
         self.assertEqual((self.root / '.git/index').read_bytes(), before)
         names = gate.out('git', 'ls-tree', '-r', '--name-only', total, cwd=self.root).decode().splitlines()
         self.assertIn('README.md', names)
         self.assertIn('untracked', names)
-        self.assertIn(b'unstaged fixture', gate.out('git', 'show', total + ':scripts/gate', cwd=self.root))
+        self.assertIn(b'unstaged fixture', gate.out('git', 'show', total + ':tools/gate', cwd=self.root))
 
     def test_repeat_count_is_forwarded_and_invalid_counts_are_rejected(self):
         cmd = self.slot_command(['--repeat', '60'])
@@ -524,11 +525,11 @@ class GateArguments(unittest.TestCase):
         call.assert_called_once()
         cmd = call.call_args.args[0]
         run_dir = pathlib.Path(cmd[0]).parent
-        self.assertEqual(cmd[:2], [str(run_dir / 'neomacs-slot'), 'velocity-N4'])
-        self.assertEqual((run_dir / 'neomacs-slot').read_bytes(), pathlib.Path(gate.SLOT).read_bytes())
-        self.assertEqual((run_dir / 'neomacs-slot-runner.py').read_bytes(), pathlib.Path(gate.RUNNER).read_bytes())
+        self.assertEqual(cmd[:2], [str(run_dir / 'gate-slot'), 'velocity-N4'])
+        self.assertEqual((run_dir / 'gate-slot').read_bytes(), pathlib.Path(gate.SLOT).read_bytes())
+        self.assertEqual((run_dir / 'gate-slot-runner').read_bytes(), pathlib.Path(gate.RUNNER).read_bytes())
         environment = call.call_args.kwargs['env']
-        self.assertEqual(environment['ROMACS_SLOT_RUNNER'], str(run_dir / 'neomacs-slot-runner.py'))
+        self.assertEqual(environment['ROMACS_SLOT_RUNNER'], str(run_dir / 'gate-slot-runner'))
         self.assertEqual(environment['ROMACS_SLOT'], cmd[0])
         return cmd
 
@@ -652,8 +653,8 @@ class Receipts(unittest.TestCase):
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
         self.git('config', 'commit.gpgsign', 'false')
-        (self.wt / 'scripts').mkdir()
-        (self.wt / 'scripts/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
+        (self.wt / 'tools').mkdir()
+        (self.wt / 'tools/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
         self.oracle = pinned_fixture(self, self.wt)
         (self.wt / 'f.rs').write_text('submitted')
         (self.wt / 'Cargo.toml').write_text('[profile.gate]\ninherits="release"\n')
@@ -690,7 +691,7 @@ class Receipts(unittest.TestCase):
             self.after_submission()
             payload = cmd[cmd.index('--') + 1:]
             self.run_dir = pathlib.Path(payload[payload.index('--run-dir') + 1])
-            self.assertEqual(pathlib.Path(payload[1]).read_bytes(), (self.wt / 'scripts/gate').read_bytes())
+            self.assertEqual(pathlib.Path(payload[1]).read_bytes(), (self.wt / 'tools/gate').read_bytes())
             def admitted():
                 with mock.patch.object(gate.sys, 'argv', payload[1:]), \
                      mock.patch.dict(os.environ, dict(env, **self.slot_env)), \

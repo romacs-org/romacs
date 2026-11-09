@@ -6,7 +6,7 @@ when nothing but the oracle's identity changed.
     rerecord.py --stale [--jobs N]     every recording whose GNU header is not the pin
 
 The oracle is $ROMACS_GNU_ORACLE, refused unless it reports the pin
-(scripts/gnu_oracle.py). Each file is re-recorded IN PLACE by its own
+(tools/lib/gnu_oracle.py). Each file is re-recorded IN PLACE by its own
 recorder, unmodified:
 
   primh evidence    tools/primh/record.py primh SPEC   (spec bound by name AND spec_sha256)

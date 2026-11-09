@@ -1,5 +1,5 @@
 {
-  "rule": "See tools/smells.py: what each smell counts. check fails when a count rises above its floor and when a layout list misses or keeps an entry; a slack crate-smell or layout floor fails too, until lower records it in the same change. Lint floors are ceilings: a drop passes, and lower records drops at checkpoints. Raising a floor or adding an entry is a deliberate hand edit in its own commit, with its reason.",
+  "rule": "See tools/lib/smells.py: what each smell counts. check fails when a count rises above its floor and when a layout list misses or keeps an entry; a slack crate-smell or layout floor fails too, until lower records it in the same change. Lint floors are ceilings: a drop passes, and lower records drops at checkpoints. Raising a floor or adding an entry is a deliberate hand edit in its own commit, with its reason.",
   "long_file_lines": 1500,
   "crates": {
     "romacs-display-protocol": {"allows": 0, "todos": 1, "long_files": 11},

@@ -2,7 +2,7 @@
 """The parity ratchet's own tests (run in the gate by
 gnu-tests/runner/tests/parity_ratchet.rs).
 
-    ROMACS_GNU_ERT=<adapter> python3 tools/parity_ratchet_test.py -v
+    ROMACS_GNU_ERT=<adapter> python3 tools/tests/parity_ratchet_test.py -v
 """
 import contextlib
 import copy
@@ -17,6 +17,7 @@ import time
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'lib'))
 import parity_ratchet as pr  # noqa: E402
 # The honest ratchet's tests run wherever these do (the gate's checker contract).
 from honest_ratchet_test import HonestRatchet  # noqa: E402,F401
@@ -94,7 +95,7 @@ class Compare(unittest.TestCase):
                                  gnu_measurement({'src/fns-tests.el': ['f1', 'f2', 'f3']}))
         self.assertEqual(status, pr.EXIT_HIGHER, out)
         self.assertIn('FAIL-WITH-INSTRUCTION', out)
-        self.assertIn('python3 tools/parity_ratchet.py record', out)
+        self.assertIn('python3 tools/lib/parity_ratchet.py record', out)
 
     def test_a_file_with_no_floor_that_gains_is_higher(self):
         status, out = run_report(ratchet(), 'gnu-files:x', gnu_measurement({'lisp/other-tests.el': ['o1']}))
@@ -958,7 +959,7 @@ class CensusPopulation(unittest.TestCase):
             (directory / lisp).mkdir(parents=True)
         (self.root / 'tools').mkdir()
         import shutil
-        shutil.copyfile(ROOT / 'tools/lisp_oracle.py', self.root / 'tools/lisp_oracle.py')
+        shutil.copyfile(ROOT / 'tools/lib/lisp_oracle.py', self.root / 'tools/lib/lisp_oracle.py')
         for name in ('a.el', 'b.el'):
             for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
                 (directory / lisp / name).write_text('(provide \'fixture)\n')

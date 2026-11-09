@@ -19,9 +19,9 @@ and the production-size integration reproducer are not weakened in debug.
 Run from the repository root:
 
 ```sh
-python3 scripts/dev-loop romacs-text --lib --test structural --test gnudiff
-python3 scripts/dev-loop romacs-text --profile gate --lib --test structural --test gnudiff
-python3 scripts/dev-loop romacs-chars --profile gate
+python3 tools/dev-loop romacs-text --lib --test structural --test gnudiff
+python3 tools/dev-loop romacs-text --profile gate --lib --test structural --test gnudiff
+python3 tools/dev-loop romacs-chars --profile gate
 ```
 
 The `gate` profile is release code generation without debug assertions, so it

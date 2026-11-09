@@ -4,7 +4,7 @@
 One report of the smells the cleanup removes, and a ratchet on each, so a
 removed smell cannot come back. The scope is the unsafe census's: every .rs
 file in a Cargo package, credited to its nearest package
-(tools/unsafe_census.py, which also keeps the unsafe floors in
+(tools/lib/unsafe_census.py, which also keeps the unsafe floors in
 UNSAFE-FLOORS.json; `report` shows its kinds and SAFETY coverage here too).
 
 Per crate:
@@ -171,14 +171,14 @@ def bound(what, have, limit):
     if have > limit:
         return f'{what}: {have}, above its floor {limit}'
     if have < limit:
-        return f'{what}: {have}, below its floor {limit}; record the drop with tools/smells.py lower'
+        return f'{what}: {have}, below its floor {limit}; record the drop with tools/lib/smells.py lower'
     return None
 
 
 def listed(what, have, floor):
     found = [f'{what}: {entry} is new; adding one is a deliberate edit of {FLOORS}'
              for entry in sorted(set(have) - set(floor))]
-    return found + [f'{what}: {entry} is gone; record it with tools/smells.py lower'
+    return found + [f'{what}: {entry} is gone; record it with tools/lib/smells.py lower'
                     for entry in sorted(set(floor) - set(have))]
 
 
@@ -253,7 +253,7 @@ def report(root, floors, now, top=12):
     per_crate = [f'{sum(c.values()):>7} {crate}' for crate, c in
                  sorted(now['lints_by_crate'].items(), key=lambda item: -sum(item[1].values()))]
     lay = now['layout']
-    return '\n'.join(['unsafe (tools/unsafe_census.py):', unsafe, '', 'smells:', *crates, '',
+    return '\n'.join(['unsafe (tools/lib/unsafe_census.py):', unsafe, '', 'smells:', *crates, '',
                       f'longest files ({len(now["long"])} over the limit):', *long, '',
                       f'warnings by lint ({sum(now["lints"].values())}; count, ceiling; '
                       f'{slack} below the ceilings, for `lower`):', *lints, '',

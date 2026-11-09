@@ -22,7 +22,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'gnu-tests'))
-sys.path.insert(0, str(ROOT / 'tools'))
+sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
 from bundled_autoloads import directories
 

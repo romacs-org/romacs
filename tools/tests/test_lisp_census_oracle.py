@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 
-ORACLE = Path(__file__).with_name("lisp-census-oracle.el").resolve()
+ORACLE = (Path(__file__).resolve().parents[1] / "lib/lisp-census-oracle.el").resolve()
 EMACS = shutil.which(os.environ.get("EMACS", "emacs"))
 
 

@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;;; Run: emacs -Q --batch --script scripts/lisp-census-oracle.el --manifest FILE
+;;; Run: emacs -Q --batch --script tools/lib/lisp-census-oracle.el --manifest FILE
 ;;; FILE is a JSON array of source path strings.  One process reads all files,
 ;;; without evaluation.  Output is a JSON object with a `files' array in manifest
 ;;; order, including duplicates.  Each file has status, form_count, forms and
@@ -14,7 +14,7 @@
 ;;; file, never resynchronizing or treating premature EOF as success.
 ;;;
 ;;; Optional execution verdict (one file in a fresh process):
-;;; emacs -Q --batch --script scripts/lisp-census-oracle.el --load-file FILE
+;;; emacs -Q --batch --script tools/lib/lisp-census-oracle.el --load-file FILE
 ;;; This DOES evaluate FILE and is NOT a sandbox.  Never use it for splitting.
 ;;; It reports only the first load error; no later forms are independently tried.
 ;;; Source stdout may precede the load verdict; read its LAST nonempty line as

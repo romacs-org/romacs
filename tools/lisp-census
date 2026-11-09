@@ -115,10 +115,10 @@ def recommendations(rows):
 
 def gnu_oracle_binary(_cache=[]):
     """The pinned GNU, never PATH. A bare 'emacs' is how the distro build became
-    the oracle; scripts/gnu_oracle.py is the one resolver and it fails closed."""
+    the oracle; tools/lib/gnu_oracle.py is the one resolver and it fails closed."""
     if not _cache:
         import importlib.util
-        spec = importlib.util.spec_from_file_location('romacs_gnu_oracle', ROOT / 'scripts/gnu_oracle.py')
+        spec = importlib.util.spec_from_file_location('romacs_gnu_oracle', ROOT / 'tools/lib/gnu_oracle.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _cache.append(str(module.require()['path']))
@@ -127,7 +127,7 @@ def gnu_oracle_binary(_cache=[]):
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
     selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
-    selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
+    selected.update(['tools/lisp-census', 'tools/lib/lisp-census-oracle.el', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
     selected.update(str(p.relative_to(root)) for p in (root / 'gnu-lisp').rglob('*.el'))
     selected.update(str(p.relative_to(root)) for p in (root / 'crates/romacs-vm').rglob('*.rs'))
@@ -351,7 +351,7 @@ def oracle_inventory():
     support = {}
     if (ROOT / 'LISP-GENERATED.json').is_file():
         import importlib.util
-        spec = importlib.util.spec_from_file_location('census_lisp_oracle', ROOT / 'tools/lisp_oracle.py')
+        spec = importlib.util.spec_from_file_location('census_lisp_oracle', ROOT / 'tools/lib/lisp_oracle.py')
         assert spec is not None and spec.loader is not None
         oracle = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(oracle)
@@ -485,7 +485,7 @@ def main():
         artifact = json.loads(args.output.read_text())
         scope = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'gnu-lisp').rglob('*.el'))
         fresh = artifact.get('oracle_inventory') == inventory and artifact.get('mode', 'cold') == args.mode and artifact.get('eager_target', False) is args.eager_target and artifact['input_sha256'] == fingerprint() and artifact.get('scope') == 'whole_tree' and sorted(r['file'] for r in artifact['files']) == scope and artifact['gnu_version'] == subprocess.check_output([gnu_oracle_binary(), '--version'], text=True).splitlines()[0]
-        print('fresh' if fresh else 'STALE: regenerate with python3 scripts/lisp-census.py')
+        print('fresh' if fresh else 'STALE: regenerate with python3 tools/lisp-census')
         return 0 if fresh else 1
     if args.files and args.output.resolve() in {a.resolve() for a in [*ARTIFACTS.values(), EAGER_ARTIFACT]}:
         ap.error('--files requires a separate --output')
@@ -500,7 +500,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='lisp-census-', dir=env['TMPDIR']) as tmp:
         manifest = Path(tmp) / 'manifest.json'
         manifest.write_text(json.dumps(list(map(str, files))))
-        p = subprocess.run([gnu_oracle_binary(), '-Q', '--batch', '--script', str(ROOT / 'scripts/lisp-census-oracle.el'), '--manifest', str(manifest)], capture_output=True, text=True, timeout=120, check=True)
+        p = subprocess.run([gnu_oracle_binary(), '-Q', '--batch', '--script', str(ROOT / 'tools/lib/lisp-census-oracle.el'), '--manifest', str(manifest)], capture_output=True, text=True, timeout=120, check=True)
         oracle = json.loads(p.stdout.splitlines()[-1])['files']
     if len(files) != len(oracle):
         raise RuntimeError('oracle omitted files')

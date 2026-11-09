@@ -28,7 +28,7 @@ class ElispRunner(unittest.TestCase):
 ''')
 
     def run_tests(self, *args, binary=None):
-        return subprocess.run([str(ROOT / 'scripts/test-elisp'), '--core', '--binary', str(binary or self.binary), str(self.fixture), *args], capture_output=True, text=True, timeout=10)
+        return subprocess.run([str(ROOT / 'tools/test-elisp'), '--core', '--binary', str(binary or self.binary), str(self.fixture), *args], capture_output=True, text=True, timeout=10)
 
     def test_pass_fail_and_error_exit_statuses(self):
         for name, status in [('fixture-pass', 'PASS'), ('fixture-fail', 'FAIL'), ('fixture-error', 'ERROR')]:

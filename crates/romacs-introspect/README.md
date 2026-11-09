@@ -44,14 +44,14 @@ core examples below describe the pre-retirement design, not today's population.
 |---|---|---|
 | which names are registered, core arity, special form | **the runtimes**: `romacs-core` `Context::new()` enumerated with `mapatoms`/`subrp`/`subr-arity`; VM2 probed with `(funcall 'NAME)` in a fresh `Vm` per name | `romacs-introspect-live`; committed as `data/registry.json` |
 | registration site, implementing fn, span | parse of `crates/romacs-core/src` and `crates/romacs-vm/src` | `build.rs`, every build whose inputs changed |
-| divergence rows (GNU beside ours, observable) | the prose ledgers `DIVERGENCES.md` and `crates/*/GNU-DIVERGENCES.md`, parsed by a port of `tools/divergence_index.py` | `build.rs` |
+| divergence rows (GNU beside ours, observable) | the prose ledgers `DIVERGENCES.md` and `crates/*/GNU-DIVERGENCES.md`, parsed by a port of `tools/lib/divergence_index.py` | `build.rs` |
 | test mentions | `(name` / `#'name` in every scanned test file (8,223 today) | `build.rs` |
 | Lisp definitions (for honest negatives) | `(defun NAME` and friends under `lisp/` | `build.rs` |
 | commit, input cleanliness, time | `git`, scoped to the inputs above | `build.rs` |
 
 ## Why the registry is live and the spans are parsed
 
-The prototype (`tools/primitive_index.py`) parsed Rust for the names and so
+The prototype (`tools/lib/primitive_index.py`) parsed Rust for the names and so
 reached 1,054 of 1,405 `register_subr` call sites; it called `car` VM2-only and
 `looking-at` not a primitive. The fix is a better source of truth, not a better
 regex: the live core registry has **1,566** subrs, by construction. Source is

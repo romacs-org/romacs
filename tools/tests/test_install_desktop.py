@@ -1,12 +1,13 @@
 """Checkout desktop installation, destination protection and Exec quoting."""
 import contextlib
+import importlib.machinery
 import importlib.util
 import io
 from pathlib import Path
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location("installer", Path(__file__).with_name("install-desktop.py"))
+spec = importlib.util.spec_from_file_location("installer", _source := Path(__file__).resolve().parents[1] / "install-desktop", loader=importlib.machinery.SourceFileLoader("installer", str(_source)))
 assert spec is not None and spec.loader is not None
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
@@ -23,7 +24,7 @@ class DesktopInstallTests(unittest.TestCase):
             launcher = prefix / "bin/romacs"
             desktop = applications / "romacs.desktop"
             original = desktop.read_bytes()
-            self.assertEqual(launcher.resolve(), Path(__file__).resolve().with_name("romacs"))
+            self.assertEqual(launcher.resolve(), Path(__file__).resolve().parents[1] / "romacs")
             entries = [line for line in original.decode().splitlines() if line.startswith("Exec=")]
             command = "Exec=" + installer.exec_quote(launcher)
             self.assertEqual(entries, [command + " %F", command + " --gnu-lisp", command + " --trace-latency"])

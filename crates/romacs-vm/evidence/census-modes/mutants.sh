@@ -2,7 +2,7 @@
 # Census dual-mode mutants: each must make test_lisp_census_modes fail at an assertion.
 . "${ROMACS_CENSUS_ENV:?set ROMACS_CENSUS_ENV to a setup script defining cbuild and EV}"
 B=crates/romacs-vm/src/bin/romacs-vm-census.rs
-P=scripts/lisp-census.py
+P=tools/lisp-census
 run() { # name file old new
   local name=$1 file=$2 old=$3 new=$4
   cp "$file" "$file.orig"

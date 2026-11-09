@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Discovery, ownership and verdicts of tools/python_tests.py."""
+"""Discovery, ownership and verdicts of tools/lib/python_tests.py."""
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
-import python_tests
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+import python_tests  # noqa: E402
 
 
 class Runner(unittest.TestCase):

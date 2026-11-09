@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-spec = importlib.util.spec_from_file_location('gate_limits', pathlib.Path(__file__).with_name('gate_limits.py'))
+spec = importlib.util.spec_from_file_location('gate_limits', pathlib.Path(__file__).resolve().parents[1] / 'lib/gate_limits.py')
 limits = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(limits)
 

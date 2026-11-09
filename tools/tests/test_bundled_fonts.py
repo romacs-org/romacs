@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/bundled_fonts.py: the checked-in fonts pass; a changed file, an
+"""tools/lib/bundled_fonts.py: the checked-in fonts pass; a changed file, an
 unrecorded font and a README without a file's SHA-256 fail."""
 import shutil
 import sys
@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 import bundled_fonts  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class BundledFontsTest(unittest.TestCase):

@@ -1,7 +1,7 @@
 """Real-compositor driver for the journey ladder.
 
 Launches the GUI binary built from this checkout with exactly the environment
-scripts/romacs gives it (ROMACS_LISP_DIR, launch font, RUST_MIN_STACK unset),
+tools/romacs gives it (ROMACS_LISP_DIR, launch font, RUST_MIN_STACK unset),
 on Hyprland workspace 2 without stealing the user's workspace,
 drives it with real Wayland key events (wtype) and reads back:
 
@@ -12,7 +12,7 @@ drives it with real Wayland key events (wtype) and reads back:
                with --trace-scene, every painted glyph with its row role.
   * grim     -- a compositor capture of the client, for corroboration only.
 
-The only difference from scripts/romacs is that stdout is kept in a file
+The only difference from tools/romacs is that stdout is kept in a file
 instead of /dev/null, so the VM's command replies can be read.
 """
 import json, os, subprocess, time

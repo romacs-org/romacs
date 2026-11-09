@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # romacs -- build if needed, then open the romacs GUI on this Wayland session.
 #
-#   scripts/romacs [--loadup | --gnu-lisp] [--geometry WxH] [--trace-latency]
+#   tools/romacs [--loadup | --gnu-lisp] [--geometry WxH] [--trace-latency]
 #
 #   (default)      VM2's own workspace, no GNU Lisp; every journey key is a
 #                  romacs stand-in (also --no-gnu-lisp).

@@ -8,7 +8,7 @@ primh.py, bulk.py and gnu_driver.el are loaded UNMODIFIED: their bytes are
 hashed into every evidence file, so changing them would re-hash every corpus.
 This entry point replaces only how the GNU executable is chosen:
 
-* there is no `--gnu`: the oracle is $ROMACS_GNU_ORACLE (scripts/gnu_oracle.py),
+* there is no `--gnu`: the oracle is $ROMACS_GNU_ORACLE (tools/lib/gnu_oracle.py),
   absolute, never a PATH lookup, and it must REPORT the pin as its own
   `emacs-repository-version` or nothing is recorded;
 * primh's `gnu_sources` are hashed from the oracle's OWN `source-directory`,

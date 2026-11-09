@@ -24,13 +24,13 @@ Where derivation is wrong or incomplete a row may carry an explicit override:
     | H1 | ... | ... | ... | ... |   <!-- symbols: maphash, apply, funcall -->
 
 Usage:
-    python3 tools/divergence_index.py            # write DIVERGENCES.json
-    python3 tools/divergence_index.py --check    # exit 1 if any row has no symbol
+    python3 tools/lib/divergence_index.py            # write DIVERGENCES.json
+    python3 tools/lib/divergence_index.py --check    # exit 1 if any row has no symbol
 """
 from __future__ import annotations
 import argparse, hashlib, json, pathlib, re, sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 # Backticked tokens that are structure, types or prose rather than Lisp symbols.
 # Kept deliberately small: a false keep is visible in the output and easy to
@@ -136,7 +136,7 @@ def main() -> int:
 
     ledgers = ['DIVERGENCES.md'] + [p.relative_to(ROOT).as_posix()
                                      for p in sorted(ROOT.glob('crates/*/GNU-DIVERGENCES.md'))]
-    inputs = sorted([*ledgers, 'tools/divergence_index.py'])
+    inputs = sorted([*ledgers, 'tools/lib/divergence_index.py'])
     rows = []
     for source in ledgers:
         rows += parse(ROOT / source, source)
@@ -148,7 +148,7 @@ def main() -> int:
 
     index = {
         'provenance': {
-            'generated_by': 'tools/divergence_index.py',
+            'generated_by': 'tools/lib/divergence_index.py',
             'input_hash': source_fingerprint(inputs),
             'inputs': inputs,
             'note': 'Derived from the prose ledgers. Do not edit; edit those and regenerate.',

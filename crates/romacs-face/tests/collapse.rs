@@ -238,7 +238,7 @@ fn the_oracles_defface_specs_are_the_trees() {
     assert!(same > 250, "only {same} tree specs matched");
     // No exemptions. lisp/ is GNU's lisp/ at the pin (LISP-PIN.json, R221) and
     // the fixtures are recorded by GNU built at the same pin (fixtures/ORACLE,
-    // scripts/gnu_oracle.py, R228), so every spec must agree. The last
+    // tools/lib/gnu_oracle.py, R228), so every spec must agree. The last
     // exemption, separator-line, existed only because the fixtures came from
     // /usr/bin/emacs at b28750b822d, 320 commits older (GNU 02819227835 added
     // its `(supports :strike-through t)` clause in between); regenerating at

@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 sys.dont_write_bytecode = True
-SOURCE = Path(__file__).with_name('neomacs-slot-runner.py')
+SOURCE = Path(__file__).resolve().parents[1] / 'gate-slot-runner'
 OLD_SOURCE = Path(os.environ.get('NEOMACS_SLOT_OLD_RUNNER', str(SOURCE)))
 REPORT_SOURCE = Path(os.environ.get('NEOMACS_SLOT_REPORT_SOURCE', str(Path(__file__).with_name('cockpit-velocity'))))
 CANDIDATE = SOURCE.with_suffix('.py.new')

@@ -2,7 +2,7 @@
 """Record the arity of every DEFUN in GNU's src/*.c at the Lisp pin.
 
 `write` regenerates crates/romacs-vm/tests/fixtures/gnu_defun_arity.json from
-the pinned commit's Git objects; `check` (run by scripts/check-derived)
+the pinned commit's Git objects; `check` (run by tools/check-derived)
 fails when the committed fixture differs. tests/gnu_arity_audit.rs compares
 it with the arity of each function Romacs defines under a DEFUN's name.
 """
@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from lisp_oracle import GNU_SOURCE  # noqa: E402
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = 'crates/romacs-vm/tests/fixtures/gnu_defun_arity.json'
 DEFUN = re.compile(r'^DEFUN\s*\(\s*"((?:[^"\\]|\\.)+)"\s*,\s*\w+\s*,\s*\w+\s*,\s*(\w+)\s*,\s*(\w+)\s*,', re.M)
 # DEFUNs that GNU's preloaded Lisp replaces unconditionally, and where; GNU
@@ -86,7 +86,7 @@ def build(root, gnu):
     found = arities(sources(gnu, commit))
     for name, file in PRELOADED.items():
         found[name] = lisp_arity(name, git(gnu, 'show', f'{commit}:{file}'))
-    return {'provenance': {'generated_by': 'tools/gnu_arity.py', 'gnu_commit': commit,
+    return {'provenance': {'generated_by': 'tools/lib/gnu_arity.py', 'gnu_commit': commit,
                            'source': 'DEFUN (NAME, F, S, MIN, MAX, ...) in src/*.c; '
                                      'the preloaded Lisp definition for ' + ', '.join(PRELOADED)},
             'arity': found}
@@ -111,7 +111,7 @@ def main():
         print(f'wrote {FIXTURE}')
         return 0
     if not fixture.exists() or fixture.read_text() != fresh:
-        print(f'gnu_arity: {FIXTURE} is stale; run tools/gnu_arity.py write', file=sys.stderr)
+        print(f'gnu_arity: {FIXTURE} is stale; run tools/lib/gnu_arity.py write', file=sys.stderr)
         return 1
     return 0
 

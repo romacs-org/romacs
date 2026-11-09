@@ -3,9 +3,9 @@
 Run from the repository root:
 
 ```sh
-python3 scripts/dev-loop romacs-regex --lib --test cache --test counters --test gnu_scenarios
-python3 scripts/dev-loop romacs-regex --profile gate --lib --test cache --test counters --test gnu_scenarios
-python3 scripts/dev-loop romacs-chars --profile gate
+python3 tools/dev-loop romacs-regex --lib --test cache --test counters --test gnu_scenarios
+python3 tools/dev-loop romacs-regex --profile gate --lib --test cache --test counters --test gnu_scenarios
+python3 tools/dev-loop romacs-chars --profile gate
 ```
 
 The `gate` profile is release code generation without debug assertions, so it

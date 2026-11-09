@@ -17,26 +17,26 @@ export MODULE SELECTOR TEST_FILES EMACS_TEST_TIMEOUT JOBS
 .PHONY: gate-small gate-full check check-expensive check-all check-list check-runner
 
 gate-small:
-	$(PYTHON) scripts/gate $(GATE_ARGS) changed $(BASE)
+	$(PYTHON) tools/gate $(GATE_ARGS) changed $(BASE)
 
 gate-full:
-	$(PYTHON) scripts/gate $(GATE_ARGS) full
+	$(PYTHON) tools/gate $(GATE_ARGS) full
 
 check:
-	$(PYTHON) scripts/test-ert
+	$(PYTHON) tools/test-ert
 
 check-expensive:
-	$(PYTHON) scripts/test-ert --selector '(not (tag :unstable))'
+	$(PYTHON) tools/test-ert --selector '(not (tag :unstable))'
 
 check-all:
-	$(PYTHON) scripts/test-ert --selector t
+	$(PYTHON) tools/test-ert --selector t
 
 check-list:
-	$(PYTHON) scripts/test-ert --list
+	$(PYTHON) tools/test-ert --list
 
 check-runner:
-	$(PYTHON) -m unittest discover -s scripts/tests -p test_module_ert.py
-	$(PYTHON) -m unittest discover -s scripts/tests -p test_gate_changed.py
+	$(PYTHON) -m unittest discover -s tools/tests -p test_module_ert.py
+	$(PYTHON) -m unittest discover -s tools/tests -p test_gate_changed.py
 
 check-%:
-	$(PYTHON) scripts/test-ert --module $*
+	$(PYTHON) tools/test-ert --module $*

@@ -2,7 +2,7 @@
 """Record every variable GNU's C declares with DEFVAR at the Lisp pin.
 
 `write` regenerates crates/romacs-vm/tests/fixtures/gnu_defvars.json from the
-pinned commit's Git objects; `check` (run by scripts/check-derived) fails when
+pinned commit's Git objects; `check` (run by tools/check-derived) fails when
 the committed fixture differs. The GUI's DEFVAR census
 (crates/romacs-vm-gui/src/defun_census.rs) checks that each is bound in the
 loadup world or listed in DEFVAR-CENSUS.tsv.
@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from gnu_arity import git, pin, sources  # noqa: E402
 from lisp_oracle import GNU_SOURCE  # noqa: E402
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = 'crates/romacs-vm/tests/fixtures/gnu_defvars.json'
 DEFVAR = re.compile(r'\bDEFVAR_(LISP|LISP_NOPRO|BOOL|INT|PER_BUFFER|KBOARD)\s*\(\s*"((?:[^"\\]|\\.)+)"')
 
@@ -32,7 +32,7 @@ def build(root, gnu):
             files_of = found.setdefault(m[2].replace('\\\\', '\\').replace('\\"', '"'), [])
             if file not in files_of:
                 files_of.append(file)
-    return {'provenance': {'generated_by': 'tools/gnu_defvars.py', 'gnu_commit': commit,
+    return {'provenance': {'generated_by': 'tools/lib/gnu_defvars.py', 'gnu_commit': commit,
                            'source': 'DEFVAR_LISP, DEFVAR_LISP_NOPRO, DEFVAR_BOOL, DEFVAR_INT, DEFVAR_PER_BUFFER '
                                      'and DEFVAR_KBOARD (NAME, ...) in src/*.c'},
             'defvars': dict(sorted(found.items()))}
@@ -57,7 +57,7 @@ def main():
         print(f'wrote {FIXTURE}')
         return 0
     if not fixture.exists() or fixture.read_text() != fresh:
-        print(f'gnu_defvars: {FIXTURE} is stale; run tools/gnu_defvars.py write', file=sys.stderr)
+        print(f'gnu_defvars: {FIXTURE} is stale; run tools/lib/gnu_defvars.py write', file=sys.stderr)
         return 1
     return 0
 

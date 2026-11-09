@@ -276,7 +276,7 @@ def populations(root, gnu, pin, rev, out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('command', choices=['check', 'populations'])
-    ap.add_argument('--root', default=str(pathlib.Path(__file__).resolve().parents[1]))
+    ap.add_argument('--root', default=str(pathlib.Path(__file__).resolve().parents[2]))
     ap.add_argument('--gnu', default=GNU_SOURCE)
     ap.add_argument('--pin', default=GNU_PIN)
     ap.add_argument('--rev', help='populations: the commit whose GNU Lisp is classified')

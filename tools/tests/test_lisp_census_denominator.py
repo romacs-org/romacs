@@ -1,6 +1,7 @@
 """R218 regression: pinned GNU content, not the bundled-tree denominator."""
 import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
+import importlib.machinery
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('census_r218', Path(__file__).with_name('lisp-census.py'))
+spec = importlib.util.spec_from_file_location('census_r218', _source := Path(__file__).resolve().parents[1] / 'lisp-census', loader=importlib.machinery.SourceFileLoader('census_r218', str(_source)))
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
 
@@ -29,8 +30,8 @@ class DenominatorTests(unittest.TestCase):
                                 '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
                                 'commit', '-qm', 'fixture'], check=True)
             pin = subprocess.check_output(['git', '-C', str(gnu), 'rev-parse', 'HEAD'], text=True).strip()
-            (root / 'tools').mkdir()
-            shutil.copyfile(census.ROOT / 'tools/lisp_oracle.py', root / 'tools/lisp_oracle.py')
+            (root / 'tools/lib').mkdir(parents=True)
+            shutil.copyfile(census.ROOT / 'tools/lib/lisp_oracle.py', root / 'tools/lib/lisp_oracle.py')
             support = root / 'gnu-lisp/generated.el'
             support.write_text('nil')
             manifest = {'gnu_commit': pin,

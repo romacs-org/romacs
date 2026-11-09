@@ -23,7 +23,7 @@ def git_root(root):
     """Where revision metadata lives, which is not always where measurement happens.
 
     The gate measures an extracted archive that has no .git, so revision identity
-    cannot be read there. scripts/gate exports ROMACS_VACUITY_GIT_ROOT naming the
+    cannot be read there. tools/gate exports ROMACS_VACUITY_GIT_ROOT naming the
     candidate worktree; use it ONLY when the measured tree genuinely has no .git,
     so a real repository is never silently overridden. ls-tree reads Git objects
     rather than working files, including an explicitly captured uncommitted tree.

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # check-installed-runtime -- prove an installed share/romacs is the source's Lisp and fonts.
 #
-#   scripts/check-installed-runtime.sh OUT [SRC]
+#   tools/check-installed-runtime.sh OUT [SRC]
 #
 # OUT is an installed prefix (a Nix output or an unpacked release tarball:
 # OUT/share/romacs/...); SRC is the source tree it was built from (default:
 # this checkout). Run at the end of nix/package.nix's postInstall, so a
 # package that drops or alters any runtime file does not build, and by
-# scripts/ci/smoke-release on every release tarball. Written after the
+# tools/ci/smoke-release on every release tarball. Written after the
 # package installed 0 of the 229 lisp-bundled/ files for a week without anyone
 # noticing.
 #

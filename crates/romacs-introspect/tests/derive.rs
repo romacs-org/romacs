@@ -215,7 +215,7 @@ fn ledger_rows_carry_symbols_observability_and_line() {
     );
 }
 
-/// The Rust port of `tools/divergence_index.py` must agree with what that
+/// The Rust port of `tools/lib/divergence_index.py` must agree with what that
 /// script last wrote. If this fails, either the port drifted from the script
 /// or `DIVERGENCES.json` is stale against the ledgers -- both are worth
 /// knowing, and the message says which side to regenerate.
@@ -242,6 +242,6 @@ fn the_rust_ledger_port_agrees_with_divergences_json() {
     let theirs: Vec<_> = py["rows"].as_array().unwrap().iter().map(key).collect();
     assert_eq!(
         ours, theirs,
-        "the ledger port and DIVERGENCES.json disagree; if the .md files changed, run python3 tools/divergence_index.py"
+        "the ledger port and DIVERGENCES.json disagree; if the .md files changed, run python3 tools/lib/divergence_index.py"
     );
 }

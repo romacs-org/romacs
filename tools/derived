@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'lib'))
 from derived_artifacts import ARTIFACTS, regenerate, validate
 
 
@@ -16,9 +16,9 @@ def git(root, *args, check=True):
 
 def setup(root):
     git(root, 'config', '--local', 'merge.romacs-derived.name', 'Defer derived JSON until sources are merged')
-    git(root, 'config', '--local', 'merge.romacs-derived.driver', 'python3 scripts/derived driver %A %B')
+    git(root, 'config', '--local', 'merge.romacs-derived.driver', 'python3 tools/derived driver %A %B')
     git(root, 'config', '--local', 'merge.romacs-derived.recursive', 'binary')
-    git(root, 'config', '--local', 'alias.merge-derived', '!python3 scripts/derived merge')
+    git(root, 'config', '--local', 'alias.merge-derived', '!python3 tools/derived merge')
     print('Installed local driver and git merge-derived alias; no global config or hooks changed.')
 
 
@@ -76,7 +76,7 @@ def main():
         ours = output.read_bytes()
         theirs = Path(args.driver_other).read_bytes()
         output.write_bytes(b'<<<<<<< derived\n' + ours + b'\n=======\n' + theirs + b'\n>>>>>>> regeneration-required\n')
-        print('Derived merge deferred: scripts/derived finish for merges; for rebase/cherry-pick, regenerate, git add artifacts, then continue.', file=sys.stderr)
+        print('Derived merge deferred: tools/derived finish for merges; for rebase/cherry-pick, regenerate, git add artifacts, then continue.', file=sys.stderr)
         return 1
     root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel').stdout.strip())
     try:

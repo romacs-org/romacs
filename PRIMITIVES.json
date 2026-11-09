@@ -1,12 +1,12 @@
 {
  "provenance": {
-  "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "12ca5c13dfed9f602c5159bf5ffad0c65cf7623d047117d8ddab3024d47d83b3",
+  "generated_by": "tools/lib/primitive_index.py",
+  "source_fingerprint": "b59cbc5408cec7c5da7167866da8981de2f1a39c389317fe0f492b2e6dfc5222",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
    "crates/romacs-vm/src/prim.rs",
-   "tools/primitive_index.py"
+   "tools/lib/primitive_index.py"
   ]
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",

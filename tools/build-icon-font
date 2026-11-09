@@ -14,8 +14,8 @@ the family Romacs Icons, a Modified Version of Symbols Nerd Font under the
 SIL Open Font License 1.1, and its glyph sets' licences (assets/icons/LICENSE).
 
 The build is deterministic: no timestamps, glyphs in codepoint order.
-The name table records the sources' digest (tools/icon_font.py), which
-scripts/check-derived compares without fontTools. With --check it rebuilds
+The name table records the sources' digest (tools/lib/icon_font.py), which
+tools/check-derived compares without fontTools. With --check it rebuilds
 into memory and exits 1 when the checked-in TTF differs. Needs fontTools (pinned through the flake's nixpkgs:
 `nix build --inputs-from . nixpkgs#python3.pkgs.fonttools`).
 
@@ -33,7 +33,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.svgLib.path import parse_path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'lib'))
 import icon_font  # noqa: E402
 
 FAMILY = 'Romacs Icons'
@@ -103,7 +103,7 @@ def build(root):
     fb.setupHead(unitsPerEm=1000, created=0, modified=0)
     out = io.BytesIO()
     fb.save(out)
-    # What it holds, for tools/icon_font.py; saving again changes only the
+    # What it holds, for tools/lib/icon_font.py; saving again changes only the
     # name table and head's checksum.
     fb.font['name'].setName(icon_font.payload_digest(out.getvalue()), icon_font.PAYLOAD_NAME_ID, 3, 1, 0x409)
     out = io.BytesIO()
@@ -119,7 +119,7 @@ def main(argv):
     target = root / 'assets/fonts/RomacsIcons.ttf'
     if check:
         if not target.exists() or target.read_bytes() != data:
-            print(f'{target} is stale: run scripts/build-icon-font.py', file=sys.stderr)
+            print(f'{target} is stale: run tools/build-icon-font', file=sys.stderr)
             return 1
         return 0
     target.parent.mkdir(parents=True, exist_ok=True)

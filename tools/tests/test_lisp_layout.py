@@ -5,7 +5,7 @@ import pathlib
 import re
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 GUI_MODULES = (
     'startup', 'find-file', 'buffer-switch', 'workspace-completion',
     'editing', 'dired', 'install-command',
@@ -112,7 +112,7 @@ class LispLayoutTests(unittest.TestCase):
                     self.assertIn(';; Portions Copyright (C) 2010-2026 Free Software Foundation, Inc., from\n;; GNU Emacs lisp/color.el', source)
                 elif file == ROOT / 'rlisp/romacs-theme-modus.el':
                     # Generated from modus-themes.el (GNU ELPA, FSF copyright) by
-                    # scripts/adapt-modus; retains its notice and names the version.
+                    # tools/adapt-modus; retains its notice and names the version.
                     self.assertIn(';; Copyright (C) 2019-2026  Free Software Foundation, Inc.', source)
                     self.assertIn(';; Adapted from modus-themes.el 5.3.0 by Protesilaos Stavrou', source)
                     self.assertRegex(source, r'sha256 [0-9a-f]{64}')

@@ -26,7 +26,7 @@ import sys
 import tomllib
 
 ENV = "ROMACS_GNU_ORACLE"
-REPO = pathlib.Path(__file__).resolve().parent.parent
+REPO = pathlib.Path(__file__).resolve().parents[2]
 REFERENCE = REPO / "parity-reference.toml"
 PROBE = ("(princ (json-serialize (list (cons 'revision (or emacs-repository-version \"\"))"
          " (cons 'version emacs-version))))")
@@ -53,7 +53,7 @@ def path(environ=None):
     value = (os.environ if environ is None else environ).get(ENV)
     if not value:
         raise OracleError(f"${ENV} is unset; set it to the absolute path of GNU Emacs built at "
-                          f"{pin()} (see scripts/build-gnu-oracle.sh). There is no default and "
+                          f"{pin()} (see tools/build-gnu-oracle.sh). There is no default and "
                           "no PATH lookup: that is how /usr/bin/emacs became the oracle.")
     p = pathlib.Path(value)
     if not p.is_absolute():

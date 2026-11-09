@@ -515,7 +515,7 @@ class Pin(unittest.TestCase):
                 run.verify_pin(root)
 
     def test_the_bootstrap_chain_is_the_census_chain(self):
-        tree = ast.parse((run.ROOT / 'scripts' / 'lisp-census.py').read_text())
+        tree = ast.parse((run.ROOT / 'tools' / 'lisp-census').read_text())
         census = next(ast.literal_eval(n.value) for n in ast.walk(tree)
                       if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'BOOTSTRAP_CHAIN'
                                                            for t in n.targets))

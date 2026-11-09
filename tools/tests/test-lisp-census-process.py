@@ -2,6 +2,7 @@
 """Focused real-process controls; no VM build, Lisp edits, or census required."""
 import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -11,8 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('census', ROOT / 'scripts/lisp-census.py')
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('census', _source := ROOT / 'tools/lisp-census', loader=importlib.machinery.SourceFileLoader('census', str(_source)))
 assert spec is not None and spec.loader is not None
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)

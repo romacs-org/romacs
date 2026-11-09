@@ -1,5 +1,5 @@
 {
- "about": "Parity floors. Written ONLY by `python3 tools/parity_ratchet.py record`; checked in the gate (gnu-tests/runner/tests/parity_ratchet.rs, crates/romacs-vm/tests/parity_ratchet.rs) and by scripts/check-derived. gnu_suite.passed counts REDUCED-harness passes (romacs-mini-ert, NOT GNU ert.el); gnu_suite.real_ert counts passes under GNU ert.el; gnu_suite.honest.counted counts GENUINE members whose file loaded. A lost protected member fails; a gain fails until recorded; the vacuous_budget may only decrease, and a budget member that stops passing is progress.",
+ "about": "Parity floors. Written ONLY by `python3 tools/lib/parity_ratchet.py record`; checked in the gate (gnu-tests/runner/tests/parity_ratchet.rs, crates/romacs-vm/tests/parity_ratchet.rs) and by tools/check-derived. gnu_suite.passed counts REDUCED-harness passes (romacs-mini-ert, NOT GNU ert.el); gnu_suite.real_ert counts passes under GNU ert.el; gnu_suite.honest.counted counts GENUINE members whose file loaded. A lost protected member fails; a gain fails until recorded; the vacuous_budget may only decrease, and a budget member that stops passing is progress.",
  "census": {
   "cold": {
    "chain": null,

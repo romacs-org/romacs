@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the GNU-suite floor restatement for review.
 
-    python3 tools/restatement_report.py OLD.json NEW.json [--command FILE] > REPORT.md
+    python3 tools/lib/restatement_report.py OLD.json NEW.json [--command FILE] > REPORT.md
 
 OLD is the ratchet in force (parity-ratchet.json), NEW what
 `parity_ratchet.py record --out NEW.json` measured. The report shows the
@@ -40,7 +40,7 @@ def render(old: dict, new: dict, evidence: dict, command: str | None) -> str:
         '',
         'Nothing here is applied. The ratchet in force stays as it is until a maintainer runs the',
         '`record --lower` command at the end. Every number below was measured by',
-        '`tools/parity_ratchet.py record --out` on the tree named in its provenance.',
+        '`tools/lib/parity_ratchet.py record --out` on the tree named in its provenance.',
         '',
         '## The figures, each labelled',
         '',

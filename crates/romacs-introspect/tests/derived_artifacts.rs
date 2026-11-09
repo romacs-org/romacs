@@ -6,7 +6,7 @@ use std::process::Command;
 fn every_derived_artifact_is_parseable_and_conflict_free() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("python3")
-        .arg(root.join("tools/derived_artifacts.py"))
+        .arg(root.join("tools/lib/derived_artifacts.py"))
         .arg("validate")
         .arg("--root")
         .arg(&root)

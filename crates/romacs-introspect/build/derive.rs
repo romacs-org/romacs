@@ -630,7 +630,7 @@ pub fn lisp_defs(root: &Path) -> (Vec<String>, LispDefs) {
 
 // ------------------------------------------------------------- divergences
 
-/// Port of `tools/divergence_index.py`: rows of the prose ledgers, keyed by the
+/// Port of `tools/lib/divergence_index.py`: rows of the prose ledgers, keyed by the
 /// symbols they affect. The prose stays canonical; this has no content of its
 /// own.
 pub static NOT_A_SYMBOL: LazyLock<Regex> = LazyLock::new(|| {

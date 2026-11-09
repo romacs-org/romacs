@@ -3,7 +3,7 @@
 
 The gate's Rust suites say nothing about behaviour against GNU. The numbers the
 project is judged by -- how many of GNU's own ERT tests pass (gnu-tests/run.py)
-and how many of GNU's Lisp files load (scripts/lisp-census.py, WARM and COLD) --
+and how many of GNU's Lisp files load (tools/lisp-census, WARM and COLD) --
 were protected only by lanes choosing to re-measure. This makes them floors.
 
 parity-ratchet.json (repo root) records, per unit, the exact MEMBERS behind each
@@ -44,7 +44,7 @@ that load. A count is the length of its member list.
         the file's `lowerings` (rule: lowering is only valid when the thing
         measured was replaced, and needs independent review).
     parity_ratchet.py verify [--root DIR] [--base REV]
-        Static, no build (scripts/check-derived runs it): the file is internally
+        Static, no build (tools/check-derived runs it): the file is internally
         consistent, and against the merge-base with master no recorded member
         was dropped without a `lowerings` entry naming it.
     parity_ratchet.py verify --candidate [--base REV]
@@ -80,7 +80,7 @@ import tempfile
 import time
 
 TOOLS = pathlib.Path(__file__).resolve().parent
-DEFAULT_ROOT = TOOLS.parent
+DEFAULT_ROOT = TOOLS.parents[1]
 RATCHET_NAME = 'parity-ratchet.json'
 GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SOURCE = pathlib.Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
@@ -89,7 +89,7 @@ CENSUS_MODES = ('warm', 'cold')
 GATE_SHARDS = 71
 PREFIX = 'parity-ratchet:'
 EXIT_PASS, EXIT_LOWER, EXIT_INVALID, EXIT_HIGHER, EXIT_NOT_MEASURED = 0, 1, 2, 3, 4
-RECORD_COMMAND = 'python3 tools/parity_ratchet.py record'
+RECORD_COMMAND = 'python3 tools/lib/parity_ratchet.py record'
 
 
 class Refusal(Exception):
@@ -110,11 +110,11 @@ def load_module(path: pathlib.Path, name: str):
 def emacs() -> str:
     """The pinned GNU, never PATH. A bare 'emacs' fallback is how the distro
     build became the oracle and every frozen baseline got recorded against the
-    wrong GNU; scripts/gnu_oracle.py is the one resolver and it fails closed."""
+    wrong GNU; tools/lib/gnu_oracle.py is the one resolver and it fails closed."""
     explicit = os.environ.get('GNU_EMACS') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
     if explicit:
         return explicit
-    oracle = load_module(pathlib.Path(__file__).resolve().parent.parent / 'scripts' / 'gnu_oracle.py',
+    oracle = load_module(pathlib.Path(__file__).resolve().parent / 'gnu_oracle.py',
                          'romacs_gnu_oracle')
     return str(oracle.require()['path'])
 
@@ -206,7 +206,7 @@ def measure_real_ert(root: pathlib.Path, members: dict[str, list[str]], binary: 
     of = sum(len(members[f]) for f in files)
     if not os.environ.get('ROMACS_GNU_ORACLE'):
         raise Refusal(EXIT_NOT_MEASURED, 'the real-ERT number needs the pinned GNU as $ROMACS_GNU_ORACLE '
-                      '(scripts/gnu_oracle.py); it is never recorded as a guess')
+                      '(tools/lib/gnu_oracle.py); it is never recorded as a guess')
     with tempfile.TemporaryDirectory(prefix='parity-real-ert-') as tmp:
         out = pathlib.Path(tmp) / 'out'
         p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run', '--harness', 'real',
@@ -262,7 +262,7 @@ def gnu_lisp_paths() -> set[str]:
     return paths
 
 
-# scripts/lisp-census.py kills a file after 10 s. A loading file takes under a
+# tools/lisp-census kills a file after 10 s. A loading file takes under a
 # second (max 0.73 s measured), but the gate runs beside other lanes' builds,
 # so the ratchet allows 30 s: only a file that hangs pays for it, and a loaded
 # file can no longer be lost to host load alone.
@@ -271,7 +271,7 @@ CENSUS_TIMEOUT = 30
 
 def census_population(root: pathlib.Path) -> tuple[set[str], set[str]]:
     """Validate the pristine pin and declared support before choosing targets."""
-    oracle = load_module(root / 'tools/lisp_oracle.py', 'census_lisp_oracle')
+    oracle = load_module(root / 'tools/lib/lisp_oracle.py', 'census_lisp_oracle')
     diagnostic = io.StringIO()
     try:
         with contextlib.redirect_stdout(diagnostic), contextlib.redirect_stderr(diagnostic):
@@ -288,7 +288,7 @@ def census_population(root: pathlib.Path) -> tuple[set[str], set[str]]:
 
 
 def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, timeout: float = CENSUS_TIMEOUT) -> dict:
-    """The census of scripts/lisp-census.py, through its own per-file runner.
+    """The census of tools/lisp-census, through its own per-file runner.
 
     Its main() needs our git repository (the gate's mirror has none) and always
     rebuilds; this drives the same run_file/bootstrap_chain on a given binary.
@@ -306,7 +306,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     with tempfile.TemporaryDirectory(prefix='parity-census-') as tmp:
         manifest = pathlib.Path(tmp) / 'manifest.json'
         manifest.write_text(json.dumps(list(map(str, files))))
-        p = subprocess.run([emacs(), '-Q', '--batch', '--script', str(root / 'scripts/lisp-census-oracle.el'),
+        p = subprocess.run([emacs(), '-Q', '--batch', '--script', str(root / 'tools/lib/lisp-census-oracle.el'),
                             '--manifest', str(manifest)], capture_output=True, text=True, timeout=600)
         if p.returncode:
             raise Refusal(EXIT_NOT_MEASURED, f'GNU form-count oracle failed (exit {p.returncode}): {p.stderr[-800:]}')
@@ -909,8 +909,8 @@ UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
 FINGERPRINTED = ('gnu-lisp', 'rlisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
-                 'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'scripts/lisp-census.py',
-                 'scripts/lisp-census-oracle.el', 'tools/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
+                 'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'tools/lisp-census',
+                 'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
                  'parity-reference.toml',
                  RATCHET_NAME)
 
@@ -1055,7 +1055,7 @@ def account(cleared: dict[str, list[str]], m: dict, root: pathlib.Path) -> tuple
 
 
 def gate_notice(lines: list[str]) -> None:
-    """The gate prints this file on GREEN as well as RED (scripts/gate)."""
+    """The gate prints this file on GREEN as well as RED (tools/gate)."""
     target = os.environ.get('ROMACS_GATE_NOTICES')
     if target and lines:
         with open(target, 'a') as f:
@@ -1064,7 +1064,7 @@ def gate_notice(lines: list[str]) -> None:
 
 
 def gate_evidence(lines: list[str]) -> None:
-    """Every verdict, PASS included, into the gate's run directory (scripts/gate
+    """Every verdict, PASS included, into the gate's run directory (tools/gate
     names the file). A passing nextest test's output is not retained in the
     run's events, so without this a PASS leaves no record of what it measured;
     the adapters refuse to pass unless their verdict line is in this file."""
@@ -1172,7 +1172,7 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'scripts', 'tools/parity_ratchet.py', 'parity-reference.toml']
+    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'scripts', 'tools/lib/parity_ratchet.py', 'parity-reference.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
     ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'gnu-tests/test',
@@ -1328,9 +1328,9 @@ def cmd_record(args) -> int:
                       'nothing was written:\n  ' + '\n  '.join(after[:20]))
     data = {
         'schema': 2,
-        'about': 'Parity floors. Written ONLY by `python3 tools/parity_ratchet.py record`; checked in the gate '
+        'about': 'Parity floors. Written ONLY by `python3 tools/lib/parity_ratchet.py record`; checked in the gate '
                  '(gnu-tests/runner/tests/parity_ratchet.rs, crates/romacs-vm/tests/parity_ratchet.rs) and by '
-                 'scripts/check-derived. gnu_suite.passed counts REDUCED-harness passes (romacs-mini-ert, NOT GNU '
+                 'tools/check-derived. gnu_suite.passed counts REDUCED-harness passes (romacs-mini-ert, NOT GNU '
                  'ert.el); gnu_suite.real_ert counts passes under GNU ert.el; gnu_suite.honest.counted counts GENUINE '
                  'members whose file loaded. A lost protected member fails; a gain fails until recorded; the '
                  'vacuous_budget may only decrease, and a budget member that stops passing is progress.',
@@ -1381,7 +1381,7 @@ def cmd_record(args) -> int:
 
 
 # --------------------------------------------------------------------------
-# Static verification (scripts/check-derived)
+# Static verification (tools/check-derived)
 
 # The gate's ratchet tests, pinned by content. Source-level checks for
 # `#[test]`, `cfg`, `ignore` and friends were defeated twice in review (a
@@ -1393,9 +1393,9 @@ GATE_TESTS = {
     'gnu-tests/runner/tests/candidate_ratchet.rs':
         '446697cc777e43bbaf3899b9dddb6e350a54776c8edae25c696daf0cdd7caba6',
     'gnu-tests/runner/tests/parity_ratchet.rs':
-        'b69c150adc1f71bed8385df15d0b48e87a2abdef96b920f3c6c4a468827c76ab',
+        '0d0510b28388df37f84b5d18d9af80b7aa7d7e4e1d58fb71647d13d402b123d0',
     'crates/romacs-vm/tests/parity_ratchet.rs':
-        '43ced4188fdb6b2929503d0b29b0c519bdc6e57ae470327e1e12240822144366',
+        'b2f22060e362c29c46467bc7edd1950bdeb6075eb8d425c13c686105642d4ac9',
 }
 
 
@@ -1415,7 +1415,7 @@ def wiring(root: pathlib.Path) -> list[str]:
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != pinned:
             problems.append(f'{rel} was edited (sha256 {actual[:12]}, pinned {pinned[:12]}); if the gate must run '
-                            'the ratchet differently, update GATE_TESTS in tools/parity_ratchet.py in the same commit')
+                            'the ratchet differently, update GATE_TESTS in tools/lib/parity_ratchet.py in the same commit')
     return problems
 
 

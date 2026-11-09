@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Payload admission regressions for the ordinary slot runner."""
+import importlib.machinery
 import importlib.util
 import os
 from pathlib import Path
@@ -10,8 +11,8 @@ from unittest.mock import patch
 
 class SlotPayloadTests(unittest.TestCase):
     def setUp(self):
-        source = Path(__file__).with_name('neomacs-slot-runner.py')
-        spec = importlib.util.spec_from_file_location('slot_runner', source)
+        source = Path(__file__).resolve().parents[1] / 'gate-slot-runner'
+        spec = importlib.util.spec_from_file_location('slot_runner', _source := source, loader=importlib.machinery.SourceFileLoader('slot_runner', str(_source)))
         assert spec is not None and spec.loader is not None
         self.runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.runner)

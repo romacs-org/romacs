@@ -67,8 +67,8 @@ repository = "https://git.thanosapollo.org/romacs"
 
 # Lints every package inherits with `[lints] workspace = true`. Every unsafe
 # operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
-# carries its own SAFETY justification. tools/unsafe_census.py (run by
-# scripts/check-derived) fails when a package neither denies this nor is
+# carries its own SAFETY justification. tools/lib/unsafe_census.py (run by
+# tools/check-derived) fails when a package neither denies this nor is
 # listed as pending in UNSAFE-FLOORS.json. Clippy's
 # undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
 # here: existing code would fail it.
@@ -467,14 +467,14 @@ codegen-units = 1
 # the link-time work that only shipped binaries need. Fat LTO with one codegen
 # unit made each romacs-core test binary a 30+ minute single-threaded build;
 # here codegen spreads over every job and an edit rebuilds incrementally.
-# Used by scripts/gate; never for shipped artifacts.
+# Used by tools/gate; never for shipped artifacts.
 [profile.gate]
 inherits = "release"
 lto = "off"
 codegen-units = 256
 incremental = true
 
-# Cheap correctness feedback only; scripts/dev-loop selects a bounded subset.
+# Cheap correctness feedback only; tools/dev-loop selects a bounded subset.
 # Compute-heavy parity/ratchet/performance and GUI suites stay on profile.gate.
 [profile.dev-fast]
 inherits = "test"

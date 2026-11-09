@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # package-release -- assemble and archive a relocatable Linux release.
 #
-#   scripts/package-release NAME BIN_DIR OUT_DIR
+#   tools/package-release NAME BIN_DIR OUT_DIR
 #
 # BIN_DIR holds builds of romacs-vm-gui, romacs-mcp and romacs-agent-host. Writes
 # OUT_DIR/NAME.tar.gz, which unpacks to NAME/:
@@ -11,7 +11,7 @@
 #   share/romacs/{gnu-lisp,rlisp,etc,assets/fonts}  share/applications  share/icons
 #
 # The binary finds share/romacs beside its bin/ (host::runtime_root), so the
-# tree works wherever it is unpacked. scripts/ci/smoke-release checks the
+# tree works wherever it is unpacked. tools/ci/smoke-release checks the
 # archive itself.
 set -euo pipefail
 
@@ -44,7 +44,7 @@ mkdir -p "$stage/share/romacs"
 cp -r "$repo/gnu-lisp" "$repo/rlisp" "$repo/etc" "$stage/share/romacs/"
 mkdir -p "$stage/share/romacs/assets"
 cp -r "$repo/assets/fonts" "$stage/share/romacs/assets/"
-bash "$repo/scripts/install-linux-desktop-assets.sh" "$stage"
+bash "$repo/tools/install-linux-desktop-assets.sh" "$stage"
 cp "$repo/COPYING" "$stage/"
 
 tar -C "$out_dir" --sort=name --owner=0 --group=0 --numeric-owner \

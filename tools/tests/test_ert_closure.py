@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ORACLE_ROOT = Path(os.environ.get("GNU_ORACLE_ROOT", Path.home() / ".cache/gnu-emacs-pin"))
 PIN = __import__("tomllib").loads((ROOT / "parity-reference.toml").read_text())["mirror_commit"]
 GNU = os.environ.get("ROMACS_GNU_ORACLE", str(ORACLE_ROOT / PIN / "bin/emacs"))
@@ -26,13 +26,13 @@ class ClosureControls(unittest.TestCase):
     def test_recorded_require_graphs_reproduce(self):
         for mode in ("load", "all"):
             with self.subTest(mode=mode):
-                result = run("-l", ROOT / "scripts/ert-require-closure.el", SOURCE / "lisp", mode)
+                result = run("-l", ROOT / "tools/lib/ert-require-closure.el", SOURCE / "lisp", mode)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 expected = json.loads((ROOT / f"crates/romacs-vm/evidence/ert-closure/require-{mode}.json").read_text())
                 self.assertEqual(normalize_graph(json.loads(result.stdout)), expected)
 
     def test_missing_require_is_fatal(self):
-        result = run("-l", ROOT / "scripts/ert-require-closure.el", SOURCE / "lisp", "load", "ert-closure-nonexistent-library")
+        result = run("-l", ROOT / "tools/lib/ert-require-closure.el", SOURCE / "lisp", "load", "ert-closure-nonexistent-library")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Unresolved dependency", result.stderr + result.stdout)
 
@@ -42,7 +42,7 @@ class ClosureControls(unittest.TestCase):
             for suffix in ("(", ")"):
                 with self.subTest(suffix=suffix):
                     (Path(directory) / "ert.el").write_text("(provide 'ert)\n" + suffix)
-                    result = run("-l", ROOT / "scripts/ert-require-closure.el", directory, "load")
+                    result = run("-l", ROOT / "tools/lib/ert-require-closure.el", directory, "load")
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("Cannot read", result.stderr + result.stdout)
 
@@ -51,13 +51,13 @@ class ClosureControls(unittest.TestCase):
             with self.subTest(body=body):
                 result = run("-l", SOURCE / "lisp/emacs-lisp/ert.el", "--eval",
                              f"(ert-deftest ert-closure-control () {body})",
-                             "-l", ROOT / "scripts/ert-closure-run.el")
+                             "-l", ROOT / "tools/lib/ert-closure-run.el")
                 self.assertEqual(result.returncode == 0, succeeds, result.stderr)
                 if not succeeds:
                     self.assertIn("ERT run incomplete or unsuccessful", result.stderr + result.stdout)
 
     def test_zero_tests_is_not_execution(self):
-        result = run("-l", SOURCE / "lisp/emacs-lisp/ert.el", "-l", ROOT / "scripts/ert-closure-run.el")
+        result = run("-l", SOURCE / "lisp/emacs-lisp/ert.el", "-l", ROOT / "tools/lib/ert-closure-run.el")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("0 executed, 0 passed", result.stderr + result.stdout)
 

@@ -1,11 +1,12 @@
 """Census assertions; run with unittest discovery from scripts/."""
 import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
+import importlib.machinery
 import importlib.util
 from pathlib import Path
 import unittest
 
-spec = importlib.util.spec_from_file_location('census', Path(__file__).with_name('lisp-census.py'))
+spec = importlib.util.spec_from_file_location('census', _source := Path(__file__).resolve().parents[1] / 'lisp-census', loader=importlib.machinery.SourceFileLoader('census', str(_source)))
 census = importlib.util.module_from_spec(spec)
 try:
     spec.loader.exec_module(census)

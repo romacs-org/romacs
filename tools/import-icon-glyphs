@@ -6,14 +6,14 @@ codepoint and its glyph set. This reads that codepoint's outline from
 Symbols Nerd Font Mono 3.4.0 (the font sources.txt identifies by its
 SHA-256; refused otherwise) and writes it as the one <path> of NAME.svg:
 scaled uniformly to fit a box 600 wide and 700 tall, centred on the
-500-wide cell of the 500-by-1000 box scripts/build-icon-font.py reads (a
+500-wide cell of the 500-by-1000 box tools/build-icon-font reads (a
 wide glyph overhangs its cell by at most a tenth of it on each side, as
 nerd-icons' do), the text baseline at y=800 and the box's middle 315
 above it. Contours keep
 TrueType's direction once the build reverses them.
 
 The import is a one-time step per glyph change: the SVGs are checked in,
-and the font is built from them alone (scripts/build-icon-font.py), so no
+and the font is built from them alone (tools/build-icon-font), so no
 build needs the upstream font. Needs fontTools (pinned through the flake's
 nixpkgs: `nix build --inputs-from . nixpkgs#python3.pkgs.fonttools`).
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # smoke-release -- unpack a release tarball and run it as a new user would.
 #
-#   scripts/ci/smoke-release TARBALL WORK_DIR
+#   tools/ci/smoke-release TARBALL WORK_DIR
 #
 # WORK_DIR must not exist; it is left behind for inspection. The tarball is
 # unpacked there and run with a private HOME and XDG directories and no
@@ -37,7 +37,7 @@ export HOME=$work/home XDG_CACHE_HOME=$work/cache XDG_CONFIG_HOME=$work/config \
     XDG_DATA_HOME=$work/data XDG_RUNTIME_DIR=$work/run TMPDIR=$work/tmp
 unset ROMACS_RUNTIME_ROOT ROMACS_LISP_DIR WAYLAND_DISPLAY DISPLAY
 
-bash "$repo/scripts/check-installed-runtime.sh" "$prefix" "$repo"
+bash "$repo/tools/check-installed-runtime.sh" "$prefix" "$repo"
 
 # GNU Lisp loaded from the tree, and charset maps read from its etc/.
 expected="$prefix/share/romacs/etc/charsets t"
@@ -55,7 +55,7 @@ if [ ! -f "$prefix/share/romacs/assets/fonts/RomacsIcons.ttf" ]; then
     echo "smoke-release: FAIL no icon font in $prefix/share/romacs/assets/fonts" >&2
     exit 1
 fi
-if ! python3 -B "$repo/tools/bundled_fonts.py" check --root "$prefix/share/romacs"; then
+if ! python3 -B "$repo/tools/lib/bundled_fonts.py" check --root "$prefix/share/romacs"; then
     echo "smoke-release: FAIL the bundled fonts in $prefix/share/romacs/assets/fonts are not sources.json's" >&2
     exit 1
 fi

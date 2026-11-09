@@ -3,6 +3,7 @@ import tempfile as _portable_tempfile
 from pathlib import Path as _PortablePath
 import contextlib
 import copy
+import importlib.machinery
 import importlib.util
 import io
 import json
@@ -11,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('census', Path(__file__).with_name('lisp-census.py'))
+spec = importlib.util.spec_from_file_location('census', _source := Path(__file__).resolve().parents[1] / 'lisp-census', loader=importlib.machinery.SourceFileLoader('census', str(_source)))
 assert spec is not None and spec.loader is not None
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)

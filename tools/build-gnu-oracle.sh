@@ -2,7 +2,7 @@
 # Build the recording oracle: GNU Emacs at the pin in parity-reference.toml,
 # installed into a prefix named by that revision (R228).
 #
-#   scripts/build-gnu-oracle.sh            # then: export ROMACS_GNU_ORACLE=$ROOT/$PIN/bin/emacs
+#   tools/build-gnu-oracle.sh            # then: export ROMACS_GNU_ORACLE=$ROOT/$PIN/bin/emacs
 #
 # Builds in a DEDICATED clone ($ROOT/src) so the shared reference checkout's
 # worktree is never touched. Configure mirrors the Arch /usr/bin/emacs the old
@@ -10,7 +10,7 @@
 # tree-sitter, modules) minus distro paths and LTO/hardening CFLAGS, so a
 # drift measurement against the old corpora varies the REVISION, not features.
 # `emacs-repository-version` is frozen into the dump by loadup.el from the
-# clone's git HEAD; scripts/gnu_oracle.py reads it back from the binary.
+# clone's git HEAD; tools/lib/gnu_oracle.py reads it back from the binary.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 PIN=$(sed -n 's/^mirror_commit = "\(.*\)"$/\1/p' "$repo/parity-reference.toml")
@@ -33,4 +33,4 @@ make -j"${JOBS:-10}"     # -j30 was OOM-killed (collect2) beside other lanes' bu
 [ ! -d "$PREFIX" ] || chmod -R u+w "$PREFIX"
 make install
 chmod -R a-w "$PREFIX"
-ROMACS_GNU_ORACLE=$PREFIX/bin/emacs python3 "$repo/scripts/gnu_oracle.py" check
+ROMACS_GNU_ORACLE=$PREFIX/bin/emacs python3 "$repo/tools/lib/gnu_oracle.py" check

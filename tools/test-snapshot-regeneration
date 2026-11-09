@@ -34,8 +34,8 @@ def exercise(root):
     def generate():
         print(run(root, 'cargo', 'run', '-q', '-p', 'romacs-introspect-live',
                   '--', '--write'), flush=True)
-        print(run(root, 'python3', 'tools/divergence_index.py'), flush=True)
-        print(run(root, 'python3', 'tools/primitive_index.py'), flush=True)
+        print(run(root, 'python3', 'tools/lib/divergence_index.py'), flush=True)
+        print(run(root, 'python3', 'tools/lib/primitive_index.py'), flush=True)
         return {path: (root / path).read_bytes() for path in ARTIFACTS}
 
     # Cover regeneration before the source edit is committed, not only clean

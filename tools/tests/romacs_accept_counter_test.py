@@ -8,7 +8,8 @@ import sys
 import tempfile
 import unittest
 
-import romacs_accept_counter as counter
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+import romacs_accept_counter as counter  # noqa: E402
 
 
 class CounterTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # journey-check.sh -- re-measure the first-session journey ladder.
 #
-#   scripts/journey-check.sh [OUT_DIR]
+#   tools/journey-check.sh [OUT_DIR]
 #
 # Builds this checkout's GUI and census binaries in RELEASE into a private
 # target (never the default ~/.cache/romacs/target), then:

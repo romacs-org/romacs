@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""tools/icon_font.py: the checked-in font passes; a font whose sources
+"""tools/lib/icon_font.py: the checked-in font passes; a font whose sources
 changed, or whose glyphs were damaged under an intact record, fails."""
 import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 import icon_font  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class IconFontTest(unittest.TestCase):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The honest GNU-suite ratchet's own tests: member classes, the vacuous
 budget, counting only files that loaded, and the labelled real-ERT number.
-Run in the gate with tools/parity_ratchet_test.py (which imports this file's
+Run in the gate with tools/tests/parity_ratchet_test.py (which imports this file's
 classes). Each test's docstring names the defect it must catch.
 """
 import collections
@@ -13,6 +13,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'lib'))
 import parity_ratchet as pr  # noqa: E402
 
 RX = 'lisp/emacs-lisp/rx-tests.el'

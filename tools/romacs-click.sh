@@ -23,11 +23,11 @@
 #   --dry-run             Show what would happen without clicking
 #
 # Examples:
-#   ./scripts/romacs-click.sh 100 10                        # click tab-bar
-#   ./scripts/romacs-click.sh 200 300 --right               # right-click
-#   ./scripts/romacs-click.sh 100 10 -s /tmp/after.png      # click + screenshot
-#   ./scripts/romacs-click.sh 50 50 --double                # double-click
-#   ./scripts/romacs-click.sh -s /tmp/snap.png              # screenshot only
+#   ./tools/romacs-click.sh 100 10                        # click tab-bar
+#   ./tools/romacs-click.sh 200 300 --right               # right-click
+#   ./tools/romacs-click.sh 100 10 -s /tmp/after.png      # click + screenshot
+#   ./tools/romacs-click.sh 50 50 --double                # double-click
+#   ./tools/romacs-click.sh -s /tmp/snap.png              # screenshot only
 
 set -euo pipefail
 

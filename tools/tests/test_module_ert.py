@@ -41,7 +41,7 @@ class ModuleERT(unittest.TestCase):
         if make:
             command = ['make', '--no-print-directory', 'check-gnosis-agent-romacs', *args]
         else:
-            command = [sys.executable, str(ROOT / 'scripts/test-ert'),
+            command = [sys.executable, str(ROOT / 'tools/test-ert'),
                        '--file', str(self.fixture), *args]
         return subprocess.run(command, cwd=ROOT, env=env, capture_output=True,
                               text=True, timeout=20)
@@ -96,7 +96,7 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('ERT complete:', result.stdout)
 
     def test_unknown_module_and_budget_refuse(self):
-        select = runpy.run_path(str(ROOT / 'scripts/test-ert'))
+        select = runpy.run_path(str(ROOT / 'tools/test-ert'))
         self.assertEqual(select['module_suites']('unknown-module', select['directories'](ROOT)), [])
         for timeout in ['0', 'nan', 'inf']:
             self.assertNotEqual(self.invoke('--timeout', timeout).returncode, 0)
@@ -113,7 +113,7 @@ class ModuleERT(unittest.TestCase):
 (ert-deftest fixture-unstable () :tags '(:unstable) (should nil))
 """)
         env = dict(os.environ, SELECTOR='', ROMACS_TEST_BINARY=str(self.binary))
-        command = [sys.executable, str(ROOT / 'scripts/test-ert'), '--file', str(self.fixture)]
+        command = [sys.executable, str(ROOT / 'tools/test-ert'), '--file', str(self.fixture)]
         result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
@@ -141,7 +141,7 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('EMPTY', result.stdout)
 
     def test_package_selection_keeps_suites_and_leaves_support_to_require(self):
-        select = runpy.run_path(str(ROOT / 'scripts/test-ert'))
+        select = runpy.run_path(str(ROOT / 'tools/test-ert'))
         names = {path.name for path in select['module_suites']('gnosis', select['directories'](ROOT))}
         self.assertIn('gnosis-test-agent-romacs.el', names)
         self.assertIn('gnosis-test-demo.el', names)

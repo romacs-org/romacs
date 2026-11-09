@@ -8,7 +8,7 @@ import tarfile
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).with_name('install.sh')
+SCRIPT = Path(__file__).resolve().parents[1] / 'install.sh'
 NAME = 'romacs-x86_64-linux'
 # Stands in for the binary: records its arguments and succeeds.
 STUB = ('#!/bin/sh\nprintf "%s\\n" "$*" >>"$HOME/romacs-calls"\n'

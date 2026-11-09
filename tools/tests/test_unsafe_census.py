@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/unsafe_census.py: what counts as a site and as documented, the
+"""tools/lib/unsafe_census.py: what counts as a site and as documented, the
 floors ratchet in both directions, and the unsafe_op_in_unsafe_fn ledger."""
 import json
 import shutil
@@ -10,10 +10,10 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 import unsafe_census  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def sites(src):

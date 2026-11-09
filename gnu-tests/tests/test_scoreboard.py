@@ -16,7 +16,7 @@ class Scoreboard(unittest.TestCase):
         with patch.object(run.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as command:
             run.verify_real_lisp(run.PIN_COMMIT)
         self.assertEqual(command.call_args.args[0], [
-            sys.executable, str(run.ROOT / 'tools' / 'lisp_oracle.py'), 'check',
+            sys.executable, str(run.ROOT / 'tools/lib/lisp_oracle.py'), 'check',
             '--root', str(run.ROOT), '--gnu', str(run.GNU_MIRROR), '--pin', run.PIN_COMMIT])
 
     def test_real_lisp_validation_fails_closed(self):
@@ -113,7 +113,7 @@ class Scoreboard(unittest.TestCase):
         import json
         import tempfile
         import ert_report
-        sys.path.insert(0, str(run.ROOT / 'scripts'))
+        sys.path.insert(0, str(run.ROOT / 'tools/lib'))
         import gnu_oracle
         with tempfile.TemporaryDirectory() as tmp:
             args = argparse.Namespace(all=False, files=['lisp/emacs-lisp/ring-tests.el'],

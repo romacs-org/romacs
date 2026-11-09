@@ -15,13 +15,13 @@ import sys
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'tools'))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
 from derived_artifacts import ARTIFACTS
 
 MERGED = 'merged artifacts must describe both source branches'
-OWNED = ('scripts/check-derived', 'scripts/derived', 'tools/derived_artifacts.py',
-         'tools/primitive_index.py', 'tools/divergence_index.py', '.gitattributes',
+OWNED = ('tools/check-derived', 'tools/derived', 'tools/lib/derived_artifacts.py',
+         'tools/lib/primitive_index.py', 'tools/lib/divergence_index.py', '.gitattributes',
          'LISP-BUNDLED.json')
 SNAPSHOT_FIXTURE = '''#!/usr/bin/env python3
 import json
@@ -71,10 +71,10 @@ def fixture(root, real=False):
         for path in (ROOT / 'crates/romacs-vm/src/prims').glob('*.rs'):
             copy(root, path.relative_to(ROOT).as_posix())
         copy(root, 'DIVERGENCES.md')
-        for name in ('tools/lisp_oracle.py', 'tools/parity_ratchet.py'):
+        for name in ('tools/lib/lisp_oracle.py', 'tools/lib/parity_ratchet.py'):
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text('raise SystemExit(0)\n')
-        (root / 'tools/bundled_autoloads.py').write_text(AUTOLOADS_FIXTURE)
+        (root / 'tools/lib/bundled_autoloads.py').write_text(AUTOLOADS_FIXTURE)
     for name in OWNED:
         copy(root, name)
     git(root, 'config', '--local', 'user.name', 'Derived fixture')
@@ -99,7 +99,7 @@ def fixture(root, real=False):
 
 
 def regenerate(root, env):
-    return run(root, sys.executable, 'scripts/derived', 'regenerate', env=env)
+    return run(root, sys.executable, 'tools/derived', 'regenerate', env=env)
 
 
 class DerivedTests(unittest.TestCase):
@@ -118,7 +118,7 @@ class DerivedTests(unittest.TestCase):
                     path = self.root / artifact
                     good = path.read_bytes()
                     path.write_bytes(corrupt)
-                    result = run(self.root, sys.executable, 'scripts/check-derived', env=self.env, check=False)
+                    result = run(self.root, sys.executable, 'tools/check-derived', env=self.env, check=False)
                     self.assertNotEqual(result.returncode, 0, 'frontdoor must reject corrupt ' + artifact)
                     self.assertEqual(path.read_bytes(), corrupt, 'validation must not heal corruption')
                     path.write_bytes(good)
@@ -153,22 +153,22 @@ class DerivedTests(unittest.TestCase):
         value = json.loads(path.read_text())
         value['counts']['rows'] = -100
         path.write_text(json.dumps(value))
-        result = run(self.root, sys.executable, 'scripts/check-derived', env=self.env, check=False)
+        result = run(self.root, sys.executable, 'tools/check-derived', env=self.env, check=False)
         self.assertNotEqual(result.returncode, 0, 'dirty stale derived artifact must not be exempt')
         self.assertNotEqual(json.loads(path.read_text())['counts']['rows'], -100)
 
     def test_failed_generator_rejected(self):
-        (self.root / 'tools/divergence_index.py').write_text('raise SystemExit(37)\n')
-        result = run(self.root, sys.executable, 'scripts/check-derived', env=self.env, check=False)
+        (self.root / 'tools/lib/divergence_index.py').write_text('raise SystemExit(37)\n')
+        result = run(self.root, sys.executable, 'tools/check-derived', env=self.env, check=False)
         self.assertNotEqual(result.returncode, 0, 'generator exit status must be checked')
         self.assertIn('37', result.stdout)
 
     def test_generator_json_and_marker_output_rejected(self):
         for payload in (b'{bad', b'<<<<<<< generator\n'):
-            (self.root / 'tools/divergence_index.py').write_text(f'from pathlib import Path\nPath("DIVERGENCES.json").write_bytes({payload!r})\n')
-            result = run(self.root, sys.executable, 'scripts/check-derived', env=self.env, check=False)
+            (self.root / 'tools/lib/divergence_index.py').write_text(f'from pathlib import Path\nPath("DIVERGENCES.json").write_bytes({payload!r})\n')
+            result = run(self.root, sys.executable, 'tools/check-derived', env=self.env, check=False)
             self.assertNotEqual(result.returncode, 0, 'successful generator must not bypass JSON/marker validation')
-            copy(self.root, 'tools/divergence_index.py')
+            copy(self.root, 'tools/lib/divergence_index.py')
             regenerate(self.root, self.env)
 
     def test_primitive_identity_reaches_commit_fixed_point(self):
@@ -189,7 +189,7 @@ class DerivedTests(unittest.TestCase):
         result = git(self.root, 'merge', '--no-ff', 'derived-right', check=False, env=self.env)
         self.assertNotEqual(result.returncode, 0, 'native merge must defer, not accept arbitrary artifact bytes')
         self.assertIn('PRIMITIVES.json', git(self.root, 'diff', '--name-only', '--diff-filter=U').stdout)
-        run(self.root, sys.executable, 'scripts/derived', 'finish', env=self.env)
+        run(self.root, sys.executable, 'tools/derived', 'finish', env=self.env)
         assert_merged(self.root)
 
     def test_finish_rejects_unstaged_or_untracked_sources(self):
@@ -204,20 +204,20 @@ class DerivedTests(unittest.TestCase):
                     added.write_text('defsubr! { name = "never-committed" }\n')
                 else:
                     source.write_bytes(before + b'\n')
-                result = run(self.root, sys.executable, 'scripts/derived', 'finish', env=self.env, check=False)
+                result = run(self.root, sys.executable, 'tools/derived', 'finish', env=self.env, check=False)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('stage all source resolutions', result.stdout)
                 if untracked:
                     added.unlink()
                 else:
                     source.write_bytes(before)
-        run(self.root, sys.executable, 'scripts/derived', 'finish', env=self.env)
+        run(self.root, sys.executable, 'tools/derived', 'finish', env=self.env)
         assert_merged(self.root)
 
     def test_source_conflict_is_not_resolved_or_committed(self):
         prepare_branches(self.root, self.env, source_conflict=True)
         before = git(self.root, 'rev-parse', 'HEAD').stdout
-        result = run(self.root, sys.executable, 'scripts/derived', 'merge', 'derived-right', env=self.env, check=False)
+        result = run(self.root, sys.executable, 'tools/derived', 'merge', 'derived-right', env=self.env, check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('resolve and stage source conflicts first', result.stdout)
         self.assertEqual(before, git(self.root, 'rev-parse', 'HEAD').stdout)
@@ -225,7 +225,7 @@ class DerivedTests(unittest.TestCase):
 
 
 def prepare_branches(root, env, source_conflict=False):
-    run(root, sys.executable, 'scripts/derived', 'setup', env=env)
+    run(root, sys.executable, 'tools/derived', 'setup', env=env)
     if source_conflict:
         (root / 'shared-source.txt').write_text('base\n')
         git(root, 'add', '.')
@@ -270,13 +270,13 @@ def assert_merged(root):
 def exercise_merge(root, env, mutant=False):
     prepare_branches(root, env)
     if mutant:
-        path = root / 'scripts/derived'
+        path = root / 'tools/derived'
         text = path.read_text()
         anchor = '    regenerate(root)\n    validate(root)\n'
         assert text.count(anchor) == 1, 'mutant must apply exactly once'
         path.write_text(text.replace(anchor, '    validate(root)\n'))
         git(root, 'config', '--local', 'merge.romacs-derived.driver', 'true')
-        git(root, 'add', 'scripts/derived')
+        git(root, 'add', 'tools/derived')
         git(root, 'commit', '-qm', 'Fixture mutant skips regeneration')
     result = git(root, 'merge-derived', 'derived-right', env=env)
     print(result.stdout, end='')
@@ -298,17 +298,17 @@ def main():
         with tempfile.TemporaryDirectory(prefix='derived-baseline-', dir=os.environ.get('TMPDIR')) as tmp:
             root = Path(tmp) / 'repo'
             env = fixture(root)
-            baseline = git(ROOT, 'show', args.baseline_commit + ':scripts/check-derived').stdout
+            baseline = git(ROOT, 'show', args.baseline_commit + ':tools/check-derived').stdout
             assert 'preexisting' in baseline, 'baseline no longer contains dirty-artifact exemption'
-            (root / 'scripts/check-derived').write_text(baseline)
-            (root / 'tools/primitive_index.py').write_text(git(
-                ROOT, 'show', args.baseline_commit + ':tools/primitive_index.py').stdout)
+            (root / 'tools/check-derived').write_text(baseline)
+            (root / 'tools/lib/primitive_index.py').write_text(git(
+                ROOT, 'show', args.baseline_commit + ':tools/lib/primitive_index.py').stdout)
             observed = []
             for name in ARTIFACTS:
                 path = root / name
                 good = path.read_bytes()
                 path.write_text('<<<<<<< corrupt\n')
-                result = run(root, sys.executable, 'scripts/check-derived', env=env, check=False)
+                result = run(root, sys.executable, 'tools/check-derived', env=env, check=False)
                 if result.returncode == 0:
                     observed.append(name)
                 path.write_bytes(good)
@@ -316,17 +316,17 @@ def main():
             print('BASELINE RED: frontdoor accepted corrupt artifacts: ' + ', '.join(observed))
             primitive = root / 'PRIMITIVES.json'
             primitive.write_text('<<<<<<< corrupt\n')
-            failed = run(root, sys.executable, 'tools/primitive_index.py', env=env, check=False)
+            failed = run(root, sys.executable, 'tools/lib/primitive_index.py', env=env, check=False)
             assert failed.returncode and 'JSONDecodeError' in failed.stdout, 'primitive generator must reproduce old-output parse failure'
             print('BASELINE RED: primitive generator parses corrupt old output and raises JSONDecodeError')
-            copy(root, 'tools/primitive_index.py')
+            copy(root, 'tools/lib/primitive_index.py')
             regenerate(root, env)
-            copy(root, 'scripts/check-derived')
+            copy(root, 'tools/check-derived')
             for name in ARTIFACTS:
                 path = root / name
                 good = path.read_bytes()
                 path.write_text('<<<<<<< corrupt\n')
-                result = run(root, sys.executable, 'scripts/check-derived', env=env, check=False)
+                result = run(root, sys.executable, 'tools/check-derived', env=env, check=False)
                 assert result.returncode and path.read_text() == '<<<<<<< corrupt\n', 'candidate must reject corruption without healing'
                 path.write_bytes(good)
             print('CANDIDATE GREEN: same corruption refused before healing for all four artifacts')

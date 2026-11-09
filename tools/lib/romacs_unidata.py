@@ -30,7 +30,7 @@ TABLES = {
 # A get or put function takes (CHAR VAL TABLE); a describer takes (VAL).
 ARITY = {b'771': ('get-', 'put-'), b'257': ('describe-',)}
 FORM = b'(define-char-code-property '
-NOTE = b';; romacs: GNU byte code replaced by rlisp/romacs-unidata.el functions (tools/romacs_unidata.py).\n'
+NOTE = b';; romacs: GNU byte code replaced by rlisp/romacs-unidata.el functions (tools/lib/romacs_unidata.py).\n'
 
 
 def byte_code_spans(text):

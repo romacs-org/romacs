@@ -2,7 +2,7 @@
 # Ledger 214: check that a GNU Emacs is the one this project's parity numbers
 # are measured against, and print the stamp a published number must carry.
 #
-#   scripts/parity-reference-attest.sh EDITOR [fingerprint|exhaustive]
+#   tools/parity-reference-attest.sh EDITOR [fingerprint|exhaustive]
 #
 # Prints ONE line on stdout -- the stamp -- and exits 0 when the editor is the
 # pin.  On any disagreement it writes a named refusal to stderr and exits 3.

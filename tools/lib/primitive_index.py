@@ -13,12 +13,12 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 VM2 = ROOT / 'crates/romacs-vm/src'
 
 
 def source_fingerprint(inputs):
-    paths = {ROOT / 'tools/primitive_index.py'}
+    paths = {ROOT / 'tools/lib/primitive_index.py'}
     for name in inputs:
         path = ROOT / name
         paths.update(path.rglob('*.rs') if path.is_dir() else [path])
@@ -70,11 +70,11 @@ def vm2_primitives():
 
 def build():
     inputs = ['crates/romacs-vm/src/lib.rs', 'crates/romacs-vm/src/prims',
-              'crates/romacs-vm/src/prim.rs', 'tools/primitive_index.py']
+              'crates/romacs-vm/src/prim.rs', 'tools/lib/primitive_index.py']
     entries = vm2_primitives()
     return {
         'provenance': {
-            'generated_by': 'tools/primitive_index.py',
+            'generated_by': 'tools/lib/primitive_index.py',
             'source_fingerprint': source_fingerprint(inputs),
             'inputs': inputs,
         },

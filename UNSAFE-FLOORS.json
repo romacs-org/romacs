@@ -1,5 +1,5 @@
 {
-  "rule": "See tools/unsafe_census.py: what counts as a site and as documented. check fails when a crate is above or below its floor; lower records a drop; raising a floor is a deliberate hand edit.",
+  "rule": "See tools/lib/unsafe_census.py: what counts as a site and as documented. check fails when a crate is above or below its floor; lower records a drop; raising a floor is a deliberate hand edit.",
   "crates": {
     "romacs-allocator": {"sites": 3, "undocumented": 3},
     "romacs-attach": {"sites": 2, "undocumented": 0},
