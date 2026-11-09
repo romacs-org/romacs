@@ -47,7 +47,8 @@ possible; say so where you do.
   smell or layout count is recorded with `lower` in the same change. Lint
   counts are ceilings instead: a drop passes, and `lower` records it at
   checkpoints. A new top-level entry or a raised floor is a deliberate commit
-  with its reason.
+  with its reason. A merge conflict in it: `python3 tools/smells.py resolve`,
+  then `lower`.
 - Follow the real consumer through its next failing form. Close a related
   dependency path end to end before expanding into unrelated primitives.
 - Keep bootstrap regimes and compatibility adaptations explicit. Preserve promised

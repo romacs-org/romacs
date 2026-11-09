@@ -185,6 +185,19 @@ class RatchetTest(unittest.TestCase):
     def test_a_crate_at_zero_leaves_the_file(self):
         self.assertEqual(smells.lowered(floors(), now(allows=0, todos=0, long_files=0))['crates'], {})
 
+    def test_a_conflict_keeps_both_sides(self):
+        ours = floors()
+        theirs = floors(root=['crates', 'ledger'], legacy_primitives=3)
+        theirs['lints'] = {'clippy::doc_markdown': 2, 'clippy::new': 4}
+        theirs['crates'] = {'a': {'allows': 1, 'todos': 5, 'long_files': 1}, 'b': {'allows': 1, 'todos': 0,
+                                                                             'long_files': 0}}
+        both = smells.resolved(ours, theirs)
+        self.assertEqual(both['lints'], {'clippy::doc_markdown': 3, 'clippy::new': 4})
+        self.assertEqual(both['crates'], {'a': {'allows': 2, 'long_files': 1, 'todos': 5},
+                                          'b': {'allows': 1, 'long_files': 0, 'todos': 0}})
+        self.assertEqual(both['layout']['root'], ['crates', 'ledger', 'tools'])
+        self.assertEqual(both['layout']['legacy_primitives'], 5)
+
     def test_the_dump_is_the_floors(self):
         self.assertEqual(json.loads(smells.dump(floors())), floors())
 

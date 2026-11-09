@@ -42,7 +42,12 @@ would put this file in every commit and every merge. `lower` only lowers floors
 and drops listed entries that are gone. Raising a floor or adding an entry is
 a hand edit, made deliberately in its own commit with its reason.
 
-usage: smells.py check|report|lower [--root ROOT] [--clippy-json FILE]
+A merge conflict in the floors file: `resolve` writes the larger floor of the
+two sides for each count and both sides' entries for each list, so neither
+side's deliberate raise is lost; then `lower` records what the merged tree
+dropped.
+
+usage: smells.py check|report|lower|resolve [--root ROOT] [--clippy-json FILE]
        smells.py report --floors   (counts in the floors file's format)
 """
 import argparse
@@ -233,6 +238,18 @@ def lowered(floors, now):
                        **{key: min(old[key], now['layout'][key]) for key in COUNTED}}}
 
 
+def resolved(ours, theirs):
+    """The floors that hold both sides of a merge: the larger of each count,
+    the union of each list."""
+    def larger(a, b):
+        return {k: larger(a.get(k, {}), b.get(k, {})) if isinstance(a.get(k, b.get(k)), dict)
+                else sorted(set(a.get(k, [])) | set(b.get(k, []))) if isinstance(a.get(k, b.get(k)), list)
+                else max(a.get(k, 0), b.get(k, 0))
+                for k in sorted(set(a) | set(b))}
+    return {**ours, 'crates': larger(ours['crates'], theirs['crates']),
+            'lints': larger(ours['lints'], theirs['lints']), 'layout': larger(ours['layout'], theirs['layout'])}
+
+
 def as_floors(rule, long_file_lines, now):
     """NOW in the floors file's shape: what `report --floors` prints."""
     crates = {c: {s: t[s] for s in CRATE_SMELLS} for c, t in sorted(now['crates'].items())
@@ -288,12 +305,22 @@ def report(root, floors, now, top=12):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower'])
+    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve'])
     parser.add_argument('--root', default='.')
     parser.add_argument('--clippy-json', help="cargo clippy's JSON messages, instead of running it")
     parser.add_argument('--floors', action='store_true', help='report: print the counts as a floors file')
     args = parser.parse_args()
     path = Path(args.root) / FLOORS
+    if args.command == 'resolve':
+        sides = [subprocess.run(['git', '-C', args.root, 'show', f':{stage}:{FLOORS}'], capture_output=True,
+                                text=True) for stage in (2, 3)]
+        if any(side.returncode for side in sides):
+            print(f'smells: {FLOORS} is not in conflict', file=sys.stderr)
+            return 2
+        floors = resolved(*(json.loads(side.stdout) for side in sides))
+        path.write_text(dump({**floors, 'layout': {k: floors['layout'][k] for k in (*LISTED, *COUNTED)}}))
+        print(f'smells: {FLOORS} holds both sides; run `tools/smells.py lower`, then git add it')
+        return 0
     floors = json.loads(path.read_text())
     try:
         now = measure(args.root, floors, args.clippy_json)
