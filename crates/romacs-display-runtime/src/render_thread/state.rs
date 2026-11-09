@@ -827,8 +827,7 @@ pub(super) enum SceneDraw {
 
 pub(super) struct RenderApp {
     pub(super) comms: RenderComms,
-    pub(super) menus: crate::menus::MenuPresentation,
-    pub(super) tooltips: crate::tooltips::Tooltips,
+    pub(super) menu_bar: crate::menu_bar::MenuBar,
 
     /// Display-lifetime owner for decoded application icon data and native
     /// Wayland toplevel-icon protocol state.
@@ -1090,8 +1089,7 @@ impl RenderApp {
             startup_error: None,
             startup_commands: Default::default(),
             frame_leases: Default::default(),
-            menus: crate::menus::MenuPresentation::default(),
-            tooltips: crate::tooltips::Tooltips::default(),
+            menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
             #[cfg(feature = "video")]
             video_wake: romacs_video::VideoWake::noop(),

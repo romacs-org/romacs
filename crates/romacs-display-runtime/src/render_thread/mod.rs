@@ -67,7 +67,6 @@ mod window_events;
 pub(crate) use bootstrap::run_render_loop_current_thread;
 #[cfg(target_os = "linux")]
 pub(crate) use bootstrap::build_render_event_loop_wayland;
-pub(crate) use lifecycle::PopupCommit;
 pub(crate) use startup::{
     InitialWindowLifetime, InitialWindowReceiver, InitialWindowReply, InitialWindowSize,
 };

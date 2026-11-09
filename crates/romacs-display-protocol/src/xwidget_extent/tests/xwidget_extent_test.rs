@@ -40,45 +40,6 @@ fn deserialization_goes_through_the_constructor() {
     }
 }
 
-/// GNU keeps the widget, glyph, and clip extents separate.  This is the
-/// protocol seam consumed by native placement, Linux composition, pointer
-/// hit-testing, and cursor geometry; callers should not need to reconstruct
-/// those meanings from three unrelated `f32` fields.
-#[test]
-fn presentation_geometry_keeps_content_advance_and_clip_distinct() {
-    let content = XwidgetContentExtent::new(600.0, 40.0).expect("content extent");
-    let advance = XwidgetLayoutAdvance::new(Px(304.0)).expect("layout advance");
-    let origin =
-        GeometryPoint::<FrameSpace, LogicalPixels>::from_px(8.0, 16.0).expect("frame-local origin");
-    let clip = GeometryRect::<FrameSpace, LogicalPixels>::new(0.0, 0.0, 312.0, 120.0)
-        .expect("frame-local clip");
-    let presentation = XwidgetPresentationGeometry::new(origin, content, advance, Some(clip));
-
-    let slot = presentation.layout_slot_rect();
-    assert_eq!(
-        (slot.x(), slot.y(), slot.width(), slot.height()),
-        (8.0, 16.0, 304.0, 40.0)
-    );
-
-    let visible = presentation
-        .resolve_visible(None)
-        .expect("valid geometry")
-        .expect("part of the widget is visible");
-    assert_eq!(visible.content_rect().width(), 600.0);
-    assert_eq!(visible.visible_rect().width(), 304.0);
-    assert_eq!(
-        visible.texture_coordinates().as_array(),
-        [0.0, 304.0 / 600.0, 0.0, 1.0]
-    );
-
-    let point = GeometryPoint::<FrameSpace, LogicalPixels>::from_px(300.0, 20.0)
-        .expect("frame-local pointer");
-    let content_point = visible
-        .content_point_at(point)
-        .expect("point lies in the visible portion");
-    assert_eq!((content_point.x(), content_point.y()), (292.0, 4.0));
-}
-
 #[test]
 fn an_xwidget_layout_advance_is_finite_and_strictly_positive() {
     assert_eq!(

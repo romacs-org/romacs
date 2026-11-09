@@ -720,7 +720,7 @@ impl RenderComms {
     ///
     /// After converting the display event, the bridge owns notifying the
     /// evaluator's wait backend.
-    pub fn send_input(&self, event: InputEvent) {
+    pub(crate) fn send_input(&self, event: InputEvent) {
         let _ = self.send_input_with_receipt(event);
     }
 

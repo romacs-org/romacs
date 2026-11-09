@@ -2283,7 +2283,7 @@ impl WgpuGlyphAtlas {
     }
 
     /// Set font metrics
-    pub fn set_metrics(&mut self, font_size: f32, line_height: f32) {
+    pub(crate) fn set_metrics(&mut self, font_size: f32, line_height: f32) {
         if (self.default_font_size - font_size).abs() > 0.1
             || (self.default_line_height - line_height).abs() > 0.1
         {

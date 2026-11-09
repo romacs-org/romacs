@@ -301,7 +301,7 @@ impl RenderApp {
         ) {
             return;
         }
-        // Retirement precedes menus, tooltips and IME interception: a
+        // Retirement precedes menu-bar and IME interception: a
         // release/focus loss cannot leave repeat authority behind there.
         match &event {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
@@ -312,53 +312,15 @@ impl RenderApp {
             }
             _ => {}
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .tooltips
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
-        {
-            return;
-        }
-        let live_owner = self.frame_windows.get_by_winit(window_id).is_some();
-        let dismiss = match &event {
-            WindowEvent::PointerButton {
-                state: ElementState::Pressed,
-                ..
-            }
-            | WindowEvent::MouseWheel { .. } => live_owner,
-            WindowEvent::KeyboardInput { event, .. } => {
-                live_owner && event.state == ElementState::Pressed
-            }
-            WindowEvent::PointerLeft { .. } => {
-                self.tooltips.owns_parent(window_id)
-                    || (live_owner && self.tooltips.owner().is_none())
-            }
-            WindowEvent::CloseRequested | WindowEvent::Destroyed => {
-                self.tooltips.owns_parent(window_id)
-            }
-            _ => false,
-        };
-        if dismiss {
-            self.tooltips.hide();
-        }
         if self.handle_native_menu_bar_event(window_id, &event)
             || self.handle_native_menu_bar_key(window_id, &event)
         {
             return;
         }
-        if let (Some(gpu), Some(renderer)) = (&self.gpu, &mut self.renderer)
-            && self
-                .menus
-                .event(window_id, &event, &gpu.device, &gpu.queue, renderer)
+        if self.gpu.is_some()
+            && self.renderer.is_some()
+            && self.menu_bar.event(window_id, &event)
         {
-            // Reconcile native hierarchy changes after this event batch,
-            // never while winit is dispatching a borrowed update batch.
-            while let Some(index) = self.menus.take_result() {
-                self.comms.send_input(InputEvent::MenuSelection {
-                    index: index.index(),
-                    token: Some(index.token),
-                });
-            }
             self.sync_menu_heading();
             return;
         }
@@ -451,7 +413,7 @@ impl RenderApp {
                 let retirements = if focused {
                     Vec::new()
                 } else {
-                    let menu_owns_focus = self.menus.owns_parent(window_id);
+                    let menu_owns_focus = self.menu_bar.owns_parent(window_id);
                     self.frame_windows
                         .get_by_winit_mut(window_id)
                         .map(|window| {

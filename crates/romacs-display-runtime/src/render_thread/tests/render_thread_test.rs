@@ -819,8 +819,8 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
     let window = app.frame_windows.primary_window_mut().unwrap();
     let owner = window.render.emacs_frame_id;
     window.render.compositor.current_frame = Some(frame);
-    app.menus.select_heading(
-        crate::menus::MenuHeading {
+    app.menu_bar.select(
+        crate::menu_bar::MenuHeading {
             frame: owner,
             parent: winit::window::WindowId::from_raw(1),
             key: "help-menu".into(),
@@ -830,13 +830,13 @@ fn keyboard_heading_switch_uses_controller_identity_and_wraps() {
         false,
     );
     assert!(app.switch_native_menu_heading(-1));
-    assert_eq!(app.menus.heading().unwrap().key, "lisp-interaction");
+    assert_eq!(app.menu_bar.heading().unwrap().key, "lisp-interaction");
     assert!(app.switch_native_menu_heading(1));
-    assert_eq!(app.menus.heading().unwrap().key, "help-menu");
-    let heading = app.menus.heading().unwrap().clone();
+    assert_eq!(app.menu_bar.heading().unwrap().key, "help-menu");
+    let heading = app.menu_bar.heading().unwrap().clone();
     assert_eq!(
-        app.menus.select_heading(heading, false),
-        crate::menus::HeadingAction::Keep
+        app.menu_bar.select(heading, false),
+        crate::menu_bar::HeadingAction::Keep
     );
 }
 

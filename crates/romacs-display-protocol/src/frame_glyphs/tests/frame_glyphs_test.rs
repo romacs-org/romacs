@@ -1632,34 +1632,6 @@ fn add_video_appends_video_glyph() {
 }
 
 #[test]
-fn add_xwidget_appends_xwidget_glyph() {
-    let mut buf = FrameGlyphBuffer::new();
-    let content = crate::XwidgetContentExtent::new(800.0, 600.0).expect("content extent");
-    let presentation = crate::XwidgetPresentationGeometry::new(
-        crate::GeometryPoint::<crate::FrameSpace, crate::LogicalPixels>::from_px(0.0, 0.0)
-            .expect("frame-local origin"),
-        content,
-        crate::XwidgetLayoutAdvance::new(crate::Px(800.0)).expect("layout advance"),
-        None,
-    );
-    buf.add_xwidget(XwidgetId::new(99), WebViewId::new(700), presentation);
-
-    match &buf.glyphs[0] {
-        FrameGlyph::Xwidget {
-            xwidget_id,
-            webview_id,
-            presentation,
-            ..
-        } => {
-            assert_eq!(xwidget_id.get(), 99);
-            assert_eq!(webview_id.get(), 700);
-            assert_eq!(presentation.content_extent(), content);
-        }
-        other => panic!("Expected Xwidget glyph, got {:?}", other),
-    }
-}
-
-#[test]
 fn slot_glyph_matches_media_slots() {
     let mut buf = FrameGlyphBuffer::new();
     buf.add_image(ImageId::new(42), 16.0, 32.0, 320.0, 240.0);

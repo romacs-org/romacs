@@ -2006,32 +2006,6 @@ impl FrameGlyphBuffer {
         });
     }
 
-    /// Add an xwidget glyph whose slot is `slot_width` wide: the widget's
-    /// `content` width when nothing cropped it, less when the right edge did.
-    pub fn add_xwidget(
-        &mut self,
-        xwidget_id: XwidgetId,
-        webview_id: WebViewId,
-        presentation: XwidgetPresentationGeometry<FrameSpace>,
-    ) {
-        let clip = self.current_clip_rect.map(|clip| {
-            GeometryRect::<FrameSpace, LogicalPixels>::new(clip.x, clip.y, clip.width, clip.height)
-                .expect("a frame draw-context clip has valid geometry")
-        });
-        let presentation = presentation.with_clip(clip);
-        let origin = presentation.origin();
-        self.glyphs.push(FrameGlyph::Xwidget {
-            window_id: self.current_window_id,
-            row_role: self.current_row_role,
-            slot_id: Some(self.current_slot_id(origin.x(), origin.y())),
-            xwidget_id,
-            webview_id,
-            presentation,
-            face_id: self.current_face_id,
-            box_vertical_edges: BoxVerticalEdges::Both,
-        });
-    }
-
     /// Register a resolved fringe bitmap for this frame, keyed by registry
     /// index. Idempotent: the same index may be registered once per row that
     /// references it; we keep a single copy.

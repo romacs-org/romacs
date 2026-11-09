@@ -109,7 +109,7 @@ impl MediaBudget {
     }
 
     /// Unregister a media item
-    pub fn unregister(&mut self, media_type: MediaType, id: u32) {
+    pub(crate) fn unregister(&mut self, media_type: MediaType, id: u32) {
         let key = self
             .entries
             .iter()

@@ -4,7 +4,7 @@
     "romacs-allocator": {"sites": 3, "undocumented": 0},
     "romacs-attach": {"sites": 2, "undocumented": 0},
     "romacs-display-protocol": {"sites": 1, "undocumented": 0},
-    "romacs-display-runtime": {"sites": 21, "undocumented": 0},
+    "romacs-display-runtime": {"sites": 20, "undocumented": 0},
     "romacs-font": {"sites": 31, "undocumented": 0},
     "romacs-font-materializer": {"sites": 2, "undocumented": 0},
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
@@ -16,5 +16,7 @@
     "romacs-vm": {"sites": 882, "undocumented": 493},
     "romacs-vm-gui": {"sites": 11, "undocumented": 2}
   },
-  "unsafe_op_in_unsafe_fn_pending": {}
+  "unsafe_op_in_unsafe_fn_pending": {
+
+  }
 }
