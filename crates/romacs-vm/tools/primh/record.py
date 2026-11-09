@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[3] / "scripts"))
+sys.path.insert(0, str(HERE.parents[3] / "tools/lib"))
 import gnu_oracle  # noqa: E402
 
 

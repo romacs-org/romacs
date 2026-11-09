@@ -64,6 +64,7 @@ import concurrent.futures
 import contextlib
 import fcntl
 import hashlib
+import importlib.machinery
 import importlib.util
 import io
 import json
@@ -101,7 +102,9 @@ class Refusal(Exception):
 
 
 def load_module(path: pathlib.Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
+    # A command without .py has no loader by suffix: name one.
+    spec = importlib.util.spec_from_file_location(
+        name, path, loader=importlib.machinery.SourceFileLoader(name, str(path)))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -295,9 +298,9 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     """
     if not binary or not pathlib.Path(binary).is_file():
         raise Refusal(EXIT_NOT_MEASURED, f'romacs-vm-census binary {binary!r} does not exist')
-    lc = load_module(root / 'scripts' / 'lisp-census.py', 'lisp_census')
+    lc = load_module(root / 'tools' / 'lisp-census', 'lisp_census')
     if pathlib.Path(lc.ROOT).resolve() != root.resolve():
-        raise Refusal(EXIT_INVALID, f'lisp-census.py resolves ROOT {lc.ROOT}, not {root}')
+        raise Refusal(EXIT_INVALID, f'tools/lisp-census resolves ROOT {lc.ROOT}, not {root}')
     gnu, support = census_population(root)
     files = [root / rel for rel in sorted(gnu | support)]
     if not files:
@@ -1172,11 +1175,11 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'scripts', 'tools/lib/parity_ratchet.py', 'parity-reference.toml']
+    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'tools', 'parity-reference.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
     ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'gnu-tests/test',
-                                    'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'scripts').splitlines()
+                                    'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'tools').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored
 
@@ -1185,7 +1188,7 @@ def python_cache(path: str) -> bool:
     """Only Python's own bytecode cache next to the scripts is harmless;
     anything ignored under gnu-lisp/ or the GNU import can change a measurement."""
     parts = pathlib.PurePosixPath(path.rstrip('/')).parts
-    return (parts[:1] == ('scripts',) and '__pycache__' in parts
+    return (parts[:1] == ('tools',) and '__pycache__' in parts
             and (parts[-1] == '__pycache__' or parts[-1].endswith('.pyc')))
 
 

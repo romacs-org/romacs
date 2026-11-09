@@ -35,7 +35,7 @@ from pathlib import Path
 
 PRIMH = Path(__file__).resolve().parent.parent
 REPO = PRIMH.parents[3]
-sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "tools/lib"))
 import gnu_oracle  # noqa: E402
 
 # The only fields a change of oracle may move.

@@ -169,11 +169,11 @@ class Record(unittest.TestCase):
             pr.cmd_record = saved
 
     def test_only_python_bytecode_is_harmless(self):
-        self.assertTrue(pr.python_cache('scripts/__pycache__/'))
-        self.assertTrue(pr.python_cache('scripts/__pycache__/x.cpython-313.pyc'))
+        self.assertTrue(pr.python_cache('tools/lib/__pycache__/'))
+        self.assertTrue(pr.python_cache('tools/tests/__pycache__/x.cpython-313.pyc'))
         self.assertFalse(pr.python_cache('lisp/__pycache__/'))
         self.assertFalse(pr.python_cache('lisp/international/charscript.el'))
-        self.assertFalse(pr.python_cache('scripts/__pycache__/gen.el'))
+        self.assertFalse(pr.python_cache('tools/__pycache__/gen.el'))
 
 
 class Confirmation(unittest.TestCase):
@@ -957,7 +957,7 @@ class CensusPopulation(unittest.TestCase):
         self.root, self.gnu = base / 'root', base / 'gnu'
         for directory, lisp in ((self.root, 'gnu-lisp'), (self.gnu, 'lisp')):
             (directory / lisp).mkdir(parents=True)
-        (self.root / 'tools').mkdir()
+        (self.root / 'tools/lib').mkdir(parents=True)
         import shutil
         shutil.copyfile(ROOT / 'tools/lib/lisp_oracle.py', self.root / 'tools/lib/lisp_oracle.py')
         for name in ('a.el', 'b.el'):

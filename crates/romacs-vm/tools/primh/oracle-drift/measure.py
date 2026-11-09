@@ -34,7 +34,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-sys.path.insert(0, str(HERE.parents[4] / "scripts"))
+sys.path.insert(0, str(HERE.parents[4] / "tools/lib"))
 import gnu_oracle  # noqa: E402
 import record as recorder  # noqa: E402
 
