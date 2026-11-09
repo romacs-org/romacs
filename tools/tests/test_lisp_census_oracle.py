@@ -8,17 +8,17 @@ HOME.  Load-mode tests execute only these disposable test fixtures.
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import unittest
 
 
 ORACLE = (Path(__file__).resolve().parents[1] / "lib/lisp-census-oracle.el").resolve()
-EMACS = shutil.which(os.environ.get("EMACS", "emacs"))
+# The pinned oracle, never whatever `emacs` the host has on PATH.
+EMACS = os.environ.get("EMACS") or os.environ.get("ROMACS_GNU_ORACLE")
 
 
-@unittest.skipUnless(EMACS, "GNU Emacs executable unavailable (set EMACS)")
+@unittest.skipUnless(EMACS, "pinned GNU unavailable (set ROMACS_GNU_ORACLE)")
 class CensusOracleTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="lisp-census-")

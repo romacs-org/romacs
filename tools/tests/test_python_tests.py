@@ -43,14 +43,16 @@ class Runner(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'does not run it'):
                 python_tests.unowned(self.root, ['tools/test_b.py'])
 
-    def test_a_file_passes_only_when_tests_ran_and_passed(self):
+    def test_a_file_passes_only_when_test_bodies_ran_and_passed(self):
         self.write('tools/test_pass.py', 'import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n')
         self.write('tools/test_fail.py', 'import unittest\nclass T(unittest.TestCase):\n    def test_x(self): self.fail()\n')
         self.write('tools/test_empty.py', 'import unittest\n')
+        self.write('tools/test_skipped.py', 'import unittest\n@unittest.skip("no oracle")\nclass T(unittest.TestCase):\n'
+                   '    def test_x(self): pass\n    def test_y(self): pass\n')
         verdicts = {path: ok for path, ok, _, _ in
-                    (python_tests.run(self.root, f'tools/test_{name}.py') for name in ('pass', 'fail', 'empty'))}
+                    (python_tests.run(self.root, f'tools/test_{name}.py') for name in ('pass', 'fail', 'empty', 'skipped'))}
         self.assertEqual(verdicts, {'tools/test_pass.py': True, 'tools/test_fail.py': False,
-                                    'tools/test_empty.py': False})
+                                    'tools/test_empty.py': False, 'tools/test_skipped.py': False})
 
 
 if __name__ == '__main__':

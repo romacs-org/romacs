@@ -7,7 +7,7 @@ A test file is a tracked `test_*.py', `test-*.py' or `*_test.py' that uses
 unittest, outside the GNU and Lisp trees. One a Rust test or the Makefile
 already runs is listed in ELSEWHERE with that runner, which must name it.
 Every other one runs here, so a new test file cannot go unrun. A file
-passes only when it ran at least one test and they all passed.
+passes only when at least one test body ran (not skipped) and all passed.
 
 usage: python_tests.py [--root DIR] [--jobs N] [FILE ...]
 """
@@ -36,6 +36,7 @@ ELSEWHERE = {
     'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
 }
 RAN = re.compile(r'^Ran (\d+) tests? in ', re.M)
+SKIPPED = re.compile(r'^(?:OK|FAILED) \(.*?\bskipped=(\d+)', re.M)
 
 
 def test_files(root):
@@ -63,13 +64,21 @@ def command(path):
             else [sys.executable, '-B', Path(path).name])
 
 
+def oracle_root():
+    """The pinned GNU oracle's cache, resolved against the caller's HOME before a
+    test's private HOME hides it (as tools/lib/gnu_oracle.py's callers find it)."""
+    return os.environ.get('GNU_ORACLE_ROOT') or str(
+        Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'gnu-emacs-pin')
+
+
 def run(root, path, timeout=300):
     """(PATH, ok, seconds, output tail) for one test file."""
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='pytest-') as private:
         home, tmp = Path(private, 'home'), Path(private, 'tmp')
         home.mkdir(), tmp.mkdir()
-        env = {**os.environ, 'HOME': str(home), 'TMPDIR': str(tmp), 'PYTHONDONTWRITEBYTECODE': '1'}
+        env = {**os.environ, 'GNU_ORACLE_ROOT': oracle_root(), 'HOME': str(home), 'TMPDIR': str(tmp),
+               'PYTHONDONTWRITEBYTECODE': '1'}
         try:
             done = subprocess.run(command(path), cwd=(root / path).parent, env=env, stdin=subprocess.DEVNULL,
                                   capture_output=True, text=True, timeout=timeout)
@@ -78,8 +87,8 @@ def run(root, path, timeout=300):
             output, code = f'timed out after {timeout}s', -1
         finally:
             subprocess.run(['chmod', '-R', 'u+w', private], check=False)
-    ran = sum(int(n) for n in RAN.findall(output))
-    return path, code == 0 and ran > 0, time.monotonic() - started, '\n'.join(output.splitlines()[-15:])
+    executed = sum(int(n) for n in RAN.findall(output)) - sum(int(n) for n in SKIPPED.findall(output))
+    return path, code == 0 and executed > 0, time.monotonic() - started, '\n'.join(output.splitlines()[-15:])
 
 
 def main():
