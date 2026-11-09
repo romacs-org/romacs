@@ -4,11 +4,11 @@
 //! embedder's process is never ended. romacs-vm-gui's batch_command_line.rs
 //! compares the batch session's exit statuses with pinned GNU.
 use romacs_vm::Vm;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// The exit code a session host received, by unwinding out of the VM.
+/// The exit code a session host received, by unwinding out of the VM. These
+/// tests go on using the VM, which no session does (`Vm::catching').
 fn exit_code(vm: &mut Vm, source: &str) -> i32 {
-    let outcome = catch_unwind(AssertUnwindSafe(|| vm.eval_source(source).map(|_| ())));
+    let outcome = vm.catching(|vm| vm.eval_source(source).map(|_| ()));
     *outcome.expect_err("kill-emacs returned").downcast::<i32>().expect("session host exit code")
 }
 

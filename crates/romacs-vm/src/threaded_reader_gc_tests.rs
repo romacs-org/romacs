@@ -448,5 +448,10 @@ fn suspended_activations_name_each_engine_and_its_registers() {
                                       (integerp (nth 2 first)) (nth 3 first) (natnump (nth 4 first))))")
         .unwrap().display().unwrap();
     assert_eq!(out, "(t 0 function t 0 t)");
+    // The engine's last row is the activation it was running.
+    let last = vm.eval_source("(let ((rows (sa-outer)))
+                                 (while (cdr rows) (setq rows (cdr rows)))
+                                 (car (cdr (car rows))))").unwrap().display().unwrap();
+    assert_eq!(last, "running");
     assert!(vm.suspended.is_empty());
 }

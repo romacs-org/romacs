@@ -75,10 +75,11 @@ fn gc_phases(cx) {
 }}
 
 // Every suspended engine's activations, oldest first: ((ENGINE KIND FUNCTION
-// FILE START)...), KIND `function' or `continuation' (a primitive's), FUNCTION
-// its code's number, FILE and START where its registers are. The engine that
-// calls this is not suspended, so it sees those beneath it.
-defsubr! { name = "romacs--suspended-activations", gnu = "eval.c:4079", effect = Reads,
+// FILE START)...), KIND `function', `continuation' (a primitive's) or `running'
+// (the one each engine was in), FUNCTION its code's number, FILE and START where
+// its registers are. The engine that calls this is not suspended, so it sees
+// those beneath it.
+defsubr! { name = "romacs--suspended-activations", gnu = "eval.c:4079", effect = Global,
 fn suspended_activations(cx) {
     Ok(cx.suspended_activations())
 }}

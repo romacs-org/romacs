@@ -766,17 +766,6 @@ pub(super) struct Suspended {
     function: usize,
     regs: *mut Value,
 }
-/// An activation of a suspended engine, for what must name one: which engine,
-/// whether a primitive's continuation (K_CODE) runs it, its function, and
-/// where its registers start in the engine's file.
-#[derive(Clone, Copy)]
-pub(super) struct Activation {
-    pub(super) engine: usize,
-    pub(super) continuation: bool,
-    pub(super) function: usize,
-    pub(super) file: usize,
-    pub(super) start: usize,
-}
 impl Suspended {
     pub(super) fn code_len(&self) -> usize {
         self.code.iter().map(Vec::len).sum()
@@ -816,39 +805,29 @@ impl Suspended {
         }
         self.visit_state_values(visit);
     }
-    /// Its activations, oldest first: those its frames saved, then the running one.
-    fn activations(&self, engine: usize, base: usize) -> impl Iterator<Item = Activation> + '_ {
-        let start = move |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
-        self.frames.iter().map(move |frame| Activation {
-            engine,
-            continuation: K_CODE.as_ptr_range().contains(&frame.pc),
-            function: frame.function as usize,
-            file: self.file,
-            start: start(frame.regs),
-        }).chain(std::iter::once(Activation { engine, continuation: false, function: self.function, file: self.file, start: start(self.regs) }))
-    }
 }
 impl Vm {
-    /// The activations of every suspended engine, oldest engine first: which
-    /// engine and function holds which registers.
-    pub(super) fn activations(&self) -> Vec<Activation> {
-        self.suspended.iter().enumerate().flat_map(|(engine, record)| {
-            let file = self.suspended_stacks.get(record.file).unwrap_or(&self.stack);
-            record.activations(engine, file.as_ptr() as usize)
-        }).collect()
-    }
-    /// The same as Lisp data: ((ENGINE KIND FUNCTION FILE START)...), KIND
-    /// `function' or `continuation', the others integers.
+    /// Every suspended engine's activations, oldest engine first, as Lisp data:
+    /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function' or
+    /// `continuation' (K_CODE) for those its frames saved; the one it was in keeps
+    /// no instruction here to say which, so it is `running', and its function is
+    /// its caller's in a continuation. FILE and START say where its registers are.
     pub(crate) fn suspended_activations(&mut self) -> Value {
         let number = |n: usize| Value::integer(n as i64).expect("an index fits a fixnum");
-        let (function, continuation) = (self.intern("function"), self.intern("continuation"));
-        let mut list = Value::NIL;
-        for a in self.activations().into_iter().rev() {
-            let kind = if a.continuation { continuation } else { function };
-            let row = self.list_value(&[number(a.engine), kind, number(a.function), number(a.file), number(a.start)]);
-            list = self.keymap_cons(row, list);
+        let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
+        let mut rows = Vec::new();
+        for (engine, record) in self.suspended.iter().enumerate() {
+            let base = self.suspended_stacks.get(record.file).unwrap_or(&self.stack).as_ptr() as usize;
+            let start = |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
+            let row = |kind, code: usize, regs| [number(engine), kind, number(code), number(record.file), number(start(regs))];
+            for frame in &record.frames {
+                let kind = if K_CODE.as_ptr_range().contains(&frame.pc) { continuation } else { function };
+                rows.push(row(kind, frame.function as usize, frame.regs));
+            }
+            rows.push(row(running, record.function, record.regs));
         }
-        list
+        let rows: Vec<Value> = rows.iter().map(|row| self.list_value(row)).collect();
+        self.list_value(&rows)
     }
 }
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {

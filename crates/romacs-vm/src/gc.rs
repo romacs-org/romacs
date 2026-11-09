@@ -232,26 +232,17 @@ romacs_snapshot::snapshot_struct!(Consed { conses, floats, vector_cells, reused_
 /// index no table has, which no operation accepts.
 pub(crate) const POISON: Value = Value(((u32::MAX as u64) << 3) | 6);
 
-/// The state nested Lisp pushes and pops on the VM, as it stood when
-/// `Vm::catching' was called: suspended engines and their register stacks,
-/// root frames, collection holds, the running-engine count, the holds on
-/// aftermath, dynamic bindings, handler and backtrace marks.
+/// What can stand at a `Vm::catching' outside any engine, for a panic to put
+/// back: an embedder's root frames and holds, the bindings, handlers and
+/// backtrace entries below it, watchers already running, and the Lisp depth.
 struct NestingMark {
-    suspended: usize,
-    stacks: usize,
     roots: usize,
-    engines: usize,
     holds: usize,
-    unwinding: usize,
-    aftermath_runs: usize,
     dynamic: usize,
     retrap: usize,
-    rooted_write: bool,
-    stack_empty: bool,
     handlers: usize,
     backtrace: usize,
     eval_depth: usize,
-    site_leaf: (usize, usize),
 }
 
 /// Bytes charged per heap object against `gc-cons-threshold': GNU's cons.
@@ -407,8 +398,12 @@ pub fn assert_no_retention_growth(
 impl Vm {
     /// Run BODY outside any engine and, if it panics, put the VM back as it
     /// was, for a caller that goes on using it: a tool scoring a file, a test.
-    /// A session never does (a panic or `kill-emacs' ends it, and its VM with
-    /// it), so nothing on the way in pays for this. What a panic left is
+    ///
+    /// The invariant: **a session never uses its VM after a panic.** A panic or
+    /// `kill-emacs' ends it, and its VM with it, so nothing on the way in pays
+    /// to be recoverable, and no frame restores anything as a panic crosses it.
+    /// `tests/panic_boundary.rs` lists every `catch_unwind` that could reach a
+    /// VM, and fails on a new one. What a panic left is
     /// dropped: suspended engines' state, root frames, holds; the bindings and
     /// handlers made since are popped, without their watchers, and no cleanup
     /// runs; what they owned (`romacs--post-gc-owned', `inhibit-quit', a job's
@@ -417,21 +412,13 @@ impl Vm {
     pub fn catching<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> std::thread::Result<T> {
         assert_eq!(self.running_engines, 0, "a panic is caught outside any engine");
         let mark = NestingMark {
-            suspended: self.suspended.len(),
-            stacks: self.suspended_stacks.len(),
             roots: self.external_roots.len(),
-            engines: self.running_engines,
             holds: self.gc_holds,
-            unwinding: self.unwinding,
-            aftermath_runs: self.aftermath_runs,
             dynamic: self.dynamic.len(),
             retrap: self.retrap.len(),
-            rooted_write: self.rooted_write,
-            stack_empty: self.stack.is_empty(),
             handlers: self.signal_handlers.len(),
             backtrace: self.backtrace.frames.len(),
             eval_depth: self.eval_depth,
-            site_leaf: self.site_leaf,
         };
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(self)));
         if caught.is_err() {
@@ -445,21 +432,20 @@ impl Vm {
         self.unwind(self.dynamic.len().saturating_sub(mark.dynamic));
         self.trapped = trapped;
         for base in self.retrap.drain(mark.retrap.min(self.retrap.len())..) { self.trapped.insert(base); }
-        self.suspended.truncate(mark.suspended);
-        self.suspended_stacks.truncate(mark.stacks);
         self.external_roots.truncate(mark.roots);
-        self.running_engines = mark.engines;
         self.gc_holds = mark.holds;
-        self.unwinding = mark.unwinding;
-        self.aftermath_runs = mark.aftermath_runs;
-        self.rooted_write = mark.rooted_write;
-        self.site_leaf = mark.site_leaf;
-        if mark.stack_empty {
-            self.stack = Vec::new();
-        }
         self.signal_handlers.truncate(mark.handlers);
         self.backtrace.leave(mark.backtrace);
         self.eval_depth = mark.eval_depth;
+        // Outside any engine, these are all at rest.
+        self.suspended.clear();
+        self.suspended_stacks.clear();
+        self.stack = Vec::new();
+        self.running_engines = 0;
+        self.unwinding = 0;
+        self.aftermath_runs = 0;
+        self.rooted_write = false;
+        self.site_leaf = (0, 0);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
         let base = self.external_roots.len();
@@ -506,7 +492,7 @@ impl Vm {
     /// GNU's `garbage_collection_inhibited`, derived from its owners: a
     /// collection may run only when no frame keeps heap Values in untraced
     /// Rust storage. Those are OWN unsuspended engines (the caller's own),
-    /// no other running engine outside `suspended_code`, no open compiler
+    /// no other running engine outside `suspended`, no open compiler
     /// builder and no watcher notification from an unrooted native writer.
     /// Every other native frame on the stack holds its Values in traced
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
@@ -740,7 +726,7 @@ impl Vm {
     /// heap may be collected (VM2-GC-FINALIZER). An explicit `garbage-collect'
     /// asks `finalizer_runner' itself.
     pub(crate) fn safe_runner(&mut self, own: usize) -> Option<Value> {
-        if self.aftermath_held() || !self.may_collect(own) { return None; }
+        if !self.may_collect(own) || self.aftermath_held() { return None; }
         self.finalizer_runner()
     }
     /// Whether anything in progress holds aftermath back: an escape being
