@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EMACS="${EMACS:-./target/release/romacs}"
+EMACS="${EMACS:-./target/release/romacs-vm-gui}"
 LOG="${LOG:-/tmp/font-family-test.log}"
 TIMEOUT="${TIMEOUT:-8s}"
 

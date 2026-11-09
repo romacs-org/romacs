@@ -13,8 +13,8 @@ EMACS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$EMACS_DIR"
 
-if [ ! -x "./target/release/romacs" ]; then
-    echo "Error: ./target/release/romacs not found. Run: cargo build --release -p romacs-vm-gui."
+if [ ! -x "./target/release/romacs-vm-gui" ]; then
+    echo "Error: ./target/release/romacs-vm-gui not found. Run: cargo build --release -p romacs-vm-gui."
     exit 1
 fi
 
@@ -24,7 +24,7 @@ if [ -z "$DISPLAY" ]; then
 fi
 
 echo "=== Romacs Inline WebKit Test ==="
-echo "Emacs: $EMACS_DIR/target/release/romacs"
+echo "Emacs: $EMACS_DIR/target/release/romacs-vm-gui"
 echo "Display: $DISPLAY"
 echo ""
 
@@ -41,4 +41,4 @@ if ! command -v xdg-dbus-proxy &> /dev/null; then
 fi
 
 # Run the test
-exec ./target/release/romacs -Q -l test/romacs/romacs-webkit-test.el "$@"
+exec ./target/release/romacs-vm-gui -Q -l test/romacs/romacs-webkit-test.el "$@"

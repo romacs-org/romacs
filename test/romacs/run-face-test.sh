@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test face rendering (font faces, colors, attributes, variable-height faces)
 # Usage: ./test/romacs/run-face-test.sh
-#        ROMACS_BIN=./target/release/romacs ./test/romacs/run-face-test.sh
+#        ROMACS_BIN=./target/release/romacs-vm-gui ./test/romacs/run-face-test.sh
 #
 # What this tests:
 # - Face attribute rendering (foreground, background, bold, italic, underline)
@@ -19,7 +19,7 @@ LOG=/tmp/face-test.log
 SCREENSHOT=/tmp/face-screenshot.png
 MATRIX_REPORT=/tmp/face-matrix-report.txt
 TEST_NAME="Face"
-ROMACS_BIN="${ROMACS_BIN:-./target/release/romacs}"
+ROMACS_BIN="${ROMACS_BIN:-./target/release/romacs-vm-gui}"
 PANIC_COUNT=0
 ERROR_COUNT=0
 
