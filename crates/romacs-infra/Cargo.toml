@@ -6,23 +6,13 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
-# Shared editor-configuration fixtures for the romacs test suites.
-#
-# A `ConfigEnvironment` is a fully-bootstrapped editor configuration — a Doom
-# Emacs checkout with its packages built, later a Spacemacs tree or any other
-# famous configuration — that GNU Emacs itself materializes once into a
-# shared cache.  Test sessions then mount it READ-ONLY: the tree through
-# `--init-directory`, the bootstrap HOME through `HOME`, with every writable
-# location redirected into a per-session directory.  After materialization
-# the fixture is sealed (chmod a-w), so an unanticipated write fails loudly
-# instead of silently dirtying the fixture for every other test.
+# Isolated display sessions and runtime workspace paths for the test suites.
 
 [dependencies]
-fs4.workspace = true
-tempfile.workspace = true
 getrandom.workspace = true
-sha2.workspace = true
-wait-timeout.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

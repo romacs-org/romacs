@@ -1,33 +1,15 @@
-//! Shared test environment infrastructure for the romacs test suites.
+//! Shared test environment infrastructure for the Romacs test suites:
 //!
-//! The crate owns everything a test *mounts* that is not the code under
-//! test:
-//!
-//! * [`config_env`] — GNU-bootstrapped, sealed, read-only editor
-//!   configuration fixtures (Doom today, Spacemacs next) that suites
-//!   mount per session;
 //! * [`display`] — the deterministic, isolated display sessions
-//!   (loopback-TCP Xvfb, weston-headless, sway) those suites run their
+//!   (loopback-TCP Xvfb, weston-headless, sway) suites run their
 //!   scenarios on;
-//! * [`runtime_image`] — the editor's bootstrap runtime image, provisioned
-//!   on demand beside the editor binary and shared by every test process
-//!   that boots a real daemon;
-//! * [`workspace_root`] — the runtime-resolved workspace identity that
-//!   archive-shipped binaries must use.
+//! * [`workspace_root`] and [`crate_root!`] — the runtime-resolved
+//!   workspace identity that archive-shipped test binaries must use.
 //!
 //! The one test for whether something belongs here: is it environment a
 //! test mounts, or assertion logic?  Assertion logic stays in the suite.
 
-pub mod config_env;
 pub mod display;
-pub mod inventory;
-pub mod packages;
-pub mod runtime_image;
-pub mod tools;
-
-pub use config_env::{
-    ConfigEnvironment, DoomEnvironment, DoomSource, SpacemacsEnvironment, SpacemacsSource,
-};
 
 use std::path::PathBuf;
 
@@ -57,22 +39,6 @@ pub fn nextest_workspace_root() -> Option<PathBuf> {
 /// fallback order lives here, once, instead of at each call site.
 pub fn workspace_root() -> PathBuf {
     nextest_workspace_root().unwrap_or_else(cargo_workspace_root)
-}
-
-/// Root of the prepared-artifact caches the package suites build up.
-///
-/// Package sources, prepared install trees, tool runtimes: every byte under
-/// here is derived from a pin and can be rebuilt, so it lives with the rest of
-/// the build output instead of in the source tree.  `cargo clean` removes it,
-/// which is the reset gesture for a suite that has gone strange.
-///
-/// `CARGO_TARGET_DIR` is honored first, so a workspace that relocates its
-/// target directory keeps its caches with it.
-pub fn melpa_cache_root() -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root().join("target"))
-        .join("melpa")
 }
 
 /// The invoking crate's root directory, resolved on the machine *running*
