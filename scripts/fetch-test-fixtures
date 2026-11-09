@@ -24,6 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 
 MANIFEST = pathlib.Path(__file__).resolve().parent.parent / 'crates/romacs-test-fonts/fixtures.json'
 MAX_BYTES = 256 * 1024 * 1024
@@ -105,7 +106,7 @@ def gzip_holds(path, digest):
     """Whether PATH is a gzip of bytes whose hash is DIGEST."""
     try:
         return path.is_file() and sha256(gzip.decompress(path.read_bytes())) == digest
-    except (OSError, EOFError, gzip.BadGzipFile):
+    except (OSError, EOFError, zlib.error):
         return False
 
 
