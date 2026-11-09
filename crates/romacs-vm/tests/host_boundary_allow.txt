@@ -8,11 +8,11 @@ crates/romacs-display-protocol/src/present_trace.rs:154 std::env::var_os romacs-
 crates/romacs-display-protocol/src/present_trace.rs:172 OpenOptions romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
 crates/romacs-display-protocol/src/present_trace.rs:172 std::fs romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
 crates/romacs-display-protocol/src/present_trace.rs:218 libc::clock romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
-crates/romacs-regex-engine/src/dfa.rs:2106 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex-engine/src/dfa.rs:2125 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex-engine/src/dfa.rs:2128 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex-engine/src/dfa.rs:2170 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex-engine/src/engine.rs:8620 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
+crates/romacs-regex-engine/src/engine/dfa.rs:2106 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine/dfa.rs:2125 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine/dfa.rs:2128 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine/dfa.rs:2170 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine/search.rs:119 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
 crates/romacs-vm/src/autoload.rs:139 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:165 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/autoload.rs:169 dynamic:saved specbind: pushes a new binding, saving the value it shadows
