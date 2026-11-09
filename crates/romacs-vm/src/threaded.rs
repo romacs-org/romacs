@@ -12,7 +12,7 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
-pub(crate) use lend::{eval_form, toplevel};
+pub(crate) use lend::{bind_from, call_frame, compile_form, eval_form, eval_text, expand_form, read_next, run_function, toplevel, unbind_to, unwind_to, write_from};
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
 use lend::{Nested, Orch, Pc, Write};
@@ -4482,7 +4482,7 @@ fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         debug_assert_eq!(r, e.regs, "a call runs in the current frame");
-        let (result, fits) = lend::deferred(e, Nested::Lazy(function));
+        let (result, fits) = lend::deferred(e, function);
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         if !fits {
@@ -4490,7 +4490,7 @@ fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut
             return None;
         }
         match result {
-            Ok(_) => Some(e.regs),
+            Ok(()) => Some(e.regs),
             Err(error) => {
                 if let Some(escape) = e.vm.propagated_escape.take() {
                     e.escape = Some(escape);

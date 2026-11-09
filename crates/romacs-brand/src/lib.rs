@@ -87,7 +87,8 @@ macro_rules! plain {
 plain!(
     [] (), [] bool, [] char, [] u8, [] u16, [] u32, [] u64, [] u128, [] usize,
     [] i8, [] i16, [] i32, [] i64, [] i128, [] isize, [] f32, [] f64, [] String, [] str,
-    [T: Plain + ?Sized] &T, [T: Plain + ?Sized] Box<T>, [T: Plain] Option<T>,
+    [] std::path::Path, [] std::path::PathBuf,
+    [T: Plain + ?Sized] &T, [T: Plain + ?Sized] Box<T>, [T: Plain + ?Sized] std::sync::Arc<T>, [T: Plain] Option<T>,
     [T: Plain, E: Plain] Result<T, E>, [T: Plain] Vec<T>, [T: Plain] [T], [T: Plain, const N: usize] [T; N],
     [A: Plain, B: Plain] (A, B), [A: Plain, B: Plain, C: Plain] (A, B, C),
     [A: Plain, B: Plain, C: Plain, D: Plain] (A, B, C, D),
