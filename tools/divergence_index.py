@@ -137,6 +137,8 @@ def main() -> int:
                     help='exit 1 if a row yields no symbol (R99: unattached rows are invisible)')
     ap.add_argument('--names', action='store_true', help='exit 1 if a file does not hold the ID it is named by')
     args = ap.parse_args()
+    if args.symbols and (args.check or args.names):
+        ap.error('a lookup takes no --check or --names; run them on their own')
     if args.names:
         problems = misnamed()
         for problem in problems:

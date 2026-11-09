@@ -56,6 +56,11 @@ class DivergenceIndexTests(unittest.TestCase):
         self.assertIn('2 rows, 2 symbols, 0 unattached', result.stdout)
         self.assertEqual(before, sorted(p.relative_to(self.root) for p in self.root.rglob('*')))
 
+    def test_a_lookup_does_not_stand_in_for_a_check(self):
+        result = self.run_index('--check', 'maphash')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('takes no --check', result.stderr)
+
     def test_check_refuses_a_row_without_a_symbol(self):
         self.assertEqual(self.run_index('--check').returncode, 0)
         (self.dir / 'H2.md').write_text(UNATTACHED)
