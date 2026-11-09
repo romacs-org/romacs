@@ -157,7 +157,8 @@ The other commands:
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The
   gate runs the batch probes (`romacs-vm-gui` test `scaling`).
-- Derived artifacts and source/floor validation: `python3 scripts/check-derived`.
+- Derived artifacts, source/floor validation and the Python unit tests: `python3 scripts/check-derived`.
+  It runs every tracked `test_*.py`/`*_test.py` that no Rust test owns (`tools/python_tests.py`).
   It can regenerate stale output; inspect and stage only task-owned changes.
 - Combined verification: `python3 scripts/gate focused 'EXPR'`, then
   `python3 scripts/gate full` for final acceptance. Inspect `--help` and select

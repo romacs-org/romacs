@@ -20,7 +20,7 @@ def main():
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f'check-derived: {exc}', file=sys.stderr)
         return 1
-    layout = subprocess.run([sys.executable, '-B', str(root / 'tools/test_lisp_layout.py')], cwd=root)
+    tests = subprocess.run([sys.executable, '-B', 'tools/python_tests.py', '--root', str(root)], cwd=root)
     oracle = subprocess.run([sys.executable, 'tools/lisp_oracle.py', 'check', '--root', str(root)], cwd=root)
     ratchet = subprocess.run([sys.executable, 'tools/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
     arity = subprocess.run([sys.executable, 'tools/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
@@ -29,10 +29,10 @@ def main():
     fonts = subprocess.run([sys.executable, '-B', 'tools/bundled_fonts.py', 'check', '--root', str(root)], cwd=root)
     grammars = subprocess.run([sys.executable, '-B', 'tools/treesit_grammars.py', 'check', '--root', str(root)], cwd=root)
     unsafe = subprocess.run([sys.executable, '-B', 'tools/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
-    if layout.returncode or oracle.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode:
+    if tests.returncode or oracle.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode:
         return 1
     print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
-          'lisp/ is the GNU pin; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources and the unsafe floors verified')
+          'the Python unit tests pass; lisp/ is the GNU pin; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources and the unsafe floors verified')
     return 0
 
 
