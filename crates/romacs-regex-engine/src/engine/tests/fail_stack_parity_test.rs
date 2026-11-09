@@ -5,8 +5,14 @@
 //! Every expected value below is GNU 31.1's `(string-match RE S)` followed by
 //! `(match-data t)` (probe: `tmp/probes/nasty.el` in the U0.5 worktree).
 
-use super::*;
-
+use crate::engine::compile::regex_compile;
+use crate::engine::matcher::fail::{MatchScratch, fail_stack_push_sites, take_matcher_overflow};
+use crate::engine::matcher::re_match_internal;
+use crate::engine::matcher::route::{take_fail_stack_probe, take_pike_fallback};
+use crate::engine::opcode::{RegexOp, extract_number};
+use crate::engine::pattern::MatchRegisters;
+use crate::engine::search::re_search;
+use crate::engine::syntax::DefaultSyntaxLookup;
 /// GNU `(and (string-match PATTERN TEXT) (match-data t))` over ASCII text,
 /// plus whether the search stopped on the fail-stack limit.
 fn string_match(pattern: &str, text: &str) -> (Option<Vec<i64>>, bool) {

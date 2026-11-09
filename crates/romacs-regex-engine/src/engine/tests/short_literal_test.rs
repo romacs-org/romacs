@@ -1,7 +1,10 @@
 //! Short literal search results compared with exhaustive matching.
 
-use super::*;
-
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa;
+use crate::engine::matcher::route::matcher_entry_count;
+use crate::engine::search::{re_search, with_fastmap_disabled};
+use crate::engine::syntax::DefaultSyntaxLookup;
 type CapturedMatch = Option<(usize, Vec<i64>, Vec<i64>)>;
 
 fn search(
@@ -14,7 +17,7 @@ fn search(
     let run = || {
         let pattern = regex_compile(expression, false, true).expect("valid pattern");
         let before = matcher_entry_count();
-        let matched = dfa::with_dfa_mode(dfa::DfaMode::Off, || {
+        let matched = dfa::filter::with_dfa_mode(dfa::filter::DfaMode::Off, || {
             re_search(&pattern, text, start, range, &DefaultSyntaxLookup, start)
         });
         (

@@ -4,8 +4,17 @@
 //! would have skipped it.  These tests pin down the facts that make the fast
 //! scans exact, and compare them with the exhaustive scan.
 
-use super::*;
-
+use crate::emacs_char;
+use crate::engine::compile::regex_compile;
+use crate::engine::dfa;
+use crate::engine::fastmap::recompute_fastmap;
+use crate::engine::matcher::route::matcher_entry_count;
+use crate::engine::opcode::RegexOp;
+use crate::engine::pattern::CompiledPattern;
+use crate::engine::scan::{FoldedScan, SparseAsciiFastmap, TextRepr, fold_prefix_literals};
+use crate::engine::search::{build_search_optimizations, re_search, with_fastmap_disabled};
+use crate::engine::syntax::DefaultSyntaxLookup;
+use crate::engine::translate::{AsciiPreimage, CaseTranslation};
 /// `AsciiPreimage::AsciiOnly` is a claim about every character code: the
 /// standard translation keeps ASCII in ASCII and non-ASCII out of it.  The
 /// folded candidate table and the folded literal prefilter both rest on it.
@@ -332,7 +341,7 @@ fn casefold_candidate_entries_drop_to_literal_hits() {
     // (`ROMACS_REGEX_DFA`) stays off.
     let search = |cp: &CompiledPattern| {
         let before = matcher_entry_count();
-        let found = dfa::with_dfa_mode(dfa::DfaMode::Off, || {
+        let found = dfa::filter::with_dfa_mode(dfa::filter::DfaMode::Off, || {
             re_search(cp, text, 0, text.len() as isize, &DefaultSyntaxLookup, 0)
         });
         (found.map(|(pos, _)| pos), matcher_entry_count() - before)

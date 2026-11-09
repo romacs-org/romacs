@@ -1,4 +1,56 @@
-use super::*;
+use crate::engine::compile::{RegexCompileError, regex_compile};
+use crate::engine::fastmap::recompute_fastmap;
+use crate::engine::matcher::re_match;
+use crate::engine::matcher::route::{
+    RegexEngineOverride, force_backtrack, force_pike, pike_fallback_count,
+    with_regex_engine_override,
+};
+use crate::engine::opcode::RegexOp;
+use crate::engine::optimize::pattern_max_match_chars;
+use crate::engine::pattern::{CompiledPattern, MatchRegisters, RewindView};
+use crate::engine::search::{fastmap_force_disabled, re_search, with_fastmap_disabled};
+use crate::engine::syntax::{DefaultSyntaxLookup, SyntaxLookup};
+// Compile + search, and compile + match, in one call.
+
+/// Compile a pattern and search for it in text.
+fn search_pattern(
+    pattern_str: &str,
+    text: &str,
+    start: usize,
+    case_fold: bool,
+    syntax: &dyn SyntaxLookup,
+    point: usize,
+) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
+    let compiled = regex_compile(pattern_str, false, case_fold)?;
+    Ok(re_search(
+        &compiled,
+        text.as_bytes(),
+        start,
+        (text.len() - start) as isize,
+        syntax,
+        point,
+    ))
+}
+
+/// Compile a pattern and match at a specific position.
+fn match_pattern(
+    pattern_str: &str,
+    text: &str,
+    pos: usize,
+    case_fold: bool,
+    syntax: &dyn SyntaxLookup,
+    point: usize,
+) -> Result<Option<(usize, MatchRegisters)>, RegexCompileError> {
+    let compiled = regex_compile(pattern_str, false, case_fold)?;
+    Ok(re_match(
+        &compiled,
+        text.as_bytes(),
+        pos,
+        text.len(),
+        syntax,
+        point,
+    ))
+}
 
 #[test]
 fn sparse_fastmap_search_agrees_with_exhaustive_candidates() {
@@ -75,7 +127,7 @@ fn sparse_fastmap_rebuild_does_not_reuse_an_old_skip_byte() {
     };
     assert_eq!(search(&compiled, b"xa"), Some((1, 2)));
     let original = compiled.clone();
-    // Recompute is the compiler's public seam for rebuilding a fastmap.
+    // Recompute rebuilds the fastmap for the current syntax table.
     // Change the literal operand without changing bytecode boundaries or
     // match registers, so any stale skip decision would miss the new byte.
     assert_eq!(&compiled.buffer[..3], &[RegexOp::Exactn as u8, 1, b'a']);
@@ -396,30 +448,12 @@ fn test_syntax_word() {
 fn default_syntax_lookup_uses_gnu_standard_classes() {
     crate::test_utils::init_test_tracing();
     let syn = DefaultSyntaxLookup;
-    assert_eq!(
-        syn.char_syntax('a'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
-    assert_eq!(
-        syn.char_syntax('$'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
-    assert_eq!(
-        syn.char_syntax('_'),
-        crate::emacs_core::syntax::SyntaxClass::Symbol
-    );
-    assert_eq!(
-        syn.char_syntax('-'),
-        crate::emacs_core::syntax::SyntaxClass::Symbol
-    );
-    assert_eq!(
-        syn.char_syntax(' '),
-        crate::emacs_core::syntax::SyntaxClass::Whitespace
-    );
-    assert_eq!(
-        syn.char_syntax('\u{4e2d}'),
-        crate::emacs_core::syntax::SyntaxClass::Word
-    );
+    assert_eq!(syn.char_syntax('a'), crate::SyntaxClass::Word);
+    assert_eq!(syn.char_syntax('$'), crate::SyntaxClass::Word);
+    assert_eq!(syn.char_syntax('_'), crate::SyntaxClass::Symbol);
+    assert_eq!(syn.char_syntax('-'), crate::SyntaxClass::Symbol);
+    assert_eq!(syn.char_syntax(' '), crate::SyntaxClass::Whitespace);
+    assert_eq!(syn.char_syntax('\u{4e2d}'), crate::SyntaxClass::Word);
 }
 
 #[test]
@@ -925,18 +959,9 @@ fn posix_space_class_matches_newline_cr_under_standard_syntax() {
 }
 
 // ===========================================================================
-// Pike VM (non-backtracking fast path) — differential fuzzer + unit tests.
-//
-// The Pike VM MUST be byte-exact with the backtracker for every eligible
-// pattern.  These tests drive that: the differential fuzzer generates random
-// elisp-subset patterns + random buffers and asserts the two engines return
-// identical match-data (match/no-match AND every capture-group start/end)
-// for anchored `re_match` and forward/backward `re_search`.
+// Pike VM (non-backtracking fast path): it must be byte-exact with the
+// backtracker for every eligible pattern.
 // ===========================================================================
-
-// ---- random pattern generation (eligible subset only) --------------------
-
-// ---- random buffer generation --------------------------------------------
 
 #[test]
 fn differential_overrides_restore_nested_and_unwound_state() {
