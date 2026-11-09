@@ -131,11 +131,6 @@ pub enum InputEvent {
         receipt: romacs_display_protocol::input_progress::InputDelivery,
         event: Box<InputEvent>,
     },
-    /// Diagnostic token paired with one actual command event.
-    Observed {
-        token: romacs_display_protocol::input_latency::InputToken,
-        event: Box<InputEvent>,
-    },
     /// Bytes read directly from a Unix TTY.
     ///
     /// This transport fact deliberately carries no terminal-sequence or
@@ -581,60 +576,38 @@ impl RenderComms {
             None => create(),
         }
     }
-    fn observe_scroll_input(event: InputEvent) -> InputEvent {
+    /// Record a pressed key's or a scroll's platform receive time in the
+    /// presentation trace, when one is open.
+    fn trace_input_received(event: &InputEvent) {
         #[cfg(target_os = "linux")]
-        if romacs_display_protocol::input_latency::enabled() {
-            let target = match &event {
-                InputEvent::Key {
-                    key: crate::host_types::FrontendKey::Keysym(0xff55 | 0xff56),
-                    pressed: true,
-                    emacs_frame_id,
-                    ..
-                } => Some((*emacs_frame_id, "page")),
+        if romacs_display_protocol::present_trace::enabled() {
+            let frame = match event {
                 InputEvent::Key {
                     pressed: true,
                     emacs_frame_id,
                     ..
-                } if romacs_display_protocol::present_trace::enabled() => {
-                    Some((*emacs_frame_id, "key"))
-                }
+                } => *emacs_frame_id,
                 InputEvent::PositionedPointer(PositionedPointerInput {
                     position,
-                    action: PointerAction::Scroll { delta, .. },
+                    action: PointerAction::Scroll { .. },
                     ..
-                }) => Some((
-                    position.target_frame_id,
-                    match delta {
-                        ScrollDelta::Lines { .. } => "wheel",
-                        ScrollDelta::Pixels { .. } => "precise",
-                    },
-                )),
-                _ => None,
+                }) => position.target_frame_id,
+                _ => return,
             };
-            if let Some((frame, kind)) = target {
-                let mut time = libc::timespec {
-                    tv_sec: 0,
-                    tv_nsec: 0,
-                };
-                // SAFETY: valid out-pointer, POSIX monotonic clock. The
-                // compositor's clock ID must match before subtraction.
-                if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
-                    let time = romacs_display_protocol::input_latency::PlatformTimestamp {
-                        clock_id: libc::CLOCK_MONOTONIC as u32,
-                        nanoseconds: time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
-                    };
-                    if let Some(token) =
-                        romacs_display_protocol::input_latency::received(frame, kind, time)
-                    {
-                        return InputEvent::Observed {
-                            token,
-                            event: Box::new(event),
-                        };
-                    }
-                }
+            let mut time = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            // SAFETY: valid out-pointer, POSIX monotonic clock. The
+            // compositor's clock ID must match before subtraction.
+            if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
+                romacs_display_protocol::present_trace::input_received(
+                    frame,
+                    libc::CLOCK_MONOTONIC as u32,
+                    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
+                );
             }
         }
-        event
     }
 
     fn is_lossy_input_event(event: &InputEvent) -> bool {
@@ -660,9 +633,7 @@ impl RenderComms {
 
     fn event_name(event: &InputEvent) -> &'static str {
         match event {
-            InputEvent::Observed { event, .. } | InputEvent::Tracked { event, .. } => {
-                Self::event_name(event)
-            }
+            InputEvent::Tracked { event, .. } => Self::event_name(event),
             InputEvent::RawTtyBytes { .. } => "raw-tty-bytes",
             InputEvent::Key { .. } => "key",
             InputEvent::PositionedPointer(PositionedPointerInput { action, .. }) => match action {
@@ -706,10 +677,7 @@ impl RenderComms {
     pub(crate) fn send_input_with_receipt(
         &self,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         self.send_input_with_tracking(event, None)
     }
 
@@ -721,26 +689,22 @@ impl RenderComms {
     ) -> (
         Option<romacs_display_protocol::input_progress::InputReceipt>,
         Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
         if self.input_interrupt.as_ref().is_some_and(|hook| hook.interrupt(&event)) {
-            return (None, None, None);
+            return (None, None);
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
             .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
         let read = delivery.as_ref().map(|delivery| delivery.receipt());
-        let (completion, token) = self.send_input_with_tracking(event, delivery);
-        (read, completion, token)
+        let completion = self.send_input_with_tracking(event, delivery);
+        (read, completion)
     }
 
     fn send_input_with_tracking(
         &self,
         event: InputEvent,
         read: Option<romacs_display_protocol::input_progress::InputDelivery>,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         crate::paint_host::trace_key_enqueue(&event, read.as_ref());
         let receipt = if matches!(
             &event,
@@ -758,11 +722,7 @@ impl RenderComms {
             None
         };
         let observer = receipt.as_ref().map(|delivery| delivery.receipt());
-        let event = Self::observe_scroll_input(event);
-        let token = match &event {
-            InputEvent::Observed { token, .. } => Some(*token),
-            _ => None,
-        };
+        Self::trace_input_received(&event);
         let event = if let Some(receipt) = receipt {
             InputEvent::Tracked {
                 receipt,
@@ -801,7 +761,7 @@ impl RenderComms {
                     );
                 }
             }
-            return (observer, token);
+            return observer;
         }
 
         match self.input_tx.send(event) {
@@ -817,7 +777,7 @@ impl RenderComms {
                 );
             }
         }
-        (observer, token)
+        observer
     }
 }
 

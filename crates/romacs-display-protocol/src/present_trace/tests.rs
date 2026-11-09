@@ -101,11 +101,9 @@ fn span_disabled_does_not_create_trace() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn present_trace_only_input_receive_is_enabled_and_preserves_domain() {
-    if let Some(records) = trace_child(
-        "present_trace_only_input_receive_is_enabled_and_preserves_domain",
-        true,
-    ) {
+fn an_input_receive_keeps_its_clock_domain_and_sequence() {
+    if let Some(records) = trace_child("an_input_receive_keeps_its_clock_domain_and_sequence", true)
+    {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["stage"], "input_received");
         assert_eq!(records[0]["frame"], 7);
@@ -115,81 +113,8 @@ fn present_trace_only_input_receive_is_enabled_and_preserves_domain() {
         assert_eq!(records[0]["ns"], 123);
         return;
     }
-    assert!(
-        crate::input_latency::enabled(),
-        "presentation tracing must enable input capture independently"
-    );
-    assert!(
-        crate::input_latency::received(
-            7,
-            "key",
-            crate::input_latency::PlatformTimestamp {
-                clock_id: 17,
-                nanoseconds: 123
-            }
-        )
-        .is_some()
-    );
-    shutdown();
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn command_span_keeps_consumed_sequence_metadata_after_completion() {
-    if let Some(records) = trace_child(
-        "command_span_keeps_consumed_sequence_metadata_after_completion",
-        true,
-    ) {
-        let stages: Vec<_> = records
-            .iter()
-            .map(|r| r["stage"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            stages,
-            [
-                "input_received",
-                "input_received",
-                "command_start",
-                "command_end",
-                "command_start",
-                "command_end"
-            ]
-        );
-        assert_eq!(records[0]["input_sequence"], 1);
-        assert_eq!(records[1]["input_sequence"], 2);
-        for record in &records[2..4] {
-            assert_eq!(record["input_sequence"], 1);
-            assert_eq!(record["input_sequence_end"], 2);
-            assert_eq!(record["frame"], 7);
-            assert_eq!(record["presentation"], 0);
-        }
-        for record in &records[4..] {
-            assert!(record.get("input_sequence").is_none());
-            assert!(record.get("input_sequence_end").is_none());
-        }
-        return;
-    }
-    use crate::input_latency::{self, CommandInputs, PlatformTimestamp};
-    for ns in [123, 124] {
-        let token = input_latency::received(
-            7,
-            "key",
-            PlatformTimestamp {
-                clock_id: 1,
-                nanoseconds: ns,
-            },
-        )
-        .unwrap();
-        input_latency::consumed(token);
-    }
-    let command = CommandInputs::begin();
-    let span = command.trace_span(7);
-    command.complete(|_| Vec::new());
-    drop(span);
-    let empty = CommandInputs::begin();
-    let span = empty.trace_span(7);
-    drop(empty);
-    drop(span);
+    assert!(enabled());
+    input_received(7, 17, 123);
     shutdown();
 }
 
@@ -256,7 +181,6 @@ fn event(stage: Stage) -> Record {
         ns: 123,
         realtime_ns: (stage == Stage::Publish).then_some(456),
         input_sequence: None,
-        input_sequence_end: None,
         draw_seq: None,
         detail: None,
         plan: None,
@@ -321,8 +245,6 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
         (Stage::ResolveStart, "resolve_start"),
         (Stage::ResolveEnd, "resolve_end"),
         (Stage::CoverageRetry, "coverage_retry"),
-        (Stage::CommandStart, "command_start"),
-        (Stage::CommandEnd, "command_end"),
         (Stage::InputReceived, "input_received"),
         (Stage::FlattenStart, "flatten_start"),
         (Stage::FlattenEnd, "flatten_end"),

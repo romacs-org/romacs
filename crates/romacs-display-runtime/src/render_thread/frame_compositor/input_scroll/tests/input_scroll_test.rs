@@ -92,7 +92,7 @@ fn input_scroll_publishes_hits_only_with_pixels_and_preserves_them_on_retained_s
     let stream = InputStream::default();
     let delivery = stream.issue().unwrap();
     let mut scroll = InputScroll::default();
-    assert!(scroll.push(&frame, 1.0, 1.0, 12.0, delivery.receipt(), None));
+    assert!(scroll.push(&frame, 1.0, 1.0, 12.0, delivery.receipt()));
     assert!(scroll.hit(point(&frame, 1.0)).is_none());
     scroll.paint(&mut frame);
     assert!(scroll.hit(point(&frame, 1.0)).is_none());
@@ -113,7 +113,7 @@ fn input_scroll_holds_target_during_mid_command_layout_and_finishes_on_frame_ack
     let mut progress = InputProgress::default();
     let command = progress.begin_command();
     let mut scroll = InputScroll::default();
-    assert!(scroll.push(&first, 1.0, 1.0, 12.0, delivery.receipt(), None));
+    assert!(scroll.push(&first, 1.0, 1.0, 12.0, delivery.receipt()));
     progress.consumed(delivery);
     let mut mid = frame(2, 5.0, 1);
     mid.input_checkpoint = progress.checkpoint();
@@ -136,14 +136,14 @@ fn input_scroll_cancels_on_revision_and_drop_and_clamps_reversal_at_coverage() {
     let delivery = stream.issue().unwrap();
     let mut scroll = InputScroll::default();
     for _ in 0..4 {
-        assert!(scroll.push(&first, 1.0, 1.0, 18.0, delivery.receipt(), None));
+        assert!(scroll.push(&first, 1.0, 1.0, 18.0, delivery.receipt()));
     }
     assert_eq!(scroll.active.as_ref().unwrap().offset, 40.0);
-    scroll.push(&first, 1.0, 1.0, -4.0, delivery.receipt(), None);
+    scroll.push(&first, 1.0, 1.0, -4.0, delivery.receipt());
     assert_eq!(scroll.active.as_ref().unwrap().offset, 36.0);
     scroll.reconcile(Some(&frame(2, 0.0, 2)));
     assert!(!scroll.active());
-    scroll.push(&first, 1.0, 1.0, 8.0, delivery.receipt(), None);
+    scroll.push(&first, 1.0, 1.0, 8.0, delivery.receipt());
     drop(delivery);
     scroll.paint(&mut first.clone());
     assert!(!scroll.active());
@@ -168,7 +168,7 @@ fn resolved_scroll_uses_authoritative_destination_without_predictable_lisp_bindi
     assert!(!scroll.resolve(&first, make_intent(2, 1)));
     assert!(!scroll.resolve(&first, make_intent(1, 2)));
     assert!(scroll.resolve(&first, make_intent(1, 1)));
-    assert!(!scroll.push(&first, 1.0, 1.0, 4.0, delivery.receipt(), None));
+    assert!(!scroll.push(&first, 1.0, 1.0, 4.0, delivery.receipt()));
     scroll.paint(&mut first);
     scroll.submit();
     assert_eq!(

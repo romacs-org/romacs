@@ -264,7 +264,6 @@ pub(crate) fn trace_key_enqueue(event: &crate::thread_comm::InputEvent, delivery
 }
 pub fn take_key_enqueue_time(event: &crate::thread_comm::InputEvent) -> Option<std::time::Instant> {
     match event {
-        crate::thread_comm::InputEvent::Observed { event, .. } => take_key_enqueue_time(event),
         crate::thread_comm::InputEvent::Tracked { receipt, .. } => {
             let actual = receipt.receipt();
             let mut times = KEY_TIMES.lock().unwrap();

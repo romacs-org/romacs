@@ -10,7 +10,7 @@ fn native_repeat_tracking_does_not_fill_command_completion_ledger() {
     let _command = progress.begin_command();
     // A single interactive command may read held-key input indefinitely.
     for _ in 0..1300 {
-        let (observer, _, _) = render.send_key_input_with_receipt(InputEvent::Key {
+        let (observer, _) = render.send_key_input_with_receipt(InputEvent::Key {
             key: crate::host_types::FrontendKey::Character('p'),
             modifiers: 0,
             pressed: true,
@@ -30,7 +30,7 @@ fn native_repeat_tracking_does_not_fill_command_completion_ledger() {
 #[test]
 fn native_page_keys_keep_read_and_scroll_completion_receipts_separate() {
     let (emacs, render) = ThreadComms::new().split();
-    let (read, completion, _) = render.send_key_input_with_receipt(InputEvent::Key {
+    let (read, completion) = render.send_key_input_with_receipt(InputEvent::Key {
         key: crate::host_types::FrontendKey::Keysym(0xff55),
         modifiers: 0,
         pressed: true,

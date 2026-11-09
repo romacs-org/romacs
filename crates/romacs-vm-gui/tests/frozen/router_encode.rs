@@ -7,7 +7,7 @@ pub fn encode(event: &InputEvent, application_cursor: bool) -> Result<Vec<u8>, S
     use romacs_display_runtime::backend::wgpu::*;
     use romacs_display_runtime::host_types::FrontendKey;
     let (key, modifiers) = match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => return encode(event, application_cursor),
+        InputEvent::Tracked { event, .. } => return encode(event, application_cursor),
         InputEvent::Key { key, modifiers, pressed: true, .. } => (key, *modifiers),
         _ => return Ok(Vec::new()),
     };

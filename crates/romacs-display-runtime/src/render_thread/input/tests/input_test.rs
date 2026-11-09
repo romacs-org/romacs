@@ -245,10 +245,7 @@ fn wheel_input_atomically_carries_its_presented_region() {
         panic!("wheel delivery must carry its completion receipt");
     };
     assert!(!receipt.receipt().cancelled());
-    let event = match *event {
-        crate::thread_comm::InputEvent::Observed { event, .. } => *event,
-        event => event,
-    };
+    let event = *event;
     assert!(matches!(
         event,
         crate::thread_comm::InputEvent::PositionedPointer(
@@ -337,10 +334,7 @@ fn continuous_x11_scroll_reaches_pixel_delivery_at_fractional_and_whole_units() 
         else {
             panic!("missing receipt")
         };
-        let event = match *event {
-            crate::thread_comm::InputEvent::Observed { event, .. } => *event,
-            event => event,
-        };
+        let event = *event;
         assert!(
             matches!(event, crate::thread_comm::InputEvent::PositionedPointer(crate::thread_comm::PositionedPointerInput { action: crate::thread_comm::PointerAction::Scroll { delta: crate::thread_comm::ScrollDelta::Pixels {x:0.0, y}, .. }, .. }) if y == -pixels)
         );

@@ -1569,16 +1569,7 @@ impl RenderApp {
                     target,
                     action,
                 });
-                let (receipt, token) = self.comms.send_input_with_receipt(input);
-                if let Some(receipt) = &receipt
-                    && let Some(state) = self.frame_windows.get_by_winit_mut(window_id)
-                {
-                    state
-                        .render
-                        .compositor
-                        .input_scroll
-                        .observe_input(receipt.clone(), token);
-                }
+                let receipt = self.comms.send_input_with_receipt(input);
                 if let (
                     ScrollDelta::Pixels {
                         x: horizontal,
@@ -1607,7 +1598,6 @@ impl RenderApp {
                         ev_y,
                         -vertical.round(),
                         receipt,
-                        token,
                     )
                 {
                     state.render.compositor.current_scene_generation =

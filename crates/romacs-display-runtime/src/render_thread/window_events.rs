@@ -15,20 +15,16 @@ impl RenderApp {
         window: WindowId,
         key: PhysicalKey,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_latency::InputToken>,
     ) {
         let pressed = matches!(&event, InputEvent::Key { pressed: true, .. });
-        let result = self.comms.send_key_input_with_receipt(event);
+        let (read, _) = self.comms.send_key_input_with_receipt(event);
         if pressed {
-            self.key_repeats.queued(window, key, result.0.clone());
+            self.key_repeats.queued(window, key, read);
             // The key may start a long command: look at the evaluator later.
             if self.comms.input_interrupt.is_some() {
                 self.busy_toast.arm(romacs_display_protocol::frame_time::observe_platform_now());
             }
         }
-        (result.1, result.2)
     }
 
     /// Record the physical modifier keys' own press and release.
@@ -604,7 +600,7 @@ impl RenderApp {
                             if self.effects.idle_dim.enabled {
                                 self.record_idle_dim_activity(window_id);
                             }
-                            let (receipt, token) = self.send_native_key(
+                            self.send_native_key(
                                 window_id,
                                 physical_key,
                                 InputEvent::Key {
@@ -614,17 +610,6 @@ impl RenderApp {
                                     emacs_frame_id: self.emacs_frame_for_window_event(window_id),
                                 },
                             );
-                            if state == ElementState::Pressed
-                                && matches!(key, FrontendKey::Keysym(0xff55 | 0xff56))
-                                && let Some(receipt) = receipt
-                                && let Some(window) = self.frame_windows.get_by_winit_mut(window_id)
-                            {
-                                window
-                                    .render
-                                    .compositor
-                                    .input_scroll
-                                    .observe_input(receipt, token);
-                            }
                         } else if state == ElementState::Pressed {
                             tracing::debug!(
                                 "KeyboardInput dropped after translation: logical_key={:?} physical_key={:?} text={:?} mods=0x{:x}",

@@ -78,7 +78,7 @@ pub struct GuiHost {
 /// with the event itself.
 fn classify(event: &InputEvent) -> Option<HostEvent> {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => classify(event),
+        InputEvent::Tracked { event, .. } => classify(event),
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
         &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
         &InputEvent::WindowResize { width, height, .. } if width > 0 && height > 0 => {
