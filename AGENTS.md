@@ -78,8 +78,8 @@ possible; say so where you do.
   mark state dirty; expensive derivations (face realisation, display
   mirroring, layout, chrome refresh) run once per command, redisplay, or
   theme switch. Hot primitives index rather than scan growing collections.
-  Every new collection-holding subsystem adds a scaling probe to
-  `crates/romacs-vm-gui/harness/scaling/probes.el`. A probe over its exponent
+  Every new collection-holding subsystem adds a scaling probe, one file under
+  `crates/romacs-vm-gui/harness/scaling/probes/`. A probe over its exponent
   budget is fixed, or carries `:known` with a ticket. Raising its budget is
   not a fix.
 - Attack cost in this order: complexity (never worse than GNU's; pick the
