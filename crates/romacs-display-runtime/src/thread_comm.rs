@@ -538,9 +538,9 @@ pub trait InputInterrupt: Send + Sync {
     /// Whether the key EVENT was taken as an interrupt instead of being
     /// queued: true only while the evaluator is busy.
     fn interrupt(&self, event: &InputEvent) -> bool;
-    /// The evaluator's busy span, while it is busy: a new one each time it
-    /// leaves a wait for input.
-    fn busy_span(&self) -> Option<u32>;
+    /// How long the evaluator has been busy, while it is: since it last
+    /// left a wait for input.
+    fn busy_for(&self) -> Option<std::time::Duration>;
 }
 
 /// Render thread communication handle
@@ -594,19 +594,13 @@ impl RenderComms {
                 }) => position.target_frame_id,
                 _ => return,
             };
-            let mut time = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            // SAFETY: valid out-pointer, POSIX monotonic clock. The
-            // compositor's clock ID must match before subtraction.
-            if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
-                romacs_display_protocol::present_trace::input_received(
-                    frame,
-                    libc::CLOCK_MONOTONIC as u32,
-                    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
-                );
-            }
+            // The compositor's clock ID must match before subtraction.
+            let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+            romacs_display_protocol::present_trace::input_received(
+                frame,
+                libc::CLOCK_MONOTONIC as u32,
+                time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64,
+            );
         }
     }
 
@@ -661,9 +655,9 @@ impl RenderComms {
         }
     }
 
-    /// The evaluator's busy span, while it is busy (`InputInterrupt').
-    pub(crate) fn evaluator_busy_span(&self) -> Option<u32> {
-        self.input_interrupt.as_ref().and_then(|hook| hook.busy_span())
+    /// How long the evaluator has been busy, while it is (`InputInterrupt').
+    pub(crate) fn evaluator_busy_for(&self) -> Option<std::time::Duration> {
+        self.input_interrupt.as_ref().and_then(|hook| hook.busy_for())
     }
 
     /// Queue a display input event for the input bridge.
