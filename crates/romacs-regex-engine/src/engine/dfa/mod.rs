@@ -18,7 +18,7 @@
 //!   tests' results;
 //! * the lazy DFA: states are (NFA kernel, facts about the previous
 //!   character), transitions are cached by (state, class);
-//! * the candidate filter ([`DfaLease`]): `re_search` asks the DFA at each
+//! * the candidate filter ([`DfaLease`](filter::DfaLease)): `re_search` asks the DFA at each
 //!   candidate; a rejection skips the matcher unless the fail-stack bound
 //!   says the backtracker could have overflowed there;
 //! * `syntax-table` property runs and the lazy `syntax-propertize` frontier
@@ -36,8 +36,8 @@
 //!
 //! | Knob | Values (default) | Effect |
 //! |------|------------------|--------|
-//! | `ROMACS_REGEX_DFA` | `on` (default), `off`, `verify` | Candidate existence filter ([`DfaMode`]). |
-//! | `ROMACS_REGEX_DFA_COLD` | `on` (default), `off` | Defer the lease; admit two nonempty failures during a scan, or one when the whole search fails ([`cold_path_enabled`]). |
+//! | `ROMACS_REGEX_DFA` | `on` (default), `off`, `verify` | Candidate existence filter ([`DfaMode`](filter::DfaMode)). |
+//! | `ROMACS_REGEX_DFA_COLD` | `on` (default), `off` | Defer the lease; admit two nonempty failures during a scan, or one when the whole search fails ([`cold_path_enabled`](filter::cold_path_enabled)). |
 //! | `ROMACS_REGEX_DFA_STATS` | unset (default), `1` | Print this thread's [`DfaStats`](filter::DfaStats) on stderr at exit with the filter on. |
 //! | `ROMACS_REGEX_DFA_FIRST_STEP` | `on` (default), `off` | Reject cached prefixes of at most eight bytes inline; verify also checks the predicate against the matcher ([`first_step_enabled`](filter::first_step_enabled)). |
 

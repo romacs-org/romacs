@@ -108,6 +108,9 @@ def run(mutant):
 
 def main():
     wanted = set(sys.argv[1:])
+    unknown = wanted - {m[0] for m in MUTANTS}
+    if unknown:
+        sys.exit(f"unknown mutants: {' '.join(sorted(unknown))}")
     dirty = subprocess.run(["git", "status", "--porcelain", "--", "src"], cwd=CRATE,
                            capture_output=True, text=True).stdout.strip()
     if dirty:

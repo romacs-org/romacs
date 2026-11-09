@@ -127,7 +127,7 @@ fn sparse_fastmap_rebuild_does_not_reuse_an_old_skip_byte() {
     };
     assert_eq!(search(&compiled, b"xa"), Some((1, 2)));
     let original = compiled.clone();
-    // Recompute is the compiler's public seam for rebuilding a fastmap.
+    // Recompute rebuilds the fastmap for the current syntax table.
     // Change the literal operand without changing bytecode boundaries or
     // match registers, so any stale skip decision would miss the new byte.
     assert_eq!(&compiled.buffer[..3], &[RegexOp::Exactn as u8, 1, b'a']);
@@ -959,18 +959,9 @@ fn posix_space_class_matches_newline_cr_under_standard_syntax() {
 }
 
 // ===========================================================================
-// Pike VM (non-backtracking fast path) — differential fuzzer + unit tests.
-//
-// The Pike VM MUST be byte-exact with the backtracker for every eligible
-// pattern.  These tests drive that: the differential fuzzer generates random
-// elisp-subset patterns + random buffers and asserts the two engines return
-// identical match-data (match/no-match AND every capture-group start/end)
-// for anchored `re_match` and forward/backward `re_search`.
+// Pike VM (non-backtracking fast path): it must be byte-exact with the
+// backtracker for every eligible pattern.
 // ===========================================================================
-
-// ---- random pattern generation (eligible subset only) --------------------
-
-// ---- random buffer generation --------------------------------------------
 
 #[test]
 fn differential_overrides_restore_nested_and_unwound_state() {

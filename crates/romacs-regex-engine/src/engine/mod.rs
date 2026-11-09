@@ -1,9 +1,9 @@
 //! GNU Emacs regular expressions: GNU's `regex-emacs.c`, translated, plus
 //! the linear-time matchers that keep its answers without its blow-ups.
 //!
-//! A pattern compiles to GNU's bytecode ([`regex_compile`] to a
-//! [`CompiledPattern`]); [`re_search`] tries candidate starts and
-//! [`re_match`] runs the backtracker from one, filling [`MatchRegisters`].
+//! A pattern compiles to GNU's bytecode ([`regex_compile`](crate::regex_compile) to a
+//! [`CompiledPattern`](crate::CompiledPattern)); [`re_search`](crate::re_search) tries candidate starts and
+//! [`re_match`](crate::re_match) runs the backtracker from one, filling [`MatchRegisters`](crate::MatchRegisters).
 //!
 //! ## Where GNU's pieces live
 //!
