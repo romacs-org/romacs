@@ -157,13 +157,13 @@ pub fn check_package_pin(
          pinned identity ({pinned}); the spec was pinned against a different \
          package set\n\
          fix: re-materialize deliberately, then run \
-         `cargo run -p xtask -- infra pin-packages {name}` to record it"
+         `cargo run -p romacs-infra --bin infra -- pin-packages {name}` to record it"
     ))
 }
 
 /// The fixture cache root: `$ROMACS_INFRA_CACHE`, else the workspace's
 /// `target/infra` (anchored at this crate's manifest, so every suite and
-/// the xtask CLI resolve the same directory whatever their CWD).
+/// the infra CLI resolve the same directory whatever their CWD).
 pub fn cache_root() -> PathBuf {
     std::env::var_os(INFRA_CACHE_OVERRIDE).map_or_else(
         || {

@@ -126,7 +126,7 @@ if [ "${1:-}" = --port ]; then
       echo "  which is NOT on the history of this tree (HEAD $port_head)."
       echo "  That binary cannot be talking about the tree being measured, so a"
       echo "  number scored with it is not a number about this tree.  Rebuild with"
-      echo "    cargo xtask fresh-build --release"
+      echo "    cargo build --release -p romacs-vm-gui"
     } >&2
     exit 3
   fi
@@ -295,7 +295,7 @@ mismatch() {
     echo "  against, so a number scored against it is not comparable with any"
     echo "  published one.  A rebuild of the GNU mirror is its own change with"
     echo "  its own re-baselining: run"
-    echo "    cargo run -p xtask -- pin-reference --emacs PATH --reason \"...\""
+    echo "    cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason \"...\""
     echo "  to re-pin deliberately, or set ROMACS_PARITY_REFERENCE=none to"
     echo "  measure without a pin and have every number branded UNATTESTED."
   } >&2

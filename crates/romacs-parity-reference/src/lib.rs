@@ -289,7 +289,7 @@ impl fmt::Display for AttestationError {
                  against, so a number scored against it is not comparable with any \
                  published one.  A rebuild of the GNU mirror is its own change with \
                  its own re-baselining: run\n    \
-                 cargo run -p xtask -- pin-reference --emacs PATH --reason \"...\"\n  \
+                 cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason \"...\"\n  \
                  to re-pin deliberately, or set {OPT_OUT_VAR}={OPT_OUT_VALUE} to \
                  measure without a pin and have every number branded UNATTESTED.",
                 path.display()
@@ -683,7 +683,7 @@ pub fn parse_manifest(text: &str) -> Result<ReferenceManifest, String> {
 
 /// Render a manifest back into the checked-in format's key block.
 ///
-/// Used by `cargo run -p xtask -- pin-reference` so that re-pinning writes the
+/// Used by `cargo run -p romacs-parity-reference --bin pin-reference` so that re-pinning writes the
 /// same bytes this crate parses.
 pub fn render_manifest_keys(manifest: &ReferenceManifest) -> String {
     format!(
