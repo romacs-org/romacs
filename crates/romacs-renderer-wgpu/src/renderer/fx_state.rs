@@ -61,6 +61,7 @@ pub(crate) struct SparkleBurstEntry {
 
 /// Entry for window edge glow (scroll boundary indicator)
 pub(crate) struct EdgeGlowEntry {
+    #[cfg(test)]
     pub(crate) window_id: i64,
     pub(crate) bounds: Rect,
     pub(crate) at_top: bool,

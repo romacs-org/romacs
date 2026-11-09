@@ -221,7 +221,7 @@ impl RenderApp {
             // OS-delivered RedrawRequested for a surface the
             // compositor is not showing.
             if !self.frame_coordinator.is_eligible(sched_id) {
-                super::frame_stats::count_plan(sched_id, &plan);
+                super::frame_stats::count_plan(&plan);
                 return;
             }
             if !plan.should_present {
@@ -234,7 +234,7 @@ impl RenderApp {
                 // than rendered unattributed.
                 plan = self.frame_coordinator.platform_redraw_plan(sched_id, tick);
             }
-            super::frame_stats::count_plan(sched_id, &plan);
+            super::frame_stats::count_plan(&plan);
             if plan.reasons.is_empty() {
                 super::frame_stats::count(
                     &super::frame_stats::UNATTRIBUTED_SUBMISSION_ATTEMPTS,
@@ -339,7 +339,6 @@ impl RenderApp {
             _ => false,
         };
         if dismiss {
-            self.comms.tooltip_context.invalidate();
             self.tooltips.hide();
         }
         if self.handle_native_menu_bar_event(window_id, &event)

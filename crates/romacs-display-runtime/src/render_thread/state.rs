@@ -10,7 +10,7 @@ use winit::dpi::{LogicalSize, PhysicalSize, Size};
 use crate::clipboard::ClipboardService;
 use crate::host_types::ResolvedImageMetadata;
 pub(crate) use crate::thread_comm::MonitorInfo;
-use crate::thread_comm::{FrameShaderAvailability, RenderComms};
+use crate::thread_comm::RenderComms;
 pub(super) use romacs_display_protocol::PointerAppearancePhase;
 use romacs_display_protocol::{
     EffectsConfig, FrameGlyphBuffer, FrameRect, ImageCacheUsage, ImageId, ImageLoadToken,
@@ -1007,14 +1007,6 @@ impl RenderApp {
             quality_mode = ?next_policy.mode(),
             "applying render-quality policy"
         );
-        let frame_shader_availability = if next_policy.frame_post_disposition().is_enabled() {
-            FrameShaderAvailability::Available
-        } else {
-            FrameShaderAvailability::SuppressedByQualityPolicy
-        };
-        self.comms
-            .capabilities
-            .publish_frame_shader_availability(frame_shader_availability);
         if !next_policy.allows_dynamic_effects() {
             self.frame_windows.discard_top_level_renderer_effects();
         }

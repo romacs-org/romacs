@@ -299,7 +299,6 @@ impl RenderApp {
         // Renderer first: pipelines and every media cache (image, video,
         // shader surfaces, frame post shader) hold old-device
         // objects.
-        self.comms.capabilities.begin_renderer_reset();
         #[cfg(feature = "video")]
         if let Some(renderer) = self.renderer.as_ref() {
             self.pending_video_recovery = renderer.video_recovery_manifests();

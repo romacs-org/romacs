@@ -19,10 +19,12 @@ pub(crate) struct QueuedPresentation {
 
 /// Proof that a revision was replaced while still in the mailbox. It was
 /// never acquired by the renderer and may be retired by the evaluator.
+#[cfg(test)]
 #[must_use = "retire the superseded evaluator presentation with discard"]
 #[derive(Debug)]
 pub(crate) struct SupersededPresentation(SealedFramePresentation);
 
+#[cfg(test)]
 impl std::ops::Deref for SupersededPresentation {
     type Target = SealedFramePresentation;
     fn deref(&self) -> &Self::Target {
@@ -40,6 +42,13 @@ impl std::ops::Deref for QueuedPresentation {
 type Pending = Arc<Mutex<VecDeque<QueuedPresentation>>>;
 
 #[derive(Clone)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "production frames arrive through the paint host; the held sender keeps the frame mailbox connected and lets tests submit"
+    )
+)]
 pub(crate) struct FrameSender {
     pending: Pending,
     wake: Arc<Sender<()>>,

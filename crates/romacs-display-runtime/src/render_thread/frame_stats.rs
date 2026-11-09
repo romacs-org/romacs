@@ -14,14 +14,11 @@
 //! All counters are relaxed atomics: every writer runs on the render thread,
 //! and readers only need eventually-consistent totals.
 
-use enum_map::EnumMap;
-use std::collections::BTreeMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use romacs_display_protocol::frame_time::EventTime;
 
-use super::frame_sched::{DemandReason, DemandReasonSet, FramePlan, NativeWindowId, RenderWork};
+use super::frame_sched::{FramePlan, RenderWork};
 
 /// One event-loop iteration (about_to_wait or user-event wake).
 pub(super) static EVENT_LOOP_WAKEUPS: AtomicU64 = AtomicU64::new(0);
@@ -142,48 +139,9 @@ pub(super) fn add(counter: &AtomicU64, n: u64) {
     counter.fetch_add(n, Ordering::Relaxed);
 }
 
-/// Per-native-window demand attribution (frame scheduling plan,
-/// Observability: "counters per native window and process-wide totals ...
-/// active demand reasons"). Written only from the render thread at points
-/// that are already awake (demand reconciliation and frame planning), so a
-/// fully idle loop never touches it; read by the diagnostics snapshot.
-struct WindowDemandStats {
-    /// Demand reasons active as of the last reconciliation.
-    active: DemandReasonSet,
-    /// Planned frames for each demand reason, keyed by the reason itself.
-    plans: EnumMap<DemandReason, u64>,
-}
-
-static WINDOW_DEMAND: Mutex<BTreeMap<u64, WindowDemandStats>> = Mutex::new(BTreeMap::new());
-
-/// The scheduler's loop-global pseudo-window (`LOOP_WINDOW`): not a native
-/// window, so it is excluded from per-window attribution. Its demand still
-/// counts in the process-wide totals.
-const LOOP_PSEUDO_WINDOW: u64 = u64::MAX;
-
-/// Replace the per-window active-reason sets with the coordinator's current
-/// view. Windows absent from `demand` (destroyed/pruned) drop their stats:
-/// per-window attribution does not outlive the window.
-pub(super) fn publish_window_demand(
-    demand: impl Iterator<Item = (NativeWindowId, DemandReasonSet)>,
-) {
-    let mut map = WINDOW_DEMAND.lock().unwrap();
-    let mut old = std::mem::take(&mut *map);
-    for (id, set) in demand {
-        if id.0 == LOOP_PSEUDO_WINDOW {
-            continue;
-        }
-        let plans = old
-            .remove(&id.0)
-            .map(|stats| stats.plans)
-            .unwrap_or_default();
-        map.insert(id.0, WindowDemandStats { active: set, plans });
-    }
-}
-
-/// Record a frame plan: its render work class and the demands it satisfies,
-/// both process-wide and attributed to the window the plan is for.
-pub(super) fn count_plan(window: NativeWindowId, plan: &FramePlan) {
+/// Record a frame plan process-wide: its render work class and the demands
+/// it satisfies.
+pub(super) fn count_plan(plan: &FramePlan) {
     let counter = match plan.work {
         RenderWork::None => &PLAN_NONE,
         RenderWork::CompositeOnly { .. } => &PLAN_COMPOSITE_ONLY,
@@ -193,17 +151,6 @@ pub(super) fn count_plan(window: NativeWindowId, plan: &FramePlan) {
     count(counter);
     for reason in plan.reasons.iter() {
         count(&PLAN_DEMAND_REASONS[reason.index()]);
-    }
-    if plan.reasons.is_empty() || window.0 == LOOP_PSEUDO_WINDOW {
-        return;
-    }
-    let mut map = WINDOW_DEMAND.lock().unwrap();
-    let stats = map.entry(window.0).or_insert_with(|| WindowDemandStats {
-        active: DemandReasonSet::empty(),
-        plans: EnumMap::default(),
-    });
-    for reason in plan.reasons.iter() {
-        stats.plans[reason] += 1;
     }
 }
 

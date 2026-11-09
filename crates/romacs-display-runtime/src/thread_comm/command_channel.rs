@@ -9,7 +9,9 @@
 mod tests;
 
 use super::{LifecycleCommand, RenderCommand};
-use crossbeam_channel::{Receiver, SendError, Sender, TryRecvError, TrySendError, bounded};
+use crossbeam_channel::{SendError, Sender, TryRecvError, TrySendError, bounded};
+#[cfg(test)]
+use crossbeam_channel::Receiver;
 #[cfg(test)]
 use crossbeam_channel::{RecvError, RecvTimeoutError};
 #[cfg(test)]
@@ -35,6 +37,7 @@ pub(crate) struct CommandSender {
 pub(crate) struct CommandReceiver {
     shared: Arc<Shared>,
     wake: Weak<Sender<()>>,
+    #[cfg(test)]
     available: Receiver<()>,
 }
 
@@ -51,6 +54,9 @@ pub(crate) fn command_channel(capacity: usize) -> (CommandSender, CommandReceive
         capacity,
     });
     let (wake, available) = bounded(1);
+    // Only tests wait on the wake channel; production polls the queue.
+    #[cfg(not(test))]
+    drop(available);
     let wake = Arc::new(wake);
     (
         CommandSender {
@@ -60,6 +66,7 @@ pub(crate) fn command_channel(capacity: usize) -> (CommandSender, CommandReceive
         CommandReceiver {
             shared,
             wake: Arc::downgrade(&wake),
+            #[cfg(test)]
             available,
         },
     )

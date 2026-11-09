@@ -14,7 +14,9 @@ use winit::{
 
 pub(crate) struct MenuRequest {
     pub tooltips: Option<romacs_display_protocol::tooltip::MenuTooltips>,
+    #[cfg(test)]
     pub request_id: Option<romacs_display_protocol::menu::MenuBarRequestId>,
+    #[cfg(test)]
     pub token: romacs_display_protocol::menu::MenuToken,
     pub frame_id: u64,
     pub parent: Arc<dyn Window>,
@@ -129,7 +131,6 @@ impl MenuPresentation {
                             fonts,
                         },
                         appearance,
-                        crate::tooltips::TooltipSource::NativeMenu,
                         now,
                     );
                 }

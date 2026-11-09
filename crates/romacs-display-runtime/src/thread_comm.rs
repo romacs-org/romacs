@@ -5,7 +5,6 @@
 //! bridge queues a converted event.
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -460,128 +459,6 @@ pub(crate) enum RenderCommand {
 const INPUT_CHANNEL_CAPACITY: usize = 4096;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
 
-/// Effective full-frame shader availability published by the render thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum FrameShaderAvailability {
-    /// No adapter has been selected. Callers may queue a request; bootstrap
-    /// will negotiate the final policy before processing normal commands.
-    Pending = 0,
-    Available = 1,
-    SuppressedByQualityPolicy = 2,
-}
-
-/// Identity of one requested full-frame shader state transition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct FrameShaderRequestId(u64);
-
-/// Renderer-acknowledged state for one frame-shader request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FrameShaderExecution {
-    Absent,
-    Pending,
-    Installed,
-    Rejected,
-    SuppressedByQualityPolicy,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct FrameShaderRuntimeState {
-    next_request: u64,
-    current_request: FrameShaderRequestId,
-    requested: bool,
-    execution: FrameShaderExecution,
-}
-
-impl Default for FrameShaderRuntimeState {
-    fn default() -> Self {
-        Self {
-            next_request: 1,
-            current_request: FrameShaderRequestId(0),
-            requested: false,
-            execution: FrameShaderExecution::Absent,
-        }
-    }
-}
-
-/// Display capability and renderer-acknowledged shader state shared by both
-/// thread handles.
-///
-/// The availability field remains lock-free for the synchronous Lisp policy
-/// check. Request generations and acknowledgements use one small mutex so a
-/// late renderer reply cannot describe a newer request.
-#[derive(Debug)]
-pub(crate) struct SharedRenderCapabilities {
-    frame_shader: AtomicU8,
-    frame_shader_runtime: Mutex<FrameShaderRuntimeState>,
-    /// A GPU renderer is live now (set on renderer creation, cleared on
-    /// loss and teardown): `romacs-model-available-p` (design §7).
-    model_renderer: std::sync::atomic::AtomicBool,
-}
-
-impl Default for SharedRenderCapabilities {
-    fn default() -> Self {
-        Self::new(FrameShaderAvailability::Pending)
-    }
-}
-
-impl SharedRenderCapabilities {
-    /// Construct a fixed initial snapshot. Embedders normally use
-    /// [`Default`] (pending); an explicit value is useful when constructing a
-    /// host around an already-negotiated renderer.
-    pub fn new(frame_shader: FrameShaderAvailability) -> Self {
-        Self {
-            frame_shader: AtomicU8::new(frame_shader as u8),
-            frame_shader_runtime: Mutex::new(FrameShaderRuntimeState::default()),
-            model_renderer: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    /// Publish whether a GPU renderer is live (render thread only).
-    pub(crate) fn set_model_renderer_live(&self, live: bool) {
-        self.model_renderer
-            .store(live, std::sync::atomic::Ordering::Release);
-    }
-
-    fn frame_shader_runtime_state(&self) -> std::sync::MutexGuard<'_, FrameShaderRuntimeState> {
-        match self.frame_shader_runtime.lock() {
-            Ok(state) => state,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
-    pub(crate) fn publish_frame_shader_availability(&self, availability: FrameShaderAvailability) {
-        self.frame_shader
-            .store(availability as u8, Ordering::Release);
-        let mut state = self.frame_shader_runtime_state();
-        if state.requested {
-            state.execution = match availability {
-                FrameShaderAvailability::SuppressedByQualityPolicy => {
-                    FrameShaderExecution::SuppressedByQualityPolicy
-                }
-                FrameShaderAvailability::Pending | FrameShaderAvailability::Available => {
-                    if state.execution == FrameShaderExecution::SuppressedByQualityPolicy {
-                        FrameShaderExecution::Pending
-                    } else {
-                        state.execution
-                    }
-                }
-            };
-        }
-    }
-
-    /// Invalidate renderer-owned acknowledgement before device teardown while
-    /// preserving the evaluator's declarative request for recovery replay.
-    pub(crate) fn begin_renderer_reset(&self) {
-        let mut state = self.frame_shader_runtime_state();
-        state.execution = if state.requested {
-            FrameShaderExecution::Pending
-        } else {
-            FrameShaderExecution::Absent
-        };
-    }
-}
-
 /// Communication channels between threads
 pub(crate) struct ThreadComms {
     /// The pointer over the primary window: Render → Emacs.
@@ -599,8 +476,6 @@ pub(crate) struct ThreadComms {
     pub input_tx: Sender<InputEvent>,
     pub input_rx: Receiver<InputEvent>,
 
-    pub capabilities: Arc<SharedRenderCapabilities>,
-    pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
 }
@@ -620,7 +495,6 @@ impl ThreadComms {
         let (frame_tx, frame_rx) = frame_mailbox::channel();
         let (cmd_tx, cmd_rx) = command_channel(COMMAND_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = bounded(INPUT_CHANNEL_CAPACITY);
-        let capabilities = Arc::new(SharedRenderCapabilities::default());
         Self {
             pointer: Arc::default(),
             frame_tx,
@@ -629,8 +503,6 @@ impl ThreadComms {
             cmd_rx,
             input_tx,
             input_rx,
-            capabilities,
-            tooltip_context: Arc::default(),
             frame_opacity: Arc::default(),
             lost_images: Arc::default(),
         }
@@ -640,13 +512,11 @@ impl ThreadComms {
     pub fn split(self) -> (EmacsComms, RenderComms) {
         let emacs = EmacsComms {
             pointer: self.pointer.clone(),
-            tooltip_context: self.tooltip_context.clone(),
             frame_opacity: Arc::clone(&self.frame_opacity),
             lost_images: Arc::clone(&self.lost_images),
             frame_tx: self.frame_tx,
             cmd_tx: self.cmd_tx,
             input_rx: self.input_rx,
-            capabilities: Arc::clone(&self.capabilities),
         };
 
         let render = RenderComms {
@@ -656,13 +526,11 @@ impl ThreadComms {
             native_window_waits: None,
             paint_diagnostics: None,
             input_stream: Default::default(),
-            tooltip_context: self.tooltip_context,
             frame_opacity: self.frame_opacity,
             lost_images: self.lost_images,
             frame_rx: self.frame_rx,
             cmd_rx: self.cmd_rx,
             input_tx: self.input_tx,
-            capabilities: self.capabilities,
         };
 
         (emacs, render)
@@ -678,11 +546,11 @@ impl Default for ThreadComms {
 /// Emacs thread communication handle
 pub(crate) struct EmacsComms {
     pub pointer: Arc<PointerCell>,
+    /// Frames for the render thread; only tests submit through it.
+    #[cfg_attr(not(test), expect(dead_code, reason = "production frames arrive through the paint host; the held sender keeps the frame mailbox connected and lets tests submit"))]
     pub frame_tx: FrameSender,
     pub cmd_tx: CommandSender,
     pub input_rx: Receiver<InputEvent>,
-    pub capabilities: Arc<SharedRenderCapabilities>,
-    pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
 }
@@ -713,8 +581,6 @@ pub(crate) struct RenderComms {
     pub frame_rx: FrameReceiver,
     pub cmd_rx: CommandReceiver,
     pub input_tx: Sender<InputEvent>,
-    pub capabilities: Arc<SharedRenderCapabilities>,
-    pub tooltip_context: Arc<romacs_display_protocol::tooltip::TooltipContext>,
     pub frame_opacity: Arc<Mutex<FrameOpacityState>>,
     pub lost_images: Arc<Mutex<LostImages>>,
 }

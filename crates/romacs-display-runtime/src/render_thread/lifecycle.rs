@@ -301,7 +301,6 @@ impl RenderApp {
                 event_loop.exit();
                 return;
             }
-            self.comms.tooltip_context.invalidate();
             self.tooltips.shutdown();
             self.menus.cancel();
             self.menus.shutdown();
@@ -510,11 +509,6 @@ impl RenderApp {
         // immediately on its first frame after idle.
         self.draw_fresh_scene(now);
         self.declare_frame_demands(now);
-        // Publish per-window active demand for diagnostics (plan:
-        // Observability). Runs only on loop wakes that already reconcile
-        // demand: a fully idle loop publishes nothing and is never woken by
-        // the counters.
-        super::frame_stats::publish_window_demand(self.frame_coordinator.window_demand());
         // Service the schedule before arming the wait. A deadline that has
         // come due is work, not a timeout: GNU's timer_check runs every ripe
         // timer and only then yields the pselect wait

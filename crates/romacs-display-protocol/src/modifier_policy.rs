@@ -269,7 +269,7 @@ struct ModifierFamily {
 }
 
 impl ModifierFamily {
-    const fn effective_right(&self) -> ModifierAssignment {
+    const fn effective_right(self) -> ModifierAssignment {
         match self.right {
             SideAssignment::InheritLeft => self.left,
             SideAssignment::Explicit(assignment) => assignment,

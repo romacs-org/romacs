@@ -8,6 +8,13 @@ use romacs_display_protocol::{
 /// The latest accepted snapshot and whether it can still produce a result.
 /// A closed snapshot is retained to reject stale show and hide requests.
 #[derive(Default, Clone, Copy)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "no production path opens a native popup menu; removing the menu subsystem is its own change"
+    )
+)]
 enum MenuLifetimeState {
     #[default]
     Unseen,

@@ -23,6 +23,7 @@ pub(crate) enum MediaType {
     /// Static images (lowest priority - can be reloaded)
     Image,
     /// Video frames (medium priority - can be re-decoded)
+    #[cfg(any(test, feature = "video"))]
     Video,
     /// Shader surfaces (evicted last: imperative ids handed to Lisp cannot
     /// be recreated by the renderer; declarative specs re-resolve on the

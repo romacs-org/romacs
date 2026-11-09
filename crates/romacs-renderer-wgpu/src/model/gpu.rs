@@ -300,6 +300,7 @@ pub(crate) struct ModelGpu {
     targets: Targets,
     pick: PickTargets,
     /// Geometry and fixed-resource bytes ([`geometry_bytes`]).
+    #[cfg(test)]
     pub geometry_bytes: u64,
 }
 
@@ -638,6 +639,7 @@ impl ModelGpu {
                 pick_request: None,
                 targets: Targets::new(device, size_px),
                 pick: PickTargets::new(device),
+                #[cfg(test)]
                 geometry_bytes: geometry_bytes(positions.len() as u64, faces.len() as u64),
             }
         })
