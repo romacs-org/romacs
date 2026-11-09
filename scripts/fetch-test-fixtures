@@ -20,6 +20,7 @@ import os
 import pathlib
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -45,10 +46,12 @@ def holds(path, digest):
 
 
 def write(path, data):
+    """Write DATA to PATH whole: a temporary file of this writer's own, then a
+    rename, so concurrent fetches into one cache never share a partial file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(f'.{path.name}.partial')
-    partial.write_bytes(data)
-    partial.replace(path)
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f'.{path.name}.', delete=False) as partial:
+        partial.write(data)
+    os.replace(partial.name, path)
 
 
 class FetchError(Exception):
