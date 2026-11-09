@@ -312,7 +312,6 @@ gstreamer-app = "0.25"
 gstreamer-allocators = "0.25"
 gstreamer-pbutils = "0.25"
 objc2-core-text = "0.3.2"
-windows = "0.62.2"
 url = "2"
 
 # Terminal support
