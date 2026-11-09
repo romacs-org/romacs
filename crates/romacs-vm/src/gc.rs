@@ -104,8 +104,15 @@ pub(crate) struct CollectionRecord {
     /// In a prompt's redisplay, the host taken for the read: no key can be
     /// seen, and one pressed waits.
     pub(crate) redisplay: bool,
+    /// When it ended, in seconds as `float-time` reads, if a clock timed it
+    /// (`host::collection_clock`).
+    pub(crate) at: Option<f64>,
+    /// What it left live in the private heap: `private_objects`, and
+    /// `Vm::live_bytes_estimate`.
+    pub(crate) objects: usize,
+    pub(crate) bytes: usize,
 }
-romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay });
+romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
 
 /// The collections since `Vm::take_collections', at most COLLECTION_RECORDS.
 #[derive(Clone, Debug, Default)]
@@ -801,9 +808,7 @@ impl Vm {
         let mut s = self.gc_stats;
         s.allocations += (self.heap_objects() - self.gc_retained) as u64;
         s.live_objects = self.heap_objects();
-        s.live_bytes = self.conses.live() * std::mem::size_of::<(Value, Value)>()
-            + self.cells.live() * std::mem::size_of::<Value>()
-            + self.closures.live() * std::mem::size_of::<Closure>()
+        s.live_bytes = self.table_bytes()
             + self
                 .closures
                 .iter()
@@ -812,48 +817,47 @@ impl Vm {
         // Native nodes may be retained by both tables and suspended cursors.
         // Keep this accounting separate from the moving arena object counts.
         let mut native_nodes = HashSet::default();
-        s.live_bytes += self.objects.live() * std::mem::size_of::<data::Object>()
-            + self
-                .objects
-                .iter()
-                .map(|o| match o {
-                    data::Object::Float(_) => 0,
-                    data::Object::Bignum(n) => size_of::<num_bigint::BigInt>()
-                        + n.bits().div_ceil(64) as usize * size_of::<u64>(),
-                    data::Object::Window(w) => w.storage_bytes(),
-                    data::Object::Frame(f) => f.storage_bytes(),
-                    data::Object::Terminal(t) => t.storage_bytes(),
-                    data::Object::WindowConfiguration(c) => c.storage_bytes(),
-                    data::Object::Sqlite(h) => h.storage_bytes(),
-                    data::Object::Treesit(t) => t.storage_bytes(),
-                    data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
-                    data::Object::Process(p) => p.storage_bytes(),
-                    data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
-                    data::Object::Bytes(v) => v.len(),
-                    data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
-                    data::Object::ByteBuffer(b) => {
-                        size_of::<bytes::ByteBuffer>() + b.storage_bytes(false)
-                    }
-                    data::Object::Marker(_) => size_of::<annotations::Marker>(),
-                    data::Object::Overlay(o) => {
-                        size_of::<annotations::Overlay>()
-                            + o.properties.len() * size_of::<(Value, Value)>()
-                    }
-                    data::Object::Vector(v) | data::Object::Record(v) => v.len() * std::mem::size_of::<Value>(),
-                    data::Object::CharTable(t) => t.storage_bytes_seen(false, &mut native_nodes),
-                    data::Object::SubCharTable(node) => char_table::CharTableNode::storage_bytes(node, false, &mut native_nodes),
-                    data::Object::MapKeymapCursor(c) => c.storage_bytes(false, &mut native_nodes),
-                    data::Object::Buffer(t) => {
-                        size_of::<annotations::AnnotatedBuffer>() + t.storage_bytes(false)
-                    }
-                    data::Object::SyntaxTable(t) => {
-                        size_of_val(t)
-                            + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
-                    }
-                    data::Object::HashTable(t) => t.storage_bytes(false),
-                    data::Object::Obarray(t) => t.storage_bytes(false),
-                })
-                .sum::<usize>();
+        s.live_bytes += self
+            .objects
+            .iter()
+            .map(|o| match o {
+                data::Object::Float(_) => 0,
+                data::Object::Bignum(n) => size_of::<num_bigint::BigInt>()
+                    + n.bits().div_ceil(64) as usize * size_of::<u64>(),
+                data::Object::Window(w) => w.storage_bytes(),
+                data::Object::Frame(f) => f.storage_bytes(),
+                data::Object::Terminal(t) => t.storage_bytes(),
+                data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                data::Object::Sqlite(h) => h.storage_bytes(),
+                data::Object::Treesit(t) => t.storage_bytes(),
+                data::Object::Finalizer(_) | data::Object::Thread | data::Object::Free => 0,
+                data::Object::Process(p) => p.storage_bytes(),
+                data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
+                data::Object::Bytes(v) => v.len(),
+                data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
+                data::Object::ByteBuffer(b) => {
+                    size_of::<bytes::ByteBuffer>() + b.storage_bytes(false)
+                }
+                data::Object::Marker(_) => size_of::<annotations::Marker>(),
+                data::Object::Overlay(o) => {
+                    size_of::<annotations::Overlay>()
+                        + o.properties.len() * size_of::<(Value, Value)>()
+                }
+                data::Object::Vector(v) | data::Object::Record(v) => v.len() * std::mem::size_of::<Value>(),
+                data::Object::CharTable(t) => t.storage_bytes_seen(false, &mut native_nodes),
+                data::Object::SubCharTable(node) => char_table::CharTableNode::storage_bytes(node, false, &mut native_nodes),
+                data::Object::MapKeymapCursor(c) => c.storage_bytes(false, &mut native_nodes),
+                data::Object::Buffer(t) => {
+                    size_of::<annotations::AnnotatedBuffer>() + t.storage_bytes(false)
+                }
+                data::Object::SyntaxTable(t) => {
+                    size_of_val(t)
+                        + t.len() * size_of::<(u32, romacs_regex_engine::SyntaxClass)>()
+                }
+                data::Object::HashTable(t) => t.storage_bytes(false),
+                data::Object::Obarray(t) => t.storage_bytes(false),
+            })
+            .sum::<usize>();
         s.capacity_bytes = self.conses.capacity_bytes()
             + self.cells.capacity_bytes()
             + self.closures.capacity_bytes()
@@ -948,10 +952,10 @@ impl Vm {
         self.cells.shrink(1024, budget);
         self.closures.shrink(1024, budget);
     }
-    /// Keep a finished collection's record, ELAPSED_NS long, IDLE as in
-    /// `collect_until_key'. One look at the host and one at the command
-    /// variable, per collection: a key pays nothing.
-    pub(super) fn note_collection(&mut self, elapsed_ns: u64, idle: bool) {
+    /// Keep a finished collection's record, `elapsed_ns` long if a clock timed
+    /// it, IDLE as in `collect_until_key`. One look at the host and one at the
+    /// command variable, per collection: a key pays nothing.
+    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool) {
         let explicit = std::mem::take(&mut self.collection_log.explicit);
         if self.collection_log.records.len() >= COLLECTION_RECORDS {
             self.collection_log.dropped += 1;
@@ -960,8 +964,26 @@ impl Vm {
         let command = if self.idle_since.is_none() && !idle { self.command_name() } else { None };
         let redisplay = command.is_none() && self.idle_since.is_some() && self.host_input.is_none();
         let key = command.is_none() && self.host_key_pending();
-        let us = (elapsed_ns / 1_000).min(u32::MAX as u64) as u32;
-        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay });
+        let us = (elapsed_ns.unwrap_or(0) / 1_000).min(u32::MAX as u64) as u32;
+        let at = elapsed_ns
+            .and_then(|_| crate::host::clock().duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs_f64());
+        let (objects, bytes) = (self.private_objects(), self.live_bytes_estimate());
+        self.collection_log.records.push(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes });
+    }
+    /// What the tables hold at their entries' own sizes.
+    fn table_bytes(&self) -> usize {
+        self.conses.live() * std::mem::size_of::<(Value, Value)>()
+            + self.cells.live() * std::mem::size_of::<Value>()
+            + self.closures.live() * std::mem::size_of::<Closure>()
+            + self.objects.live() * std::mem::size_of::<data::Object>()
+    }
+    /// The live heap's size just after a collection, without a walk: the
+    /// tables, and the strings and vectors the mark counted. It leaves out what
+    /// only `heap_stats`, which walks, sees: buffers' text, hash tables, windows
+    /// and the rest; and frozen regions.
+    fn live_bytes_estimate(&self) -> usize {
+        self.table_bytes() + self.gc_census.string_bytes + self.gc_census.vector_slots * std::mem::size_of::<Value>()
     }
     /// The running command's name, or the last one's in the command loop's
     /// tail (`romacs--command-loop-top' has cleared the running one).
@@ -975,9 +997,11 @@ impl Vm {
         Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
-    /// RECORD (KIND MS MET COMMAND), KIND `idle', `explicit' or `automatic',
-    /// MS a float, the pause in milliseconds to the microsecond,
-    /// MET `command', `key', `redisplay' or nil, COMMAND a string or nil.
+    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES), KIND `idle`, `explicit` or
+    /// `automatic`, MS a float, the pause in milliseconds to the microsecond,
+    /// MET `command`, `key`, `redisplay` or nil, COMMAND a string or nil,
+    /// T when it ended as `float-time` reads, or nil if nothing timed it,
+    /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk).
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
         let mut result = Value::NIL;
@@ -992,7 +1016,12 @@ impl Vm {
             let command = record.command.map_or(Value::NIL, |name| self.make_lisp_string(name.into_bytes(), true));
             let kind = self.intern(kind);
             let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
-            let mut row = self.keymap_cons(command, Value::NIL);
+            let at = record.at.map_or(Value::NIL, |at| self.allocate_object(data::Object::Float(at)));
+            let size = |n: usize| Value::integer(i64::try_from(n).expect("a heap's size fits i64")).expect("a heap's size fits fixnum");
+            let mut row = self.keymap_cons(size(record.bytes), Value::NIL);
+            row = self.keymap_cons(size(record.objects), row);
+            row = self.keymap_cons(at, row);
+            row = self.keymap_cons(command, row);
             row = self.keymap_cons(met, row);
             row = self.keymap_cons(ms, row);
             row = self.keymap_cons(kind, row);
