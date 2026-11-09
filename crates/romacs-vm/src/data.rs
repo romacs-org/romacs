@@ -13,7 +13,7 @@ const POLL_PAYLOAD: usize = 256 << 10;
 
 /// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
 /// next collection: a string's text, a vector's or record's slots, a bool
-/// vector's bits.
+/// vector's bits; and a bignum's digits, which live outside the tables.
 /// What the memory profiler charges for OBJECT when it is made: the entry
 /// and the storage `heap_stats' counts as live (GNU's malloc_probe sizes).
 pub(super) fn profiled_bytes(object: &Object) -> usize {
@@ -33,6 +33,7 @@ pub(super) fn payload_bytes(object: &Object) -> usize {
         Object::Bytes(bytes) => bytes.len(),
         Object::BoolVector(bits) => bits.bytes.len(),
         Object::Vector(slots) | Object::Record(slots) => slots.len() * std::mem::size_of::<Value>(),
+        Object::Bignum(digits) => usize::try_from(digits.bits().div_ceil(8)).unwrap_or(usize::MAX),
         _ => 0,
     }
 }

@@ -796,3 +796,17 @@ fn a_collections_record_reads_its_pause_to_the_microsecond() {
         .unwrap().display().unwrap();
     assert_eq!(out, "(explicit t t t)");
 }
+
+/// A bignum's digits are memory the next collection must answer for, as a
+/// string's bytes are. GNU collects through this churn; with only the object
+/// counted, a run this size reached 3 GB without a collection.
+#[test]
+fn a_churn_of_bignums_collects() {
+    let mut vm = Vm::new();
+    vm.set_gc_stress(0);
+    let out = vm.eval_source("(let ((before gcs-done) (i 0))
+                                (while (< i 40000) (ash 1 65000) (setq i (1+ i)))
+                                (> gcs-done before))")
+        .unwrap().display().unwrap();
+    assert_eq!(out, "t");
+}
