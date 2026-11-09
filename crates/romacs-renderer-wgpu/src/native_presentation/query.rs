@@ -29,6 +29,9 @@ struct Functions {
     past: abi::GetPast,
 }
 impl Functions {
+    /// # Safety
+    /// DEVICE must be a live Vulkan device whose instance supports the
+    /// present-timing extension these entry points come from.
     unsafe fn load(device: &wgpu::hal::vulkan::Device) -> Option<Self> {
         let instance = device.shared_instance().raw_instance();
         let raw = device.raw_device().handle();
@@ -140,8 +143,8 @@ impl SwapchainTiming {
     }
 
     pub fn matches(&self, surface: &wgpu::Surface<'_>, generation: u64) -> bool {
-        // SAFETY: read-only identity lookup; no raw operation on saved handles.
         self.generation == generation
+            // SAFETY: read-only identity lookup; no raw operation on saved handles.
             && unsafe { surface.as_hal::<Vulkan>() }
                 .is_some_and(|surface| surface.raw_native_swapchain() == Some(self.swapchain))
     }
@@ -179,6 +182,9 @@ impl SwapchainTiming {
         accepted
     }
 
+    /// # Safety
+    /// DEVICE must be the device this swapchain timing was created on, with
+    /// the swapchain still alive.
     unsafe fn calibrate(&self, device: &wgpu::hal::vulkan::Device) -> Option<Calibration> {
         let mut local = abi::SwapchainTimestamp {
             swapchain: self.swapchain,
