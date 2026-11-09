@@ -1240,11 +1240,11 @@ impl Vm {
             assert_ne!(i, usize::MAX, "rewriting an unmarked root");
             *v = Value::reference(i + offset, tag);
         };
-        self.conses.compact(|p| {
+        self.conses.collector_compact(|p| {
             rewrite(&mut p.0);
             rewrite(&mut p.1);
         });
-        self.closures.compact(|c| {
+        self.closures.collector_compact(|c| {
             for v in c.captures.iter_mut().chain(c.metadata.iter_mut()) {
                 rewrite(v);
             }
@@ -1257,7 +1257,7 @@ impl Vm {
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
         }).collect();
-        self.cells.compact(|v| rewrite(v));
+        self.cells.collector_compact(|v| rewrite(v));
         for v in roots
             .iter_mut()
             .chain(self.stack.iter_mut())
@@ -1304,7 +1304,7 @@ impl Vm {
         // Forward each physical native slot once, even when several live
         // cursors retain the same subtree (possibly detached from its table).
         native_nodes.clear();
-        self.objects.compact(|object| {
+        self.objects.collector_compact(|object| {
                 match object {
                     data::Object::Vector(values) | data::Object::Record(values) => {
                         for v in values {
@@ -1363,10 +1363,10 @@ impl Vm {
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
         // Stress fillers: unreachable, so the next collection drops them.
-        self.conses.prepend(fill[0], || (Value::NIL, Value::NIL));
-        self.closures.prepend(fill[1], || Closure { function: 0, captures: vec![], metadata: vec![], document: Value::NIL });
-        self.cells.prepend(fill[2], || Value::NIL);
-        self.objects.prepend(fill[3], || data::Object::String(Box::new(data::LispString::from_bytes(vec![], true))));
+        self.conses.collector_prepend(fill[0], || (Value::NIL, Value::NIL));
+        self.closures.collector_prepend(fill[1], || Closure { function: 0, captures: vec![], metadata: vec![], document: Value::NIL });
+        self.cells.collector_prepend(fill[2], || Value::NIL);
+        self.objects.collector_prepend(fill[3], || data::Object::String(Box::new(data::LispString::from_bytes(vec![], true))));
         lap.lap(&mut self.gc_times, Phase::Rewrite);
         self.shrink_tables();
         lap.lap(&mut self.gc_times, Phase::Shrink);

@@ -25,8 +25,9 @@ enum Class {
     /// Holds Values that shade at their stores once C1 adds the shade. Until
     /// then a store here runs nothing: not `Barrier`.
     Owed,
-    /// Read for what a mark reached (an own-obarray symbol, a marked region),
-    /// and read again at the finish of an incremental mark.
+    /// Read for what a mark reached (an own-obarray symbol, a marked region).
+    /// An incremental mark will have to read it again at its finish; until C
+    /// does, nothing reads it twice.
     Rescanned,
     /// Holds no heap Value.
     Free,
@@ -42,9 +43,10 @@ use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
-    // Keeps the last kernel's arguments until the next edit clears it; during
-    // one it is `stack`, swapped in, and nothing reads it in between (insdel.rs).
-    ("kernel_stack", Transient),
+    // Keeps the last kernel's arguments until the next edit clears it, past
+    // any collection; during one it is `stack`, swapped in. Inert: nothing
+    // reads it before that clear (insdel.rs).
+    ("kernel_stack", Cache),
     ("change_slots", Free), ("case_symbols_slot", Free), ("print_number_index", Free), ("undo_list_slot", Free),
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.
@@ -82,8 +84,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("strict_root", Free), ("reached_head", Free), ("reached_generated", Free), ("loader_order_request", Free),
     ("keep_captures", Free), ("lambda_depth", Free), ("window_change_seen", Free), ("expanded_macros", Free), ("expanded_symbols", Free),
     ("image", Free),
-    // A frozen region's symbols, read once it is marked. Written once at
-    // placement, before any Value names the region (frozen.rs), so no store.
+    // A frozen region's symbols, read once it is marked. Written when it is
+    // placed and when its hash tables are put in, both before any Value names
+    // the region (frozen.rs), so no store.
     ("regions", Rescanned),
     ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("inotify", Free),
     ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
@@ -259,12 +262,12 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
     assert_eq!(parsed, ["A", "B", "C"].map(str::to_owned).into());
 }
 
-/// The `Table` methods that write past the barrier, and who may call them:
+/// The `Table` methods that write past the barrier, and who may name them:
 /// the collector's own rewrites, and the hash table's setters, whose `Stores`
 /// handle tells each store but whose `&mut HashTable` would let a caller write
-/// around it.
+/// around it. Each name is the method's alone, so any use of it counts.
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
-    ("collector_entries_mut", collector), ("compact", collector), ("prepend", collector),
+    ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
     ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
 ];
 
@@ -275,16 +278,15 @@ fn collector(file: &str) -> bool {
     file == "table.rs" || (file.starts_with("gc") && !file.contains('/'))
 }
 
-/// Each file under `src` that calls a method of PAST_THE_BARRIER it may not, as
-/// `FILE: METHOD`. A call is `.METHOD(`, so a field of that name, a comment
-/// or a string never counts.
+/// Each file under `src` that names a method of PAST_THE_BARRIER it may not,
+/// as `FILE: METHOD`: a call, a path to it, a reference to it or a macro's
+/// argument, any use of the identifier. A comment or a string never counts.
 fn calls_past_the_barrier(sources: &[(String, String)]) -> Vec<String> {
     let mut problems = vec![];
     for (file, text) in sources {
         let toks = tokens(text);
         for (method, allowed) in PAST_THE_BARRIER {
-            let call = [Token::Punct('.'), Token::Ident((*method).into()), Token::Punct('(')];
-            if !allowed(file) && toks.windows(3).any(|w| w == call) {
+            if !allowed(file) && toks.contains(&Token::Ident((*method).into())) {
                 problems.push(format!("{file}: {method}"));
             }
         }
@@ -312,20 +314,23 @@ fn only_the_collector_and_the_hash_setters_write_past_the_barrier() {
     assert!(problems.is_empty(), "past the barrier: {}", problems.join(", "));
 }
 
-/// The check can fire: each method, called from a file that may not.
+/// The check can fire: each method, named from a file that may not, by a
+/// call, a path, a reference and a macro's argument.
 #[test]
 fn a_call_past_the_barrier_is_refused() {
     let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
     let sources = [
-        file("window.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); vm.conses.compact(|_| {}); }"),
-        file("prim/gc_leaf.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); vm.cells.prepend(1, || NIL); }"),
-        file("gc.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); vm.objects.hash_mut(2); }"),
-        file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // .compact( in a comment"),
-        file("handle.rs", "fn f(vm: &mut Vm) { vm.allocation.compact = true; }"),
+        file("window.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); vm.conses.collector_compact(|_| {}); }"),
+        file("prim/gc_leaf.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); Table::collector_prepend(&mut vm.cells, 1, || NIL); }"),
+        file("gc.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); let g = Table::hash_mut; g(&mut vm.objects, 2); }"),
+        file("frame.rs", "fn f(vm: &mut Vm) { through!(vm.objects, hash_mut, 3); }"),
+        file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // collector_compact in a comment"),
+        file("handle.rs", "fn f(vm: &mut Vm) { vm.allocation.compact = true; let s = \"collector_prepend\"; }"),
     ];
     assert_eq!(calls_past_the_barrier(&sources), [
-        "window.rs: compact", "window.rs: hash_mut",
-        "prim/gc_leaf.rs: collector_entries_mut", "prim/gc_leaf.rs: prepend",
+        "window.rs: collector_compact", "window.rs: hash_mut",
+        "prim/gc_leaf.rs: collector_entries_mut", "prim/gc_leaf.rs: collector_prepend",
         "gc.rs: hash_mut",
+        "frame.rs: hash_mut",
     ]);
 }

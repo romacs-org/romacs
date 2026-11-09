@@ -4051,7 +4051,8 @@ unsafe fn t2_prepare_apply(
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
 /// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
+/// its operands name lie in that frame and code, as lowering checked. R is a
+/// continuation activation: this is reached only from `t2_call` in `K_CODE`.
 unsafe fn t2_enter_closure(
     mut e: Eng<'_, '_>,
     r: *mut Value,
@@ -4093,7 +4094,6 @@ unsafe fn t2_enter_closure(
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
-        // Reached only from `t2_call` in `K_CODE`, so R is a continuation activation.
         let new = r.add(k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N)));
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);

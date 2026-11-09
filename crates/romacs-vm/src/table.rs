@@ -580,7 +580,7 @@ impl<T> Table<T> {
     }
     /// Compaction: keep the marked entries, in order, each through KEEP. The
     /// table is left dense.
-    pub(crate) fn compact(&mut self, mut keep: impl FnMut(&mut T)) {
+    pub(crate) fn collector_compact(&mut self, mut keep: impl FnMut(&mut T)) {
         self.high = self.high.max(self.entries.len());
         let (colors, mut i) = (&self.colors, 0);
         self.entries.retain_mut(|entry| {
@@ -594,7 +594,7 @@ impl<T> Table<T> {
         self.dense();
     }
     /// N fillers in front of every entry, which move up past them.
-    pub(crate) fn prepend(&mut self, n: usize, filler: impl FnMut() -> T) {
+    pub(crate) fn collector_prepend(&mut self, n: usize, filler: impl FnMut() -> T) {
         self.entries.splice(0..0, std::iter::repeat_with(filler).take(n));
         self.dense();
     }
@@ -727,10 +727,10 @@ mod tests {
         for i in [2, 5, 7] {
             t.mark(i);
         }
-        t.compact(|entry| *entry += 100);
+        t.collector_compact(|entry| *entry += 100);
         assert_eq!(t.entries, [102, 105, 107]);
         assert_eq!((t.unused(), t.live()), (0, 3));
-        t.prepend(2, || 0);
+        t.collector_prepend(2, || 0);
         assert_eq!(t.entries, [0, 0, 102, 105, 107]);
         assert_eq!(t.alloc(1), 5, "dense: the end");
     }
@@ -791,7 +791,7 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        t.compact(|_| {});
+        t.collector_compact(|_| {});
         assert!(!raw.holds(&t), "compacted with every entry kept");
         let mut t = table(100);
         let raw = raw_of(&mut t);
