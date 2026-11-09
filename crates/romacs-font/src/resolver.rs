@@ -62,63 +62,8 @@ pub struct CharResolution {
     pub source: CharResolutionSource,
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) use crate::fontconfig_catalog::{self as catalog, FaceList, ListSpec, ListedFace};
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) mod catalog {
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(crate) struct ListedFace {
-        pub family: String,
-        pub file: String,
-        pub selector: u32,
-        pub postscript_name: Option<String>,
-        pub weight: u16,
-        pub slant: romacs_display_protocol::font::FontSlantKind,
-        pub width: u16,
-        pub spacing: Option<i32>,
-        pub foundry: Option<String>,
-        pub fc_style: (i32, i32, i32),
-    }
-    impl ListedFace {
-        pub fn is_monospace(&self) -> bool {
-            false
-        }
-    }
-    pub(crate) fn handle() -> Option<()> {
-        None
-    }
-    pub(crate) fn list_faces(_: Option<&str>, _: Option<char>) -> Vec<ListedFace> {
-        Vec::new()
-    }
-    pub(crate) fn match_family(_: &str) -> Option<String> {
-        None
-    }
-    pub(crate) fn sort_faces(_: &str, _: char) -> Vec<ListedFace> {
-        Vec::new()
-    }
-    pub(crate) fn list_families() -> Vec<String> {
-        Vec::new()
-    }
-    #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-    pub(crate) struct ListSpec {
-        pub family: Option<String>,
-        pub foundry: Option<String>,
-        pub chars: Vec<u32>,
-        pub langs: Vec<String>,
-    }
-    pub(crate) struct FaceList;
-    impl FaceList {
-        pub fn covering(&self, _: char) -> Vec<ListedFace> {
-            Vec::new()
-        }
-    }
-    pub(crate) fn list_constrained(_: &ListSpec) -> Option<FaceList> {
-        None
-    }
-}
-#[cfg(not(target_os = "linux"))]
-use catalog::{FaceList, ListSpec, ListedFace};
 
 /// Generic family names Fontconfig resolves through alias rules rather than
 /// listing (GNU `ftfont_resolve_generic_family`).
@@ -139,7 +84,6 @@ fn is_generic_family(family: &str) -> bool {
 /// the same file face the metrics came from.
 enum OpenedFace {
     /// Scalable outlines: FreeType's hinted advance, as GNU's Cairo backend.
-    #[cfg(target_os = "linux")]
     FreeType(freetype::Face),
     /// Faces FreeType cannot size freely (colour bitmap strikes such as
     /// Noto Color Emoji's CBDT): design-unit advances scaled to the size.
@@ -153,7 +97,6 @@ enum OpenedFace {
 impl OpenedFace {
     fn glyph(&self, ch: char) -> Option<(ResolvedGlyphId, f32)> {
         match self {
-            #[cfg(target_os = "linux")]
             Self::FreeType(face) => {
                 let glyph = face
                     .get_char_index(ch as usize)
@@ -183,7 +126,6 @@ impl OpenedFace {
     fn bearings(&self, ch: char) -> Option<(f32, f32)> {
         let (_, advance) = self.glyph(ch)?;
         match self {
-            #[cfg(target_os = "linux")]
             Self::FreeType(face) => {
                 let metrics = face.glyph().metrics();
                 let left = metrics.horiBearingX as f32 / 64.0;
@@ -204,7 +146,6 @@ impl OpenedFace {
     fn ink(&self, ch: char) -> Option<(f32, f32, f32)> {
         let (_, advance) = self.glyph(ch)?;
         match self {
-            #[cfg(target_os = "linux")]
             Self::FreeType(face) => {
                 let metrics = face.glyph().metrics();
                 let (top, height) = (metrics.horiBearingY as f32 / 64.0, metrics.height as f32 / 64.0);
@@ -258,8 +199,13 @@ fn sfnt_metrics(data: &[u8], index: u32, pixel_size: f32) -> Option<crate::probe
 
 /// Resolves faces and characters to exact fonts. Holds FreeType faces, so it
 /// is single-threaded: one resolver per layout thread.
+/// An icon lookup's character, weight, slant, width and pixel size (bits).
+type SoleKey = (char, u16, romacs_display_protocol::font::FontSlantKind, u16, u32);
+
+/// A group's identity while it is held (`Alternatives::identity`).
+type GroupKey = (usize, usize);
+
 pub struct FontResolver {
-    #[cfg(target_os = "linux")]
     library: freetype::Library,
     interner: FontInstanceInterner,
     selection_order: FontSelectionState,
@@ -269,7 +215,7 @@ pub struct FontResolver {
     chars: HashMap<(RequestKey, char), Result<CharResolution, FontResolveError>>,
     /// Romacs's icons: by the request's family, so a lookup allocates no
     /// key, then character, style and size (`resolve_sole').
-    sole: HashMap<String, HashMap<(char, u16, romacs_display_protocol::font::FontSlantKind, u16, u32), Result<CharResolution, FontResolveError>>>,
+    sole: HashMap<String, HashMap<SoleKey, Result<CharResolution, FontResolveError>>>,
     /// Fontconfig's listings for each spec, kept across rule changes: they
     /// depend on the installed fonts alone.
     lists: HashMap<ListSpec, Option<Arc<FaceList>>>,
@@ -278,7 +224,7 @@ pub struct FontResolver {
     realized: HashMap<(RequestKey, usize), Vec<ResolvedFont>>,
     /// Each group in search order, by group and request: reordered once a
     /// revision, as GNU's realized font-group is.
-    orders: HashMap<((usize, usize), RequestKey), Arc<Vec<romacs_layout_input::Alternative>>>,
+    orders: HashMap<(GroupKey, RequestKey), Arc<Vec<romacs_layout_input::Alternative>>>,
     opened: HashMap<(String, u32, u32), Option<OpenedFace>>,
     files: HashMap<String, Option<std::sync::Arc<Vec<u8>>>>,
 }
@@ -297,7 +243,6 @@ impl FontResolver {
     pub fn new() -> Result<Self, FontResolveError> {
         catalog::handle().ok_or(FontResolveError::CatalogUnavailable)?;
         Ok(Self {
-            #[cfg(target_os = "linux")]
             library: freetype::Library::init().map_err(|_| FontResolveError::CatalogUnavailable)?,
             interner: FontInstanceInterner::default(),
             selection_order: FontSelectionState::default(),
@@ -720,7 +665,6 @@ impl FontResolver {
     }
 
     fn open_face(&mut self, file: &str, selector: u32, px: u32) -> Option<OpenedFace> {
-        #[cfg(target_os = "linux")]
         if let Ok(face) = self.library.new_face(file, selector as isize)
             && face.is_scalable()
             && face.set_pixel_sizes(0, px).is_ok()

@@ -5,7 +5,7 @@
     "romacs-attach": {"sites": 2, "undocumented": 0},
     "romacs-display-protocol": {"sites": 7, "undocumented": 4},
     "romacs-display-runtime": {"sites": 28, "undocumented": 12},
-    "romacs-font": {"sites": 60, "undocumented": 49},
+    "romacs-font": {"sites": 31, "undocumented": 0},
     "romacs-font-materializer": {"sites": 2, "undocumented": 0},
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
     "romacs-gui-tests": {"sites": 4, "undocumented": 1},
