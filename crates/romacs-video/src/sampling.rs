@@ -17,14 +17,12 @@ use crate::{
 /// Linux DRM render-node identity shared by the Vulkan compositor and the
 /// decoder selected inside GStreamer. A DMA-BUF path is only called direct
 /// when both sides prove this identity is the same.
-#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LinuxDrmDevice {
     major: u32,
     minor: u32,
 }
 
-#[cfg(target_os = "linux")]
 impl LinuxDrmDevice {
     #[cfg(test)]
     pub(crate) const fn from_device_numbers(major: u32, minor: u32) -> Self {
@@ -255,7 +253,6 @@ impl GpuVideoContext {
         &self.device
     }
 
-    #[cfg(target_os = "linux")]
     pub(crate) fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
@@ -268,7 +265,6 @@ impl GpuVideoContext {
         self.allocations.bytes()
     }
 
-    #[cfg(target_os = "linux")]
     pub(crate) fn linux_render_device(&self) -> Option<LinuxDrmDevice> {
         let (major, minor) = linux_render_device_numbers(&self.device)?;
         Some(LinuxDrmDevice { major, minor })
@@ -299,7 +295,6 @@ impl GpuVideoContext {
             .on_submitted_work_done(retirement.into_completion_callback());
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn wrap_texture<L>(
         &self,
         geometry: VideoGeometry,
@@ -317,7 +312,6 @@ impl GpuVideoContext {
         self.wrap_prepared_texture(geometry, prepared, native_lease)
     }
 
-    #[cfg(target_os = "linux")]
     pub(crate) fn wrap_prepared_texture_with_release<L>(
         &self,
         geometry: VideoGeometry,
@@ -361,34 +355,9 @@ impl GpuVideoContext {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn prepare_bi_planar_textures(
-        &self,
-        luma_texture: wgpu::Texture,
-        chroma_texture: wgpu::Texture,
-        format: BiPlanarVideoFormat,
-        colorimetry: VideoColorimetry,
-        geometry: VideoGeometry,
-    ) -> Result<PreparedBiPlanarTexture, String> {
-        let luma_view = luma_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let chroma_view = chroma_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.prepare_bi_planar_views(
-            BiPlanarTexturePlanes {
-                luma_texture,
-                chroma_texture,
-                luma_view,
-                chroma_view,
-            },
-            format,
-            colorimetry,
-            geometry,
-        )
-    }
-
-    /// Prepare the two aspects of one native Vulkan/DXGI multi-planar
+    /// Prepare the two aspects of one native Vulkan multi-planar
     /// texture. Both views share one wgpu texture identity, so resource-state
     /// tracking remains aware that the planes alias the same image.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub(crate) fn prepare_multi_planar_texture(
         &self,
         texture: wgpu::Texture,
@@ -513,7 +482,6 @@ impl GpuVideoContext {
         GpuVideoFrame::new_bi_planar(geometry, self.generation, prepared, native_lease)
     }
 
-    #[cfg(target_os = "linux")]
     pub(crate) fn wrap_prepared_bi_planar_texture_with_release<L>(
         &self,
         geometry: VideoGeometry,
@@ -529,7 +497,6 @@ impl GpuVideoContext {
         frame
     }
 
-    #[cfg(target_os = "linux")]
     pub(crate) fn upload_rgba(
         &self,
         geometry: VideoGeometry,
@@ -598,7 +565,6 @@ impl GpuVideoContext {
 /// Query the exact DRM render-device identity selected by wgpu's Vulkan
 /// adapter. The device numbers come from Vulkan's DRM properties extension,
 /// avoiding ambiguous vendor/device scans on identical multi-GPU systems.
-#[cfg(target_os = "linux")]
 pub fn linux_render_device_numbers(device: &wgpu::Device) -> Option<(u32, u32)> {
     use std::ffi::CStr;
 

@@ -16,7 +16,7 @@ use gstreamer_video as gst_video;
 use romacs_display_protocol::types::VideoId;
 
 use crate::backend::{
-    BackendEvent, BackendInbox, BackendPublisher, DecodedFrame, DecodedFrameImport, DecoderBackend,
+    BackendEvent, BackendInbox, BackendPublisher, DecodedFrame, DecoderBackend,
     DecoderOutputGeneration, DecoderOutputRejection, DecoderReconfiguration, backend_bridge,
 };
 use crate::sampling::LinuxDrmDevice;
@@ -1028,7 +1028,6 @@ fn decode_sample(
             format,
             colorimetry,
             output_generation,
-            decoder_import: DecodedFrameImport::Deferred,
         }));
     }
 
@@ -1073,7 +1072,6 @@ fn decode_sample(
         format,
         colorimetry: VideoColorimetry::SRGB,
         output_generation,
-        decoder_import: DecodedFrameImport::Deferred,
     }))
 }
 
