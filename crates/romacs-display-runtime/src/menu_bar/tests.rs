@@ -40,15 +40,49 @@ fn switching_headings_requests_each_afresh_and_a_press_closes() {
     assert!(bar.heading().is_none());
 }
 
+fn key(logical_key: Key) -> WindowEvent {
+    WindowEvent::KeyboardInput {
+        device_id: None,
+        event: winit::event::KeyEvent {
+            physical_key: winit::keyboard::PhysicalKey::Unidentified(
+                winit::keyboard::NativeKeyCode::Unidentified,
+            ),
+            logical_key: logical_key.clone(),
+            text: None,
+            location: winit::keyboard::KeyLocation::Standard,
+            state: ElementState::Pressed,
+            repeat: false,
+            text_with_all_modifiers: None,
+            key_without_modifiers: logical_key,
+        },
+        is_synthetic: false,
+    }
+}
+
 #[test]
 fn an_open_heading_closes_with_control_g_and_escape() {
-    for key in [Key::Character("g".into()), Key::Named(NamedKey::Escape)] {
+    let id = WindowId::from_raw(1);
+    for (modifiers, cancel) in [
+        (ModifiersState::CONTROL, Key::Character("g".into())),
+        (ModifiersState::empty(), Key::Named(NamedKey::Escape)),
+    ] {
         let mut bar = MenuBar::default();
         bar.select(heading("help-menu"), false);
-        bar.modifiers = ModifiersState::CONTROL;
-        assert!(cancels(&key, bar.modifiers));
-        bar.close();
+        bar.event(
+            id,
+            &WindowEvent::ModifiersChanged(winit::event::Modifiers::new(
+                modifiers,
+                Default::default(),
+            )),
+        );
+        assert!(bar.event(id, &key(Key::Character("x".into()))));
+        assert!(bar.heading().is_some(), "other keys keep the heading open");
+        assert!(
+            bar.event(id, &key(cancel)),
+            "the menu bar owns the cancel key"
+        );
         assert!(bar.heading().is_none());
+        assert!(!bar.event(id, &key(Key::Character("x".into()))));
     }
 }
 
