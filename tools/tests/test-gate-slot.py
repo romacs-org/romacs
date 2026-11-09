@@ -556,7 +556,9 @@ with tempfile.TemporaryDirectory(prefix='neomacs-slot-test-', dir=os.environ['TM
     for n in (1, 2):
         assert subprocess.call(['flock', '--nonblock', '--exclusive', str(root / f'bridge.{n}'), 'true']) == 0
     children = []
-    for lane, duration in [('alpha-one', '5'), ('alpha-two', '.2'), ('beta-one', '4'), ('error-one', '.1')]:
+    # beta-one's slot frees 5 s before alpha-one's, more than a loaded host's
+    # child start-up can take: error-one takes it while alpha-two waits for its lane.
+    for lane, duration in [('alpha-one', '6'), ('alpha-two', '.2'), ('beta-one', '1'), ('error-one', '.1')]:
         import select
         ready, notify = os.pipe()
         try:

@@ -27,13 +27,16 @@ class ProcessControls(unittest.TestCase):
         self.path = self.directory / 'target.el'
 
     def run_control(self, action, report=None):
+        # A control that ends gets as long as a loaded host needs to start
+        # Python; one that sleeps (10 s) is cut off well before it wakes.
+        timeout = 3 if 'sleep' in action else 30
         control = self.directory / 'control.py'
         source = '#!/usr/bin/env python3\nimport os, signal, resource, time\nresource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n'
         if report is not None:
             source += f'print({json.dumps(report)!r}, flush=True)\n'
         control.write_text(source + action + '\n')
         control.chmod(0o700)
-        return census.run_file(self.path, {'form_count': 2, 'status': 'ok'}, control, [], 0.3)
+        return census.run_file(self.path, {'form_count': 2, 'status': 'ok'}, control, [], timeout)
 
     def primary(self, ok=False, panic=False):
         return {'measurement': True, 'file': str(self.path), 'ok': ok, 'panic': panic,
