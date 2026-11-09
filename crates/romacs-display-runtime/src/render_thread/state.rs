@@ -316,15 +316,6 @@ pub(super) fn emacs_pixels_from_window_size(
     }
 }
 
-#[cfg(feature = "webview")]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct WebViewPointerCapture {
-    pub(super) target: romacs_webview::WebViewInputTarget,
-    /// WebView content origin in the native window's logical coordinates.
-    pub(super) surface_origin_x: f32,
-    pub(super) surface_origin_y: f32,
-}
-
 /// FPS counter and frame time tracking state.
 #[derive(Clone)]
 pub(super) struct FpsCounter {
@@ -908,8 +899,6 @@ pub(super) struct RenderApp {
     pub(super) video_wake: romacs_video::VideoWake,
     /// Native browser callbacks wake winit after publishing lifecycle, script,
     /// or frame work. Production replaces the no-op test value before run.
-    #[cfg(feature = "webview")]
-    pub(super) webview_wake: romacs_webview::WebViewWake,
     /// Device generation attached to every imported native video surface.
     #[cfg(feature = "video")]
     pub(super) video_gpu_generation: romacs_video::GpuGeneration,
@@ -963,15 +952,6 @@ pub(super) struct RenderApp {
     pub(super) effects: EffectsConfig,
 
     pub(super) transition_policy: TransitionPolicy,
-    #[cfg(feature = "webview")]
-    pub(super) webview_system: Option<romacs_webview::WebViewSystem>,
-    #[cfg(feature = "webview")]
-    pub(super) webview_scene_clocks:
-        HashMap<romacs_webview::HostWindowId, super::frame_ingest::WebViewSceneClock>,
-    #[cfg(feature = "webview")]
-    pub(super) focused_webview: Option<romacs_webview::WebViewInputTarget>,
-    #[cfg(feature = "webview")]
-    pub(super) webview_pointer_capture: Option<WebViewPointerCapture>,
 
     pub(super) frame_windows: GuiFrameWindowManager,
     /// Latest child snapshots whose immediate ancestry has not been presented
@@ -1169,8 +1149,6 @@ impl RenderApp {
             renderer: None,
             #[cfg(feature = "video")]
             video_wake: romacs_video::VideoWake::noop(),
-            #[cfg(feature = "webview")]
-            webview_wake: romacs_webview::WebViewWake::noop(),
             #[cfg(feature = "video")]
             video_gpu_generation: romacs_video::GpuGeneration::INITIAL,
             #[cfg(feature = "video")]
@@ -1195,14 +1173,6 @@ impl RenderApp {
             requested_visual_config,
             effects: EffectsConfig::default(),
             transition_policy: TransitionPolicy::default(),
-            #[cfg(feature = "webview")]
-            webview_system: None,
-            #[cfg(feature = "webview")]
-            webview_scene_clocks: HashMap::new(),
-            #[cfg(feature = "webview")]
-            focused_webview: None,
-            #[cfg(feature = "webview")]
-            webview_pointer_capture: None,
             frame_windows,
             pending_child_frames: HashMap::new(),
             scene_children: Vec::new(),

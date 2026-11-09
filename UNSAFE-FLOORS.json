@@ -10,16 +10,14 @@
     "romacs-gnu-tests": {"sites": 2, "undocumented": 1},
     "romacs-gui-tests": {"sites": 4, "undocumented": 1},
     "romacs-regex-engine": {"sites": 24, "undocumented": 17},
-    "romacs-renderer-wgpu": {"sites": 33, "undocumented": 18},
+    "romacs-renderer-wgpu": {"sites": 32, "undocumented": 18},
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
     "romacs-tui-tests": {"sites": 10, "undocumented": 6},
     "romacs-video": {"sites": 28, "undocumented": 0},
     "romacs-vm": {"sites": 882, "undocumented": 493},
-    "romacs-vm-gui": {"sites": 11, "undocumented": 2},
-    "romacs-webview": {"sites": 110, "undocumented": 98}
+    "romacs-vm-gui": {"sites": 11, "undocumented": 2}
   },
   "unsafe_op_in_unsafe_fn_pending": {
-    "romacs-renderer-wgpu": "src/vulkan_dmabuf.rs hal_import allows it: 29 unsafe calls in nine unsafe fn bodies need their own SAFETY review, proven on the dma-buf import path on a real GPU.",
-    "romacs-webview": "src/platform/linux allows it for its WPE FFI. That module builds only with the webview feature against wpe-webkit-2.0, which neither the gate nor the build host provides, so a fix cannot be compiled here yet."
+    "romacs-renderer-wgpu": "src/vulkan_dmabuf.rs hal_import allows it: 29 unsafe calls in nine unsafe fn bodies need their own SAFETY review, proven on the dma-buf import path on a real GPU."
   }
 }

@@ -81,10 +81,7 @@ impl RenderApp {
         })
     }
 
-    // WebView command fields (button/state/modifiers/keycode/script/frame id) are
-    // consumed only inside the `webview` cfg blocks below.
-    #[cfg_attr(not(feature = "webview"), allow(unused_variables))]
-    // Video creation fields are likewise consumed only by the video build.
+    // Video creation fields are consumed only by the video build.
     #[cfg_attr(not(feature = "video"), allow(unused_variables))]
     pub(super) fn handle_asset(&mut self, cmd: AssetCommand) {
         match cmd {
@@ -271,46 +268,6 @@ impl RenderApp {
                 self.frame_windows.mark_top_level_dirty();
                 self.frame_windows
                     .for_each_top_level_window(|window_state| window_state.request_redraw());
-            }
-            AssetCommand::WebView(command) => {
-                #[cfg(not(feature = "webview"))]
-                {
-                    tracing::warn!(
-                        view = ?command.id(),
-                        "this build has no WebView backend; dropping command"
-                    );
-                }
-                #[cfg(feature = "webview")]
-                {
-                    let id = command.id();
-                    let closing = matches!(command, romacs_webview::WebViewCommand::Close { .. });
-                    let Some(system) = self.webview_system.as_mut() else {
-                        tracing::warn!(?id, "WebView system is not initialized");
-                        return;
-                    };
-                    if let Err(error) = system.command(command) {
-                        tracing::error!(?id, ?error, "WebView command failed");
-                        return;
-                    }
-                    if closing {
-                        if let Some(renderer) = self.renderer.as_mut() {
-                            renderer.remove_webview(id);
-                        }
-                        if self
-                            .focused_webview
-                            .is_some_and(|target| target.view() == id)
-                        {
-                            self.focused_webview = None;
-                        }
-                        if self
-                            .webview_pointer_capture
-                            .is_some_and(|capture| capture.target.view() == id)
-                        {
-                            self.webview_pointer_capture = None;
-                        }
-                        self.frame_windows.mark_top_level_dirty();
-                    }
-                }
             }
             AssetCommand::Video(VideoSessionCommand::Open { id, request }) => {
                 tracing::info!(video_id = id.get(), source = ?request.source, "opening video");

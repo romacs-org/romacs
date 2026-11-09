@@ -33,7 +33,6 @@ members = [
     "crates/romacs-tui-tests",
     "crates/romacs-video",
     "crates/romacs-video-model",
-    "crates/romacs-webview",
     "crates/romacs-gnudiff",
     "crates/xtask",
     "gnu-tests/runner",
@@ -82,7 +81,6 @@ romacs-font-materializer = { path = "crates/romacs-font-materializer" }
 romacs-test-fonts = { path = "crates/romacs-test-fonts" }
 romacs-video = { path = "crates/romacs-video", default-features = false }
 romacs-video-model = { path = "crates/romacs-video-model" }
-romacs-webview = { path = "crates/romacs-webview", default-features = false }
 romacs-attach = { path = "crates/romacs-attach" }
 romacs-imaging = { path = "crates/romacs-imaging" }
 romacs-renderer-wgpu = { path = "crates/romacs-renderer-wgpu", default-features = false }
@@ -90,10 +88,6 @@ romacs-scene = { path = "crates/romacs-scene" }
 romacs-infra = { path = "crates/romacs-infra" }
 romacs-tui-tests = { path = "crates/romacs-tui-tests" }
 romacs-gui-tests = { path = "crates/romacs-gui-tests" }
-
-# Native build glue
-glib = "0.22"
-
 
 # Logging / tracing
 tracing = { version = "0.1", features = ["attributes"] }
@@ -296,7 +290,6 @@ gstreamer-app = "0.25"
 gstreamer-allocators = "0.25"
 gstreamer-pbutils = "0.25"
 objc2-core-text = "0.3.2"
-url = "2"
 
 # Terminal support
 parking_lot = "0.12"
@@ -306,8 +299,6 @@ static_assertions = "1.1"
 
 # Build dependencies
 which = "7.0"
-bindgen = "0.72"
-pkg-config = "0.3"
 regex = "1.12"
 
 # OS pipe

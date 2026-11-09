@@ -302,7 +302,7 @@ impl DmaBufBuffer {
         }
     }
 
-    #[cfg(any(feature = "video-dmabuf", feature = "webview"))]
+    #[cfg(feature = "video-dmabuf")]
     fn import_params(&self) -> Option<crate::vulkan_dmabuf::DmaBufImportParams<'_>> {
         use std::os::fd::AsFd;
 
@@ -349,10 +349,10 @@ impl DmaBufBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Option<wgpu::Texture> {
-        #[cfg(not(any(feature = "video-dmabuf", feature = "webview")))]
+        #[cfg(not(feature = "video-dmabuf"))]
         let _ = (device, queue, self.num_planes);
 
-        #[cfg(any(feature = "video-dmabuf", feature = "webview"))]
+        #[cfg(feature = "video-dmabuf")]
         {
             let params = self.import_params()?;
             if let Some(texture) = crate::vulkan_dmabuf::import_dmabuf(device, queue, &params) {
@@ -373,19 +373,6 @@ impl DmaBufBuffer {
             self.num_planes
         );
         None
-    }
-
-    /// Import only as a foreign GPU texture, with no mmap-owned fallback.
-    /// WebView caching uses this contract so it can copy the browser allocation
-    /// into cache-owned storage before the WPE frame lease is released.
-    #[cfg(feature = "webview")]
-    pub fn to_external_wgpu_texture(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Option<wgpu::Texture> {
-        let params = self.import_params()?;
-        crate::vulkan_dmabuf::import_dmabuf_external(device, queue, &params)
     }
 
     /// Get dimensions of this buffer.
