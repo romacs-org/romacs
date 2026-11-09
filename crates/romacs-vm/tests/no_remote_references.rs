@@ -59,7 +59,9 @@ const FIELDS: &[(&str, Class)] = &[
     // An entry goes when the value it was converted from dies (gc.rs), and
     // a moving collection rewrites that value.
     ("mode_line_forms", Cache),
-    // An ephemeron table: an entry is traced while its list, the key, lives.
+    // An ephemeron table: unlike `mode_line_forms`, whose entries keep
+    // nothing alive, an entry here is traced while its list, the key, lives
+    // (gc.rs `weak_round`), so what it holds survives through it.
     ("lambda_lists", Root),
     ("images", Free),
     // A `Band`: its object constants are `Rooted` handles, and its `rule` keeps

@@ -64,8 +64,12 @@ pub(crate) struct Stress {
     /// test that holds them), for a test to ask.
     #[cfg(test)]
     pub(crate) buried: usize,
+    /// The last mark's weak rounds and `lambda_lists` entries traced, for a
+    /// test to ask.
+    #[cfg(test)]
+    pub(crate) last_mark: (usize, usize),
 }
-romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving, threads, inplace, #[cfg(test)] faults, #[cfg(test)] buried });
+romacs_snapshot::snapshot_struct!(Stress { every, entries, pads, shift, verify, moving, threads, inplace, #[cfg(test)] faults, #[cfg(test)] buried, #[cfg(test)] last_mark });
 
 /// What a test breaks in a collection, to see a check catch it.
 #[cfg(test)]
@@ -170,6 +174,11 @@ struct MarkState {
     /// once, by the round that finds its list live, and those left at the
     /// fixpoint are the dead lists.
     untraced_lists: Vec<u64>,
+    /// Weak rounds run and `lambda_lists` entries traced (`Stress::last_mark`).
+    #[cfg(test)]
+    weak_rounds: usize,
+    #[cfg(test)]
+    lists_traced: usize,
 }
 
 /// A running phase clock (`GcTimes').
@@ -779,6 +788,8 @@ impl Vm {
         pending: &mut Vec<Value>,
         local_live: &mut HashSet<usize>,
     ) -> bool {
+        #[cfg(test)]
+        { state.weak_rounds += 1; }
         let (symbols, regions) = (&state.obarray_symbols_live, &state.region_marks);
         for &t in &state.weak_tables {
             let data::Object::HashTable(table) = &self.objects[t] else {
@@ -810,6 +821,8 @@ impl Vm {
         state.untraced_lists.retain(|&list| {
             let live = self.survives(symbols, regions, Value(list));
             if live && let Some(entry) = lists.get_mut(&list) {
+                #[cfg(test)]
+                { state.lists_traced += 1; }
                 entry.visit_values(&mut |v| if !self.survives(symbols, regions, *v) { pending.push(*v) });
             }
             !live
@@ -1085,7 +1098,9 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, mut own, doomed, local_live, code_marks, census, state } = marked;
-        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists } = state;
+        #[cfg(test)]
+        { self.gc_stress.last_mark = (state.weak_rounds, state.lists_traced); }
+        let MarkState { mut native_nodes, weak_tables, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, .. } = state;
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
@@ -1472,10 +1487,7 @@ impl Vm {
             }
         }
         lap.lap(&mut self.gc_times, Phase::Roots);
-        // Lent to the mark, which visits an entry through `&mut`, and back
-        // however it ends.
-        let mut lists = std::mem::take(&mut self.lambda_lists);
-        let untraced_lists = lists.keys().copied().collect();
+        let untraced_lists = self.lambda_lists.keys().copied().collect();
         let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, ..MarkState::default() };
         state.region_marks[0] = true;
         // GNU dooms finalizers once, after the roots and before the weak
@@ -1489,6 +1501,9 @@ impl Vm {
         let mut own = gc_mark::Worker::default();
         // All a mark wants of the VM but to read it, while nothing else asks.
         let mut host = if until_key { self.host_input.take() } else { None };
+        // Lent to the mark, which visits an entry through `&mut`, and back
+        // however it ends.
+        let mut lists = std::mem::take(&mut self.lambda_lists);
         let this = &*self;
         let view = this.mark_view(in_obarray, local_binding, &code_marks);
         let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
@@ -1533,6 +1548,7 @@ impl Vm {
     /// last taken by it (`RawTable::holds'). It sweeps on the threads' N, so
     /// verify keeps the threaded sweep and its graves.
     fn verify_mark(&mut self, threads: Marked, n: usize, roots: &[Value], in_obarray: &[bool], local_binding: &[bool]) -> Marked {
+        fn sorted<T: Ord + Clone>(list: &[T]) -> Vec<T> { let mut list = list.to_vec(); list.sort_unstable(); list }
         let colors = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         self.clear_marks();
         let mut lap = Lap(None);
@@ -1549,10 +1565,9 @@ impl Vm {
         assert_eq!(threads.local_live, alone.local_live, "threads and one thread kept different local bindings");
         assert_eq!(threads.state.obarray_symbols_live, alone.state.obarray_symbols_live, "threads and one thread kept different symbols");
         assert_eq!(threads.state.region_marks, alone.state.region_marks, "threads and one thread kept different regions");
-        let sorted = |list: &[usize]| { let mut list = list.to_vec(); list.sort_unstable(); list };
         assert_eq!(sorted(&threads.state.weak_tables), sorted(&alone.state.weak_tables), "threads and one thread found different weak tables");
         assert_eq!(sorted(&threads.state.live_obarrays), sorted(&alone.state.live_obarrays), "threads and one thread found different obarrays");
-        assert_eq!(threads.state.untraced_lists, alone.state.untraced_lists, "threads and one thread kept different lambda lists");
+        assert_eq!(sorted(&threads.state.untraced_lists), sorted(&alone.state.untraced_lists), "threads and one thread kept different lambda lists");
         let mut alone = alone;
         alone.marking.sweep_on(n);
         alone

@@ -115,7 +115,12 @@ fn a_mode_line_form_survives_collections() {
     let slot = vm.slot("romacs-mode-line-format");
     for moving in [false, true] {
         vm.set_gc_moving(moving);
+        let before = segment(&mut vm);
         vm.collect_garbage();
+        // Stress collections may have compacted the segment already.
+        if moving && std::env::var_os("ROMACS_GC_STRESS").is_none() {
+            assert_ne!(segment(&mut vm), before, "the fixture must move the segment");
+        }
         let saved = vm.mode_line_forms.get(&slot).map(|&(known, _)| known);
         assert_eq!(saved, Some(segment(&mut vm)), "the entry follows the value (moving: {moving})");
         assert!(std::sync::Arc::ptr_eq(&first, &segment_handle(&mut vm)), "the form is the cached one (moving: {moving})");

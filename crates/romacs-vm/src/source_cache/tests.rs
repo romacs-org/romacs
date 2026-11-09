@@ -60,13 +60,16 @@ fn snapshot_values(entry: &LambdaList) -> Vec<Value> {
     }).collect()
 }
 
-/// Whether V is a live object: verify mode poisons a freed cons and frees
-/// an object's entry, and reuses neither.
+/// Whether V, a Value the snapshot fixture holds, is live: verify mode
+/// poisons a freed cons and frees an object's entry, and reuses neither.
+/// `nil`, `t`, fixnums and symbols are never freed.
 fn live(vm: &Vm, v: Value) -> bool {
     match v.tag() {
+        _ if v == Value::NIL || v == Value::TRUE => true,
+        1 | 7 => true,
         3 => vm.cons_pair(v).is_ok_and(|pair| pair != (crate::gc::POISON, crate::gc::POISON)),
-        0 if v != Value::NIL => vm.object(v).is_ok(),
-        _ => true,
+        0 => vm.object(v).is_ok(),
+        tag => panic!("the fixture holds no Value of tag {tag}: {v:?}"),
     }
 }
 
@@ -94,4 +97,25 @@ fn a_snapshot_keeps_the_children_only_it_names() {
         assert_eq!(vm.eval_source("(funcall cache-list)").unwrap().display().unwrap(), "new", "moving: {moving}");
         assert_eq!(vm.source_cache_stats().lambda_compiles, compiles + 1, "changed, so compiled again (moving: {moving})");
     }
+}
+
+/// However many weak rounds a mark takes, each live entry is traced once:
+/// a chain through a key-weak table, whose next key each entry's value
+/// holds, makes a round per link.
+#[test]
+fn a_live_entry_is_traced_once_per_collection() {
+    let mut vm = Vm::new();
+    vm.eval_source(
+        "(progn (defvar cache-lists (list (list 'lambda '() 1) (list 'lambda '() 2) (list 'lambda '() 3)))
+                (funcall (car cache-lists)) (funcall (car (cdr cache-lists))) (funcall (car (cdr (cdr cache-lists))))
+                (defvar cache-chain (make-hash-table :weakness 'key :test 'eq))
+                (defvar cache-chain-head (list 'link))
+                (let ((key cache-chain-head))
+                  (dotimes (_ 4) (let ((next (list 'link))) (puthash key (list next) cache-chain) (setq key next)))))",
+    )
+    .unwrap();
+    vm.collect_garbage();
+    let (rounds, traced) = vm.gc_stress.last_mark;
+    assert!(rounds > 4, "the chain must force a round per link: {rounds}");
+    assert_eq!(traced, vm.lambda_lists.len(), "each live entry traced once, in {rounds} rounds");
 }

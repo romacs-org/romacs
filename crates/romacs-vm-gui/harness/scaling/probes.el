@@ -2845,12 +2845,13 @@ closures over a mutable variable (each a closure and a cell)."
           (message nil)
           (setq scaling--retire-collections gcs-done)))
 
-;; Compiled `(lambda ...)' lists (source_cache.rs `lambda_lists'): N live
-;; lists, each called once, then collections.  A list's entry, its closure
-;; and the snapshot a call compares, is traced once per collection, by the
-;; weak round that finds the list live (gc.rs `weak_round'), and a dead
-;; list's entry goes after the mark: linear in N.  An entry traced again
-;; at every round, or the map scanned per entry, would grow faster.
+;; Compiled `(lambda ...)' lists (source_cache.rs `lambda_lists'): what a
+;; collection costs with N live entries, each list called once.  An entry,
+;; its closure and the snapshot a call compares, is traced by the weak
+;; round that finds its list live (gc.rs `weak_round'), and a dead list's
+;; entry goes after the mark.  Every list here is live by the first round,
+;; so the rounds do not grow with N: that each entry is traced once per
+;; collection is source_cache.rs's test, not this probe's.
 (defvar scaling--lambda-lists nil
   "The lists the `gc-lambda-lists' probe calls and keeps.")
 
