@@ -88,7 +88,6 @@ fn reordered_native_feedback_preserves_draw_cookies() {
             .args(["--exact", NAME])
             .env(CHILD, "1")
             .env("ROMACS_PRESENT_TRACE", &path)
-            .env_remove("ROMACS_INPUT_LATENCY_FILE")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");

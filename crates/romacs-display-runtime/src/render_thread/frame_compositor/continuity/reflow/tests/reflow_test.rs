@@ -667,7 +667,7 @@ fn a_second_pass_over_one_install_observes_no_reflow() {
     );
 }
 
-/// Install `windows`/`rows` WITHOUT composing, the way `poll_frame` does when
+/// Install `windows`/`rows` WITHOUT composing, the way the render loop does when
 /// two commits arrive between ticks.
 fn install_without_composing(
     render: &mut crate::render_thread::frame_windows::GuiFrameRenderState,
@@ -688,7 +688,7 @@ fn install_without_composing(
 #[test]
 fn a_commit_superseded_before_it_was_drawn_does_not_become_the_thing_the_next_one_is_measured_against()
  {
-    // `poll_frame` drains the whole channel, so two commits arriving between
+    // The render loop ingests every pending paint, so two commits arriving between
     // ticks are both installed and only the second is ever drawn. Measuring
     // against the presentation that was never composed reports the motion from
     // a picture nobody saw; the user's eye travelled the whole distance, from

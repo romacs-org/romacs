@@ -10,7 +10,7 @@ fn native_repeat_tracking_does_not_fill_command_completion_ledger() {
     let _command = progress.begin_command();
     // A single interactive command may read held-key input indefinitely.
     for _ in 0..1300 {
-        let (observer, _) = render.send_key_input_with_receipt(InputEvent::Key {
+        let observer = render.send_key_input_with_receipt(InputEvent::Key {
             key: crate::host_types::FrontendKey::Character('p'),
             modifiers: 0,
             pressed: true,
@@ -30,15 +30,14 @@ fn native_repeat_tracking_does_not_fill_command_completion_ledger() {
 #[test]
 fn native_page_keys_keep_read_and_scroll_completion_receipts_separate() {
     let (emacs, render) = ThreadComms::new().split();
-    let (read, completion) = render.send_key_input_with_receipt(InputEvent::Key {
-        key: crate::host_types::FrontendKey::Keysym(0xff55),
-        modifiers: 0,
-        pressed: true,
-        emacs_frame_id: 1,
-    });
-    let read = read.unwrap();
-    let completion = completion.unwrap();
-    assert!(!read.same_input(&completion));
+    let read = render
+        .send_key_input_with_receipt(InputEvent::Key {
+            key: crate::host_types::FrontendKey::Keysym(0xff55),
+            modifiers: 0,
+            pressed: true,
+            emacs_frame_id: 1,
+        })
+        .unwrap();
     let mut progress = romacs_display_protocol::input_progress::InputProgress::default();
     let command = progress.begin_command();
     let InputEvent::Tracked { receipt, event } = emacs.input_rx.try_recv().unwrap() else {
@@ -48,6 +47,8 @@ fn native_page_keys_keep_read_and_scroll_completion_receipts_separate() {
     let InputEvent::Tracked { receipt, .. } = *event else {
         panic!("missing scroll completion receipt");
     };
+    let completion = receipt.receipt();
+    assert!(!read.same_input(&completion));
     progress.consumed(receipt);
     assert!(read.consumed_or_cancelled());
     assert!(!completion.acknowledged_by(&progress.checkpoint()));

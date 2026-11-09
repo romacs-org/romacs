@@ -222,7 +222,6 @@ fn s1b_hidden_cursor_repeated_poll_has_no_dirty_content_with_default_effects() {
             ])
             .env(CHILD, "1")
             .env_remove("ROMACS_PRESENT_TRACE")
-            .env_remove("ROMACS_INPUT_LATENCY_FILE")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");

@@ -686,18 +686,15 @@ impl RenderComms {
     pub(super) fn send_key_input_with_receipt(
         &self,
         event: InputEvent,
-    ) -> (
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-        Option<romacs_display_protocol::input_progress::InputReceipt>,
-    ) {
+    ) -> Option<romacs_display_protocol::input_progress::InputReceipt> {
         if self.input_interrupt.as_ref().is_some_and(|hook| hook.interrupt(&event)) {
-            return (None, None);
+            return None;
         }
         let delivery = matches!(&event, InputEvent::Key { pressed: true, .. })
             .then(romacs_display_protocol::input_progress::InputDelivery::for_read);
         let read = delivery.as_ref().map(|delivery| delivery.receipt());
-        let completion = self.send_input_with_tracking(event, delivery);
-        (read, completion)
+        self.send_input_with_tracking(event, delivery);
+        read
     }
 
     fn send_input_with_tracking(

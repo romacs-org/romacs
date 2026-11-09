@@ -95,8 +95,8 @@ pub(crate) struct FrameCompositor {
     /// What the continuity measurements compare the next presentation against.
     ///
     /// Deliberately NOT `current_frame`. Presentations are installed one at a
-    /// time but composed in batches: `poll_frame` drains the whole channel, so
-    /// when two commits arrive between ticks the first is installed, measured,
+    /// time but composed in batches: the render loop ingests every pending paint
+    /// command before it draws, so when two commits arrive between ticks the first is installed, measured,
     /// and retired without a frame ever being drawn from it. Measuring against
     /// `current_frame` would then compare the second commit against the first,
     /// and the motion the user actually sees — from the last frame on screen to

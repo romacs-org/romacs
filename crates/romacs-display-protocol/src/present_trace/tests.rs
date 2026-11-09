@@ -15,7 +15,6 @@ fn trace_child(name: &str, enabled: bool) -> Option<Vec<serde_json::Value>> {
     child
         .args(["--exact", &format!("present_trace::tests::{name}")])
         .env(CHILD, "1")
-        .env_remove("ROMACS_INPUT_LATENCY_FILE")
         .env_remove("ROMACS_PRESENT_TRACE");
     if enabled {
         child.env("ROMACS_PRESENT_TRACE", &path);
@@ -246,10 +245,6 @@ fn stage_labels_and_optional_realtime_are_unambiguous() {
         (Stage::ResolveEnd, "resolve_end"),
         (Stage::CoverageRetry, "coverage_retry"),
         (Stage::InputReceived, "input_received"),
-        (Stage::FlattenStart, "flatten_start"),
-        (Stage::FlattenEnd, "flatten_end"),
-        (Stage::MaterializeStart, "materialize_start"),
-        (Stage::MaterializeEnd, "materialize_end"),
         (Stage::AcquireStart, "acquire_start"),
         (Stage::AcquireEnd, "acquire_end"),
         (Stage::TessellateStart, "tessellate_start"),

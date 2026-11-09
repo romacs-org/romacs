@@ -17,7 +17,7 @@ impl RenderApp {
         event: InputEvent,
     ) {
         let pressed = matches!(&event, InputEvent::Key { pressed: true, .. });
-        let (read, _) = self.comms.send_key_input_with_receipt(event);
+        let read = self.comms.send_key_input_with_receipt(event);
         if pressed {
             self.key_repeats.queued(window, key, read);
             // The key may start a long command: look at the evaluator later.
