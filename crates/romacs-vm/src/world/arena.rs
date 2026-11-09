@@ -896,7 +896,8 @@ pub fn restore_outcome() -> Restore {
 /// builder's. What goes into it goes into the world, so nothing that depends
 /// on the moment belongs there.
 pub fn heap_is_image() -> bool {
-    started() && !ADOPTED.load(Ordering::Acquire)
+    // What `write_image' asks of a process: none other can capture its heap.
+    BACKING.load(Ordering::Relaxed) >= 0 && !ADOPTED.load(Ordering::Acquire)
 }
 
 /// Whether a heap table may take its one large reservation (`table.rs'): not
