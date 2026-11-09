@@ -586,8 +586,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 (defun romacs-agent-attach-tests--codex-images (session send)
   "The image paths of the message SEND makes SESSION write to Codex."
   (let ((written nil))
-    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (setq written object)))
-              ((symbol-function 'romacs-agent--image-caption) (lambda (file) (concat "[" file "]"))))
+    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (setq written object))))
       (funcall send))
     (cl-loop for item across (gethash "input" (gethash "params" written))
              when (equal (gethash "type" item) "localImage") collect (gethash "path" item))))

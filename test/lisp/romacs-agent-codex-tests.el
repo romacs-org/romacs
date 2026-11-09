@@ -33,10 +33,7 @@ journals what its harness writes."
      (unwind-protect
          (cl-letf (((symbol-function 'romacs-agent--line)
                     (lambda (_session object &optional journal) (push (cons object journal) romacs-agent-codex-tests--written)))
-                   ((symbol-function 'process-live-p) (lambda (_) t))
-                   ((symbol-function 'romacs-agent--instructions) (lambda (_session) "Romacs says hello"))
-                   ((symbol-function 'romacs-agent--image-caption)
-                    (lambda (file) (format "[Attached image saved at: %s]" file))))
+                   ((symbol-function 'process-live-p) (lambda (_) t)))
            (cl-flet* ((feed (key object)
                         (let ((record (make-hash-table :test #'equal)))
                           (puthash "seq" (cl-incf seq) record)
@@ -70,7 +67,7 @@ journals what its harness writes."
   (romacs-agent-codex-tests--with (:options '(:model "m"))
     (let ((start (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (should (equal (gethash "method" start) "thread/start"))
-      (should (equal (gethash "developerInstructions" (gethash "params" start)) "Romacs says hello"))
+      (should (equal (gethash "developerInstructions" (gethash "params" start)) (romacs-agent--instructions session)))
       (should (equal (gethash "cwd" (gethash "params" start)) "/work"))
       (should (equal (gethash "model" (gethash "params" start)) "m"))
       (echo)
@@ -89,7 +86,7 @@ journals what its harness writes."
     (let ((resume (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (should (equal (gethash "method" resume) "thread/resume"))
       (should (equal (gethash "threadId" (gethash "params" resume)) "01bb-exec"))
-      (should (equal (gethash "developerInstructions" (gethash "params" resume)) "Romacs says hello"))
+      (should (equal (gethash "developerInstructions" (gethash "params" resume)) (romacs-agent--instructions session)))
       (should-not (gethash "model" (gethash "params" resume)))
       (echo)
       (out "id" (gethash "id" resume) "error" (romacs-mcp--object "code" -32600 "message" "no rollout"))
@@ -112,9 +109,10 @@ journals what its harness writes."
     (should (equal (gethash "text" (aref (gethash "input" (gethash "params" (last-written))) 0)) "waited"))))
 
 (defun romacs-agent-codex-tests--ready (session)
-  "SESSION, as its startup leaves it."
+  "SESSION, as its startup leaves it, in the run it is in."
   (setf (romacs-agent-harness-session session) "th"
-        (romacs-agent-driver-state session) (list :sent "thread" :thread "th" :ready t)
+        (romacs-agent-driver-state session) (append (list :sent "thread" :thread "th" :ready t)
+                                                    (romacs-agent-driver-state session))
         (romacs-agent-state session) 'idle))
 
 (ert-deftest romacs-agent-codex-turn-and-steer ()
@@ -133,7 +131,7 @@ journals what its harness writes."
         (should (equal (mapcar (lambda (item) (gethash "type" item)) (gethash "input" params))
                        '("text" "text" "localImage")))
         (should (equal (gethash "text" (aref (gethash "input" params) 1))
-                       (format "[Attached image saved at: %s]" image)))
+                       (romacs-agent--image-caption image)))
         ;; The journal keeps the message with its files, and the id written.
         (should (equal (gethash "id" record) (gethash "id" sent)))
         (should (equal (append (gethash "images" record) nil) (list image)))
@@ -160,6 +158,23 @@ journals what its harness writes."
     ;; No turn: nothing to interrupt.
     (should-error (romacs-agent-interrupt session) :type 'user-error)))
 
+(ert-deftest romacs-agent-codex-late-start-acknowledgement ()
+  ;; The turn ended before its turn/start was answered: it stays over, so
+  ;; the next message starts a turn and there is nothing to interrupt.
+  (romacs-agent-codex-tests--with ()
+    (romacs-agent-codex-tests--ready session)
+    (romacs-agent-send session "quick")
+    (let ((start (last-written)))
+      (echo)
+      (notify "turn/started" "threadId" "th" "turn" (romacs-mcp--object "id" "t1"))
+      (notify "turn/completed" "threadId" "th" "turn" (romacs-mcp--object "id" "t1" "status" "completed"))
+      (out "id" (gethash "id" start) "result" (romacs-mcp--object "turn" (romacs-mcp--object "id" "t1"))))
+    (should-not (plist-get (romacs-agent-driver-state session) :turn))
+    (should (eq (romacs-agent-state session) 'idle))
+    (should-error (romacs-agent-interrupt session) :type 'user-error)
+    (romacs-agent-send session "next")
+    (should (equal (gethash "method" (last-written)) "turn/start"))))
+
 (ert-deftest romacs-agent-codex-steer-that-missed-its-turn ()
   ;; The turn ended as the steer went: it is sent as a turn of its own.
   (romacs-agent-codex-tests--with ()
@@ -184,6 +199,40 @@ journals what its harness writes."
         (out "method" "thread/status/changed" "params" (romacs-mcp--object))
         (should (eq (last-written) retry))))))
 
+(defun romacs-agent-codex-tests--asked (events)
+  "The request id of the last approval among EVENTS."
+  (plist-get (cl-find 'approval events :key (lambda (e) (plist-get e :type))) :request-id))
+
+(ert-deftest romacs-agent-codex-approvals-are-their-run-s ()
+  ;; Codex numbers its requests from 0 every run: an earlier run's row is
+  ;; gone with its harness, and names nothing of the next.
+  (romacs-agent-codex-tests--with ()
+    (let ((events nil) (first nil) (second nil))
+      (let ((romacs-agent-event-functions (list (lambda (_session event) (push event events)))))
+        (feed "note" (romacs-mcp--object "type" "run"))
+        (romacs-agent-codex-tests--ready session)
+        (out "id" 0 "method" "item/commandExecution/requestApproval"
+             "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "i" "command" "rm -r a"))
+        (setq first (romacs-agent-codex-tests--asked events))
+        (feed "exit" 1)
+        (should (= (hash-table-count (romacs-agent-approvals session)) 0))
+        (should-error (romacs-agent-respond session first t) :type 'user-error)
+        (feed "note" (romacs-mcp--object "type" "run"))
+        (romacs-agent-codex-tests--ready session)
+        (setq events nil)
+        (out "id" 0 "method" "item/commandExecution/requestApproval"
+             "params" (romacs-mcp--object "threadId" "th" "turnId" "t2" "itemId" "j" "command" "rm -r b"))
+        (setq second (romacs-agent-codex-tests--asked events))
+        (should-not (equal first second))
+        (should-error (romacs-agent-respond session first t) :type 'user-error)
+        ;; Nothing answered: the run's own startup lines alone were written.
+        (should-not (cl-find-if (lambda (w) (gethash "result" (car w))) romacs-agent-codex-tests--written))
+        (romacs-agent-respond session second t)
+        (should (eql (gethash "id" (last-written)) 0))
+        (echo)
+        (should (equal (plist-get (car events) :request-id) second))
+        (should (= (hash-table-count (romacs-agent-approvals session)) 0))))))
+
 (ert-deftest romacs-agent-codex-approvals ()
   (romacs-agent-codex-tests--with ()
     (romacs-agent-codex-tests--ready session)
@@ -197,7 +246,8 @@ journals what its harness writes."
           (should (equal (gethash "command" (plist-get approval :input)) "rm -r x"))
           (should (equal (plist-get approval :description) "cleanup")))
         (should (eq (romacs-agent-state session) 'waiting-approval))
-        (romacs-agent-respond session 0 t)
+        ;; Any answer that allows accepts (a plist of questions' answers too).
+        (romacs-agent-respond session (romacs-agent-codex-tests--asked events) '(:answers nil))
         (should (equal (gethash "decision" (gethash "result" (last-written))) "accept"))
         (should (eql (gethash "id" (last-written)) 0))
         (echo)
@@ -206,16 +256,23 @@ journals what its harness writes."
         ;; A file change, declined.
         (out "id" 1 "method" "item/fileChange/requestApproval"
              "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "f"))
-        (romacs-agent-respond session 1 nil)
+        (romacs-agent-respond session (romacs-agent-codex-tests--asked events) nil)
         (should (equal (gethash "decision" (gethash "result" (last-written))) "decline"))
         (echo)
         (should (equal (plist-get (car events) :behavior) "deny"))
+        ;; Allowed for the rest of the session.
+        (out "id" 4 "method" "item/commandExecution/requestApproval"
+             "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "k" "command" "make"))
+        (romacs-agent-respond session (romacs-agent-codex-tests--asked events) '(:always t))
+        (should (equal (gethash "decision" (gethash "result" (last-written))) "acceptForSession"))
+        (echo)
+        (should (equal (plist-get (car events) :behavior) "allow"))
         ;; Permissions: what was asked, or nothing.
         (out "id" 2 "method" "item/permissions/requestApproval"
              "params" (romacs-mcp--object "threadId" "th" "turnId" "t1" "itemId" "p" "cwd" "/work"
                                           "reason" :null
                                           "permissions" (romacs-mcp--object "network" (romacs-mcp--object "enabled" t))))
-        (romacs-agent-respond session 2 t)
+        (romacs-agent-respond session (romacs-agent-codex-tests--asked events) t)
         (let ((result (gethash "result" (last-written))))
           (should (equal (gethash "scope" result) "turn"))
           (should (eq (gethash "enabled" (gethash "network" (gethash "permissions" result))) t)))
@@ -300,7 +357,7 @@ journals what its harness writes."
       (setf (romacs-agent-driver-state session) (list :turn "t1" :window 258000))
       (let ((end (events "turn/completed" "turn" (romacs-mcp--object "id" "t1" "status" "failed" "durationMs" 1500
                                                                      "error" (romacs-mcp--object "message" "boom")))))
-        (should (equal (car end) '(:type handshake :state (:turn nil))))
+        (should (equal (car end) '(:type handshake :state (:turn nil :ended ("t1")))))
         (should (equal (plist-get (cadr end) :reason) "boom"))
         (should (plist-get (cadr end) :error))
         (should (= (plist-get (cadr end) :duration) 1.5))

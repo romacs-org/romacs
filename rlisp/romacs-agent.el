@@ -168,7 +168,8 @@ not started, `outcome unknown' when it had)."
   ;; Its harness's driver (`romacs-agent-define-harness'), looked up once.
   driver
   ;; The driver's startup state, folded from this run's journal records
-  ;; (`handshake' events; an exit clears it), the startup line written and
+  ;; (:run, the seq the run started at, then `handshake' events; an exit
+  ;; clears it), the startup line written and
   ;; not yet journaled back, whether the records seen are the live ones
   ;; (the supervisor's replay acknowledged), and the lines written to the
   ;; harness so far, every run's (request ids count on from them).
@@ -986,8 +987,10 @@ itself, so the turn goes on whatever becomes of this server."
                     ;; The context held stays; its window was the last model's.
                     (setf (romacs-agent-context-window session) nil))
                   (when model (setf (romacs-agent-model session) model))))
-    ;; A run starts (the supervisor's first record): its startup is its own.
-    ('run (setf (romacs-agent-driver-state session) nil (romacs-agent-startup-pending session) nil))
+    ;; A run starts (the supervisor's first record): its startup is its own,
+    ;; and the record's seq names the run.
+    ('run (setf (romacs-agent-driver-state session) (list :run (plist-get event :seq))
+                (romacs-agent-startup-pending session) nil))
     ('handshake (let ((state (romacs-agent-driver-state session)))
                   (cl-loop for (key value) on (plist-get event :state) by #'cddr
                            do (setq state (plist-put state key value)))
@@ -1019,8 +1022,10 @@ itself, so the turn goes on whatever becomes of this server."
                       (process-live-p (romacs-agent-connection session)))
              (run-at-time 0 nil #'romacs-agent--settle session)))
     ('exit
-     ;; A run's startup is its own: the next run starts over.
+     ;; A run's startup is its own: the next run starts over.  What its
+     ;; harness asked is no longer anyone's to answer.
      (setf (romacs-agent-driver-state session) nil (romacs-agent-startup-pending session) nil)
+     (clrhash (romacs-agent-approvals session))
      ;; Ended with its last prompt's turn never done: cut, however many
      ;; runs (a resumed one journals no prompt) it took.
      (setf (romacs-agent-interrupted session)
