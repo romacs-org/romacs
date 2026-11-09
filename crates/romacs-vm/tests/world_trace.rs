@@ -362,7 +362,19 @@ fn a_case_query_records_the_filesystem_facts_restore_asks_again() {
     let facts: Vec<&Json> = items(&trace, "records", "probe").into_iter()
         .filter(|r| r["probe"] == "fs-type" || r["probe"] == "dir-flags").collect();
     let kinds: Vec<&str> = facts.iter().map(|r| r["probe"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["fs-type", "fs-type", "dir-flags"], "{trace}");
+    // Flags are asked only of a filesystem whose folding is per directory
+    // (ext4, f2fs, tmpfs). TMPDIR may be any of them, so the trace's own
+    // recorded types say which queries asked: /dev/shm, a tmpfs, always does.
+    const PER_DIRECTORY: [u32; 3] = [0xef53, 0xf2f5_2010, 0x0102_1994];
+    let expected: Vec<&str> = facts.iter().filter(|r| r["probe"] == "fs-type")
+        .flat_map(|r| match r["result"].as_u64().map(|t| PER_DIRECTORY.contains(&(t as u32))) {
+            Some(true) => vec!["fs-type", "dir-flags"],
+            _ => vec!["fs-type"],
+        })
+        .collect();
+    assert_eq!(kinds, expected, "{trace}");
+    assert_eq!(expected.iter().filter(|k| **k == "fs-type").count(), 2, "{trace}");
+    assert_eq!(expected.last(), Some(&"dir-flags"), "/dev/shm is a tmpfs: {trace}");
     // The directory changes after the build, as HOME and TMPDIR do: the
     // query keyed its type, not its times, so every record still holds.
     write(&dir.join("d/new"), "");

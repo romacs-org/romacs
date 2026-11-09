@@ -1082,12 +1082,7 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
-            // Only an INTERNED keyword is SYMBOL_NOWRITE (GNU lread.c
-            // intern_sym); an uninterned `:x' is an ordinary variable.
-            let name = &self.vm.symbol_names[slot];
-            if self.vm.protected_variable_slot(slot)
-                || (name.starts_with(':') && self.vm.names.get(name) == Some(&slot))
-            {
+            if self.vm.protected_variable_slot(slot) || self.vm.interned_keyword_slot(slot) {
                 return Err(Fault::SettingConstant(v));
             }
             self.notify(slot, value, "set", Some(Value::NIL))?;
@@ -1110,7 +1105,7 @@ mod leaf {
                 return Ok(true);
             }
             let slot = self.symbol_slot(v)?;
-            Ok(self.vm.protected_variable_slot(slot) || self.vm.symbol_names[slot].starts_with(':'))
+            Ok(self.vm.protected_variable_slot(slot) || self.vm.interned_keyword_slot(slot))
         }
         /// GNU `SYMBOL_FORWARDED`: V is a built-in variable. Not followed
         /// through aliases (an alias is `SYMBOL_VARALIAS`).
@@ -1186,7 +1181,7 @@ mod leaf {
                 // GNU binds an interned keyword to itself (lread.c intern);
                 // VM2 self-evaluates keywords without a value cell, so give
                 // the cell its GNU value before an alias can read it.
-                if self.vm.symbol_names[slot].starts_with(':') && self.vm.slots[slot].value == Value::UNBOUND {
+                if self.vm.interned_keyword_slot(slot) && self.vm.slots[slot].value == Value::UNBOUND {
                     self.vm.slots[slot].value = base;
                 }
                 slot
@@ -1424,9 +1419,8 @@ mod leaf {
         }
         pub fn symbol_name_value(&mut self, symbol: Value) -> super::Out {
             if let Some(&name) = self.vm.permanent_symbol_names.get(&symbol.0) { return Ok(name); }
-            if let Ok(slot) = self.symbol_slot(symbol) {
-                if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
-            }
+            if let Ok(slot) = self.symbol_slot(symbol)
+                && let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             let name = self.symbol_name(symbol)?;
             let value = match crate::symkey::to_internal(&name) {
                 Some(internal) => self.make_string(internal, true),
@@ -1927,6 +1921,11 @@ pub(crate) fn line_field_position(vm: &mut Vm, n: Value, end: bool) -> std::resu
 /// (Leaf::hosted_rows_end).
 pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64) -> std::result::Result<i64, Fault> {
     Leaf::new(vm).hosted_rows_end(window, start, rows)
+}
+
+/// The effective `text-quoting-style' (Leaf::text_quoting_style).
+pub(crate) fn text_quoting_style(vm: &mut Vm) -> std::result::Result<&'static str, Fault> {
+    Leaf::new(vm).text_quoting_style()
 }
 
 /// Realize C-initialized coding variables before their first Lisp observation.

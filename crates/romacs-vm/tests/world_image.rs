@@ -69,8 +69,8 @@ fn with_limits(mut command: Command, stack: u64, address_space: u64) -> Command 
 }
 
 /// Whether a child of this process may run without an address-space
-/// limit: the hard limit is none. Nextest's wrapper sets one (8 GiB) on
-/// every test process, and a child cannot raise it.
+/// limit: the hard limit is none. A runner that sets one on the test
+/// process leaves a child no way to raise it.
 fn address_space_unlimited() -> bool {
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     let asked = unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) };
