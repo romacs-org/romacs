@@ -51,7 +51,8 @@ pub fn re_match(
 /// re-entrant search finds the cell empty and works on a fresh one.
 #[must_use = "the thread-local extent ends when this guard drops"]
 pub(crate) struct MatchScratchLease {
-    scratch: std::mem::ManuallyDrop<Box<MatchScratch>>,
+    /// `Some` from `take` until `Drop` hands the box back.
+    scratch: Option<Box<MatchScratch>>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 static_assertions::assert_not_impl_any!(MatchScratchLease: Send, Sync);
@@ -59,8 +60,14 @@ static_assertions::assert_not_impl_any!(MatchScratchLease: Send, Sync);
 impl std::fmt::Debug for MatchScratchLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MatchScratchLease")
-            .field("frame_capacity", &self.scratch.frames.capacity())
-            .field("undo_capacity", &self.scratch.undo.capacity())
+            .field(
+                "frame_capacity",
+                &self.scratch.as_ref().map(|s| s.frames.capacity()),
+            )
+            .field(
+                "undo_capacity",
+                &self.scratch.as_ref().map(|s| s.undo.capacity()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -69,18 +76,18 @@ impl MatchScratchLease {
     #[inline]
     pub(crate) fn take() -> Self {
         Self {
-            scratch: std::mem::ManuallyDrop::new(MATCH_SCRATCH.with(|cell| {
-                match cell.try_borrow_mut() {
-                    Ok(mut cur) => cur.take().unwrap_or_default(),
-                    Err(_) => Box::default(),
-                }
+            scratch: Some(MATCH_SCRATCH.with(|cell| match cell.try_borrow_mut() {
+                Ok(mut cur) => cur.take().unwrap_or_default(),
+                Err(_) => Box::default(),
             })),
             _thread: std::marker::PhantomData,
         }
     }
     #[inline]
     pub(crate) fn get(&mut self) -> &mut MatchScratch {
-        &mut self.scratch
+        self.scratch
+            .as_deref_mut()
+            .expect("a lease holds its scratch until it drops")
     }
 }
 
@@ -89,11 +96,7 @@ impl Drop for MatchScratchLease {
     // `re_search` changes register allocation throughout its candidate loops.
     #[inline(never)]
     fn drop(&mut self) {
-        // SAFETY: this private field is initialized by `take`, remains owned
-        // by the lease, and is extracted exactly once by its only destructor.
-        // `ManuallyDrop` prevents a second destruction after returning the box.
-        let scratch = unsafe { std::mem::ManuallyDrop::take(&mut self.scratch) };
-        crate::tls_scope::TlsScope::restore_now(&MATCH_SCRATCH, Some(scratch));
+        crate::tls_scope::TlsScope::restore_now(&MATCH_SCRATCH, self.scratch.take());
     }
 }
 

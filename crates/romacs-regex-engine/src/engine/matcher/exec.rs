@@ -14,7 +14,7 @@ use crate::engine::matcher::step::{
     SyntaxAssertion, evaluate_syntax_assertion, match_anychar_at, match_categoryspec_at,
     match_charset_at, match_exactn_char_at, match_syntaxspec_at, match_syntaxspecset_at,
 };
-use crate::engine::opcode::{RegexOp, extract_number, extract_number_u16};
+use crate::engine::opcode::{RegexOp, extract_number_u16};
 use crate::engine::pattern::{CompiledPattern, MatchRegisters};
 use crate::engine::syntax::SyntaxLookup;
 
@@ -216,36 +216,33 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
         };
     }
 
-    // Sealed-gated bytecode fetches for the loop below. SAFETY of the
-    // SEALED arms: `validate_sealed_buffer` proved every operand span
-    // in-bounds at every op boundary, and runtime `pc` values are closed
-    // over validated boundaries (linear advances, validated jump targets,
-    // fail-frame resumes derived from those).
-    macro_rules! bc_num {
-        ($pos:expr) => {{
-            let pos = $pos;
-            if SEALED {
-                debug_assert!(pos + 1 < bytecode.len());
-                unsafe {
-                    i16::from_le_bytes([
-                        *bytecode.get_unchecked(pos),
-                        *bytecode.get_unchecked(pos + 1),
-                    ])
-                }
-            } else {
-                extract_number(bytecode, pos)
-            }
-        }};
-    }
+    // Bytecode fetches for the loop below: unchecked in a sealed buffer,
+    // checked otherwise.  Every unchecked read of the loop goes through
+    // `bc_byte!`.
     macro_rules! bc_byte {
         ($pos:expr) => {{
             let pos = $pos;
             if SEALED {
                 debug_assert!(pos < bytecode.len());
+                // SAFETY: `validate_sealed_buffer` proved that every op
+                // boundary holds a valid opcode whose operands lie in bounds,
+                // that the last op is `succeed` or `posix_end`, and that every
+                // jump lands on an op boundary.  Runtime `pc` values are closed
+                // over those boundaries (linear advances, validated jump
+                // targets, fail-frame resumes derived from them), and each
+                // `pos` read is an op boundary, an operand of the op at one,
+                // or a fused-loop peek at the op after or three bytes before
+                // the current one, which the peek's own guard keeps in bounds.
                 unsafe { *bytecode.get_unchecked(pos) }
             } else {
                 bytecode[pos]
             }
+        }};
+    }
+    macro_rules! bc_num {
+        ($pos:expr) => {{
+            let pos = $pos;
+            i16::from_le_bytes([bc_byte!(pos), bc_byte!(pos + 1)])
         }};
     }
 
@@ -300,29 +297,21 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
         }
 
         let op_pc = pc;
-        // SEALED: `pc < len` was just checked, validation proved every
-        // in-buffer op boundary carries a valid opcode byte, and runtime
-        // `pc` values are closed over validated boundaries.
-        let op = if SEALED {
-            // SAFETY: sealing proves that pc is an in-bounds op boundary,
-            // and the matcher advances only to validated op boundaries.
-            let op_byte = unsafe { *bytecode.get_unchecked(pc) };
-            RegexOp::from_repr(op_byte).unwrap_or_else(|| {
+        // A sealed buffer holds only valid opcodes at op boundaries
+        // (`validate_sealed_buffer`); an unsealed one fails the match on an
+        // invalid byte.
+        let op = match RegexOp::from_byte(bc_byte!(pc)) {
+            Some(op) => op,
+            None if SEALED => {
                 debug_assert!(false, "sealed bytecode contains an invalid opcode");
-                // SAFETY: validate_sealed_buffer checked every opcode with
-                // the same derived decoder after all compiler rewrites;
-                // the sealed buffer is immutable during matching, and pc
-                // remains on those validated opcode boundaries. The private
-                // compiler also emits NoOp before Nastyloop retry markers.
+                // SAFETY: `validate_sealed_buffer` decoded every op boundary
+                // with this decoder after all compiler rewrites, the buffer
+                // is immutable while matching, and `pc` stays on those
+                // boundaries (see `bc_byte!`).  Telling the compiler so lets
+                // the dispatch below jump on the byte without a range check.
                 unsafe { std::hint::unreachable_unchecked() }
-            })
-        } else {
-            let op_byte = bytecode[pc];
-            let Some(op) = RegexOp::from_byte(op_byte) else {
-                // Invalid opcode — treat as match failure
-                return None;
-            };
-            op
+            }
+            None => return None,
         };
         pc += 1;
 
@@ -504,8 +493,8 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                 // literal is re-matched whole each iteration, exactly
                 // as jumping back to the Exactn op would.
                 if SEALED
-                    && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::OnFailureJump as u8
-                    && unsafe { *bytecode.get_unchecked(pc + 3) } == RegexOp::Jump as u8
+                    && bc_byte!(pc) == RegexOp::OnFailureJump as u8
+                    && bc_byte!(pc + 3) == RegexOp::Jump as u8
                     && ((pc as i64) + 6 + bc_num!(pc + 4) as i64) as usize == op_pc
                 {
                     let ofj_pc = pc;
@@ -549,7 +538,7 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                 // quit poll; on failure the loop-entry OFKSJ frame resumes
                 // at the exit with the string position kept, via try_fail.
                 if SEALED
-                    && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                    && bc_byte!(pc) == RegexOp::Jump as u8
                     && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize == op_pc
                 {
                     'ks_exactn: loop {
@@ -592,9 +581,9 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                 // opcode boundary, so the op_pc-3 peek reads a real op.)
                 if SEALED
                     && op_pc >= 3
-                    && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                    && bc_byte!(pc) == RegexOp::Jump as u8
                     && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize == op_pc - 3
-                    && unsafe { *bytecode.get_unchecked(op_pc - 3) } == RegexOp::OnFailureJump as u8
+                    && bc_byte!(op_pc - 3) == RegexOp::OnFailureJump as u8
                 {
                     let ofj_pc = op_pc - 3;
                     let exit = ((ofj_pc as i64) + 3 + bc_num!(ofj_pc + 1) as i64) as usize;
@@ -640,9 +629,8 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // (see the Charset arm): per-iteration frames with
                         // the original payload, quit poll on the back edge.
                         if SEALED
-                            && unsafe { *bytecode.get_unchecked(pc) }
-                                == RegexOp::OnFailureJump as u8
-                            && unsafe { *bytecode.get_unchecked(pc + 3) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::OnFailureJump as u8
+                            && bc_byte!(pc + 3) == RegexOp::Jump as u8
                             && ((pc as i64) + 6 + bc_num!(pc + 4) as i64) as usize == op_pc
                         {
                             let ofj_pc = pc;
@@ -664,7 +652,7 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // resolved `OFKSJ exit; AnyChar; Jump AnyChar` loop
                         // runs inline with no frames and no dispatch.
                         if SEALED
-                            && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::Jump as u8
                             && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize == op_pc
                         {
                             loop {
@@ -684,10 +672,9 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // frames, run inline.
                         if SEALED
                             && op_pc >= 3
-                            && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::Jump as u8
                             && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize == op_pc - 3
-                            && unsafe { *bytecode.get_unchecked(op_pc - 3) }
-                                == RegexOp::OnFailureJump as u8
+                            && bc_byte!(op_pc - 3) == RegexOp::OnFailureJump as u8
                         {
                             let ofj_pc = op_pc - 3;
                             let exit = ((ofj_pc as i64) + 3 + bc_num!(ofj_pc + 1) as i64) as usize;
@@ -742,9 +729,8 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // payload) and the back-edge quit poll preserved.
                         // Sealed only: the peeks rely on validated bounds.
                         if SEALED
-                            && unsafe { *bytecode.get_unchecked(pc) }
-                                == RegexOp::OnFailureJump as u8
-                            && unsafe { *bytecode.get_unchecked(pc + 3) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::OnFailureJump as u8
+                            && bc_byte!(pc + 3) == RegexOp::Jump as u8
                             && ((pc as i64) + 6 + bc_num!(pc + 4) as i64) as usize == charset_op_pos
                         {
                             let ofj_pc = pc;
@@ -775,7 +761,7 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // resolved `OFKSJ exit; Charset; Jump Charset` loop
                         // runs inline with no frames and no dispatch.
                         if SEALED
-                            && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::Jump as u8
                             && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize == charset_op_pos
                         {
                             loop {
@@ -804,11 +790,10 @@ pub(crate) fn re_match_loop<const SEALED: bool>(
                         // frames, run inline.
                         if SEALED
                             && charset_op_pos >= 3
-                            && unsafe { *bytecode.get_unchecked(pc) } == RegexOp::Jump as u8
+                            && bc_byte!(pc) == RegexOp::Jump as u8
                             && ((pc as i64) + 3 + bc_num!(pc + 1) as i64) as usize
                                 == charset_op_pos - 3
-                            && unsafe { *bytecode.get_unchecked(charset_op_pos - 3) }
-                                == RegexOp::OnFailureJump as u8
+                            && bc_byte!(charset_op_pos - 3) == RegexOp::OnFailureJump as u8
                         {
                             let ofj_pc = charset_op_pos - 3;
                             let exit = ((ofj_pc as i64) + 3 + bc_num!(ofj_pc + 1) as i64) as usize;
