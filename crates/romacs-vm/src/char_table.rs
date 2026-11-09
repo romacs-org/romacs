@@ -34,8 +34,8 @@ mod tests {
         table.set(300, int(2)).unwrap();
         table.set(0x10005, int(3)).unwrap();
         table.set_range(0x20000, 0x2ffff, int(4)).unwrap();
-        // A node two root slots share, a shape no write makes (cursors and
-        // sub-char-tables share nodes): the walk visits it once.
+        // A node two root slots share, made here by hand (`set-char-table-range`
+        // with a sub-char-table shares one too): the walk visits it once.
         let shared = table.root.lock().unwrap().slots[0].clone();
         table.root.lock().unwrap().slots[5] = shared;
         let mut before = vec![];
@@ -48,7 +48,7 @@ mod tests {
         table.map_entries(&mut |value| after.push(*value));
         assert_eq!(read, before, "a read sees what a map would, in its order");
         assert_eq!(after, before, "a read leaves the entries as they were");
-        assert!(read.contains(&int(1)) && read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
+        assert!(read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
         assert_eq!(read.iter().filter(|&&v| v == int(1)).count(), 1, "the shared node once");
     }
 
