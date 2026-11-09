@@ -188,6 +188,7 @@ struct Barrier {
     /// this is all a store pays.
     watch: u8,
 }
+romacs_snapshot::snapshot_struct!(Barrier { watch });
 
 impl Barrier {
     #[inline(always)]
@@ -293,21 +294,24 @@ impl<'a, T> IntoIterator for &'a Table<T> {
 impl Table<(Value, Value)> {
     #[inline]
     pub(crate) fn set_car(&mut self, i: usize, new: Value) {
+        let entry = &mut self.entries[i];
         self.barrier.stored(i, new);
-        self.entries[i].0 = new;
+        entry.0 = new;
     }
     #[inline]
     pub(crate) fn set_cdr(&mut self, i: usize, new: Value) {
+        let entry = &mut self.entries[i];
         self.barrier.stored(i, new);
-        self.entries[i].1 = new;
+        entry.1 = new;
     }
 }
 
 impl Table<Value> {
     #[inline]
     pub(crate) fn set(&mut self, i: usize, new: Value) {
+        let entry = &mut self.entries[i];
         self.barrier.stored(i, new);
-        self.entries[i] = new;
+        *entry = new;
     }
 }
 
@@ -359,8 +363,9 @@ impl<T: WholeEntry> Table<T> {
     /// table while it lives, and nothing runs Lisp without the VM it is part of.
     #[inline]
     pub(crate) fn entry_mut(&mut self, i: usize) -> &mut T {
+        let entry = &mut self.entries[i];
         self.barrier.touched(i);
-        &mut self.entries[i]
+        entry
     }
     /// As `entry_mut`, for an I that may be past the table.
     #[inline]

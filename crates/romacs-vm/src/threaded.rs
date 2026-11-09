@@ -3732,6 +3732,7 @@ unsafe fn take_step(
         } else {
             if !depth_room(e) { return Continue::Stop; }
             let width = if std::ptr::eq(pc, &K_CODE[0]) {
+                // R is a continuation activation here, so its count registers hold fixnums.
                 k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N))
             } else {
                 e.vm.functions.get_unchecked(e.function).regs.max(1)
@@ -4092,6 +4093,7 @@ unsafe fn t2_enter_closure(
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
+        // Reached only from `t2_call` in `K_CODE`, so R is a continuation activation.
         let new = r.add(k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N)));
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);

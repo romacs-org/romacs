@@ -42,7 +42,7 @@ crates/romacs-vm/src/gc.rs:293 std::env::var_os the collector's in-place stress 
 crates/romacs-vm/src/gc.rs:1297 dynamic:saved collector: marks the saved values
 crates/romacs-vm/src/gc.rs:1418 dynamic:saved collector: forwards the saved values
 crates/romacs-vm/src/gc_check.rs:82 dynamic:saved verify's reference marker: the saved values are roots it reads again
-crates/romacs-vm/src/hash.rs:935 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/hash.rs:934 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:173 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
 crates/romacs-vm/src/image.rs:185 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)

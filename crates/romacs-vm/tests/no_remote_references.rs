@@ -20,24 +20,30 @@ use std::path::Path;
 enum Class {
     /// The collector reads it as a root at every mark.
     Root,
-    /// Holds Values a later collector learns of at their stores.
+    /// Holds Values a later collector learns of at their stores: the hook runs.
     Barrier,
+    /// Holds Values that shade at their stores once C1 adds the shade. Until
+    /// then a store here runs nothing: not `Barrier`.
+    Owed,
+    /// Read for what a mark reached (an own-obarray symbol, a marked region),
+    /// and read again at the finish of an incremental mark.
+    Rescanned,
     /// Holds no heap Value.
     Free,
-    /// Keeps nothing alive, and the collector clears or checks what it holds.
+    /// Keeps nothing alive: the collector clears or checks what it holds, or a
+    /// stale one is inert by use.
     Cache,
     /// Holds Values only between two points where no collection runs.
     Transient,
-    /// Not settled: read and not yet shown to be any of the above.
-    Open,
 }
-use Class::{Barrier, Cache, Free, Open, Root, Transient};
+use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 
 /// Every `Vm` field.
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
-    // Empty between edits; during one it is `stack`, swapped in (insdel.rs).
+    // Keeps the last kernel's arguments until the next edit clears it; during
+    // one it is `stack`, swapped in, and nothing reads it in between (insdel.rs).
     ("kernel_stack", Transient),
     ("change_slots", Free), ("case_symbols_slot", Free), ("print_number_index", Free), ("undo_list_slot", Free),
     // `Shown`'s Values are compared only while `collections` still matches, and
@@ -50,10 +56,11 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp_cache", Cache),
     ("mode_line_forms", Cache), ("lambda_lists", Cache),
     ("images", Free),
-    // A `Band`: its object constants are `Rooted` handles, but its `rule` keeps
-    // a `CharTableView`, whose Value and node no root list reads, and a click
-    // reads them after any collection since.
-    ("status_bar_line", Open),
+    // A `Band`: its object constants are `Rooted` handles, and its `rule` keeps
+    // a `CharTableView` no root list reads. Inert: those Values reach only
+    // `== NIL` and `integer_value()` (width_rule.rs), so a stale one changes
+    // nothing.
+    ("status_bar_line", Cache),
     ("execution_fatal", Free), ("loader", Free), ("source_cache", Free), ("macros", Free), ("expanding", Free),
     ("compile_depth", Free), ("eval_depth", Free), ("dynamic_scope", Free),
     ("propagated_escape", Root),
@@ -75,12 +82,13 @@ const FIELDS: &[(&str, Class)] = &[
     ("strict_root", Free), ("reached_head", Free), ("reached_generated", Free), ("loader_order_request", Free),
     ("keep_captures", Free), ("lambda_depth", Free), ("window_change_seen", Free), ("expanded_macros", Free), ("expanded_symbols", Free),
     ("image", Free),
-    // A frozen region's symbols are roots once it is marked; they shade at their store.
-    ("regions", Barrier),
+    // A frozen region's symbols, read once it is marked. Written once at
+    // placement, before any Value names the region (frozen.rs), so no store.
+    ("regions", Rescanned),
     ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("inotify", Free),
     ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
     // An alias names a symbol slot, a Value in all but type.
-    ("variable_redirects", Barrier),
+    ("variable_redirects", Owed),
     ("forwarded", Root),
     ("fixnum_slots", Free), ("local_binding_slots", Free), ("free_local_binding_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
@@ -88,7 +96,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("gc_holds", Free), ("running_engines", Free), ("rooted_write", Free), ("gc_stress", Free), ("allocation", Free),
     ("names", Free), ("initial_obarray", Free), ("symbol_names", Free),
     // Read for the symbols marked, which own-obarray ones are only if reached.
-    ("obarray_symbol_names", Barrier),
+    ("obarray_symbol_names", Rescanned),
     ("permanent_symbol_names", Root),
     // Weak references to nodes the case tables own.
     ("native_case_roots", Cache),
@@ -103,8 +111,8 @@ const FIELDS: &[(&str, Class)] = &[
     ("execution", Root), ("spare_programs", Root),
     ("reader_trampolines", Free),
     ("closures", Barrier), ("cells", Barrier), ("conses", Barrier), ("objects", Barrier),
-    // A paired cell's trace pushes the pair's Value, and its writes shade.
-    ("cell_pairs", Barrier),
+    // A paired cell's trace pushes the pair's Value, and its writes will shade.
+    ("cell_pairs", Owed),
     ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
@@ -119,8 +127,8 @@ const FIELDS: &[(&str, Class)] = &[
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
     ("dynamic", Root),
-    // Custom symbols' entries are read with their symbol, and shade at their store.
-    ("conditions", Barrier),
+    // Custom symbols' entries are read with their symbol, and will shade at their store.
+    ("conditions", Owed),
     ("rooted", Root),
 ];
 
@@ -136,7 +144,7 @@ const VARIANTS: &[(&str, Class)] = &[
     // Text shared by indirect buffers is traced from the base alone.
     ("Buffer", Barrier),
     ("Marker", Barrier), ("Overlay", Barrier), ("Bytes", Free), ("ByteBuffer", Barrier),
-    // Stores go through its setters (`Table::hash_mut`), weak tables' telling nothing.
+    // Stores go through its setters (`Table::hash_mut`, hash.rs alone), weak ones' too.
     ("HashTable", Barrier),
     ("Obarray", Barrier), ("Free", Free),
 ];
@@ -251,13 +259,44 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
     assert_eq!(parsed, ["A", "B", "C"].map(str::to_owned).into());
 }
 
-/// Past `Table::collector_entries_mut` a store runs no barrier, so only the
-/// collector may hold it.
+/// The `Table` methods that write past the barrier, and who may call them:
+/// the collector's own rewrites, and the hash table's setters, whose `Stores`
+/// handle tells each store but whose `&mut HashTable` would let a caller write
+/// around it.
+const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
+    ("collector_entries_mut", collector), ("compact", collector), ("prepend", collector),
+    ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
+];
+
+/// Whether a file under `src` may call a method.
+type MayCall = fn(&str) -> bool;
+
+fn collector(file: &str) -> bool {
+    file == "table.rs" || (file.starts_with("gc") && !file.contains('/'))
+}
+
+/// Each file under `src` that calls a method of PAST_THE_BARRIER it may not, as
+/// `FILE: METHOD`. A call is `.METHOD(`, so a field of that name, a comment
+/// or a string never counts.
+fn calls_past_the_barrier(sources: &[(String, String)]) -> Vec<String> {
+    let mut problems = vec![];
+    for (file, text) in sources {
+        let toks = tokens(text);
+        for (method, allowed) in PAST_THE_BARRIER {
+            let call = [Token::Punct('.'), Token::Ident((*method).into()), Token::Punct('(')];
+            if !allowed(file) && toks.windows(3).any(|w| w == call) {
+                problems.push(format!("{file}: {method}"));
+            }
+        }
+    }
+    problems
+}
+
 #[test]
-fn only_the_collector_writes_past_the_barrier() {
+fn only_the_collector_and_the_hash_setters_write_past_the_barrier() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut stack = vec![src.clone()];
-    let mut problems = vec![];
+    let mut sources = vec![];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
@@ -265,13 +304,28 @@ fn only_the_collector_writes_past_the_barrier() {
                 stack.push(path);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let relative = path.strip_prefix(&src).unwrap().to_string_lossy().into_owned();
-                let allowed = relative == "table.rs" || (relative.starts_with("gc") && !relative.contains('/'));
-                let name = Token::Ident("collector_entries_mut".into());
-                if !allowed && tokens(&std::fs::read_to_string(&path).unwrap()).contains(&name) {
-                    problems.push(relative);
-                }
+                sources.push((relative, std::fs::read_to_string(&path).unwrap()));
             }
         }
     }
-    assert!(problems.is_empty(), "past the barrier outside the collector: {}", problems.join(", "));
+    let problems = calls_past_the_barrier(&sources);
+    assert!(problems.is_empty(), "past the barrier: {}", problems.join(", "));
+}
+
+/// The check can fire: each method, called from a file that may not.
+#[test]
+fn a_call_past_the_barrier_is_refused() {
+    let file = |name: &str, text: &str| (name.to_owned(), text.to_owned());
+    let sources = [
+        file("window.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); vm.conses.compact(|_| {}); }"),
+        file("prim/gc_leaf.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); vm.cells.prepend(1, || NIL); }"),
+        file("gc.rs", "fn f(vm: &mut Vm) { vm.cells.collector_entries_mut(); vm.objects.hash_mut(2); }"),
+        file("hash.rs", "fn f(vm: &mut Vm) { vm.objects.hash_mut(1); } // .compact( in a comment"),
+        file("handle.rs", "fn f(vm: &mut Vm) { vm.allocation.compact = true; }"),
+    ];
+    assert_eq!(calls_past_the_barrier(&sources), [
+        "window.rs: compact", "window.rs: hash_mut",
+        "prim/gc_leaf.rs: collector_entries_mut", "prim/gc_leaf.rs: prepend",
+        "gc.rs: hash_mut",
+    ]);
 }

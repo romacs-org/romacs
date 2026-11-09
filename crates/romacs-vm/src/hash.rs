@@ -208,19 +208,18 @@ impl HashTable {
         assert!(!self.stale, "hash table lookup through a stale index");
         self.buckets[self.bucket(hash)]
     }
-    /// `puthash` after a lookup that found slot FOUND, or none. Only a strong
-    /// table tells its stores: a weak one's entries keep nothing alive, and the
-    /// collector reads them in its last rounds.
+    /// `puthash` after a lookup that found slot FOUND, or none. Every table
+    /// tells its stores, weak ones too: a key-weak table holds its value while
+    /// the key lives, so a generational collector needs the edge, and the
+    /// barrier's slow path decides what a store means for the table it is in.
+    #[inline]
     fn put(&mut self, mut stores: Stores<'_>, found: Option<usize>, key: Value, value: Value, hash: u64, moving: bool) {
-        let strong = self.weakness == Weakness::None;
         if let Some(slot) = found {
-            if strong { stores.stored(value); }
+            stores.stored(value);
             self.values[slot] = value;
         } else {
-            if strong {
-                stores.stored(key);
-                stores.stored(value);
-            }
+            stores.stored(key);
+            stores.stored(value);
             self.insert(key, value, hash, moving);
         }
     }

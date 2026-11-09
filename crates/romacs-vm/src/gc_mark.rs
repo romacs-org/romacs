@@ -141,10 +141,15 @@ impl Seen<'_> {
 
 impl RawTable<data::Object> {
     /// Object I, as `Seen`. Private to this file, whose every call is in a mark
-    /// or the scan for the dead, while nothing writes an object.
+    /// or the scan for the dead. The mutator is stopped, so the only writer of
+    /// an object is a `&mut` visitor holding a `Handed` for it, and an object is
+    /// handed over only after its one claim, by the worker that claimed it and
+    /// has called this for it already. So a call here and a `Handed` never meet
+    /// on one entry: a vector too long for one go is read in `VectorPart`s by
+    /// the claimer, never handed, and the scan for the dead runs after the mark.
     fn seen(&self, i: usize) -> Seen<'_> {
         use data::Object::*;
-        // SAFETY: nothing writes it now (above), and only plain data is read below.
+        // SAFETY: as above, no `Handed` exists for I, and only plain data is read below.
         match unsafe { self.get_unsync(i) } {
             Free => Seen::Free,
             Float(_) => Seen::Float,
