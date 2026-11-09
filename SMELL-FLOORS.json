@@ -9,7 +9,7 @@
     "romacs-introspect": {"allows": 1, "todos": 0, "long_files": 0},
     "romacs-layout2": {"allows": 0, "todos": 0, "long_files": 1},
     "romacs-regex-engine": {"allows": 4, "todos": 0, "long_files": 0},
-    "romacs-renderer-wgpu": {"allows": 2, "todos": 12, "long_files": 12},
+    "romacs-renderer-wgpu": {"allows": 0, "todos": 12, "long_files": 12},
     "romacs-snapshot": {"allows": 8, "todos": 0, "long_files": 0},
     "romacs-video": {"allows": 0, "todos": 0, "long_files": 2},
     "romacs-vm": {"allows": 18, "todos": 2, "long_files": 16},
