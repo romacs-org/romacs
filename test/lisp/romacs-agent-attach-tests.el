@@ -475,10 +475,11 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (let ((event (car (romacs-agent--claude-input-events session kept))))
         (should (equal (plist-get event :text) "see"))
         (should (equal (plist-get event :images) (list image))))
-      ;; Without images there is one line, and no images in its event.
+      ;; Without images the journal keeps none: only the turn's request id.
       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ w &optional j) (setq wire w kept j))))
         (romacs-agent--input session "plain"))
-      (should-not kept)
+      (should-not (gethash "images" kept))
+      (should (integerp (gethash "romacsRequest" kept)))
       (should-not (plist-get (car (romacs-agent--claude-input-events session wire)) :images)))))
 
 (ert-deftest romacs-agent-only-the-supervisor-s-record-names-a-prompt-s-images ()
@@ -518,7 +519,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (should-not (romacs-agent-image-file-p link))
       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ wire &optional journal) (setq kept (list wire journal)))))
         (romacs-agent--input session "see" (list link)))
-      (should-not (cadr kept))
+      (should-not (gethash "images" (cadr kept)))
       (should (stringp (gethash "content" (gethash "message" (car kept))))))))
 
 (ert-deftest romacs-agent-size-is-checked-again-at-send ()
@@ -537,7 +538,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
         (let ((kept :none))
           (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ wire &optional journal) (setq kept (list wire journal)))))
             (romacs-agent--input session "see" (list image)))
-          (should-not (cadr kept))
+          (should-not (gethash "images" (cadr kept)))
           (should (stringp (gethash "content" (gethash "message" (car kept))))))))))
 
 (ert-deftest romacs-agent-attach-refuses-an-oversized-image ()

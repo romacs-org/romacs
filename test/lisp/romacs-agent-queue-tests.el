@@ -28,7 +28,7 @@
     (should (= (romacs-agent-queue-length session) 3))
     ;; Sent now: off the queue, in order.
     (let ((sent nil))
-      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
         (romacs-agent--send-next session)
         (romacs-agent--send-next session))
       (should (= (length sent) 2))
@@ -62,7 +62,7 @@
                                      :state 'starting))
         (sent nil))
     (romacs-agent-send-later session "waited")
-    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
       (romacs-agent--send-next session)
       (should (null sent))
       (romacs-agent--send-next session t))
@@ -97,7 +97,7 @@
       (when cut
         (let ((sent nil))
           (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
-                    ((symbol-function 'romacs-agent--line) (lambda (_ object) (push object sent))))
+                    ((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
             (romacs-agent--raise session (list :type 'done :text "resumed" :seq 4))
             (romacs-agent--send-next session))
           (should (= (length sent) 1))

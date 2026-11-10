@@ -547,9 +547,11 @@ or a repeat."
            (if wake (romacs-agent-ui--arrival session event wake)
              (romacs-agent-ui--line session event "")
              (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
-             (romacs-agent-ui--insert "> " 'romacs-agent-turn t)
+             ;; A prompt carries its request id: what names its turn.
+             (romacs-agent-ui--insert "> " 'romacs-agent-turn (or (plist-get event :request) t))
              (let ((images (plist-get event :images)))
-               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt 'romacs-agent-turn t
+               (romacs-agent-ui--insert (concat (plist-get event :text)) 'face 'romacs-agent-prompt
+                                        'romacs-agent-turn (or (plist-get event :request) t)
                                         'romacs-agent-images images)
                (romacs-agent-ui--insert "\n")
                (dolist (file images)
@@ -994,6 +996,7 @@ WORD its help."
     (define-key map "r" (romacs-agent-ui--transcript-key #'romacs-agent-chat-quote-region))
     (define-key map "y" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow))
     (define-key map "N" (romacs-agent-ui--transcript-key #'romacs-agent-chat-deny))
+    (define-key map "d" (romacs-agent-ui--transcript-key #'romacs-agent-chat-diff))
     (define-key map "!" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow-always))
     (define-key map " " (romacs-agent-ui--transcript-key #'scroll-up-command))
     (define-key map (kbd "S-SPC") (romacs-agent-ui--transcript-key #'scroll-down-command))
@@ -1598,6 +1601,25 @@ with a prefix argument, asked for."
             (if (or (null (romacs-agent-pending-selection session)) (equal now next)) ""
               (concat " → " (funcall shown next))))))
 
+(defun romacs-agent-ui--turn-here ()
+  "The request id of the prompt at or before point, or nil."
+  (save-excursion
+    (let ((pos (min (point) (1- romacs-agent-ui--end))))
+      (while (and (> pos (point-min)) (not (numberp (get-text-property pos 'romacs-agent-turn))))
+        (setq pos (or (previous-single-property-change pos 'romacs-agent-turn) (point-min))))
+      (let ((turn (get-text-property pos 'romacs-agent-turn)))
+        (and (numberp turn) turn)))))
+
+(defun romacs-agent-chat-diff (&optional all)
+  "Show what the turn at point changed in the project (the last turn from
+the composer) in `diff-mode', in another window; with a prefix argument
+ALL, what every turn of the session did."
+  (interactive "P" romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (romacs-agent-diff-turn session (unless all (or (and (< (point) romacs-agent-ui--end) (romacs-agent-ui--turn-here))
+                                                    (romacs-agent-diff-current session)
+                                                    (user-error "No turn yet"))))))
+
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-chat-mode)
@@ -1839,6 +1861,7 @@ only sessions whose chat is open."
             (if (equal now next) "" (concat " → " (romacs-agent-ui--effort next))))))
 
 (require 'keymap-popup)
+(require 'romacs-agent-diff)
 
 (defconst romacs-agent-ui--finished-workers 3
   "How many finished workers the actions menu keeps after the active ones.")
@@ -1975,6 +1998,7 @@ view."
   "e" ("Edit turn at point" romacs-agent-chat-edit-turn)
   "w" ("Copy turn or region" romacs-agent-chat-copy)
   :group "View"
+  "D" ("Diff of this turn (C-u: all)" romacs-agent-chat-diff)
   "+" ("Expand all outputs" romacs-agent-chat-expand-all)
   "-" ("Collapse all outputs" romacs-agent-chat-collapse-all)
   "c" ("Show commands" romacs-agent-chat-show-commands))

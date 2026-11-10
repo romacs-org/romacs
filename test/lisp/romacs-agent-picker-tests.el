@@ -86,7 +86,7 @@
       ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
        (romacs-agent-providers `(("claude" :program ,program)))
        (written nil))
-    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object) (push object written))))
+    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object &optional _journal) (push object written))))
       (romacs-agent--refresh-models session)
       (should (equal (gethash "subtype" (gethash "request" (car written))) "initialize"))
       (let* ((id (gethash "request_id" (car written)))

@@ -54,7 +54,7 @@
 (ert-deftest romacs-agent-select-holds-messages-until-confirmed ()
   (romacs-agent-select-tests--with (:options '(:model "a") :state 'idle :caught-up t)
     (let ((written nil) (sent nil) (romacs-agent-select-timeout 3600))
-      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object) (push object written)))
+      (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object &optional _journal) (push object written)))
                 ((symbol-function 'romacs-agent--harness-live-p) (lambda (_session) t))
                 ((symbol-function 'romacs-agent--harness-free-p) (lambda (_session) t))
                 ((symbol-function 'romacs-agent--input) (lambda (_session text &rest _) (push text sent)))

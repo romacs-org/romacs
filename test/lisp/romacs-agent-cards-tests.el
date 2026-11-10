@@ -73,7 +73,7 @@
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "  ✓ ⇢ Review it  codex  completed  ↗ thread\n"
                            "  ⇠ child  completed  ↗ thread  all good second line\n")))
-    (should-not (text-property-any (point-min) (point-max) 'romacs-agent-turn t))
+    (should-not (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil))
     ;; The whole result is one fold away.
     (goto-char (point-min))
     (forward-line 1)
@@ -124,7 +124,7 @@
     (let ((text "Delegated task 99999999-2222-4333-8444-555555555555 (x) [completed]:\nhi"))
       (romacs-agent-cards-tests--draw session :type 'input :text text :seq 1)
       (should (equal (romacs-agent-cards-tests--visible) (concat "> " text "\n")))
-      (should (text-property-any (point-min) (point-max) 'romacs-agent-turn t)))))
+      (should (text-property-not-all (point-min) (point-max) 'romacs-agent-turn nil)))))
 
 (ert-deftest romacs-agent-wake-text-reads-back ()
   (romacs-agent-cards-tests--with-chat session

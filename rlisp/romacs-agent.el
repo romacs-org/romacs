@@ -127,6 +127,12 @@ not started, `outcome unknown' when it had)."
 (defvar romacs-agent-event-functions nil
   "Functions called with a session and each event it raises.")
 
+(defvar romacs-agent-input-functions nil
+  "Functions called with a session and a request id once a user's message
+is written to its harness: before the harness has acted on it, whenever
+its journal's record is read back.  The message's `input' event carries
+the id as :request.")
+
 (cl-defstruct (romacs-agent (:constructor romacs-agent--make))
   "One agent session."
   id harness provider config-dir cwd dir host-socket connection (seq 0) (state 'starting)
@@ -905,16 +911,17 @@ message's text, which a child's result or a quote can fill.")
 the attached IMAGES.  The journal keeps the message as it would be without
 them, and their files: a replay reads every record, and no image's bytes.
 Both are made with one request id: the journal's is the one written."
-  (let ((input (romacs-agent--harness-get session :input))
-        (images (romacs-agent--sendable-images images))
-        (id (romacs-agent-request-id session)))
-    (if (not images)
-        (romacs-agent--line session (funcall input session text id))
-      (let ((record (funcall input session text id)))
-        (puthash "images" (vconcat images) record)
-        (romacs-agent--line session
-                            (let ((romacs-agent--message-images images)) (funcall input session text id))
-                            record)))))
+  (let* ((input (romacs-agent--harness-get session :input))
+         (images (romacs-agent--sendable-images images))
+         (id (romacs-agent-request-id session))
+         (record (funcall input session text id)))
+    ;; The journal's alone: the id names the message's turn.
+    (puthash "romacsRequest" id record)
+    (when images (puthash "images" (vconcat images) record))
+    (romacs-agent--line session
+                        (let ((romacs-agent--message-images images)) (funcall input session text id))
+                        record)
+    (run-hook-with-args 'romacs-agent-input-functions session id)))
 
 (defun romacs-agent--uuid-p (id)
   "Whether ID is a UUID, as Claude Code's and Codex's conversations are named."
@@ -1115,7 +1122,13 @@ other; empty for none."
                              (list (list :type 'input :text (gethash "prompt" in)
                                          :images (append (gethash "images" in) nil))))
                             ((hash-table-p in)
-                             (funcall (or (romacs-agent--harness-get session :input-events) #'ignore) session in))
+                             (let ((request (gethash "romacsRequest" in)))
+                               (mapcar (lambda (event)
+                                         (if (and request (eq (plist-get event :type) 'input))
+                                             (append event (list :request request))
+                                           event))
+                                       (funcall (or (romacs-agent--harness-get session :input-events) #'ignore)
+                                                session in))))
                             ;; A per-turn harness's prompt, written as text.
                             ((not (eq in :absent))
                              (list (list :type 'input :text (if (stringp in) in (romacs-agent--json in)))))
