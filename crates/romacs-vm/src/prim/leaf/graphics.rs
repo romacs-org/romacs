@@ -672,6 +672,9 @@ fn placeholder_of_key(key: &ImageKey) -> ImageFacts {
     placeholder_sized(dim(":width"), dim(":height"))
 }
 
+/// An image loader's error, logged to `*Messages*` unshown (GNU's `image_error`).
+pub(crate) const IMAGE_ERROR_LOG: &str = "(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))";
+
 impl crate::Vm {
     /// ENTRY, pending, as its decode FINISHED it: its final facts, or
     /// GNU's placeholder and the loader's message.
@@ -716,7 +719,7 @@ impl crate::Vm {
         let (messages, landed) = self.image_completions();
         for message in messages {
             let text = self.allocate_object(crate::data::Object::String(Box::new(crate::data::LispString::new(&message))));
-            self.call_prepared_source_propagating("(lambda (m) (let ((inhibit-message t)) (message \"%s\" m)))", &[text])?;
+            self.call_prepared_source_propagating(IMAGE_ERROR_LOG, &[text])?;
         }
         Ok(landed)
     }
