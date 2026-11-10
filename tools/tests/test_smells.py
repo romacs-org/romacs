@@ -187,24 +187,47 @@ class RatchetTest(unittest.TestCase):
     def test_a_crate_at_zero_leaves_the_file(self):
         self.assertEqual(smells.lowered(floors(), now(allows=0, todos=0, long_files=0))['crates'], {})
 
-    def test_a_conflict_keeps_both_sides(self):
-        ours = floors()
+    def test_a_merge_adds_each_sides_raise_and_keeps_a_lowered_floor(self):
+        def lint(n):
+            return {**floors(), 'lints': {'clippy::doc_markdown': n}}
+
+        def merged(base, ours, theirs):
+            return smells.merged(lint(base), lint(ours), lint(theirs))['lints'].get('clippy::doc_markdown', 0)
+        self.assertEqual(merged(9, 10, 10), 11, 'the same raise on both sides is two raises')
+        self.assertEqual(merged(9, 10, 5), 6, 'a raise over a floor the other side lowered')
+        self.assertEqual(merged(9, 5, 7), 5, 'two drops do not add: they may be the same smells')
+        self.assertEqual(merged(9, 9, 4), 4)
+        self.assertEqual(merged(9, 0, 9), 0)
+
+    def test_a_merge_of_every_part(self):
+        base = floors()
+        ours = floors(root=['crates', 'tools', 'ours'], legacy_primitives=6)
         theirs = floors(root=['crates', 'ledger'], legacy_primitives=3)
-        theirs['lints'] = {'clippy::doc_markdown': 2, 'clippy::new': 4}
+        theirs['lints'] = {'clippy::new': 4}                     # doc_markdown reached zero and left the file
         theirs['crates'] = {'a': {'allows': 1, 'todos': 5, 'long_files': 1}, 'b': {'allows': 1, 'todos': 0,
                                                                              'long_files': 0}}
-        both = smells.resolved(ours, theirs)
-        self.assertEqual(both['lints'], {'clippy::doc_markdown': 3, 'clippy::new': 4})
-        self.assertEqual(both['crates'], {'a': {'allows': 2, 'long_files': 1, 'todos': 5},
-                                          'b': {'allows': 1, 'long_files': 0, 'todos': 0}})
-        self.assertEqual(both['layout']['root'], ['crates', 'ledger', 'tools'])
-        self.assertEqual(both['layout']['legacy_primitives'], 5)
+        both = smells.merged(base, ours, theirs)
+        self.assertEqual(both['lints'], {'clippy::new': 4})
+        self.assertEqual(both['crates'], {'a': {'allows': 1, 'todos': 5, 'long_files': 1},
+                                          'b': {'allows': 1, 'todos': 0, 'long_files': 0}})
+        self.assertEqual(both['layout']['root'], ['crates', 'ledger', 'ours'], 'tools: removed by one side')
+        self.assertEqual(both['layout']['legacy_primitives'], 4, '3, and the raise of 1')
+        self.assertEqual(json.loads(smells.dump(both)), both)
+        self.assertEqual(smells.merged(base, base, base), base)
 
-    def test_a_conflict_across_a_change_of_form_keeps_the_newer_form(self):
-        ours, theirs = floors(), floors()
-        theirs['layout']['generated'] = 1
-        self.assertEqual(smells.resolved(ours, theirs)['layout']['generated'], ['Cargo.lock'])
-        self.assertEqual(smells.resolved(theirs, ours)['layout']['generated'], ['Cargo.lock'])
+    def test_the_limit_changed_differently_on_the_two_sides_is_a_conflict(self):
+        def limit(n):
+            return {**floors(), 'long_file_lines': n}
+        self.assertEqual(smells.merged(limit(1000), limit(500), limit(1000))['long_file_lines'], 500)
+        self.assertEqual(smells.merged(limit(1000), limit(1000), limit(2000))['long_file_lines'], 2000)
+        with self.assertRaises(ValueError):
+            smells.merged(limit(1000), limit(500), limit(2000))
+
+    def test_a_merge_across_a_change_of_form_keeps_the_newer_form(self):
+        old = floors()
+        old['layout']['generated'] = 1
+        self.assertEqual(smells.merged(old, floors(), old)['layout']['generated'], ['Cargo.lock'])
+        self.assertEqual(smells.merged(old, old, floors())['layout']['generated'], ['Cargo.lock'])
 
     def test_the_dump_is_the_floors(self):
         self.assertEqual(json.loads(smells.dump(floors())), floors())
@@ -264,8 +287,16 @@ class MergeBaseTest(unittest.TestCase):
                           "; remove 1, or set its floor in SMELL-FLOORS.json 1 above the merge-base's"])
         self.assertEqual(smells.rises(counts(lint=11), merged, counts(lint=6), counts(lint=7)), [])
 
-    def test_a_lowered_floor_allows_nothing_and_forbids_nothing(self):
-        self.assertEqual(smells.rises(counts(lint=1), counts(lint=9), counts(), counts()), [])
+    def test_a_branch_does_not_lower_a_floor_or_drop_a_listing(self):
+        # Its drop is its own tree's: the merge with the trunk may not have it.
+        (problem,) = smells.rises(counts(lint=1), counts(lint=9), counts(), counts(lint=1))
+        self.assertIn('lint clippy::doc_markdown: its floor is lowered from 9 to 1', problem)
+        (problem,) = smells.rises(counts(root=('crates',)), counts(), counts(), counts(root=('crates',)))
+        self.assertIn('layout root: tools is dropped from the list', problem)
+
+    def test_the_trunk_itself_lowers(self):
+        self.assertEqual(smells.rises(counts(lint=1, root=('crates',)), counts(lint=9), counts(), counts(lint=1),
+                                      ahead=False), [])
 
     def test_a_new_lint_or_crate_is_a_rise_from_zero(self):
         tree = counts()
@@ -349,7 +380,7 @@ class BaseCountsTest(unittest.TestCase):
         floors = json.loads((Path(self.repo) / smells.FLOORS).read_text())
         tree = smells.as_floors(None, 1500, self.measure(self.repo, floors))
         self.measured.clear()
-        return smells.rises(floors, *smells.base_side(self.repo, base, floors, tree), tree)
+        return smells.held_to_base(self.repo, base, floors, tree)
 
     def test_the_branch_is_held_to_its_fork_not_to_the_trunk_since(self):
         self.commit(5, name='other')                      # the branch: unchanged in the lint
@@ -398,7 +429,7 @@ class BaseCountsTest(unittest.TestCase):
 
     def test_supplied_diagnostics_are_not_kept_as_a_trees_counts(self):
         floors = json.loads((Path(self.repo) / smells.FLOORS).read_text())
-        smells.base_side(self.repo, 'trunk', floors)      # as main calls it under --clippy-json
+        smells.held_to_base(self.repo, 'trunk', floors, smells.as_floors(None, 1500, now()), keep_own=False)
         self.assertEqual(self.measured, [str(Path(self.cache) / 'base')])
 
     def test_counts_are_kept_per_way_of_counting(self):
@@ -444,7 +475,75 @@ class CargoSettingsTest(unittest.TestCase):
         self.assertNotEqual(plain, self.settings(home))
 
 
+class MergeDriverTest(unittest.TestCase):
+    """git merges the floors file through the driver tools/derived setup installs."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo)
+        self.git('init', '-q', '-b', 'trunk')
+        tool = Path(__file__).resolve().parents[1] / 'lib/smells.py'
+        self.git('config', 'merge.romacs-floors.driver', f'{sys.executable} -B {tool} merge %O %A %B')
+        (Path(self.repo) / '.gitattributes').write_text(f'{smells.FLOORS} merge=romacs-floors\n')
+        self.commit(9)
+        self.git('checkout', '-q', '-b', 'branch')
+
+    def git(self, *args, check=True):
+        return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.org', '-c',
+                               'commit.gpgsign=false', *args], cwd=self.repo, check=check,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def commit(self, floor, other=1):
+        (Path(self.repo) / smells.FLOORS).write_text(smells.dump({**floors(), 'lints': {
+            'clippy::doc_markdown': floor, 'clippy::other': other}}))
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', f'floor {floor}')
+
+    def merge(self, ours, theirs, other=2):
+        self.commit(ours)
+        self.git('checkout', '-q', 'trunk')
+        self.commit(theirs, other)
+        self.git('checkout', '-q', 'branch')
+        done = self.git('merge', '-q', '--no-edit', 'trunk', check=False)
+        self.assertEqual(done.returncode, 0, done.stdout)
+        return json.loads((Path(self.repo) / smells.FLOORS).read_text())['lints']['clippy::doc_markdown']
+
+    def test_the_same_raise_on_both_sides_is_two(self):
+        self.assertEqual(self.merge(10, 10), 11)     # text alone would merge the identical edits to 10
+
+    def test_git_asks_no_driver_when_the_sides_are_one_file(self):
+        self.assertEqual(self.merge(10, 10, other=1), 10)    # the check's failure names the floor to set
+
+    def test_a_raise_and_a_lowered_floor_merge_without_a_conflict(self):
+        self.assertEqual(self.merge(10, 5), 6)       # text alone would conflict
+
+    def test_resolve_writes_the_same_merge_where_the_driver_is_not_installed(self):
+        self.git('config', '--unset', 'merge.romacs-floors.driver')
+        self.commit(10)
+        self.git('checkout', '-q', 'trunk')
+        self.commit(5)
+        self.git('checkout', '-q', 'branch')
+        self.assertNotEqual(self.git('merge', '-q', '--no-edit', 'trunk', check=False).returncode, 0)
+        with mock.patch.object(sys, 'argv', ['smells.py', 'resolve', '--root', self.repo]):
+            self.assertEqual(smells.main(), 0)
+        self.assertEqual(json.loads((Path(self.repo) / smells.FLOORS).read_text())['lints'],
+                         {'clippy::doc_markdown': 6, 'clippy::other': 1})
+
+    def test_a_side_that_is_not_a_floors_file_is_left_a_conflict(self):
+        bad = Path(self.repo) / 'bad'
+        bad.write_text('not json')
+        good = Path(self.repo) / smells.FLOORS
+        before = good.read_text()
+        self.assertEqual(smells.merge_files(str(good), str(good), str(bad)), 1)
+        self.assertEqual(good.read_text(), before)
+
+
 class TreeTest(unittest.TestCase):
+    def test_the_floors_file_is_merged_by_its_driver(self):
+        root = Path(__file__).resolve().parents[2]
+        self.assertIn(f'{smells.FLOORS} merge=romacs-floors', (root / '.gitattributes').read_text().splitlines())
+        self.assertIn('merge.romacs-floors.driver', (root / 'tools/derived').read_text())
+
     def test_the_floors_file_is_in_dump_form(self):
         root = Path(__file__).resolve().parents[2]
         text = (root / smells.FLOORS).read_text()

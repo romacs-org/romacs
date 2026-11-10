@@ -40,7 +40,8 @@ not for floors lowered since it forked, and not for a rise the floors' slack
 would have hidden. A drop needs no record. The one way to add a smell is to
 raise its floor in SMELL-FLOORS.json by as much, a hand edit made deliberately
 in its own commit with its reason; a new layout entry, a generated file among
-them, is added to its list the same way.
+them, is added to its list the same way. A branch does not lower a floor or drop a listed entry either: the
+merge may not have its drop, so `lower` records drops on the trunk.
 
 The merge-base is measured once and kept (`base_counts`), under
 $ROMACS_SMELLS_CACHE, else $XDG_CACHE_HOME/romacs/smells: one file per tree,
@@ -54,12 +55,15 @@ extra fails, and a slack crate-smell or layout floor fails until `lower`
 records it. A lint's floor is a ceiling there: a drop passes. `lower` only
 lowers floors and drops listed entries that are gone.
 
-A merge conflict in the floors file: `resolve` writes the larger floor of the
-two sides for each count and both sides' entries for each list, so neither
-side's deliberate raise is lost.
+The floors file merges by its meaning, not its text (`merged`): each side's
+raise is added, a lowered floor stays lowered, and a list has what both keep
+and what either added. `tools/derived setup` installs that as git's merge
+driver for the file, so a merge needs no hand; where the driver is not
+installed and git reports a conflict, `resolve` writes the same merge.
 
 usage: smells.py check [--base REV | --absolute] [--root ROOT] [--clippy-json FILE]
        smells.py report|lower|resolve [--root ROOT] [--clippy-json FILE]
+       smells.py merge BASE OURS THEIRS   (the merge driver: the result replaces OURS)
        smells.py report --floors   (counts in the floors file's format)
 """
 import argparse
@@ -254,12 +258,22 @@ def tally(counts):
     return flat
 
 
-def rises(floors, base_floors, base, now):
+def rises(floors, base_floors, base, now, ahead=True):
     """Why NOW adds a smell to BASE, one line each. BASE and NOW are the counts of
     the merge-base and of the tree, and BASE_FLOORS and FLOORS their floors
-    files: a floor raised between them allows a rise of as much."""
+    files: a floor raised between them allows a rise of as much.
+
+    A tree AHEAD of its merge-base, a branch, may not lower a floor or drop a
+    listed entry. Its drop was measured on its own tree, and the merge with the
+    trunk may not have it (a file one side shortened and the other lengthened);
+    a floor lowered there would leave the trunk above its floor with no change
+    to blame. Lowering is recorded on the trunk, at a checkpoint."""
     have, had, raised, was = tally(now), tally(base), tally(floors), tally(base_floors)
     found = []
+    if ahead:
+        found += [f'{what}: its floor is lowered from {was[what]} to {raised.get(what, 0)}; a drop needs no record on '
+                  f'a branch, and `lower` records it on the trunk at a checkpoint: restore the floor'
+                  for what in sorted(was) if raised.get(what, 0) < was[what]]
     for what in sorted(have):
         allowed = max(0, raised.get(what, 0) - was.get(what, 0))
         if have[what] > had.get(what, 0) + allowed:
@@ -273,6 +287,9 @@ def rises(floors, base_floors, base, now):
     for key in LISTED:
         new = entries(now, key) - entries(base, key) - (entries(floors, key) - entries(base_floors, key))
         found += [f'layout {key}: {entry} is new; adding one is a deliberate edit of {FLOORS}' for entry in sorted(new)]
+        if ahead:
+            found += [f'layout {key}: {entry} is dropped from the list; `lower` drops it on the trunk at a '
+                      f'checkpoint: restore it' for entry in sorted(entries(base_floors, key) - entries(floors, key))]
     return found
 
 
@@ -375,7 +392,13 @@ def base_side(root, rev, floors, now=None):
         keep(kept(tree, how), now)
     was = git(root, 'show', f'{commit}:{FLOORS}')
     empty = {'crates': {}, 'lints': {}, 'layout': {}}
-    return json.loads(was) if was else empty, base_counts(root, commit, floors, how)
+    return json.loads(was) if was else empty, base_counts(root, commit, floors, how), commit
+
+
+def held_to_base(root, rev, floors, tree, keep_own=True):
+    """`rises` for the tree at ROOT, whose counts are TREE, against its merge-base with REV."""
+    base_floors, base, commit = base_side(root, rev, floors, tree if keep_own else None)
+    return rises(floors, base_floors, base, tree, ahead=git(root, 'rev-parse', 'HEAD') != commit)
 
 
 def lowered(floors, now):
@@ -392,22 +415,57 @@ def lowered(floors, now):
                        **{key: min(old[key], now['layout'][key]) for key in COUNTED}}}
 
 
-def resolved(ours, theirs):
-    """The floors that hold both sides of a merge: the larger of each count,
-    the union of each list."""
-    def larger(a, b):
-        return {k: one(a.get(k), b.get(k)) for k in sorted(set(a) | set(b))}
+def merged(base, ours, theirs):
+    """The floors file a merge of OURS and THEIRS has, both grown from BASE.
 
-    def one(x, y):
-        """The larger of two values of one key. Where the file's form changed
-        between the sides (a count that became a list), the list is the newer."""
-        if isinstance(x, dict) or isinstance(y, dict):
-            return larger(x if isinstance(x, dict) else {}, y if isinstance(y, dict) else {})
-        if isinstance(x, list) or isinstance(y, list):
-            return sorted(set(x if isinstance(x, list) else []) | set(y if isinstance(y, list) else []))
-        return max(x or 0, y or 0)
-    return {**ours, 'crates': larger(ours['crates'], theirs['crates']),
-            'lints': larger(ours['lints'], theirs['lints']), 'layout': larger(ours['layout'], theirs['layout'])}
+    A count is each side's raise added to the lowest of the three: a raise is
+    an allowance its side asked for, so two raises both count, and a floor one
+    side lowered stays lowered. Only the trunk lowers (`rises` holds a branch
+    to that), so the lowered floor is one the trunk's own tree met, and the
+    merge can exceed it only by what the branch's raise allows. A list has
+    what both keep and what either added. Where the file's form changed on one
+    side (a count that became a list), the list is the newer form. The limit
+    and the rule's text changed differently on the two sides is a conflict."""
+    def count(b, o, t):
+        return min(b, o, t) + max(0, o - b) + max(0, t - b)
+
+    def entries(b, o, t):
+        return sorted((o & t) | (o - b) | (t - b))
+
+    def one(b, o, t):
+        sides = (b, o, t)
+        if any(isinstance(x, dict) for x in sides):
+            b, o, t = (x if isinstance(x, dict) else {} for x in sides)
+            both = {k: one(b.get(k), o.get(k), t.get(k)) for k in sorted(set(o) | set(t))}
+            return {k: v for k, v in both.items() if v != 0}
+        if any(isinstance(x, list) for x in sides):
+            return entries(*(set(x) if isinstance(x, list) else set() for x in sides))
+        return count(*(x or 0 for x in sides))
+    kept = {}
+    for key in ('rule', 'long_file_lines'):
+        if len({json.dumps(side[key]) for side in (base, ours, theirs)}) == 3:
+            raise ValueError(f'{key} changed differently on the two sides')
+        kept[key] = ours[key] if ours[key] != base[key] else theirs[key]
+    crates = one(base['crates'], ours['crates'], theirs['crates'])
+    return {**ours, **kept, 'lints': one(base['lints'], ours['lints'], theirs['lints']),
+            'crates': {c: {s: v.get(s, 0) for s in CRATE_SMELLS} for c, v in crates.items() if v},
+            'layout': {**{k: [] for k in LISTED}, **{k: 0 for k in COUNTED},
+                       **one(base['layout'], ours['layout'], theirs['layout'])}}
+
+
+def merge_files(base, ours, theirs):
+    """Git's merge driver for the floors file (tools/derived setup installs
+    it): write the three-way merge over OURS. 1, leaving OURS, when a side
+    is not a floors file (no common ancestor has one, or it does not parse):
+    git then reports the conflict as it would without a driver. Git asks no
+    driver when the two sides are the same file, so the same raise made on
+    both sides, with nothing else differing, still merges to one raise."""
+    try:
+        text = dump(merged(*(json.loads(Path(p).read_text()) for p in (base, ours, theirs))))
+    except (OSError, ValueError, KeyError, TypeError):
+        return 1
+    Path(ours).write_text(text)
+    return 0
 
 
 def as_floors(rule, long_file_lines, now):
@@ -465,7 +523,8 @@ def report(root, floors, now, top=12):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve'])
+    parser.add_argument('command', choices=['check', 'report', 'lower', 'resolve', 'merge'])
+    parser.add_argument('files', nargs='*', help='merge: BASE OURS THEIRS')
     parser.add_argument('--root', default='.')
     parser.add_argument('--clippy-json', help="cargo clippy's JSON messages, instead of running it")
     parser.add_argument('--floors', action='store_true', help='report: print the counts as a floors file')
@@ -474,15 +533,22 @@ def main():
     parser.add_argument('--absolute', action='store_true', help='check: hold the tree to the floors file instead')
     args = parser.parse_args()
     path = Path(args.root) / FLOORS
+    if args.command == 'merge':
+        if len(args.files) != 3:
+            parser.error('merge takes BASE OURS THEIRS')
+        return merge_files(*args.files)
     if args.command == 'resolve':
         sides = [subprocess.run(['git', '-C', args.root, 'show', f':{stage}:{FLOORS}'], capture_output=True,
-                                text=True) for stage in (2, 3)]
+                                text=True) for stage in (1, 2, 3)]
         if any(side.returncode for side in sides):
-            print(f'smells: {FLOORS} is not in conflict', file=sys.stderr)
+            print(f'smells: {FLOORS} is not in a three-way conflict', file=sys.stderr)
             return 2
-        floors = resolved(*(json.loads(side.stdout) for side in sides))
-        path.write_text(dump({**floors, 'layout': {k: floors['layout'][k] for k in (*LISTED, *COUNTED)}}))
-        print(f'smells: {FLOORS} holds both sides; run `tools/smells.py lower`, then git add it')
+        try:
+            path.write_text(dump(merged(*(json.loads(side.stdout) for side in sides))))
+        except ValueError as exc:
+            print(f'smells: {exc}; settle it by hand', file=sys.stderr)
+            return 1
+        print(f'smells: {FLOORS} is the merge of both sides; git add it')
         return 0
     floors = json.loads(path.read_text())
     try:
@@ -500,7 +566,7 @@ def main():
     try:
         tree = as_floors(None, floors['long_file_lines'], now)
         found = problems(floors, now) if args.absolute else \
-            rises(floors, *base_side(args.root, args.base, floors, None if args.clippy_json else tree), tree)
+            held_to_base(args.root, args.base, floors, tree, keep_own=not args.clippy_json)
     except (ValueError, subprocess.CalledProcessError) as exc:
         print(f'smells: {exc}', file=sys.stderr)
         return 1
