@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import sys
 ROOT = pathlib.Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "tools/lib"))
 import gnu_oracle
 HERE = pathlib.Path(__file__).resolve().parent
 ident = gnu_oracle.require()

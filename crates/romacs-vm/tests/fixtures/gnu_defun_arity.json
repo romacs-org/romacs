@@ -1,4 +1,4 @@
-{"provenance": {"generated_by": "tools/gnu_arity.py", "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea", "source": "DEFUN (NAME, F, S, MIN, MAX, ...) in src/*.c; the preloaded Lisp definition for frame-windows-min-size"},
+{"provenance": {"generated_by": "tools/lib/gnu_arity.py", "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea", "source": "DEFUN (NAME, F, S, MIN, MAX, ...) in src/*.c; the preloaded Lisp definition for frame-windows-min-size"},
 "arity": {
  "%": [2, 2],
  "*": [0, "many"],

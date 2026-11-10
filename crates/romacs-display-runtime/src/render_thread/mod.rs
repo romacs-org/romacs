@@ -16,7 +16,6 @@ mod deferred_gui_native_test;
 mod device_loss;
 mod frame_compositor;
 mod frame_ingest;
-mod frame_preparation;
 mod frame_sched;
 mod frame_state;
 pub(crate) mod frame_stats;
@@ -67,7 +66,6 @@ mod window_events;
 pub(crate) use bootstrap::run_render_loop_current_thread;
 #[cfg(target_os = "linux")]
 pub(crate) use bootstrap::build_render_event_loop_wayland;
-pub(crate) use lifecycle::PopupCommit;
 pub(crate) use startup::{
     InitialWindowLifetime, InitialWindowReceiver, InitialWindowReply, InitialWindowSize,
 };

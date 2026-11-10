@@ -74,7 +74,7 @@ pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
 /// is never cloned.
 pub fn ends_idle(event: &InputEvent) -> bool {
     match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => ends_idle(event),
+        InputEvent::Tracked { event, .. } => ends_idle(event),
         &InputEvent::Key { ref key, modifiers, pressed: true, emacs_frame_id } => crate::native::translate(
             InputEvent::Key { key: key.clone(), modifiers, pressed: true, emacs_frame_id },
         ).is_some(),

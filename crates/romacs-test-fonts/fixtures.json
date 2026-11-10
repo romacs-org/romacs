@@ -1,5 +1,5 @@
 {
- "about": "Pinned upstream test assets. scripts/fetch-test-fixtures downloads and verifies them into ROMACS_TEST_FONTS_DIR (default ~/.cache/romacs-test-fonts); tests only read them. Licences: each file is its upstream project's, unmodified.",
+ "about": "Pinned upstream test assets. tools/fetch-test-fixtures downloads and verifies them into ROMACS_TEST_FONTS_DIR (default ~/.cache/romacs-test-fonts); tests only read them. Licences: each file is its upstream project's, unmodified.",
  "archives": [
   {
    "url": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",

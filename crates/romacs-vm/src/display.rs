@@ -262,12 +262,9 @@ pub(super) struct DisplayState {
     pub(crate) face_revision: u64,
     /// The status bar's row height for its faces, for a face revision.
     pub(super) bar_fit: Option<(u64, Vec<Face>, u32)>,
-    /// The status bar's last text by owner (`Vm::status_bar_target'): each
-    /// character it shows as its index in the expanded text, where
-    /// `fit_band' dropped any, and each window's line in that text
-    /// (character range, window id).
-    bar_kept: Option<Vec<usize>>,
-    bar_parts: Vec<(std::ops::Range<usize>, u64)>,
+    /// The status bar's last line as fitted (`Vm::status_bar_target'):
+    /// its characters, and its window's id.
+    bar_line: Option<(usize, u64)>,
     /// The bar's last expansion and what it depended on (`Vm::bar_key').
     pub(super) bar_cache: Option<(status_bar::BarKey, StatusBarSnapshot)>,
     /// Advanced by `force-mode-line-update' and `set-buffer-modified-p':
@@ -286,7 +283,7 @@ pub(super) struct DisplayState {
     /// since `romacs--layout-refusals' last took them (VM2-WTPS1).
     pub(crate) refusals: Vec<LayoutRefusal>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_kept, bar_parts, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -325,11 +322,10 @@ impl DisplayState {
         self.previous.remove(&id);
         self.version = self.version.wrapping_add(1);
     }
-    /// The window and column of the status bar's shown character COLUMN
-    /// in that window's own expansion; none over a separator.
-    pub(super) fn bar_target(&self, column: usize) -> Option<(u64, usize)> {
-        let expanded = self.bar_kept.as_ref().map_or(Some(column), |kept| kept.get(column).copied())?;
-        self.bar_parts.iter().find(|(range, _)| range.contains(&expanded)).map(|(range, id)| (*id, expanded - range.start))
+    /// The id of the window whose line holds the status bar's shown
+    /// character COLUMN; none past its line.
+    pub(super) fn bar_target(&self, column: usize) -> Option<u64> {
+        self.bar_line.filter(|(chars, _)| column < *chars).map(|(_, id)| id)
     }
     /// Forget a deleted window's last publication. Ids are monotonic and never
     /// reused, so without this the map grows for the life of the VM.
@@ -392,8 +388,7 @@ impl DisplayState {
             bases: std::collections::BTreeMap::new(),
             face_revision: 0,
             bar_fit: None,
-            bar_kept: None,
-            bar_parts: vec![],
+            bar_line: None,
             bar_cache: None,
             mode_line_epoch: 0,
             version: 0,

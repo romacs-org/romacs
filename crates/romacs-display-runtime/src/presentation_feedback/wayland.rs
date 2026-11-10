@@ -112,21 +112,6 @@ impl Receipts {
                 nanoseconds,
                 submission.draw_seq,
             );
-            romacs_display_protocol::input_latency::projected_confirmed(
-                submission.frame,
-                submission.serial,
-                romacs_display_protocol::input_latency::PlatformTimestamp {
-                    clock_id: timestamp.clock_id,
-                    nanoseconds,
-                },
-            );
-            romacs_display_protocol::input_latency::confirmed(
-                submission.layout,
-                romacs_display_protocol::input_latency::PlatformTimestamp {
-                    clock_id: timestamp.clock_id,
-                    nanoseconds,
-                },
-            );
         }
         let Some(path) = &self.path else { return };
         if submission.serial <= self.latest_presented {
@@ -268,7 +253,6 @@ impl Session {
         layout: romacs_display_protocol::PresentationId,
         size: (u32, u32),
         scale: f64,
-        projected: &[romacs_display_protocol::input_latency::InputToken],
     ) -> Result<(), String> {
         let RawWindowHandle::Wayland(handle) = window
             .window_handle()
@@ -298,11 +282,6 @@ impl Session {
             height: size.1,
             scale,
         };
-        romacs_display_protocol::input_latency::projected_requested(
-            projected,
-            frame,
-            submission.serial,
-        );
         self.receipts
             .pending
             .requested(submission.serial, observe_platform_now());
@@ -335,15 +314,7 @@ impl PresentationObserver {
     pub(crate) fn new() -> Self {
         Self {
             state: initial_state(
-                std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT")
-                    .or_else(|| {
-                        std::env::var_os("ROMACS_INPUT_LATENCY_FILE").map(|path| {
-                            PathBuf::from(path)
-                                .with_extension("receipt")
-                                .into_os_string()
-                        })
-                    })
-                    .map(PathBuf::from),
+                std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").map(PathBuf::from),
                 romacs_display_protocol::present_trace::enabled,
             ),
         }
@@ -356,7 +327,6 @@ impl PresentationObserver {
         layout: romacs_display_protocol::PresentationId,
         size: (u32, u32),
         scale: f64,
-        projected: &[romacs_display_protocol::input_latency::InputToken],
     ) {
         if matches!(self.state, ObserverState::Uninitialized(_)) {
             let ObserverState::Uninitialized(path) =
@@ -370,7 +340,7 @@ impl PresentationObserver {
             }
         }
         if let ObserverState::Active(session) = &mut self.state
-            && let Err(error) = session.request(window, frame, layout, size, scale, projected)
+            && let Err(error) = session.request(window, frame, layout, size, scale)
         {
             tracing::warn!(%error, "cannot request native presentation feedback");
         }
@@ -417,5 +387,4 @@ impl Drop for PresentationObserver {
 }
 
 #[cfg(test)]
-#[path = "tests/wayland_test.rs"]
 mod tests;

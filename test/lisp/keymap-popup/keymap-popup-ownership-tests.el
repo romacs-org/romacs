@@ -130,6 +130,28 @@
         (should (window-live-p other))
         (should-not (window-live-p popup))))))
 
+(ert-deftest keymap-popup-ownership-title-without-mode-line ()
+  "A popup window that draws no mode line shows the title as its first row."
+  (keymap-popup-ownership--isolated
+    (delete-other-windows)
+    (let ((keymap-popup-backend #'keymap-popup-backend-side-window)
+          (map (make-sparse-keymap)))
+      (keymap-set map "a" #'ignore)
+      (keymap-popup-attach map '("a" ("Action" ignore)) :description "Popup title")
+      (keymap-popup map)
+      (let* ((buf (get-buffer keymap-popup--buffer-name))
+             (popup (get-buffer-window buf))
+             (first-line (lambda () (with-current-buffer buf
+                                      (goto-char (point-min))
+                                      (buffer-substring-no-properties (point) (line-end-position))))))
+        (should (> (window-mode-line-height popup) 0))
+        (should-not (string-match-p "Popup title" (funcall first-line)))
+        (set-window-parameter popup 'mode-line-format 'none)
+        (should (zerop (window-mode-line-height popup)))
+        ;; `format-mode-line' gives batch nothing (xdisp.c).
+        (let ((noninteractive nil)) (keymap-popup--refresh buf))
+        (should (string-match-p "Popup title" (funcall first-line)))))))
+
 (ert-deftest keymap-popup-ownership-reused-window ()
   (keymap-popup-ownership--isolated
     (delete-other-windows)

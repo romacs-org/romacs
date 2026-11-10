@@ -125,10 +125,6 @@ impl XwidgetLayoutAdvance {
     }
 }
 
-/// Coordinates inside the xwidget's own content surface.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum XwidgetContentSpace {}
-
 /// The complete portable geometry contract for one presented xwidget.
 ///
 /// `Space` brands the coordinate system of the origin and clip.  Layout emits
@@ -205,25 +201,6 @@ impl<Space: Copy> XwidgetPresentationGeometry<Space> {
         )
     }
 
-    /// Resolve the native/GPU-visible part of the widget through its text-area
-    /// clip and an optional enclosing-frame clip.
-    pub fn resolve_visible(
-        self,
-        enclosing_clip: Option<GeometryRect<Space, LogicalPixels>>,
-    ) -> Result<Option<XwidgetVisibleGeometry<Space>>, GeometryError> {
-        let content = self.content_rect();
-        let visible = match self.clip {
-            Some(clip) => content.try_intersection(clip)?,
-            None => Some(content),
-        };
-        let visible = match (visible, enclosing_clip) {
-            (Some(visible), Some(clip)) => visible.try_intersection(clip)?,
-            (visible, None) => visible,
-            (None, _) => None,
-        };
-        Ok(visible.map(|visible| XwidgetVisibleGeometry { content, visible }))
-    }
-
     /// Translate the presentation while changing its coordinate-space brand.
     pub fn translated<To: Copy>(
         self,
@@ -261,77 +238,5 @@ impl<Space: Copy> XwidgetPresentationGeometry<Space> {
     }
 }
 
-/// Intrinsic and clipped rectangles after resolving one presentation.
-///
-/// All consumers use this result: native placement reads both rectangles,
-/// Linux composition additionally reads the texture coordinates, and pointer
-/// dispatch maps a visible point into [`XwidgetContentSpace`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct XwidgetVisibleGeometry<Space> {
-    content: GeometryRect<Space, LogicalPixels>,
-    visible: GeometryRect<Space, LogicalPixels>,
-}
-
-impl<Space: Copy> XwidgetVisibleGeometry<Space> {
-    #[must_use]
-    pub const fn content_rect(self) -> GeometryRect<Space, LogicalPixels> {
-        self.content
-    }
-
-    #[must_use]
-    pub const fn visible_rect(self) -> GeometryRect<Space, LogicalPixels> {
-        self.visible
-    }
-
-    #[must_use]
-    pub fn texture_coordinates(self) -> XwidgetTextureCoordinates {
-        XwidgetTextureCoordinates {
-            u_min: (self.visible.x() - self.content.x()) / self.content.width(),
-            u_max: (self.visible.x() + self.visible.width() - self.content.x())
-                / self.content.width(),
-            v_min: (self.visible.y() - self.content.y()) / self.content.height(),
-            v_max: (self.visible.y() + self.visible.height() - self.content.y())
-                / self.content.height(),
-        }
-    }
-
-    /// Map a visible point in the presentation's coordinate space into the
-    /// widget's intrinsic content coordinates.
-    #[must_use]
-    pub fn content_point_at(
-        self,
-        point: GeometryPoint<Space, LogicalPixels>,
-    ) -> Option<GeometryPoint<XwidgetContentSpace, LogicalPixels>> {
-        let inside = point.x() >= self.visible.x()
-            && point.x() < self.visible.x() + self.visible.width()
-            && point.y() >= self.visible.y()
-            && point.y() < self.visible.y() + self.visible.height();
-        inside.then(|| {
-            GeometryPoint::<XwidgetContentSpace, LogicalPixels>::from_px(
-                point.x() - self.content.x(),
-                point.y() - self.content.y(),
-            )
-            .expect("the difference of finite visible and content coordinates is finite")
-        })
-    }
-}
-
-/// Normalized source coordinates for the visible part of an xwidget texture.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct XwidgetTextureCoordinates {
-    u_min: f32,
-    u_max: f32,
-    v_min: f32,
-    v_max: f32,
-}
-
-impl XwidgetTextureCoordinates {
-    #[must_use]
-    pub const fn as_array(self) -> [f32; 4] {
-        [self.u_min, self.u_max, self.v_min, self.v_max]
-    }
-}
-
 #[cfg(test)]
-#[path = "xwidget_extent/tests/xwidget_extent_test.rs"]
 mod tests;

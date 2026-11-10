@@ -29,7 +29,7 @@ fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))
 }
 
-type Engine = std::rc::Rc<std::cell::RefCell<romacs_layout2::LayoutEngine>>;
+type Engine = std::rc::Rc<std::cell::RefCell<romacs_layout::LayoutEngine>>;
 
 /// Lay the frame out as the GUI does, so positions are measured.
 fn paint(vm: &mut Vm, engine: &Engine) {
@@ -66,7 +66,7 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
-        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new().unwrap()));
+        let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         // The GUI renders an echo area, where printing to t goes.
         vm.set_echo_area_host(true);

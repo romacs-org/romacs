@@ -1005,5 +1005,4 @@ fn clear_color(background: [f32; 4]) -> wgpu::Color {
 }
 
 #[cfg(test)]
-#[path = "gpu/tests.rs"]
 mod tests;

@@ -108,5 +108,4 @@ impl RenderApp {
 }
 
 #[cfg(test)]
-#[path = "toolbar/tests/toolbar_test.rs"]
 mod tests;

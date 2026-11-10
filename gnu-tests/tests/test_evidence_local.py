@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'gnu-tests/tools'))
 import member_evidence
 import vacuity_binding as binding
-sys.path.insert(0, str(ROOT / 'tools'))
+sys.path.insert(0, str(ROOT / 'tools/lib'))
 import parity_ratchet
 
 

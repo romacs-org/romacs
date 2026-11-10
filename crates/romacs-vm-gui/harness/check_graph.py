@@ -37,7 +37,7 @@ def main():
     assert inverse['exit'] != 0 and 'did not match' in inverse['stderr'], inverse
     for package, forbidden in [('romacs-vm-gui', ['romacs-core']),
                                ('romacs-vm', ['romacs-core']),
-                               ('romacs-layout2', ['romacs-core', 'romacs-vm'])]:
+                               ('romacs-layout', ['romacs-core', 'romacs-vm'])]:
         result = run(['cargo', 'tree', '--locked', '--offline', '-p', package, '-e', 'normal'])
         records.append(result)
         assert result['exit'] == 0, result
@@ -53,7 +53,7 @@ def main():
     # not a pre-implementation RED claim and not a substitute for Cargo/nm above.
     mutants = [lambda: no_core_symbols('00000 r romacs_core::PDUMP_FINGERPRINT'),
                lambda: check_tree('romacs-display-runtime\n└── romacs-core v0.0.20', ['romacs-core']),
-               lambda: check_tree('romacs-layout2\n└── romacs-vm v0.0.20', ['romacs-vm'])]
+               lambda: check_tree('romacs-layout\n└── romacs-vm v0.0.20', ['romacs-vm'])]
     for mutate in mutants:
         try:
             mutate()

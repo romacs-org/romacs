@@ -1,6 +1,6 @@
 //! The parity ratchet, Lisp-census half: the GNU files that load under the
 //! WARM (parity metric) and COLD (diagnostic) census are floors recorded in
-//! parity-ratchet.json (tools/parity_ratchet.py). The census binary is the one
+//! parity-ratchet.json (tools/lib/parity_ratchet.py). The census binary is the one
 //! Cargo just built for this package.
 //!
 //! Green only when the checker says PASS for exactly that unit AND reports
@@ -21,7 +21,7 @@ fn field(line: &str, name: &str) -> Option<usize> {
 fn ratchet(unit: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("python3")
-        .arg(root.join("tools/parity_ratchet.py"))
+        .arg(root.join("tools/lib/parity_ratchet.py"))
         .args(["check", "--accept-gains", "--unit", unit, "--census-bin", env!("CARGO_BIN_EXE_romacs-vm-census"), "--jobs", "8"])
         .current_dir(&root)
         .output()
@@ -50,7 +50,7 @@ fn ratchet(unit: &str) {
 
 /// A PASS must stay auditable. nextest keeps nothing a passing test prints, so
 /// the checker writes every verdict into the gate's run directory
-/// (`ROMACS_GATE_EVIDENCE`, set by scripts/gate); refuse to pass if this
+/// (`ROMACS_GATE_EVIDENCE`, set by tools/gate); refuse to pass if this
 /// unit's verdict line is not there. Outside the gate, print the verdict.
 fn require_evidence(unit: &str, line: &str, stdout: &str) {
     for l in stdout.lines().filter(|l| l.starts_with("parity-ratchet:")) {

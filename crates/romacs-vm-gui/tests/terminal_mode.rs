@@ -1,4 +1,4 @@
-use romacs_vm_gui::{command, startup};
+use romacs_vm_gui::{command, fonts, startup};
 use romacs_vm::{CommandEvent, TerminalHost, TerminalSnapshot, Vm};
 use std::{cell::RefCell, rc::Rc};
 
@@ -546,4 +546,41 @@ fn terminal_commands_declare_their_mode_and_its_hints_show_real_keys() {
     assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--hint)) \"C-c i interrupt  C-c C-j leave\")"),"t","A_REBINDING_SHOWS");
     assert_eq!(printed(&mut vm,"(equal (substring-no-properties (romacs-term--away-keys)) \"C-p/C-n move; type or C-c C-j to return; there M-p/M-n recall history\")"),"t");
     assert_eq!(printed(&mut vm,"(get-text-property 0 'face (romacs-term--away-keys))"),"help-key-binding");
+}
+
+/// The status bar (VM2-STATUS-BAR) describes the selected window's buffer
+/// only: a terminal's own `mode-line-format' in an unselected window,
+/// even while its output arrives, shows nothing there; selected, its line
+/// is the bar.
+#[test]
+fn the_status_bar_shows_a_terminal_only_while_it_is_selected() {
+    std::thread::Builder::new().stack_size(64 << 20).spawn(status_bar_shows_only_the_selected_window).unwrap().join().unwrap();
+}
+/// The `--loadup' GUI session, its chrome and status bar, with the fake terminal.
+fn status_bar_shows_only_the_selected_window() {
+    let state=Rc::new(RefCell::new(State { created:0, text:"$ ".into(), cursor:2, screen:0, revision:1, alternate:false, bracketed:false, pending:false, exited:false, child:false, sent:vec![] }));
+    let mut vm=Vm::new();
+    vm.set_frame_geometry(1000,700,20,10).unwrap();
+    vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+    vm.set_terminal_host(Some(Box::new(Host(state.clone())))).unwrap();
+    startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
+    open(&mut vm);
+    // Wide enough that nothing is dropped to fit.
+    let bar = |vm: &mut Vm| vm.frame_snapshot(3000, 700).unwrap().status_bar.expect("a status bar").text.utf8;
+    let term = bar(&mut vm);
+    assert!(term.contains("*romacs-term*") && term.contains("running"), "THE_SELECTED_TERMINAL_IS_THE_BAR: {term:?}");
+    vm.eval_source("(setq term-window (selected-window)) (select-window (split-window-right)) (switch-to-buffer (get-buffer-create \"notes\"))").unwrap();
+    let notes = bar(&mut vm);
+    assert!(notes.contains("notes"), "{notes:?}");
+    for text in ["*romacs-term*", "running", "interrupt"] {
+        assert!(!notes.contains(text), "AN_UNSELECTED_TERMINAL_STAYS_OUT_OF_THE_BAR: {notes:?}");
+    }
+    // Output in the unselected terminal leaves the bar as it was.
+    state.borrow_mut().show("$ ls\nfile\n$ ", 0);
+    vm.poll_terminal_output().unwrap();
+    assert_eq!(printed(&mut vm, "(with-current-buffer \"*romacs-term*\" (equal (buffer-string) \"$ ls\nfile\n$ \"))"), "t", "THE_OUTPUT_ARRIVED");
+    assert_eq!(bar(&mut vm), notes, "OUTPUT_ELSEWHERE_DOES_NOT_REACH_THE_BAR");
+    vm.eval_source("(select-window term-window)").unwrap();
+    let selected = bar(&mut vm);
+    assert!(selected.contains("*romacs-term*") && selected.contains("running") && !selected.contains("notes"), "SELECTED_AGAIN_IT_IS_THE_BAR: {selected:?}");
 }

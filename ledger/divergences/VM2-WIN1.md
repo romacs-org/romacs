@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-WIN1 | `window-resize-apply-total` and window total sizes | GNU keeps `w->total_lines`/`total_cols` as independent slots: `window_resize_apply_total` (`src/window.c:4905`, DEFUN `:5003`) installs each window's `new_total` without touching pixel sizes, so `(set-window-new-total (frame-root-window) 7)` then `(window-resize-apply-total)` makes `window-total-height` 7 | VM2 derives a window's total size from its pixel size and the canonical character (`window-total-height`), so `window-resize-apply-total` validates FRAME and returns t without changing anything; totals follow `window-resize-apply`. Pin `window-resize-apply-total/0010` (VALUE) | **Package-observable** only by a caller that applies totals that disagree with the pixel sizes it applied; GNU's own `window.el` always calls `window-resize-apply` first with matching pixel sizes | One size per window cannot disagree with itself | <!-- symbols: window-resize-apply-total, window-total-height, set-window-new-total -->

@@ -518,16 +518,6 @@ impl Vm {
         assert!(std::ptr::eq(frame.vm, self), "a root frame of another VM");
         &self.external_roots[frame.base..frame.base + frame.len]
     }
-    /// Run Lisp that must not collect: BODY's collections are refused (the
-    /// funnel sees the hold), so its caller may keep Values in Rust locals
-    /// across it. Named so each one is counted: a deferred collection is
-    /// latency debt.
-    pub(crate) fn defer<T>(&mut self, body: impl FnOnce(&mut Vm) -> T) -> T {
-        self.gc_holds += 1;
-        let out = body(self);
-        self.gc_holds -= 1;
-        out
-    }
     /// Release FRAME, returning its forwarded values.
     pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
         assert_eq!(frame.len, N, "root frames are released whole");

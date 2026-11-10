@@ -211,31 +211,31 @@ impl WgpuRenderer {
 
     /// Open one stable editor video session from a fully typed request.
     #[cfg(feature = "video")]
-    pub fn open_video(&mut self, id: VideoId, request: VideoOpenRequest) {
+    pub(crate) fn open_video(&mut self, id: VideoId, request: VideoOpenRequest) {
         self.caches.video.open(id, request);
     }
 
     /// Apply one typed playback transition to an existing video session.
     #[cfg(feature = "video")]
-    pub fn control_video(&mut self, id: VideoId, action: PlaybackAction) {
+    pub(crate) fn control_video(&mut self, id: VideoId, action: PlaybackAction) {
         self.caches.video.control(id, action);
     }
 
     /// Close one stable editor video session.
     #[cfg(feature = "video")]
-    pub fn close_video(&mut self, id: VideoId) {
+    pub(crate) fn close_video(&mut self, id: VideoId) {
         self.caches.video.close(id);
     }
 
     /// Snapshot the native video pipeline without exposing renderer handles.
     #[cfg(feature = "video")]
-    pub fn video_diagnostics(&self) -> Result<romacs_video::VideoDiagnostics, String> {
+    pub(crate) fn video_diagnostics(&self) -> Result<romacs_video::VideoDiagnostics, String> {
         self.caches.video.diagnostics()
     }
 
     /// Acknowledge a new native-video diagnostics measurement epoch.
     #[cfg(feature = "video")]
-    pub fn begin_video_measurement_epoch(&mut self) -> Result<(), String> {
+    pub(crate) fn begin_video_measurement_epoch(&mut self) -> Result<(), String> {
         self.caches.video.begin_measurement_epoch()?;
         self.gpu_frame_timer.begin_measurement_epoch();
         Ok(())

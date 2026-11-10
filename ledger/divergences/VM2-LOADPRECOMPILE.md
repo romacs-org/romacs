@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-LOADPRECOMPILE | When compiled code is made | `make` compiles an installation's `.elc` before first use; a package's are made at installation. | The installation's store (`EXECUTABLE.lisp/` beside the executable, shared by every HOME; else the user's cache) is filled ahead of use while an interactive session is idle (`rlisp/romacs-precompile.el`, `romacs-precompile`, `romacs-precompile-idle-delay`): a host thread of the session, which never touches the Lisp heap, starts one compile process at a time at the idle CPU and I/O priority once the session has been idle that long, first for the files loads just read from source for want of an artifact, then the files compiled loads used before, then every file of the installation's Lisp trees. | A first `require` finds its artifact made, without an install step; the session itself does no work for it, between keys or while idle. | <!-- symbols: romacs-precompile, romacs-precompile-idle-delay, romacs-precompile-start, romacs-precompile-stop -->

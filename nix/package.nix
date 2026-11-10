@@ -168,7 +168,7 @@ craneLib.buildPackage (
         "$out/share/info" \
         "$out/share/man"
       ${lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-        bash scripts/install-linux-desktop-assets.sh "$out"
+        bash tools/install-linux-desktop-assets.sh "$out"
       ''}
 
       # Keep VM2's native CLI name; the desktop command launches the GUI.
@@ -182,7 +182,7 @@ craneLib.buildPackage (
       # Refuse to produce a package whose runtime Lisp is not the source's:
       # every gnu-lisp/, rlisp/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
-      bash scripts/check-installed-runtime.sh "$out" .
+      bash tools/check-installed-runtime.sh "$out" .
     '';
 
     passthru = {

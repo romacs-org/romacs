@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-OBARRAY1 | Initial obarray projection | GNU's initial obarray is a bucket-ordered table, counts every symbol, resets an invalid current `obarray` to the initial table before signalling, and permits removing its nil/t symbols. | VM2's initial object lazily projects the existing compiler name table. `mapatoms` uses stable slot order (custom tables use GNU bucket order), its printed count includes only subsequent explicit insertions, nil/t remain canonical, and invalid current bindings are rejected without GNU's reset. Live witnesses `evidence/obarray-substrate/divergence-probes.json`: `invalid-current-reset` is GNU t / VM2 nil; filtered initial order differs. Removing compiler-known names also retains existing name-keyed compiler/variable metadata. | **Package-observable default-table limitations**, not full initial-obarray parity. Custom obarray lookup, identity, removal, iteration and GC are independently tested. | <!-- symbols: obarrayp, intern, intern-soft, unintern, mapatoms -->

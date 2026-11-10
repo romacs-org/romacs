@@ -1,0 +1,5 @@
+## Observable by a package: columns and minibuffer identity
+
+| # | Scope | GNU | VM2 | Reason / evidence |
+|---|---|---|---|---|
+| VM2-STRING-WIDTH-COMPOSITION | `string-width`, `truncate-string-to-width` and `format`'s field width over an automatic composition | `lisp_string_width` (character.c) measures a cluster `composition-function-table` composes (a base with combining marks, an emoji sequence, a lone combining mark) as its shaping draws it, by the frame's font or the terminal: `(string-width (string #x301))` is 1 | Romacs counts each character by the width rule (`crates/romacs-vm/src/width_rule.rs`, CHARACTER_WIDTH), as GNU does with no composition rule: a lone combining mark is 0 columns; a `composition` property still signals. `tests/width_rule_oracle.rs` compares with `composition-function-table` empty on both sides | **Package-observable** for text with combining marks or emoji sequences: such a string measures by its characters, not its shaped clusters | <!-- symbols: string-width, truncate-string-to-width, format -->

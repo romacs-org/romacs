@@ -33,7 +33,7 @@ fn scene_projection_uses_zero_emergency_font_lookups() {
         }
         let snapshot = vm.display_snapshot(400, 300).unwrap();
         vm.collect_garbage();
-        let frame = romacs_layout2::layout(&snapshot, presentation).unwrap();
+        let frame = romacs_layout::layout(&snapshot, presentation).unwrap();
         atlas.set_current_frame_fonts(frame.font_bindings());
         let SurfaceState::Drawable(surface) =
             SurfaceState::from_device_size(400, 300, DeviceScale::new(1.0).unwrap()).unwrap()

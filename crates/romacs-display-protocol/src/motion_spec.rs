@@ -371,5 +371,4 @@ impl MotionSpec {
 }
 
 #[cfg(test)]
-#[path = "motion_spec/tests/motion_spec_test.rs"]
 mod tests;
