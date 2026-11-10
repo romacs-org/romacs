@@ -94,6 +94,18 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
     }
 }
 
+/// Whether EVENT is a special event a read runs and never returns
+/// (focus, a native model's): GNU's `input-pending-p' leaves them out
+/// (readable_events with READABLE_EVENTS_FILTER_EVENTS), so they neither
+/// end `sit-for' nor throw out of `while-no-input'.
+fn special(event: &InputEvent) -> bool {
+    match event {
+        InputEvent::Tracked { event, .. } => special(event),
+        InputEvent::WindowFocus { .. } | InputEvent::Model { .. } => true,
+        _ => false,
+    }
+}
+
 /// What SHARED records of an event a prompt read: the frame closing, or its size.
 fn note(shared: &mut Shared, event: &HostEvent) {
     match *event {
@@ -258,7 +270,7 @@ impl HostInput for GuiHost {
         self.drain();
         let shared = self.shared.borrow();
         // A closed frame is not repainted.
-        shared.closed || !shared.pending.is_empty()
+        shared.closed || shared.pending.iter().any(|event| !special(event))
     }
 
     fn key_pending(&mut self) -> bool {
@@ -367,6 +379,15 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// A queued special event is not input: only an event a read returns is.
+    #[test]
+    fn special_events_are_not_pending_input() {
+        let model = InputEvent::Model { id: 3, event: romacs_display_protocol::model::ModelEvent::Readiness { current: true, rev: 1, req: 0 } };
+        let focus = InputEvent::WindowFocus { focused: true, emacs_frame_id: 0 };
+        assert!(special(&model) && special(&focus));
+        assert!(!special(&InputEvent::WindowClose { emacs_frame_id: 0 }));
     }
 
     /// A read that first gets an event a prompt ignores (a key release)
