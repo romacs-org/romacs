@@ -33,14 +33,16 @@ project, for `romacs-agent-diff-turn'."
   "unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 cd \"$1\" && root=$(git rev-parse --show-toplevel) && cd \"$root\" || exit 1
 real=$(git rev-parse --path-format=absolute --git-path index)
-cp \"$real\" \"$2\" 2>/dev/null || rm -f \"$2\"
+cp -p \"$real\" \"$2\" 2>/dev/null || rm -f \"$2\"
 GIT_INDEX_FILE=\"$2\" git add -A >/dev/null 2>&1 && tree=$(GIT_INDEX_FILE=\"$2\" git write-tree)
 status=$?
 rm -f \"$2\"
 [ $status -eq 0 ] && printf '%s\\n%s\\n' \"$tree\" \"$root\""
   "A checkpoint of the project at $1, through the private index $2: its
 tree and root, a line each.  The index starts as a copy of the user's,
-only for its cached file stats.")
+only for its cached file stats, keeping its time: git trusts a cached stat
+only when the file is older than the index, and a copy made now would
+make an edit of the same size, just made, look unchanged.")
 
 (defun romacs-agent-diff--file (session)
   (expand-file-name "checkpoints" (romacs-agent-dir session)))
