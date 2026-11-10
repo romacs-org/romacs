@@ -1209,6 +1209,8 @@ fn evaluate(
     let images = residency::Shared::default();
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
+    // A paint rendered wakes the wait, which then retires it: nothing polls.
+    if live { sender.on_render(terminal_service.waker()); }
     // An image decoded off the VM wakes the same wait as a terminal.
     vm.set_display_host(Some(Box::new(fonts::Display::new()?.with_images(images.clone()).with_wake(terminal_service.waker())
         .with_alpha_hook(move |frame, alpha, limit| {
