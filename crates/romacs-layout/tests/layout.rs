@@ -551,11 +551,15 @@ fn a_surface_takes_its_slot_on_the_rows_baseline() {
         _ => None,
     }).collect();
     let a = chars[0];
-    assert_eq!(surfaces, [(9, a.1 + frame.char_width, a.2 - 48.0, 64.0, 48.0)]);
-    assert_eq!((chars[1].0, chars[1].1, chars[1].2), ('b', a.1 + frame.char_width + 64.0, a.2));
+    // The same arithmetic gives the same floats: compare their bits.
+    let px = f32::to_bits;
+    let surfaces: Vec<_> = surfaces.into_iter().map(|(id, x, y, w, h)| (id, px(x), px(y), px(w), px(h))).collect();
+    assert_eq!(surfaces, [(9, px(a.1 + frame.char_width), px(a.2 - 48.0), px(64.0), px(48.0))]);
+    assert_eq!((chars[1].0, px(chars[1].1), px(chars[1].2)), ('b', px(a.1 + frame.char_width + 64.0), px(a.2)));
     assert!(!frame.glyphs.iter().any(|g| matches!(g, FrameGlyph::Image { .. })));
+    let hairline = 1f32.to_bits();
     let outline = frame.glyphs.iter().filter(|g| matches!(g, FrameGlyph::Stretch { width, height, .. }
-        if *width == 1.0 || *height == 1.0)).count();
+        if width.to_bits() == hairline || height.to_bits() == hairline)).count();
     assert_eq!(outline, 0);
 }
 

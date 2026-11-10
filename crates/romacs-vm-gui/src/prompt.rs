@@ -95,9 +95,9 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
 }
 
 /// Whether EVENT is a special event a read runs and never returns
-/// (focus, a native model's): GNU's `input-pending-p' leaves them out
-/// (readable_events with READABLE_EVENTS_FILTER_EVENTS), so they neither
-/// end `sit-for' nor throw out of `while-no-input'.
+/// (focus, a native model's): GNU's `input-pending-p` leaves them out
+/// (`readable_events` with `READABLE_EVENTS_FILTER_EVENTS`), so they neither
+/// end `sit-for` nor throw out of `while-no-input`.
 fn special(event: &InputEvent) -> bool {
     match event {
         InputEvent::Tracked { event, .. } => special(event),
@@ -427,7 +427,7 @@ mod tests {
     }
 
     /// A native model's event during a Lisp read reaches the read, which
-    /// runs it as the special event `romacs-model', instead of being dropped.
+    /// runs it as the special event `romacs-model`, instead of being dropped.
     #[test]
     fn model_events_reach_a_lisp_read() {
         let event = romacs_display_protocol::model::ModelEvent::Readiness { current: true, rev: 2, req: 1 };

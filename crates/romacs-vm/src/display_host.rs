@@ -163,11 +163,15 @@ pub trait DisplayHost {
     fn model_available(&self) -> bool { false }
     /// Create native model surface ID as MODEL describes. It loads
     /// asynchronously: its outcome comes back as a [`crate::HostEvent::Model`].
-    /// An error is the display's refusal; nothing was created.
+    /// # Errors
+    /// The display's refusal (no renderer, or busy); nothing was created.
     fn create_model(&mut self, _id: u32, _model: ModelCreate) -> Result<(), String> {
         Err(NO_MODELS.into())
     }
     /// Lisp's request REQ for model ID, settled in order by the renderer.
+    ///
+    /// # Errors
+    /// The display's refusal (no renderer, or busy); nothing was sent.
     fn update_model(&mut self, _id: u32, _req: u64, _change: romacs_display_protocol::model::ModelChange) -> Result<(), String> {
         Err(NO_MODELS.into())
     }
@@ -206,7 +210,7 @@ impl Vm {
     /// stays closed, the frame an initial-terminal frame, until
     /// [`Vm::open_display`].
     pub fn set_display_host(&mut self, host: Option<Box<dyn DisplayHost>>) {
-        self.display = host.map(|host| Display { host, open: false, face_fonts: Default::default(), surfaces: Default::default() });
+        self.display = host.map(|host| Display { host, open: false, face_fonts: rustc_hash::FxHashMap::default(), surfaces: Surfaces::default() });
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer

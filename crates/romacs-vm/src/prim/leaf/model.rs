@@ -1,8 +1,8 @@
-//! Native model primitives (rlisp/romacs-model.el, display_host/models.rs): Lisp's
+//! Native model primitives (rlisp/romacs-model.el, `display_host/models.rs`): Lisp's
 //! arguments checked and turned into the model protocol's values, then
 //! sent to the open display. Mesh IDs stay in Lisp; the renderer sees
 //! mesh indices only.
-use super::*;
+use super::{Fault, Leaf, Value, data};
 use crate::prim::Out;
 use romacs_display_protocol::model::{
     MODEL_EDGE_RANGE, MODEL_MAX_HIGHLIGHT_LAYERS, MODEL_MAX_MESHES, ModelChange, ModelHighlightLayer, ModelMeshSpec,
@@ -17,22 +17,41 @@ fn error(message: impl Into<String>) -> Fault {
     Fault::Error(message.into())
 }
 
+fn natural(value: Value, what: &str) -> std::result::Result<u64, Fault> {
+    value.integer_value().and_then(|n| u64::try_from(n).ok())
+        .ok_or_else(|| error(format!("Model {what} must be a natural number")))
+}
+
+fn edge(value: Value, what: &str) -> std::result::Result<u32, Fault> {
+    let edge = natural(value, what)?;
+    u32::try_from(edge).ok().filter(|edge| MODEL_EDGE_RANGE.contains(edge))
+        .ok_or_else(|| error(format!("Model {what} must be {}..{} pixels", MODEL_EDGE_RANGE.start(), MODEL_EDGE_RANGE.end())))
+}
+
+fn mesh_index(value: Value, meshes: usize) -> std::result::Result<u16, Fault> {
+    natural(value, "mesh index").ok().and_then(|n| u16::try_from(n).ok()).filter(|&n| usize::from(n) < meshes)
+        .ok_or_else(|| error("Model mesh index out of range"))
+}
+
+/// A colour or background component, checked in 0..1 before it narrows.
+#[expect(clippy::cast_possible_truncation, reason = "a component in 0..1 keeps its value as f32")]
+fn component(value: f64) -> f32 {
+    value as f32
+}
+
 impl Leaf<'_> {
-    /// `romacs-model--available-p': whether the open display has a live
+    /// `romacs-model--available-p`: whether the open display has a live
     /// GPU renderer.
-    pub(crate) fn model_available(&mut self) -> Out {
+    pub(crate) fn model_available(&mut self) -> Value {
         let live = self.vm.window_system_host().is_some_and(|host| host.model_available());
-        Ok(if live { Value::TRUE } else { Value::NIL })
+        if live { Value::TRUE } else { Value::NIL }
     }
 
+    /// A number: a fixnum the model protocol can use (an i32), or a float.
     fn model_number(&self, value: Value, what: &str) -> std::result::Result<f64, Fault> {
-        value.integer_value().map(|n| n as f64).map_or_else(|| self.float_value(value), Ok)
+        value.integer_value().and_then(|n| i32::try_from(n).ok()).map(f64::from)
+            .map_or_else(|| self.float_value(value), Ok)
             .map_err(|_| error(format!("Model {what} must be a number")))
-    }
-
-    fn model_natural(&self, value: Value, what: &str) -> std::result::Result<u64, Fault> {
-        value.integer_value().and_then(|n| u64::try_from(n).ok())
-            .ok_or_else(|| error(format!("Model {what} must be a natural number")))
     }
 
     /// VALUE's elements, a proper list of at most MAX: a longer, dotted or
@@ -56,11 +75,6 @@ impl Leaf<'_> {
             .validated().map_err(error)
     }
 
-    fn model_edge(&self, value: Value, what: &str) -> std::result::Result<u32, Fault> {
-        let edge = self.model_natural(value, what)?;
-        u32::try_from(edge).ok().filter(|edge| MODEL_EDGE_RANGE.contains(edge))
-            .ok_or_else(|| error(format!("Model {what} must be {}..{} pixels", MODEL_EDGE_RANGE.start(), MODEL_EDGE_RANGE.end())))
-    }
 
     /// One mesh, (PATH SHA256-OR-NIL): an absolute local path, and
     /// optionally the lowercase hex digest the loader checks.
@@ -87,14 +101,14 @@ impl Leaf<'_> {
         let parts = self.model_items(value, "background", 3)?;
         let rgb = parts.iter().map(|&c| self.model_number(c, "background")).collect::<std::result::Result<Vec<_>, _>>()?;
         match rgb[..] {
-            [r, g, b] if rgb.iter().all(|c| (0.0..=1.0).contains(c)) => Ok([r as f32, g as f32, b as f32, 1.0]),
+            [r, g, b] if rgb.iter().all(|c| (0.0..=1.0).contains(c)) => Ok([component(r), component(g), component(b), 1.0]),
             _ => Err(error("Model background must be three numbers in 0..1")),
         }
     }
 
-    /// `romacs-model--create' MESHES VIEW BACKGROUND WIDTH HEIGHT: a new
+    /// `romacs-model--create` MESHES VIEW BACKGROUND WIDTH HEIGHT: a new
     /// model's surface id. It loads asynchronously; failures come back as
-    /// its `failed' event.
+    /// its `failed` event.
     pub(crate) fn model_create(&mut self, meshes: Value, view: Value, background: Value, width: Value, height: Value) -> Out {
         let meshes = self.model_items(meshes, "meshes", MODEL_MAX_MESHES)?.into_iter().map(|m| self.model_mesh(m)).collect::<std::result::Result<Vec<_>, _>>()?;
         if meshes.is_empty() {
@@ -105,7 +119,7 @@ impl Leaf<'_> {
             _ => return Err(error("Model view must be (YAW PITCH ZOOM)")),
         };
         let background = self.model_background(background)?;
-        let size = (self.model_edge(width, "width")?, self.model_edge(height, "height")?);
+        let size = (edge(width, "width")?, edge(height, "height")?);
         let count = meshes.len();
         let display = self.vm.display.as_mut().filter(|d| d.open)
             .ok_or_else(|| error("Native models need a graphical display"))?;
@@ -118,8 +132,8 @@ impl Leaf<'_> {
 
     /// Send CHANGE as request REQ to live model ID.
     fn model_update(&mut self, id: Value, req: Value, change: impl FnOnce(&Self, usize) -> std::result::Result<ModelChange, Fault>) -> Out {
-        let id = u32::try_from(self.model_natural(id, "id")?).map_err(|_| error("Model id out of range"))?;
-        let req = self.model_natural(req, "request")?;
+        let id = u32::try_from(natural(id, "id")?).map_err(|_| error("Model id out of range"))?;
+        let req = natural(req, "request")?;
         let meshes = self.vm.display.as_ref().and_then(|d| d.surfaces.meshes(id))
             .ok_or_else(|| error("Model is destroyed"))?;
         let change = change(self, meshes)?;
@@ -132,10 +146,6 @@ impl Leaf<'_> {
         self.model_update(id, req, |cx, _| Ok(ModelChange::View(cx.model_view(yaw, pitch, zoom)?)))
     }
 
-    fn model_mesh_index(&self, value: Value, meshes: usize) -> std::result::Result<u16, Fault> {
-        self.model_natural(value, "mesh index").ok().filter(|&n| (n as usize) < meshes).map(|n| n as u16)
-            .ok_or_else(|| error("Model mesh index out of range"))
-    }
 
     fn model_plist_get(&self, plist: &[Value], key: &str) -> Option<Value> {
         plist.chunks(2).find(|pair| self.symbol_name(pair[0]).ok().as_deref() == Some(key)).and_then(|pair| pair.get(1).copied())
@@ -147,8 +157,8 @@ impl Leaf<'_> {
     fn model_target(&self, value: Value, meshes: usize) -> std::result::Result<ModelTarget, Fault> {
         let plist = self.model_items(value, "target", MODEL_TARGET_FIELDS)?;
         let field = |key: &str| self.model_plist_get(&plist, key).ok_or_else(|| error(format!("Model target needs {key}")));
-        let mesh = self.model_mesh_index(field(":mesh")?, meshes)?;
-        let face = |cx: &Self, value| cx.model_natural(value, "face").ok().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| error("Model face out of range"));
+        let mesh = mesh_index(field(":mesh")?, meshes)?;
+        let face = |value| natural(value, "face").ok().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| error("Model face out of range"));
         let target = match self.symbol_name(field(":kind")?)?.as_str() {
             "object" => ModelTarget::Object { mesh },
             "point" => {
@@ -158,10 +168,10 @@ impl Leaf<'_> {
                 };
                 let weights = weights.iter().map(|&w| self.model_number(w, "barycentric weight")).collect::<std::result::Result<Vec<_>, _>>()?;
                 let barycentric = <[f64; 3]>::try_from(weights).map_err(|_| error("Model barycentric needs three weights"))?;
-                ModelTarget::Point { mesh, face: face(self, field(":face")?)?, barycentric, tolerance: self.model_number(field(":tolerance")?, "tolerance")? }
+                ModelTarget::Point { mesh, face: face(field(":face")?)?, barycentric, tolerance: self.model_number(field(":tolerance")?, "tolerance")? }
             }
             "region" => {
-                let faces = self.model_items(field(":faces")?, "faces", self.vm.list_limit())?.into_iter().map(|f| face(self, f)).collect::<std::result::Result<Vec<_>, _>>()?;
+                let faces = self.model_items(field(":faces")?, "faces", self.vm.list_limit())?.into_iter().map(face).collect::<std::result::Result<Vec<_>, _>>()?;
                 ModelTarget::Region { mesh, faces }
             }
             other => return Err(error(format!("Unknown model target kind {other}"))),
@@ -169,23 +179,23 @@ impl Leaf<'_> {
         target.validated().map_err(error)
     }
 
-    /// `romacs-model--set-highlight' ID REQ TARGET SELECTED.
+    /// `romacs-model--set-highlight` ID REQ TARGET SELECTED.
     pub(crate) fn model_set_highlight(&mut self, id: Value, req: Value, target: Value, selected: Value) -> Out {
         self.model_update(id, req, |cx, meshes| {
             let target = (target != Value::NIL).then(|| cx.model_target(target, meshes)).transpose()?;
-            let selected = (selected != Value::NIL).then(|| cx.model_mesh_index(selected, meshes)).transpose()?;
+            let selected = (selected != Value::NIL).then(|| mesh_index(selected, meshes)).transpose()?;
             Ok(ModelChange::Highlight { target, selected })
         })
     }
 
-    /// `romacs-model--set-highlight-layers' ID REQ LAYERS, each (TARGET R G B).
+    /// `romacs-model--set-highlight-layers` ID REQ LAYERS, each (TARGET R G B).
     pub(crate) fn model_set_highlight_layers(&mut self, id: Value, req: Value, layers: Value) -> Out {
         self.model_update(id, req, |cx, meshes| {
             let layers = cx.model_items(layers, "layers", MODEL_MAX_HIGHLIGHT_LAYERS)?;
             let layers = layers.into_iter().map(|layer| {
                 let parts = cx.model_items(layer, "layer", 4)?;
                 let (&target, rgb) = parts.split_first().ok_or_else(|| error("Model layer needs a target"))?;
-                let rgb = rgb.iter().map(|&c| cx.model_number(c, "colour").map(|c| c as f32)).collect::<std::result::Result<Vec<_>, _>>()?;
+                let rgb = rgb.iter().map(|&c| cx.model_number(c, "colour").map(component)).collect::<std::result::Result<Vec<_>, _>>()?;
                 let color = <[f32; 3]>::try_from(rgb).map_err(|_| error("Model layer colour needs three components"))?;
                 ModelHighlightLayer { target: cx.model_target(target, meshes)?, color }.validated().map_err(error)
             }).collect::<std::result::Result<Vec<_>, _>>()?;
@@ -194,14 +204,14 @@ impl Leaf<'_> {
     }
 
     pub(crate) fn model_resize(&mut self, id: Value, req: Value, width: Value, height: Value) -> Out {
-        self.model_update(id, req, |cx, _| Ok(ModelChange::Resize { width: cx.model_edge(width, "width")?, height: cx.model_edge(height, "height")? }))
+        self.model_update(id, req, |_, _| Ok(ModelChange::Resize { width: edge(width, "width")?, height: edge(height, "height")? }))
     }
 
     pub(crate) fn model_freeze(&mut self, id: Value, req: Value) -> Out {
         self.model_update(id, req, |_, _| Ok(ModelChange::Freeze))
     }
 
-    /// The slot a `(surface :id ID :width WIDTH :height HEIGHT)' display
+    /// The slot a `(surface :id ID :width WIDTH :height HEIGHT)` display
     /// spec shows: WIDTH x HEIGHT pixels standing on the baseline, holding
     /// live surface ID.  None for a malformed spec or a freed surface,
     /// whose text then shows instead.
@@ -209,7 +219,7 @@ impl Leaf<'_> {
         let plist = self.vm.list_values(spec).ok()?;
         let plist = plist.get(1..)?;
         let id = u32::try_from(self.model_plist_get(plist, ":id")?.integer_value()?).ok()?;
-        let edge = |key| self.model_plist_get(plist, key).and_then(|v| self.model_edge(v, key).ok()).map(i64::from);
+        let edge = |key| self.model_plist_get(plist, key).and_then(|v| edge(v, key).ok()).map(i64::from);
         let (width, height) = (edge(":width")?, edge(":height")?);
         self.vm.display.as_ref()?.surfaces.meshes(id)?;
         Some(romacs_layout_input::InlineImage {
@@ -218,10 +228,12 @@ impl Leaf<'_> {
         })
     }
 
-    /// `romacs-surface-destroy' ID: free a live surface; a freed or unknown
+    /// `romacs-surface-destroy` ID: free a live surface; a freed or unknown
     /// one is left alone, so a finalizer after an explicit destroy is safe.
+    /// ID must be a fixnum.
     pub(crate) fn surface_destroy(&mut self, id: Value) -> Out {
-        let Some(id) = id.integer_value().and_then(|n| u32::try_from(n).ok()) else { return Ok(Value::NIL) };
+        let n = id.integer_value().ok_or(Fault::Wrong("fixnump", id))?;
+        let Ok(id) = u32::try_from(n) else { return Ok(Value::NIL) };
         if let Some(display) = self.vm.display.as_mut() && display.surfaces.remove(id) {
             display.host.free_surface(id);
             // Its glyphs show their text from the next redisplay: every

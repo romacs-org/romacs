@@ -760,7 +760,7 @@ romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 /// cache, at BODY_X and BODY_Y in the slot (its margins and relief).
 /// RELIEF is `:relief' (raised when positive), its colors from
 /// RELIEF_BACKGROUND (0xRRGGBB), else the face's background.
-/// A `(surface :id ID ...)' specification is laid out the same way, IMAGE
+/// A `(surface :id ID ...)` specification is laid out the same way, IMAGE
 /// 0 and SURFACE its native surface (a model): the renderer composites
 /// that surface in the slot.  SURFACE is 0 for an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

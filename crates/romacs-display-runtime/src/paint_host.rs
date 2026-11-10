@@ -466,6 +466,7 @@ impl PaintSender {
 
     /// Whether a GPU renderer is live now, so a native model can be drawn
     /// (`romacs-model-available-p`).
+    #[must_use]
     pub fn model_renderer_live(&self) -> bool {
         self.comms.model_renderer.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -474,6 +475,9 @@ impl PaintSender {
     /// (sRGB RGBA), LOGICAL pixels in size. It loads on the renderer's own
     /// thread; its outcome arrives as an `InputEvent::Model`. False, and
     /// nothing sent, while the command channel is full.
+    ///
+    /// # Errors
+    /// The render thread is gone.
     pub fn create_model(
         &self,
         id: u32,
@@ -487,6 +491,9 @@ impl PaintSender {
     }
 
     /// Lisp request REQ for native model ID.  False while the channel is full.
+    ///
+    /// # Errors
+    /// The render thread is gone.
     pub fn update_model(
         &self,
         id: u32,
@@ -499,6 +506,9 @@ impl PaintSender {
     /// Free surface ID once no presented frame draws it: native models
     /// are the only surfaces the evaluator makes.  False while the channel
     /// is full.
+    ///
+    /// # Errors
+    /// The render thread is gone.
     pub fn free_surface(&self, id: u32) -> Result<bool, String> {
         self.send_asset(crate::thread_comm::AssetCommand::ModelFree { id })
     }

@@ -25,7 +25,11 @@ const ASSETS_PER_PUBLICATION: usize = 16;
 pub trait Sink {
     fn load(&self, id: u32, attempt: u64, decoded: Arc<SemanticImageDecoded>) -> Result<bool, String>;
     fn retire(&self, id: u32) -> Result<bool, String>;
-    /// Free native surface ID once no presented frame draws it.
+    /// Free native surface ID once no presented frame draws it: false
+    /// while the channel is full.
+    ///
+    /// # Errors
+    /// The render thread is gone.
     fn free_surface(&self, id: u32) -> Result<bool, String>;
     /// The images it lost since the last call, and whether it lost them all.
     fn lost(&self) -> (Vec<u32>, bool);
@@ -144,6 +148,9 @@ impl Images {
     /// them has gone (after `publish` and its paint): no scene the renderer
     /// holds draws a freed surface.  At most `ASSETS_PER_PUBLICATION`; the
     /// rest, and those a full channel refused, go after the next frame.
+    ///
+    /// # Errors
+    /// The render thread is gone.
     pub fn retire_surfaces(&mut self, sink: &impl Sink) -> Result<(), String> {
         for _ in 0..ASSETS_PER_PUBLICATION {
             let Some(&id) = self.surfaces.front() else { break };

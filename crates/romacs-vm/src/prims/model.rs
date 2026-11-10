@@ -1,12 +1,12 @@
 //! Native 3D models drawn by the GPU renderer (rlisp/romacs-model.el,
 //! prim/leaf/model.rs). Each model is an integer surface id that Lisp's
-//! handle owns; its events come back as `(romacs-model ID TYPE PLIST)'
+//! handle owns; its events come back as `(romacs-model ID TYPE PLIST)`
 //! special events.
-use super::*;
+use super::Value;
 
 // Whether the open display has a live GPU renderer that can draw models.
 defsubr! { name = "romacs-model--available-p", gnu = "romacs:display", effect = Reads,
-fn romacs_model_available_p(cx) { cx.model_available() }}
+fn romacs_model_available_p(cx) { Ok(cx.model_available()) }}
 
 // Create a model of MESHES, each (FILE SHA256-OR-NIL), at VIEW (YAW PITCH
 // ZOOM) on BACKGROUND (R G B in 0..1), WIDTH x HEIGHT logical pixels: its

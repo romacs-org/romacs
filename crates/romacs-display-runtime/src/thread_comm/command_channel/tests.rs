@@ -360,11 +360,12 @@ fn a_limited_producer_leaves_the_rest_of_the_channel() {
     assert!(room < capacity / 2, "a publication's commands fit beside the requests");
     let (sender, receiver) = command_channel(capacity);
     let retire = |id| RenderCommand::Asset(AssetCommand::ImageRetire { image: ImageId::new(id) });
-    for id in 0..room as u32 {
+    let (room_ids, capacity_ids) = (u32::try_from(room).unwrap(), u32::try_from(capacity).unwrap());
+    for id in 0..room_ids {
         sender.try_send_within(retire(id), room).unwrap();
     }
     assert!(matches!(sender.try_send_within(retire(999), room), Err(TrySendError::Full(_))));
-    for id in room as u32..capacity as u32 {
+    for id in room_ids..capacity_ids {
         sender.try_send(retire(id)).unwrap();
     }
     assert!(matches!(sender.try_send(retire(999)), Err(TrySendError::Full(_))));

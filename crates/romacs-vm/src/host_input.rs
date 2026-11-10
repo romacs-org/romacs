@@ -54,7 +54,7 @@ pub enum HostEvent {
     /// and FOCUS_OUT_EVENT, read as GNU's special events.
     Focus(bool),
     /// The renderer's event about native model ID, read as the special
-    /// event `(romacs-model ID TYPE PLIST)' (display_host/models.rs).
+    /// event `(romacs-model ID TYPE PLIST)` (`display_host/models.rs`).
     Model { id: u32, event: romacs_display_protocol::model::ModelEvent },
 }
 

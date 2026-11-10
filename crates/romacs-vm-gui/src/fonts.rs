@@ -210,6 +210,7 @@ impl Display {
         Self { visual_hook: Some(Box::new(hook)), ..self }
     }
     /// This display, drawing native models on SENDER's render thread.
+    #[must_use]
     pub fn with_models(self, sender: std::sync::Arc<romacs_display_runtime::paint_host::PaintSender>) -> Self {
         Self { models: Some(sender), ..self }
     }
@@ -247,10 +248,7 @@ impl Display {
 /// A model command's outcome: a full channel refuses it, so Lisp's request
 /// number stays unissued.
 fn sent(result: Result<bool, String>) -> Result<(), String> {
-    match result? {
-        true => Ok(()),
-        false => Err("the renderer is busy; try again".into()),
-    }
+    if result? { Ok(()) } else { Err("the renderer is busy; try again".into()) }
 }
 
 fn font_entity(entity: entity::Entity) -> FontEntity {

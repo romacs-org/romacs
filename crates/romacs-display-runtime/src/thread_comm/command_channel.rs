@@ -78,6 +78,7 @@ impl CommandSender {
     }
     /// As `try_send`, but `Full` once LIMIT commands wait: a producer that
     /// must leave the rest of the channel to others.
+    #[expect(clippy::result_large_err, reason = "a refused command comes back to its sender whole, as try_send's does")]
     pub fn try_send_within(&self, command: RenderCommand, limit: usize) -> Result<(), TrySendError<RenderCommand>> {
         let mut pending = self.shared.pending.lock().unwrap();
         if !pending.receiver_alive {

@@ -1,8 +1,8 @@
-//! Native models (rlisp/romacs-model.el, src/display_host/models.rs): the primitives
+//! Native models (rlisp/romacs-model.el, `src/display_host/models.rs`): the primitives
 //! check Lisp's arguments and send the display exactly the protocol values,
-//! a `(surface :id ...)' display spec lays out as a surface glyph only while
+//! a `(surface :id ...)` display spec lays out as a surface glyph only while
 //! its surface lives, and the renderer's events reach Lisp as the special
-//! event `(romacs-model ID TYPE PLIST)', between commands and inside a read.
+//! event `(romacs-model ID TYPE PLIST)`, between commands and inside a read.
 use romacs_display_protocol::model::{ModelChange, ModelEvent, ModelHit, ModelTarget, ModelView};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::cell::RefCell;
@@ -20,7 +20,7 @@ struct Log {
 struct Display(Rc<RefCell<Log>>);
 
 impl romacs_vm::DisplayHost for Display {
-    fn window_system(&self) -> &str { "pgtk" }
+    fn window_system(&self) -> &'static str { "pgtk" }
     fn display_name(&self) -> String { String::new() }
     fn list_fonts(&mut self, _: &romacs_vm::FontQuery) -> Vec<romacs_vm::FontEntity> { vec![] }
     fn font_families(&mut self) -> Vec<String> { vec![] }
@@ -69,7 +69,7 @@ fn create_and_requests_send_the_protocol_values() {
         assert_eq!(model.meshes.len(), 2);
         assert_eq!(model.meshes[1].path, std::path::PathBuf::from("/m/b.obj"));
         assert_eq!(model.view, ModelView { yaw: 10.0, pitch: -20.0, zoom: 1.5 });
-        assert_eq!(model.background, [0.0, 0.5, 1.0, 1.0]);
+        assert_eq!(model.background.map(f32::to_bits), [0.0f32, 0.5, 1.0, 1.0].map(f32::to_bits));
         assert_eq!(model.size, (64, 48));
     }
     eval(&mut vm, "(romacs-model--set-view 1 1 30 0 2)");
@@ -99,7 +99,7 @@ fn bad_arguments_and_freed_models_are_refused_and_send_nothing() {
         (r#"(romacs-model--create '(("/a.obj" "XYZ")) '(0 0 1) '(0 0 0) 64 64)"#, "64 lowercase hex"),
         (r#"(romacs-model--create '(("/a.obj" nil)) '(0 0 9) '(0 0 0) 64 64)"#, "zoom 0.25..4"),
         (r#"(romacs-model--create '(("/a.obj" nil)) '(0 0 1) '(0 0 0) 8 64)"#, "32..2048"),
-        (r#"(romacs-model--create nil '(0 0 1) '(0 0 0) 64 64)"#, "1..255 meshes"),
+        (r"(romacs-model--create nil '(0 0 1) '(0 0 0) 64 64)", "1..255 meshes"),
         // Fixed arities and limits refuse before converting anything, a
         // circular list too.
         (r#"(romacs-model--create '(("/a.obj" nil)) (let ((v (list 0 0 1))) (setcdr (cdr (cdr v)) v) v) '(0 0 0) 64 64)"#, "view must be a list of at most 3"),

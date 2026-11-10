@@ -1,7 +1,7 @@
 //! Native model surfaces on the open display (rlisp/romacs-model.el). The
 //! VM names each surface by an integer id it allocates, sends Lisp's
 //! requests to the display host, and hands the renderer's events to Lisp as
-//! special events `(romacs-model ID TYPE PLIST)`, which `special-event-map'
+//! special events `(romacs-model ID TYPE PLIST)`, which `special-event-map`
 //! runs at once, inside a read or between commands. Lisp owns each handle
 //! and frees its surface when the handle is collected (a finalizer) or
 //! destroyed: the VM keeps only the ids still live, to refuse requests to a
@@ -39,7 +39,7 @@ impl Surfaces {
 
 impl Vm {
     /// The renderer's EVENT about model ID as the special event Lisp reads:
-    /// `(romacs-model ID TYPE PLIST)'.
+    /// `(romacs-model ID TYPE PLIST)`.
     pub(crate) fn model_event_value(&mut self, id: u32, event: &ModelEvent) -> Value {
         let kind = self.intern("romacs-model");
         let id = Value::integer(i64::from(id)).expect("a surface id is a fixnum");
@@ -106,7 +106,7 @@ impl Vm {
         self.list_value(&values)
     }
 
-    /// `(:mesh INDEX :face N :barycentric [A B C] :point [X Y Z])'.
+    /// `(:mesh INDEX :face N :barycentric [A B C] :point [X Y Z])`.
     fn hit_value(&mut self, hit: &ModelHit) -> Value {
         let barycentric = self.floats(&hit.barycentric);
         let barycentric = self.allocate_object(data::Object::Vector(barycentric));
@@ -121,12 +121,15 @@ impl Vm {
     }
 
     /// Run the renderer's EVENT about model ID as the special event it is
-    /// (keyboard.c read_char): its `special-event-map' binding, here
+    /// (keyboard.c `read_char`): its `special-event-map` binding, here
     /// between commands. Inside a read, the read runs it
     /// ([`crate::HostEvent::Model`]). A freed model's events still go:
     /// Lisp drops what names no live handle.  The embedder's top level
     /// calls it: an error or quit comes back as the result, with no engine
     /// above to hand an escape to.
+    ///
+    /// # Errors
+    /// What the binding signalled, or a quit.
     pub fn run_model_event(&mut self, id: u32, event: &ModelEvent) -> Result<()> {
         let value = self.model_event_value(id, event);
         self.call_prepared_source_raw(
