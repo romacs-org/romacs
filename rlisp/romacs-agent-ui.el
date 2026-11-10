@@ -637,6 +637,7 @@ or a repeat."
            (romacs-agent-ui--line session event (format "  · %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
         ('forked (romacs-agent-ui--draw-source session event))
+        ('rolled-back (romacs-agent-ui--rolled-back session event))
         ('selection
          (romacs-agent-ui--line session event
                                 (format "── %s → %s ──" (romacs-agent-ui--selection-label (plist-get event :from))
@@ -1016,6 +1017,7 @@ whoever wrote last and whatever the session's state."
     (define-key map "y" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow))
     (define-key map "N" (romacs-agent-ui--transcript-key #'romacs-agent-chat-deny))
     (define-key map "d" (romacs-agent-ui--transcript-key #'romacs-agent-chat-diff))
+    (define-key map "u" (romacs-agent-ui--transcript-key #'romacs-agent-chat-rollback))
     (define-key map "!" (romacs-agent-ui--transcript-key #'romacs-agent-chat-allow-always))
     (define-key map " " (romacs-agent-ui--transcript-key #'scroll-up-command))
     (define-key map (kbd "S-SPC") (romacs-agent-ui--transcript-key #'scroll-down-command))
@@ -1675,6 +1677,60 @@ with a prefix argument, asked for."
       (let ((turn (get-text-property pos 'romacs-agent-turn)))
         (and (numberp turn) turn)))))
 
+(defun romacs-agent-ui--rolled-back (session event)
+  "Dim the turns EVENT rolled back, from its prompt on, and say so: they
+stay readable, as the journal keeps them."
+  (let ((at (point-min)))
+    (while (and at (< at romacs-agent-ui--end) (not (equal (get-text-property at 'romacs-agent-turn) (plist-get event :to))))
+      (setq at (next-single-property-change at 'romacs-agent-turn nil romacs-agent-ui--end)))
+    (when (and at (< at romacs-agent-ui--end))
+      (let ((inhibit-read-only t)) (add-face-text-property at romacs-agent-ui--end 'romacs-agent-dim))))
+  (let ((turns (or (plist-get event :turns) 0)))
+    (romacs-agent-ui--line session event
+                           (format "↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
+                                   (if (plist-get event :files) " and their files" "")
+                                   (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n")) 60 nil nil t))
+                           'face 'romacs-agent-dim)))
+
+(defun romacs-agent-ui--last-prompt (session)
+  "The request id of SESSION's last prompt still in its conversation."
+  (car (last (delq nil (mapcar #'romacs-agent--record-request
+                               (romacs-agent--live-records (romacs-agent--journal-records session)))))))
+
+(defun romacs-agent-chat-rollback (&optional last)
+  "Take this session back to just before the turn at point (with a prefix
+argument LAST, its last turn): its conversation, and its files when the
+turn has a checkpoint.  Without one, offer the conversation alone.  Files
+changed meanwhile by something else are named, and restored only when
+you say so."
+  (interactive "P" romacs-agent-chat-mode)
+  (let* ((session romacs-agent-ui--session)
+         (request (or (if last (romacs-agent-ui--last-prompt session)
+                        (and (< (point) romacs-agent-ui--end) (romacs-agent-ui--turn-here)))
+                      (user-error "No turn here")))
+         (files (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start)))
+                          (romacs-agent-diff--checkpoints session))))
+    (unless (if files (y-or-n-p "Roll back to before this turn, its conversation and its files? ")
+              (y-or-n-p "No checkpoint of this turn's files: roll back its conversation only? "))
+      (user-error "Not rolled back"))
+    (cl-labels ((go (force)
+                  (romacs-agent-rollback
+                   session request
+                   (lambda (outcome)
+                     ;; Asked from the command loop, not from git's sentinel.
+                     (run-at-time 0 nil
+                                  (lambda ()
+                                    (pcase outcome
+                                      (`(:done ,n) (message "Rolled back %d turn%s" n (if (= n 1) "" "s")))
+                                      (`(:clobbered ,names)
+                                       (if (yes-or-no-p (format "Changed meanwhile by something else: %s.  Restore them anyway? "
+                                                                (string-join names ", ")))
+                                           (go t)
+                                         (message "Not rolled back")))
+                                      (`(:error ,why) (message "Not rolled back: %s" why))))))
+                   :files (and files t) :force force)))
+      (go nil))))
+
 (defun romacs-agent-chat-diff (&optional all)
   "Show what the turn at point changed in the project (the last turn from
 the composer) in `diff-mode', in another window; with a prefix argument
@@ -1885,6 +1941,7 @@ only sessions whose chat is open."
 
 (require 'keymap-popup)
 (require 'romacs-agent-diff)
+(require 'romacs-agent-rollback)
 (require 'romacs-agent-handoff)
 (require 'romacs-agent-idle)
 
@@ -1992,6 +2049,8 @@ view."
   "i" ("Interrupt" romacs-agent-chat-interrupt :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
   "k" ("Interrupt + send" romacs-agent-chat-interrupt-and-send :inapt-if (lambda () (not (romacs-agent-ui--running-p))))
   "q" (#'romacs-agent-ui--queue-label romacs-agent-chat-queue)
+  "u" ("Roll back to before this turn (C-u: the last)" romacs-agent-chat-rollback
+       :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-ui--session))))
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)

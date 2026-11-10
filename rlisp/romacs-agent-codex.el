@@ -57,6 +57,30 @@ a thread is its startup's to say."
 run: its own is not named yet (Codex writes it when it forks)."
   (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-harness-session session))))
 
+(defun romacs-agent--codex-rollback (session records request)
+  "The `thread/revert' taking SESSION's live thread back to before prompt
+REQUEST: the turn it started, by the id its `turn/start' was answered
+with, goes with every later one."
+  (unless (and (romacs-agent--harness-live-p session) (romacs-agent--ready-p session))
+    (user-error "Codex rolls back a thread it has loaded: resume the session first"))
+  (let* ((input (gethash "in" (or (cl-find request records :key #'romacs-agent--record-request :test #'equal)
+                                  (user-error "No such prompt in this session's conversation"))))
+         (answer (and (equal (gethash "method" input) "turn/start")
+                      (cl-find-if (lambda (record)
+                                    (let ((out (gethash "out" record)))
+                                      (and (hash-table-p out) (not (gethash "method" out))
+                                           (equal (gethash "id" out) (gethash "id" input)))))
+                                  records)))
+         (turn (and answer (hash-table-p (gethash "result" (gethash "out" answer)))
+                    (gethash "id" (gethash "turn" (gethash "result" (gethash "out" answer)))))))
+    (unless turn
+      (user-error (if (equal (gethash "method" input) "turn/steer")
+                      "That message steered a turn: roll back to the turn's own prompt"
+                    "Codex never started a turn for that prompt")))
+    (romacs-agent--codex-request "thread/revert" (romacs-agent-request-id session)
+                                 (romacs-mcp--object "threadId" (romacs-agent-harness-session session)
+                                                     "beforeTurnId" turn))))
+
 (defun romacs-agent--codex-thread (session number)
   "The request starting SESSION's thread: going on with the one it has, a
 fork of the one its options' :fork names, else a new one."
@@ -283,6 +307,10 @@ what to do should it miss its turn."
       ("turn/steer" (romacs-agent--codex-steered session id error))
       ;; An interrupt that found the turn over has nothing to say.
       ("turn/interrupt" nil)
+      ("thread/revert" (if error
+                           (list (list :type 'error :text (format "Codex could not roll back: %s" error))
+                                 (list :type 'reverted :error error))
+                         (list (list :type 'reverted))))
       (_ (and error (list (list :type 'error :text error)))))))
 
 (defun romacs-agent--codex-steered (session id error)
@@ -512,6 +540,7 @@ line an earlier `codex exec' run journaled)."
   :scrub '("CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS" "CODEX_CI" "CODEX_SANDBOX_NETWORK_DISABLED"
            "CODEX_SESSION_ID" "CODEX_THREAD_ID" "CODEX_TOOL_CALL_ID" "CODEX_VERSION")
   :lifetime 'persistent :forks #'romacs-agent--codex-forking
+  :rollback #'romacs-agent--codex-rollback
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next
