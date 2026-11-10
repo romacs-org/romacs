@@ -11,73 +11,6 @@ use crate::{
     *,
 };
 impl Vm {
-    pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
-        let index = self.buffer_index()?;
-        let buffer = self.slots[self.buffer_slot].value;
-        // Point's neighbouring properties, whether one run spans point, the
-        // local map and the overlays at point. A unibyte buffer has no
-        // overlays (VM2-MD2).
-        let around = |properties: &crate::properties::Properties, at: ByteOffset, len: usize| {
-            let raw = |at| properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-            (if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
-             if at.0 < len { raw(at) } else { vec![] },
-             at.0 > 0 && at.0 < len && properties.same_run_state(ByteOffset(at.0 - 1), at))
-        };
-        let (at, (left, right, same), local, overlays) = match &self.objects[index] {
-            Object::Buffer(text) => {
-                let at = text.point;
-                (at.0, around(&text.properties, at, text.len_bytes()), text.local_keymap,
-                 text.intervals.query_with_end(at.0 as u32, at.0 as u32, true,
-                     at.0 == text.len_bytes(), &text.anchors).0)
-            }
-            Object::ByteBuffer(b) => {
-                let properties = crate::properties::Properties::from_map(&b.properties);
-                let overlays = match b.shown() {
-                    Some(text) => {
-                        let at = text.byte_of_char(CharOffset(b.point.0))?.0;
-                        text.intervals.query_with_end(at as u32, at as u32, true, at == text.len_bytes(), &text.anchors).0
-                    }
-                    None => vec![],
-                };
-                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, overlays)
-            }
-            _ => unreachable!(),
-        };
-        let mut value = self.ordered_overlay_property(overlays, property)?;
-        if value == Value::NIL {
-            value = self.annotation_resolve(&right, property)?;
-        }
-        if value == Value::NIL {
-            value = self.insertion_overlay_property(buffer, at, property)?;
-        }
-        if value == Value::NIL {
-            let inherited = self.annotation_inherited(left, right, same)?;
-            value = self.annotation_resolve(&inherited, property)?;
-        }
-        Ok(self.resolve_keymap(value).unwrap_or_else(|| {
-            if self.names.get("local-map").is_some_and(|&slot| property == Value::reference(slot + 1, 7)) { local } else { Value::NIL }
-        }))
-    }
-
-    fn insertion_overlay_property(&self, buffer: Value, at: usize, property: Value) -> Result<Value> {
-        let Some(text) = self.overlay_store(buffer) else { return Ok(Value::NIL); };
-        let at = if matches!(self.object(buffer)?, Object::ByteBuffer(_)) { text.byte_of_char(CharOffset(at))?.0 } else { at };
-        let mut candidates = text.intervals.query_with_end(at.saturating_sub(1) as u32,
-            (at + 1).min(text.len_bytes()) as u32, false, true, &text.anchors).0;
-        candidates.retain(|&overlay| {
-            let object = self.overlay(overlay).unwrap();
-            let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
-            start as usize <= at && at <= end as usize
-                && !(start as usize == at && object.front == Bias::Right)
-                && !(end as usize == at && object.rear != Bias::Right)
-        });
-        self.ordered_overlay_property(candidates, property)
-    }
-
-    fn ordered_overlay_property(&self, overlays: Vec<Value>, property: Value) -> Result<Value> {
-        Ok(self.ordered_overlay_hit(overlays, property)?.0)
-    }
-
     /// The highest-priority overlay among OVERLAYS with a non-nil PROPERTY:
     /// (VALUE, OVERLAY), or (nil, nil) when none has it.
     fn ordered_overlay_hit(&self, overlays: Vec<Value>, property: Value) -> Result<(Value, Value)> {
@@ -785,10 +718,13 @@ impl Vm {
             let raw = raw_at(vm, at)?;
             vm.annotation_resolve(&raw, key).map_err(Fault::Error)
         };
+        // A unibyte buffer's overlays and its narrowing are its mirror's.
+        if matches!(self.object_if(object), Some(Object::ByteBuffer(_))) {
+            self.mirror_shown(object).map_err(Fault::Error)?;
+        }
         if self.overlay_store(object).is_none() {
             return text_property(self, pos, property);
         }
-        self.mirror_shown(object).map_err(Fault::Error)?;
         let b = self.annotated(object).map_err(Fault::Error)?;
         let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
         let max = b.len_chars() as i64 + 1;

@@ -120,6 +120,7 @@ mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
 pub mod anchors;
+mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
@@ -578,7 +579,6 @@ enum Primitive {
     DefineKey,
     MakeSparseKeymap,
     Keymapp,
-    KeyBinding,
     LookupKey,
     GlobalSetKey,
     CurrentGlobalMap,
@@ -843,7 +843,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("define-key", Primitive::DefineKey),
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
-    ("key-binding", Primitive::KeyBinding),
     // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
     ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
