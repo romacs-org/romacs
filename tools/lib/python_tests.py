@@ -34,6 +34,8 @@ ELSEWHERE = {
     'crates/romacs-vm-gui/harness/test_scaling_live.py': 'crates/romacs-vm-gui/tests/scaling.rs',
     'tools/tests/parity_ratchet_test.py': 'gnu-tests/runner/tests/parity_ratchet.rs',
     'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
+    # Needs a built host, which only Cargo can promise.
+    'tools/tests/test_elisp_runner.py': 'crates/romacs-vm/tests/elisp_runner.rs',
 }
 RAN = re.compile(r'^Ran (\d+) tests? in ', re.M)
 SKIPPED = re.compile(r'^(?:OK|FAILED) \(.*?\bskipped=(\d+)', re.M)

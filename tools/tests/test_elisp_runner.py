@@ -62,22 +62,5 @@ class ElispRunner(unittest.TestCase):
         self.assertEqual(before, hashlib.sha256(self.binary.read_bytes()).digest())
 
 
-class ExplicitUserInit(unittest.TestCase):
-    def test_missing_explicit_init_is_not_silent_success(self):
-        target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
-        binary = Path(os.environ.get('ROMACS_EDITOR_TEST_BINARY', target / 'gate/romacs-vm-gui')).resolve()
-        if not binary.is_file():
-            raise RuntimeError('Build romacs-vm-gui once or set ROMACS_EDITOR_TEST_BINARY')
-        with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as temp:
-            missing = Path(temp) / 'missing-init.el'
-            env = dict(os.environ, HOME=temp, XDG_CONFIG_HOME=temp,
-                       ROMACS_LISP_DIR=str(ROOT / 'gnu-lisp'))
-            result = subprocess.run([str(binary), '--batch', str(ROOT / 'rlisp'), '--init-file', str(missing)],
-                                    input='(boundp \'user-init-file)', capture_output=True,
-                                    text=True, env=env, timeout=10)
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn(str(missing), result.stderr)
-
-
 if __name__ == '__main__':
     unittest.main()
