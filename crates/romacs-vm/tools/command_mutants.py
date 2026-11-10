@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix=".command-mutants-", dir=crate / "tools"
     (candidate / "tests").mkdir()
     shutil.copy2(crate / "tests" / "command.rs", candidate / "tests" / "command.rs")
     manifest = (crate / "Cargo.toml").read_text()
-    for dependency in ["romacs-layout-input", "romacs-face", "romacs-regex-engine"]:
+    for dependency in ["romacs-layout-input", "romacs-face", "romacs-regex"]:
         manifest = manifest.replace('path = "../' + dependency + '"', 'path = "' + str(repo / "crates" / dependency) + '"')
     manifest = re.sub(r'\[dev-dependencies\]\n.*?(?=\n\[|\Z)', '', manifest, flags=re.S)
     (candidate / "Cargo.toml").write_text(manifest)

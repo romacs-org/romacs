@@ -17,7 +17,7 @@
 //!   an `ITERS = 0` run of the same workload subtracted
 //!   (`tools/regex_bench.py`).  No GC exists on this side: the crate has no
 //!   Lisp heap.
-use romacs_regex_engine::{
+use romacs_regex::{
     CompiledPattern, DefaultSyntaxLookup, MatchRegisters, re_search, regex_compile,
     take_matcher_overflow,
 };

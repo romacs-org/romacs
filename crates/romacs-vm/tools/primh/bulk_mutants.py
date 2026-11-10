@@ -3,7 +3,7 @@
 
 Each mutant edits exactly one implementation site, runs the corpus test, and
 must FAIL at a corpus assertion -- the bulk test's `core-group violations` or
-primh's `NEW DIVERGENCE` (tests/primh_fns_core.rs) -- naming at least one
+primh's `NEW DIVERGENCE` (tests/primh.rs) -- naming at least one
 case of the expected primitive. A compile failure, or a failure anywhere else,
 does not count as a kill. The tree is restored after every mutant, also on
 interrupt. Run from the repository root with the lane's cargo environment:
@@ -77,9 +77,9 @@ MUTANTS = [
 
 
 def run(name):
-    """Run the bulk corpus test and the primh fns-core replay; collect both logs."""
+    """Run the bulk corpus test and the primh replays; collect both logs."""
     out, code = "", 0
-    for test, filt in (("bulk_core", "bulk_core_matches_gnu_case_for_case"), ("primh_fns_core", "primh_")):
+    for test, filt in (("bulk_core", "bulk_core_matches_gnu_case_for_case"), ("primh", "primh_")):
         p = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", test, "--", filt],
                            capture_output=True, text=True)
         out += f"\n=== {test}\n" + p.stdout + p.stderr
@@ -105,7 +105,7 @@ def main():
             path.write_text(text)
         compiled = "error[E" not in out and "could not compile" not in out
         hits = re.findall(r"(?:NEW DIVERGENCE|CHANGED PIN|STALE PIN)[^\n]*?: (" + re.escape(prefix) + r"\d{4})", out)
-        primh = len(re.findall(r"NEW DIVERGENCE \([A-Z-]+\): " + re.escape(prefix), out.split("\n=== primh_fns_core\n")[-1]))
+        primh = len(re.findall(r"NEW DIVERGENCE \([A-Z-]+\): " + re.escape(prefix), out.split("\n=== primh\n")[-1]))
         ok = code != 0 and compiled and hits and ("core-group violations" in out or "NEW DIVERGENCE" in out)
         (killed if ok else survived).append(name)
         n = re.search(r"(\d+) core-group violations", out)

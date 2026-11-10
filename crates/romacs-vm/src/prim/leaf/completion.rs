@@ -1,6 +1,6 @@
 use super::*;
 use crate::regexp::Translation;
-use romacs_regex_engine::{CaseTable, CaseTranslation};
+use romacs_regex::{CaseTable, CaseTranslation};
 
 #[derive(Debug)]
 struct CompletionCase {

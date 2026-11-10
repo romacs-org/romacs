@@ -29,5 +29,5 @@ This is a bounded host prerequisite for the five regexp primitives, not a
 claim to finish the syntax-table subsystem. Generic array-access diagnostics
 inherit VM2's existing primitive error adapter. See `REGEXP.md` for supported
 syntax-class and syntax-property matching. RX1's matcher-overflow-budget
-behaviour is inherited unchanged from `romacs-regex-engine` and remains in
+behaviour is inherited unchanged from `romacs-regex` and remains in
 the root ledger.

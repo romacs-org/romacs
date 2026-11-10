@@ -54,5 +54,19 @@ class ReplayRenderingTests(unittest.TestCase):
                         self.assertFalse(out.exists())
 
 
+    def test_into_adds_each_missing_replay_once_under_the_same_template(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "primh.rs"
+            assoc, cdr = (str(render_replay.HERE / "specs" / name) for name in ("assoc.json", "cdr-safe.json"))
+            render_replay.render("primh", [assoc], str(target))
+            first = target.read_text()
+            self.assertEqual(len(render_replay.into([cdr, assoc], str(target))), 1)
+            self.assertTrue(target.read_text().startswith(first))
+            self.assertEqual(len(render_replay.REPLAY.findall(target.read_text())), 2)
+            self.assertEqual(render_replay.into([cdr], str(target)), [])
+            target.write_text(first.replace("use romacs_vm::Vm;", "use other::Vm;"))
+            with self.assertRaisesRegex(ValueError, "does not begin with the template"):
+                render_replay.into([cdr], str(target))
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@ fn iso_class(chars: &[u32]) -> Option<std::result::Result<(u32, usize), Fault>> 
     if chars.len() < 4 || chars[..2] != [b'[' as u32, b':' as u32] { return None; }
     let end = 2 + chars[2..].windows(2).position(|w| w == [b':' as u32, b']' as u32])?;
     let name: String = chars[2..end].iter().filter_map(|&c| char::from_u32(c)).collect();
-    Some(romacs_regex_engine::char_class_bit(&name)
+    Some(romacs_regex::char_class_bit(&name)
         .map(|bit| (bit, end + 2))
         .ok_or_else(|| Fault::Error("Invalid ISO C character class".into())))
 }
@@ -34,8 +34,8 @@ impl CharacterSet {
         while at < chars.len() {
             if let Some(class) = iso_class(&chars[at..]) {
                 let (bit, used) = class?;
-                if Some(bit) == romacs_regex_engine::char_class_bit("upper") { upper = true; }
-                else if Some(bit) == romacs_regex_engine::char_class_bit("lower") { lower = true; }
+                if Some(bit) == romacs_regex::char_class_bit("upper") { upper = true; }
+                else if Some(bit) == romacs_regex::char_class_bit("lower") { lower = true; }
                 else { classes |= bit; }
                 at += used;
                 continue;
@@ -64,9 +64,9 @@ impl CharacterSet {
     /// SYNTAX is the buffer's table, present when the set has classes; CASE
     /// is buffer.h downcase (true) or upcase of a character, for [:upper:]
     /// (uppercasep) and [:lower:] (lowercasep).
-    fn contains(&self, code: u32, buffer_multibyte: bool, syntax: Option<&dyn romacs_regex_engine::SyntaxLookup>,
+    fn contains(&self, code: u32, buffer_multibyte: bool, syntax: Option<&dyn romacs_regex::SyntaxLookup>,
                 case: &dyn Fn(u32, bool) -> std::result::Result<u32, Fault>) -> std::result::Result<bool, Fault> {
-        if let Some(syntax) = syntax && romacs_regex_engine::char_in_classes(code, self.classes, syntax) {
+        if let Some(syntax) = syntax && romacs_regex::char_in_classes(code, self.classes, syntax) {
             return Ok(!self.negate);
         }
         if self.upper || self.lower {
@@ -103,7 +103,7 @@ impl Leaf<'_> {
         let tables = if set.upper || set.lower { (self.current_case_mapping(true)?, self.current_case_mapping(false)?) } else { (Value::NIL, Value::NIL) };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = source.map(|source| crate::regexp::VmSyntax::new(self.vm, source));
-        let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex_engine::SyntaxLookup);
+        let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex::SyntaxLookup);
         let leaf = &*self;
         let case = |code: u32, down: bool| leaf.case_of(if down { tables.0 } else { tables.1 }, code, down);
         let (start, at) = match &self.vm.objects[index] {

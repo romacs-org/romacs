@@ -9,7 +9,7 @@ members = [
     "crates/romacs-grammars",
     "tests/coordinate-contract",
     "crates/romacs-logo",
-    "crates/romacs-regex-engine",
+    "crates/romacs-regex",
     "crates/romacs-mcp",
     "crates/romacs-allocator",
     "crates/romacs-display-protocol",
@@ -28,7 +28,6 @@ members = [
     "crates/romacs-infra",
     "crates/romacs-video",
     "crates/romacs-video-model",
-    "crates/romacs-gnudiff",
     "gnu-tests/runner",
 ]
 default-members = [
