@@ -1,11 +1,14 @@
 # gnu-tests: GNU Emacs's own test suite as romacs's parity specification
 
 `test/` here is GNU Emacs's `test/` directory at the oracle pin
-`45b0f7699df`, imported byte for byte (`PIN.json`). **Never edit it.** Its
-content hashes to git tree `cc4d1dbcc23b776e1eb39caef099b6a5ee26a3d1`, which is
-GNU's own `45b0f7699df:test`; `run.py verify-pin` recomputes that hash from the
-working files (no repository needed) and every run refuses to start, and
-re-checks at the end, if it differs. Tests execute in a scratch copy, because
+`45b0f7699df`, imported byte for byte (`PIN.json`), less the GNU files that
+`PIN.json`'s `excluded` drops deliberately (its ChangeLog, README, build files
+and the CI under `infra/`). **Never edit it.** Its content hashes to the git
+tree `test_tree` in `PIN.json`; `run.py verify-pin` recomputes that hash from
+the working files (no repository needed) and every run refuses to start, and
+re-checks at the end, if it differs. `run.py verify-pin --gnu GNU` (run by
+`scripts/check-derived`) also derives `test_tree` from GNU's own
+`45b0f7699df:test` less the excluded paths, so the record stays GNU's. Tests execute in a scratch copy, because
 GNU's tests write beside themselves (`bytecomp-resources/*.elc`).
 
 The milestone metric is **passed GNU deftests under real ERT**, not static

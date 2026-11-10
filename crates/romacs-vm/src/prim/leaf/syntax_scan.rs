@@ -203,8 +203,8 @@ struct Served {
 
 
 /// A scan's memory: the first run's BEGV, ZV and point, coerced FROM and
-/// TO, its variables as flags, its initial parse state (`state_memory'),
-/// then, for a parse, where it stopped (`suspended_memory'; nothing when it
+/// TO, its variables as flags, its initial parse state (`state_memory`),
+/// then, for a parse, where it stopped (`suspended_memory`; nothing when it
 /// stopped before reading), else the syntax it read.
 const MEMORY_STATE: usize = 6;
 
@@ -216,7 +216,7 @@ fn label_code<T: PartialEq>(all: &[T], item: &T) -> Value {
 
 /// A stopped parse as fixnums: its label, its locals (positions as
 /// characters), its levels, its comment scan if it stopped in one, then its
-/// parse state (`state_memory').
+/// parse state (`state_memory`).
 fn suspended_memory(suspended: &scan::Suspended) -> Vec<Value> {
     let fixnum = |n: i64| Value::integer(n).expect("fixnum");
     let count = |n: usize| fixnum(i64::try_from(n).expect("count"));
@@ -237,7 +237,7 @@ fn suspended_memory(suspended: &scan::Suspended) -> Vec<Value> {
     values
 }
 
-/// `suspended_memory' read back, POS giving a character's position.
+/// `suspended_memory` read back, POS giving a character's position.
 fn memory_suspended(values: &[Value], pos: impl Fn(i64) -> Pos) -> scan::Suspended {
     let int = |i: usize| values[i].integer_value().expect("saved parse");
     let syntax = |i: usize| i32::try_from(int(i)).expect("saved syntax");
@@ -754,7 +754,7 @@ impl Leaf<'_> {
 mod tests {
     use crate::Vm;
 
-    /// A parse that stops for `internal--syntax-propertize' at every chunk
+    /// A parse that stops for `internal--syntax-propertize` at every chunk
     /// reads each character once, as GNU's one scan does, however many
     /// stops it makes: a stop resumes the scan rather than restarting it.
     #[test]

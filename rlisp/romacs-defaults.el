@@ -76,7 +76,7 @@
     ;; A steady cursor: the renderer animates its motion, and a blink
     ;; would flash it away mid-glide.
     (blink-cursor-mode nil)
-    ;; A bar where text goes in, a block where it does not (romacs-cursor.el).
+    ;; The bar cursor in every buffer (romacs-cursor.el).
     ,@(and (fboundp 'romacs-cursor-shape-mode) '((romacs-cursor-shape-mode t)))
     ;; Programming buffers number their lines (`romacs-defaults--line-numbers'),
     ;; counted from point, the current line by its own number.

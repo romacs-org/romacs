@@ -135,7 +135,7 @@ struct Case<'a> {
     seed: u64,
 }
 /// The propagation a stop at CHARPOS runs: change the syntax of a few
-/// positions, before, at and after it, and move `done' past it.
+/// positions, before, at and after it, and move `done` past it.
 fn propagate(rng: &mut Rng, case: &Case<'_>, charpos: i64) -> i64 {
     let len = case.text.text.len();
     for _ in 0..rng.below(3) {
@@ -144,8 +144,13 @@ fn propagate(rng: &mut Rng, case: &Case<'_>, charpos: i64) -> i64 {
     }
     charpos + 1 + i64::try_from(rng.below(6)).expect("small")
 }
+/// The propagation calls of a parse, as (argument, stop position).
+type Calls = Vec<(i64, i64)>;
+/// Where each stop of a parse went on: none for a stop before any read.
+type Resumed = Vec<Option<(At, Option<ForwAt>)>>;
+
 /// CASE parsed as before: each stop reruns from FROM, replaying what was read.
-fn by_replay(case: &Case<'_>) -> (ParseState, Vec<(i64, i64)>) {
+fn by_replay(case: &Case<'_>) -> (ParseState, Calls) {
     let (text, ppss) = (case.text, BTreeMap::new());
     text.record.set(true);
     text.overrides.borrow_mut().clear();
@@ -170,7 +175,7 @@ fn by_replay(case: &Case<'_>) -> (ParseState, Vec<(i64, i64)>) {
     }
 }
 /// CASE parsed by resuming each stop; also where each stop went on.
-fn by_resume(case: &Case<'_>) -> (ParseState, Vec<(i64, i64)>, Vec<Option<(At, Option<ForwAt>)>>) {
+fn by_resume(case: &Case<'_>) -> (ParseState, Calls, Resumed) {
     let (text, ppss) = (case.text, BTreeMap::new());
     text.record.set(false);
     text.overrides.borrow_mut().clear();
@@ -211,7 +216,7 @@ fn oldstate(text: &Mutable<'_>, options: Options, mid: i64, exact: bool) -> Pars
     state
 }
 fn mutable<'a>(text: &[u8], table: &'a [i32; 128]) -> Mutable<'a> {
-    Mutable { text: text.to_vec(), table, overrides: Default::default(), record: Default::default(), replay: Default::default(), read: Default::default() }
+    Mutable { text: text.to_vec(), table, overrides: std::cell::RefCell::default(), record: std::cell::Cell::default(), replay: std::cell::RefCell::default(), read: std::cell::RefCell::default() }
 }
 
 /// A parse that stops for propagation and goes on where it stopped
@@ -240,7 +245,7 @@ fn a_resumed_parse_is_a_replayed_one() {
         b"; e\\\nq ab\\ /*\\*/*/ \"\\\"\" | \\| | (((a)) b",
         b"ab/*c*/ <#<##<#< \\ \"x\" xy{}z\n w ;\\",
     ];
-    let mut seen = Vec::new();
+    let mut reached = Vec::new();
     let mut seed = 1;
     for fixture in fixtures {
         let text = mutable(fixture, &table);
@@ -257,7 +262,7 @@ fn a_resumed_parse_is_a_replayed_one() {
                             let (replayed, replay_log) = by_replay(&case);
                             let (resumed, resume_log, labels) = by_resume(&case);
                             assert_eq!((&resumed, &resume_log), (&replayed, &replay_log), "{:?} from {mid} done {done} {args:?} exact {exact} escaped {escaped}", std::str::from_utf8(fixture));
-                            for label in labels { if !seen.contains(&label) { seen.push(label); } }
+                            for label in labels { if !reached.contains(&label) { reached.push(label); } }
                         }
                     }
                 }
@@ -272,7 +277,7 @@ fn a_resumed_parse_is_a_replayed_one() {
         Some((At::InComment, Some(ForwAt::EscapeSkipped))), Some((At::InComment, Some(ForwAt::Incomment))),
         Some((At::InComment, Some(ForwAt::NestedChecks))), None,
     ];
-    let missed: Vec<_> = wanted.iter().filter(|label| !seen.contains(label)).collect();
+    let missed: Vec<_> = wanted.iter().filter(|label| !reached.contains(label)).collect();
     assert!(missed.is_empty(), "never stopped at {missed:?}");
     let mut rng = Rng(0x5eed_0f57);
     for _ in 0..3000 {

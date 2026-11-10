@@ -71,25 +71,6 @@ def document_icons(mark: ET.Element) -> None:
     shutil.copyfile(target, target.with_name("emacs-document23.svg"))
 
 
-def legacy_monochrome_icon(png: Path, temporary: Path) -> None:
-    pbm = temporary / "emacs.pbm"
-    subprocess.run([
-        "magick", str(png), "-colorspace", "gray", "-threshold", "10%", str(pbm),
-    ], check=True)
-    pixels = subprocess.check_output([
-        "magick", str(pbm), "-depth", "8", "gray:-",
-    ])
-    words = []
-    for offset in range(0, len(pixels), 16):
-        word = sum((value < 128) << (15 - bit) for bit, value in enumerate(pixels[offset:offset + 16]))
-        words.append(f"0x{word:04X}")
-    rows = [", ".join(words[index:index + 8]) for index in range(0, len(words), 8)]
-    (ROOT / "etc/emacs.icon").write_text(
-        "/* Format_version=1, Width=64, Height=64, Depth=1, Valid_bits_per_item=16 */\n"
-        + ",\n".join(rows) + "\n"
-    )
-
-
 def raster_assets(temporary: Path) -> None:
     for size in (16, 24, 32, 48, 128):
         target = ICONS / f"{size}x{size}/apps/emacs.png"
@@ -113,7 +94,6 @@ def raster_assets(temporary: Path) -> None:
         "magick", *(str(frame) for frame in frames),
         str(ICONS / "scalable/apps/emacs.ico"),
     ], check=True)
-    legacy_monochrome_icon(temporary / "icon-64.png", temporary)
 
 
 def main() -> None:

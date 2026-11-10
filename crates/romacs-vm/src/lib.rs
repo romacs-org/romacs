@@ -1296,8 +1296,8 @@ pub struct Vm {
     command_point: (i64, Value),
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     change_prepared: bool,
-    /// The storage kernels' argument stack, reused across changes
-    /// (`insdel::edit_kernel').
+    /// The register file natives borrow for their arguments, reused across
+    /// calls (`Vm::with_kernel_stack'): empty between them.
     kernel_stack: Vec<Value>,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
@@ -1574,10 +1574,6 @@ pub struct Vm {
     special_cache: Vec<u64>,
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
-    register_width: usize,
-    /// Registers kept free at the stack's end for `apply`'s spread
-    /// arguments; it grows to fit the longest spread (GNU has no limit).
-    spread_reserve: usize,
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
     /// lowered code kept), reused by the next nested run
@@ -1775,7 +1771,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     special_cache,
     functions,
     request_code,
-    register_width,
     closures,
     cells,
     cell_pairs,
@@ -1804,7 +1799,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     dynamic,
     conditions,
     rooted,
-    spread_reserve,
     reader_trampolines,
     quit,
     force_quit_count,
@@ -2007,8 +2001,6 @@ impl Vm {
             special_cache: Vec::new(),
             functions: vec![],
             request_code: request_code::RequestCode::default(),
-            register_width: 1,
-            spread_reserve: 4096,
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
             reader_trampolines: Vec::new(),

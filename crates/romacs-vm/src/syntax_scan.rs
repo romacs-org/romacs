@@ -108,7 +108,7 @@ pub(crate) enum Halt {
 }
 pub(crate) type R<T> = Result<T, Halt>;
 
-/// Where forw_comment goes on: the code after each update that can stop.
+/// Where `forw_comment` goes on: the code after each update that can stop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ForwAt { Read, EscapeSkipped, Incomment, NestedChecks }
 
@@ -116,11 +116,11 @@ impl ForwAt {
     pub(crate) const ALL: [ForwAt; 4] = [ForwAt::Read, ForwAt::EscapeSkipped, ForwAt::Incomment, ForwAt::NestedChecks];
 }
 
-/// forw_comment's whole state between two steps.
+/// `forw_comment`'s whole state between two steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Forw { pub at: ForwAt, pub from: Pos, pub nesting: i64, pub syntax: i32, pub code: i32, pub prev_syntax: i32 }
 
-/// forw_comment stopped for Lisp, at FORW.
+/// `forw_comment` stopped for Lisp, at FORW.
 pub(crate) struct CommentHalt { pub halt: Halt, pub forw: Forw }
 impl From<CommentHalt> for Halt {
     fn from(stopped: CommentHalt) -> Self {
@@ -201,7 +201,7 @@ pub(crate) struct Scanner<'a, T: Text> {
     pub modiff: u64,
 }
 
-/// Labels of scan_sexps_forward: GNU's gotos, and the code after each step
+/// Labels of `scan_sexps_forward`: GNU's gotos, and the code after each step
 /// that can stop for Lisp (`inc_from!` names the label it goes on at).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum At {
@@ -233,12 +233,12 @@ impl At {
     ];
 }
 
-/// A level of scan_sexps_forward: the start of its last sexp, and of the one
+/// A level of `scan_sexps_forward`: the start of its last sexp, and of the one
 /// before.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Level { pub last: i64, pub prev: i64 }
 
-/// scan_sexps_forward's locals between two steps.
+/// `scan_sexps_forward`'s locals between two steps.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Locals {
     pub from: Pos,
@@ -321,7 +321,7 @@ impl<T: Text> Scanner<'_, T> {
         self.forw_run(Forw { at, from, nesting, syntax: prev_syntax, code: prev_syntax & 0xff, prev_syntax }, stop, style)
     }
 
-    /// forw_comment from FORW, which a stop for Lisp left: each label is the
+    /// `forw_comment` from FORW, which a stop for Lisp left: each label is the
     /// code after the update that stopped.
     fn forw_run(&self, forw: Forw, stop: i64, style: i32) -> Result<(bool, Pos, i64, i32), CommentHalt> {
         let Forw { mut at, mut from, mut nesting, mut syntax, mut code, mut prev_syntax } = forw;
@@ -996,7 +996,7 @@ impl<T: Text> Scanner<'_, T> {
         Ok(state)
     }
 
-    /// scan_sexps_forward's loop, from AT with LOCALS (and FORW, a comment
+    /// `scan_sexps_forward`'s loop, from AT with LOCALS (and FORW, a comment
     /// scan it stopped in): every step that can stop for Lisp names the
     /// label it goes on at, and goes there, so that a resumed parse runs the
     /// code an unstopped one does.

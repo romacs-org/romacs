@@ -278,7 +278,12 @@ impl Vm {
         start: usize,
         n: usize,
     ) -> Result<Value> {
-        let mut a = self.stack[start..start + n].to_vec();
+        let a = self.stack[start..start + n].to_vec();
+        self.interpreted_closure_values(p, a)
+    }
+    /// The closure primitives on their arguments A, already out of the file.
+    pub(super) fn interpreted_closure_values(&mut self, p: Primitive, mut a: Vec<Value>) -> Result<Value> {
+        let n = a.len();
         match p {
             Primitive::ClosureMetadata => {
                 if n != 6 {

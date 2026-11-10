@@ -27,8 +27,8 @@ fn get_char_property_and_overlay_names_the_supplying_overlay() {
 }
 
 /// A position outside the accessible region signals as GNU's does: the
-/// position as both ends for `get-text-property' and `text-properties-at'
-/// (validate_interval_range), alone for `get-char-property', a marker kept as
+/// position as both ends for `get-text-property` and `text-properties-at`
+/// (`validate_interval_range`), alone for `get-char-property`, a marker kept as
 /// the marker.
 #[test]
 fn positions_outside_the_restriction_signal_as_gnu() {
