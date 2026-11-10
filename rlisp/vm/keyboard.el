@@ -176,12 +176,14 @@ on.  A VM without the process prelude runs no timers."
                                current)))
                       shown ran)
                 ;; read_char: an event `special-event-map' binds (focus, a
-                ;; user signal) runs its binding at once and is never input;
-                ;; the read goes on, and redisplays first what the binding
-                ;; changed.
+                ;; user signal, a native model's) runs its binding at once
+                ;; and is never input; the read goes on, and redisplays
+                ;; first what the binding changed.  The binding quits as
+                ;; the read's caller does: GNU runs it outside the wait.
                 (when (and (or (consp c) (and c (symbolp c)))
                            (lookup-key special-event-map (vector (if (consp c) (car c) c))))
-                  (romacs--special-event c)
+                  (let ((inhibit-quit outer-inhibit))
+                    (romacs--special-event c))
                   (setq c nil shown nil))
                 (setq waiting (null c)))))))
       (and timers (null end) (romacs--timer-stop-idle)))

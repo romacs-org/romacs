@@ -78,7 +78,7 @@ pub(super) struct Source<'l, 'a> {
 struct Syms {
     display: Value, invisible: Value, composition: Value, before: Value, after: Value, priority: Value,
     line_prefix: Value, wrap_prefix: Value, space: Value, when: Value, disable_eval: Value, margin: Value,
-    left_margin: Value, right_margin: Value, left_fringe: Value, right_fringe: Value, image: Value,
+    left_margin: Value, right_margin: Value, left_fringe: Value, right_fringe: Value, image: Value, surface: Value,
     slice: Value, space_width: Value, height: Value, raise: Value, min_width: Value, width: Value,
     relative_width: Value, align_to: Value, text: Value, left: Value, right: Value, center: Value,
     scroll_bar: Value, plus: Value, minus: Value, zero_width: Value, thin_space: Value, empty_box: Value,
@@ -707,7 +707,7 @@ impl<'l, 'a> Source<'l, 'a> {
             spec = self.leaf.pair(tail).map_or(Value::NIL, |(first, _)| first);
         }
         let simple = |leaf: &Leaf<'_>, head: Value| {
-            head != Value::NIL && ![s.image, s.space, s.when, s.slice, s.space_width, s.height, s.raise, s.left_fringe, s.right_fringe, s.min_width]
+            head != Value::NIL && ![s.image, s.surface, s.space, s.when, s.slice, s.space_width, s.height, s.raise, s.left_fringe, s.right_fringe, s.min_width]
                 .contains(&head) && !leaf.pair(head).is_some_and(|(h, _)| h == s.margin)
         };
         let items: Vec<Value> = match self.leaf.pair(spec) {
@@ -767,8 +767,13 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(if self.leaf.vm.str_view(value).is_some() { Some(Replacement::String(value, text_area)) }
             else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.space) { Some(Replacement::Space(value, text_area)) }
             // valid_image_p, on a window-system frame only: elsewhere the text shows.
-            else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.image) && self.leaf.vm.window_system_open()
-                && self.leaf.image_spec(value)?.is_some() { Some(Replacement::Image(value, text_area, Value::NIL)) }
+            // A live native surface (a model) shows as an image does.
+            else if self.leaf.vm.window_system_open()
+                && match self.leaf.pair(value) {
+                    Some((h, _)) if h == s.image => self.leaf.image_spec(value)?.is_some(),
+                    Some((h, _)) if h == s.surface => self.leaf.surface_glyph(value).is_some(),
+                    _ => false,
+                } { Some(Replacement::Image(value, text_area, Value::NIL)) }
             else { None })
     }
 
@@ -780,10 +785,15 @@ impl<'l, 'a> Source<'l, 'a> {
                 self.string(string, Origin { string, strpos: None, from_display: true, text_area, ..origin })
             }
             Replacement::Image(spec, text_area, slice) => {
-                let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
-                let window = self.view.window;
-                let face = self.leaf.vm.remapped_default_face(window).map_err(Fault::Error)?;
-                let Some(image) = self.leaf.image_glyph(&parsed, slice, face.as_ref())? else { return Ok(()) };
+                let image = if self.leaf.pair(spec).is_some_and(|(h, _)| h == self.syms.surface) {
+                    self.leaf.surface_glyph(spec)
+                } else {
+                    let Some(parsed) = self.leaf.image_spec(spec)? else { return Ok(()) };
+                    let window = self.view.window;
+                    let face = self.leaf.vm.remapped_default_face(window).map_err(Fault::Error)?;
+                    self.leaf.image_glyph(&parsed, slice, face.as_ref())?
+                };
+                let Some(image) = image else { return Ok(()) };
                 let at = self.images.len() as u32;
                 self.images.push((image, spec));
                 let shape = Shape::Image { width: image.width, ascent: image.ascent, descent: image.descent, at };
@@ -810,24 +820,24 @@ impl<'l, 'a> Source<'l, 'a> {
     /// `(space ...)' as the text's stretch is, but that it reads no buffer
     /// character: a `:relative-width' counts a column, the band's space;
     /// None for another display.
-    pub(super) fn band_stretch(&mut self, spec: Value) -> R<Option<romacs_layout_input::StretchWidth>> {
+    pub(super) fn band_stretch(&mut self, spec: Value) -> Option<romacs_layout_input::StretchWidth> {
         use romacs_layout_input::StretchWidth;
         let s = self.syms;
-        if self.leaf.pair(spec).is_none_or(|(car, _)| car != s.space) { return Ok(None); }
+        if self.leaf.pair(spec).is_none_or(|(car, _)| car != s.space) { return None; }
         let plist = self.leaf.pair(spec).map_or(Value::NIL, |(_, p)| p);
         let column = self.view.column;
         if self.plist_get(plist, s.width) == Value::NIL
             && let Some(factor) = self.leaf.number_value(self.plist_get(plist, s.relative_width)).filter(|&f| f > 0.0) {
-            return Ok(Some(StretchWidth::Width { width: (factor * column as f64) as i64, zero_ok: false }));
+            return Some(StretchWidth::Width { width: (factor * column as f64) as i64, zero_ok: false });
         }
         let origin = Origin { charpos: self.view.begv, string: Value::NIL, strpos: None, from_display: true, text_area: true, whitespace_under: false };
-        Ok(Some(match self.stretch_shape(spec, origin) {
+        Some(match self.stretch_shape(spec, origin) {
             Ok(Shape::Stretch { width, zero_ok }) => StretchWidth::Width { width, zero_ok },
             Ok(Shape::Align { target }) => StretchWidth::AlignTo(target),
             // What the text's stretches refuse (a height of its own, physical
             // units) shows as one column, as GNU's default width is.
             Ok(_) | Err(_) => StretchWidth::Width { width: column, zero_ok: false },
-        }))
+        })
     }
 
     /// produce_stretch_glyph's width, before it depends on the x position.
@@ -1106,7 +1116,7 @@ impl Syms {
             display: i("display"), invisible: i("invisible"), composition: i("composition"), before: i("before-string"),
             after: i("after-string"), priority: i("priority"), line_prefix: i("line-prefix"), wrap_prefix: i("wrap-prefix"),
             space: i("space"), when: i("when"), disable_eval: i("disable-eval"), margin: i("margin"), left_margin: i("left-margin"),
-            right_margin: i("right-margin"), left_fringe: i("left-fringe"), right_fringe: i("right-fringe"), image: i("image"),
+            right_margin: i("right-margin"), left_fringe: i("left-fringe"), right_fringe: i("right-fringe"), image: i("image"), surface: i("surface"),
             slice: i("slice"), space_width: i("space-width"), height: i("height"), raise: i("raise"), min_width: i("min-width"),
             width: i(":width"), relative_width: i(":relative-width"), align_to: i(":align-to"), text: i("text"), left: i("left"),
             right: i("right"), center: i("center"), scroll_bar: i("scroll-bar"), plus: i("+"), minus: i("-"),

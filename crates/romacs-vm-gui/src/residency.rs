@@ -7,11 +7,13 @@
 //! evicted, or lost with its GPU, goes again the next time a frame draws it.
 //! The channel is the frame's too: a publication sends at most
 //! `ASSETS_PER_PUBLICATION` loads and retirements, none while the channel
-//! is full, and the frame goes again with the rest.
+//! is full, and the frame goes again with the rest.  Native surfaces (a
+//! model) that Lisp freed retire after the frame that no longer draws
+//! them, as many at a time, so a full channel never loses one.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_runtime::paint_host::PaintSender;
 use romacs_imaging::decode::SemanticImageDecoded;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 /// Most loads and retirements one publication sends: the paint channel
@@ -23,6 +25,12 @@ const ASSETS_PER_PUBLICATION: usize = 16;
 pub trait Sink {
     fn load(&self, id: u32, attempt: u64, decoded: Arc<SemanticImageDecoded>) -> Result<bool, String>;
     fn retire(&self, id: u32) -> Result<bool, String>;
+    /// Free native surface ID once no presented frame draws it: false
+    /// while the channel is full.
+    ///
+    /// # Errors
+    /// The render thread is gone.
+    fn free_surface(&self, id: u32) -> Result<bool, String>;
     /// The images it lost since the last call, and whether it lost them all.
     fn lost(&self) -> (Vec<u32>, bool);
     /// Whether it lost them all since the last call, without taking that.
@@ -34,6 +42,7 @@ impl Sink for PaintSender {
         self.load_image(id, attempt, decoded)
     }
     fn retire(&self, id: u32) -> Result<bool, String> { self.retire_image(id) }
+    fn free_surface(&self, id: u32) -> Result<bool, String> { PaintSender::free_surface(self, id) }
     fn lost(&self) -> (Vec<u32>, bool) { self.take_lost_images() }
     fn reset_pending(&self) -> bool { self.images_reset_pending() }
 }
@@ -46,6 +55,8 @@ pub struct Images {
     /// The last attempt sent for each image the VM still holds.
     attempts: HashMap<u32, u64>,
     released: Vec<u32>,
+    /// Native surfaces Lisp freed, still to retire in the renderer.
+    surfaces: VecDeque<u32>,
     /// Pixels decoded off the VM landed since the last publication, or a
     /// publication left loads or retirements unsent: the frame goes again.
     landed: bool,
@@ -70,6 +81,13 @@ impl Images {
         self.decoded.remove(&id);
         self.attempts.remove(&id);
         if self.resident.remove(&id).is_some() { self.released.push(id); }
+    }
+
+    /// Retire native surface ID at the next publication: the loop paints
+    /// again to send it.
+    pub fn free_surface(&mut self, id: u32) {
+        self.surfaces.push_back(id);
+        self.landed = true;
     }
 
     /// Whether pixels wait to go to the renderer: the loop paints again.
@@ -125,6 +143,23 @@ impl Images {
         }
         Ok(())
     }
+
+    /// Free the surfaces Lisp freed, once the frame that no longer draws
+    /// them has gone (after `publish` and its paint): no scene the renderer
+    /// holds draws a freed surface.  At most `ASSETS_PER_PUBLICATION`; the
+    /// rest, and those a full channel refused, go after the next frame.
+    ///
+    /// # Errors
+    /// The render thread is gone.
+    pub fn retire_surfaces(&mut self, sink: &impl Sink) -> Result<(), String> {
+        for _ in 0..ASSETS_PER_PUBLICATION {
+            let Some(&id) = self.surfaces.front() else { break };
+            if !sink.free_surface(id)? { break; }
+            self.surfaces.pop_front();
+        }
+        if !self.surfaces.is_empty() { self.landed = true; }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +191,11 @@ mod tests {
         fn retire(&self, id: u32) -> Result<bool, String> {
             if !self.take() { return Ok(false) }
             self.sent.borrow_mut().push(format!("retire {id}"));
+            Ok(true)
+        }
+        fn free_surface(&self, id: u32) -> Result<bool, String> {
+            if !self.take() { return Ok(false) }
+            self.sent.borrow_mut().push(format!("free {id}"));
             Ok(true)
         }
         fn lost(&self) -> (Vec<u32>, bool) { std::mem::take(&mut *self.lost.borrow_mut()) }
@@ -255,4 +295,43 @@ mod tests {
         assert_eq!((publications, renderer.sent.borrow().len()), (3, 43 + 39));
     }
 
+
+    /// A freed surface the full channel refused stays to retire: the frame
+    /// goes again, and the next publication with room frees it once.
+    #[test]
+    fn a_freed_surface_survives_a_full_channel() {
+        let renderer = Renderer::default();
+        let mut images = Images::default();
+        images.free_surface(5);
+        assert!(images.behind());
+        renderer.room.set(Some(0));
+        images.publish(&renderer, std::iter::empty()).unwrap();
+        images.retire_surfaces(&renderer).unwrap();
+        assert!(images.behind(), "refused: it goes again");
+        assert!(renderer.sent.borrow().is_empty());
+        renderer.room.set(None);
+        for _ in 0..2 {
+            images.publish(&renderer, std::iter::empty()).unwrap();
+            images.retire_surfaces(&renderer).unwrap();
+        }
+        assert_eq!(*renderer.sent.borrow(), ["free 5"]);
+        assert!(!images.behind());
+    }
+
+    /// Many freed surfaces go in order, at most one batch after each frame,
+    /// each once.
+    #[test]
+    fn freed_surfaces_go_in_batches_after_each_frame() {
+        let renderer = Renderer::default();
+        let mut images = Images::default();
+        for id in 0..40 { images.free_surface(id); }
+        let mut frames = 0;
+        while images.behind() {
+            images.publish(&renderer, std::iter::empty()).unwrap();
+            images.retire_surfaces(&renderer).unwrap();
+            frames += 1;
+        }
+        let expected: Vec<_> = (0..40).map(|id| format!("free {id}")).collect();
+        assert_eq!((frames, renderer.sent.borrow().clone()), (3, expected));
+    }
 }
