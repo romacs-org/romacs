@@ -488,6 +488,13 @@ impl Cursor {
         }
         Ok(Advance::Done(self.result))
     }
+    /// Leave unwalked the autoloaded keymap `next` just asked to load, as
+    /// `map_keymap` without AUTOLOAD does: whether the walk requires it (an
+    /// embedded keymap, which `get_keymap` then refuses) or may end there (a
+    /// parent).
+    pub(super) fn decline_load(&mut self) -> bool {
+        matches!(self.stack.pop(), Some(MapFrame::Resolve { required: true, .. }))
+    }
     pub(super) fn collector_visit_values(
         &mut self,
         seen: &mut HashSet<usize>,

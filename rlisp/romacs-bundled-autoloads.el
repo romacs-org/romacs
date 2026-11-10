@@ -377,7 +377,7 @@ This function is part of the `fzf' completion style.
 
 ;;; Generated autoloads from romacs-keymap.el
 
-(register-definition-prefixes "romacs-keymap" '("posn-point" "romacs--menu-filter"))
+(register-definition-prefixes "romacs-keymap" '("posn-point"))
 
 
 ;;; Generated autoloads from romacs-landing.el

@@ -229,6 +229,12 @@ impl Vm {
     pub fn calls_entered(&self) -> usize {
         self.backtrace.calls_entered()
     }
+    /// How many times `where-is-internal` walked keymaps for their
+    /// bindings, which its cache saves: what a test of that cache counts.
+    pub fn where_is_walks(&self) -> usize {
+        let walks = self.names.get(crate::where_is::WALKS).and_then(|&slot| self.slots[slot].value.integer_value());
+        walks.and_then(|walks| usize::try_from(walks).ok()).unwrap_or(0)
+    }
     /// Evaluate a UTF-8 source file sequentially in this persistent strand.
     /// This call may mark and compact; the result borrows the VM.
     pub fn eval_source(&mut self, source: &str) -> Result<Local<'_>> {
