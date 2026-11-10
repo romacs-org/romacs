@@ -177,6 +177,20 @@ fn a_legacy_primitives_watchers_and_hook_may_collect() {
     }
 }
 
+/// The bootstrap's `emacs-lisp-mode` and `menu-bar-mode` write their variables
+/// as `set` does: a watcher runs at the engine's drain, where it may collect.
+#[test]
+fn bootstrap_mode_writes_watchers_may_collect() {
+    let mut vm = Vm::new();
+    vm.eval_source("(progn (add-variable-watcher 'major-mode (lambda (&rest _) (garbage-collect))) \
+        (add-variable-watcher 'menu-bar-mode (lambda (&rest _) (garbage-collect))))").unwrap();
+    for (form, expected) in [("(progn (emacs-lisp-mode) major-mode)", "emacs-lisp-mode"), ("(menu-bar-mode -1)", "nil")] {
+        let before = vm.heap_stats().collections;
+        assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), expected, "{form}");
+        assert!(vm.heap_stats().collections > before, "{form} collected nothing: its watcher ran with collection held");
+    }
+}
+
 /// A primitive's queued write (`watchers.rs`) differs from GNU's in place in
 /// one way Lisp can see: the rest of the primitive has run when its watcher
 /// does, so what it did stands if the watcher signals. DIVERGENCES VM2-WATCH1.

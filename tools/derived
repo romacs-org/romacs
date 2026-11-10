@@ -18,8 +18,10 @@ def setup(root):
     git(root, 'config', '--local', 'merge.romacs-derived.name', 'Defer derived JSON until sources are merged')
     git(root, 'config', '--local', 'merge.romacs-derived.driver', 'python3 tools/derived driver %A %B')
     git(root, 'config', '--local', 'merge.romacs-derived.recursive', 'binary')
+    git(root, 'config', '--local', 'merge.romacs-floors.name', 'Merge the smell floors by their meaning')
+    git(root, 'config', '--local', 'merge.romacs-floors.driver', 'python3 -B tools/lib/smells.py merge %O %A %B')
     git(root, 'config', '--local', 'alias.merge-derived', '!python3 tools/derived merge')
-    print('Installed local driver and git merge-derived alias; no global config or hooks changed.')
+    print('Installed local drivers and git merge-derived alias; no global config or hooks changed.')
 
 
 def require_staged_sources(root):

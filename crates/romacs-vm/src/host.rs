@@ -1861,7 +1861,10 @@ pub fn run_time() -> io::Result<std::time::Duration> {
     crate::flight::value("run-time", live_run_time)
 }
 
-fn live_run_time() -> io::Result<std::time::Duration> {
+/// The processor time this process has used, read live and never logged:
+/// for a process outside the session's own results (a mark twin's child,
+/// `twin.rs`, whose usage starts at its fork).
+pub(crate) fn live_run_time() -> io::Result<std::time::Duration> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage writes the whole struct it is given.
     if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } < 0 {
@@ -2750,6 +2753,16 @@ pub fn spawn_isolate(program: &Path, args: &[OsString], socket: OwnedFd) -> io::
     Ok(command.spawn()?.id() as i32)
 }
 
+/// End this process now with CODE: no destructor, atexit handler or
+/// buffered output of it runs, so a forked child leaves nothing it shares
+/// with its parent flushed twice.
+pub fn exit_at_once(code: i32) -> ! {
+    // SAFETY: `_exit' takes only a status; it ends the process at once, and
+    // nothing of this process (destructor, atexit handler, other thread) runs
+    // after it. No safe std call exits without running atexit handlers.
+    unsafe { libc::_exit(code) }
+}
+
 /// This process was forked from a zygote (`fork_isolate`).
 static FORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2770,10 +2783,33 @@ pub fn other_threads() -> io::Result<Vec<i32>> {
 /// thread is the caller, else the child's pid. The child resets what is
 /// its own with `forked_child_reset`.
 pub fn fork_isolate() -> io::Result<i32> {
+    let pid = fork()?;
+    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
+    Ok(pid)
+}
+
+/// fork(2) from a process whose other threads run on (a mark twin's,
+/// `twin.rs`): 0 in the child, else the child's pid. The child has the
+/// caller's thread alone, so a lock another thread held stays held in it:
+/// the allocator's is held across the fork (`arena::across_fork`), and the
+/// child takes no other lock and ends with `exit_at_once`. It dies with the
+/// forking thread, even one that ends without unwinding (`_exit`), and ends
+/// at once if that thread was gone before it could ask.
+pub(crate) fn fork_threaded() -> io::Result<i32> {
+    let parent = std::process::id();
+    let pid = crate::world::arena::across_fork(fork)?;
+    if pid == 0 && (set_parent_death_signal(libc::SIGKILL).is_err() || std::os::unix::process::parent_id() != parent) {
+        exit_at_once(0);
+    }
+    Ok(pid)
+}
+
+fn fork() -> io::Result<i32> {
     effect(|| "fork".into())?;
+    // SAFETY: fork(2) takes no arguments; each caller states what its child
+    // may run (`fork_isolate`, `fork_threaded`).
     let pid = unsafe { libc::fork() };
     if pid < 0 { return Err(io::Error::last_os_error()); }
-    if pid == 0 { FORKED.store(true, std::sync::atomic::Ordering::SeqCst); }
     Ok(pid)
 }
 
@@ -2871,7 +2907,7 @@ pub fn set_process_name(name: &str) -> io::Result<()> {
     std::fs::write("/proc/self/comm", name)
 }
 
-/// emacs_pipe: a close-on-exec pipe (read end, write end).
+/// `emacs_pipe`: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
     let mut fds = [0; 2];
