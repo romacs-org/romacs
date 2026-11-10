@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 VM = 'crates/romacs-vm/src/'
 HOST_TEST = ['cargo', 'test', '-p', 'romacs-vm', '--test', 'host_input']
 LIB_TEST = ['cargo', 'test', '-p', 'romacs-vm', '--lib', 'host_input']
-CURSOR_TEST = ['cargo', 'test', '-p', 'romacs-layout2', '--test', 'cursor']
+CURSOR_TEST = ['cargo', 'test', '-p', 'romacs-layout', '--test', 'cursor']
 
 MUTANTS = [
     ('M1 gate reverted: no host means end-of-file', 'rlisp/vm/minibuf.el',
@@ -44,7 +44,7 @@ MUTANTS = [
      "      (throw 'exit (lambda () (signal 'minibuffer-quit nil))))))", "      (throw 'exit nil))))", HOST_TEST),
     ('M12 Closed signals error, not quit', VM + 'host_input.rs',
      'let quit = self.intern("quit");', 'let quit = self.intern("error");', HOST_TEST),
-    ('M13 active minibuffer gets no cursor (pre-fix layout)', 'crates/romacs-layout2/src/lib.rs',
+    ('M13 active minibuffer gets no cursor (pre-fix layout)', 'crates/romacs-layout/src/lib.rs',
      'cursor.filter(|&(id, _)| placed.snapshot.mode_line.is_some() || id == placed.snapshot.id)',
      'cursor.filter(|_| placed.snapshot.mode_line.is_some())', CURSOR_TEST),
     ('M17 a closed frame is not sticky (a caught quit waits again)', 'crates/romacs-vm-gui/src/prompt.rs',

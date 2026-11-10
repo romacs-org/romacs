@@ -10,7 +10,6 @@ use wgpu::hal::{api::Vulkan, vulkan};
 
 pub fn requested() -> bool {
     std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").is_some()
-        || std::env::var_os("ROMACS_INPUT_LATENCY_FILE").is_some()
 }
 
 pub(crate) struct DeviceFeatures {

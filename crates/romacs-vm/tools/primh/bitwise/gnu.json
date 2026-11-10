@@ -8,7 +8,7 @@
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
   "cases_sha256": "fe9ae2988296f40c0960c4597c99ce33755b62433356e787740468e51651b424",
-  "recorder_sha256": "34bcb94f68441083f6fd09c92abe20d69469d881e2f0f28588cfc985aecef555",
+  "recorder_sha256": "264c7a74aa059335b2077869a29c303faa618c76379f7c70fdbfcaebda99437b",
   "cases": [
     {
       "id": "logior-0",

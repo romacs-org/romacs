@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-FORMATTIME1 | `format-time-string`, `current-time-string`, `current-time-zone`, `decode-time`, `float-time` | GNU accepts its full time-value domain, locale directives and TZ rules. | VM2 implements C-locale formatting, UTC/fixed offsets, fixed POSIX zones and installed TZif transition tables, plus the adjacent accessors. Arbitrary locales, POSIX recurring DST tails, leap-second tables, non-string zone abbreviations, and time values exceeding bounded i128 intermediates remain unsupported or divergent; non-C system-time-locale is not applied. | Partial, not full parity. Live pinned GNU cases and native-helper verification are in `crates/romacs-vm/evidence/time/`; VM replay and five behavioral mutants pass; locale/TZ-dependent replay runs in an isolated C-locale, UTC0 child, not through global test-process environment mutation. Local/zonefile results depend on TZ and recorded host tzdata. | <!-- symbols: format-time-string, current-time-string, current-time-zone, decode-time, float-time -->

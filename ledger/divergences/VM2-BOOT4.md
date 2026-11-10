@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-BOOT4 | `make-symbol` name domain | GNU checks STRINGP and preserves any Emacs string as the new uninterned symbol name (`src/alloc.c:3708-3742`) | VM2 creates a fresh generated symbol slot, outside the default obarray, with the exact Unicode/ASCII name; non-ASCII unibyte names signal `multibyte-string-p` through the owned text reader | **Package-observable staged identity/name gaps:** raw high-octet names are unsupported. Existing name-based VM checks can treat an uninterned `load-path` as special, an uninterned `:k` as constant, and an uninterned `macro` as a descriptor tag; GNU qualifies these by interned identity (`src/data.c:385-393,1667-1680`; `src/eval.c:3977-3989`). Slots and generated-ID maps are retained until VM destruction rather than collecting unreachable uninterned symbols (`src/alloc.c:7048-7095`). These limitations apply despite fresh `eq` identity and absence from the default obarray; no borrowed heap reader escapes | <!-- symbols: make-symbol -->

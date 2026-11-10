@@ -116,5 +116,4 @@ impl FrameOpacityState {
 }
 
 #[cfg(test)]
-#[path = "frame_opacity/tests/frame_opacity_test.rs"]
 mod tests;

@@ -85,7 +85,7 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32) -> Result<Prepar
     let thread = std::thread::Builder::new().name("romacs-preparing".into()).spawn(move || {
         let mut engine = None;
         let mut paint = |presentation: u64, t: f64| -> Result<(), String> {
-            let engine = match &mut engine { Some(engine) => engine, None => engine.insert(romacs_layout2::LayoutEngine::new()?) };
+            let engine = match &mut engine { Some(engine) => engine, None => engine.insert(romacs_layout::LayoutEngine::new()?) };
             let cell = engine.frame_metrics(&face)?;
             let (frame, _) = engine.layout_frame(&snapshot(&face, width, height, cell, t), presentation, None)?;
             sender.submit(frame)

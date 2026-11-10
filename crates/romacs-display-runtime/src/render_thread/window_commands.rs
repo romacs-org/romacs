@@ -39,28 +39,6 @@ impl RenderApp {
         }
     }
 
-    fn remove_pending_child_subtree(&mut self, frame_id: u64) {
-        let mut subtree = std::collections::HashSet::from([frame_id]);
-        loop {
-            let before = subtree.len();
-            for (&id, state) in &self.pending_child_frames {
-                if state
-                    .state
-                    .frame_placement
-                    .parent()
-                    .is_some_and(|parent| subtree.contains(&parent.get()))
-                {
-                    subtree.insert(id);
-                }
-            }
-            if subtree.len() == before {
-                break;
-            }
-        }
-        self.pending_child_frames
-            .retain(|id, _| !subtree.contains(id));
-    }
-
     /// Remove child FRAME_ID and its descendants from every top-level
     /// window, retiring their presentations.
     pub(super) fn remove_child_frame(&mut self, frame_id: u64) {
@@ -76,7 +54,6 @@ impl RenderApp {
         });
         self.frame_windows
             .remove_child_frame_from_top_level_windows(frame_id);
-        self.remove_pending_child_subtree(frame_id);
         for presentation in retirements {
             self.comms
                 .send_input(InputEvent::PresentationRetired { presentation });

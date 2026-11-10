@@ -3864,12 +3864,13 @@ impl Vm {
         if matches!(p, CacheStats | CacheClear | CacheEntries) {
             return self.cache_primitive(p, n);
         }
-        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
+        // The other loader primitives are lent from the engine (`loader_body`).
+        if matches!(p, Provide | Featurep) {
             let args = self.stack[start..start + n].to_vec();
-            let result = self.loader_primitive(p, &args);
-            // Only the reentrant engine path can re-raise an eval escape.
-            self.propagated_escape = None;
-            return result;
+            return self.feature_primitive(p, &args);
+        }
+        if matches!(p, Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
+            return Err("a loader primitive is lent from its engine (`loader_body`), never called here".into());
         }
         if p == Message {
             // The echo area holds the last message; (message nil) clears it.

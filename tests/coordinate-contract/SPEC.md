@@ -79,7 +79,7 @@ Build in a fresh worktree with the pinned Rust toolchain exported in that shell:
 ```sh
 export PATH=/path/to/pinned-rust-1.96.1/bin:$PATH
 unset ROMACS_RUNTIME_ROOT
-cargo xtask fresh-build --release
+cargo build --release -p romacs-vm-gui
 python3 tests/coordinate-contract/measure.py --binary ABS_BINARY --binary-commit BUILD_COMMIT --image ABS_IMAGE --runtime ABS_RUNTIME --output ABS_READINGS
 python3 tests/coordinate-contract/check_performance.py ABS_READINGS --ascii-baseline ABS_BEFORE
 ```

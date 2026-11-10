@@ -15,7 +15,7 @@ examples.
   load, sync or search.
 - Behaviour observable from Lisp stays GNU's. Where a scheduling choice
   departs from GNU (for example a timer pass that yields to input), it is
-  recorded in DIVERGENCES.md and gated by perkey.
+  recorded in =ledger/divergences/= and gated by perkey.
 
 * Measure before changing anything
 
@@ -31,8 +31,8 @@ examples.
    may belong to the keys being typed, not to the feature.
 5. Keep perkey (=romacs-check=) and the scaling probes as the gate. A
    change that moves work around must show no per-key regression, and a
-   new collection must have a probe in
-   =crates/romacs-vm-gui/harness/scaling/probes.el=.
+   new collection must have a probe, one file under
+   =crates/romacs-vm-gui/harness/scaling/probes/=.
 
 * Attack cost in order
 
@@ -115,5 +115,5 @@ laziness, then parallelism. In practice:
   worst key, keys over 50 ms, and how many of those the feature caused.
 - Correctness of the handover on real-shaped data: no duplicates, nothing
   missing, compared with the plain path on the same copy.
-- Perkey and scaling through =romacs-check=, Sol review, and DIVERGENCES
-  entries for any intended departure from GNU.
+- Perkey and scaling through =romacs-check=, Sol review, and a
+  =ledger/divergences/= file for any intended departure from GNU.

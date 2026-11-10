@@ -9,7 +9,6 @@
 pub mod animated_visual;
 pub(crate) mod child_frame_animation;
 pub mod cursor;
-pub mod dma_buf;
 pub(crate) mod effect_command;
 pub mod effect_config;
 pub mod face;
@@ -28,7 +27,6 @@ pub mod menu;
 pub mod model;
 pub mod modifier_policy;
 pub mod motion_spec;
-pub(crate) mod popup_placement;
 pub mod present_mapping;
 pub mod present_trace;
 pub mod presentation_origin;
@@ -38,12 +36,10 @@ pub mod scene;
 pub mod scroll_animation;
 pub mod scroll_coverage;
 pub mod scroll_input;
-pub(crate) mod sealed_frame_presentation;
 pub(crate) mod snapshot_text;
 pub mod terminal_color;
 pub mod text_animation;
 pub(crate) mod toolbar_icon;
-pub mod tooltip;
 pub mod transition_policy;
 pub(crate) mod tty_palette;
 pub mod types;
@@ -56,7 +52,6 @@ pub(crate) mod xterm_palette;
 pub(crate) mod xwidget_extent;
 pub use glyph_matrix::*;
 
-pub use dma_buf::*;
 pub use effect_command::*;
 pub use effect_config::*;
 pub use face::*;
@@ -67,7 +62,6 @@ pub use gradient::*;
 pub use image::*;
 pub use interaction_projection::*;
 pub use modifier_policy::*;
-pub use popup_placement::*;
 pub use present_mapping::*;
 pub use window_chrome::*;
 
@@ -77,7 +71,6 @@ pub use presented_pointer::*;
 pub use scene::*;
 pub use scroll_animation::*;
 pub use scroll_input::*;
-pub use sealed_frame_presentation::*;
 pub use terminal_color::TerminalColor;
 pub use toolbar_icon::*;
 pub use transition_policy::*;
@@ -91,5 +84,3 @@ pub use xwidget_extent::*;
 
 #[cfg(test)]
 mod tests;
-
-pub mod input_latency;

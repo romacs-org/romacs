@@ -15,7 +15,7 @@ pub(super) use romacs_display_protocol::PointerAppearancePhase;
 use romacs_display_protocol::{
     EffectsConfig, FrameGlyphBuffer, FrameRect, ImageCacheUsage, ImageId, ImageLoadToken,
     InteractionId, PointerAppearanceId, PointerAppearanceSelection, PresentationId,
-    PresentedResizeAxis, TransitionPolicy, VisualConfig,
+    PresentedResizeAxis, VisualConfig,
 };
 use romacs_renderer_wgpu::{RowRange, WgpuRenderer};
 
@@ -25,6 +25,7 @@ use super::frame_windows::{
 };
 use super::render_quality::{RenderBackendProfile, RenderQualityPolicy};
 pub(super) use super::toolbar::ToolbarResources;
+use super::transitions::TransitionPolicy;
 
 /// Decoded image facts shared from the render thread to the evaluator.
 ///
@@ -827,8 +828,7 @@ pub(super) enum SceneDraw {
 
 pub(super) struct RenderApp {
     pub(super) comms: RenderComms,
-    pub(super) menus: crate::menus::MenuPresentation,
-    pub(super) tooltips: crate::tooltips::Tooltips,
+    pub(super) menu_bar: crate::menu_bar::MenuBar,
 
     /// Display-lifetime owner for decoded application icon data and native
     /// Wayland toplevel-icon protocol state.
@@ -909,12 +909,8 @@ pub(super) struct RenderApp {
     pub(super) transition_policy: TransitionPolicy,
 
     pub(super) frame_windows: GuiFrameWindowManager,
-    /// Latest child snapshots whose immediate ancestry has not been presented
-    /// yet. They are retried transactionally when an ancestor arrives.
-    pub(super) pending_child_frames: HashMap<u64, super::frame_preparation::PreparedFrame>,
     /// The child frames the last paint scene showed (core-free hosts).
     pub(super) scene_children: Vec<u64>,
-    pub(super) frame_preparation: Option<super::frame_preparation::FramePreparation>,
 
     pub(super) child_frame_style: ChildFrameStyle,
     pub(super) toolbar: ToolbarResources,
@@ -1090,8 +1086,7 @@ impl RenderApp {
             startup_error: None,
             startup_commands: Default::default(),
             frame_leases: Default::default(),
-            menus: crate::menus::MenuPresentation::default(),
-            tooltips: crate::tooltips::Tooltips::default(),
+            menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
             #[cfg(feature = "video")]
             video_wake: romacs_video::VideoWake::noop(),
@@ -1120,9 +1115,7 @@ impl RenderApp {
             effects: EffectsConfig::default(),
             transition_policy: TransitionPolicy::default(),
             frame_windows,
-            pending_child_frames: HashMap::new(),
             scene_children: Vec::new(),
-            frame_preparation: None,
             child_frame_style: ChildFrameStyle::default(),
             toolbar: ToolbarResources::default(),
             scroll_indicators_enabled: false,
@@ -1155,5 +1148,4 @@ impl RenderApp {
 }
 
 #[cfg(test)]
-#[path = "state/tests/state_test.rs"]
 mod tests;

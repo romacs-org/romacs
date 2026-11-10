@@ -3,7 +3,7 @@
 Base: `vm2/radix-reader` / `10b484302d7971453c06989f5070413d16003451`.
 GNU source and binary revision: `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`.
 
-`oracle.py` uses `scripts/gnu_oracle.py` to verify the recording binary's own
+`oracle.py` uses `tools/lib/gnu_oracle.py` to verify the recording binary's own
 revision and records its executable SHA256. `cases.json` and the recorder are
 hashed in `gnu.json`. All expected values and complete condition payloads are
 recorded, not handwritten. The 29 rows cover empty/many arguments, overlap,

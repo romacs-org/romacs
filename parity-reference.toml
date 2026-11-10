@@ -22,7 +22,7 @@
 # RE-BASELINING.  A rebuild of the GNU mirror is its own change with its own
 # re-baselining, never a side effect of a session.  To re-pin, run
 #
-#     cargo run -p xtask -- pin-reference --emacs PATH --reason "..."
+#     cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason "..."
 #
 # which rewrites the keys below and appends to the log in this comment block.
 # Editing the keys by hand defeats the log; the command exists so that the
@@ -35,8 +35,8 @@
 #               e40bd060..., and it says built without native compilation or
 #               a window system. The GNU that actually exists at this mirror
 #               commit, and that records every GNU answer
-#               (scripts/gnu_oracle.py refuses any binary not reporting this
-#               revision), is the one scripts/build-gnu-oracle.sh built into
+#               (tools/lib/gnu_oracle.py refuses any binary not reporting this
+#               revision), is the one tools/build-gnu-oracle.sh built into
 #               ~/.cache/gnu-emacs-pin/45b0f7699df.../: pgtk, cairo,
 #               harfbuzz, native compilation (aot), tree-sitter, modules,
 #               CFLAGS -O2 -pipe, configured --disable-build-details,

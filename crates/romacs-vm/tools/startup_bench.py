@@ -25,7 +25,7 @@ def main():
     args = p.parse_args()
     binary = str(args.binary_dir / 'romacs-vm')
     producer = str(args.binary_dir / 'romacs-vm-image')
-    counter = ROOT.parents[1] / 'scripts/romacs_accept_counter.py'
+    counter = ROOT.parents[1] / 'tools/lib/romacs_accept_counter.py'
     attributes = load(counter, 'counter_abi').attributes
     scratch = args.output.parent
     scratch.mkdir(parents=True, exist_ok=True)

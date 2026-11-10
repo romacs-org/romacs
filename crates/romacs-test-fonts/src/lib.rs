@@ -1,7 +1,7 @@
 //! Pinned upstream font assets for tests, read from a local cache.
 //!
 //! Tests never touch the network. `fixtures.json` pins each asset by SHA-256
-//! and source; `scripts/fetch-test-fixtures` downloads and verifies them into
+//! and source; `tools/fetch-test-fixtures` downloads and verifies them into
 //! the cache, `ROMACS_TEST_FONTS_DIR` or `~/.cache/romacs-test-fonts`. A test
 //! asking for an asset the cache lacks panics and names that script.
 
@@ -34,7 +34,7 @@ fn cache_root() -> PathBuf {
 
 fn missing(path: &Path) -> String {
     format!(
-        "test fixture {} is missing; run scripts/fetch-test-fixtures (tests never download)",
+        "test fixture {} is missing; run tools/fetch-test-fixtures (tests never download)",
         path.display()
     )
 }

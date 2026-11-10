@@ -13,7 +13,7 @@ The reference is GNU revision `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`:
 (`DISP_TABLE_P`). Record from the repository root with the pinned wrapper:
 
 ```sh
-scripts/build-gnu-oracle.sh
+tools/build-gnu-oracle.sh
 export ROMACS_GNU_ORACLE="${GNU_ORACLE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/gnu-emacs-pin}/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/bin/emacs"
 python3 crates/romacs-vm/tools/primh/record.py primh \
   crates/romacs-vm/tools/primh/format-message-specs/format-message.json

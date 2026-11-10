@@ -34,7 +34,7 @@ tall toasts: every one shown ends above the status bar
 (`romacs-chrome-bottom') and the bar's pixel probe still finds its
 background (on a short --mode one toast waits hidden); then a narrow
 window, and a bottom side window whose buffer sets its own line
-(keymap-popup's), which the bar shows after the selected window's.  With --slowdown N the window animations run N times
+(keymap-popup's), which the bar leaves out: it shows the selected window's alone.  With --slowdown N the window animations run N times
 longer and a screenshot is taken a third into the second split.
 
 With --gpu-frames N (at least 200) the three panes then show N edits,
@@ -411,7 +411,7 @@ def main():
                     time.sleep(1.5)
                     shot('scene-narrow')
                     report['state-narrow'] = json.loads(narrow.read_text())
-                    # A popup's own line folds into the bar.
+                    # A popup's own line stays out of the bar.
                     popup = notes / 'popup.json'
                     wait(popup.exists, args.timeout, 'popup', proc)
                     time.sleep(1.5)

@@ -270,43 +270,10 @@ fn face_of(props: &Form) -> Option<String> {
 }
 
 impl Band {
-    /// This band as a context segment of the status bar (VM2-STATUS-BAR):
-    /// FACE (`mode-line-inactive') under every byte no run of its own
-    /// covers, all of it the `context' segment, lowest in priority.
-    pub(super) fn into_context(mut self, face: &str) -> Band {
-        let mut runs = std::mem::take(&mut self.runs);
-        runs.sort_by_key(|(range, _)| range.start);
-        let mut at = 0;
-        for (range, name) in runs {
-            if range.start > at { self.runs.push((at..range.start, face.to_owned())); }
-            at = at.max(range.end);
-            self.runs.push((range, name));
-        }
-        if at < self.text.len() { self.runs.push((at..self.text.len(), face.to_owned())); }
-        let context: Projected = std::rc::Rc::new(vec![("romacs-segment", std::rc::Rc::new(Form::Sym("context".into()))), ("romacs-priority", std::rc::Rc::new(Form::Int(0)))]);
-        self.segments.push((0..self.text.len(), context));
-        self
-    }
-    /// OTHER after this band, SEPARATOR in FACE between them: its text and
-    /// every range of it moved past this band's.
-    pub(super) fn append(&mut self, other: Band, separator: &str, face: &str) {
-        let start = self.text.len();
-        self.text.push_str(separator);
-        self.runs.push((start..self.text.len(), face.to_owned()));
-        let at = self.text.len();
-        let moved = |range: Range<usize>| at + range.start..at + range.end;
-        self.runs.extend(other.runs.into_iter().map(|(r, v)| (moved(r), v)));
-        self.props.extend(other.props.into_iter().map(|(r, v)| (moved(r), v)));
-        self.segments.extend(other.segments.into_iter().map(|(r, v)| (moved(r), v)));
-        self.elts.extend(other.elts.into_iter().map(|(r, v)| (moved(r), v)));
-        self.element_starts.extend(other.element_starts.into_iter().map(|start| at + start));
-        self.text.push_str(&other.text);
-    }
     /// The band without the bytes of DROP, disjoint ranges in order: its
     /// text, and every range over it moved to the text left, a range
-    /// left empty gone. Returns each kept character's index in the text
-    /// before.
-    pub(super) fn drop_ranges(&mut self, drop: &[Range<usize>]) -> Vec<usize> {
+    /// left empty gone.
+    pub(super) fn drop_ranges(&mut self, drop: &[Range<usize>]) {
         // Bytes dropped before each range, to move a position by one search.
         let mut before = Vec::with_capacity(drop.len());
         let mut total = 0;
@@ -317,13 +284,11 @@ impl Band {
             let last = &drop[k - 1];
             at - before[k - 1] - (at.min(last.end) - last.start)
         };
-        let mut kept = vec![];
         let mut text = String::with_capacity(self.text.len());
         let mut next = 0;
-        for (index, (at, ch)) in self.text.char_indices().enumerate() {
+        for (at, ch) in self.text.char_indices() {
             while next < drop.len() && drop[next].end <= at { next += 1; }
             if drop.get(next).is_some_and(|r| r.contains(&at)) { continue; }
-            kept.push(index);
             text.push(ch);
         }
         fn remap<T>(ranges: &mut Vec<(Range<usize>, T)>, moved: &dyn Fn(usize) -> usize) {
@@ -335,7 +300,6 @@ impl Band {
         remap(&mut self.segments, &moved);
         remap(&mut self.elts, &moved);
         self.text = text;
-        kept
     }
     /// `n` columns of padding, never more than can still be shown.
     fn pad(&mut self, n: i64, face: Option<&String>) {
@@ -842,8 +806,7 @@ impl Vm {
             '[' | ']' => c.to_string().repeat(state.command_loop_level),
             // A string's dashes are "infinitely long" as two.
             '-' if target != Target::Display => "--".into(),
-            // The status bar has no dashes: they would fill it and hide the
-            // lines folded into it (VM2-STATUS-BAR).
+            // The status bar has no dashes: they would fill it (VM2-STATUS-BAR).
             '-' if state.clip.is_some() => String::new(),
             '-' => "-".repeat(if field <= 0 || field as usize > LOTS_OF_DASHES { 4 * state.frame_cols - 1 } else { LOTS_OF_DASHES }),
             'b' => state.buffer_name.clone(),

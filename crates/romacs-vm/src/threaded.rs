@@ -4305,11 +4305,14 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
-        // Only `provide' and `featurep' come here (the rest route through
-        // `primitive', a lend); `provide''s after-load hooks run deferred.
-        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |vm, p, start, n| {
+        // The other loader primitives never come here: the engine lends them
+        // (`loader_body`). These two run no Lisp.
+        Provide | Featurep => |vm, p, start, n| {
             let args = vm.stack[start..start + n].to_vec();
-            vm.defer(|vm| vm.loader_primitive(p, &args))
+            vm.feature_primitive(p, &args)
+        },
+        Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |_, _, _, _| {
+            Err("a loader primitive is lent from its engine (`loader_body`), never called here".into())
         },
         Get | Put | RawPropertiesAt | GetCharProperty | BufferSubstring
         | InsertInherit | KillNew | CurrentKill | YankPart | YankFinalize | YankPropertyRun
@@ -4399,10 +4402,13 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's or `defalias-fset-function''s own signal
-            // travels behind the write's text, as does GNU's read-only
-            // error with its object behind a frozen write's (`frozen.rs`).
-            if (matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) || error == crate::frozen::READ_ONLY)
+            // A `defvar` watcher's own signal travels behind the write's text,
+            // as GNU's read-only error does with its object behind a frozen
+            // write's (`frozen.rs`). A `set`, `makunbound` or
+            // `defalias-fset-function` escape comes through the queue's drain
+            // instead: this engine runs, so those writes wait for its
+            // completion (`Vm::write_from_native`).
+            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY)
                 && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);

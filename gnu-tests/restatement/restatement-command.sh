@@ -1,4 +1,4 @@
-python3 tools/parity_ratchet.py record \
+python3 tools/lib/parity_ratchet.py record \
   --lower gnu:lisp/emacs-lisp/bindat-tests.el --because 'owner restatement of the GNU-suite floor (PARITY-METRIC-AUDIT.org, 2026-10-21): these members pass only for the wrong reason -- VACUOUS, WRONG-ERROR, WRONG-ERROR-DATA or HARNESS-SELF per gnu-tests/MEMBER-EVIDENCE.json, or a should-error satisfied by absent machinery (vacuous-pass rule)' \
   --lower gnu:lisp/emacs-lisp/byte-run-tests.el --because 'owner restatement of the GNU-suite floor (PARITY-METRIC-AUDIT.org, 2026-10-21): these members pass only for the wrong reason -- VACUOUS, WRONG-ERROR, WRONG-ERROR-DATA or HARNESS-SELF per gnu-tests/MEMBER-EVIDENCE.json, or a should-error satisfied by absent machinery (vacuous-pass rule)' \
   --lower gnu:lisp/emacs-lisp/eieio-tests/eieio-tests.el --because 'owner restatement of the GNU-suite floor (PARITY-METRIC-AUDIT.org, 2026-10-21): these members pass only for the wrong reason -- VACUOUS, WRONG-ERROR, WRONG-ERROR-DATA or HARNESS-SELF per gnu-tests/MEMBER-EVIDENCE.json, or a should-error satisfied by absent machinery (vacuous-pass rule)' \

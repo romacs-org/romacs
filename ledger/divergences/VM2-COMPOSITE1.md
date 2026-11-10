@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-COMPOSITE1 | Character composition | `composite.c:692` `clear-composition-cache` replaces the gstring cache and returns `(clear-face-cache t)`, nil. `compose-region-internal` and `compose-string-internal` (`composite.c:2009-2046`) put compose_text's `composition` property, ((LENGTH . COMPONENTS) . MODIFICATION-FUNC), which redisplay realizes (registering the composition and rewriting the property) and draws as one glyph. | `clear-composition-cache` returns nil: VM2 keeps no gstring or display face cache to clear. The two compose primitives put GNU's property exactly (`tests/compose_internal.rs`), but the display draws the characters uncomposed and never rewrites the property. | Lisp sees GNU's values; drawing composed characters is absent (`composition-function-table` is a plain char-table nothing reads, and a `composition` property is not realized). | <!-- symbols: clear-composition-cache, composition-function-table, compose-region-internal, compose-string-internal -->

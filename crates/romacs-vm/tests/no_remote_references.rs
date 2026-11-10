@@ -452,6 +452,9 @@ const CELLS: &[(&str, Behind)] = &[
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
     ("compiled_lisp/mod.rs:Configured.identity", Plain),
     ("prim/leaf/syntax_scan.rs:View.ascii", Plain), ("prim/leaf/syntax_scan.rs:View.read", Plain), ("prim/leaf/syntax_scan.rs:View.last", Plain),
+    // The scanner's test text: syntax codes and positions, no Value.
+    ("syntax_scan_tests.rs:Mutable.overrides", Plain), ("syntax_scan_tests.rs:Mutable.record", Plain),
+    ("syntax_scan_tests.rs:Mutable.replay", Plain), ("syntax_scan_tests.rs:Mutable.read", Plain),
     // Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     ("treesit/mod.rs:Registry.parsers", Plain), ("treesit/mod.rs:Registry.edited", Plain), ("treesit/mod.rs:Early.changes", Plain),
     ("treesit/mod.rs:Parser.native", Plain), ("treesit/mod.rs:Parser.core", Plain), ("treesit/mod.rs:Task.state", Plain),

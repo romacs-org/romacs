@@ -69,5 +69,4 @@ impl TerminalColor {
 }
 
 #[cfg(test)]
-#[path = "terminal_color/tests/terminal_color_test.rs"]
 mod tests;

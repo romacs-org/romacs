@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-CMD3 | VM2 command presentation | `keyboard.c:command_loop_1` invokes `undefined` for unbound keys (ordinary case rings/messages without signalling); `dispnew.c` drives redisplay | Unbound keys emit BEL plus a host stderr/JSON message, no signal; actual `Escape::Signal` errors are returned structurally and next keys still repaint. The live GUI runs commands independently of rendering and coalesces FIFO edits into full-frame owned snapshots after a bounded input batch, with one presentation in flight. The JSON oracle remains synchronous. Return sends LF for the minimal insert route, not GNU's full RET/newline command. Echo area and cursor are rendered | **Package/user-observable staged GUI**, not damage-only redisplay or a frame-budget claim. Native compositor screenshots certify burst text and final cursor as well as `C-x C-e` echo results; presentation completion instrumentation observes successful renderer submission, not compositor presentation | <!-- symbols: undefined, ding, message, redisplay, self-insert-command -->

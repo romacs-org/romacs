@@ -9,7 +9,7 @@ romacs-vm = { path = "../romacs-vm" }
 romacs-grammars = { path = "../romacs-grammars" }
 romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-layout-input = { path = "../romacs-layout-input" }
-romacs-layout2 = { path = "../romacs-layout2" }
+romacs-layout = { path = "../romacs-layout" }
 romacs-display-protocol.workspace = true
 romacs-logo.workspace = true
 romacs-font.workspace = true

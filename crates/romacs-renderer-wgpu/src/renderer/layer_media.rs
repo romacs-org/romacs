@@ -632,5 +632,4 @@ impl WgpuRenderer {
 }
 
 #[cfg(all(test, feature = "video"))]
-#[path = "layer_media/tests/layer_media_test.rs"]
 mod tests;

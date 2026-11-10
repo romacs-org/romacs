@@ -1,0 +1,5 @@
+## GNU ERT batch execution
+
+| # | Mechanism | GNU | Romacs | Why |
+|---|---|---|---|---|
+| DBG-NEXT-CALL | `debug-on-next-call` and debug-on-exit observe Lisp calls only | bytecode.c's call opcode and Ffuncall call the debugger with `(lambda)` at the next call of any function, primitives included, and with `(exit VALUE)` when any flagged activation returns, a primitive's too | The call boundary's hooks (`threaded.rs` `arm_debug_on_call`, `debug_on_exit`) stop at the next Lisp function call, with GNU byte-code's `(lambda)`; `debug-on-next-call` stays set through the primitive calls before it, which run as GNU opcodes do. A flagged primitive activation (`j` on a `mapcar` frame) returns without entering the debugger; its flag is dropped as it leaves. Normal returns of Lisp activations, and throws and errors out of them, match GNU byte-code (`tests/debugger_entry.rs`). `debug-on-next-call` is a forwarded boolean, as GNU's DEFVAR_BOOL | One test on the call path (`profiler.active`) covers profiling and both hooks; primitive calls stay off it | <!-- symbols: debug-on-next-call, backtrace-debug -->

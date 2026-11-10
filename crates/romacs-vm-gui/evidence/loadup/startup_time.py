@@ -4,7 +4,7 @@
     startup_time.py BINARY OUT_DIR [REPS]
 
 Time from the launch command to the VM's first `ready` reply on stdout (the
-first frame has been painted and activated), with scripts/romacs's
+first frame has been painted and activated), with tools/romacs's
 environment (jlib's command line), on Hyprland workspace 2. Prints one line
 per run and the median per mode. The window is closed after each run.
 """

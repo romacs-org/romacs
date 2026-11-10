@@ -14,7 +14,7 @@ def unrust(s):
 
 
 def main():
-    sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "tools/lib"))
     import gnu_oracle
     gnu = gnu_oracle.require()["path"]
     if not os.path.isabs(gnu):

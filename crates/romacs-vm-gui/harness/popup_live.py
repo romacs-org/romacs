@@ -1023,8 +1023,8 @@ def main():
                     return [text for _, text, _ in rows(glyphs(), 'Text')]
 
                 def mode_lines():
-                    # The status bar is the mode line (VM2-STATUS-BAR), with
-                    # the popup's own line folded into it.
+                    # The status bar is the mode line (VM2-STATUS-BAR): the
+                    # selected window's alone.
                     return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
                 fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
@@ -1085,7 +1085,7 @@ def main():
                     raise AssertionError(f"fit-window-to-buffer: {probe['outcome']}")
                 # The popup is the bottom window: its text is the rows between
                 # its top and its body's bottom edge.  A GUI window has no
-                # mode-line row (its line folds into the status bar), so the
+                # mode-line row (the status bar is its mode line), so the
                 # edge comes from the window's geometry, not a painted band.
                 text = rows(painted, 'Text')
                 line = probe['frame-char-height']

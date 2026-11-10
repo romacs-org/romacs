@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# smoke-release -- unpack a release tarball and run it as a new user would.
+#
+#   tools/ci/smoke-release TARBALL WORK_DIR
+#
+# WORK_DIR must not exist; it is left behind for inspection. The tarball is
+# unpacked there and run with a private HOME and XDG directories and no
+# display: its runtime tree must match this checkout byte-for-byte and be the
+# one the binary resolves (check-installed-runtime.sh), a --batch session
+# must evaluate GNU Lisp from it, and the GUI world must build from it.
+set -euo pipefail
+
+if (($# != 2)); then
+    echo "usage: $0 TARBALL WORK_DIR" >&2
+    exit 2
+fi
+tarball=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+if [ -e "$2" ]; then
+    echo "smoke-release: $2 already exists" >&2
+    exit 1
+fi
+mkdir -p "$2"
+work=$(cd "$2" && pwd)
+
+mkdir "$work/root" "$work/home" "$work/cache" "$work/config" "$work/data" "$work/tmp"
+mkdir -m 0700 "$work/run"
+tar -C "$work/root" -xzf "$tarball"
+prefixes=("$work"/root/*)
+if [ "${#prefixes[@]}" -ne 1 ] || [ ! -d "${prefixes[0]}" ]; then
+    echo "smoke-release: $tarball does not unpack to one directory" >&2
+    exit 1
+fi
+prefix=${prefixes[0]}
+
+export HOME=$work/home XDG_CACHE_HOME=$work/cache XDG_CONFIG_HOME=$work/config \
+    XDG_DATA_HOME=$work/data XDG_RUNTIME_DIR=$work/run TMPDIR=$work/tmp
+unset ROMACS_RUNTIME_ROOT ROMACS_LISP_DIR WAYLAND_DISPLAY DISPLAY
+
+bash "$repo/tools/check-installed-runtime.sh" "$prefix" "$repo"
+
+# GNU Lisp loaded from the tree, and charset maps read from its etc/.
+expected="$prefix/share/romacs/etc/charsets t"
+actual=$("$prefix/bin/romacs" -Q --batch --eval \
+    "(progn (require 'subr-x) (princ (format \"%s %s\" (car charset-map-path) (fboundp 'string-join))))")
+if [ "$actual" != "$expected" ]; then
+    echo "smoke-release: FAIL --batch printed '$actual', not '$expected'" >&2
+    exit 1
+fi
+echo "smoke-release: --batch evaluates GNU Lisp from $prefix/share/romacs"
+
+# The mode line's icons draw only with the icon font, and the default face
+# falls back to some system font without Iosevka; nothing else says so.
+if [ ! -f "$prefix/share/romacs/assets/fonts/RomacsIcons.ttf" ]; then
+    echo "smoke-release: FAIL no icon font in $prefix/share/romacs/assets/fonts" >&2
+    exit 1
+fi
+if ! python3 -B "$repo/tools/lib/bundled_fonts.py" check --root "$prefix/share/romacs"; then
+    echo "smoke-release: FAIL the bundled fonts in $prefix/share/romacs/assets/fonts are not sources.json's" >&2
+    exit 1
+fi
+echo "smoke-release: the icon font and the bundled Iosevka are in $prefix/share/romacs/assets/fonts"
+
+"$prefix/bin/romacs" -Q --loadup --world-build
+if [ -z "$(ls -A "$XDG_CACHE_HOME/romacs/worlds")" ]; then
+    echo "smoke-release: FAIL --world-build left no world in $XDG_CACHE_HOME/romacs/worlds" >&2
+    exit 1
+fi
+echo "smoke-release: built the GUI world from the unpacked tree"
+echo "smoke-release: $tarball ok"

@@ -565,8 +565,6 @@ const MINTS: &[(&str, &[&str], usize)] = &[
     ("threaded.rs", &["Gc", ":", ":", "unchecked"], 1),
     // A lazy body's expansion runs under its builder's hold (`lend::deferred`).
     ("threaded.rs", &["lend", ":", ":", "deferred"], 1),
-    // `provide''s after-load hooks, from a cached primitive call.
-    ("threaded.rs", &[".", "defer", "("], 1),
     // The embedder's command: its Rust caller holds no Value (`Toplevel` closes this).
     ("command.rs", &["threaded", ":", ":", "toplevel"], 1),
     // `autoload_do_load` for callers not yet converted: `macroexpand_steps` and

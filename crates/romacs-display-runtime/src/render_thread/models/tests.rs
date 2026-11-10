@@ -545,7 +545,7 @@ fn renderer_loss_reaches_the_input_channel_before_a_later_key() {
                     id: MODEL,
                     event: ModelEvent::Readiness { current: false, .. }
                 },
-                InputEvent::Key { .. } | InputEvent::Observed { .. } | InputEvent::Tracked { .. }
+                InputEvent::Key { .. } | InputEvent::Tracked { .. }
             ]
         ),
         "R{{nil}} must precede the later key, got {after:?}"
