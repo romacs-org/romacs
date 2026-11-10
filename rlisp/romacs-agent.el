@@ -1243,6 +1243,57 @@ goes."
         (setf (romacs-agent-state session) 'idle))
       (when (romacs-agent-queue session) (romacs-agent--send-next session t))))))
 
+(defun romacs-agent--scratch (session)
+  "A copy of SESSION to replay its journal into: it parses as SESSION does,
+and changes nothing of SESSION's, writes nothing to its harness, and sends
+nothing that waits."
+  (let ((scratch (copy-romacs-agent session)))
+    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
+          (romacs-agent-title-auto scratch) nil
+          (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
+          (romacs-agent-tools scratch) (make-hash-table :test #'equal)
+          (romacs-agent-approvals scratch) (make-hash-table :test #'equal)
+          ;; Its replayed turn ends never send what waits for the live ones,
+          ;; nor does its replayed startup write to the harness.
+          (romacs-agent-queue scratch) nil (romacs-agent-queue-tail scratch) nil
+          (romacs-agent-queue-length scratch) 0
+          (romacs-agent-connection scratch) nil (romacs-agent-caught-up scratch) nil
+          ;; The live session's: its rows come from its own events.
+          (romacs-agent-subagents scratch) nil
+          ;; The live session's: a confirmation replayed here is not this copy's.
+          (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
+          (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
+    scratch))
+
+(defun romacs-agent-events (session)
+  "SESSION's journal as the events it raised, in order, replayed on a
+copy (`romacs-agent--scratch'): SESSION is left as it is."
+  (let* ((scratch (romacs-agent--scratch session)) (events nil)
+         (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
+    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
+    (nreverse events)))
+
+(defun romacs-agent-events-async (session then &optional batch)
+  "Call THEN with SESSION's journal as the events it raised (as
+`romacs-agent-events' gives them), replayed BATCH records (200 by default)
+at a time between the editor's other work: a long journal never holds it."
+  (let* ((scratch (romacs-agent--scratch session)) (events nil)
+         (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         (lines (and (file-readable-p journal)
+                     (with-temp-buffer
+                       (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
+                       (split-string (buffer-string) "\n" t))))
+         (step nil))
+    (setq step (lambda ()
+                 (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
+                   (dotimes (_ (or batch 200))
+                     (when lines
+                       (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
+                                                                       :null-object :null :false-object :false))))
+                         (when (hash-table-p record) (romacs-agent--record scratch record))))))
+                 (if lines (run-at-time 0 nil step) (funcall then (nreverse events)))))
+    (funcall step)))
+
 (defun romacs-agent--read-journal (session function &optional from)
   "Call FUNCTION with each record of SESSION's journal, in order, from
 byte FROM (a record's start) when given."

@@ -1120,22 +1120,7 @@ harness's own transcript it was imported from, when it was."
     (require 'romacs-agent-history)
     (romacs-agent-history-draw session (romacs-agent-imported session)))
   ;; A copy parses, so the live session's own state is not replayed over.
-  (let ((scratch (copy-romacs-agent session)))
-    (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
-          (romacs-agent-title-auto scratch) nil
-          (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
-          (romacs-agent-tools scratch) (make-hash-table :test #'equal)
-          (romacs-agent-approvals scratch) (make-hash-table :test #'equal)
-          ;; Its replayed turn ends never send what waits for the live ones,
-          ;; nor does its replayed startup write to the harness.
-          (romacs-agent-queue scratch) nil (romacs-agent-queue-tail scratch) nil
-          (romacs-agent-queue-length scratch) 0
-          (romacs-agent-connection scratch) nil (romacs-agent-caught-up scratch) nil
-          ;; The live session's: its rows come from its own events.
-          (romacs-agent-subagents scratch) nil
-          ;; The live session's: a confirmation replayed here is not this copy's.
-          (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
-          (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
+  (let ((scratch (romacs-agent--scratch session)))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    ;; The scratch copy's turn data, for the footers it draws.
@@ -1653,6 +1638,23 @@ ALL, what every turn of the session did."
                                                     (romacs-agent-diff-current session)
                                                     (user-error "No turn yet"))))))
 
+(defun romacs-agent-chat-handoff (provider model next)
+  "Go on with this thread under another instance or model: PROVIDER and
+MODEL picked as for a new session, NEXT what to do there.  A new session
+starts on a brief of the thread, and its chat opens."
+  (interactive
+   (let ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows)))))
+     (list (plist-get fields :provider) (plist-get fields :model)
+           (read-string "Go on with: " nil nil "Go on from where this thread left off.")))
+   romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (message "Gathering %s's thread..." (romacs-agent-title session))
+    ;; Replayed between keystrokes: a long thread never holds the editor.
+    (romacs-agent-events-async
+     session (lambda (events)
+               (romacs-agent-show (romacs-agent-handoff session (romacs-agent-handoff-thread session events)
+                                                        provider model next))))))
+
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-chat-mode)
@@ -1836,6 +1838,7 @@ only sessions whose chat is open."
 
 (require 'keymap-popup)
 (require 'romacs-agent-diff)
+(require 'romacs-agent-handoff)
 
 (defconst romacs-agent-ui--finished-workers 3
   "How many finished workers the actions menu keeps after the active ones.")
@@ -1944,6 +1947,7 @@ view."
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
+  "H" ("Hand off to another…" romacs-agent-chat-handoff)
   :group "Session"
   "b" ("Switch chat" romacs-agent-switch-chat)
   "t" ("Switch thread" romacs-agent-switch)
