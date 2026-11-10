@@ -185,10 +185,7 @@ mod tests {
         let unsettle: [fn(&mut Vm, Value); 3] = [
             |vm, _| { vm.alloc_cons(Value::NIL, Value::NIL); },
             |vm, old| vm.conses.set_car(old.index_if(3).unwrap(), Value::TRUE),
-            |vm, old| {
-                let (_, mut stores) = vm.objects.hash_mut(0).expect("the old table");
-                stores.stored(old);
-            },
+            |vm, old| vm.objects.log_a_put(0, old),
         ];
         for change in unsettle {
             change(&mut vm, roots[0]);

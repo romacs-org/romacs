@@ -379,6 +379,12 @@ impl Table<Object> {
         let weak = table.weakness != crate::hash::Weakness::None;
         Some((&mut **table, Stores { barrier, color, weak }))
     }
+    /// A put of VALUE into the hash table at entry I, as far as the barrier
+    /// knows, for a test elsewhere of what empties the log.
+    #[cfg(test)]
+    pub(crate) fn log_a_put(&mut self, i: usize, value: Value) {
+        self.hash_mut(i).expect("a hash table").1.stored(value);
+    }
     pub(crate) fn swap(&mut self, a: usize, b: usize) {
         *self.store_at(a).1 |= DIRTY;
         *self.store_at(b).1 |= DIRTY;
