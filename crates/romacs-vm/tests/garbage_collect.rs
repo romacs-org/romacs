@@ -508,8 +508,8 @@ fn big_primitive_allocation_collects_inside_the_loop() {
         let source = format!("(let ((g gcs-done)) (dotimes (_ 40) {body}) (- gcs-done g))");
         let collected: i64 = vm.eval_source(&source).unwrap().display().unwrap().parse().unwrap();
         if collected == 0 { missed.push(path); }
-        let latest: i64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
-        if !(1..=100_000 + 16_384 + 1_000).contains(&latest) { late.push((path, latest)); }
+        let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+        if !(1.0..=117_384.0).contains(&latest) { late.push((path, latest)); }
     }
     assert!(missed.is_empty(), "no collection inside the loop: {missed:?}");
     assert!(late.is_empty(), "collections began at no excess or too far past their trigger: {late:?}");
@@ -528,8 +528,8 @@ fn inline_allocation_waits_at_most_one_budget_period() {
     let collected = vm.eval_source("(let ((g gcs-done) (l nil)) (dotimes (i 300000) (setq l (cons i l))) (- gcs-done g))")
         .unwrap().display().unwrap();
     assert_ne!(collected, "0", "the loop collected");
-    let latest: i64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
-    assert!((1..=10_000 + 500).contains(&latest), "a collection began {latest} objects past its trigger");
+    let latest: f64 = vm.eval_source(LATEST_LATE).unwrap().display().unwrap().parse().unwrap();
+    assert!((1.0..=10_500.0).contains(&latest), "a collection began {latest} objects past its trigger");
 }
 
 /// A protected form run again and again from native code (`Vm::execute'),

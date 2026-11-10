@@ -48,8 +48,8 @@
 ;;       what it left live in the private heap, B an estimate that does not
 ;;       walk and leaves out buffers' text and hash tables.  L is how far
 ;;       past its automatic trigger it began, in objects at the collector's
-;;       charge: the allocation between falling due and the poll that took
-;;       it.  M, when there is
+;;       charge (a float, as the trigger is): the allocation between falling
+;;       due and the poll that took it.  M, when there is
 ;;       one, says who waited at most
 ;;       MS: "command", C being the command it ran in or at the end of;
 ;;       "key", a key press queued as it ended; or "redisplay", in a

@@ -120,8 +120,9 @@ pub(crate) struct CollectionRecord {
     /// due and the poll that took it. A trigger that moved down (a lowered
     /// threshold or percentage, a lifted floor) or a hold that just ended
     /// gives a large value with a prompt poll, so a consumer sizing a
-    /// nursery from it reads its upper percentiles with that in mind.
-    pub(crate) late: u64,
+    /// nursery from it reads its upper percentiles with that in mind. A
+    /// float, as the trigger is.
+    pub(crate) late: f64,
 }
 romacs_snapshot::snapshot_struct!(CollectionRecord { idle, explicit, us, command, key, redisplay, at, objects, bytes, late });
 
@@ -718,9 +719,9 @@ impl Vm {
         (allocated / budget).max(code)
     }
     /// Objects past the automatic trigger now (`CollectionRecord::late`).
-    pub(crate) fn collection_late(&self) -> u64 {
+    pub(crate) fn collection_late(&self) -> f64 {
         let (allocated, budget) = self.collection_budget();
-        (allocated - budget).max(0.0) as u64
+        (allocated - budget).max(0.0)
     }
     /// After a collection: no payload charged since, no poll pending, and the
     /// vector slots the live heap keeps, for the proportional rule.
@@ -1076,7 +1077,7 @@ impl Vm {
     /// Keep a finished collection's record, `elapsed_ns` long if a clock timed
     /// it, IDLE as in `collect_until_key`. One look at the host and one at the
     /// command variable, per collection: a key pays nothing.
-    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool, late: u64) {
+    pub(super) fn note_collection(&mut self, elapsed_ns: Option<u64>, idle: bool, late: f64) {
         let explicit = std::mem::take(&mut self.collection_log.explicit);
         if self.collection_log.records.len() >= COLLECTION_RECORDS {
             self.collection_log.dropped += 1;
@@ -1123,7 +1124,7 @@ impl Vm {
     /// MET `command`, `key`, `redisplay` or nil, COMMAND a string or nil,
     /// T when it ended as `float-time` reads, or nil if nothing timed it,
     /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk),
-    /// LATE how far past its trigger it began (`CollectionRecord::late`).
+    /// LATE a float, how far past its trigger it began (`CollectionRecord::late`).
     pub(crate) fn take_collections(&mut self) -> Value {
         let CollectionLog { records, dropped, .. } = std::mem::take(&mut self.collection_log);
         let mut result = Value::NIL;
@@ -1140,7 +1141,8 @@ impl Vm {
             let ms = self.allocate_object(data::Object::Float(record.us as f64 / 1000.0));
             let at = record.at.map_or(Value::NIL, |at| self.allocate_object(data::Object::Float(at)));
             let size = |n: usize| Value::integer(i64::try_from(n).expect("a heap's size fits i64")).expect("a heap's size fits fixnum");
-            let mut row = self.keymap_cons(size(record.late as usize), Value::NIL);
+            let late = self.allocate_object(data::Object::Float(record.late));
+            let mut row = self.keymap_cons(late, Value::NIL);
             row = self.keymap_cons(size(record.bytes), row);
             row = self.keymap_cons(size(record.objects), row);
             row = self.keymap_cons(at, row);
@@ -1989,27 +1991,24 @@ mod tests {
     fn every_allocation_kind_advances_the_allocation_meter() {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
-        let mut charged = |vm: &mut Vm, allocate: &dyn Fn(&mut Vm)| {
-            let before = vm.allocation.allocated;
-            allocate(vm);
-            vm.allocation.allocated - before
-        };
         let value = size_of::<Value>() as u64;
-        let kinds: [(&str, u64, &dyn Fn(&mut Vm)); 7] = [
-            ("cons", 2 * value, &|vm| { vm.alloc_cons(Value::NIL, Value::NIL); }),
-            ("cell", value, &|vm| { vm.alloc_cell(Value::NIL); }),
-            ("closure", 2 * value, &|vm| {
-                vm.alloc_closure(Closure { function: 0, captures: vec![Value::NIL; 2], metadata: Vec::new(), document: Value::NIL });
-            }),
-            ("object", size_of::<data::Object>() as u64, &|vm| { vm.allocate_object(data::Object::Float(1.0)); }),
-            ("string payload", 1000, &|vm| { vm.make_lisp_string(vec![b'x'; 1000], false); }),
-            ("vector payload", 100 * value, &|vm| { vm.allocate_object(data::Object::Vector(vec![Value::NIL; 100])); }),
-            ("bool vector", 1000, &|vm| { vm.allocate_object(data::Object::BoolVector(Box::new(data::BoolVector::new(8000, false).unwrap()))); }),
-        ];
-        for (kind, least, allocate) in kinds {
-            let advanced = charged(&mut vm, allocate);
+        let mut check = |kind: &str, least: u64, allocate: &dyn Fn(&mut Vm)| {
+            let before = vm.allocation.allocated;
+            allocate(&mut vm);
+            let advanced = vm.allocation.allocated - before;
             assert!(advanced >= least, "{kind} advanced the meter {advanced}, under {least}");
-        }
+        };
+        check("cons", 2 * value, &|vm| { vm.alloc_cons(Value::NIL, Value::NIL); });
+        check("cell", value, &|vm| { vm.alloc_cell(Value::NIL); });
+        check("closure", 2 * value, &|vm| {
+            vm.alloc_closure(Closure { function: 0, captures: vec![Value::NIL; 2], metadata: Vec::new(), document: Value::NIL });
+        });
+        check("object", size_of::<data::Object>() as u64, &|vm| { vm.allocate_object(data::Object::Float(1.0)); });
+        check("string payload", 1000, &|vm| { vm.make_lisp_string(vec![b'x'; 1000], false); });
+        check("vector payload", 100 * value, &|vm| { vm.allocate_object(data::Object::Vector(vec![Value::NIL; 100])); });
+        check("bool vector", 1000, &|vm| {
+            vm.allocate_object(data::Object::BoolVector(Box::new(data::BoolVector::new(8000, false).unwrap())));
+        });
     }
 
     /// A collection's record says how many objects past its trigger it
@@ -2020,14 +2019,18 @@ mod tests {
         vm.set_gc_stress(0);
         vm.set_collection_floor(100_000);
         vm.collect(&mut []);
-        let budget = vm.collection_budget().1 as i64;
-        conses(&mut vm, budget / 2);
+        // The floor's trigger, as `collection_budget` sets it: twice what the
+        // last collection kept, at least the floor, less what it kept.
+        let budget = u32::try_from(vm.gc_retained.saturating_mul(2).max(100_000) - vm.gc_retained).unwrap();
+        let trigger = |vm: &Vm| vm.collection_budget().1.to_string();
+        assert_eq!(trigger(&vm), budget.to_string(), "the floor sets the trigger");
+        conses(&mut vm, i64::from(budget / 2));
         vm.collect(&mut []);
-        assert_eq!(vm.collection_budget().1 as i64, budget, "dead conses leave the trigger where it was");
-        conses(&mut vm, budget + 5_000);
+        assert_eq!(trigger(&vm), budget.to_string(), "dead conses leave the trigger where it was");
+        conses(&mut vm, i64::from(budget) + 5_000);
         vm.collect(&mut []);
-        let late: Vec<u64> = vm.collection_log.records.iter().map(|record| record.late).collect();
-        assert_eq!(late[late.len() - 2..], [0, 5_000], "below the trigger, then 5,000 past it: {late:?}");
+        let late: Vec<String> = vm.collection_log.records.iter().map(|record| record.late.to_string()).collect();
+        assert_eq!(late[late.len() - 2..], ["0", "5000"], "below the trigger, then 5,000 past it: {late:?}");
     }
 
     /// A mark twin's mark (`mark_only') marks what the roots reach, keeps a
