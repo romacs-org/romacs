@@ -124,10 +124,12 @@ impl Vm {
     /// (keyboard.c read_char): its `special-event-map' binding, here
     /// between commands. Inside a read, the read runs it
     /// ([`crate::HostEvent::Model`]). A freed model's events still go:
-    /// Lisp drops what names no live handle.
+    /// Lisp drops what names no live handle.  The embedder's top level
+    /// calls it: an error or quit comes back as the result, with no engine
+    /// above to hand an escape to.
     pub fn run_model_event(&mut self, id: u32, event: &ModelEvent) -> Result<()> {
         let value = self.model_event_value(id, event);
-        self.call_prepared_source_propagating(
+        self.call_prepared_source_raw(
             "(lambda (event) (romacs--run-special-event event))",
             &[value],
         )?;

@@ -23,7 +23,7 @@ compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rus
 compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is in the initial obarray, whose symbols are never reclaimed
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
-display_host/models.rs run_model_event call_prepared_source_propagating 1 clean  # the event list is only the call's argument; its value is discarded, and nothing heap from before it is used after
+display_host/models.rs run_model_event call_prepared_source_raw 1 clean  # the event list is only the call's argument; its value is discarded, and nothing heap from before it is used after
 eval_buffer.rs eval_buffer_primitive write_from_native 2 held  # the bootstrap's emacs-lisp-mode and menu-bar-mode, as set writes: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
 eval_form.rs eval_primitive execute_raw 1 clean  # DATUM and the lexical environment are converted to forms first

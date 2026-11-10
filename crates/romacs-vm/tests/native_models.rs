@@ -100,6 +100,11 @@ fn bad_arguments_and_freed_models_are_refused_and_send_nothing() {
         (r#"(romacs-model--create '(("/a.obj" nil)) '(0 0 9) '(0 0 0) 64 64)"#, "zoom 0.25..4"),
         (r#"(romacs-model--create '(("/a.obj" nil)) '(0 0 1) '(0 0 0) 8 64)"#, "32..2048"),
         (r#"(romacs-model--create nil '(0 0 1) '(0 0 0) 64 64)"#, "1..255 meshes"),
+        // Fixed arities and limits refuse before converting anything, a
+        // circular list too.
+        (r#"(romacs-model--create '(("/a.obj" nil)) (let ((v (list 0 0 1))) (setcdr (cdr (cdr v)) v) v) '(0 0 0) 64 64)"#, "view must be a list of at most 3"),
+        (r#"(romacs-model--create '(("/a.obj" nil)) '(0 0 1) '(0 0 0 0) 64 64)"#, "background must be a list of at most 3"),
+        (r#"(romacs-model--create (make-list 256 '("/a.obj" nil)) '(0 0 1) '(0 0 0) 64 64)"#, "meshes must be a list of at most 255"),
     ] {
         let got = eval(&mut vm, form);
         assert!(got.contains(error), "{form}: {got}");
@@ -171,6 +176,18 @@ fn events_run_their_special_event_binding_between_commands() {
                "((romacs-model 4 pick (:hit (:mesh 1 :face 7 :barycentric [0.25 0.25 0.5] :point [1.0 -2.0 0.5]) \
 :view (0.0 90.0 1.0) :rev 3 :req 2)) (romacs-model 4 readiness (:current t :rev 3 :req 2)) \
 (romacs-model 4 failed (:error \"λ missing\")))");
+}
+
+/// A binding that signals between commands answers the embedder with the
+/// error and leaves nothing behind: the next evaluation runs as usual.
+#[test]
+fn a_failing_event_binding_leaves_no_escape_behind() {
+    let (mut vm, _) = session(true);
+    eval(&mut vm, "(progn (current-global-map) (define-key special-event-map [romacs-model] \
+        (lambda (_event) (interactive \"e\") (error \"model handler failed\"))) t)");
+    let failed = vm.run_model_event(4, &pick());
+    assert!(failed.is_err(), "the error comes back: {failed:?}");
+    assert_eq!(eval(&mut vm, "(condition-case err (+ 1 2) (error (list 'caught err)))"), "3");
 }
 
 struct Script(VecDeque<HostEvent>);
