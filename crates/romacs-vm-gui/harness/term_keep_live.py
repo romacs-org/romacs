@@ -11,8 +11,9 @@ replaced and the terminal must be back in the new one:
                  session adopts the terminal it finds in the keeper);
   --keeper-exec  the keeper execs itself in place first;
   --kill-helper  kill -9 of the terminal's helper process first: the
-                 terminal must end, the keeper's row keep its status, and
-                 the restart bring the buffer back saying so;
+                 terminal must end, the keeper's row say how, and the
+                 session let the handle go, which hangs up the shell left
+                 on the kept pty;
   --refuse       a successor that reads other helper versions: the restart
                  must be refused, naming the terminal, and nothing change;
   --terminals N  N terminals, the extra ones with a full scrollback;
@@ -24,6 +25,12 @@ shows every line printed while no session had it, and goes on showing new
 ones.  report.json holds that as `k2_shell', beside the time line, who
 holds the pty, the helper's and the keeper's memory, the session's threads
 by name, and how many updates came whole and how many as deltas.
+
+Not here: the session itself as a systemd user unit.  A unit given this
+harness's private runtime directory cannot reach the user manager, so
+romacs-restart cannot start its successor as a unit; given the real one it
+would see the user's own keeper and sockets.  That journey needs a user
+manager of the harness's own.
 
 Beside the terminal the session also carries a pipe subprocess and a TCP
 connection, stand-ins for what later slices keep; they end at the restart
@@ -301,8 +308,16 @@ def one(args, index, output):
             os.kill(helper, 9)
             killed = time.time()
             wait(lambda: not engine.ask('(with-current-buffer "*romacs-term*" (and (romacs-term-running-p) t))'), 10, 'the terminal to end', None, .01)
-            helper_kill = {'helper_pid': helper, 'live_terminal_ended_after_seconds': round(time.time() - killed, 3),
-                           'row_status_after_kill': engine.ask(ROW)[1], 'shell_alive_right_after': alive(int((work / 'term.pid').read_text()))}
+            ended = round(time.time() - killed, 3)
+            status = engine.ask(ROW)[1]
+            # Its shell is on the pty the keeper holds: the session lets the
+            # handle go, which hangs the shell up. Nothing is left running
+            # that nobody can reach.
+            shell = int((work / 'term.pid').read_text())
+            wait(lambda: not alive(shell), 10, 'the shell to be hung up', None, .01)
+            helper_kill = {'helper_pid': helper, 'live_terminal_ended_after_seconds': ended, 'row_status_after_kill': status,
+                           'shell_hung_up_after_seconds': round(time.time() - killed, 3),
+                           'handles_left': engine.ask('(length (romacs-keeper-handles))')}
         def links(pid):
             out = []
             for fd in Path(f'/proc/{pid}/fd').iterdir():
@@ -434,6 +449,7 @@ def one(args, index, output):
             'buffer_follows_new_output': bool(later and f'line {later[0]}' in text2),
             'handle': engine.ask('(and (get-buffer "*romacs-term*") (boundp (quote romacs-term-handle)) (with-current-buffer "*romacs-term*" romacs-term-handle))'),
             'session_pid': engine.ask('(condition-case nil (progn (require (quote romacs-keeper)) (romacs-session-pid)) (error nil))'),
+            'reattach_microseconds': engine.ask('(and (boundp (quote romacs-term-reattach-seconds)) (mapcar (lambda (e) (round (* 1000000 (cdr e)))) romacs-term-reattach-seconds))'),
             'transport_counts': engine.ask('(and (get-buffer "*romacs-term*") (with-current-buffer "*romacs-term*" (and romacs-term-session (fboundp (quote romacs--term-transport-counts)) (let ((c (romacs--term-transport-counts romacs-term-session))) (list (car c) (cdr c))))))'),
             'threads': len(list(Path(f'/proc/{engine.process.pid}/task').iterdir())),
             'fds': len(list(Path(f'/proc/{engine.process.pid}/fd').iterdir())),
@@ -441,9 +457,8 @@ def one(args, index, output):
         }
         if helper_kill is not None:
             helper_kill['restored_buffer_says'] = text.strip()[:160]
-            time.sleep(1.0)
-            helper_kill['shell_alive_after_restore'] = alive(pids['shell'])
-            helper_kill['pass'] = bool('helper process ended' in text and 'signaled 9' in helper_kill['row_status_after_kill'] and not helper_kill['shell_alive_after_restore'])
+            helper_kill['pass'] = bool('signaled 9' in helper_kill['row_status_after_kill'] and helper_kill['handles_left'] == 0
+                                       and not alive(pids['shell']))
             entry['k2_helper_kill'] = helper_kill
         if args.terminals > 1:
             states = engine.ask(f'(mapcar (lambda (n) (let ((b (get-buffer (format "*romacs-term*<%d>" n)))) (and b (with-current-buffer b (list (and (romacs-term-running-p) t) (count-lines (point-min) (point-max))))))) (number-sequence 2 {args.terminals}))')

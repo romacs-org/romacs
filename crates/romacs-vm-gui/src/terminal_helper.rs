@@ -226,8 +226,11 @@ impl Terminal {
 
     /// The push that brings a session from the last push to now: the lines
     /// that scrolled into history and the screen, or with FULL (and
-    /// whenever the mark cannot vouch for a delta) every line.
-    fn collect(&mut self, full: bool) -> Push {
+    /// whenever the mark cannot vouch for a delta) every line. With
+    /// `SCREEN_ONLY` it is the screen alone, as a terminal with no history:
+    /// what a session that has just attached paints first. History follows
+    /// in the next push, which is then in full.
+    fn collect(&mut self, full: bool, screen_only: bool) -> Push {
         let shell_foreground = self.shell_foreground();
         let mut term = self.term.lock();
         let mode = *term.mode();
@@ -241,22 +244,28 @@ impl Terminal {
         // when there was none to mark.
         let same = self.pushed.as_ref().filter(|p| !full && p.size == self.size && p.alternate == alternate && Flags::all().bits() & MARK == 0);
         let scrolled = same.and_then(|p| if p.marked { (1..=history).find(|lines| marked(grid, *lines)).map(|lines| lines - 1) } else { Some(history) });
-        let first = scrolled.map_or(history, |scrolled| scrolled.min(history));
+        let first = if screen_only { 0 } else { scrolled.map_or(history, |scrolled| scrolled.min(history)) };
         let lines = (back(first).0..narrow(rows)).map(|line| (line, row_of(&grid[Line(line)], columns))).collect();
-        // Move the mark to the newest history line.
-        let stale = match scrolled { Some(scrolled) => scrolled + 1..scrolled + 2, None => 1..history + 1 };
-        for lines in stale.filter(|lines| *lines <= history) {
-            let flags = &mut grid[back(lines)][Column(0)].flags;
-            *flags = Flags::from_bits_retain(flags.bits() & !MARK);
+        // Move the mark to the newest history line. Not for the screen
+        // alone: that push must not cost a walk of the history, and the
+        // full one that follows clears every mark before it sets its own.
+        if !screen_only {
+            let stale = match scrolled { Some(scrolled) => scrolled + 1..scrolled + 2, None => 1..history + 1 };
+            for lines in stale.filter(|lines| *lines <= history) {
+                let flags = &mut grid[back(lines)][Column(0)].flags;
+                *flags = Flags::from_bits_retain(flags.bits() & !MARK);
+            }
+            if history > 0 {
+                let flags = &mut grid[Line(-1)][Column(0)].flags;
+                *flags = Flags::from_bits_retain(flags.bits() | MARK);
+            }
         }
-        if history > 0 {
-            let flags = &mut grid[Line(-1)][Column(0)].flags;
-            *flags = Flags::from_bits_retain(flags.bits() | MARK);
-        }
-        self.pushed = Some(Pushed { size: self.size, alternate, marked: history > 0 });
+        // After the screen alone nothing is known of the session's history:
+        // the next push carries everything.
+        self.pushed = (!screen_only).then_some(Pushed { size: self.size, alternate, marked: history > 0 });
         let cursor = grid.cursor.point;
-        Push { revision: 0, scrolled: scrolled.map(narrow), columns: self.size.0, rows: self.size.1,
-               history: narrow(history), cursor_line: u16::try_from(cursor.line.0).unwrap_or(0), cursor_column: narrow(cursor.column.0),
+        Push { revision: 0, scrolled: scrolled.filter(|_| !screen_only).map(narrow), columns: self.size.0, rows: self.size.1,
+               history: if screen_only { 0 } else { narrow(history) }, cursor_line: u16::try_from(cursor.line.0).unwrap_or(0), cursor_column: narrow(cursor.column.0),
                cursor_wraps: grid.cursor.input_needs_wrap, mode: mode.bits(), running: self.running, shell_foreground, colors, lines }
     }
 
@@ -267,7 +276,9 @@ impl Terminal {
         // SAFETY: the owned pidfd targets this child without PID reuse; null siginfo and
         // zero flags pass no userspace memory. HUP lets the shell retire its own jobs.
         unsafe { pidfd_send_signal(child.as_raw_fd(), 1, std::ptr::null(), 0); }
-        if self.finished.recv_timeout(std::time::Duration::from_millis(250)).is_err() {
+        // A second for the shell to pass the hangup on to its jobs: this
+        // is the helper's own end, and holds up no session.
+        if self.finished.recv_timeout(std::time::Duration::from_secs(1)).is_err() {
             // SAFETY: the pidfd is still owned here, so escalation cannot
             // target a later process even if the child has already exited.
             unsafe { pidfd_send_signal(child.as_raw_fd(), 9, std::ptr::null(), 0); }
@@ -277,6 +288,18 @@ impl Terminal {
     }
 }
 
+/// What a push must carry.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Next {
+    /// What changed since the last push.
+    Delta,
+    /// Every line.
+    Full,
+    /// The screen alone: the first push after an attach, so a session
+    /// paints a terminal before it has its history. Every line follows.
+    Screen,
+}
+
 /// The session now talking to this helper.
 struct Conversation {
     id: u64,
@@ -284,8 +307,8 @@ struct Conversation {
     greeted: bool,
     /// Whether the session has applied the last push.
     acked: bool,
-    /// Whether the next push must carry every line.
-    full: bool,
+    /// What the next push must carry.
+    next: Next,
     /// Descriptors the session sent and no record has taken yet. They can
     /// arrive in the same read as an earlier record than the one they
     /// are for, so they wait here for the OPEN.
@@ -374,7 +397,7 @@ pub fn run(shell: &str) -> Result<(), String> {
                 Hello { epoch: 0, pid: std::process::id(), classes: vec![proto::helper_class()] }.record().encode_into(&mut wire);
                 if stream.write_all(&wire).is_ok() && let Ok(reader) = stream.try_clone() {
                     listen(conversations, reader, wake.clone());
-                    conversation = Some(Conversation { id: conversations, stream, greeted: false, acked: true, full: true, fds: Vec::new() });
+                    conversation = Some(Conversation { id: conversations, stream, greeted: false, acked: true, next: Next::Screen, fds: Vec::new() });
                 }
             }
             Ok(Wake::Record(id, record, fds)) => if let Some(talk) = conversation.as_mut().filter(|c| c.id == id) {
@@ -401,7 +424,8 @@ pub fn run(shell: &str) -> Result<(), String> {
                         }
                         // A master sent to a terminal that already runs is let go.
                         talk.fds.clear();
-                        (talk.full, dirty) = (true, true);
+                        if talk.next == Next::Delta { talk.next = Next::Full; }
+                        dirty = true;
                     },
                     kind::INPUT => if let Some(terminal) = &terminal { terminal.input(record.payload.clone()); dirty = true; },
                     kind::ACK => { talk.acked = true; dirty = true; }
@@ -420,11 +444,16 @@ pub fn run(shell: &str) -> Result<(), String> {
         dirty |= std::mem::replace(&mut foreground, now) != now;
         if let Some(talk) = conversation.as_mut().filter(|c| c.greeted && c.acked && dirty) {
             dirty = false;
-            let mut push = terminal.collect(talk.full);
+            let screen_first = talk.next == Next::Screen;
+            let mut push = terminal.collect(talk.next != Next::Delta, screen_first);
+            // After the screen the history is owed: it goes once this push
+            // is acknowledged.
+            let after = if screen_first { Next::Full } else { Next::Delta };
+            dirty |= screen_first;
             let body = push.encode();
             // Nothing new to say. Only a delta that scrolled nothing can be
             // dropped: any other has moved the mark, and the session must follow.
-            if push.scrolled == Some(0) && body == last { continue; }
+            if push.scrolled == Some(0) && body == last { talk.next = after; continue; }
             revision += 1;
             push.revision = revision;
             let bytes = push.encode();
@@ -434,7 +463,7 @@ pub fn run(shell: &str) -> Result<(), String> {
             while let Some(chunk) = chunks.next() {
                 sent &= send(&mut talk.stream, if chunks.peek().is_some() { kind::PART } else { kind::PUSH }, chunk);
             }
-            (talk.acked, talk.full) = (false, false);
+            (talk.acked, talk.next) = (false, after);
             if !sent { conversation = None; }
         }
     }

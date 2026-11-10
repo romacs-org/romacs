@@ -52,6 +52,46 @@ then belongs to this session alone."
                              (error-message-string err))
                     nil)))))
 
+(declare-function romacs-keeper-events "romacs-keeper")
+
+(defvar romacs-term-keep--watch nil
+  "The timer that looks for terminals whose helper process has died.")
+
+(defvar romacs-term-keep--dead nil
+  "Handles of terminals whose helper has ended, still to be let go.")
+
+(defun romacs-term-keep--release-dead ()
+  "Let go of every terminal whose helper process has ended.
+The keeper says when a helper ends.  Its shell may still be alive on the
+pty the keeper holds, with no emulator and no session that could show
+it: the handle is closed, which hangs the shell up, and the buffer
+keeps its last screen as a terminal that has exited.  A close that
+fails is tried again at the next call."
+  (when (romacs-keeper-attached-p)
+    (dolist (event (ignore-errors (romacs-keeper-events)))
+      (let ((row (cdr event)))
+        (when (and (eq (car event) 'status)
+                   (equal (plist-get row :kind) "terminal")
+                   (memq (car (plist-get row :status)) '(exited signaled)))
+          (dolist (buffer (buffer-list))
+            (when (eql (buffer-local-value 'romacs-term-handle buffer) (plist-get row :handle))
+              ;; No longer a terminal a restart could bring back.
+              (with-current-buffer buffer
+                (setq romacs-term-handle nil)
+                (kill-local-variable 'desktop-save-buffer))))
+          (push (plist-get row :handle) romacs-term-keep--dead))))
+    (when romacs-term-keep--dead
+      ;; Only a listing that succeeded says a handle is gone: a keeper
+      ;; that does not answer now is asked again at the next call.
+      (let ((listed (condition-case nil
+                        (cons t (mapcar (lambda (row) (plist-get row :handle)) (romacs-keeper-handles)))
+                      (error nil))))
+        (when listed
+          (dolist (handle romacs-term-keep--dead)
+            (when (or (not (memq handle (cdr listed)))
+                      (ignore-errors (romacs-keeper-close handle) t))
+              (setq romacs-term-keep--dead (delq handle romacs-term-keep--dead)))))))))
+
 ;;;###autoload
 (defun romacs-term-keep-open (shell directory)
   "Start SHELL in DIRECTORY as the current buffer's terminal; its session.
@@ -71,6 +111,8 @@ outlives this session; `romacs-term-handle' names it."
            (bound nil))
       (unwind-protect
           (prog1 (romacs--term-adopt handle)
+            (unless romacs-term-keep--watch
+              (setq romacs-term-keep--watch (run-with-timer 1 1 #'romacs-term-keep--release-dead)))
             (setq romacs-term-handle handle bound t)
             (setq-local desktop-save-buffer #'romacs-term--desktop-save))
         (unless bound (ignore-errors (romacs-keeper-close handle)))))))
@@ -93,12 +135,18 @@ outlives this session; `romacs-term-handle' names it."
     (insert (propertize (format "This terminal did not come back: %s.\n" why) 'face 'warning))
     (set-buffer-modified-p nil)))
 
+(defvar romacs-term-reattach-seconds nil
+  "How long each terminal took to come back, newest first: (BUFFER . SECONDS).")
+
 (defun romacs-term--reattach (misc)
   "Attach the current buffer to the terminal MISC names, if it still runs.
 The keeper must be the one that held it, and its helper process alive;
 else the buffer says what became of it.  A buffer that already has its
 terminal is left as it is."
-  (unless romacs-term-session (romacs-term--reattach-1 misc)))
+  (unless romacs-term-session
+    (let ((started (float-time)))
+      (romacs-term--reattach-1 misc)
+      (push (cons (buffer-name) (- (float-time) started)) romacs-term-reattach-seconds))))
 
 (defun romacs-term--reattach-1 (misc)
   "Do `romacs-term--reattach' for a buffer with no terminal yet."
@@ -113,6 +161,9 @@ terminal is left as it is."
      ((not keeper) (romacs-term--ended "the keeper that held it is gone"))
      ((not row) (romacs-term--ended "its keeper no longer holds it"))
      ((not (equal (plist-get row :status) '(running)))
+      ;; Its shell may still run on the pty the keeper holds, where
+      ;; nothing can reach it: letting the handle go hangs it up.
+      (ignore-errors (romacs-keeper-close handle))
       (romacs-term--ended (format "its helper process ended (%s)"
                                   (mapconcat (lambda (part) (format "%s" part)) (plist-get row :status) " "))))
      (t
@@ -122,6 +173,8 @@ terminal is left as it is."
               ;; Not shown in a window yet: its last size, until it is.
               (error (romacs--term-adopt handle (plist-get misc :columns) (plist-get misc :rows)))))
       (setq romacs-term-handle handle)
+      (unless romacs-term-keep--watch
+        (setq romacs-term-keep--watch (run-with-timer 1 1 #'romacs-term-keep--release-dead)))
       (setq-local desktop-save-buffer #'romacs-term--desktop-save)
       (romacs-term--bound)))))
 
@@ -209,6 +262,12 @@ for this session."
                (or (romacs-keeper-attached-p) (file-exists-p (romacs-keeper-socket)))
                (romacs-term--keeper))
       (dolist (row (romacs-keeper-handles))
+        ;; A helper that died while no session had it: its shell may live
+        ;; on the kept pty.  Nobody is told of it again, so it goes here.
+        (when (and (equal (plist-get row :kind) "terminal")
+                   (not (plist-get row :owner-alive))
+                   (memq (car (plist-get row :status)) '(exited signaled)))
+          (ignore-errors (romacs-keeper-close (plist-get row :handle))))
         (let ((name (decode-coding-string (plist-get row :metadata) 'utf-8)))
           (when (and (equal (plist-get row :kind) "terminal")
                      (not (plist-get row :owner-alive))

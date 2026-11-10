@@ -657,7 +657,7 @@ for this session." t)
 (add-hook 'after-init-hook #'romacs-term--adopt-at-startup)
 (with-eval-after-load 'desktop (add-to-list 'desktop-buffer-mode-handlers '(romacs-term-mode . romacs-term-desktop-restore)))
 (setq romacs-term-open-function #'romacs-term-keep-open)
-(register-definition-prefixes "romacs-term-keep" '("romacs-term--"))
+(register-definition-prefixes "romacs-term-keep" '("romacs-term-"))
 
 
 ;;; Generated autoloads from romacs-test.el
