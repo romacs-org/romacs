@@ -38,7 +38,9 @@
                                 (list "--socket" (romacs-agent--route session) "--reconnect"
                                       "--session" (romacs-agent-id session)
                                       "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
-                                ","))))
+                                ","))
+        ;; Codex's own limit on a call.
+        "-c" (format "mcp_servers.romacs.tool_timeout_sec=%d" (+ (truncate romacs-agent-reply-timeout) 15))))
 
 (defun romacs-agent--codex-argv (session _resume)
   "`codex app-server''s command line for SESSION: whether it goes on with

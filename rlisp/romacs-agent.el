@@ -114,10 +114,13 @@ no model named leaves the choice to the harness's configuration."
 session is restarted on it instead."
   :type 'number :group 'romacs-agent)
 
-(defcustom romacs-agent-reply-timeout 120
-  "Seconds a session's relay waits for a tool call's answer while the
-editor is busy before it withdraws the call (`not executed' when it had
-not started, `outcome unknown' when it had)."
+(defcustom romacs-agent-reply-timeout 3900
+  "Seconds a Romacs tool call may take: a session's relay waits that long
+for its answer before it withdraws the call (`not executed' when it had
+not started, `outcome unknown' when it had), and each harness gives the
+call 15 s more, so the relay's answer is the one.  65 minutes, as T3
+Code gives its own tools: a delegated task waited on, or a long
+evaluation, finishes.  A harness's relay takes it at its launch."
   :type 'number :group 'romacs-agent)
 
 (defcustom romacs-agent-unit-properties '("MemoryMax=8G")
@@ -1037,6 +1040,11 @@ itself, so the turn goes on whatever becomes of this server."
               (when (plist-get event :permission-mode)
                 (setf (romacs-agent-permission-mode session) (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
+    ;; A request: when the prompt cache it wrote expires, or unknown.
+    ('cache (setf (romacs-agent-driver-state session)
+                  (plist-put (romacs-agent-driver-state session) :cache-expires
+                             (and (plist-get event :ttl) (plist-get event :time)
+                                  (+ (plist-get event :time) (plist-get event :ttl))))))
     ;; What a fork was last forked from, folded from its journal.
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
@@ -1057,7 +1065,17 @@ itself, so the turn goes on whatever becomes of this server."
                   (cl-loop for (key value) on (plist-get event :state) by #'cddr
                            do (setq state (plist-put state key value)))
                   (setf (romacs-agent-driver-state session) state)))
-    ('input (setf (romacs-agent-state session) 'running
+    ;; Whether the turn is a compaction (/compact, or /compact INSTRUCTIONS);
+    ;; a steer into a running one leaves it so.
+    ('input (setf (romacs-agent-driver-state session)
+                  (plist-put (romacs-agent-driver-state session) :compact-turn
+                             (or (and (eq (romacs-agent-state session) 'running)
+                                      (plist-get (romacs-agent-driver-state session) :compact-turn))
+                                 (let ((case-fold-search t))
+                                   (and (string-match-p "\\`[ \t\n]*/compact\\(?:[ \t\n]\\|\\'\\)"
+                                                        (or (plist-get event :text) ""))
+                                        t)))))
+            (setf (romacs-agent-state session) 'running
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
             (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))

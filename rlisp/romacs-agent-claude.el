@@ -32,8 +32,12 @@ RESUME is non-nil."
                               "command" (romacs-agent--program "romacs-mcp")
                               "args" (vector "--socket" (romacs-agent--route session) "--reconnect"
                                              "--session" (romacs-agent-id session)
-                                             "--reply-timeout" (number-to-string romacs-agent-reply-timeout))))))
+                                             "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
+                              ;; Claude Code's own limit on a call, in ms: past
+                              ;; the relay's, so the relay's answer is the one.
+                              "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
     (append (romacs-agent--environment-words session)
+            (list (format "MCP_TOOL_TIMEOUT=%d" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))
             (list (plist-get instance :program) "-p" "--output-format" "stream-json"
                   "--input-format" "stream-json" "--verbose" "--include-partial-messages"
                   ;; Without it the stream carries thinking blocks with no text.
@@ -133,6 +137,16 @@ runs is that subagent's: no event."
                                       ("completed" 'completed) ("failed" 'failed) (_ 'stopped))
                              :summary (romacs-agent--value (gethash "summary" line)))))))))))
 
+(defun romacs-agent--claude-cache-ttl (usage)
+  "Seconds the prompt cache a request with USAGE wrote lives: an hour or
+five minutes, as it says; nil when it wrote none (served wholly from the
+cache, it reports none) or does not say."
+  (let ((made (and (hash-table-p usage) (gethash "cache_creation" usage))))
+    (when (hash-table-p made)
+      (cl-flet ((wrote (key) (let ((n (gethash key made))) (and (numberp n) (> n 0)))))
+        (cond ((wrote "ephemeral_1h_input_tokens") 3600)
+              ((wrote "ephemeral_5m_input_tokens") 300))))))
+
 (cl-defun romacs-agent--claude-events (session line)
   "The events of LINE, one of Claude Code's stream-json objects."
   (let ((type (gethash "type" line))
@@ -158,7 +172,9 @@ runs is that subagent's: no event."
          (pcase kind
            ("message_start"
             (setf (romacs-agent-message session) (gethash "id" (gethash "message" event)))
-            nil)
+            ;; A top-level request: how long the prompt cache it wrote lives.
+            (unless parent
+              (list (list :type 'cache :ttl (romacs-agent--claude-cache-ttl (gethash "usage" (gethash "message" event)))))))
            ("content_block_delta"
             (let* ((delta (gethash "delta" event)) (dtype (gethash "type" delta)))
               (puthash (romacs-agent-message session) t (romacs-agent-streamed session))

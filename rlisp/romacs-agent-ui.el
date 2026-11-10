@@ -1886,6 +1886,7 @@ only sessions whose chat is open."
 (require 'keymap-popup)
 (require 'romacs-agent-diff)
 (require 'romacs-agent-handoff)
+(require 'romacs-agent-idle)
 
 (defconst romacs-agent-ui--finished-workers 3
   "How many finished workers the actions menu keeps after the active ones.")
