@@ -75,7 +75,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("propagated_escape_hooked", Free), ("propagated_eval_depth", Free), ("propagate_next", Free),
     ("host_input", Free), ("layout_host", Free), ("display", Free), ("visual", Free), ("session_host", Free), ("idle_since", Free),
     ("redisplay_since_mark", Free), ("treesit_plain", Free), ("treesit_deferred", Free), ("treesit_parse_owed", Free),
-    ("quit", Free), ("force_quit_count", Free), ("quit_slots", Free),
+    ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
     // Interned symbols, which no collection frees, and indices.
     ("face_keys", Free),
     ("debug_event_slots", Free), ("keymap_generation", Free), ("process_jobs", Free), ("subprocesses", Free),
