@@ -227,6 +227,8 @@ runs is that subagent's: no event."
            (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
            (list (list :type 'approval :request-id (gethash "request_id" line)
                        :tool (gethash "tool_name" request) :input (gethash "input" request)
+                       ;; A question, or a plan to approve, is the user's alone.
+                       :user (and (member (gethash "tool_name" request) '("AskUserQuestion" "ExitPlanMode")) t)
                        :questions (and (equal (gethash "tool_name" request) "AskUserQuestion")
                                        (romacs-agent--claude-questions (gethash "input" request)))
                        :description (gethash "description" request))))))

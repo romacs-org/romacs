@@ -293,7 +293,9 @@ an approval or questions for the user, anything else refused."
   (cl-flet ((approval (tool input &optional questions)
               (let ((approval (romacs-agent--codex-approval-id session id)))
                 (puthash approval (list id method params) (romacs-agent-approvals session))
+                ;; A question is the user's alone to answer.
                 (list (list :type 'approval :request-id approval :tool tool :input input :questions questions
+                            :user (equal method "item/tool/requestUserInput")
                             :description (romacs-agent--value (gethash "reason" params))))))
             (refused (&optional why)
               (append (and why (list (list :type 'status :text why)))

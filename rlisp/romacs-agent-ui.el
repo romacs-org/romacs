@@ -610,6 +610,8 @@ or a repeat."
                                         (propertize "Session compacted" 'face 'romacs-agent-link 'mouse-face 'highlight))
                                 'keymap romacs-agent-ui--compaction-map 'help-echo "Show what the session kept"
                                 'romacs-agent-compaction (plist-get event :text)))
+        ;; A tool call the policy answers asks no one: its card shows it.
+        ((and 'approval (guard (romacs-agent--auto-p event))) nil)
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
@@ -620,7 +622,8 @@ or a repeat."
                                           (plist-get event :tool) (romacs-agent-ui--brief (plist-get event :input))
                                           (or (plist-get event :description) "")))
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
-        ('answered
+        ;; Under an approval shown: one the policy answered had none.
+        ((and 'answered (guard (gethash (plist-get event :request-id) (romacs-agent-ui--asks))))
          (romacs-agent-ui--line session event (format "  %s" (pcase (plist-get event :behavior)
                                                                ("allow" "✓ allowed") ("deny" "! denied") (_ "answered")))
                                 'face 'romacs-agent-dim))
@@ -1122,7 +1125,7 @@ harness's own transcript it was imported from, when it was."
           (romacs-agent-title-auto scratch) nil
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
           (romacs-agent-tools scratch) (make-hash-table :test #'equal)
-          (romacs-agent-approvals scratch) (make-hash-table :test #'equal)
+          (romacs-agent-approvals scratch) (make-hash-table :test #'equal) (romacs-agent-asks scratch) nil
           ;; Its replayed turn ends never send what waits for the live ones,
           ;; nor does its replayed startup write to the harness.
           (romacs-agent-queue scratch) nil (romacs-agent-queue-tail scratch) nil
