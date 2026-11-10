@@ -10,7 +10,7 @@ Run from the repository root. Build the pinned oracle once, then use `record.py`
 not direct `primh.py record` or `bulk.py record` calls:
 
 ```sh
-scripts/build-gnu-oracle.sh
+tools/build-gnu-oracle.sh
 H=crates/romacs-vm/tools/primh
 PIN=$(python3 -c 'import tomllib; print(tomllib.load(open("parity-reference.toml", "rb"))["mirror_commit"])')
 export ROMACS_GNU_ORACLE="${GNU_ORACLE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/gnu-emacs-pin}/$PIN/bin/emacs"

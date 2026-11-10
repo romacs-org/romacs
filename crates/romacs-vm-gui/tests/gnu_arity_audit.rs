@@ -1,7 +1,7 @@
 //! Every function Romacs defines under the name of a GNU DEFUN, native or
 //! Lisp, takes GNU's arguments: its `func-arity' in a batch session equals
 //! the DEFUN's MIN and MAX at the Lisp pin (tests/fixtures/gnu_defun_arity.json
-//! in romacs-vm, from tools/gnu_arity.py).
+//! in romacs-vm, from tools/lib/gnu_arity.py).
 use std::collections::BTreeMap;
 use std::process::Command;
 

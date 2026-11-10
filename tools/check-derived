@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Reject corrupt or stale derived artifacts before the expensive gate.
+
+Corruption is rejected without healing. Freshness checks run checked generators
+and leave valid regenerated output for review. Explicit recovery is available
+through tools/derived regenerate.
+"""
+import pathlib
+import subprocess
+import sys
+
+def main():
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
+    if not (root / '.git').exists():
+        sys.exit(f'check-derived: {root} is not a worktree')
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'lib'))
+    import derived_artifacts
+    try:
+        derived_artifacts.check(root)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f'check-derived: {exc}', file=sys.stderr)
+        return 1
+    tests = subprocess.run([sys.executable, '-B', 'tools/lib/python_tests.py', '--root', str(root)], cwd=root)
+    oracle = subprocess.run([sys.executable, 'tools/lib/lisp_oracle.py', 'check', '--root', str(root)], cwd=root)
+    import lisp_oracle
+    gnu_pin = subprocess.run([sys.executable, '-B', 'gnu-tests/run.py', 'verify-pin', '--gnu', lisp_oracle.GNU_SOURCE], cwd=root)
+    ratchet = subprocess.run([sys.executable, 'tools/lib/parity_ratchet.py', 'verify', '--candidate', '--root', str(root)], cwd=root)
+    arity = subprocess.run([sys.executable, 'tools/lib/gnu_arity.py', 'check', '--root', str(root)], cwd=root)
+    defvars = subprocess.run([sys.executable, '-B', 'tools/lib/gnu_defvars.py', 'check', '--root', str(root)], cwd=root)
+    icons = subprocess.run([sys.executable, '-B', 'tools/lib/icon_font.py', 'check', '--root', str(root)], cwd=root)
+    fonts = subprocess.run([sys.executable, '-B', 'tools/lib/bundled_fonts.py', 'check', '--root', str(root)], cwd=root)
+    grammars = subprocess.run([sys.executable, '-B', 'tools/lib/treesit_grammars.py', 'check', '--root', str(root)], cwd=root)
+    unsafe = subprocess.run([sys.executable, '-B', 'tools/lib/unsafe_census.py', 'check', '--root', str(root)], cwd=root)
+    smells = subprocess.run([sys.executable, '-B', 'tools/lib/smells.py', 'check', '--root', str(root)], cwd=root)
+    if tests.returncode or oracle.returncode or gnu_pin.returncode or ratchet.returncode or arity.returncode or defvars.returncode or icons.returncode or fonts.returncode or grammars.returncode or unsafe.returncode or smells.returncode:
+        return 1
+    print(f'check-derived: ok, {len(derived_artifacts.ARTIFACTS)} derived artifacts match their sources; '
+          'the Python unit tests pass; lisp/ and gnu-tests/test are the GNU pin less its declared exclusions; parity floors, GNU DEFUN arities and DEFVARs, the icon font, the bundled fonts, the bundled grammars\' sources, the unsafe floors and the smell floors verified')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

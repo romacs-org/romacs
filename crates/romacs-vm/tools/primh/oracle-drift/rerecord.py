@@ -6,7 +6,7 @@ when nothing but the oracle's identity changed.
     rerecord.py --stale [--jobs N]     every recording whose GNU header is not the pin
 
 The oracle is $ROMACS_GNU_ORACLE, refused unless it reports the pin
-(scripts/gnu_oracle.py). Each file is re-recorded IN PLACE by its own
+(tools/lib/gnu_oracle.py). Each file is re-recorded IN PLACE by its own
 recorder, unmodified:
 
   primh evidence    tools/primh/record.py primh SPEC   (spec bound by name AND spec_sha256)
@@ -35,7 +35,7 @@ from pathlib import Path
 
 PRIMH = Path(__file__).resolve().parent.parent
 REPO = PRIMH.parents[3]
-sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "tools/lib"))
 import gnu_oracle  # noqa: E402
 
 # The only fields a change of oracle may move.

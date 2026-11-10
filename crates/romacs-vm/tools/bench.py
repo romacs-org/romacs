@@ -23,7 +23,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 GNU = "/usr/bin/emacs"
-COUNTER = ROOT.parents[1] / "scripts/romacs_accept_counter.py"
+COUNTER = ROOT.parents[1] / "tools/lib/romacs_accept_counter.py"
 
 
 def load(path, name):

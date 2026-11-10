@@ -44,7 +44,7 @@ Romacs sessions run an installation's compiled Lisp: the store beside the
 binary is filled first, as an installer does (--no-compile-lisp reuses it).
 GNU runs -Q, with `save-place-mode' as Romacs's defaults have it, and
 tree-sitter modes (`treesit-enabled-modes' t, grammars
-from --grammars: `tools/treesit_grammars.py so --out DIR') or, for
+from --grammars: `tools/lib/treesit_grammars.py so --out DIR') or, for
 reference, its regex modes; Romacs runs its interactive defaults, whose
 tree-sitter modes are the shipped grammars'.
 
@@ -659,7 +659,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--romacs', required=True)
     parser.add_argument('--gnu', default=os.environ.get('ROMACS_GNU_ORACLE'))
-    parser.add_argument('--grammars', required=True, help='libtree-sitter-*.so for GNU (tools/treesit_grammars.py so)')
+    parser.add_argument('--grammars', required=True, help='libtree-sitter-*.so for GNU (tools/lib/treesit_grammars.py so)')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--engines', default='romacs,gnu-ts,gnu-regex')

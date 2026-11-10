@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Re-record GNU's answers for tests/gnutls.rs from the pinned oracle:
 #   ROMACS_GNU_ORACLE=/abs/path/to/emacs crates/romacs-vm/tests/fixtures/tls/regenerate.sh
-# The oracle must be the pin (scripts/gnu_oracle.py check). The session cases
+# The oracle must be the pin (tools/lib/gnu_oracle.py check). The session cases
 # and the capability shape are recorded to staging files, and merged into
 # gnu-answers.json, with the build that gave them, only if both tests pass.
 set -euo pipefail
 [ $# -eq 0 ] || { echo "regenerate.sh takes no arguments; set ROMACS_GNU_ORACLE" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../../.." && pwd)
-python3 -B "$root/scripts/gnu_oracle.py" check
+python3 -B "$root/tools/lib/gnu_oracle.py" check
 cd "$root"
 ROMACS_GNUTLS_RECORD=1 cargo test --profile gate --locked --offline -p romacs-vm --test gnutls -- \
   tls_sessions_match_pinned_gnu tls_capability_claims_sessions_only --test-threads 1

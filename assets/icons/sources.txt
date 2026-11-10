@@ -1,6 +1,6 @@
 # Each icon's upstream glyph: NAME, its Nerd Fonts glyph name and
 # codepoint, and the glyph set it comes from (assets/icons/LICENSE gives
-# each set's licence). scripts/import-icon-glyphs.py writes
+# each set's licence). tools/import-icon-glyphs writes
 # assets/icons/NAME.svg from Symbols Nerd Font Mono 3.4.0 (NFM.ttf as
 # nerd-icons.el ships it, revision 1e75075e, SHA-256
 # f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60).
@@ -64,4 +64,4 @@ database nf-md-database_outline U+F1632 md
 # romacs is Romacs's own: the red R of the Romacs mark
 # (crates/romacs-display-runtime/assets/window-icon.svg) without its blue
 # crescent, on the baseline at the text's cap height and made heavier by
-# scripts/make-romacs-icon.py; not imported from Nerd Fonts.
+# tools/make-romacs-icon; not imported from Nerd Fonts.

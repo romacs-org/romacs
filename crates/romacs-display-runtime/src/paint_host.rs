@@ -26,6 +26,10 @@ pub(crate) struct PaintDiagnostics {
     /// The adapter the window draws with: 0 not chosen yet, 1 a GPU, 2 a
     /// software rasterizer (wgpu's `DeviceType::Cpu`).
     adapter: std::sync::atomic::AtomicU8,
+    /// Called when a presentation newer than the latest sample is published: the
+    /// evaluator's wait wakes for it, where it would otherwise have to
+    /// poll for the sample.
+    wake: std::sync::OnceLock<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl PaintDiagnostics {
@@ -41,8 +45,16 @@ impl PaintDiagnostics {
     }
 
     pub(crate) fn publish(&self, diagnostic: PaintDiagnostic) {
-        *self.latest.lock().unwrap() = Some(diagnostic);
+        let newer = {
+            let mut latest = self.latest.lock().unwrap();
+            let newer = latest.is_none_or(|sample| sample.presentation < diagnostic.presentation);
+            *latest = Some(diagnostic);
+            newer
+        };
         self.changed.notify_all();
+        // Once per presentation: the frames the render thread draws again
+        // on its own (effects, video) retire nothing and wake no one.
+        if newer && let Some(wake) = self.wake.get() { wake(); }
     }
 
     /// The latest sample once PRESENTATION or a later one has rendered: the
@@ -73,6 +85,24 @@ impl PaintDiagnostics {
 mod diagnostic_tests {
     use super::*;
     use std::time::Duration;
+
+    /// The wake a waiter registered runs once for each newer presentation,
+    /// after its sample is stored, so a waiter woken by it finds the render
+    /// without polling; a frame the render thread draws again wakes no one.
+    #[test]
+    fn a_newer_presentation_rendered_wakes_its_waiter_once_with_the_sample_readable() {
+        let state = std::sync::Arc::new(PaintDiagnostics::default());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (reader, log) = (state.clone(), seen.clone());
+        let wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+            log.lock().unwrap().push(reader.wait(0, Duration::ZERO).map(|sample| sample.presentation));
+        });
+        assert!(state.wake.set(wake).is_ok());
+        for presentation in [1, 1, 2, 2, 2, 3] {
+            state.publish(PaintDiagnostic { presentation, unresolved_face_text_total: 0 });
+        }
+        assert_eq!(*seen.lock().unwrap(), vec![Ok(1), Ok(2), Ok(3)], "no wake for a presentation drawn again");
+    }
 
     #[test]
     fn diagnostic_preserves_nonzero_renderer_sample_and_identity() {
@@ -296,6 +326,19 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
+    /// Call WAKE, from the render thread, when a presentation newer than
+    /// any before it has rendered: a paint's completion then ends a wait
+    /// for input itself. One waiter per sender: a second registration
+    /// would leave its wait unwoken, and is refused.
+    ///
+    /// # Panics
+    ///
+    /// When a waiter is already registered on this sender.
+    pub fn on_render(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        let registered = self.diagnostics.wake.set(wake).is_ok();
+        assert!(registered, "one render waiter per paint sender");
+    }
+
     /// Whether the window draws on a software rasterizer: None until the
     /// render thread has chosen its adapter.
     pub fn software_adapter(&self) -> Option<bool> {

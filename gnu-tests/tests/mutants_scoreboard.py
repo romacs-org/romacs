@@ -121,8 +121,8 @@ def main(argv=None):
         (isolated / 'tests' / 'test_scoreboard.py').write_text(tests)
         (isolated / 'run.py').write_text(source)
         (isolated / 'ert_report.py').write_text((here.parent / 'ert_report.py').read_text())
-        (root / 'scripts').mkdir()
-        (root / 'scripts/gnu_oracle.py').write_text((checkout / 'scripts/gnu_oracle.py').read_text())
+        (root / 'tools/lib').mkdir(parents=True)
+        (root / 'tools/lib/gnu_oracle.py').write_text((checkout / 'tools/lib/gnu_oracle.py').read_text())
         command, baseline = execute(root)
         (evidence / 'cli-mutants-baseline.log').write_text(baseline.stdout)
         report['baseline'] = {'command': command, 'returncode': baseline.returncode}

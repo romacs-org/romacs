@@ -69,7 +69,7 @@ REFERENCE = ROOT / 'parity-reference.toml'
 EXTRACT = HERE / 'tools' / 'extract-forms.el'
 GNU_RUN = HERE / 'tools' / 'gnu-run.el'
 # GNU lisp/loadup.el order, loaded as far as it reaches (same list and rule as
-# the WARM census, scripts/lisp-census.py BOOTSTRAP_CHAIN; a test pins them).
+# the WARM census, tools/lisp-census BOOTSTRAP_CHAIN; a test pins them).
 BOOTSTRAP_CHAIN = ['emacs-lisp/debug-early', 'emacs-lisp/byte-run', 'emacs-lisp/backquote', 'subr',
                    'keymap', 'version', 'widget', 'custom', 'emacs-lisp/map-ynp', 'international/mule',
                    'international/mule-conf', 'env', 'format', 'bindings', 'window', 'files',
@@ -302,7 +302,7 @@ def normalize(name: str) -> str:
 # The exclusion ledger
 
 def divergence_rows() -> dict[str, dict]:
-    sys.path.insert(0, str(ROOT / 'tools'))
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     try:
         import divergence_index  # the one parser of the prose ledgers
     finally:
@@ -489,8 +489,8 @@ def baseline_path(rel: str) -> pathlib.Path:
 
 def pinned_oracle() -> dict:
     """The pinned GNU that may record baselines: $ROMACS_GNU_ORACLE, asked who
-    it is (scripts/gnu_oracle.py), and its digest equal to the pin's."""
-    sys.path.insert(0, str(ROOT / 'scripts'))
+    it is (tools/lib/gnu_oracle.py), and its digest equal to the pin's."""
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     try:
         ident = gnu_oracle.require()
@@ -1062,7 +1062,7 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
 
 
 def verify_real_lisp(pin):
-    command = [sys.executable, str(ROOT / 'tools' / 'lisp_oracle.py'), 'check',
+    command = [sys.executable, str(ROOT / 'tools/lib/lisp_oracle.py'), 'check',
                '--root', str(ROOT), '--gnu', str(GNU_MIRROR), '--pin', pin]
     try:
         result = subprocess.run(command, capture_output=True, text=True)
@@ -1075,7 +1075,7 @@ def verify_real_lisp(pin):
 def cmd_scoreboard(args) -> int:
     """Real ERT execution; no mini classification or stale baseline can bless it."""
     from ert_report import ReportError, parse_report, run_native
-    sys.path.insert(0, str(ROOT / 'scripts'))
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     p = verify_pin()
     verify_real_lisp(p['gnu_commit'])

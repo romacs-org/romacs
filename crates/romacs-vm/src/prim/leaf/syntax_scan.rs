@@ -14,12 +14,19 @@ enum Body<'a> {
     Unibyte(&'a crate::bytes::ByteBuffer),
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The syntax reads of every `View` on this thread, replayed or live.
+    static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The current buffer as `crate::syntax_scan::Text`.
 ///
 /// A rerun after a mid-scan Lisp call replays the syntax the stopped run
 /// read, in order, then reads live: GNU's one scan read those positions
 /// before the call, so their syntax is what it was then, even where the
-/// call changed `syntax-table' properties since.
+/// call changed `syntax-table' properties since. A parse records nothing:
+/// it goes on where it stopped instead.
 struct View<'a> {
     vm: &'a Vm,
     body: Body<'a>,
@@ -128,6 +135,8 @@ impl scan::Text for View<'_> {
         }
     }
     fn syntax(&self, at: Pos) -> i32 {
+        #[cfg(test)]
+        READS.with(|n| n.set(n.get() + 1));
         if !self.record {
             return self.live_syntax(at);
         }
@@ -177,7 +186,8 @@ pub(crate) enum Outcome {
     /// Call `internal--syntax-propertize' with the first position, then
     /// require `syntax-propertize--done' past the second.
     /// Both stops carry the scan's memory for its rerun: a vector of the
-    /// start's BEGV, ZV and point and the syntax read so far.
+    /// start's BEGV, ZV and point, then where a parse stopped, or the
+    /// syntax another scan read so far (`MEMORY_STATE').
     Propertize(i64, i64, Value),
     Ppss(i64, Value),
 }
@@ -193,9 +203,63 @@ struct Served {
 
 
 /// A scan's memory: the first run's BEGV, ZV and point, coerced FROM and
-/// TO, its variables as flags, its initial parse state (`state_memory'),
-/// then the syntax it read.
+/// TO, its variables as flags, its initial parse state (`state_memory`),
+/// then, for a parse, where it stopped (`suspended_memory`; nothing when it
+/// stopped before reading), else the syntax it read.
 const MEMORY_STATE: usize = 6;
+
+/// The index of ITEM in ALL, as a fixnum.
+fn label_code<T: PartialEq>(all: &[T], item: &T) -> Value {
+    let index = all.iter().position(|label| label == item).expect("a listed label");
+    Value::integer(i64::try_from(index).expect("label index")).expect("fixnum")
+}
+
+/// A stopped parse as fixnums: its label, its locals (positions as
+/// characters), its levels, its comment scan if it stopped in one, then its
+/// parse state (`state_memory`).
+fn suspended_memory(suspended: &scan::Suspended) -> Vec<Value> {
+    let fixnum = |n: i64| Value::integer(n).expect("fixnum");
+    let count = |n: usize| fixnum(i64::try_from(n).expect("count"));
+    let l = &suspended.locals;
+    let mut values = vec![label_code(&scan::At::ALL, &suspended.at)];
+    values.extend([l.from.char, l.prev_from.char, i64::from(l.prev_from_syntax), i64::from(l.prev_prev_from_syntax),
+        l.depth, l.mindepth, l.maxdepth, i64::from(l.in_symbol), l.symbol_prev, i64::from(l.spent)].map(fixnum));
+    values.push(count(l.levels.len()));
+    values.extend(l.levels.iter().flat_map(|level| [fixnum(level.last), fixnum(level.prev)]));
+    match &suspended.forw {
+        None => values.push(Value::NIL),
+        Some(f) => {
+            values.push(label_code(&scan::ForwAt::ALL, &f.at));
+            values.extend([f.from.char, f.nesting, i64::from(f.syntax), i64::from(f.code), i64::from(f.prev_syntax)].map(fixnum));
+        }
+    }
+    values.extend(state_memory(&suspended.state));
+    values
+}
+
+/// `suspended_memory` read back, POS giving a character's position.
+fn memory_suspended(values: &[Value], pos: impl Fn(i64) -> Pos) -> scan::Suspended {
+    let int = |i: usize| values[i].integer_value().expect("saved parse");
+    let syntax = |i: usize| i32::try_from(int(i)).expect("saved syntax");
+    let label = |i: usize| usize::try_from(int(i)).expect("saved label");
+    let levels = usize::try_from(int(11)).expect("saved levels");
+    let locals = scan::Locals {
+        from: pos(int(1)), prev_from: pos(int(2)), prev_from_syntax: syntax(3), prev_prev_from_syntax: syntax(4),
+        depth: int(5), mindepth: int(6), maxdepth: int(7), in_symbol: int(8) != 0, symbol_prev: int(9), spent: int(10) != 0,
+        levels: (0..levels).map(|k| scan::Level { last: int(12 + 2 * k), prev: int(13 + 2 * k) }).collect(),
+    };
+    let at = 12 + 2 * levels;
+    let (forw, state) = if values[at] == Value::NIL {
+        (None, at + 1)
+    } else {
+        let forw = scan::Forw {
+            at: scan::ForwAt::ALL[label(at)], from: pos(int(at + 1)), nesting: int(at + 2),
+            syntax: syntax(at + 3), code: syntax(at + 4), prev_syntax: syntax(at + 5),
+        };
+        (Some(forw), at + 6)
+    };
+    scan::Suspended { at: scan::At::ALL[label(0)], locals, state: memory_state(&values[state..]), forw }
+}
 
 /// A parse state as eleven fixnums, its open-paren count, then the list.
 fn state_memory(state: &ParseState) -> Vec<Value> {
@@ -431,42 +495,54 @@ impl Leaf<'_> {
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
         let mut view = View::new(self.vm, index, table, properties);
-        // Only a stop for Lisp reads the syntax a scan recorded.
-        view.record = properties || (options.comment_use_syntax_ppss && !matches!(op, Op::ParsePartialSexp));
+        // Only a stop for Lisp reads the syntax a scan recorded, and a
+        // stopped parse goes on where it stopped instead.
+        view.record = !matches!(op, Op::ParsePartialSexp) && (properties || options.comment_use_syntax_ppss);
         // A rerun scans from the first run's start, whatever the call did
         // to point or the restriction.
+        let mut suspended = None;
         let (begv, zv, point) = match &memory {
             None => (begv, zv, point),
             Some(memory) => {
-                let reads = MEMORY_STATE + 12 + int(memory[MEMORY_STATE + 11]) as usize;
-                view.replay = memory[reads..].iter().map(|&s| int(s) as i32).collect();
+                let tail = MEMORY_STATE + 12 + int(memory[MEMORY_STATE + 11]) as usize;
+                if matches!(op, Op::ParsePartialSexp) {
+                    if tail < memory.len() {
+                        suspended = Some(memory_suspended(&memory[tail..], |c| scan::Text::pos(&view, c)));
+                    }
+                } else {
+                    view.replay = memory[tail..].iter().map(|&s| int(s) as i32).collect();
+                }
                 let at = |i: usize| scan::Text::pos(&view, memory[i].integer_value().expect("saved position"));
                 (at(0), at(1), at(2))
             }
         };
         let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: cached, modiff };
-        let result = match op {
+        let result: std::result::Result<Result_, scan::Stopped> = match op {
             Op::ForwardComment => {
                 let count = args[0].integer_value().expect("checked");
-                scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found))
+                scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(Into::into)
             }
             Op::ScanLists | Op::ScanSexps => {
                 let int = |v: Value| v.integer_value().expect("checked");
                 let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
-                scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps)).map(Result_::Lists)
+                scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
+                    .map(Result_::Lists).map_err(Into::into)
             }
             Op::ParsePartialSexp => {
                 let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
-                let start = scan::Text::pos(&view, from);
-                scanner.scan_sexps_forward(&mut state, start, to, target, stopbefore, commentstop)
-                    .map(|()| Result_::Parse(state))
+                if let Some(suspended) = suspended {
+                    scanner.resume(suspended, to, target, stopbefore, commentstop).map(Result_::Parse)
+                } else {
+                    let start = scan::Text::pos(&view, from);
+                    scanner.parse(&mut state, start, to, target, stopbefore, commentstop).map(|()| Result_::Parse(state))
+                }
             }
-            Op::BackwardPrefixChars => scanner.backward_prefix_chars(point).map(Result_::Prefix),
+            Op::BackwardPrefixChars => scanner.backward_prefix_chars(point).map(Result_::Prefix).map_err(Into::into),
         };
         let written = scanner.defun_start.filter(|&cache| Some(cache) != cached);
         let read = view.read.take();
         drop(view);
-        let mut memory = |leaf: &mut Self| {
+        let memory = |leaf: &mut Self, suspended: Option<Box<scan::Suspended>>| {
             let fixnum = |n: i64| Value::integer(n).expect("fixnum");
             let (from, to, state) = match &parse {
                 Some((from, to, _, _, _, state)) => (fixnum(*from), fixnum(*to), state.clone()),
@@ -474,14 +550,19 @@ impl Leaf<'_> {
             };
             let mut values: Vec<Value> = vec![fixnum(begv.char), fixnum(zv.char), fixnum(point.char), from, to, fixnum(flags)];
             values.extend(state_memory(&state));
-            values.extend(read.iter().map(|&s| fixnum(i64::from(s))));
+            match suspended {
+                Some(suspended) => values.extend(suspended_memory(&suspended)),
+                None => values.extend(read.iter().map(|&s| fixnum(i64::from(s)))),
+            }
             leaf.vector(&values)
         };
         let result = match result {
             Ok(result) => result,
-            Err(Halt::ScanError(message, a, b)) => return Err(self.scan_error(message, a, b)),
-            Err(Halt::Propertize(arg, charpos)) => return Ok(Outcome::Propertize(arg, charpos, memory(self))),
-            Err(Halt::Ppss(pos)) => return Ok(Outcome::Ppss(pos, memory(self))),
+            Err(scan::Stopped { halt: Halt::ScanError(message, a, b), .. }) => return Err(self.scan_error(message, a, b)),
+            Err(scan::Stopped { halt: Halt::Propertize(arg, charpos), suspended }) => {
+                return Ok(Outcome::Propertize(arg, charpos, memory(self, suspended)));
+            }
+            Err(scan::Stopped { halt: Halt::Ppss(pos), suspended }) => return Ok(Outcome::Ppss(pos, memory(self, suspended))),
         };
         if let Some(cache) = written {
             self.vm.defun_start_epoch += 1;
@@ -666,5 +747,35 @@ impl Leaf<'_> {
     fn syntax_character(&self, v: Value) -> std::result::Result<u32, Fault> {
         v.integer_value().filter(|c| (0..=i64::from(crate::lstring::MAX_CHAR)).contains(c))
             .map(|c| c as u32).ok_or(Fault::Wrong("characterp", v))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Vm;
+
+    /// A parse that stops for `internal--syntax-propertize` at every chunk
+    /// reads each character once, as GNU's one scan does, however many
+    /// stops it makes: a stop resumes the scan rather than restarting it.
+    #[test]
+    fn a_propertized_parse_reads_each_character_once() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        let span: usize = 400_000;
+        let source = format!(
+            "(with-temp-buffer
+               (dotimes (_ {lines}) (insert \"(defun f (a) \\\"doc (\\\" (list a ?\\\\( 'b)) ; c\\n\"))
+               (set (make-local-variable 'parse-sexp-lookup-properties) t)
+               (fset 'internal--syntax-propertize
+                     (lambda (pos) (setq syntax-propertize--done (min (point-max) (+ pos 2000)))))
+               (setq syntax-propertize--done 1)
+               (parse-partial-sexp (point-min) (point-max))
+               (- (point-max) (point-min)))",
+            lines = span / 45);
+        let before = super::READS.with(std::cell::Cell::get);
+        let chars = vm.eval_source_raw(&source).unwrap().integer_value().unwrap();
+        let reads = super::READS.with(std::cell::Cell::get) - before;
+        assert!(chars > 350_000, "{chars}");
+        assert!(reads <= 2 * usize::try_from(chars).unwrap(), "{reads} syntax reads for {chars} characters");
     }
 }

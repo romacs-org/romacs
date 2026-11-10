@@ -36,6 +36,10 @@ it, and writes each probe's top inclusive symbols beside the report (as
 PROBE.callgraph.txt).  Whole stacks need frame pointers: measure a build
 made with RUSTFLAGS='-C force-frame-pointers=yes'.
 
+A batch session is bounded by --timeout seconds of CPU (RLIMIT_CPU), which
+a loaded host does not use up the way it stretches wall time; the wall
+clock, at ten times that, only ends a session that waits without working.
+
 Writes OUTPUT/report.json (status PASS or FAIL) and OUTPUT/table.md, and
 prints the table.
 
@@ -50,6 +54,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -59,6 +64,8 @@ PROBES = HERE / 'scaling' / 'probes.el'
 MIN_WORK = 1_000_000
 STACK_SLACK = 64 * 1024
 DEFAULT_BUDGET = 1.25
+# A session that spends no CPU for this many times its CPU bound is hung.
+WALL_FACTOR = 10
 
 
 class Refused(Exception):
@@ -180,13 +187,27 @@ def private_env(home, extra=None):
     return {**env, **(extra or {})}
 
 
+def bounded(what, argv, timeout, **kwargs):
+    """ARGV run to its end within TIMEOUT seconds of CPU, its output captured;
+    a session that waits without working ends at WALL_FACTOR times that."""
+    cpu = max(1, math.ceil(timeout))
+    # prlimit, not a preexec_fn: callers run this from a thread pool.
+    try:
+        done = subprocess.run(['prlimit', f'--cpu={cpu}:{cpu + 1}', '--', *argv], capture_output=True, text=True,
+                              timeout=timeout * WALL_FACTOR, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise Refused(f'{what}: no end after {timeout * WALL_FACTOR:.0f}s, within {cpu}s of CPU: hung') from None
+    if done.returncode == -signal.SIGXCPU:
+        raise Refused(f'{what}: used its {cpu}s of CPU')
+    if done.returncode == -signal.SIGKILL:
+        raise Refused(f'{what}: killed (SIGKILL) under a CPU limit of {cpu}s, hard {cpu + 1}s')
+    return done
+
+
 def batch(binary, home, form, timeout, prefix=(), env=None):
     """Run FORM after loading the probes in a batch session; its SCALING lines."""
     argv = [*prefix, str(binary), '-Q', '--batch', '-l', str(PROBES), '--eval', form]
-    try:
-        done = subprocess.run(argv, env=private_env(home, env), cwd=home, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise Refused(f'{form}: timed out after {timeout}s') from None
+    done = bounded(form, argv, timeout, env=private_env(home, env), cwd=home)
     lines = scaling_lines(done.stdout)
     if done.returncode != 0 or not lines:
         raise Refused(f'{form}: exit {done.returncode}: {done.stderr.strip()[-600:]}')
@@ -197,10 +218,9 @@ def prepare(binary, home, timeout):
     """Build the GUI and batch worlds in HOME, as a first session does."""
     for sub in ('config', 'cache', 'data', 'state', 'tmp'):
         (home / sub).mkdir(parents=True, exist_ok=True)
-    built = subprocess.run([str(binary), '--loadup', '--world-build'], env=private_env(home), cwd=home,
-                           capture_output=True, text=True, timeout=timeout)
+    built = bounded('--world-build', [str(binary), '--loadup', '--world-build'], timeout, env=private_env(home), cwd=home)
     if built.returncode != 0:
-        raise Refused(f'--world-build: {built.stderr.strip()[-600:]}')
+        raise Refused(f'--world-build: exit {built.returncode}: {built.stderr.strip()[-600:]}')
     probes = [probe_entry(raw) for raw in batch(binary, home, '(scaling-list)', timeout)]
     store = home / 'cache' / 'romacs' / 'worlds'
     deadline = time.monotonic() + timeout
@@ -328,7 +348,7 @@ def main():
     parser.add_argument('--mode', choices=('all', 'batch', 'gui'), default='all')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--record', action='store_true')
-    parser.add_argument('--timeout', type=float, default=300)
+    parser.add_argument('--timeout', type=float, default=300, help='CPU seconds per batch session')
     args = parser.parse_args()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)

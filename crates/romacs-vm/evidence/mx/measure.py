@@ -5,6 +5,7 @@ from pathlib import Path as _PortablePath
 import argparse
 import concurrent.futures
 import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -21,7 +22,8 @@ OUT = args.output.resolve()
 if OUT.is_relative_to(ROOT):
     parser.error('--output must be outside the source repository')
 OUT.mkdir(parents=True, exist_ok=True)
-spec = importlib.util.spec_from_file_location('census', ROOT / 'scripts/lisp-census.py')
+spec = importlib.util.spec_from_file_location('census', ROOT / 'tools/lisp-census',
+                                              loader=importlib.machinery.SourceFileLoader('census', str(ROOT / 'tools/lisp-census')))
 assert spec is not None and spec.loader is not None
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)

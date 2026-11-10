@@ -3,7 +3,7 @@
 and active/inactive mode lines across C-x o / C-x 2 / C-x 1.
 
 Same harness discipline as evidence/usable/live/run.py: launches the
-command (scripts/romacs) on $ROMACS_LIVE_WORKSPACE of $ROMACS_LIVE_MONITOR without stealing
+command (tools/romacs) on $ROMACS_LIVE_WORKSPACE of $ROMACS_LIVE_MONITOR without stealing
 the workspace, drives it with real Wayland key events (wtype), captures
 compositor pixels (grim) plus the GUI's own painted-glyph dump (--trace-scene),
 returns focus to the user's window and terminates the GUI.
@@ -55,7 +55,7 @@ original = active()['address']
 before = {c['pid'] for c in clients()}
 # A lane target dir, so the walk never replaces an installed binary.
 target = os.environ.get('ROMACS_TARGET_DIR', str(ROOT / 'target'))
-cmd = __import__('shlex').join(['env', f'HOME={out}/home', f'ROMACS_TARGET_DIR={target}', f'XDG_STATE_HOME={out}/state', str(ROOT / 'scripts/romacs'), '--trace-scene'])
+cmd = __import__('shlex').join(['env', f'HOME={out}/home', f'ROMACS_TARGET_DIR={target}', f'XDG_STATE_HOME={out}/state', str(ROOT / 'tools/romacs'), '--trace-scene'])
 hy('eval', f'hl.exec_cmd({json.dumps(cmd)}, {{workspace="{WORKSPACE} silent"}})')
 records, failures, pid, addr = [], [], None, None
 

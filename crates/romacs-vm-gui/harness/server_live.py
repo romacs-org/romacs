@@ -120,7 +120,7 @@ class Server:
     def client(self, *argv, timeout=120, check=True):
         """Run `romacs --server NAME ARGV'; (seconds, stdout)."""
         started = time.time()
-        # No launch mode: the launcher's default (scripts/romacs) gives none.
+        # No launch mode: the launcher's default (tools/romacs) gives none.
         done = subprocess.run([self.args.romacs, '--server', self.name, *argv], env=self.env,
                               cwd=self.root / 'work', capture_output=True, text=True, timeout=timeout)
         if check and done.returncode != 0:

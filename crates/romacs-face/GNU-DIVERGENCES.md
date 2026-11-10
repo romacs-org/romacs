@@ -1,7 +1,7 @@
 # romacs-face: deliberate differences from GNU Emacs
 
 Reference: GNU Emacs 32.0.50 built at the pin 45b0f7699df (`$ROMACS_GNU_ORACLE -Q --batch`,
-checked by `scripts/gnu_oracle.py`), throwaway HOME. Fixtures before R228 came from
+checked by `tools/lib/gnu_oracle.py`), throwaway HOME. Fixtures before R228 came from
 `/usr/bin/emacs` at b28750b822d; regenerating at the pin changed only `separator-line`.
 This crate is not wired to redisplay yet. These are the contracts for wiring,
 not claims about the running editor. R90 removes Custom's machinery, not the

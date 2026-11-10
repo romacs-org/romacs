@@ -153,11 +153,13 @@ impl Presentation {
     /// the latency trace's keys for it are complete.
     pub fn take_retired(&mut self) -> Option<(u64, Instant)> { self.retired.take() }
 
-    /// How long to block for input: briefly while a paint is in flight, whose
-    /// completion nothing signals, and less often once it stalled (a hidden
-    /// window may stay undrawn for hours); otherwise until input or a wake.
+    /// How long to block for input while a paint is in flight: until it
+    /// would count as stalled, so the stall is told when it begins. The
+    /// paint's completion wakes the wait itself (`PaintSender::on_render`),
+    /// so nothing polls for it; None otherwise, and once stalled (a hidden
+    /// window may stay undrawn for hours): until input or a wake.
     pub fn wait(&self, stall: Duration) -> Option<Duration> {
-        self.in_flight.map(|_| Duration::from_millis(if self.stalled(stall) { 50 } else { 1 }))
+        self.in_flight.and_then(|(_, since)| stall.checked_sub(since.elapsed())).filter(|left| !left.is_zero())
     }
 }
 
@@ -327,13 +329,13 @@ mod tests {
         let mut presentation = Presentation::new();
         presentation.submitted(7, Instant::now());
         assert!(!presentation.stalled(stall) && presentation.stall_warning(stall).is_none());
-        assert_eq!(presentation.wait(stall), Some(Duration::from_millis(1)));
+        assert!(presentation.wait(stall).is_some_and(|left| left > Duration::from_millis(1) && left <= stall), "waits for the stall, not a poll");
         std::thread::sleep(stall);
         for _ in 0..3 { presentation.changed(); }
         assert!(presentation.stalled(stall) && !presentation.ready(), "commands coalesce while undrawn");
         assert_eq!(presentation.stall_warning(stall).map(|(p, _)| p), Some(7));
         assert_eq!(presentation.stall_warning(stall), None, "one warning per stall");
-        assert_eq!(presentation.wait(stall), Some(Duration::from_millis(50)), "no 1 ms spin while hidden");
+        assert_eq!(presentation.wait(stall), None, "nothing polls while hidden: the render wakes the wait");
         presentation.completed(7, Instant::now());
         assert!(presentation.ready(), "the frame drawn on showing releases the newest");
         presentation.submitted(8, Instant::now());

@@ -87,6 +87,29 @@ fn run(binary: &str, dir: &Path, args: &[String], world: bool) -> (Option<i32>, 
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
 
+/// An init file named with `--init-file` that does not exist is an error
+/// naming it, never a session that silently runs without it.
+#[test]
+fn a_missing_explicit_init_file_is_an_error() {
+    use std::io::Write;
+    let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("romacs-batch-missing-init-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing-init.el");
+    let mut child = Command::new(romacs)
+        .arg("--batch").arg(root.join("rlisp")).arg("--init-file").arg(&missing)
+        .env("HOME", &dir).env("XDG_CONFIG_HOME", &dir).env("ROMACS_LISP_DIR", root.join("gnu-lisp"))
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+        .spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"(boundp 'user-init-file)").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{}{stderr}", String::from_utf8_lossy(&output.stdout));
+    assert!(stderr.contains(&missing.display().to_string()), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// A batch program's settings stay out of an init, as a session's do
 /// (rlisp/romacs-saved-settings.el, in the chain): `disable-command' creates no
 /// ~/.emacs, and with an init named, both writers save beside it.

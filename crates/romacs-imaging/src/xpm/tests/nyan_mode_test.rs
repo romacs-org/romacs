@@ -2,7 +2,7 @@
 //!
 //! `nyan.xpm` is TeMPOraL/nyan-mode's, so a copy in this tree would be a fork
 //! of it: `romacs-test-fonts`' fixtures.json pins its URL and SHA-256, and
-//! scripts/fetch-test-fixtures fetches it into the test cache. The report's claim was that
+//! tools/fetch-test-fixtures fetches it into the test cache. The report's claim was that
 //! "gray details turn black" in this file, and its palette is where the
 //! ladder lives -- fourteen `grayNN` names, nine of which the pixel data paints.
 
