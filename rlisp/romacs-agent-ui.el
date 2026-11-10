@@ -1125,7 +1125,7 @@ harness's own transcript it was imported from, when it was."
           (romacs-agent-title-auto scratch) nil
           (romacs-agent-streamed scratch) (make-hash-table :test #'equal)
           (romacs-agent-tools scratch) (make-hash-table :test #'equal)
-          (romacs-agent-approvals scratch) (make-hash-table :test #'equal) (romacs-agent-asks scratch) nil
+          (romacs-agent-approvals scratch) (make-hash-table :test #'equal)
           ;; Its replayed turn ends never send what waits for the live ones,
           ;; nor does its replayed startup write to the harness.
           (romacs-agent-queue scratch) nil (romacs-agent-queue-tail scratch) nil

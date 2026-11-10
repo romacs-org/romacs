@@ -136,33 +136,6 @@ approve) always comes to the user."
   :type '(choice (const :tag "Allow every tool call" allow) (const :tag "Ask" ask))
   :group 'romacs-agent)
 
-(defun romacs-agent--auto-p (event)
-  "Whether approval EVENT is Romacs's to answer: a tool call, under the
-`allow' policy; never what only the user can answer (:user)."
-  (and (eq romacs-agent-approval-policy 'allow) (not (plist-get event :user))))
-
-(defun romacs-agent--live-p (session)
-  "Whether SESSION's records are its live ones: the registered session,
-its replay over.  A copy drawn again, or a replay, answers nothing."
-  (and (eq (romacs-agent-get (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
-
-(defun romacs-agent--allow (session id)
-  "Allow SESSION's tool call ID, if it still waits, is no question of the
-user's, and the `allow' policy holds."
-  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session)
-             (gethash id (romacs-agent-approvals session)) (not (member id (romacs-agent-asks session))))
-    (condition-case err (romacs-agent-respond session id t)
-      (error (message "Romacs could not allow %s: %s" id (error-message-string err))))))
-
-(defun romacs-agent--allow-tool-calls (session)
-  "Allow every tool call SESSION's harness waits on, under the `allow'
-policy, when its records are the live ones: what came while no editor was
-attached, or an answer lost with its connection, is answered on catching
-up."
-  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session))
-    (dolist (id (hash-table-keys (romacs-agent-approvals session)))
-      (romacs-agent--allow session id))))
-
 (defvar romacs-agent-input-functions nil
   "Functions called with a session and a request id once a user's message
 is written to its harness: before the harness has acted on it, whenever
@@ -220,13 +193,46 @@ the id as :request.")
   compacting
   ;; What runs under it, for its views: its harness's own subagents by tool
   ;; id, then those and its delegated tasks as rows and as a line.
-  subagents children-rows children-summary
-  ;; The approvals waiting that only the user can answer (questions, a
-  ;; plan), by request id: the rest the `allow' policy answers.
-  asks)
+  subagents children-rows children-summary)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
+
+(defun romacs-agent-asks (session)
+  "The approvals SESSION's run waits on that only the user can answer
+\(questions, a plan), by request id: the rest the `allow' policy answers.
+Its run's, kept in the driver's state."
+  (plist-get (romacs-agent-driver-state session) :asks))
+
+(defun romacs-agent--set-asks (session asks)
+  (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :asks asks)))
+
+(defun romacs-agent--auto-p (event)
+  "Whether approval EVENT is Romacs's to answer: a tool call, under the
+`allow' policy; never what only the user can answer (:user)."
+  (and (eq romacs-agent-approval-policy 'allow) (not (plist-get event :user))))
+
+(defun romacs-agent--live-p (session)
+  "Whether SESSION's records are its live ones: the registered session,
+its replay over.  A copy drawn again, or a replay, answers nothing."
+  (and (eq (romacs-agent-get (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
+
+(defun romacs-agent--allow (session id)
+  "Allow SESSION's tool call ID, if it still waits, is no question of the
+user's, and the `allow' policy holds."
+  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session)
+             (gethash id (romacs-agent-approvals session)) (not (member id (romacs-agent-asks session))))
+    (condition-case err (romacs-agent-respond session id t)
+      (error (message "Romacs could not allow %s: %s" id (error-message-string err))))))
+
+(defun romacs-agent--allow-tool-calls (session)
+  "Allow every tool call SESSION's harness waits on, under the `allow'
+policy, when its records are the live ones: what came while no editor was
+attached, or an answer lost with its connection, is answered on catching
+up."
+  (when (and (eq romacs-agent-approval-policy 'allow) (romacs-agent--live-p session))
+    (dolist (id (hash-table-keys (romacs-agent-approvals session)))
+      (romacs-agent--allow session id))))
 
 ;;; Places
 
@@ -1052,13 +1058,14 @@ itself, so the turn goes on whatever becomes of this server."
     ('approval (if (romacs-agent--auto-p event)
                    (when (romacs-agent--live-p session)
                      (run-at-time 0 nil #'romacs-agent--allow session (plist-get event :request-id)))
-                 (push (plist-get event :request-id) (romacs-agent-asks session))
+                 (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
                  (setf (romacs-agent-state session) 'waiting-approval)))
-    ('answered (setf (romacs-agent-asks session) (remove (plist-get event :request-id) (romacs-agent-asks session))
-                     ;; Still waiting on the user while one of theirs waits.
-                     (romacs-agent-state session) (if (romacs-agent-asks session) 'waiting-approval 'running)))
+    ('answered (romacs-agent--set-asks session (remove (plist-get event :request-id) (romacs-agent-asks session)))
+               ;; Still waiting on the user while one of theirs waits.
+               (setf (romacs-agent-state session) (if (romacs-agent-asks session) 'waiting-approval 'running)))
     ;; A turn's end: what it asked the user is moot.
-    ('done (setf (romacs-agent-state session) 'idle (romacs-agent-asks session) nil
+    ('done (romacs-agent--set-asks session nil)
+           (setf (romacs-agent-state session) 'idle
                  (romacs-agent-reply session) (plist-get event :text)
                  (romacs-agent-failed session) (plist-get event :error))
            (cl-incf (romacs-agent-turns session))
@@ -1083,7 +1090,6 @@ itself, so the turn goes on whatever becomes of this server."
      ;; harness asked is no longer anyone's to answer.
      (setf (romacs-agent-driver-state session) nil (romacs-agent-startup-pending session) nil)
      (clrhash (romacs-agent-approvals session))
-     (setf (romacs-agent-asks session) nil)
      ;; Ended with its last prompt's turn never done: cut, however many
      ;; runs (a resumed one journals no prompt) it took.
      (setf (romacs-agent-interrupted session)
