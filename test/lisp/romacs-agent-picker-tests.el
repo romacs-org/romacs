@@ -81,41 +81,35 @@
       (set-file-times program (time-add (current-time) 100))
       (should (equal (mapcar #'car (romacs-agent--models instance)) '("a" "b"))))))
 
-(ert-deftest romacs-agent-picker-refresh-asks-once ()
+(ert-deftest romacs-agent-picker-the-run-s-initialize-brings-the-models ()
   (romacs-agent-picker--with
-      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
-       (romacs-agent-providers `(("claude" :program ,program)))
-       (written nil))
-    (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_session object &optional _journal) (push object written))))
-      (romacs-agent--refresh-models session)
-      (should (equal (gethash "subtype" (gethash "request" (car written))) "initialize"))
-      (let* ((id (gethash "request_id" (car written)))
-             (response (lambda (request-id body)
-                         (romacs-mcp--object "type" "control_response"
-                                             "response" (romacs-mcp--object "subtype" "success" "request_id" request-id
-                                                                            "response" body))))
-             (answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
-        ;; Another's answer, as on a replay, is nothing to keep.
-        (romacs-agent--claude-events session (funcall response "other" answer))
-        (should-not (file-exists-p (romacs-agent--models-file "claude")))
-        (romacs-agent--claude-events session (funcall response id answer))
-        (should (assoc "model-x" (romacs-agent--models (romacs-agent--configured "claude"))))
-        (should-not (romacs-agent-models-request session))
-        ;; Kept: the next session does not ask.
-        (setq written nil)
-        (romacs-agent--refresh-models session)
-        (should-not written)))))
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
+                                    :driver-state (list :initialize "romacs-init-1")))
+       (romacs-agent-providers `(("claude" :program ,program))))
+    (let* ((response (lambda (request-id body)
+                       (romacs-mcp--object "type" "control_response"
+                                           "response" (romacs-mcp--object "subtype" "success" "request_id" request-id
+                                                                          "response" body))))
+           (answer (romacs-agent-picker--answer (romacs-agent-picker--model "x" "model-x" "X" '("low")))))
+      ;; Another's answer is nothing to keep.
+      (should-not (romacs-agent--claude-events session (funcall response "other" answer)))
+      (should-not (file-exists-p (romacs-agent--models-file "claude")))
+      ;; The run's own: its models kept, and the run is initialized.
+      (should (equal (romacs-agent--claude-events session (funcall response "romacs-init-1" answer))
+                     '((:type handshake :state (:initialized t)))))
+      (should (assoc "model-x" (romacs-agent--models (romacs-agent--configured "claude")))))))
 
 (ert-deftest romacs-agent-picker-refused-answer-keeps-nothing ()
   (romacs-agent-picker--with
       ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"
-                                    :models-request "r"))
+                                    :driver-state (list :initialize "r")))
        (romacs-agent-providers `(("claude" :program ,program))))
-    (romacs-agent--claude-events
-     session (romacs-mcp--object "type" "control_response"
-                                 "response" (romacs-mcp--object "subtype" "error" "request_id" "r" "error" "no")))
-    (should-not (file-exists-p (romacs-agent--models-file "claude")))
-    (should-not (romacs-agent-models-request session))))
+    ;; Refused, it keeps nothing, yet the run goes on: messages are not held.
+    (should (equal (romacs-agent--claude-events
+                    session (romacs-mcp--object "type" "control_response"
+                                                "response" (romacs-mcp--object "subtype" "error" "request_id" "r" "error" "no")))
+                   '((:type handshake :state (:initialized t)))))
+    (should-not (file-exists-p (romacs-agent--models-file "claude")))))
 
 (ert-deftest romacs-agent-picker-rows ()
   (romacs-agent-picker--with

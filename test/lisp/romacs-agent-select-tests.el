@@ -21,7 +21,7 @@
   "BODY with `session', of FIELDS, recorded in a private directory."
   (declare (indent 1))
   `(let* ((dir (make-temp-file "romacs-select-" t))
-          (session (romacs-agent--make ,@fields :id "s" :harness 'claude :provider "claude" :dir dir
+          (session (romacs-agent--make ,@fields :driver-state (list :initialized t :ready t) :id "s" :harness 'claude :provider "claude" :dir dir
                                        :host-socket (expand-file-name "none.sock" dir))))
      (unwind-protect
          (progn (romacs-agent--manifest session nil) ,@body)

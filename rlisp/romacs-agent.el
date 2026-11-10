@@ -995,7 +995,10 @@ itself, so the turn goes on whatever becomes of this server."
                   (when model (setf (romacs-agent-model session) model))))
     ;; A run starts (the supervisor's first record): its startup is its own,
     ;; and the record's seq names the run.
-    ('run (setf (romacs-agent-driver-state session) (list :run (plist-get event :seq))
+    ;; A run starts on its driver as defined now: one loaded since speaks
+    ;; to the next run, never to the one going on.
+    ('run (setf (romacs-agent-driver session) nil
+                (romacs-agent-driver-state session) (list :run (plist-get event :seq))
                 (romacs-agent-startup-pending session) nil))
     ('handshake (let ((state (romacs-agent-driver-state session)))
                   (cl-loop for (key value) on (plist-get event :state) by #'cddr
@@ -1144,10 +1147,15 @@ other; empty for none."
           (when (romacs-agent-caught-up session) (romacs-agent--step session)))))))
 
 (defun romacs-agent--step-id (object)
-  "What names a startup line written, to know its echo by: its request id
-\=(JSON-RPC's \"id\"); t for one with none, whose echo is the next line
+  "What names a driver line written, to know its echo by: its request id
+\=(JSON-RPC's \"id\", a control message's \"request_id\", or that of the
+response it carries); t for one with none, whose echo is the next line
 journaled."
-  (or (and (hash-table-p object) (gethash "id" object)) t))
+  (or (and (hash-table-p object)
+           (or (gethash "id" object) (gethash "request_id" object)
+               (let ((response (gethash "response" object)))
+                 (and (hash-table-p response) (gethash "request_id" response)))))
+      t))
 
 (defun romacs-agent--ready-p (session)
   "Whether SESSION's harness takes messages: started up, when its driver
