@@ -34,13 +34,13 @@ pub fn new_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
 /// nothing moves them. Other drivers do not read the variable.
 ///
 /// A value that already says `nosam` or `sam` is the user's choice and
-/// stands; options are separated by commas or spaces, as Mesa's
+/// stands; options are separated by commas, spaces or newlines, as Mesa's
 /// `parse_debug_string` reads them. The driver reads the variable when an
 /// instance is made, so the caller sets it before the first one.
 #[must_use]
 pub fn radv_perftest(current: Option<&str>) -> Option<String> {
     let current = current.unwrap_or_default();
-    let mut options = current.split([',', ' ']).filter(|option| !option.is_empty());
+    let mut options = current.split([',', ' ', '\n']).filter(|option| !option.is_empty());
     if options.clone().any(|option| matches!(option, "nosam" | "sam")) {
         return None;
     }
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(radv_perftest(Some("")).as_deref(), Some("nosam"));
         assert_eq!(radv_perftest(Some("gpl, nocache")).as_deref(), Some("gpl, nocache,nosam"), "the user's other options stand as written");
         assert_eq!(radv_perftest(Some(" , ")).as_deref(), Some("nosam"));
-        for chosen in ["nosam", "sam", "gpl,sam", "nosam,gpl", "sam pswave32,cswave32", "gpl nosam"] {
+        for chosen in ["nosam", "sam", "gpl,sam", "nosam,gpl", "sam pswave32,cswave32", "gpl nosam", "sam\npswave32", "gpl\nnosam"] {
             assert_eq!(radv_perftest(Some(chosen)), None, "{chosen}");
         }
         assert_eq!(radv_perftest(Some("nosamples")).as_deref(), Some("nosamples,nosam"), "an option is its whole name");
