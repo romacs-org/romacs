@@ -582,6 +582,12 @@ fn use_collector_threads() {
 }
 
 fn main() {
+    // The Vulkan driver reads it when the display makes its instance.
+    if let Some(perftest) = romacs_renderer_wgpu::gpu_policy::radv_perftest(std::env::var("RADV_PERFTEST").ok().as_deref()) {
+        // SAFETY: main's first statement: no other thread exists yet to
+        // read or write the environment.
+        unsafe { std::env::set_var("RADV_PERFTEST", perftest) };
+    }
     // A session's every end says why (exit.rs); other modes keep their own.
     let end = match std::panic::catch_unwind(run) {
         Ok(Ok(None)) => return,
