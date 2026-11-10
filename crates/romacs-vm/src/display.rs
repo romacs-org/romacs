@@ -1067,7 +1067,7 @@ impl Vm {
         use romacs_layout_input::NoFont;
         let slot = self.slot("glyphless-char-display");
         let table = self.variable_value(slot).unwrap_or(Value::NIL);
-        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras.first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
+        let method = match self.object_if(table) { Some(Object::CharTable(t)) => t.extras().first().copied().unwrap_or(Value::NIL), _ => Value::NIL };
         let method = self.cons_pair(method).map_or(method, |(graphical, _)| graphical);
         if method == self.display_symbol("hex-code") { NoFont::HexCode }
         else if method == self.display_symbol("thin-space") { NoFont::ThinSpace }

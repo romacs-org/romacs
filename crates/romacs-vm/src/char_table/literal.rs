@@ -18,11 +18,10 @@ impl Vm {
             depth: 0, min_char: 0,
             slots: fields[4..68].iter().map(|&v| self.literal_table_slot(v)).collect(),
         }));
-        super::note_write();
         let table = CharTable {
             default: fields[0], parent: fields[1], purpose: fields[2],
             ascii: self.literal_table_slot(fields[3]), root, extras: fields[68..].to_vec(),
-            edits: 0,
+            edits: 0, serial: super::fresh_serial(),
         };
         Ok(self.allocate_object(data::Object::CharTable(Box::new(table))))
     }

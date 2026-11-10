@@ -15,7 +15,7 @@ impl Leaf<'_> {
             let Some(table) = self.variable_value(symbol)? else { continue };
             let purpose = self.intern("display-table");
             if let Some(crate::data::Object::CharTable(t)) = self.vm.object_if(table)
-                && t.purpose == purpose && t.extras.len() == DISP_TABLE_EXTRA_SLOTS {
+                && t.purpose() == purpose && t.extras().len() == DISP_TABLE_EXTRA_SLOTS {
                 return Ok(Some(table));
             }
         }

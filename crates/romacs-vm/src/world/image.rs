@@ -96,14 +96,6 @@ impl Vm {
                 self.set_directory_of(buffer, directory);
             }
         }
-        // Syntax summaries were read under the building process's char-table
-        // writes; this process counts its own. They hold no Values, so they
-        // change through their cell, past the barrier.
-        for object in self.objects.iter() {
-            if let crate::data::Object::Buffer(text) = object {
-                text.syntax.borrow_mut().forget();
-            }
-        }
         self.random = crate::random::Random::from_entropy();
         self.mktime_offset = 0;
         self.tz_rule_dstoff = 0;
@@ -124,7 +116,8 @@ impl Vm {
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + 'static>(vm: Vm, carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     vm.world_quiescent()?;
-    let counters = [crate::expand::next_generated(), 0, 0, 0];
+    let [serials, writes] = crate::char_table::image_counters();
+    let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = Box::into_raw(Box::new((vm, carry))) as usize;
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"));
@@ -144,6 +137,7 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
         return None;
     }
     crate::expand::raise_generated(fields.counters[0]);
+    crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     Some(*root)
 }

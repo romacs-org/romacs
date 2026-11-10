@@ -546,7 +546,7 @@ impl Leaf<'_> {
         }
         let check = self.syntax_var("romacs-syntax-summaries-check")? != Value::NIL;
         let context = Context {
-            table: self.vm.char_table_identity(table),
+            table: self.vm.char_table_serial(table),
             writes: crate::char_table::writes(),
             escaped_ends: options.comment_end_can_be_escaped,
             properties: options.propertize_done.is_some(),

@@ -34,13 +34,13 @@ const FANOUT: usize = 16;
 const KEYS: usize = 4;
 
 /// What summaries depend on besides the text: the syntax table, by its
-/// identity and the char-table writes so far (`crate::char_table::writes`:
+/// serial (`Vm::char_table_serial`) and the char-table writes so far (`crate::char_table::writes`:
 /// any write to any table, its parents' included, renews it),
 /// `comment-end-can-be-escaped', and whether `syntax-table' properties are
 /// honoured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Context {
-    pub table: usize,
+    pub table: u64,
     pub writes: u64,
     pub escaped_ends: bool,
     pub properties: bool,
