@@ -526,7 +526,7 @@ impl Vm {
                 // keyword is itself constant (GNU copies trapped_write).
                 if self.protected_variable_slot(original) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
                 let value = if p == Set { self.stack[start+1] } else { Value::UNBOUND };
-                self.set_variable_value(slot, value)?;
+                self.write_from_native(crate::watchers::NativeWrite::set(slot, value)).map_err(crate::watchers::fault_text)?;
                 Ok(if p == Set { value } else { symbol })
             }
             MakeLocalVariable => { self.make_local_variable(slot)?; Ok(symbol) }

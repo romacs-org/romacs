@@ -16,7 +16,7 @@
 #              writer that has not rooted its frame.
 #   boundary   an embedder or top-level request: the caller keeps no raw Value.
 #   collector  a collection point; its caller passes every root.
-bootstrap.rs bootstrap_primitive call_lisp_at_write 1 held  # defalias-fset-function from a legacy primitive call: its engine is not suspended
+bootstrap.rs bootstrap_primitive write_from_native 1 held  # defalias-fset-function: queued for the legacy call's engine, which always runs here, so the hook runs at the drain; with no engine it would run at once, the list rooted in `perform_write`'s frame
 compiled_lisp/mod.rs compile_lisp_file compile_walk 1 clean  # the source, key and names are Rust data; nothing heap is used after the walk
 compiled_lisp/mod.rs compile_unit compile_request 1 clean  # FORM is Rust data; the result is a function id the encoder reads afterwards
 compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rust form before any unit compiles; :eof is in the initial obarray, whose symbols are never reclaimed
@@ -158,12 +158,14 @@ variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, 
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
-variable_runtime.rs variable_primitive notify_watchers_at 1 held  # a legacy primitive: its engine is not suspended
-variable_runtime.rs variable_primitive set_variable_value 2 held  # a legacy primitive: its engine is not suspended, so nothing collects; the file-local defvar returns its symbol
+variable_runtime.rs variable_primitive notify_watchers_at 1 held  # defvar's set-default, in place: a fenced variable's defvar records its saved write at the call, which a queued store would repeat as a plain write
+variable_runtime.rs variable_primitive set_variable_value 1 held  # the file-local defvar's `macroexp--dynvars`, in place beside defvar's set-default; its engine is not suspended, so nothing collects
+variable_runtime.rs variable_primitive write_from_native 1 held  # set and makunbound: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
 watchers.rs notify_watchers notify_watchers_at 1 clean  # a tail call
 watchers.rs notify_watchers_at call_lisp_at_write 1 rooted  # the list, value and place are a frame, read back after each watcher
-watchers.rs perform_deferred perform_write 3 rooted  # the write is in the queue's frame, the buffer current before it in its own, read back
+watchers.rs perform_queued perform_write 3 rooted  # the write is in the queue's frame, the buffer current before it in its own, read back
+watchers.rs perform_rooted call_lisp_at_write 1 rooted  # the hook, definition and docstring are FRAME's list, read back after the hook
 watchers.rs perform_rooted notify_watchers 1 rooted  # VALUE is in FRAME, read back
 watchers.rs perform_rooted notify_watchers_at 1 rooted  # VALUE and the buffer are in FRAME, read back
 watchers.rs perform_write perform_rooted 1 rooted  # VALUE and the buffer are in FRAME, read back

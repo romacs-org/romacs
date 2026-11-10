@@ -4315,10 +4315,13 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's or `defalias-fset-function''s own signal
-            // travels behind the write's text, as does GNU's read-only
-            // error with its object behind a frozen write's (`frozen.rs`).
-            if (matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) || error == crate::frozen::READ_ONLY)
+            // A `defvar` watcher's own signal travels behind the write's text,
+            // as GNU's read-only error does with its object behind a frozen
+            // write's (`frozen.rs`). A `set`, `makunbound` or
+            // `defalias-fset-function` escape comes through the queue's drain
+            // instead: this engine runs, so those writes wait for its
+            // completion (`Vm::write_from_native`).
+            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY)
                 && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);

@@ -29,6 +29,10 @@ pub(crate) enum WriteKind {
     ClearLocal,
     /// A permanent hook's filter: `makunbound` reported with VALUE, then stored.
     StoreLocal,
+    /// `defalias-fset-function` (data.c:993), the variable being the function's
+    /// symbol: VALUE is (HOOK DEFINITION . DOCSTRING). The hook stores the
+    /// definition, then a non-nil docstring is put (data.c:1021).
+    Defalias,
 }
 romacs_snapshot::snapshot_enum!(WriteKind {
     WriteKind::Set => (),
@@ -38,9 +42,10 @@ romacs_snapshot::snapshot_enum!(WriteKind {
     WriteKind::Report => (),
     WriteKind::ClearLocal => (),
     WriteKind::StoreLocal => (),
+    WriteKind::Defalias => (),
 });
-const WRITE_KINDS: [WriteKind; 7] = [WriteKind::Set, WriteKind::Bound, WriteKind::SetDefault, WriteKind::Alias,
-    WriteKind::Report, WriteKind::ClearLocal, WriteKind::StoreLocal];
+const WRITE_KINDS: [WriteKind; 8] = [WriteKind::Set, WriteKind::Bound, WriteKind::SetDefault, WriteKind::Alias,
+    WriteKind::Report, WriteKind::ClearLocal, WriteKind::StoreLocal, WriteKind::Defalias];
 /// A write of the variable at SLOT that its watchers hear.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeWrite {
@@ -55,12 +60,23 @@ impl NativeWrite {
     }
 }
 
+/// A legacy primitive's text for FAULT, from a write it made or queued: the
+/// writes it makes fail only with text.
+pub(crate) fn fault_text(fault: Fault) -> String {
+    match fault {
+        Fault::Error(text) => text,
+        _ => "a native write failed".into(),
+    }
+}
+
 impl Vm {
     /// WRITE from native code: at once when nothing can hear it or no engine
     /// will complete this call; else queued, as is whatever follows a queued
-    /// write, so the writes keep their order.
+    /// write, so the writes keep their order. A native body that queues calls
+    /// no Lisp in place afterwards: a nested engine's first native return
+    /// would drain this queue inside that call.
     pub(crate) fn write_from_native(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
-        let heard = self.variable_trapped(self.indirect_variable(write.slot));
+        let heard = write.kind == WriteKind::Defalias || self.variable_trapped(self.indirect_variable(write.slot));
         if !self.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended.len()) {
             let buffer = self.slots[self.buffer_slot].value;
             self.deferred_writes.push((write, buffer));
@@ -89,9 +105,23 @@ impl Vm {
     /// with `current_buffer`, but what it meant for a binding of the killed
     /// buffer has nothing left to do.
     pub(crate) fn perform_deferred(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
+        // A queued `set`'s own store fault keeps GNU's condition, as the legacy
+        // call's text did (`forwarded_condition`); the value is the queue's, rooted.
+        match self.perform_queued(frame, i) {
+            Err(Fault::Error(error)) if self.propagated_escape.is_none() && self.queued_kind(frame, i) == WriteKind::Set => {
+                let value = self.rooted(frame, 4 * i + 1);
+                Err(self.forwarded_condition(&error, value).map_or(Fault::Error(error), |(condition, data)| Fault::Signal(condition, data)))
+            }
+            outcome => outcome,
+        }
+    }
+    fn queued_kind(&self, frame: &RootFrame, i: usize) -> WriteKind {
+        let index = self.rooted(frame, 4 * i + 3).integer_value().and_then(|index| usize::try_from(index).ok()).expect("a kind's index");
+        WRITE_KINDS[index]
+    }
+    fn perform_queued(&mut self, frame: &RootFrame, i: usize) -> std::result::Result<(), Fault> {
         let slot = usize::try_from(self.rooted(frame, 4 * i).payload()).expect("a symbol's slot") - 1;
-        let kind = self.rooted(frame, 4 * i + 3).integer_value().and_then(|index| usize::try_from(index).ok()).expect("a kind's index");
-        let kind = WRITE_KINDS[kind];
+        let kind = self.queued_kind(frame, i);
         let write = NativeWrite { kind, slot, value: self.rooted(frame, 4 * i + 1) };
         let buffer = self.rooted(frame, 4 * i + 2);
         if !self.live_buffer_value(buffer) {
@@ -154,6 +184,18 @@ impl Vm {
             WriteKind::ClearLocal => {
                 reported(self, Value::NIL, "makunbound", self.rooted(frame, 1))?;
                 prim::clear_local_slot(self, slot, self.rooted(frame, 1))
+            }
+            WriteKind::Defalias => {
+                let symbol = Value::reference(slot + 1, 7);
+                let (hook, rest) = self.cons_pair(self.rooted(frame, 0)).map_err(Fault::Error)?;
+                let (definition, _) = self.cons_pair(rest).map_err(Fault::Error)?;
+                self.call_lisp_at_write(hook, &[symbol, definition]).map_err(Fault::Error)?;
+                // Read back: the hook may have collected.
+                let property = self.intern("function-documentation");
+                let (_, rest) = self.cons_pair(self.rooted(frame, 0)).map_err(Fault::Error)?;
+                let (_, documentation) = self.cons_pair(rest).map_err(Fault::Error)?;
+                if documentation == Value::NIL { return Ok(()); }
+                self.put_symbol_property(symbol, property, documentation).map(|_| ()).map_err(Fault::Error)
             }
             WriteKind::StoreLocal => {
                 reported(self, self.rooted(frame, 0), "makunbound", self.rooted(frame, 1))?;
