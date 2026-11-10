@@ -114,7 +114,6 @@ const FIELDS: &[(&str, Class)] = &[
     // Each function's ops hold constants, traced from the code that is live.
     ("functions", Root),
     ("request_code", Root),
-    ("register_width", Free), ("spread_reserve", Free),
     // Lowered code, which adds nothing to its function's ops, and registers.
     ("execution", Root), ("spare_programs", Root),
     ("reader_trampolines", Free),

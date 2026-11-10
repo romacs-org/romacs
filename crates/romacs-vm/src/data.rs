@@ -627,12 +627,14 @@ impl Vm {
         Ok(values)
     }
     #[inline(never)]
-    /// `apply`'s spread window: (FUNCTION, OFFSET, COUNT), or Err(COUNT)
-    /// when COUNT arguments do not fit the stack's reserved tail.
+    /// `apply`'s spread, written at AT, the caller's end: (FUNCTION, AT,
+    /// COUNT), or Err(NEED) when the file needs NEED slots to hold it with
+    /// the slack every window keeps.
     pub(super) fn prepare_apply(
         &mut self,
         start: usize,
         argc: usize,
+        at: usize,
     ) -> Result<std::result::Result<(Value, usize, usize), usize>> {
         if argc < 1 {
             return Err("wrong primitive arity".into());
@@ -644,12 +646,12 @@ impl Vm {
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
         let values = values.get(1..).unwrap_or_default();
-        if values.len() > self.spread_reserve {
-            return Ok(Err(values.len()));
+        let need = at + values.len() + crate::threaded::WINDOW;
+        if need > self.stack.len() {
+            return Ok(Err(need));
         }
-        let offset = self.stack.len() - self.spread_reserve;
-        self.stack[offset..offset + values.len()].copy_from_slice(values);
-        Ok(Ok((target, offset, values.len())))
+        self.stack[at..at + values.len()].copy_from_slice(values);
+        Ok(Ok((target, at, values.len())))
     }
     #[inline(never)]
     pub(super) fn primitive_call(

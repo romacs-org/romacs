@@ -527,8 +527,9 @@ impl Vm {
         self.gc_holds == 0 && self.deferred_writes.is_empty()
             && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
-    /// Set the suspended engine's register stack aside for a nested run,
-    /// still traced, its allocation unmoved for the frames' raw pointers.
+    /// Set the register stack aside, still traced, its allocation unmoved for
+    /// the frames' raw pointers: an engine's for a nested run, or for a
+    /// storage kernel's.
     pub(crate) fn suspend_stack(&mut self) {
         let stack = std::mem::take(&mut self.stack);
         self.suspended_stacks.push(stack);
@@ -536,6 +537,22 @@ impl Vm {
     pub(crate) fn resume_stack(&mut self) {
         debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
         self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
+    }
+    /// RUN on ARGS in the reused kernel file, the current one set aside beneath
+    /// it, still traced, its allocation unmoved: the one way a native borrows
+    /// register slots (a storage kernel, a property query) without touching a
+    /// running engine's. RUN gets the arguments' count; they start at 0.
+    pub(crate) fn with_kernel_stack<T>(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> T) -> T {
+        self.suspend_stack();
+        self.stack = std::mem::take(&mut self.kernel_stack);
+        self.stack.clear();
+        self.stack.extend_from_slice(args);
+        let out = run(self, args.len());
+        // Untraced between calls: nothing it held may stay in it.
+        self.stack.clear();
+        self.kernel_stack = std::mem::take(&mut self.stack);
+        self.resume_stack();
+        out
     }
     /// SLOTS as a dense membership table over every symbol slot.
     fn slot_set<'a>(&self, slots: impl Iterator<Item = &'a usize>) -> Vec<bool> {
@@ -1075,6 +1092,8 @@ impl Vm {
         if !self.may_collect(0) {
             return false;
         }
+        // Every engine is suspended: trace each file only to its engine's top.
+        self.clear_dead_tails();
         let mut lap = Lap::start();
         // Buffers move and local bindings go (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
@@ -1295,10 +1314,12 @@ impl Vm {
             Some((cell.payload() as usize, pair))
         }).collect();
         self.cells.collector_compact(|v| rewrite(v));
+        // The traced register slots (`register_roots`); above the tops is NIL.
+        let tops = self.register_tops();
+        let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
         for v in roots
             .iter_mut()
-            .chain(self.stack.iter_mut())
-            .chain(self.suspended_stacks.iter_mut().flatten())
+            .chain(registers.flat_map(|(file, top)| file[..top].iter_mut()))
             .chain(self.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().flat_map(|binding| std::iter::once(&mut binding.buffer).chain(binding.away.iter_mut()).chain(binding.unremapped_maps.iter_mut())))
         {
