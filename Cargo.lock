@@ -3623,6 +3623,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "romacs-keeper"
+version = "0.0.20"
+dependencies = [
+ "libc",
+ "romacs-record",
+]
+
+[[package]]
 name = "romacs-layout"
 version = "0.0.20"
 dependencies = [

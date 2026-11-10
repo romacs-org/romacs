@@ -2,6 +2,7 @@
 members = [
     "crates/romacs-brand",
     "crates/romacs-record",
+    "crates/romacs-keeper",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-layout-input",

@@ -1,0 +1,40 @@
+[package]
+name = "romacs-keeper"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The keeper: a small long-lived process that holds a session's descriptors and is its children's parent"
+
+[[bin]]
+name = "romacs-keeper"
+path = "src/main.rs"
+
+# Stand-ins the integration tests run: the next keeper build, a build that
+# cannot resume, and a second session process. Bins, not examples, so a
+# test run can never meet a stale one.
+[[bin]]
+name = "romacs-keeper-test-next"
+path = "tests/bin/next.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "romacs-keeper-test-broken"
+path = "tests/bin/broken.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "romacs-keeper-test-session"
+path = "tests/bin/session.rs"
+test = false
+doc = false
+
+[dependencies]
+libc.workspace = true
+romacs-record = { path = "../romacs-record" }
+
+[lints]
+workspace = true
