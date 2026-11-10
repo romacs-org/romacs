@@ -584,8 +584,12 @@ fn use_collector_threads() {
 fn main() {
     // The Vulkan driver reads it when the display makes its instance.
     if let Some(perftest) = romacs_renderer_wgpu::gpu_policy::radv_perftest(std::env::var("RADV_PERFTEST").ok().as_deref()) {
-        // SAFETY: main's first statement: no other thread exists yet to
-        // read or write the environment.
+        // SAFETY: main's first statement, so no thread this program
+        // starts exists yet. The one thing that runs before main is the
+        // allocator's constructor: it reads its configuration from the
+        // environment on this thread and returns, and the purge thread it
+        // can be asked to start (`background_thread`) never reads or
+        // writes the environment. So nothing touches it concurrently.
         unsafe { std::env::set_var("RADV_PERFTEST", perftest) };
     }
     // A session's every end says why (exit.rs); other modes keep their own.

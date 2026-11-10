@@ -34,15 +34,17 @@ pub fn new_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
 /// nothing moves them. Other drivers do not read the variable.
 ///
 /// A value that already says `nosam` or `sam` is the user's choice and
-/// stands. The driver reads the variable when an instance is made, so the
-/// caller sets it before the first one.
+/// stands; options are separated by commas or spaces, as Mesa's
+/// `parse_debug_string` reads them. The driver reads the variable when an
+/// instance is made, so the caller sets it before the first one.
 #[must_use]
 pub fn radv_perftest(current: Option<&str>) -> Option<String> {
-    let options: Vec<&str> = current.unwrap_or_default().split(',').map(str::trim).filter(|option| !option.is_empty()).collect();
-    if options.iter().any(|option| matches!(*option, "nosam" | "sam")) {
+    let current = current.unwrap_or_default();
+    let mut options = current.split([',', ' ']).filter(|option| !option.is_empty());
+    if options.clone().any(|option| matches!(option, "nosam" | "sam")) {
         return None;
     }
-    Some(options.into_iter().chain(["nosam"]).collect::<Vec<_>>().join(","))
+    Some(if options.next().is_some() { format!("{current},nosam") } else { "nosam".to_owned() })
 }
 
 /// The power preference `ROMACS_GPU` asks for: `low` or `integrated` prefer
@@ -293,8 +295,9 @@ mod tests {
     fn radv_keeps_command_buffers_out_of_visible_vram_unless_the_user_chose() {
         assert_eq!(radv_perftest(None).as_deref(), Some("nosam"));
         assert_eq!(radv_perftest(Some("")).as_deref(), Some("nosam"));
-        assert_eq!(radv_perftest(Some("gpl, nocache")).as_deref(), Some("gpl,nocache,nosam"), "the user's other options stand");
-        for chosen in ["nosam", "sam", "gpl,sam", "nosam,gpl"] {
+        assert_eq!(radv_perftest(Some("gpl, nocache")).as_deref(), Some("gpl, nocache,nosam"), "the user's other options stand as written");
+        assert_eq!(radv_perftest(Some(" , ")).as_deref(), Some("nosam"));
+        for chosen in ["nosam", "sam", "gpl,sam", "nosam,gpl", "sam pswave32,cswave32", "gpl nosam"] {
             assert_eq!(radv_perftest(Some(chosen)), None, "{chosen}");
         }
         assert_eq!(radv_perftest(Some("nosamples")).as_deref(), Some("nosamples,nosam"), "an option is its whole name");
