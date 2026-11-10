@@ -370,6 +370,11 @@ This function is part of the `fzf' completion style.
 (register-definition-prefixes "romacs-install-command" '("romacs-gui-install-command"))
 
 
+;;; Generated autoloads from romacs-keeper.el
+
+(register-definition-prefixes "romacs-keeper" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-key-hint.el
 
 (register-definition-prefixes "romacs-key-hint" '("romacs-key-hint"))

@@ -273,7 +273,20 @@ fn a_deadline_closes_only_a_handle_nobody_owns() {
     client.set_deadline(mine.handle, soon).unwrap();
     wait_for("the deadline", || !alive(orphan_pid));
     assert!(alive(mine.pid));
-    assert_eq!(row(&mut client, mine.handle).unwrap().deadline, 0, "a deadline met by an owner is spent");
+    assert_eq!(row(&mut client, mine.handle).unwrap().deadline, soon, "under a live owner a deadline waits");
+    // A deadline that passed while the owner lived holds when it goes,
+    // unless a successor claimed the handle first.
+    let mut leaving = keeper.session();
+    let (late, late_pid) = leaving.spawn("sleep 600");
+    let (claimed, claimed_pid) = leaving.spawn("sleep 600");
+    client.set_deadline(late, romacs_keeper::server::now_ms() + 100).unwrap();
+    client.set_deadline(claimed, romacs_keeper::server::now_ms() + 100).unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(alive(late_pid) && alive(claimed_pid));
+    client.claim(claimed, leaving.pid).unwrap();
+    wait_for("the overdue handle's end", || !alive(late_pid));
+    assert!(alive(claimed_pid));
+    assert_eq!(row(&mut client, claimed).unwrap().deadline, 0);
 }
 
 #[test]

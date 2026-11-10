@@ -32,7 +32,8 @@
 //!   cannot be revoked.
 //! - **Quit, restart, crash.** A session that quits detaches with `quit`
 //!   and its handles close, unless marked kept. One that restarts or
-//!   crashes leaves them. No timeout of the keeper's own closes a handle:
+//!   crashes leaves them. A deadline closes a handle that has no live
+//!   owner once it has passed; a claim cancels it. No timeout of the keeper's own closes a handle:
 //!   only a close, a deadline its owner set, or the successor's sweep of
 //!   what nobody claimed ([`proto::kind::CLOSE_ORPHANS`]).
 //! - **Closing is a request**, slot by slot: end of file reaches a child

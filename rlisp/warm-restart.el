@@ -135,6 +135,8 @@ rebuild, such as `hard' newlines the user typed."
 
 (defconst warm-restart--schema 1 "The image form's schema.")
 
+(defvar romacs-keeper-restarting)
+
 (defvar warm-restart--problems nil
   "What went wrong in the restore running now, as `lost'-style entries.")
 
@@ -1204,7 +1206,10 @@ for running a newer build."
       (when server (warm-restart--publish-pending image server))
       (condition-case err
           (progn
-            (run-hooks 'kill-emacs-hook)
+            ;; A restart, not a quit: what the keeper holds for this
+            ;; session stays for the successor (romacs-keeper.el).
+            (let ((romacs-keeper-restarting t))
+              (run-hooks 'kill-emacs-hook))
             ;; The new process locks these files again; this one's locks
             ;; would name a pid that is about to end.
             (dolist (buffer (buffer-list))

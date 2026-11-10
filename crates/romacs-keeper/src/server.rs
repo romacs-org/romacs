@@ -228,6 +228,10 @@ impl Keeper {
         if attachment.owned == 0 { self.table.attachments.remove(&id); }
         // A process that inherited the socket does not keep the session attached.
         for conn in &mut self.conns { conn.dead |= conn.attachment == id; }
+        // A deadline that passed while this session still lived takes
+        // effect now that nobody owns the handle.
+        let now = now_ms();
+        for handle in self.owned_where(|e| e.owner == id && e.deadline != 0 && e.deadline <= now) { self.close(handle, libc::SIGHUP); }
     }
 
     fn send(&mut self, index: usize, kind: u16, payload: &[u8], fds: Vec<OwnedFd>) {
@@ -451,6 +455,7 @@ impl Keeper {
     /// one is handed the descriptors.
     fn take(&mut self, handle: Handle, attachment: u64, supersedes: i32) -> Result<(), String> {
         let owner = self.table.handles[&handle].owner;
+        let mut killed = None;
         if owner != attachment && let Some(Attachment { pid, pidfd: Some(pidfd), .. }) = self.table.attachments.get(&owner) {
             if *pid != supersedes {
                 return Err(format!("handle {handle} is owned by session {pid}, which is alive"));
@@ -460,10 +465,17 @@ impl Keeper {
             if !readable(pidfd.as_raw_fd(), GRACE) {
                 return Err(format!("session {pid}, which owns handle {handle}, did not die"));
             }
-            self.session_ended(owner);
+            killed = Some(owner);
         }
         self.table.set_owner(handle, attachment);
-        if let Some(child) = &mut self.table.handles.get_mut(&handle).expect("present").child { child.unreported = false; }
+        let entry = self.table.handles.get_mut(&handle).expect("present");
+        // A claim answers the deadline: the handle has an owner again.
+        self.table.timers.remove(&(entry.deadline, handle));
+        entry.deadline = 0;
+        if let Some(child) = &mut entry.child { child.unreported = false; }
+        // Only now is the old session's end taken in: what it still owns
+        // past its deadline goes, and this handle is no longer among it.
+        if let Some(owner) = killed { self.session_ended(owner); }
         Ok(())
     }
 
@@ -492,10 +504,10 @@ impl Keeper {
             if entry.closing {
                 // Its signal was not enough.
                 if let Some(child) = &entry.child { let _ = spawn::signal(&child.pidfd, child.leader.then_some(child.pid), libc::SIGKILL); }
-            } else if entry.deadline == at {
-                entry.deadline = 0;
-                // A deadline is for a handle nobody claimed in time.
-                if !self.table.owner_alive(self.table.handles[&handle].owner) { self.close(handle, libc::SIGHUP); }
+            } else if entry.deadline == at && !self.table.owner_alive(self.table.handles[&handle].owner) {
+                // A deadline is for a handle nobody claimed in time. Under
+                // a live owner it stays set, and holds when that owner goes.
+                self.close(handle, libc::SIGHUP);
             }
         }
     }

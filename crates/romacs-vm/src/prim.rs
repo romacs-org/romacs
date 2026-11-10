@@ -1835,6 +1835,7 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod keeper;
     mod flight;
     mod compiled_lisp;
     mod casetab;
