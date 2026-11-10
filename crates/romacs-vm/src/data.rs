@@ -7,10 +7,6 @@ pub(crate) use crate::bool_vector::BoolVector;
 #[path = "string_cursor_tests.rs"]
 mod string_cursor_tests;
 
-/// Payload bytes between the engine's polls for a collection
-/// (`Vm::collect_poll').
-const POLL_PAYLOAD: usize = 256 << 10;
-
 /// The bytes OBJECT holds beyond its own slot, as GNU charges them to the
 /// next collection: a string's text, a vector's or record's slots, a bool
 /// vector's bits.
@@ -22,6 +18,7 @@ pub(super) fn profiled_bytes(object: &Object) -> usize {
             Object::String(s) | Object::RawString(s) => s.storage_bytes(false),
             Object::Bytes(bytes) => bytes.len(),
             Object::Vector(slots) | Object::Record(slots) => slots.len() * size_of::<Value>(),
+            Object::BoolVector(bits) => bits.bytes.len(),
             Object::HashTable(table) => table.storage_bytes(false),
             _ => 0,
         }
@@ -462,12 +459,9 @@ impl Vm {
         }
         self.allocate_object(string_object(LispString::from_bytes(bytes, multibyte)))
     }
-    /// Charge BYTES of payload to the next collection, and ask the engine
-    /// to poll for one whenever the charge passes another `POLL_PAYLOAD'.
+    /// Charge BYTES of payload to the next collection (`collection_budget`).
     pub(super) fn charge_payload(&mut self, bytes: usize) {
-        let before = self.gc_payload_bytes;
-        self.gc_payload_bytes = before.saturating_add(bytes);
-        self.collect_poll |= self.gc_payload_bytes / POLL_PAYLOAD != before / POLL_PAYLOAD;
+        self.gc_payload_bytes = self.gc_payload_bytes.saturating_add(bytes);
     }
     /// A new object: the lowest free entry of the table, else a new one
     /// (`table.rs'). Every object enters here.

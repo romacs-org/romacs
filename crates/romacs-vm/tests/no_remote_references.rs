@@ -94,7 +94,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("forwarded", Root),
     ("fixnum_slots", Free), ("local_binding_slots", Free), ("free_local_binding_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
-    ("collect_poll", Free), ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
+    ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
     ("gc_holds", Free), ("running_engines", Free), ("rooted_write", Free), ("gc_stress", Free), ("allocation", Free),
     ("names", Free), ("initial_obarray", Free), ("symbol_names", Free),
     // Read for the symbols marked, which own-obarray ones are only if reached.

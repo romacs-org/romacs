@@ -730,7 +730,9 @@ impl Vm {
     }
 
     /// Attach BACKING as a new region: its root value. Signals when every
-    /// id is live.
+    /// id is live. The region raises the collector's count through
+    /// `region_weight`, not `Allocation::allocated`, so it asks the engine
+    /// for no poll: the budget's poll bounds what it makes due.
     pub(crate) fn attach(&mut self, backing: Backing) -> Result<Value> {
         let bytes = backing.bytes().map_err(|e| e.to_string())?;
         let decoded = decode(&bytes)?;

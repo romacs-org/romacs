@@ -1512,11 +1512,6 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
-    /// Payload since the last collection crossed another `POLL_PAYLOAD'
-    /// bytes, or an engine ended with a collection's aftermath pending: the
-    /// engine polls, and collects if due, at its next jump or call
-    /// (`leave_native'), as GNU's maybe_gc runs at every call.
-    collect_poll: bool,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1743,7 +1738,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     collection_log,
     gc_retained,
     gc_payload_bytes,
-    collect_poll,
     gc_retained_slots,
     gc_code,
     gc_holds,
@@ -1974,7 +1968,6 @@ impl Vm {
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
-            collect_poll: false,
             gc_retained_slots: 0,
             gc_code: 0,
             gc_floor: None,
