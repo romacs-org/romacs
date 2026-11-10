@@ -10,3 +10,10 @@ test-threads = 24
 
 # Bound surviving tests without the retired legacy oracle's package overrides.
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
+
+# The batch scaling probes bound each session by its CPU (scaling_live.py);
+# load stretches their wall time, not their work. The test ends on those
+# bounds, and on a hung session's own wall-clock backstop.
+[[profile.default.overrides]]
+filter = 'test(=batch_probes_scale_within_their_budgets)'
+slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }
