@@ -3656,7 +3656,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-regex-engine"
+name = "romacs-regex"
 version = "0.0.20"
 dependencies = [
  "libc",
@@ -3795,7 +3795,7 @@ dependencies = [
  "romacs-layout-input",
  "romacs-layout2",
  "romacs-logo",
- "romacs-regex-engine",
+ "romacs-regex",
  "romacs-snapshot",
  "romacs-vm",
  "ropey",
