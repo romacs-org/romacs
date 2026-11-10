@@ -128,3 +128,4 @@ lib-src/rcs2log diff=shell
 java/INSTALL -whitespace
 
 rlisp/romacs-bundled-autoloads.el merge=romacs-derived
+SMELL-FLOORS.json merge=romacs-floors
