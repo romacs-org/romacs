@@ -1018,6 +1018,12 @@ impl Vm {
         self.cells.settle_old();
         self.objects.settle_old();
     }
+    /// Whether every table is as a completed collection leaves it: its
+    /// entries old and clean, its log empty.
+    #[cfg(test)]
+    pub(crate) fn generations_settled(&self) -> bool {
+        self.conses.settled() && self.closures.settled() && self.cells.settled() && self.objects.settled()
+    }
     /// Under verify, after a full collection: every entry in use is
     /// exactly old and no log holds anything, or the next collection would
     /// start from generations this one did not leave.
@@ -1771,10 +1777,6 @@ mod tests {
         assert_eq!(deferral(f64::NAN), 0.0);
     }
 
-    fn settled(vm: &Vm) -> bool {
-        vm.conses.settled() && vm.closures.settled() && vm.cells.settled() && vm.objects.settled()
-    }
-
     /// A collection leaves every survivor old and no log; Lisp's stores into
     /// what survived reach the logs, and the next collection empties them.
     #[test]
@@ -1782,16 +1784,16 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         vm.eval_source_raw("(setq gen-list (list 1 2 3) gen-vector (make-vector 4 nil) gen-table (make-hash-table))").unwrap();
-        assert!(!settled(&vm), "what was just made is young");
+        assert!(!vm.generations_settled(), "what was just made is young");
         vm.collect(&mut []);
-        assert!(settled(&vm));
+        assert!(vm.generations_settled());
         vm.eval_source_raw("(setcar gen-list (list 4)) (setcdr (cdr gen-list) (list 5)) (setcar (cdr gen-list) 6)").unwrap();
         assert_eq!(vm.conses.dirty_old().count(), 2, "the two old conses written");
         vm.eval_source_raw("(aset gen-vector 0 (list 7)) (aset gen-vector 1 'symbol) (puthash (list 8) (list 9) gen-table)").unwrap();
         assert_eq!(vm.objects.logged().len(), 2, "a strong table's key and value");
         assert!(vm.objects.dirty_old().count() >= 1, "and a short vector");
         vm.collect(&mut []);
-        assert!(settled(&vm));
+        assert!(vm.generations_settled());
         let kept = vm.eval_source_raw("(equal (list (car gen-list) (cdr (cdr gen-list)) (aref gen-vector 0) (hash-table-count gen-table)) '((4) (5) (7) 1))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the stores put in survives");
     }
@@ -1804,9 +1806,9 @@ mod tests {
         vm.eval_source_raw("(setq gen-old (list 1 2) gen-table (make-hash-table))").unwrap();
         vm.collect(&mut []);
         vm.eval_source_raw("(setcar gen-old (list 3)) (puthash (list 4) (list 5) gen-table)").unwrap();
-        assert!(!settled(&vm));
+        assert!(!vm.generations_settled());
         vm.settle_generations();
-        assert!(settled(&vm));
+        assert!(vm.generations_settled());
     }
 
     #[test]
