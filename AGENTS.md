@@ -35,11 +35,11 @@ possible; say so where you do.
 - Prefer small functions and existing owners. Reuse GNU Lisp when it supplies the
   behavior; implement missing runtime substrate in its existing Rust module.
 - Every new `unsafe` carries a `// SAFETY:` comment on the line directly above
-  the keyword. `tools/unsafe_census.py` (run by `scripts/check-derived`) holds
+  the keyword. `tools/lib/unsafe_census.py` (run by `tools/check-derived`) holds
   each crate's unsafe and undocumented sites to `UNSAFE-FLOORS.json`. After
-  deleting unsafe, run `python3 tools/unsafe_census.py lower` and commit the
+  deleting unsafe, run `python3 tools/lib/unsafe_census.py lower` and commit the
   lowered floors with the change. Raising a floor is a deliberate commit.
-- `tools/smells.py` (also run by `scripts/check-derived`) holds the other smells
+- `tools/lib/smells.py` (also run by `tools/check-derived`) holds the other smells
   to `SMELL-FLOORS.json`: `allow(dead_code|unused*)`, TODO/FIXME, files over
   1,500 lines, every rustc and Clippy pedantic warning by lint, the tree's
   top-level entries, and primitives declared outside `src/prims/` or through
@@ -136,7 +136,7 @@ The gates, small and whole for each side:
 
 - Rust, small: `make gate-small`. Tests named after the Rust modules changed since
   master, or since `BASE=REV`, and the structural rules whatever changed (`STRUCTURAL`
-  in `scripts/gate`). A change it cannot map, such as Lisp or a crate root, runs
+  in `tools/gate`). A change it cannot map, such as Lisp or a crate root, runs
   everything, so give a branch of a branch its real base.
 - Rust, whole: `make gate-full`, for the final combined candidate.
 - Lisp, one module: `make check-MODULE`.
@@ -145,19 +145,19 @@ The gates, small and whole for each side:
 The other commands:
 
 - Focused runtime checks: `cargo test --profile gate --locked --offline -p romacs-vm --test TARGET`, optionally followed by `-- TEST_NAME --exact`.
-- Fast development checks: `python3 scripts/dev-loop PACKAGE --test TARGET`,
+- Fast development checks: `python3 tools/dev-loop PACKAGE --test TARGET`,
   optionally with `-E 'test(NAME)'`. Without `--test`, it selects library tests.
   `--list` shows selection without building; `--jobs` and `--threads` bound work.
   It preserves `CARGO_TARGET_DIR` and defaults to `dev-fast`. Use `--profile gate`
   for compute-heavy GNU loading and oracle tests, with the same focused selectors.
-- Editable Lisp checks on a prebuilt host: `python3 scripts/test-elisp`. Its
+- Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
   `--test`, `--match`, file arguments, and `--core` option support smaller checks.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
   `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
   (`make check-list` names the modules: a package like `gnosis`, or one library),
   with `SELECTOR=`, `TEST_FILES=`, `EMACS_TEST_TIMEOUT=` (seconds per file) and `JOBS=`.
   Each file runs in a fresh process with a private HOME. Set `ROMACS_TEST_BINARY`
-  or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `scripts/test-ert` keeps
+  or use `CARGO_TARGET_DIR`'s gate build. `--logs DIR` on `tools/test-ert` keeps
   each file's output. Lisp edits take effect without a rebuild. `make check-runner`
   checks the runner itself against pinned GNU.
 - ERT report/parser checks: `python3 -m unittest discover -s gnu-tests/tests -p test_ert_report.py`.
@@ -166,10 +166,11 @@ The other commands:
   optionally `--mode batch|gui`, `--only NAME ...`, and `--record`. `--record`
   writes call graphs for probes over budget; give it a frame-pointer build. The
   gate runs the batch probes (`romacs-vm-gui` test `scaling`).
-- Derived artifacts and source/floor validation: `python3 scripts/check-derived`.
+- Derived artifacts, source/floor validation and the Python unit tests: `python3 tools/check-derived`.
+  It runs every tracked `test_*.py`/`*_test.py` that no Rust test owns (`tools/lib/python_tests.py`).
   It can regenerate stale output; inspect and stage only task-owned changes.
-- Combined verification: `python3 scripts/gate focused 'EXPR'`, then
-  `python3 scripts/gate full` for final acceptance. Inspect `--help` and select
+- Combined verification: `python3 tools/gate focused 'EXPR'`, then
+  `python3 tools/gate full` for final acceptance. Inspect `--help` and select
   resource bounds for the current machine. Defaults keep outer VM and display
   execution serial, with a 34G heavy-job cap. Supply the pinned GNU executable
   with `--oracle` when the gate's isolated environment needs it. Slot tools come

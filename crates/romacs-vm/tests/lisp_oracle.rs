@@ -1,6 +1,6 @@
 //! R221: `lisp/` is GNU's Lisp byte for byte at the oracle pin.
 //!
-//! The guard is `tools/lisp_oracle.py check`; `scripts/check-derived` runs it
+//! The guard is `tools/lib/lisp_oracle.py check`; `tools/check-derived` runs it
 //! before a landing, and this test runs it inside the gate. The fixture tests
 //! below prove each refusal fires on a synthetic GNU repository, so the guard
 //! is known to be able to fail (a guard that has never failed is not a guard).
@@ -13,13 +13,13 @@ fn repo() -> PathBuf {
 
 fn guard(root: &Path, extra: &[&str]) -> Output {
     Command::new("python3")
-        .arg(repo().join("tools/lisp_oracle.py"))
+        .arg(repo().join("tools/lib/lisp_oracle.py"))
         .arg("check")
         .arg("--root")
         .arg(root)
         .args(extra)
         .output()
-        .expect("python3 runs tools/lisp_oracle.py")
+        .expect("python3 runs tools/lib/lisp_oracle.py")
 }
 
 fn text(out: &Output) -> String {

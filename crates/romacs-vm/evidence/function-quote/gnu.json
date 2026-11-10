@@ -6,7 +6,7 @@
     "version": "32.0.50",
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
-  "recorder_sha256": "3faffdfdcf269bc666175ec1ac387acf45d3002653d4400643b13d562a977fe6",
+  "recorder_sha256": "124490d49a43f0c3910964a4dc3283e1268631d671aebb3dc084d4a2288c69f3",
   "cases": [
     {
       "form": "(list (function 42) (function nil) (function [1 2]) (function (a . b)) (function \"text\"))",

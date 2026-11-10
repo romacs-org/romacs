@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Heavy admission: priority then FIFO, one job/group, four slots by default.
+# --light: no slot/group limit or Cargo env rewrite, but tracked in its own
+# ticket and systemd scope (acceptance workers read that scope's PSI and use it
+# as their admission proof). --max-min bounds execution, not queue.
+# Publish by new inode + rename, never edit live files in place.
+set -eu
+ROOT=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+exec python3 "$ROOT/gate-slot-runner" "$@"

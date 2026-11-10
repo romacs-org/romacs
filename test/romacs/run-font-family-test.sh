@@ -14,7 +14,7 @@ TIMEOUT="${TIMEOUT:-8s}"
 
 if [ ! -x "$EMACS" ]; then
     echo "ERROR: Romacs binary not found or not executable: $EMACS"
-    echo "Run: cargo xtask fresh-build --release"
+    echo "Run: cargo build --release -p romacs-vm-gui"
     exit 1
 fi
 

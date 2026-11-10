@@ -4,7 +4,7 @@
 # with a build of that commit and moves its tag there; a newer push cancels an
 # older run. A pushed `v*` tag, which must name the workspace version, creates
 # a permanent release marked latest. Both publish romacs-x86_64-linux.tar.gz
-# and its SHA256SUMS, after scripts/ci/smoke-release has run the tarball.
+# and its SHA256SUMS, after tools/ci/smoke-release has run the tarball.
 name: release
 
 on:
@@ -61,11 +61,11 @@ jobs:
 
       - name: Package
         run: |
-          scripts/package-release romacs-x86_64-linux target/release dist
+          tools/package-release romacs-x86_64-linux target/release dist
           (cd dist && sha256sum "$ASSET" > SHA256SUMS)
 
       - name: Smoke-test the tarball
-        run: scripts/ci/smoke-release "dist/$ASSET" "$RUNNER_TEMP/smoke"
+        run: tools/ci/smoke-release "dist/$ASSET" "$RUNNER_TEMP/smoke"
 
       - name: Publish nightly
         if: github.ref_type == 'branch'

@@ -30,13 +30,11 @@ members = [
     "crates/romacs-video",
     "crates/romacs-video-model",
     "crates/romacs-gnudiff",
-    "crates/xtask",
     "gnu-tests/runner",
 ]
 default-members = [
     "crates/romacs-vm",
     "crates/romacs-vm-gui",
-    "crates/xtask",
 ]
 resolver = "2"
 
@@ -57,8 +55,8 @@ repository = "https://git.thanosapollo.org/romacs"
 
 # Lints every package inherits with `[lints] workspace = true`. Every unsafe
 # operation inside an `unsafe fn` needs its own `unsafe {}` block, so each
-# carries its own SAFETY justification. tools/unsafe_census.py (run by
-# scripts/check-derived) fails when a package neither denies this nor is
+# carries its own SAFETY justification. tools/lib/unsafe_census.py (run by
+# tools/check-derived) fails when a package neither denies this nor is
 # listed as pending in UNSAFE-FLOORS.json. Clippy's
 # undocumented_unsafe_blocks is enforced by that census's SAFETY ratchet, not
 # here: existing code would fail it.
@@ -223,9 +221,8 @@ winit = "=0.31.0-beta.3"
 wgpu = { version = "30", features = ["glsl"] }
 # Keep this on the same major version as wgpu: the DMA-BUF importer passes
 # wgpu-hal types through wgpu's public HAL interop API.
-# Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types;
-# `cargo xtask check-dependency-coherence` prevents Cargo updates from resolving
-# the two crates onto incompatible Windows binding versions.
+# Its `gpu-allocator` collaborator also exchanges nominal `windows` COM types,
+# so a Cargo update must keep the two on compatible Windows binding versions.
 wgpu-hal = { version = "30", features = ["vulkan"] }
 # Shader-surface WGSL/GLSL validation on the Lisp thread (same version wgpu embeds)
 naga = { version = "30", features = ["wgsl-in", "glsl-in"] }
@@ -380,8 +377,7 @@ opt-level = 3
 # Optimized build driven by a PGO profile. Same codegen settings as release,
 # but cargo gives it its own target/release-pgo directory, so a PGO build never
 # replaces an ordinary release binary (or invalidates its pdump fingerprint).
-# The profile data itself is supplied by RUSTFLAGS, which xtask sets --
-# see `cargo xtask fresh-build --profile release-pgo`.
+# The profile data itself is supplied by RUSTFLAGS (-Cprofile-use=FILE).
 [profile.release-pgo]
 inherits = "release"
 lto = true
@@ -414,14 +410,14 @@ codegen-units = 1
 # the link-time work that only shipped binaries need. Fat LTO with one codegen
 # unit made each romacs-core test binary a 30+ minute single-threaded build;
 # here codegen spreads over every job and an edit rebuilds incrementally.
-# Used by scripts/gate; never for shipped artifacts.
+# Used by tools/gate; never for shipped artifacts.
 [profile.gate]
 inherits = "release"
 lto = "off"
 codegen-units = 256
 incremental = true
 
-# Cheap correctness feedback only; scripts/dev-loop selects a bounded subset.
+# Cheap correctness feedback only; tools/dev-loop selects a bounded subset.
 # Compute-heavy parity/ratchet/performance and GUI suites stay on profile.gate.
 [profile.dev-fast]
 inherits = "test"

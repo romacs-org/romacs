@@ -200,7 +200,7 @@ fn check_live_font(backend: GuiBackend, scenario: &str, case: LiveFontCase) {
     }
     // The fonts the expected grids were measured with, never the host's.
     let fontconfig = std::env::var_os("ROMACS_GNU_GUI_FONTCONFIG")
-        .expect("ROMACS_GNU_GUI_FONTCONFIG names the gate's fontconfig (scripts/gate); the host's fonts are not the fixture");
+        .expect("ROMACS_GNU_GUI_FONTCONFIG names the gate's fontconfig (tools/gate); the host's fonts are not the fixture");
     plan = plan.with_env("FONTCONFIG_FILE", fontconfig.to_string_lossy());
     for (key, value) in session.env() {
         plan = plan.with_env(key, value);

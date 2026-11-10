@@ -27,7 +27,7 @@ echo ""
 
 if [[ ! -x "$EMACS_BIN" ]]; then
     echo -e "${RED}ERROR: Romacs binary not found at $EMACS_BIN${NC}"
-    echo "Run: cargo xtask fresh-build --release"
+    echo "Run: cargo build --release -p romacs-vm-gui"
     exit 1
 fi
 

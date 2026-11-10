@@ -13,5 +13,5 @@
   ],
   "restore_pristine_paths": "git -C GNU archive --format=tar 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea lisp | tar -x --transform='s,^lisp,gnu-lisp,'  # restores pristine paths only; then delete what `excluded` names; does not generate support",
   "generated_support": "LISP-GENERATED.json",
-  "drift_check": "python3 tools/lisp_oracle.py check --gnu GNU  # pristine Git blobs, excluded paths absent, declared support SHA-256 bytes and no undeclared Lisp inputs; also run by scripts/check-derived and crates/romacs-vm/tests/lisp_oracle.rs"
+  "drift_check": "python3 tools/lib/lisp_oracle.py check --gnu GNU  # pristine Git blobs, excluded paths absent, declared support SHA-256 bytes and no undeclared Lisp inputs; also run by tools/check-derived and crates/romacs-vm/tests/lisp_oracle.rs"
 }
