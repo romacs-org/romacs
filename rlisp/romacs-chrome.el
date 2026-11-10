@@ -18,8 +18,8 @@
 ;;
 ;; The status bar between the windows and the minibuffer line is the
 ;; mode line: the mode line of the window the selected one is
-;; (`romacs-status-bar-window'), with the lines of other visible windows
-;; that set their own folded in; no window draws a band of its own.  It
+;; (`romacs-status-bar-window'), and only that window's: another window's
+;; own format shows nowhere.  No window draws a band of its own.  It
 ;; is at the bottom, or under the tab bar (`romacs-status-bar-position');
 ;; layers and toasts keep clear of it (`romacs-chrome-bottom',
 ;; `romacs-chrome-top').
@@ -335,7 +335,7 @@ WINDOW with STRING and COLUMN as its object, as GNU's are."
   "Run the binding of the status bar's mode line for a mouse event of
 TYPE at the bar's shown character COLUMN: `romacs--mode-line-click' of
 the window whose line it is, at that column of the bar's text
-\(`romacs--status-bar-target'); a separator runs nothing."
+\(`romacs--status-bar-target'); past the line nothing runs."
   (when-let* ((target (romacs--status-bar-target column)))
     (romacs--mode-line-click (nth 0 target) (nth 1 target) (nth 2 target) type)))
 

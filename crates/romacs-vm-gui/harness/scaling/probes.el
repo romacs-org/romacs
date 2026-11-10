@@ -1065,17 +1065,18 @@ comment and string syntax, its summaries made by one parse to the end."
              other))
   :body (with-current-buffer it (insert "x")))
 
-;; The same bar with a box, and a context window's line folded in: the
-;; stretches of its box run, and the context's background swept with the
+;; The same bar with a box: the stretches of its box run with the
 ;; characters, never a walk over the segments for each one.  N stays small
-;; enough to fit: a bar too full drops the context and clips the pills.
-;; The body refuses a run whose bar, at its widest after the last key, has
-;; lost the context, which follows every pill, so the pills are shown too.
+;; enough to fit: a bar too full clips the pills.  The body refuses a run
+;; whose bar, at its widest after the last key, has lost the end marker,
+;; which follows every pill, so the pills are shown too.
 (scaling-probe mode-line-bar-boxed :gui t :n 6 :steps 20
   :setup (progn
            (require 'romacs-mode-line)
            (romacs-mode-line-mode 1)
            (set-face-attribute 'mode-line nil :box '(:line-width 1 :color "#808080"))
+           (romacs-mode-line-define-segment bar-boxed-end "A probe's end marker." :format ("bar-end"))
+           (push 'bar-boxed-end romacs-mode-line-right)
            (dotimes (i n)
              (let ((face (intern (format "bar-boxed-face-%d" i))))
                (make-face face)
@@ -1089,15 +1090,12 @@ comment and string syntax, its summaries made by one parse to the end."
            (romacs-mode-line-rebuild)
            (let ((buffer (scaling--lines-buffer "scaling-bar-boxed" 50)))
              (switch-to-buffer buffer)
-             (with-selected-window (split-window-below)
-               (switch-to-buffer (get-buffer-create "scaling-bar-context"))
-               (setq-local mode-line-format '("q  " "context")))
              buffer))
   :body (progn
           (with-current-buffer it (insert "x"))
           (when (= i 19)
             (let ((shown (romacs-status-bar-string)))
-              (unless (string-search "context" shown)
+              (unless (string-search "bar-end" shown)
                 (scaling--mark (list :scaling "unfit" :shown shown))
                 (kill-emacs 3))))))
 
@@ -1155,9 +1153,8 @@ comment and string syntax, its summaries made by one parse to the end."
            buffer)
   :body (with-current-buffer it (goto-char (point-max)) (insert "x")))
 
-;; N windows, each showing its own buffer and drawing its own line
-;; (VM2-MODE-LINE), a key typed in one: the others' lines are reused,
-;; not expanded again.
+;; N windows, each showing its own buffer, a key typed in one: the
+;; status bar expands the selected window's line alone (VM2-STATUS-BAR).
 (scaling-probe mode-line-windows :gui t :n 2 :steps 20
   :setup (progn
            (require 'romacs-mode-line)
@@ -1170,36 +1167,6 @@ comment and string syntax, its summaries made by one parse to the end."
                  (select-window (split-window (get-largest-window) nil (quote below)))
                  (switch-to-buffer (scaling--lines-buffer (format "scaling-window-%d" i) 5))))
              (balance-windows)
-             main))
-  :body (with-current-buffer it (insert "x")))
-
-;; N side windows whose buffers set their own mode line, each folded into
-;; the status bar as a context segment (VM2-STATUS-BAR), a key typed in
-;; the selected window.
-(scaling-probe mode-line-contexts :gui t :n 2 :steps 20
-  :setup (progn
-           (delete-other-windows)
-           (let ((main (scaling--lines-buffer "scaling-contexts" 20)))
-             (switch-to-buffer main)
-             (dotimes (i n)
-               (let ((buffer (scaling--lines-buffer (format "scaling-context-%d" i) 2)))
-                 (with-current-buffer buffer (setq-local mode-line-format (list (format "ctx %d " i) "%b")))
-                 (display-buffer-in-side-window buffer `((side . right) (slot . ,i) (window-width . 12)))))
-             main))
-  :body (with-current-buffer it (insert "x")))
-
-;; N side windows whose own lines are each wider than the bar, so every
-;; one is dropped when the bar fits (VM2-STATUS-BAR): fitting and folding
-;; stay linear in what they drop.
-(scaling-probe mode-line-contexts-saturated :gui t :n 3 :steps 20
-  :setup (progn
-           (delete-other-windows)
-           (let ((main (scaling--lines-buffer "scaling-saturated" 20)))
-             (switch-to-buffer main)
-             (dotimes (i n)
-               (let ((buffer (scaling--lines-buffer (format "scaling-saturated-%d" i) 2)))
-                 (with-current-buffer buffer (setq-local mode-line-format (list (make-string 200 (+ ?a (% i 26))))))
-                 (display-buffer-in-side-window buffer `((side . ,(if (cl-oddp i) 'left 'right)) (slot . ,i) (window-width . 10)))))
              main))
   :body (with-current-buffer it (insert "x")))
 
