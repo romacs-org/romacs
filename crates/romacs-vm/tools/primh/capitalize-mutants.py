@@ -24,7 +24,7 @@ MUTANTS = [
     ("no-character-casing", PRIM, "mapping(code).map_or(code, |row| row.1)", "mapping(code).map_or(code, |_row| code)", "capitalize", "CAPITALIZE_NATIVE_CONTRACT"),
     ("drop-unibyte-properties", PRIM, "cx.buffer_name_string(object, bytes, false)", "cx.make_string(bytes, false)", "capitalize", "CAPITALIZE_NATIVE_CONTRACT"),
     ("not-automatically-local", VARIABLES, 'slot == self.truncate_lines_slot || self.names.get("case-symbols-as-words") == Some(&slot)', 'slot == self.truncate_lines_slot', "capitalize", "CAPITALIZE_NATIVE_CONTRACT"),
-    ("replay-no-lower", PRIM, "|r| r.3)", "|_r| &fallback[..])", "primh_capitalize", "NEW DIVERGENCE"),
+    ("replay-no-lower", PRIM, "|r| r.3)", "|_r| &fallback[..])", "primh", "NEW DIVERGENCE"),
     ("frontier-missing-capitalize", PRIM, 'name = "capitalize"', 'name = "capitalize-mutant"', "custom_bootstrap", "CUSTOM_FILES_FRONTIER_MOVED"),
 ]
 results = []
