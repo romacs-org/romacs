@@ -172,7 +172,7 @@ impl Vm {
     /// stays closed, the frame an initial-terminal frame, until
     /// [`Vm::open_display`].
     pub fn set_display_host(&mut self, host: Option<Box<dyn DisplayHost>>) {
-        self.display = host.map(|host| Display { host, open: false, face_fonts: Default::default() });
+        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: Default::default() });
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer

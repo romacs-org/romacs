@@ -117,5 +117,52 @@ class Summaries(unittest.TestCase):
         self.assertEqual(pk.text_point(published), 7)
 
 
+class HostCalls(unittest.TestCase):
+    ROWS = ('(find-file top 1 ((layout.measure local 5) (read-file cross 2)))\n'
+            '(next-line top 1 ((layout.measure local 9) (read-file cross 2)))\n'
+            '(next-line top 1 ((sender.input cross 1) (layout.measure local 12) (read-file cross 2)))\n'
+            '(next-line top 1 ((sender.input cross 1) (layout.measure local 13) (read-file cross 2)))\n'
+            '(scroll-up-command top 1 ((sender.input cross 1) (layout.measure local 20) (read-file cross 2)))\n'
+            '(scroll-up-command top 40 ((sender.input cross 1) (layout.measure local 30) (read-file cross 2)))\n'
+            '(scroll-up-command top 40 ((sender.input cross 1) (layout.measure local 31) (read-file cross 2)))\n'
+            '(self-insert-command minibuffer 1 ((sender.input cross 3) (layout.measure local 32) (read-file cross 2)))\n'
+            '(self-insert-command minibuffer 1 ((sender.input cross 5) (layout.measure local 32) (read-file cross 2)))\n'
+            '(auto-fill-mode top 40 ((sender.input cross 9) (layout.measure local 34) (read-file cross 2)))\n')
+
+    def rows(self):
+        return pk.host_call_rows(pk.sexps(self.ROWS))
+
+    def test_a_command_counts_only_after_the_same_command_in_the_same_context(self):
+        self.assertEqual(pk.host_call_segments(self.rows()), [
+            ('next-line', {'sender.input': ('cross', 1), 'layout.measure': ('local', 3)}),
+            ('next-line', {'layout.measure': ('local', 1)}),
+            ('scroll-up-command', {'layout.measure': ('local', 10)}),
+            ('minibuffer self-insert-command', {'sender.input': ('cross', 2)})])
+
+    def test_each_side_and_name_is_averaged_over_the_commands(self):
+        report = pk.host_calls_per_command(pk.host_call_segments(self.rows()))
+        self.assertEqual(report['next-line'], {
+            'commands': 2, 'local': {'mean': 2, 'max': 3}, 'cross': {'mean': .5, 'max': 1},
+            'by_name': {'layout.measure': {'side': 'local', 'mean': 2}, 'sender.input': {'side': 'cross', 'mean': .5}}})
+        self.assertEqual(report['scroll-up-command']['commands'], 1)
+
+    def test_a_prompt_counts_from_the_command_before_it_to_the_one_that_ends_it(self):
+        prompts = pk.host_call_prompts(self.rows())
+        self.assertEqual(prompts, {'minibuffer': {'sender.input': ('cross', 8), 'layout.measure': ('local', 3)}})
+        self.assertEqual(pk.host_calls_per_prompt_key([prompts, prompts], {'minibuffer': 4}), {'minibuffer': {
+            'prompts': 2, 'keys_each': 4, 'local': .75, 'cross': 2,
+            'by_name': {'layout.measure': {'side': 'local', 'per_key': .75}, 'sender.input': {'side': 'cross', 'per_key': 2}}}})
+
+    def test_rows_count_after_the_setup(self):
+        rows = [('self-insert-command', 'minibuffer', '1', {}), ('eval-expression', 'top', '1', {}), ('next-line', 'top', '1', {})]
+        self.assertEqual(pk.after_setup(rows), rows[2:])
+        self.assertEqual(pk.after_setup(rows[2:]), rows[2:])
+
+    def test_the_search_letters_occur_three_times(self):
+        self.assertEqual(pk.search_word('a' * 40 + pk.text_of(5)), 'ordina')
+        with self.assertRaises(pk.Invalid):
+            pk.search_word('aaaaaaaaaaaaaaaaaaaaaaaa one two three')
+
+
 if __name__ == '__main__':
     unittest.main()

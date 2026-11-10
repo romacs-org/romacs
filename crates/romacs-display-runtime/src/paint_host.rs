@@ -341,6 +341,7 @@ impl PaintSender {
     /// Whether the window draws on a software rasterizer: None until the
     /// render thread has chosen its adapter.
     pub fn software_adapter(&self) -> Option<bool> {
+        romacs_display_protocol::call_count::count("sender.software_adapter");
         self.diagnostics.software_adapter()
     }
 
@@ -348,6 +349,7 @@ impl PaintSender {
     /// evaluator waits, for at most one second; native I/O never runs here or
     /// on the render thread. Absence of text is distinct from transport errors.
     pub fn clipboard_text(&self) -> Result<Option<String>, String> {
+        romacs_display_protocol::call_count::count("sender.clipboard_text");
         self.clipboard_request(|expires_at, reply| ClipboardCommand::GetText {
             selection: ClipboardSelection::Clipboard,
             expires_at,
@@ -359,6 +361,7 @@ impl PaintSender {
     /// a background-command result or proof of cancellation: native work that
     /// already started may finish later; queued expired requests are rejected.
     pub fn set_clipboard_text(&self, text: &str) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.set_clipboard_text");
         self.clipboard_request(|expires_at, reply| ClipboardCommand::SetText {
             selection: ClipboardSelection::Clipboard,
             text: Some(text.to_owned()),
@@ -395,6 +398,7 @@ impl PaintSender {
         presentation: u64,
         timeout: std::time::Duration,
     ) -> Result<PaintDiagnostic, String> {
+        romacs_display_protocol::call_count::count(if timeout.is_zero() { "sender.render_poll" } else { "sender.wait_for_render" });
         self.diagnostics.wait(presentation, timeout)
     }
 
@@ -416,6 +420,7 @@ impl PaintSender {
         children: Vec<FrameGlyphBuffer>,
         text_animations: Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)>,
     ) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.submit_scene");
         validate_frame(&frame)?;
         validate_children(&frame, &children)?;
         let scene = crate::thread_comm::PaintScene { root: frame, children, text_animations };
@@ -435,6 +440,7 @@ impl PaintSender {
     pub fn load_image(&self, image: u32, attempt: u64,
                       decoded: std::sync::Arc<romacs_renderer_wgpu::image_cache::SemanticImageDecoded>) -> Result<bool, String> {
         use romacs_display_protocol::{ImageId, ImageLoadAttempt, ImageLoadToken};
+        romacs_display_protocol::call_count::count("sender.load_image");
         let attempt = ImageLoadAttempt::new(attempt).ok_or("image load attempts start at 1")?;
         let load = ImageLoadToken::new(ImageId::new(image), attempt);
         self.send_asset(crate::thread_comm::AssetCommand::ImageLoadDecoded { load, decoded })
@@ -443,24 +449,28 @@ impl PaintSender {
     /// Release IMAGE's texture once no presented frame draws it.  False,
     /// and nothing sent, while the command channel is full.
     pub fn retire_image(&self, image: u32) -> Result<bool, String> {
+        romacs_display_protocol::call_count::count("sender.retire_image");
         self.send_asset(crate::thread_comm::AssetCommand::ImageRetire { image: romacs_display_protocol::ImageId::new(image) })
     }
 
     /// The images the renderer lost since the last call: those it evicted,
     /// and whether a GPU rebuild lost them all.
     pub fn take_lost_images(&self) -> (Vec<u32>, bool) {
+        romacs_display_protocol::call_count::count("sender.take_lost_images");
         let mut lost = self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner());
         (std::mem::take(&mut lost.evicted), std::mem::take(&mut lost.reset))
     }
 
     /// Whether a GPU rebuild lost every image since the last take.
     pub fn images_reset_pending(&self) -> bool {
+        romacs_display_protocol::call_count::count("sender.images_reset_pending");
         self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset
     }
 
     /// Debug: rebuild the GPU state as after a device loss
     /// (`romacs--debug-lose-device`). Whether the request went.
     pub fn debug_lose_device(&self) -> Result<bool, String> {
+        romacs_display_protocol::call_count::count("sender.debug_lose_device");
         self.send_asset(crate::thread_comm::AssetCommand::DebugSimulateDeviceLoss)
     }
 
@@ -480,6 +490,7 @@ impl PaintSender {
     /// while active and inactive (negative leaves its opacity alone),
     /// raised to LIMIT.
     pub fn set_frame_alpha(&self, frame: u64, alpha: [f32; 2], limit: f32) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.set_frame_alpha");
         self.comms.frame_opacity.lock().unwrap_or_else(|e| e.into_inner()).accept(frame, alpha, limit);
         let result = self
             .comms
@@ -500,6 +511,7 @@ impl PaintSender {
         height: u32,
         title: String,
     ) -> Result<crossbeam_channel::Receiver<Result<(), String>>, String> {
+        romacs_display_protocol::call_count::count("sender.show_primary");
         let (reply, ready) = crossbeam_channel::bounded(1);
         let none = crate::host_types::GuiFrameGeometryHints {
             base_width: 0, base_height: 0, min_width: 0, min_height: 0, width_inc: 0, height_inc: 0,
@@ -526,11 +538,13 @@ impl PaintSender {
 
     /// Where the pointer is over the primary window, if it is.
     pub fn pointer(&self) -> Option<(i32, i32)> {
+        romacs_display_protocol::call_count::count("sender.pointer");
         self.comms.pointer.get()
     }
 
     /// Title the primary window (xdisp.c gui_consider_frame_title).
     pub fn set_title(&self, title: String) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.set_title");
         let result = self
             .comms
             .cmd_tx
@@ -542,6 +556,7 @@ impl PaintSender {
 
     /// Close a server's primary window; the render loop and the GPU stay.
     pub fn hide_primary(&self) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.hide_primary");
         let result = self
             .comms
             .cmd_tx
@@ -555,6 +570,7 @@ impl PaintSender {
     /// window from the next paint. Sent rather than tried: a dropped
     /// configuration would leave an option silently without effect.
     pub fn set_visual_config(&self, config: romacs_display_protocol::VisualConfig) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.set_visual_config");
         let result = self
             .comms
             .cmd_tx
@@ -566,6 +582,7 @@ impl PaintSender {
 
     /// Ask the compositor to bring the primary window to the user.
     pub fn raise_primary(&self) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.raise_primary");
         let result = self
             .comms
             .cmd_tx
@@ -576,10 +593,12 @@ impl PaintSender {
     }
 
     pub fn input(&self) -> &crossbeam_channel::Receiver<crate::thread_comm::InputEvent> {
+        romacs_display_protocol::call_count::count("sender.input");
         &self.comms.input_rx
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
+        romacs_display_protocol::call_count::count("sender.shutdown");
         let result = self
             .comms
             .cmd_tx

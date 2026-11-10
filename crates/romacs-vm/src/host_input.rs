@@ -133,7 +133,7 @@ impl Vm {
     /// `read-from-minibuffer' outside a keyboard macro reads its keys here.
     pub fn set_host_input(&mut self, host: Option<Box<dyn HostInput>>) {
         let attached = if host.is_some() { Value::TRUE } else { Value::NIL };
-        self.host_input = host;
+        self.host_input = host.map(|host| Box::new(crate::host_calls::Counted(host)) as Box<dyn HostInput>);
         self.declare_special_raw(HOST_INPUT_VARIABLE, attached);
     }
 
