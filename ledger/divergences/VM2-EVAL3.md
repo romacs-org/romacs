@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-EVAL3 | A repeatedly evaluated mode-line datum compiles once | GNU's mode line evaluates an `:eval` form (and `%@`'s `file-remote-p` test) with `safe_eval` at each redisplay, expanding its macros each time | The code for each such datum is cached by its structure (`cached_datum`, crates/romacs-vm/src/source_cache.rs) and reused while its guard holds: a macro it expanded is unchanged, the special-ness of each symbol it names is unchanged, and no call in it became a macro. A datum holding an object with no spelling compiles for each use. Copied constants (VM2-EVAL2) are therefore created once and shared by every evaluation of that structure, as GNU shares the datum's own objects | **Package-observable limit:** a macro whose expansion reads mutable state (not just its definition) expands once per definition here, at each redisplay in GNU. Before this, every mode-line `:eval` compiled a request per frame, and those requests forced collections while typing | <!-- symbols: format-mode-line, mode-line-format -->

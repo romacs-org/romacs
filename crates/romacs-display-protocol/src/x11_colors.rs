@@ -142,5 +142,4 @@ pub fn x11_color_spec_16bit(spec: &[u8]) -> Option<(u16, u16, u16)> {
 }
 
 #[cfg(test)]
-#[path = "x11_colors/tests/x11_colors_test.rs"]
 mod tests;

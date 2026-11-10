@@ -153,6 +153,16 @@ impl<'b, E> Mx<'_, 'b, E> {
     }
 }
 
+/// Orchestration without the permission: BODY gets leaves over E and a brand of
+/// its own, and no [`Gc`], so it reaches no collection point. A function
+/// pointer, it captures nothing, so no outer permission comes in with it. Raw
+/// code that holds Values runs orchestration this way (a read that may call no
+/// Lisp).
+#[inline]
+pub fn without_gc<E, A: Plain, N: Plain>(e: &mut E, a: A, body: for<'m, 'b> fn(Mx<'m, 'b, E>, A) -> N) -> N {
+    body(Mx { e, _brand: PhantomData }, a)
+}
+
 /// Raw mode to orchestration and back, consuming the handle. BODY is a
 /// function pointer, so it captures nothing of the caller's; it returns, as
 /// plain data, where raw mode goes next, and THEN takes the engine there.

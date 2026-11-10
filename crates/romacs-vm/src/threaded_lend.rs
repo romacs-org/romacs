@@ -11,7 +11,8 @@
 //! here, at the call. A load is converted: it goes on under this permission.
 //!
 //! The requests over a VM below are the same thing without an engine: what
-//! orchestration over a `Vm` (`crate::loader`, `crate::command`) may ask.
+//! orchestration over a `Vm` (`crate::loader`, `crate::command`,
+//! `crate::host_input`) may ask.
 use super::*;
 use crate::brand::{Gc, Key, Mx, Plain};
 use std::marker::PhantomData;
@@ -189,12 +190,6 @@ pub(crate) fn compile_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Fo
 pub(crate) fn expand_form<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, form: &Form) -> Result<Option<Form>> {
     m.request(&EngineKey, gc, |vm| vm.expand_macro(form), (), |_, (), expanded| expanded)
 }
-/// The next form of SOURCE, its value, offset and end; reading can call Lisp
-/// (a `\N{NAME}` character). THEN consumes the value at once.
-pub(crate) fn read_next<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &[u8], b: B,
-    then: impl FnOnce(&mut Vm, B, Result<Option<(Value, usize, usize)>>) -> R + Copy + 'static) -> R {
-    m.request(&EngineKey, gc, |vm| vm.read_internal_span(source), b, then)
-}
 /// The function rooted first in FRAME, called on the rest, THEN consuming its
 /// value at once.
 pub(crate) fn call_frame<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, frame: &RootFrame, b: B,
@@ -203,6 +198,38 @@ pub(crate) fn call_frame<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<
         let values = vm.rooted_values(frame).to_vec();
         vm.reader_call(values[0], &values[1..])
     }, b, then)
+}
+/// The prepared Lisp SOURCE (`Vm::call_prepared_source_propagating`) on the
+/// arguments rooted in FRAME, as a request, THEN consuming its value at once.
+pub(crate) fn call_source<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, source: &'static str, frame: Option<&RootFrame>, b: B,
+    then: impl FnOnce(&mut Vm, B, Result<Value>) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| {
+        let args = frame.map_or_else(Vec::new, |frame| vm.rooted_values(frame).to_vec());
+        vm.call_prepared_source_propagating(source, &args)
+    }, b, then)
+}
+/// A redisplay's freeze of the frame, whose Lisp (a mode-line `:eval`, the
+/// window-change and pre-redisplay functions) may collect, as a request: THEN
+/// gets the frame at once, with when the freeze began.
+pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, b: B,
+    then: impl FnOnce(&mut Vm, B, (std::time::Instant, Result<romacs_layout_input::FrameSnapshot>)) -> R + Copy + 'static) -> R {
+    m.request(&EngineKey, gc, |vm| {
+        let (width, height) = (vm.window_state.width, vm.window_state.height);
+        let started = crate::host::monotonic();
+        (started, vm.frame_snapshot(width, height))
+    }, b, then)
+}
+/// The frame resized to WIDTH and HEIGHT: its root window first, whose Lisp
+/// may collect, as a request; then the frame's geometry, at the line height
+/// and column width it had before.
+pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (width, height): (u32, u32)) -> Result<()> {
+    m.request(&EngineKey, gc, |vm| {
+        let cell = (vm.window_state.line, vm.window_state.column);
+        (cell, vm.resize_root_window(width, height))
+    }, (width, height), |vm, (width, height), ((line, column), resized)| {
+        resized?;
+        vm.set_frame_geometry(width, height, line, column)
+    })
 }
 /// A writer whose Values are rooted: its watchers are free to collect.
 fn rooted_writer<T>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> T) -> T {
@@ -269,6 +296,12 @@ impl Nested<'_> {
                 vm.lambda_list_closure(list)
             }
             Nested::Aftermath(runner) => vm.run_aftermath(runner.get(), true),
+            Nested::Loader(Primitive::ReadHostEvent, frame) => {
+                let out = vm.root_frame(&[Value::NIL]);
+                let outcome = over_vm(vm, gc, (frame, &out), |mut m, gc, (args, out)| crate::host_input::wait_for_event(&mut m, gc, args, (out, 0)));
+                let [value] = vm.release_frame(out);
+                outcome.map(|()| value)
+            }
             Nested::Loader(p, frame) if crate::loader::loads(p) => {
                 let out = vm.root_frame(&[Value::NIL]);
                 let outcome = over_vm(vm, gc, (p, frame, &out), |mut m, gc, (p, args, out)| crate::loader::load_primitive(&mut m, gc, p, args, (out, 0)));
@@ -367,13 +400,30 @@ pub(super) fn unwind<'b>(m: &mut Orch<'_, 'b, '_>, _gc: Gc<'_, 'b>, n: usize) {
     m.raw(&EngineKey).code_suspended(|vm| rooted_writer(vm, |vm| vm.unwind(n)));
 }
 
-/// A generated primitive whose body reads (`read`, `read-from-string`), and
-/// so runs Lisp: TARGET on the ARGC arguments at register offset START, its
-/// step handed to THEN.
-pub(super) fn read<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc: Gc<'_, 'b>, (target, start, argc): (Imm, usize, usize), b: B,
+/// A reading primitive (`read`, `read-from-string`: `prim::Body::Reader`),
+/// which may run Lisp: TARGET on the ARGC arguments at register offset START,
+/// in place, its body orchestration over the VM under this permission; its
+/// step handed to THEN. An escape from its Lisp stays in `propagated_escape`.
+pub(super) fn read<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<'_, 'b>, (target, start, argc): (Imm, usize, usize), b: B,
     then: impl FnOnce(&mut Engine<'a>, B, std::result::Result<prim::Step, Option<(Value, Value)>>) -> R + Copy + 'static) -> R {
     let e = m.raw(&EngineKey);
-    let step = e.code_suspended(|vm| vm.call_generated(target.get(), start, argc));
+    let step = e.code_suspended(|vm| {
+        let index = vm.reading_primitive(target.get(), argc)?;
+        let out = vm.root_frame(&[Value::NIL; 3]);
+        let signalled = over_vm(vm, gc, (index, start, argc, &out), |mut m, gc, (index, start, argc, out)| {
+            prim::reader_body(index)(prim::ReadCall { m: &mut m, gc, start, argc, out })
+        });
+        let [value, condition, data] = vm.release_frame(out);
+        if !signalled {
+            Ok(prim::Step::Done(value))
+        } else if condition == Value::NIL {
+            // The body's fault was an escape, which waits in
+            // `propagated_escape` for `read_body` to take first (`prim::land`).
+            Err(None)
+        } else {
+            Err(Some((condition, data)))
+        }
+    });
     then(e, b, step)
 }
 
@@ -387,4 +437,13 @@ pub(super) fn callback<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, _gc
         vm.reader_call(function, &[object])
     });
     then(e, b, result)
+}
+
+#[cfg(test)]
+pub(crate) mod test_requests {
+    use super::*;
+    /// A collection now, for a test standing in for Lisp that collects.
+    pub(crate) fn collect_now<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>) {
+        m.request(&EngineKey, gc, |vm| { vm.collect(&mut []); }, (), |_, (), ()| ());
+    }
 }

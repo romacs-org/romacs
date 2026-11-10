@@ -284,41 +284,45 @@ impl Vm {
         }
         Ok(None)
     }
+    /// `featurep`, and the bootstrap's `#:vm2-provide`: data only, so no Lisp
+    /// runs (the `provide` Lisp calls runs `after-load-alist` as a continuation,
+    /// prims/provide.rs).
+    pub(super) fn feature_primitive(&mut self, p: Primitive, args: &[Value]) -> Result<Value> {
+        if args.is_empty() || args.len() > 2 {
+            return Err("wrong primitive arity".into());
+        }
+        // Match GNU's CHECK_SYMBOL then CHECK_LIST before inspecting features.
+        self.symbol_plist(args[0])?;
+        let subfeature = args.get(1).copied().unwrap_or(Value::NIL);
+        if p == Primitive::Provide && subfeature != Value::NIL && subfeature.tag() != 3 {
+            return Err("provide subfeatures list required".into());
+        }
+        let present = self.feature_present(args[0])?;
+        if p == Primitive::Featurep {
+            let found = present && (subfeature == Value::NIL
+                || self.feature_subfeature_matches(args[0], subfeature)
+                    .map_err(|_| "featurep subfeature fault".to_owned())?);
+            return Ok(if found { Value::TRUE } else { Value::NIL });
+        }
+        // fns.c:3751: recorded whether or not FEATURE is present.
+        self.autoload_note_provide();
+        if !present {
+            let slot = self.slot("features");
+            let old = self.slots[slot].value;
+            self.slots[slot].value = self.alloc_cons(args[0], old);
+        }
+        if subfeature != Value::NIL {
+            let key = self.intern("subfeatures");
+            self.put_symbol_property(args[0], key, subfeature)?;
+        }
+        let provide = self.intern("provide");
+        let entry = self.alloc_cons(provide, args[0]);
+        self.attach_load_history(entry)?;
+        Ok(args[0])
+    }
     pub(super) fn loader_primitive(&mut self, p: Primitive, args: &[Value]) -> Result<Value> {
         match p {
-            Primitive::Featurep | Primitive::Provide => {
-                if args.is_empty() || args.len() > 2 {
-                    return Err("wrong primitive arity".into());
-                }
-                // Match GNU's CHECK_SYMBOL then CHECK_LIST before inspecting features.
-                self.symbol_plist(args[0])?;
-                let subfeature = args.get(1).copied().unwrap_or(Value::NIL);
-                if p == Primitive::Provide && subfeature != Value::NIL && subfeature.tag() != 3 {
-                    return Err("provide subfeatures list required".into());
-                }
-                let present = self.feature_present(args[0])?;
-                if p == Primitive::Featurep {
-                    let found = present && (subfeature == Value::NIL
-                        || self.feature_subfeature_matches(args[0], subfeature)
-                            .map_err(|_| "featurep subfeature fault".to_owned())?);
-                    return Ok(if found { Value::TRUE } else { Value::NIL });
-                }
-                // fns.c:3751: recorded whether or not FEATURE is present.
-                self.autoload_note_provide();
-                if !present {
-                    let slot = self.slot("features");
-                    let old = self.slots[slot].value;
-                    self.slots[slot].value = self.alloc_cons(args[0], old);
-                }
-                if subfeature != Value::NIL {
-                    let key = self.intern("subfeatures");
-                    self.put_symbol_property(args[0], key, subfeature)?;
-                }
-                let provide = self.intern("provide");
-                let entry = self.alloc_cons(provide, args[0]);
-                self.attach_load_history(entry)?;
-                Ok(args[0])
-            }
+            Primitive::Featurep | Primitive::Provide => self.feature_primitive(p, args),
             Primitive::Load | Primitive::Require | Primitive::AutoloadDoLoad => {
                 let frame = self.root_frame(args);
                 let out = self.root_frame(&[Value::NIL]);
@@ -332,7 +336,6 @@ impl Vm {
             }
             Primitive::Eval => self.eval_primitive(args),
             Primitive::Macroexpand => self.macroexpand_primitive(args),
-            Primitive::ReadHostEvent => self.read_host_event(args),
             Primitive::FormatModeLine => self.format_mode_line(args),
             _ => unreachable!(),
         }
@@ -811,7 +814,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         // safepoint of its own still lets C-g end the load, the forms before it
         // kept.
         m.leaf((), |vm, ()| vm.poll_quit())?;
-        let read = crate::threaded::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
+        let read = crate::reader::read_next(m, gc.by_ref(), &source[at..], (), |vm, (), read| {
             read.map(|read| read.map(|(value, begin, used)| (vm.source_form(value, 0), begin, used)))
         });
         let Some((form, begin, used)) = read.map_err(|e| {

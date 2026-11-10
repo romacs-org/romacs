@@ -183,4 +183,41 @@ fn propertizing_parses_match_pinned_gnu() {
        (list (parse-partial-sexp 1 (point-max)) (point)))"#;
     let (expected, actual) = run(&PRELUDE.replace("EXPR", rewritten));
     assert_eq!(actual.as_deref(), Ok(expected.as_str()));
+    // A stop inside a comment, on the update after an escape GNU's
+    // forw_comment skips, at END itself: GNU calls the propagation again
+    // there.
+    let escaped = r#"(with-temp-buffer
+       (syn ?\; "<" ?\n ">" ?\\ "\\")
+       (insert ";\\x more")
+       (set (make-local-variable 'parse-sexp-lookup-properties) t)
+       (setq comment-end-can-be-escaped t)
+       (let ((log nil))
+         (fset 'internal--syntax-propertize
+               (lambda (pos) (setq log (cons pos log)) (setq syntax-propertize--done pos)))
+         (setq syntax-propertize--done 3)
+         (list (parse-partial-sexp 1 4) (point) (nreverse log))))"#;
+    let (expected, actual) = run(&PRELUDE.replace("EXPR", escaped));
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()));
+    // A parse that stops at every few characters, in symbols, strings,
+    // escapes and nested comments, while the propagation changes syntax it
+    // already read and syntax ahead of it.
+    let stops = r#"(with-temp-buffer
+       (syn ?\( "()1n" ?\) ")(4n" ?* ". 23n" ?\; "<" ?\n ">" ?\" "\"" ?\\ "\\")
+       (build "(a (* x (* y *) \\*) z *) \"s\\\"t\" b\\(c ; d\n" 300)
+       (set (make-local-variable 'parse-sexp-lookup-properties) t)
+       (let ((log nil) (n 0))
+         (fset 'internal--syntax-propertize
+               (lambda (pos)
+                 (setq log (cons pos log) n (1+ n))
+                 (when (= 0 (% n 7))
+                   (put-text-property (max 1 (- pos 20)) (max 2 (- pos 19)) 'syntax-table (string-to-syntax "(")))
+                 (when (= 0 (% n 11))
+                   (put-text-property pos (min (point-max) (1+ pos)) 'syntax-table (string-to-syntax "\"")))
+                 (setq syntax-propertize--done (min (point-max) (+ pos (% (* n 13) 17))))))
+         (setq syntax-propertize--done 1)
+         (list (parse-partial-sexp 1 (point-max)) (point) (length log) (nreverse log)
+               (progn (setq log nil n 0 syntax-propertize--done 500)
+                      (list (parse-partial-sexp 400 (point-max) nil nil (parse-partial-sexp 1 400)) (nreverse log))))))"#;
+    let (expected, actual) = run(&PRELUDE.replace("EXPR", stops));
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()));
 }

@@ -558,5 +558,4 @@ pub fn validate_surface_glsl(
 }
 
 #[cfg(test)]
-#[path = "shader_surface/tests/shader_surface_test.rs"]
 mod tests;

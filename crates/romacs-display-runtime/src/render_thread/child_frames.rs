@@ -170,7 +170,7 @@ pub(crate) struct ChildFrameManager {
     pub frames: HashMap<u64, ChildFrameEntry>,
     /// Frame IDs sorted by z_order for rendering (lowest first = back-most)
     render_order: Vec<u64>,
-    /// Monotonic counter incremented each poll_frame cycle
+    /// Monotonic counter incremented once per render-loop wake
     frame_counter: u64,
     root: Option<PresentedFramePlacement>,
     /// Frames removed while a close slot is enabled, kept for their fade.
@@ -197,7 +197,7 @@ impl ChildFrameManager {
         self.rebuild_presented_scene();
     }
 
-    /// Increment the frame counter. Call once per poll_frame cycle.
+    /// Increment the frame counter. Call once per render-loop wake.
     pub fn tick(&mut self) {
         self.frame_counter += 1;
     }
@@ -897,5 +897,4 @@ fn glide_frame(frame: &FrameGlyphBuffer, from_y: f32) -> Option<FrameGlyphBuffer
 }
 
 #[cfg(test)]
-#[path = "child_frames/tests/child_frames_test.rs"]
 mod tests;

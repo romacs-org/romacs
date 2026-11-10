@@ -75,13 +75,13 @@ def main():
         kind, expected = json.loads(output)
         process = subprocess.run([args.binary], input=json.dumps({'source': source}), text=True, capture_output=True)
         actual = process.stdout.strip()
-        # GNU-DIVERGENCES.md D001. Keep both answers visible and compare
+        # ledger/divergences/D001.md. Keep both answers visible and compare
         # against an exact, named expectation, never an ignored mismatch.
         divergence = None
         romacs_expected = expected
         if source == '(condition-case e (let ((s (copy-sequence "αβγ"))) (aset s 1 955) (aref s 1)) (error 18))':
             assert (kind, expected) == ('value', '18')
-            divergence = 'GNU-DIVERGENCES.md#d001--unicode-scalar-string-mutation'
+            divergence = 'ledger/divergences/D001.md'
             romacs_expected = '955'
         if kind == 'value':
             passed = process.returncode == 0 and actual == romacs_expected

@@ -344,6 +344,7 @@ impl Vm {
             self.propagated_escape = None;
             self.propagated_escape_hooked = false;
             self.propagated_eval_depth = None;
+            self.drop_deferred_escapes();
         }
         // A request boundary: no engine's registers are live here, and any
         // suspended frame or caller below holds its Values in traced storage

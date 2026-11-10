@@ -7,18 +7,18 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 CASES = {
-    'deferred-unread': ('src/reader.rs',
+    'deferred-unread': ('src/reader/parse.rs',
         '                self.unread_lookahead()?;\n                if !escaped {',
         '                // mutant: leave delimiter consumed\n                if !escaped {',
         'reader_nested_callback_unread_is_immediate'),
-    'raw-byte-as-unicode': ('src/reader.rs',
+    'raw-byte-as-unicode': ('src/reader/parse.rs',
         'let c = bytes[0] as u32;\n                    (if c >= 128 { c + 0x3fff00 } else { c }, 1)',
         'let c = bytes[0] as u32;\n                    (c, 1)', 'reader_bytes_unibyte_literal'),
     'copy-ascii-from-source': ('src/char_table.rs',
         'let ascii = Self::ascii_from_root(&root);',
         'let ascii = self.ascii.clone();',
         'review_independent_ascii_is_preserved_in_copy_and_rejected_by_mapping'),
-    'missing-dot-unread': ('src/reader.rs',
+    'missing-dot-unread': ('src/reader/parse.rs',
         '            46 if Self::dot_follows(self.peek()) => {\n                self.unread_lookahead()?;',
         '            46 if Self::dot_follows(self.peek()) => {\n                // mutant: signal while the delimiter remains consumed',
         'reader_error_callback_collection_preserves_condition'),

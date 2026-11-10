@@ -33,5 +33,4 @@ fn select_present_mode(
 }
 
 #[cfg(test)]
-#[path = "tests/pacing_test.rs"]
 mod tests;

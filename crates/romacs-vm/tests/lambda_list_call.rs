@@ -88,3 +88,35 @@ fn a_lambda_list_compiles_once_while_unchanged() {
     assert_eq!((again, changed, after), (0, 1, 0));
     assert_eq!(vm.eval_source("(funcall lambda-list-once 1)").unwrap().display().unwrap(), "3");
 }
+
+/// The expansions a fresh VM counts after SETUP and then CALL, BETWEEN and
+/// CALL again, CALL running a quoted lambda list whose body expands
+/// `lambda-list-counted`.
+fn expansions(setup: &str, call: &str, between: &str) -> String {
+    let mut vm = Vm::new();
+    vm.eval_source(&format!(
+        "(progn (defvar lambda-list-expansions 0)
+                (defmacro lambda-list-counted () (setq lambda-list-expansions (1+ lambda-list-expansions)) 1)
+                {setup})"
+    ))
+    .unwrap();
+    vm.eval_source(&format!("(progn {call} {between} {call} lambda-list-expansions)")).unwrap().display().unwrap()
+}
+
+/// A collection is invisible to Lisp: a list keeps its compiled code across
+/// one, so its macros expand no more often than with none.
+#[test]
+fn a_collection_does_not_compile_a_lambda_list_again() {
+    let setup = "(defun lambda-list-caller () (funcall '(lambda () (lambda-list-counted))))";
+    let call = "(lambda-list-caller)";
+    assert_eq!([expansions(setup, call, ""), expansions(setup, call, "(garbage-collect)")], ["1", "1"]);
+}
+
+/// The same for a quoted lambda on a hook, called by `run-hooks`.
+#[test]
+fn a_collection_does_not_compile_a_hooked_lambda_list_again() {
+    let setup = "(progn (defvar lambda-list-counted-hook nil)
+                        (setq lambda-list-counted-hook (list '(lambda () (lambda-list-counted)))))";
+    let call = "(run-hooks 'lambda-list-counted-hook)";
+    assert_eq!([expansions(setup, call, ""), expansions(setup, call, "(garbage-collect)")], ["1", "1"]);
+}

@@ -12,7 +12,9 @@ pub(super) use signal_handlers::SignalHandler;
 use signal_handlers::{prepare_signal, release_control, speculative, DEBUGGER_HELPER};
 #[path = "threaded_lend.rs"]
 mod lend;
-pub(crate) use lend::{bind_from, call_frame, compile_form, eval_form, eval_text, expand_form, read_next, run_function, toplevel, unbind_to, unwind_to, write_from};
+pub(crate) use lend::{bind_from, call_frame, call_source, compile_form, eval_form, eval_text, expand_form, redisplay, resize, run_function, toplevel, unbind_to, unwind_to, write_from};
+#[cfg(test)]
+pub(crate) use lend::test_requests::collect_now;
 use crate::brand::{orchestrate, Gc, Plain};
 use crate::gc::RootFrame;
 use lend::{Nested, Orch, Pc, Write};
@@ -3773,8 +3775,8 @@ unsafe fn generated_step(
     unsafe {
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
-        // The reader runs Lisp: a lend, which the dispatch makes.
-        if matches!(prim::name(target), Some("read" | "read-from-string")) {
+        // A reading primitive runs Lisp: a lend, which the dispatch makes.
+        if matches!(prim::generated(target), Some(prim::PrimDesc { body: prim::Body::Reader(_), .. })) {
             debug_assert_eq!(r, e.regs, "a call runs in the current frame");
             return Continue::Read(Box::new((Pc::new(pc), Imm::new(e.vm, target).expect("a primitive"), base + start, argc)));
         }
@@ -4309,11 +4311,14 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::traversal_primitive
         }
         Message => Vm::primitive,
-        // Only `provide' and `featurep' come here (the rest route through
-        // `primitive', a lend); `provide''s after-load hooks run deferred.
-        Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |vm, p, start, n| {
+        // The other loader primitives never come here: the engine lends them
+        // (`loader_body`). These two run no Lisp.
+        Provide | Featurep => |vm, p, start, n| {
             let args = vm.stack[start..start + n].to_vec();
-            vm.defer(|vm| vm.loader_primitive(p, &args))
+            vm.feature_primitive(p, &args)
+        },
+        Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine => |_, _, _, _| {
+            Err("a loader primitive is lent from its engine (`loader_body`), never called here".into())
         },
         Get | Put | RawPropertiesAt | GetCharProperty | BufferSubstring
         | InsertInherit | KillNew | CurrentKill | YankPart | YankFinalize | YankPropertyRun
@@ -4403,10 +4408,13 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's or `defalias-fset-function''s own signal
-            // travels behind the write's text, as does GNU's read-only
-            // error with its object behind a frozen write's (`frozen.rs`).
-            if (matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) || error == crate::frozen::READ_ONLY)
+            // A `defvar` watcher's own signal travels behind the write's text,
+            // as GNU's read-only error does with its object behind a frozen
+            // write's (`frozen.rs`). A `set`, `makunbound` or
+            // `defalias-fset-function` escape comes through the queue's drain
+            // instead: this engine runs, so those writes wait for its
+            // completion (`Vm::write_from_native`).
+            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY)
                 && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);

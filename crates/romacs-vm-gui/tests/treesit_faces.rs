@@ -6,7 +6,7 @@
 //! executable ships (DIVERGENCES.md VM2-TREESIT-BUNDLED).
 //!
 //! The expected runs are pinned GNU's: build the shipped grammars as
-//! libraries with `tools/treesit_grammars.py so --out DIR`, then for each
+//! libraries with `tools/lib/treesit_grammars.py so --out DIR`, then for each
 //! sample run pinned GNU as
 //! `TREESIT_FACES_GRAMMARS=DIR TREESIT_FACES_FILE=sample.EXT emacs -Q --batch
 //! --eval "$(cat faces.form)" > sample.EXT.faces` in that directory.

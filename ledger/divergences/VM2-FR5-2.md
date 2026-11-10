@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-FR5-2 | memory-full signal data | `make_vector` (`src/alloc.c:3536`) past `VECTOR_ELTS_MAX`, or on a failed `malloc`, calls `memory_full` (`src/alloc.c:4130`), which signals `memory-signal-data` (`src/alloc.c:7504-7512`). `startup.el:1738` rewrites that to `(error (substitute-command-keys "Memory exhausted--use \\[save-some-buffers] ..."))`, so live batch GNU signals `(error #("Memory exhausted--use C-x s then exit and restart Emacs" 22 27 (face help-key-binding ...)))` | VM2 has no `memory-signal-data` variable and signals the C initializer, `(error "Memory exhausted--use M-x save-some-buffers then exit and restart Emacs")` (`crates/romacs-vm/src/prims/frontier.rs`, asserted by value in `tests/frontier5.rs`). The condition is `error` in both. Pinned: `make-vector/0114-0132,0411-0417,0501` (class `DATA`/`VALUE`) | **Package-observable** only in the message text of an out-of-memory error | <!-- symbols: make-vector, memory-signal-data -->

@@ -14,7 +14,7 @@ go through each engine's own command loop, typed by wtype, in *scratch*:
   syntax    M-x describe-syntax RET: describe-vector over the syntax table
             with internal-describe-syntax-value.  Not run by default: the
             table shows U+2FFF, which no font of the gate's covers, and an
-            uncovered character still ends a Romacs session (layout2's
+            uncovered character still ends a Romacs session (romacs-layout's
             `unresolved face text'); name it to run it.
 
 COMPARISON POLICY: parity_live.py's -- buffers, point, text, properties,

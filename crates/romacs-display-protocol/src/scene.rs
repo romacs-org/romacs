@@ -417,5 +417,4 @@ impl Scene {
 }
 
 #[cfg(test)]
-#[path = "scene/tests/scene_test.rs"]
 mod tests;

@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-CASE3 | Region casing that expands a character | `casefiddle.c:do_casify_multibyte_region` replaces a character whose case is several characters (`ß` to `SS`) through `replace_range_2` without moving markers: markers keep their character positions, the extra characters take the stickiness-inherited properties at the character's start and the last keeps the old character's. | `upcase-region` and `upcase-initials-region` replace such a character as one run: its properties cover all the new characters and markers after it follow the text, as for any other replacement. One-for-one casing, of any byte width, keeps properties and character positions as GNU does. | A marker past an expanded character still points at the same text, which GNU's comment on replace_range_2 calls not yet right. Checked in `tests/replace_match.rs` `region_case_expansion_keeps_properties_and_follows_markers`. | <!-- symbols: upcase-region, upcase-initials-region -->

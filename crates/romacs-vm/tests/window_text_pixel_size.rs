@@ -50,7 +50,7 @@ const CASES: &str = r###"
 (progn (insert (make-string 78 ?a) "日本" (make-string 3 ?b) "\t" (make-string 70 ?c) "\tz") (list (window-text-pixel-size) (window-text-pixel-size nil 78 82) (window-text-pixel-size nil 80 85)))
 (progn (setq line-prefix "> ") (insert "abc\n" (make-string 100 ?x) "\n") (list (window-text-pixel-size) (progn (setq wrap-prefix "..") (window-text-pixel-size)) (progn (setq wrap-prefix '(space :width 5)) (window-text-pixel-size))))
 (progn (insert (propertize "abc" 'line-prefix "PRE") "\n" (propertize (make-string 90 ?y) 'wrap-prefix (propertize "W" 'invisible t))) (list (window-text-pixel-size) (window-text-pixel-size nil 5)))
-(progn (insert "abc d­e​f‑g") (list (window-text-pixel-size) (let ((nobreak-char-display nil)) (window-text-pixel-size)) (let ((nobreak-char-display 'x)) (window-text-pixel-size))))
+(progn (insert "abc d\u00ADe\u200Bf‑g") (list (window-text-pixel-size) (let ((nobreak-char-display nil)) (window-text-pixel-size)) (let ((nobreak-char-display 'x)) (window-text-pixel-size))))
 (progn (insert "a\u0085b\U000E0080c") (list (window-text-pixel-size) (let ((display-raw-bytes-as-hex t)) (window-text-pixel-size))))
 (progn (insert "ab\ncd") (setq buffer-display-table (make-display-table)) (aset buffer-display-table ?a [?x ?y ?z]) (aset buffer-display-table ?c []) (set-display-table-slot buffer-display-table 'selective-display [?! ?!]) (list (window-text-pixel-size) (window-text-pixel-size nil 1 2) (progn (insert (propertize "inv" 'invisible 'q)) (add-to-invisibility-spec '(q . t)) (window-text-pixel-size))))
 (progn (insert "abc") (narrow-to-region 2 3) (list (window-text-pixel-size) (window-text-pixel-size nil 1 9) (window-text-pixel-size nil t t)))
@@ -217,13 +217,13 @@ const SHARED_STARTS: &str = r###"
 fn displayed_window_refuses_after_a_host_layout() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(column * 80, line * 24, line, column).unwrap();
     vm.eval_source(r#"(progn (set-buffer (get-buffer-create "shown")) (insert "abc") (set-window-buffer nil (current-buffer)))"#).unwrap();
     let before = vm.eval_source("(list (window-text-pixel-size) (posn-at-point 1))").unwrap().display().unwrap();
     assert_eq!(before, format!("(({} . {}) nil)", 3 * column, line));
     let snapshot = vm.frame_snapshot(column * 80, line * 24).unwrap();
-    let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
+    let (_, ends) = romacs_layout::layout_frame(&snapshot, 1).unwrap();
     vm.display_apply_layout(&ends).unwrap();
     for (call, name) in [("(window-text-pixel-size)", "window-text-pixel-size"), ("(buffer-text-pixel-size)", "buffer-text-pixel-size"), ("(posn-at-point 1)", "posn-at-point")] {
         let refused = vm.eval_source(&format!("(condition-case e {call} (error (car (cdr e))))")).unwrap().display().unwrap();

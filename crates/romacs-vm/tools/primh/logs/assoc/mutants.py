@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Source mutants of the assoc/delete/nlistp bodies; each must fail the primh
-replay assertion of tests/primh_fns_equal.rs. Restores the source afterwards.
+replay assertion of tests/primh.rs. Restores the source afterwards.
 
 Run from an owned checkout with the prepared project environment:
   python3 crates/romacs-vm/tools/primh/logs/assoc/mutants.py
@@ -42,7 +42,8 @@ MUTANTS = [
 
 def run(log):
     with open(log, "w") as out:
-        p = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "primh_fns_equal"],
+        p = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "primh", "--",
+                            "primh_assoc", "primh_delete", "primh_nlistp", "--exact"],
                            stdout=out, stderr=subprocess.STDOUT)
     return p.returncode, log.read_text()
 
@@ -57,7 +58,7 @@ def main():
             log = LOGS / prim / f"mutant-{name}.log"
             rc, text = run(log)
             failed = sorted(set(re.findall(r"test (primh_\w+) \.\.\. FAILED", text)))
-            at_replay = len(re.findall(r"panicked at crates/romacs-vm/tests/primh_fns_equal\.rs:79:5", text))
+            at_replay = len(re.findall(r"panicked at crates/romacs-vm/tests/primh\.rs:79:5", text))
             counts = re.findall(r'^(\d+) "([a-z-]+)":', text, re.M)
             compiled = "error[E" not in text and "could not compile" not in text
             killed = rc != 0 and compiled and at_replay == len(failed) and f"primh_{prim}" in failed

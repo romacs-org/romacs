@@ -114,5 +114,4 @@ impl ShelfAllocator {
 }
 
 #[cfg(test)]
-#[path = "allocator/tests/allocator_test.rs"]
 mod tests;

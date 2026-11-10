@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import collections
 import concurrent.futures
+import fnmatch
 import hashlib
 import json
 import os
@@ -68,7 +69,7 @@ REFERENCE = ROOT / 'parity-reference.toml'
 EXTRACT = HERE / 'tools' / 'extract-forms.el'
 GNU_RUN = HERE / 'tools' / 'gnu-run.el'
 # GNU lisp/loadup.el order, loaded as far as it reaches (same list and rule as
-# the WARM census, scripts/lisp-census.py BOOTSTRAP_CHAIN; a test pins them).
+# the WARM census, tools/lisp-census BOOTSTRAP_CHAIN; a test pins them).
 BOOTSTRAP_CHAIN = ['emacs-lisp/debug-early', 'emacs-lisp/byte-run', 'emacs-lisp/backquote', 'subr',
                    'keymap', 'version', 'widget', 'custom', 'emacs-lisp/map-ynp', 'international/mule',
                    'international/mule-conf', 'env', 'format', 'bindings', 'window', 'files',
@@ -166,6 +167,42 @@ def git_tree_id(directory: pathlib.Path) -> str:
     return hashlib.sha1(b'tree %d\0' % len(body) + body).hexdigest()
 
 
+def tree_of(node: dict) -> str:
+    """The git tree id of NODE, {name: (mode, blob id) or {sub-node}}."""
+    entries = []
+    for name, value in node.items():
+        if isinstance(value, dict):
+            mode, oid, key = b'40000', tree_of(value), name + '/'
+        else:
+            (mode, oid), key = value, name
+        entries.append((key.encode(), mode + b' ' + name.encode() + b'\0' + bytes.fromhex(oid)))
+    body = b''.join(e for _, e in sorted(entries))
+    return hashlib.sha1(b'tree %d\0' % len(body) + body).hexdigest()
+
+
+def gnu_test_tree(gnu: pathlib.Path, commit: str, patterns: list) -> tuple[str, list]:
+    """GNU's `test/` tree id at COMMIT without the PATTERNS it excludes, read
+    from GNU's object store and written nowhere; and the patterns that match
+    nothing there."""
+    listing = subprocess.run(['git', '-C', str(gnu), 'ls-tree', '-r', '-z', f'{commit}:test'],
+                             check=True, capture_output=True).stdout
+    root, used = {}, set()
+    for entry in filter(None, listing.split(b'\0')):
+        meta, path = entry.split(b'\t', 1)
+        mode, _, oid = meta.split()
+        name = path.decode()
+        hits = {pattern for pattern in patterns if fnmatch.fnmatchcase(name, pattern)}
+        used |= hits
+        if hits:
+            continue
+        *dirs, leaf = name.split('/')
+        node = root
+        for d in dirs:
+            node = node.setdefault(d, {})
+        node[leaf] = (mode, oid.decode())
+    return tree_of(root), [pattern for pattern in patterns if pattern not in used]
+
+
 # --------------------------------------------------------------------------
 # The pristine import
 
@@ -173,18 +210,26 @@ def pin(root: pathlib.Path = ROOT) -> dict:
     return json.loads((root / 'gnu-tests' / 'PIN.json').read_text())
 
 
-def verify_pin(root: pathlib.Path = ROOT) -> dict:
-    """Refuse unless gnu-tests/test is byte-for-byte GNU's test/ at the pin.
+def verify_pin(root: pathlib.Path = ROOT, gnu: pathlib.Path | None = None) -> dict:
+    """Refuse unless gnu-tests/test is byte-for-byte GNU's test/ at the pin,
+    less the GNU files PIN.json's `excluded` drops deliberately.
 
     The git tree id of the WORKING content of gnu-tests/test (computed by
     git_tree_id, no repository needed, so it also holds in the gate's source
-    mirror) must equal GNU's own tree id for `test/` at the pinned commit.
-    Any edit, addition, deletion or mode change anywhere under it changes the
-    id.
+    mirror) must equal PIN.json's `test_tree`. Any edit, addition, deletion or
+    mode change anywhere under it changes the id. With GNU, `test_tree` must
+    also be what GNU's own `test/` at the pin hashes to without the excluded
+    paths, so the record stays anchored to GNU, not to the local bytes.
     """
     p = pin(root)
     actual = git_tree_id(root / 'gnu-tests' / 'test')
     problems = []
+    if gnu is not None:
+        want, stale = gnu_test_tree(gnu, p['gnu_commit'], p.get('excluded', []))
+        if want != p['test_tree']:
+            problems.append(f'PIN.json test_tree {p["test_tree"]} is not GNU {p["gnu_commit"][:11]}:test '
+                            f'without its excluded paths ({want}).')
+        problems += [f'PIN.json excluded pattern {pattern!r} matches nothing in GNU\'s test/.' for pattern in stale]
     if actual != p['test_tree']:
         problems.append(f'its content hashes to git tree {actual}; GNU {p["gnu_commit"][:11]}:test is '
                         f'{p["test_tree"]}. Something under gnu-tests/test was edited, added, '
@@ -257,16 +302,13 @@ def normalize(name: str) -> str:
 # The exclusion ledger
 
 def divergence_rows() -> dict[str, dict]:
-    sys.path.insert(0, str(ROOT / 'tools'))
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     try:
         import divergence_index  # the one parser of the prose ledgers
     finally:
         sys.path.pop(0)
-    rows = divergence_index.parse(ROOT / 'DIVERGENCES.md', 'DIVERGENCES.md')
-    for p in sorted(ROOT.glob('crates/*/GNU-DIVERGENCES.md')):
-        rows += divergence_index.parse(p, str(p.relative_to(ROOT)))
     out = {}
-    for r in rows:
+    for r in divergence_index.rows(ROOT):
         ident = re.sub(r'^\[([^\]]+)\]\(.*\)$', r'\1', r['id'] or '')
         if DIVERGENCE_ID.match(ident):
             out[ident] = r
@@ -444,8 +486,8 @@ def baseline_path(rel: str) -> pathlib.Path:
 
 def pinned_oracle() -> dict:
     """The pinned GNU that may record baselines: $ROMACS_GNU_ORACLE, asked who
-    it is (scripts/gnu_oracle.py), and its digest equal to the pin's."""
-    sys.path.insert(0, str(ROOT / 'scripts'))
+    it is (tools/lib/gnu_oracle.py), and its digest equal to the pin's."""
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     try:
         ident = gnu_oracle.require()
@@ -1017,7 +1059,7 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
 
 
 def verify_real_lisp(pin):
-    command = [sys.executable, str(ROOT / 'tools' / 'lisp_oracle.py'), 'check',
+    command = [sys.executable, str(ROOT / 'tools/lib/lisp_oracle.py'), 'check',
                '--root', str(ROOT), '--gnu', str(GNU_MIRROR), '--pin', pin]
     try:
         result = subprocess.run(command, capture_output=True, text=True)
@@ -1030,7 +1072,7 @@ def verify_real_lisp(pin):
 def cmd_scoreboard(args) -> int:
     """Real ERT execution; no mini classification or stale baseline can bless it."""
     from ert_report import ReportError, parse_report, run_native
-    sys.path.insert(0, str(ROOT / 'scripts'))
+    sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     p = verify_pin()
     verify_real_lisp(p['gnu_commit'])
@@ -1042,7 +1084,7 @@ def cmd_scoreboard(args) -> int:
              else [normalize(f) for f in args.files])
     if not files or args.jobs < 1:
         raise Refusal(2, 'name test files, or --all; jobs must be positive')
-    out = pathlib.Path(args.out or (HERE / 'out' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     if out.exists() and any(out.iterdir()):
         raise Refusal(2, 'scoreboard output directory must be empty')
     (out / 'log').mkdir(parents=True, exist_ok=True)
@@ -1179,7 +1221,7 @@ def cmd_run(args) -> int:
     files = suite_files() if args.all else [normalize(f) for f in args.files]
     if not files:
         raise Refusal(2, 'name test files, or --all')
-    out = pathlib.Path(args.out or (HERE / 'out' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
+    out = pathlib.Path(args.out or (ROOT / 'target' / 'gnu-tests' / time.strftime('%Y%m%d-%H%M%S'))).resolve()
     (out / 'log').mkdir(parents=True, exist_ok=True)
     baselines = {rel: load_baseline(rel) for rel in files}
     binary = pathlib.Path(args.bin) if args.bin else build_adapter()
@@ -1293,7 +1335,8 @@ def main(argv=None) -> int:
     b.add_argument('--force', action='store_true', help='re-record every regime, not only missing ones')
     c = sub.add_parser('check-ledger')
     c.add_argument('--ledger', default=str(LEDGER), help='validate another file (to demonstrate a refusal)')
-    sub.add_parser('verify-pin')
+    v = sub.add_parser('verify-pin')
+    v.add_argument('--gnu', help="also derive test_tree from this GNU repository's object store")
     args = ap.parse_args(argv)
     try:
         if args.cmd == 'run':
@@ -1310,8 +1353,9 @@ def main(argv=None) -> int:
             print(f'{ledger}: {len(rows)} valid row(s)')
             return 0
         if args.cmd == 'verify-pin':
-            p = verify_pin()
-            print(f'gnu-tests/test is GNU {p["gnu_commit"]}:test, tree {p["test_tree"]}, unmodified')
+            p = verify_pin(gnu=pathlib.Path(args.gnu) if args.gnu else None)
+            print(f'gnu-tests/test is GNU {p["gnu_commit"]}:test less {len(p.get("excluded", []))} excluded '
+                  f'pattern(s), tree {p["test_tree"]}, unmodified')
             return 0
     except Refusal as e:
         print(f'run.py: REFUSED: {e}', file=sys.stderr)

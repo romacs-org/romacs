@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-COMPLETION-SORT | `minibuffer--sort-by-length-alpha` and `minibuffer--sort-by-position` are native | minibuffer.el sorts with `sort` and a Lisp predicate (`length` then `string<`), and by history position through `minibuffer--sort-by-key` and an `equal` hash table | The two are aliases of `romacs--sort-by-length-alpha` and `romacs--sort-by-history` (`src/prims/orderless.rs`, set after minibuffer.el loads in `romacs-loadup-bootstrap.el`): the same stable orders. A non-string element signals `(wrong-type-argument stringp ...)` in the length sort, and in the history sort a non-string never takes a history position. `tests/orderless_oracle.rs` | To a package: `symbol-function` of the two names is a primitive; the errors above | Over 5,000 candidates the Lisp-predicate sorts took 27 ms and 15 ms per completion key (pinned GNU 0.3 and 0.5 ms) | <!-- symbols: minibuffer--sort-by-length-alpha minibuffer--sort-by-position -->

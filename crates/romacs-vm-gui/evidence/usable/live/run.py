@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real-compositor walk of the romacs GUI on a real Hyprland session.
 
-Launches the command (scripts/romacs) on $ROMACS_LIVE_WORKSPACE of
+Launches the command (tools/romacs) on $ROMACS_LIVE_WORKSPACE of
 $ROMACS_LIVE_MONITOR without stealing the workspace, drives it with real Wayland key events
 (wtype), and captures compositor pixels (grim) plus the GUI's own painted-glyph
 dump (--trace-scene) for every step. Focus is returned to the user's window
@@ -47,7 +47,7 @@ original = active()['address']
 before = {c['pid'] for c in clients()}
 args = ' --gnu-lisp' if gnu else ''
 # The command, exactly; the state dir only moves the log here.
-cmd = __import__('shlex').join(['env', f'HOME={out}/home', f'XDG_STATE_HOME={out}/state', str(ROOT / 'scripts/romacs'), '--trace-scene', *(['--gnu-lisp'] if gnu else [])])
+cmd = __import__('shlex').join(['env', f'HOME={out}/home', f'XDG_STATE_HOME={out}/state', str(ROOT / 'tools/romacs'), '--trace-scene', *(['--gnu-lisp'] if gnu else [])])
 hy('eval', f'hl.exec_cmd({json.dumps(cmd)}, {{workspace="{WORKSPACE} silent"}})')
 records, pid = [], None
 addr = None
@@ -141,7 +141,7 @@ try:
     hy('dispatch', f'hl.dsp.window.fullscreen({{window="address:{addr}",mode="fullscreen",state="on"}})')
     hy('dispatch', f'hl.dsp.focus({{window="address:{addr}"}})')
     time.sleep(0.8)
-    shot('00-window', 'scripts/romacs opened a window')
+    shot('00-window', 'tools/romacs opened a window')
     if not gnu:
         text('hello κόσμε λ')
         shot('01-typed-multibyte', 'self-insert of ASCII, Greek')

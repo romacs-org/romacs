@@ -9,7 +9,7 @@ use romacs_vm::Vm;
 fn a_narrowed_window_shows_and_ends_in_its_accessible_region() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(column * 80, line * 24, line, column).unwrap();
     vm.eval_source(r#"(progn (set-buffer (get-buffer-create "narrowed")) (set-window-buffer nil (current-buffer))
                              (dotimes (i 100) (insert (format "line %d\n" i)))
@@ -20,7 +20,7 @@ fn a_narrowed_window_shows_and_ends_in_its_accessible_region() {
     // text starts at the buffer byte `published_base' names.
     let base = vm.published_base(window.id);
     assert_eq!((base + window.start_byte, base + window.text.utf8.len()), (19, 59), "start clipped to BEGV, text ends at ZV");
-    let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
+    let (_, ends) = romacs_layout::layout_frame(&snapshot, 1).unwrap();
     vm.display_apply_layout(&ends).unwrap();
     assert_eq!(vm.eval_source("(list (window-end) (point-max))").unwrap().display().unwrap(), "(60 60)");
 }

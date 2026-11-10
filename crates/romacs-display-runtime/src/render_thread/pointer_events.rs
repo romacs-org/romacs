@@ -393,7 +393,7 @@ impl RenderApp {
             } if button.clone().mouse_button() == Some(MouseButton::Left) => (position, true),
             _ => return false,
         };
-        if !pressed && !self.menus.owns_parent(id) {
+        if !pressed && !self.menu_bar.owns_parent(id) {
             return false;
         }
         let Some(window) = self.frame_windows.get_by_winit_mut(id) else {
@@ -426,8 +426,8 @@ impl RenderApp {
         compact: bool,
         pressed: bool,
     ) {
-        let action = self.menus.select_heading(
-            crate::menus::MenuHeading {
+        let action = self.menu_bar.select(
+            crate::menu_bar::MenuHeading {
                 frame,
                 parent: id,
                 key: hit.key.clone(),
@@ -436,13 +436,7 @@ impl RenderApp {
             },
             pressed,
         );
-        while let Some(result) = self.menus.take_result() {
-            self.comms.send_input(InputEvent::MenuSelection {
-                index: result.index(),
-                token: Some(result.token),
-            });
-        }
-        if let crate::menus::HeadingAction::Request(request_id) = action {
+        if let crate::menu_bar::HeadingAction::Request(request_id) = action {
             let mut event = Self::menu_bar_click_event(hit, frame);
             if let InputEvent::MenuBarClick {
                 request_id: origin, ..
@@ -466,17 +460,17 @@ impl RenderApp {
         if event.state != ElementState::Pressed {
             return false;
         }
-        let Some(step) = self.menus.heading_step(id, &event.logical_key) else {
+        let Some(step) = self.menu_bar.heading_step(id, &event.logical_key) else {
             return false;
         };
         self.switch_native_menu_heading(step)
     }
 
     pub(super) fn switch_native_menu_heading(&mut self, step: i32) -> bool {
-        if self.menus.heading().is_none() {
+        if self.menu_bar.heading().is_none() {
             return false;
         }
-        let heading = self.menus.heading().unwrap().clone();
+        let heading = self.menu_bar.heading().unwrap().clone();
         let Some(frame) = self
             .frame_windows
             .get(heading.frame)
@@ -569,7 +563,7 @@ impl RenderApp {
 
     /// Chrome is a projection of controller state, never the switch authority.
     pub(super) fn sync_menu_heading(&mut self) {
-        let heading = self.menus.heading();
+        let heading = self.menu_bar.heading();
         self.frame_windows.for_each_top_level_window_mut(|window| {
             let selected = heading.filter(|h| h.frame == window.render.emacs_frame_id);
             let normal = selected.filter(|h| !h.compact).map(|h| h.index);
@@ -1575,16 +1569,7 @@ impl RenderApp {
                     target,
                     action,
                 });
-                let (receipt, token) = self.comms.send_input_with_receipt(input);
-                if let Some(receipt) = &receipt
-                    && let Some(state) = self.frame_windows.get_by_winit_mut(window_id)
-                {
-                    state
-                        .render
-                        .compositor
-                        .input_scroll
-                        .observe_input(receipt.clone(), token);
-                }
+                let receipt = self.comms.send_input_with_receipt(input);
                 if let (
                     ScrollDelta::Pixels {
                         x: horizontal,
@@ -1613,7 +1598,6 @@ impl RenderApp {
                         ev_y,
                         -vertical.round(),
                         receipt,
-                        token,
                     )
                 {
                     state.render.compositor.current_scene_generation =

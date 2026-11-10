@@ -8,7 +8,7 @@
     "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
   },
   "cases_sha256": "5768e3e2eff20b43fd4064cc9b59c82740e2143b8b05711046d5fb37c3ca0f76",
-  "recorder_sha256": "02f4d7ea1db915c59a6c5b78be68756249553927e204ae61697d557ae85d17ec",
+  "recorder_sha256": "a68f2313e4c3b74f43eb46357972f974aa29dd30cbc92e11f41a52978b9c0b6d",
   "cases": [
     {
       "id": "radix-000",

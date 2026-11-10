@@ -44,6 +44,7 @@ mod xml_read;
 pub mod host;
 pub mod world;
 pub mod flight;
+mod twin;
 pub mod compiled_lisp;
 mod environment;
 mod watchers;
@@ -179,6 +180,14 @@ mod syntax_summary;
 mod surface;
 mod tails;
 mod prim;
+
+/// Where escapes deferred to a reach wait (`Vm::defer_escape`), and the
+/// primitive a reach takes its own with.
+const DEFERRED_ESCAPES: &str = "romacs--deferred-escapes";
+const TAKE_DEFERRED_ESCAPE: &str = "romacs--take-deferred-escape";
+fn take_deferred_escape_form(id: i64) -> Form {
+    Form::List(vec![Form::Sym(TAKE_DEFERRED_ESCAPE.into()), Form::Int(id)])
+}
 
 pub type Result<T> = std::result::Result<T, String>;
 /// Opaque compiler identity. Source APIs cannot construct one.
@@ -1326,14 +1335,14 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
-    /// object: cleared by every collection, which can move it.
+    /// object: dropped when that value dies, rewritten when it moves.
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
     /// GNU's image caches (graphics.rs): facts of the images frames have
     /// loaded, their pixels the display host's.
     images: graphics::ImageCache,
     /// The closures `(lambda ...)' lists called as functions compiled to,
-    /// by the list object (`Vm::lambda_list_closure'): cleared by every
-    /// collection, which can move the lists and what their snapshots hold.
+    /// by the list object (`Vm::lambda_list_closure`): an ephemeron, each
+    /// entry traced while its list lives and moved with it (`Vm::weak_round`).
     lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
     /// The status bar's last fitted line (a `display::mode_line::Band'),
     /// kept for a click to read (`Vm::status_bar_target'); its object
@@ -1367,6 +1376,8 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    /// A host wait in progress, its host moved out of `host_input`.
+    host_wait: Option<host_input::HostWait>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1393,6 +1404,9 @@ pub struct Vm {
     quit: std::sync::Arc<quit::QuitSignal>,
     /// keyboard.c force_quit_count: `C-g's in a row that found `quit-flag' set.
     force_quit_count: u8,
+    /// The escapes deferred to a reach so far (`defer_escape`): each one`s
+    /// id, never used again, so code compiled for a spent one takes no other.
+    deferred_escapes: i64,
     /// `quit-flag', `inhibit-quit' and `throw-on-input''s symbol slots, for
     /// the evaluator's quit polls (quit.rs).
     quit_slots: [usize; 3],
@@ -1453,7 +1467,7 @@ pub struct Vm {
     /// The error objects (CONDITION . DATA) of the `no-catch'es throws that
     /// found no live catch made, while those errors escape, the newest last:
     /// an error with one of these very objects, made afresh for each signal,
-    /// is that throw, not one Lisp signalled (`signal_form' raises it again
+    /// is that throw, not one Lisp signalled (`defer_escape' holds it again
     /// as the throw). Each retires when its error is caught; they are weak
     /// (gc.rs), so one whose error a Rust caller discards goes at the next
     /// collection and keeps nothing alive.
@@ -1796,6 +1810,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     reader_trampolines,
     quit,
     force_quit_count,
+    deferred_escapes,
     redisplay_since_mark,
     treesit_plain,
     treesit_deferred,
@@ -1812,6 +1827,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     status_bar_line,
     suspended,
     host_input,
+    host_wait,
     layout_host,
     display,
     visual,
@@ -1904,6 +1920,7 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            host_wait: None,
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -1915,6 +1932,7 @@ impl Vm {
             treesit_parse_owed: false,
             quit: std::sync::Arc::default(),
             force_quit_count: 0,
+            deferred_escapes: 0,
             quit_slots: [0; 3],
             face_keys: crate::prim::FaceKeys::EMPTY,
             debug_event_slots: [0; 3],
@@ -2389,7 +2407,15 @@ impl Vm {
         {
             body = &body[1..];
         }
+        let deferred = self.deferred_escapes;
         let r = self.progn(&mut b, body)?;
+        // An escape deferred while this body compiled belongs to the
+        // evaluation that compiled it. A reach it passed over has not taken
+        // it, so the body's end does, inside that same evaluation; every
+        // later run finds it gone (`expansion_failed`).
+        for id in deferred + 1..=self.deferred_escapes {
+            self.expr_now(&mut b, &take_deferred_escape_form(id))?;
+        }
         if dynamic != 0 {
             b.emit(Op::Unbind(dynamic));
         }
@@ -2724,46 +2750,97 @@ impl Vm {
         self.quit_unwinding = saved || quit;
         (result, quit)
     }
-    /// F, whose expansion just escaped. When a quit from C-g left it (QUIT),
-    /// what left it is raised at F's reach, as it left, without running the
-    /// macro again; otherwise F expands again at its reach.
+    /// F, whose expansion just escaped: F expands again at its reach. When
+    /// a quit from C-g left the expansion (QUIT), what left it belongs to
+    /// the evaluation it interrupted, not to the code compiled for it. So it
+    /// is held, deferred (`defer_escape`), and F's reach first takes it:
+    /// raised there, as it left and without running the macro again, the
+    /// form's own handlers see it, as GNU's see a quit in an expansion at
+    /// the reach. Should that evaluation pass the reach over, the end of the
+    /// body being compiled takes it (`function`). One neither took, because
+    /// the evaluation left some other way, ends with the request or the
+    /// worker's job (`drop_deferred_escapes`): nothing later raises it.
     fn expansion_failed(&mut self, b: &mut Builder, f: &Form, quit: bool) -> Result<usize> {
         let escape = self.propagated_escape.take();
         let ended = match &escape {
             Some(threaded::Escape::Error { object, .. }) => Some(*object),
             _ => None,
         };
-        let raised = escape.filter(|_| quit).and_then(|escape| self.signal_form(escape));
+        let deferred = escape.filter(|_| quit).and_then(|escape| self.defer_escape(escape));
         // The escape ends here, so its throw's mark retires.
         if let Some(object) = ended {
             self.retire_thrown_no_catch(object);
         }
-        match raised {
-            Some(raised) => self.expr_now(b, &raised),
-            None => self.reach_thunk(b, f),
+        if let Some(id) = deferred {
+            self.expr_now(b, &take_deferred_escape_form(id))?;
         }
+        self.reach_thunk(b, f)
     }
-    /// `(signal CONDITION DATA)' for the signal ESCAPE carries, or `(throw
-    /// TAG VALUE)' for a throw, which the expansion's `Boundary' made a
-    /// `no-catch' (a `while-no-input' around the form catches it there).
-    fn signal_form(&mut self, escape: threaded::Escape) -> Option<Form> {
-        let call = |vm: &Self, head: &str, a, b| Form::List(vec![Form::Sym(head.into()), vm.eval_quoted_form(a), vm.eval_quoted_form(b)]);
-        let (condition, data, thrown) = match escape {
-            threaded::Escape::Signal(condition, data) => (condition, data, false),
+    /// Hold ESCAPE for the reach that takes it by the id returned: a signal's
+    /// condition and data, or a throw's tag and value (one the expansion's
+    /// `Boundary` made a `no-catch` is that throw again). They wait in
+    /// `romacs--deferred-escapes`, a variable, so they are traced like any
+    /// value and can be seen from Lisp.
+    fn defer_escape(&mut self, escape: threaded::Escape) -> Option<i64> {
+        let (throw, a, b) = match escape {
+            threaded::Escape::Signal(condition, data) => (false, condition, data),
             threaded::Escape::Error { object, .. } => {
                 let (condition, data) = self.cons_pair(object).ok()?;
-                (condition, data, self.thrown_no_catch.contains(&object))
+                match (self.thrown_no_catch.contains(&object), self.cons_pair(data)) {
+                    (true, Ok((tag, rest))) => match self.cons_pair(rest) {
+                        Ok((value, Value::NIL)) => (true, tag, value),
+                        _ => (false, condition, data),
+                    },
+                    _ => (false, condition, data),
+                }
             }
-            threaded::Escape::Throw(tag, value) => return Some(call(self, "throw", tag, value)),
+            threaded::Escape::Throw(tag, value) => (true, tag, value),
             threaded::Escape::Normal(_) => return None,
         };
-        if thrown
-            && let Ok((tag, rest)) = self.cons_pair(data)
-            && let Ok((value, Value::NIL)) = self.cons_pair(rest)
-        {
-            return Some(call(self, "throw", tag, value));
+        self.deferred_escapes += 1;
+        let id = self.deferred_escapes;
+        let kind = if throw { Value::TRUE } else { Value::NIL };
+        let entry = self.list_value(&[Value::integer(id).ok()?, kind, a, b]);
+        let mut pending = self.deferred_escape_list();
+        pending.push(entry);
+        self.set_deferred_escape_list(&pending);
+        Some(id)
+    }
+    /// The entries of `romacs--deferred-escapes`: each (ID THROW A B).
+    fn deferred_escape_list(&mut self) -> Vec<Value> {
+        // Only `defer_escape` makes the symbol: a VM no C-g interrupted in
+        // an expansion never has it.
+        let Some(&slot) = self.names.get(DEFERRED_ESCAPES) else { return vec![] };
+        match self.slots[slot].value {
+            Value::UNBOUND => vec![],
+            list => self.list_values(list).unwrap_or_default(),
         }
-        Some(call(self, "signal", condition, data))
+    }
+    /// The slot itself, not an assignment: this is no user variable, and no
+    /// watcher, alias or buffer-local value may hide or reorder an entry.
+    fn set_deferred_escape_list(&mut self, entries: &[Value]) {
+        let slot = self.slot(DEFERRED_ESCAPES);
+        self.slots[slot].value = self.list_value(entries);
+    }
+    /// Take the escape deferred under ID, if it still waits: whether it is
+    /// a throw, and its condition and data or tag and value.
+    pub(crate) fn take_deferred_escape(&mut self, id: i64) -> Option<(bool, Value, Value)> {
+        let mut pending = self.deferred_escape_list();
+        let at = pending.iter().position(|&entry| self.list_values(entry).is_ok_and(|e| e.first().and_then(|v| v.integer_value()) == Some(id)))?;
+        let entry = self.list_values(pending.remove(at)).ok()?;
+        self.set_deferred_escape_list(&pending);
+        // What is raised is the quit C-g began, still unwinding, as when
+        // `maybe_quit` raised it: an expansion it leaves defers it again.
+        self.quit_unwinding = true;
+        Some((entry[1] != Value::NIL, entry[2], entry[3]))
+    }
+    /// A request or a worker's job ends: an escape still deferred was left
+    /// by an evaluation that ended some other way, and ends with it.
+    pub(crate) fn drop_deferred_escapes(&mut self) {
+        let Some(&slot) = self.names.get(DEFERRED_ESCAPES) else { return };
+        if !matches!(self.slots[slot].value, Value::UNBOUND | Value::NIL) {
+            self.slots[slot].value = Value::NIL;
+        }
     }
     /// OBJECT's error has ended: no throw's mark is kept for it.
     pub(crate) fn retire_thrown_no_catch(&mut self, object: Value) {
@@ -3785,12 +3862,13 @@ impl Vm {
         if matches!(p, CacheStats | CacheClear | CacheEntries) {
             return self.cache_primitive(p, n);
         }
-        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
+        // The other loader primitives are lent from the engine (`loader_body`).
+        if matches!(p, Provide | Featurep) {
             let args = self.stack[start..start + n].to_vec();
-            let result = self.loader_primitive(p, &args);
-            // Only the reentrant engine path can re-raise an eval escape.
-            self.propagated_escape = None;
-            return result;
+            return self.feature_primitive(p, &args);
+        }
+        if matches!(p, Load | Require | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
+            return Err("a loader primitive is lent from its engine (`loader_body`), never called here".into());
         }
         if p == Message {
             // The echo area holds the last message; (message nil) clears it.

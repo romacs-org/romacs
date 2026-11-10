@@ -3,14 +3,14 @@
 #   ROMACS_GNU_ORACLE=/abs/path/to/emacs regenerate.sh
 # One isolated `emacs -Q --batch' per theme, throwaway HOME, no network.
 # The oracle is GNU built at the pin (parity-reference.toml), named by
-# $ROMACS_GNU_ORACLE and refused by scripts/gnu_oracle.py unless the binary
+# $ROMACS_GNU_ORACLE and refused by tools/lib/gnu_oracle.py unless the binary
 # itself reports the pin. There is no default: /usr/bin/emacs is 320 GNU
 # commits older and produced the separator-line mismatch (R228).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../../.." && pwd)
 [ $# -eq 0 ] || { echo "regenerate.sh takes no arguments; set ROMACS_GNU_ORACLE" >&2; exit 2; }
-emacs=$(python3 "$repo/scripts/gnu_oracle.py" path)
+emacs=$(python3 "$repo/tools/lib/gnu_oracle.py" path)
 out="$here/fixtures"; mkdir -p "$out"
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 # The face model's evidence is GNU's own themes, which Romacs does not ship:

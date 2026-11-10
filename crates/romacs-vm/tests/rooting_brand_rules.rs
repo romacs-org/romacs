@@ -19,7 +19,7 @@ use std::path::Path;
 
 /// Modules converted to rooting as a type (`romacs_brand`): these checks cover
 /// what the types leave.
-const CONVERTED: &[&str] = &["autoload.rs", "command.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
+const CONVERTED: &[&str] = &["autoload.rs", "command.rs", "host_input.rs", "prims/read.rs", "reader/mod.rs", "reader/parse.rs", "threaded.rs", "threaded_signal.rs", "threaded_lend.rs", "traversal.rs"];
 
 fn source(name: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)).unwrap()
@@ -565,13 +565,14 @@ const MINTS: &[(&str, &[&str], usize)] = &[
     ("threaded.rs", &["Gc", ":", ":", "unchecked"], 1),
     // A lazy body's expansion runs under its builder's hold (`lend::deferred`).
     ("threaded.rs", &["lend", ":", ":", "deferred"], 1),
-    // `provide''s after-load hooks, from a cached primitive call.
-    ("threaded.rs", &[".", "defer", "("], 1),
     // The embedder's command: its Rust caller holds no Value (`Toplevel` closes this).
     ("command.rs", &["threaded", ":", ":", "toplevel"], 1),
     // `autoload_do_load` for callers not yet converted: `macroexpand_steps` and
     // `expand_macro`, each keeping its rows.
     ("autoload.rs", &["threaded", ":", ":", "toplevel"], 1),
+    // `read_source_raw` for callers not yet converted (eval_source, the
+    // embedder's prepared lambdas and reads), each keeping its row.
+    ("reader/mod.rs", &["threaded", ":", ":", "toplevel"], 1),
 ];
 
 #[test]

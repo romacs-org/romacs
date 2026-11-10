@@ -1,6 +1,3 @@
-[alias]
-xtask = "run -p xtask --"
-
 [env]
 # Cargo does not expose the workspace root to member crates. Resolve this
 # workspace-owned variable relative to `.cargo/config.toml`, so package depth
