@@ -81,6 +81,8 @@ fn classify(event: &InputEvent) -> Option<HostEvent> {
         InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => classify(event),
         InputEvent::WindowClose { .. } => Some(HostEvent::Closed),
         &InputEvent::WindowFocus { focused, .. } => Some(HostEvent::Focus(focused)),
+        // The read runs it as a special event (`romacs-model').
+        InputEvent::Model { id, event } => Some(HostEvent::Model { id: *id, event: event.clone() }),
         &InputEvent::WindowResize { width, height, .. } if width > 0 && height > 0 => {
             Some(HostEvent::Resize { width, height })
         }
@@ -97,7 +99,8 @@ fn note(shared: &mut Shared, event: &HostEvent) {
     match *event {
         HostEvent::Closed => shared.closed = true,
         HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_) => {}
+        HostEvent::Key(_) | HostEvent::Background | HostEvent::Process | HostEvent::Timeout | HostEvent::Focus(_)
+        | HostEvent::Model { .. } => {}
     }
 }
 
@@ -400,5 +403,13 @@ mod tests {
             let event = InputEvent::WindowFocus { focused, emacs_frame_id: 0 };
             assert_eq!(classify(&event), Some(HostEvent::Focus(focused)));
         }
+    }
+
+    /// A native model's event during a Lisp read reaches the read, which
+    /// runs it as the special event `romacs-model', instead of being dropped.
+    #[test]
+    fn model_events_reach_a_lisp_read() {
+        let event = romacs_display_protocol::model::ModelEvent::Readiness { current: true, rev: 2, req: 1 };
+        assert_eq!(classify(&InputEvent::Model { id: 3, event: event.clone() }), Some(HostEvent::Model { id: 3, event }));
     }
 }

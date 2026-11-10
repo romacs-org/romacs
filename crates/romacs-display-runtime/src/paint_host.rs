@@ -422,6 +422,52 @@ impl PaintSender {
         self.send_asset(crate::thread_comm::AssetCommand::DebugSimulateDeviceLoss)
     }
 
+    /// Whether a GPU renderer is live now, so a native model can be drawn
+    /// (`romacs-model-available-p`).
+    pub fn model_renderer_live(&self) -> bool {
+        self.comms.capabilities.model_renderer_live()
+    }
+
+    /// Create native model surface ID from MESHES at VIEW on BACKGROUND
+    /// (sRGB RGBA), LOGICAL pixels in size. It loads on the renderer's own
+    /// thread; its outcome arrives as an `InputEvent::Model`. False, and
+    /// nothing sent, while the command channel is full.
+    pub fn create_model(
+        &self,
+        id: u32,
+        meshes: Vec<romacs_display_protocol::model::ModelMeshSpec>,
+        view: romacs_display_protocol::model::ModelView,
+        background: [f32; 4],
+        logical: (u32, u32),
+    ) -> Result<bool, String> {
+        self.send_asset(crate::thread_comm::AssetCommand::SurfaceCreate {
+            id,
+            source: crate::thread_comm::SurfaceSource::Model { meshes, view, background },
+            width: logical.0,
+            height: logical.1,
+            animate: false,
+            fps: None,
+            // Lisp owns the handle: an evicted model would stay blank.
+            recreatable: false,
+        })
+    }
+
+    /// Lisp request REQ for native model ID.  False while the channel is full.
+    pub fn update_model(
+        &self,
+        id: u32,
+        req: u64,
+        change: romacs_display_protocol::model::ModelChange,
+    ) -> Result<bool, String> {
+        self.send_asset(crate::thread_comm::AssetCommand::ModelUpdate { id, req, change })
+    }
+
+    /// Free surface ID once no presented frame draws it.  False while the
+    /// channel is full.
+    pub fn free_surface(&self, id: u32) -> Result<bool, String> {
+        self.send_asset(crate::thread_comm::AssetCommand::SurfaceFree { id })
+    }
+
     /// Send an asset COMMAND: whether it went, false while the channel is
     /// full (its sender sends it again later).
     fn send_asset(&self, command: crate::thread_comm::AssetCommand) -> Result<bool, String> {

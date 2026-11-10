@@ -970,14 +970,23 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
                             *slot_rect = romacs_display_protocol::Rect::new(ox + x, oy + y, advance_px, height);
                             *face_id = id;
                         }
+                    } else if image.surface != 0 {
+                        // A native surface (a model) composited in the slot.
+                        let (_, _, sw, sh) = image.source;
+                        frame.add_surface(romacs_display_protocol::SurfaceId::new(image.surface),
+                                          ox + x + image.body_x as f32, oy + y + image.body_y as f32, sw as f32, sh as f32);
+                        if let Some(romacs_display_protocol::FrameGlyph::Surface { face_id, .. }) = frame.glyphs.last_mut() {
+                            *face_id = id;
+                        }
                     }
                     // The background slot and the image in it move together,
                     // listed in glyph order.
-                    let slot_at = frame.glyphs.len() - 1 - usize::from(image.image != 0);
+                    let shown = image.image != 0 || image.surface != 0;
+                    let slot_at = frame.glyphs.len() - 1 - usize::from(shown);
                     row_images.extend((slot_at..frame.glyphs.len()).map(|at| (at, ascent)));
                     // An image that failed to load: a rectangle of its size in
                     // the face's foreground (x_draw_image_foreground).
-                    if image.image == 0 {
+                    if !shown {
                         let (_, _, sw, sh) = image.source;
                         let (bx, by, bw, bh) = (ox + x + image.body_x as f32, oy + y + image.body_y as f32, sw as f32, sh as f32);
                         let ink = color(snapshot.faces[index].foreground);
@@ -1360,6 +1369,7 @@ fn settle_row(frame: &mut FrameGlyphBuffer, from: usize, top: f32, height: f32, 
                 box_rect.y += shift;
                 bottom = bottom.max(slot_rect.y + slot_rect.height - top);
             }
+            FrameGlyph::Surface { y, height: h, .. } => { *y += shift; bottom = bottom.max(*y + *h - top); }
             _ => {}
         }
     }

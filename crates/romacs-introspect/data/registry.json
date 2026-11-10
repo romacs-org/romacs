@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "126a557175e27e5290ccc29ac0d27bf737de15856d8529b587d71c07da7d3988",
+    "input_hash": "7f7ab3dcf67f1626d1e357b7dde6fa629b665913c9b718699f7ba23949c34f24",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 8671
+    "vm2_universe": 8709
   },
   "schema": 2,
   "vm2": {
-    "count": 1448,
+    "count": 1456,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -1074,10 +1074,18 @@
       "romacs-image-header-size",
       "romacs-instructions",
       "romacs-json-read",
+      "romacs-model--available-p",
+      "romacs-model--create",
+      "romacs-model--freeze",
+      "romacs-model--resize",
+      "romacs-model--set-highlight",
+      "romacs-model--set-highlight-layers",
+      "romacs-model--set-view",
       "romacs-native-stack-room",
       "romacs-pbkdf2-hmac",
       "romacs-status-bar-height",
       "romacs-status-bar-window",
+      "romacs-surface-destroy",
       "romacs-treesit-bundled-grammars",
       "round",
       "run-hook-with-args",
