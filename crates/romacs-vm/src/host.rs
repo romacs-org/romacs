@@ -2907,7 +2907,7 @@ pub fn set_process_name(name: &str) -> io::Result<()> {
     std::fs::write("/proc/self/comm", name)
 }
 
-/// emacs_pipe: a close-on-exec pipe (read end, write end).
+/// `emacs_pipe`: a close-on-exec pipe (read end, write end).
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     effect(|| "pipe".into())?;
     let mut fds = [0; 2];
