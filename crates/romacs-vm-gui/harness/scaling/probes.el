@@ -2852,7 +2852,7 @@ closures over a mutable variable (each a closure and a cell)."
 ;; entry goes after the mark.  Every list here is live by the first round,
 ;; so the rounds do not grow with N: that each entry is traced once per
 ;; collection is `a_live_entry_is_traced_once_per_collection''s, in
-;; crates/romacs-vm/src/source_cache/tests.rs, not this probe's.
+;; crates/romacs-vm/src/source_cache/cache_tests.rs, not this probe's.
 (defvar scaling--lambda-lists nil
   "The lists the `gc-lambda-lists' probe calls and keeps.")
 
