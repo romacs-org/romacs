@@ -5,11 +5,10 @@ use crate::terminal_host::TerminalBinding;
 impl Leaf<'_> {
     /// A terminal of COLUMNS x ROWS, or, when nil, of the stable body of
     /// the window that controls the current buffer (`controlling_window').
-    pub(crate) fn terminal_create(&mut self, shell: Value, directory: Value, columns: Value, rows: Value) -> Out {
-        let shell = self.string_text(shell)?;
-        let directory = self.string_text(directory)?;
-        let buffer = self.current_buffer()?;
-        let (columns, rows) = if columns == Value::NIL && rows == Value::NIL {
+    /// The size a terminal in the current buffer starts at: COLUMNS and
+    /// ROWS, or with both nil its controlling window's stable body.
+    fn terminal_start_size(&mut self, buffer: Value, columns: Value, rows: Value) -> std::result::Result<(u16, u16), Fault> {
+        if columns == Value::NIL && rows == Value::NIL {
             self.vm.ensure_windows().map_err(Fault::Error)?;
             let mut showing = vec![];
             for w in self.vm.leaf_windows().map_err(Fault::Error)? {
@@ -18,17 +17,24 @@ impl Leaf<'_> {
             let control = self.vm.controlling_window(buffer, &showing).map_err(Fault::Error)?
                 .ok_or_else(|| Fault::Error("Terminal buffer is not shown in a window".into()))?;
             self.vm.stable_window_body(control).map_err(Fault::Error)?
-                .ok_or_else(|| Fault::Error("Window too small for a terminal".into()))?
+                .ok_or_else(|| Fault::Error("Window too small for a terminal".into()))
         } else {
             let size = |v: Value, what: &str| v.as_integer().ok().and_then(|n| u16::try_from(n).ok()).filter(|n| *n > 0)
                 .ok_or_else(|| Fault::Error(format!("Invalid terminal {what}")));
-            (size(columns, "columns")?, size(rows, "rows")?)
-        };
+            Ok((size(columns, "columns")?, size(rows, "rows")?))
+        }
+    }
+
+    /// Bind the current buffer to the terminal START makes at its size.
+    fn terminal_bind(&mut self, columns: Value, rows: Value,
+                     start: impl FnOnce(&mut dyn crate::TerminalHost, Option<&crate::keeper::Link>, u16, u16) -> std::result::Result<u64, String>) -> Out {
+        let buffer = self.current_buffer()?;
+        let (columns, rows) = self.terminal_start_size(buffer, columns, rows)?;
         if self.vm.terminal_bindings.iter().any(|b| b.buffer == buffer) {
             return Err(Fault::Error("Buffer already owns a terminal".into()));
         }
         let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
-        let session = host.create(&shell, &directory, columns, rows).map_err(Fault::Error)?;
+        let session = start(host.as_mut(), self.vm.keeper.as_ref(), columns, rows).map_err(Fault::Error)?;
         let value = i64::try_from(session).ok().and_then(|id| Value::integer(id).ok());
         let Some(value) = value else {
             let _ = host.close(session);
@@ -37,6 +43,37 @@ impl Leaf<'_> {
         self.vm.terminal_bindings.push(TerminalBinding::new(buffer, session, columns, rows));
         self.vm.buffer_state_mut(buffer).map_err(Fault::Error)?.terminal = Some(session);
         Ok(value)
+    }
+
+    pub(crate) fn terminal_create(&mut self, shell: Value, directory: Value, columns: Value, rows: Value) -> Out {
+        let shell = self.string_text(shell)?;
+        let directory = self.string_text(directory)?;
+        self.terminal_bind(columns, rows, |host, _, columns, rows| host.create(&shell, &directory, columns, rows))
+    }
+
+    /// A terminal over the helper process behind keeper handle HANDLE,
+    /// whose first descriptor is the helper's control socket.
+    pub(crate) fn terminal_adopt(&mut self, handle: i64, columns: Value, rows: Value) -> Out {
+        let handle = u64::try_from(handle).map_err(|_| Fault::Error("Invalid keeper handle".into()))?;
+        self.terminal_bind(columns, rows, |host, keeper, columns, rows| {
+            let control = keeper.ok_or("This session has no keeper attached")?.duplicate(handle, 0)?;
+            host.adopt(control, columns, rows)
+        })
+    }
+
+    /// `(FULLS . DELTAS)`: how many of SESSION's updates carried the whole
+    /// grid and how many a change; nil where the host has no such count.
+    pub(crate) fn terminal_transport_counts(&mut self, session: i64) -> Out {
+        let id = u64::try_from(session).map_err(|_| Fault::Error("Invalid terminal session".into()))?;
+        let host = self.vm.terminal_host.as_mut().ok_or_else(|| Fault::Error("No terminal host attached".into()))?;
+        Ok(match host.transport_counts(id) {
+            Some((fulls, deltas)) => {
+                let count = |n: u64| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).map_err(Fault::Error);
+                let (fulls, deltas) = (count(fulls)?, count(deltas)?);
+                self.cons(fulls, deltas)
+            }
+            None => Value::NIL,
+        })
     }
 
     pub(crate) fn terminal_send(&mut self, session: i64, bytes: Value) -> Out {

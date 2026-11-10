@@ -17,7 +17,7 @@
     "romacs-snapshot": {"sites": 14, "undocumented": 0},
     "romacs-video": {"sites": 28, "undocumented": 0},
     "romacs-vm": {"sites": 851, "undocumented": 486},
-    "romacs-vm-gui": {"sites": 11, "undocumented": 2}
+    "romacs-vm-gui": {"sites": 11, "undocumented": 1}
   },
   "unsafe_op_in_unsafe_fn_pending": {
 

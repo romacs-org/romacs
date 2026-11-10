@@ -42,6 +42,12 @@ impl Link {
             .ok_or_else(|| format!("This session holds no descriptor {slot} of keeper handle {handle}"))
     }
 
+    /// A duplicate of a held descriptor, for a part of the session that
+    /// talks to the resource itself (a terminal's helper).
+    pub(crate) fn duplicate(&self, handle: u64, slot: usize) -> Result<OwnedFd, String> {
+        self.slot(handle, slot)?.try_clone().map_err(|e| e.to_string())
+    }
+
     /// Up to MAX bytes from a held descriptor: `None` when nothing arrives
     /// within TIMEOUT, empty at end of file.
     pub(crate) fn read(&self, handle: u64, slot: usize, max: usize, timeout: std::time::Duration) -> Result<Option<Vec<u8>>, String> {

@@ -387,3 +387,44 @@ fn real_soft_wrap_unicode_and_cursor_padding() {
     assert_eq!(snapshot, service.snapshot(id).unwrap());
     service.close(id).unwrap();
 }
+
+/// Past the history limit every push scrolls by the same count and can
+/// look like the one before: the session must still be told, or its
+/// history falls behind the terminal's.
+#[test]
+fn repeated_output_past_the_history_limit_keeps_the_newest_lines() {
+    let mut service = Service::new();
+    let id = service.create("/bin/sh", "/", 40, 5).unwrap();
+    service.send(id, b"i=0; while [ $i -lt 10400 ]; do echo same; i=$((i+1)); done; echo L1; echo same; echo L2; echo same; echo L3\n").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let text = loop {
+        let _ = service.ready().recv_timeout(Duration::from_millis(100));
+        service.changed_sessions();
+        let snapshot = service.snapshot(id).unwrap();
+        if snapshot.text.contains("\nL3\n") { break snapshot.text; }
+        assert!(std::time::Instant::now() < deadline, "the last lines never arrived");
+    };
+    // Whether or not the next prompt has been printed yet.
+    let lines: Vec<&str> = text.lines().collect();
+    let last = lines.iter().rposition(|line| *line == "L3").unwrap();
+    assert_eq!(lines[last - 4..=last], ["L1", "same", "L2", "same", "L3"], "the history ends as the terminal's does");
+    assert_eq!(lines[last - 6..last - 4], ["same", "same"]);
+    let (fulls, deltas) = service.transport_counts(id).unwrap();
+    assert!(deltas > 0 && fulls < 10, "{fulls} full pushes, {deltas} deltas");
+    service.close(id).unwrap();
+}
+
+/// A shell that cannot start is an ended terminal, not a blank running one.
+#[test]
+fn a_shell_that_cannot_start_ends_the_terminal() {
+    let mut service = Service::new();
+    assert!(service.create("/bin/sh", "/", 1, 5).is_err(), "no helper is spawned for a size no terminal has");
+    let id = service.create("/bin/sh", "/nonexistent-directory-for-a-terminal", 40, 5);
+    if let Ok(id) = id {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while service.input_state(id).unwrap().running {
+            assert!(std::time::Instant::now() < deadline, "the terminal still claims to run");
+            let _ = service.ready().recv_timeout(Duration::from_millis(50));
+        }
+    }
+}

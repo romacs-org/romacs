@@ -1,0 +1,193 @@
+;;; romacs-term-keep.el --- Terminals that outlive the session  -*- lexical-binding: t -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
+;; A terminal is a helper process of its own (the pty, the shell, the
+;; emulator).  Here a session keeps that process in its keeper
+;; (romacs-keeper.el), so the terminal outlives the session:
+;;
+;; - `romacs-restart' brings each terminal buffer back attached to its
+;;   running terminal (a desktop handler, which warm-restart.el calls);
+;; - a session that starts after one that crashed finds the terminals it
+;;   left and brings them back too (`romacs-term-adopt-orphans').
+;;
+;; romacs-term.el itself runs in every session, also where GNU's Lisp is
+;; not loaded, and knows of this only through `romacs-term-open-function'.
+
+;;; Code:
+
+(require 'romacs-keeper)
+
+(defvar romacs-term-session)
+(defvar romacs-term-handle)
+(defvar romacs-term-open-function)
+(declare-function romacs-term--prepare "romacs-term")
+(declare-function romacs-term--bound "romacs-term")
+(declare-function romacs--term-create "terminal.rs")
+(declare-function romacs--term-adopt "terminal.rs")
+
+(defvar romacs-keeper-enabled)
+(defvar romacs-keeper-attachment)
+(defvar desktop-save-buffer)
+(defvar desktop-buffer-mode-handlers)
+(defvar warm-restart-passive)
+(defvar warm-restart-activate-functions)
+(declare-function romacs-keeper-attached-p "romacs-keeper")
+(declare-function romacs-keeper-attach "romacs-keeper")
+(declare-function romacs-keeper-spawn "romacs-keeper")
+(declare-function romacs-keeper-claim "romacs-keeper")
+(declare-function romacs-keeper-close "romacs-keeper")
+(declare-function romacs-keeper-handles "romacs-keeper")
+
+(defun romacs-term--keeper ()
+  "Non-nil when this session keeps its terminals in a keeper, attached now.
+A keeper that cannot be reached is said once per terminal; the terminal
+then belongs to this session alone."
+  (require 'romacs-keeper)
+  (and romacs-keeper-enabled
+       (or (romacs-keeper-attached-p)
+           (condition-case err (romacs-keeper-attach)
+             (error (message "No keeper, so this terminal ends with the session: %s"
+                             (error-message-string err))
+                    nil)))))
+
+;;;###autoload
+(defun romacs-term-keep-open (shell directory)
+  "Start SHELL in DIRECTORY as the current buffer's terminal; its session.
+With a keeper the terminal's helper process is the keeper's child and
+outlives this session; `romacs-term-handle' names it."
+  (if (not (romacs-term--keeper))
+      (romacs--term-create shell directory)
+    (let* ((host (expand-file-name invocation-name invocation-directory))
+           (row (romacs-keeper-spawn "terminal" 1 (list host "--terminal-helper" shell)
+                                     :environment process-environment
+                                     :directory (directory-file-name (expand-file-name directory))
+                                     :session t
+                                     :descriptors '((0 . null) (1 . null) (2 . null) (3 . socket))
+                                     :metadata (encode-coding-string (buffer-name) 'utf-8)))
+           (handle (plist-get row :handle))
+           (bound nil))
+      (unwind-protect
+          (prog1 (romacs--term-adopt handle)
+            (setq romacs-term-handle handle bound t)
+            (setq-local desktop-save-buffer #'romacs-term--desktop-save))
+        (unless bound (ignore-errors (romacs-keeper-close handle)))))))
+
+(defun romacs-term--desktop-save (_dirname)
+  "What a later session needs to find this terminal again."
+  (and romacs-term-handle
+       (let ((window (get-buffer-window (current-buffer) t)))
+         (list :handle romacs-term-handle
+               :incarnation (plist-get romacs-keeper-attachment :incarnation)
+               :session (emacs-pid)
+               :directory default-directory
+               :columns (if window (window-body-width window) 80)
+               :rows (if window (window-body-height window) 24)))))
+
+(defun romacs-term--ended (why)
+  "Leave the current buffer as a terminal that did not come back, saying WHY."
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (insert (propertize (format "This terminal did not come back: %s.\n" why) 'face 'warning))
+    (set-buffer-modified-p nil)))
+
+(defun romacs-term--reattach (misc)
+  "Attach the current buffer to the terminal MISC names, if it still runs.
+The keeper must be the one that held it, and its helper process alive;
+else the buffer says what became of it.  A buffer that already has its
+terminal is left as it is."
+  (unless romacs-term-session (romacs-term--reattach-1 misc)))
+
+(defun romacs-term--reattach-1 (misc)
+  "Do `romacs-term--reattach' for a buffer with no terminal yet."
+  (let* ((handle (plist-get misc :handle))
+         (keeper (and (romacs-term--keeper)
+                      (equal (plist-get romacs-keeper-attachment :incarnation) (plist-get misc :incarnation))))
+         (row nil))
+    (when keeper
+      (dolist (candidate (romacs-keeper-handles))
+        (when (eql (plist-get candidate :handle) handle) (setq row candidate))))
+    (cond
+     ((not keeper) (romacs-term--ended "the keeper that held it is gone"))
+     ((not row) (romacs-term--ended "its keeper no longer holds it"))
+     ((not (equal (plist-get row :status) '(running)))
+      (romacs-term--ended (format "its helper process ended (%s)"
+                                  (mapconcat (lambda (part) (format "%s" part)) (plist-get row :status) " "))))
+     (t
+      (romacs-keeper-claim handle (plist-get misc :session))
+      (setq romacs-term-session
+            (condition-case nil (romacs--term-adopt handle)
+              ;; Not shown in a window yet: its last size, until it is.
+              (error (romacs--term-adopt handle (plist-get misc :columns) (plist-get misc :rows)))))
+      (setq romacs-term-handle handle)
+      (setq-local desktop-save-buffer #'romacs-term--desktop-save)
+      (romacs-term--bound)))))
+
+;;;###autoload
+(defun romacs-term-desktop-restore (_file name misc)
+  "The terminal buffer NAME of MISC, attached again to its running terminal."
+  (let ((buffer (get-buffer-create name)))
+    (with-current-buffer buffer
+      (romacs-term--prepare (or (plist-get misc :directory) default-directory)))
+    (let ((attach (lambda ()
+                    (when (buffer-live-p buffer)
+                      (with-current-buffer buffer (romacs-term--reattach misc))))))
+      (if (bound-and-true-p warm-restart-passive)
+          (setq warm-restart-activate-functions (append warm-restart-activate-functions (list attach)))
+        (funcall attach)))
+    buffer))
+
+(declare-function romacs-keeper-socket "romacs-keeper")
+
+;;;###autoload
+(defun romacs-term-adopt-orphans ()
+  "Bring back the terminals a session that is gone left running.
+A session that crashed, or was killed, leaves its terminals in its
+keeper with their programs running.  Each comes back in a buffer of the
+name it had.  Return those buffers.  Does nothing when no keeper runs
+for this session."
+  (interactive)
+  (require 'romacs-keeper)
+  (let ((buffers nil))
+    (when (and romacs-keeper-enabled
+               (or (romacs-keeper-attached-p) (file-exists-p (romacs-keeper-socket)))
+               (romacs-term--keeper))
+      (dolist (row (romacs-keeper-handles))
+        (let ((name (decode-coding-string (plist-get row :metadata) 'utf-8)))
+          (when (and (equal (plist-get row :kind) "terminal")
+                     (not (plist-get row :owner-alive))
+                     (equal (plist-get row :status) '(running))
+                     (not (string-empty-p name))
+                     (not (and (get-buffer name) (buffer-local-value 'romacs-term-session (get-buffer name)))))
+            (with-current-buffer (get-buffer-create name)
+              (romacs-term--prepare default-directory)
+              (romacs-term--reattach (list :handle (plist-get row :handle)
+                                           :incarnation (plist-get romacs-keeper-attachment :incarnation)
+                                           :columns 80 :rows 24))
+              (push (current-buffer) buffers)))))
+      (when buffers
+        (message "Terminals brought back: %s" (mapconcat #'buffer-name buffers ", "))))
+    (nreverse buffers)))
+
+;; A session that starts where a keeper already runs looks, once idle, for
+;; terminals nobody owns.  A restored image has claimed its own by then.
+;;;###autoload
+(progn
+  (defun romacs-term--adopt-at-startup ()
+    "Once started and idle, bring back terminals a gone session left."
+    (unless noninteractive
+      (run-with-idle-timer 1 nil (lambda () (ignore-errors (romacs-term-adopt-orphans))))))
+  (add-hook 'after-init-hook #'romacs-term--adopt-at-startup))
+
+;; In every session from its start: a restored one must find the handler
+;; before this library is loaded.
+;;;###autoload
+(with-eval-after-load 'desktop
+  (add-to-list 'desktop-buffer-mode-handlers '(romacs-term-mode . romacs-term-desktop-restore)))
+
+;;;###autoload
+(setq romacs-term-open-function #'romacs-term-keep-open)
+
+(provide 'romacs-term-keep)
+;;; romacs-term-keep.el ends here

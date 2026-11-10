@@ -105,7 +105,16 @@ NAME defaults to the server's name, else \"default\"."
       (unless (eql 0 (call-process program nil nil nil "--socket" socket "--idle-ms" idle))
         (error "The keeper at %s did not start" program)))))
 
+(defvar romacs-keeper-attachment nil
+  "What `romacs-keeper-attach' returned for the keeper now attached.
+Its :incarnation tells this keeper from another one: a handle saved
+under one incarnation names nothing in another.")
+
 (defun romacs-keeper--attach-socket (socket)
+  "Attach to the keeper at SOCKET, starting one if none answers."
+  (setq romacs-keeper-attachment (romacs-keeper--attach-socket-1 socket)))
+
+(defun romacs-keeper--attach-socket-1 (socket)
   "Attach to the keeper at SOCKET, starting one if none answers."
   (when (romacs-keeper-attached-p)
     (error "This session is attached to the keeper with pid %d; detach first"

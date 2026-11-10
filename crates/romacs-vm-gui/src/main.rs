@@ -696,6 +696,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
                 return batch::compile_lisp(file.into(), world_store).map(|()| None);
             }
             // A worker's own end is its spawner's to report; its failure says why here.
+            // A terminal's helper process (terminal_helper.rs): no VM, no display.
+            "--terminal-helper" => return Ok(romacs_vm_gui::terminal_helper::run(&args.next().unwrap_or_default()).err()
+                                              .map(|error| exit::Exit::new("terminal-helper-error", error, 1))),
             "--isolate" => return Ok(isolate_worker::run(std::iter::once(arg).chain(args).collect()).err()
                                      .map(|error| exit::Exit::new("isolate-error", error, 1))),
             "--" => {
