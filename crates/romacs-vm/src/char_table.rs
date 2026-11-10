@@ -24,6 +24,32 @@ mod tests {
         WROTE.with(std::cell::Cell::get) - before
     }
 
+    /// A copy whose root lands where a freed table's was is still another
+    /// table to what keys on serials, and a new table and a literal read each
+    /// take a serial of their own.
+    #[test]
+    fn a_copy_where_a_freed_table_was_has_its_own_serial() {
+        let template = CharTable::new(Value::NIL);
+        let mut landed = 0;
+        for _ in 0..1000 {
+            let freed = CharTable::new(Value::NIL);
+            let (address, serial) = (Arc::as_ptr(&freed.root), freed.serial);
+            drop(freed);
+            let copy = template.clone();
+            if Arc::as_ptr(&copy.root) == address {
+                landed += 1;
+                assert_ne!(copy.serial, serial, "a copy where a freed table was took its serial");
+            }
+        }
+        assert!(landed > 0, "no copy landed where a freed table was: the case is not exercised");
+        let mut vm = Vm::new();
+        let literal = run(&mut vm, &format!("#^[nil nil test nil{}]", " nil".repeat(64)));
+        let made = run(&mut vm, "(make-char-table 'test)");
+        let serials = [vm.char_table_serial(literal), vm.char_table_serial(made), template.serial];
+        assert!(serials.iter().all(|&serial| serial != 0), "{serials:?}");
+        assert!(serials[0] != serials[1] && serials[0] != serials[2] && serials[1] != serials[2], "{serials:?}");
+    }
+
     /// A read of the entries sees what a map would, in its order, once for a
     /// node two slots share, and passes nothing to the funnel nor counts an edit.
     #[test]
@@ -417,6 +443,15 @@ impl Vm {
         Ok(value)
     }
 
+    /// TABLE's serial, which no other table has had (0 for a value that is
+    /// not a char table).
+    pub(crate) fn char_table_serial(&self, table: Value) -> u64 {
+        match self.object_if(table) {
+            Some(data::Object::CharTable(t)) => t.serial,
+            _ => 0,
+        }
+    }
+
     /// TABLE's own runs of one value, in character order, each slot of the
     /// table once: char_table_ref_and_range walked over the characters.
     pub(crate) fn char_table_edits(&self, table: Value) -> Result<u64> {
@@ -718,8 +753,36 @@ fn optimize_node<E>(node: &CharTableNodeHandle, same: &mut impl FnMut(Value, Val
 /// a `Node`'s handle, never lock it here.
 #[inline]
 fn wrote(_stored: &CharTableSlot) {
+    WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     #[cfg(test)]
     tests::WROTE.with(|n| n.set(n.get() + 1));
+}
+
+/// The writes to char tables' contents so far in this process, all tables
+/// counted together: what is derived from a table's contents (the syntax
+/// summaries) keys on it with the table's serial, so a write
+/// anywhere, through a parent or a node shared with another table
+/// included, renews the key.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) fn writes() -> u64 {
+    WRITES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The next table serial: one per table made, copied or read, never handed
+/// out twice in a process or across the world image it restores.
+static SERIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn fresh_serial() -> u64 {
+    SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+/// The counters a world image records: the next serial and the writes.
+pub(crate) fn image_counters() -> [u64; 2] {
+    [SERIALS.load(std::sync::atomic::Ordering::Relaxed), writes()]
+}
+/// Continue a restored world's COUNTERS: a table in it keeps its serial,
+/// and what was derived under its writes stays valid until the next one.
+pub(crate) fn restore_counters([serials, writes]: [u64; 2]) {
+    SERIALS.fetch_max(serials, std::sync::atomic::Ordering::Relaxed);
+    WRITES.fetch_max(writes, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The collector's own visit of HANDLE's Values, which forwarding rewrites in
@@ -790,8 +853,11 @@ pub(super) struct CharTable {
     extras: Vec<Value>,
     /// Counts the writes to its characters, for what is derived from them.
     edits: u64,
+    /// This table among all others, made, copied or read (`fresh_serial`):
+    /// what derived data keys on, since an address may be reused or moved.
+    serial: u64,
 }
-romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits });
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits, serial });
 
 impl CharTable {
     /// Whether no character has a value, as a new table's: read without
@@ -817,6 +883,7 @@ impl Clone for CharTable {
             parent: self.parent,
             extras: self.extras.clone(),
             edits: 0,
+            serial: fresh_serial(),
         }
     }
 }
@@ -871,7 +938,7 @@ impl CharTable {
         self.extras.copy_from_slice(values);
     }
     pub fn new(purpose: Value) -> Self {
-        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0 }
+        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0, serial: fresh_serial() }
     }
     // Called before publication, in a leaf allocation window (never collects).
     pub fn initialize(&mut self, count: usize, init: Value) -> Result<()> {

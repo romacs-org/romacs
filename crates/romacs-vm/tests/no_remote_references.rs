@@ -439,6 +439,8 @@ const CELLS: &[(&str, Behind)] = &[
     ("text.rs:TextBody.flat", Plain), ("text.rs:TextBody.flat_moved", Plain), ("text.rs:TextBody.flat_internal", Plain),
     ("text.rs:TextBody.coordinate", Plain), ("text.rs:TextBody.chunk", Plain), ("text.rs:TextBody.cold_chunks", Plain),
     ("text.rs:TextBody.cold_order", Plain), ("text.rs:TextBody.scanned_bytes", Plain), ("text.rs:TextBody.coordinate_steps", Plain),
+    // Parse-state summaries: positions and syntax codes, no Value.
+    ("text.rs:TextBody.syntax", Plain),
     // Text shared by indirect buffers, its properties among it: `TextBody`'s own write methods.
     ("text.rs:Text.body", Held),
     ("tls.rs:Session.peer", Plain), ("tls.rs:Verifier.peer", Plain),
