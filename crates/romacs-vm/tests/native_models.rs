@@ -115,6 +115,8 @@ fn bad_arguments_and_freed_models_are_refused_and_send_nothing() {
         ("(romacs-model--set-highlight 1 1 '(:mesh 2 :kind object) nil)", "mesh index out of range"),
         ("(romacs-model--set-highlight 1 1 '(:mesh 0 :kind point :face 0 :barycentric [1 1 1] :tolerance 1) nil)", "summing to 1"),
         ("(romacs-model--set-view 9 1 0 0 1)", "Model is destroyed"),
+        ("(romacs-model--set-highlight 1 1 (list :mesh 0 :kind 'point :face 0 :barycentric (make-vector 100000 0) :tolerance 1) nil)",
+         "three weights"),
     ] {
         let got = eval(&mut vm, form);
         assert!(got.contains(error), "{form}: {got}");

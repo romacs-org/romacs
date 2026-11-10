@@ -163,7 +163,9 @@ impl Leaf<'_> {
             "object" => ModelTarget::Object { mesh },
             "point" => {
                 let weights = match self.vm.object_if(field(":barycentric")?) {
-                    Some(data::Object::Vector(items)) => items.clone(),
+                    // Its length first: no work in proportion to a long vector.
+                    Some(data::Object::Vector(items)) if items.len() <= 3 => items.clone(),
+                    Some(data::Object::Vector(_)) => return Err(error("Model barycentric needs three weights")),
                     _ => self.model_items(field(":barycentric")?, "barycentric", 3)?,
                 };
                 let weights = weights.iter().map(|&w| self.model_number(w, "barycentric weight")).collect::<std::result::Result<Vec<_>, _>>()?;
