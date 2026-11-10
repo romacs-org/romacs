@@ -5,7 +5,6 @@ mod clock;
 mod query;
 
 use ash::vk;
-pub use clock::Calibration;
 pub use query::{Observation, SwapchainTiming};
 use wgpu::hal::{api::Vulkan, vulkan};
 
@@ -43,8 +42,10 @@ impl DeviceFeatures {
             ids: Default::default(),
         };
         this.timing.p_next = (&mut this.ids as *mut abi::IdFeatures).cast();
-        let mut features = vk::PhysicalDeviceFeatures2::default();
-        features.p_next = (&mut this.timing as *mut abi::TimingFeatures).cast();
+        let mut features = vk::PhysicalDeviceFeatures2 {
+            p_next: (&mut this.timing as *mut abi::TimingFeatures).cast(),
+            ..Default::default()
+        };
         // SAFETY: both extension structs and output feature storage remain live
         // during this query on the adapter's own physical device.
         unsafe {
@@ -115,10 +116,14 @@ pub unsafe fn prepare_surface(device: &wgpu::Device, surface: &wgpu::Surface<'_>
             return false;
         };
         let mut ids = abi::IdCapabilities::default();
-        let mut timing = abi::TimingCapabilities::default();
-        timing.p_next = (&mut ids as *mut abi::IdCapabilities).cast();
-        let mut caps = vk::SurfaceCapabilities2KHR::default();
-        caps.p_next = (&mut timing as *mut abi::TimingCapabilities).cast();
+        let mut timing = abi::TimingCapabilities {
+            p_next: (&mut ids as *mut abi::IdCapabilities).cast(),
+            ..Default::default()
+        };
+        let mut caps = vk::SurfaceCapabilities2KHR {
+            p_next: (&mut timing as *mut abi::TimingCapabilities).cast(),
+            ..Default::default()
+        };
         let info = vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(raw_surface);
         let query = ash::khr::get_surface_capabilities2::Instance::new(
             shared.entry(),

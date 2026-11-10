@@ -53,7 +53,7 @@ fn immediate_hashes_and_position_hashes_remain_distinct_after_compaction() {
     assert_ne!(roots[0], cell, "S109 cell index actually moved");
     assert_eq!(roots[0].tag(), 5, "S109 cell identity after forwarding");
     assert_eq!(roots[0].payload(), 0, "S109 one-based cell decoded index");
-    assert_eq!(vm.cells[..], [wide], "S109 cell payload remains immediate");
+    assert_eq!(vm.cells.iter().copied().collect::<Vec<_>>(), [wide], "S109 cell payload remains immediate");
     assert_eq!(roots[1], wide, "S109 integer bits never forwarded");
     assert_eq!(roots[2], Value::TRUE, "S109 t is not cell zero");
     assert_eq!(

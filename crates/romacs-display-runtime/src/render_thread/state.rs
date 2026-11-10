@@ -9,8 +9,8 @@ use winit::dpi::{LogicalSize, PhysicalSize, Size};
 
 use crate::clipboard::ClipboardService;
 use crate::host_types::ResolvedImageMetadata;
-pub use crate::thread_comm::MonitorInfo;
-use crate::thread_comm::{FrameShaderAvailability, RenderComms};
+pub(crate) use crate::thread_comm::MonitorInfo;
+use crate::thread_comm::RenderComms;
 pub(super) use romacs_display_protocol::PointerAppearancePhase;
 use romacs_display_protocol::{
     EffectsConfig, FrameGlyphBuffer, FrameRect, ImageCacheUsage, ImageId, ImageLoadToken,
@@ -35,7 +35,7 @@ pub(super) use super::toolbar::ToolbarResources;
 /// superseding the last — so a reader asking for the terminal state keeps
 /// waiting past any number of bands.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ImageDecodeTerminal {
+pub(crate) enum ImageDecodeTerminal {
     /// One band of a decode still running: rows that exist, in source-row
     /// coordinates.
     Band(RowRange),
@@ -47,6 +47,7 @@ pub enum ImageDecodeTerminal {
 }
 
 impl ImageDecodeTerminal {
+    #[cfg(test)]
     /// Whether this publication ends a load, as opposed to advancing one.
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
@@ -56,17 +57,11 @@ impl ImageDecodeTerminal {
         }
     }
 
+    #[cfg(test)]
     /// The terminal state of a load, if the terminal one is what is published.
     fn terminal(self) -> Option<Self> {
         self.is_terminal().then_some(self)
     }
-}
-
-/// Result of a redisplay-safe, non-blocking terminal-state observation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ImageTerminalProbe {
-    Busy,
-    Available(Option<ImageDecodeTerminal>),
 }
 
 /// Exclusive renderer publication capability for terminal image results.
@@ -74,7 +69,7 @@ pub enum ImageTerminalProbe {
 /// The contained map is deliberately private. Holding this value models the
 /// only contention redisplay's [`ImageTerminalProbe::Busy`] path must tolerate;
 /// dropping it wakes bounded synchronous waiters once for the whole batch.
-pub struct ImageTerminalPublication<'a> {
+pub(crate) struct ImageTerminalPublication<'a> {
     terminals: MutexGuard<'a, HashMap<ImageLoadToken, ImageDecodeTerminal>>,
     terminal_changed: &'a Condvar,
 }
@@ -93,11 +88,7 @@ impl ImageTerminalPublication<'_> {
         self.publish(load, ImageDecodeTerminal::Band(rows));
     }
 
-    pub fn remove(&mut self, load: ImageLoadToken) {
-        self.terminals.remove(&load);
-    }
-
-    pub fn clear_image(&mut self, image: ImageId) {
+    pub(crate) fn clear_image(&mut self, image: ImageId) {
         self.terminals.retain(|load, _| load.image() != image);
     }
 }
@@ -113,7 +104,7 @@ impl Drop for ImageTerminalPublication<'_> {
 /// Terminal decode results need a condition variable for bounded synchronous
 /// measurement. Cache usage is an independent lock-free snapshot: querying
 /// `image-cache-size` never waits for a decode or the render thread.
-pub struct ImageRenderState {
+pub(crate) struct ImageRenderState {
     terminals: Mutex<HashMap<ImageLoadToken, ImageDecodeTerminal>>,
     terminal_changed: Condvar,
     cache_bytes: AtomicU64,
@@ -136,6 +127,7 @@ impl ImageRenderState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    #[cfg(test)]
     /// The terminal state of `load`, if it has one.
     ///
     /// A load whose decode is still running has bands published but no terminal
@@ -148,33 +140,14 @@ impl ImageRenderState {
             .and_then(ImageDecodeTerminal::terminal)
     }
 
-    pub fn begin_terminal_publication(&self) -> ImageTerminalPublication<'_> {
+    pub(crate) fn begin_terminal_publication(&self) -> ImageTerminalPublication<'_> {
         ImageTerminalPublication {
             terminals: self.lock_terminals(),
             terminal_changed: &self.terminal_changed,
         }
     }
 
-    pub fn try_terminal(&self, load: ImageLoadToken) -> ImageTerminalProbe {
-        match self.terminals.try_lock() {
-            Ok(terminals) => ImageTerminalProbe::Available(
-                terminals
-                    .get(&load)
-                    .cloned()
-                    .and_then(ImageDecodeTerminal::terminal),
-            ),
-            Err(std::sync::TryLockError::WouldBlock) => ImageTerminalProbe::Busy,
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => ImageTerminalProbe::Available(
-                poisoned
-                    .into_inner()
-                    .get(&load)
-                    .cloned()
-                    .and_then(ImageDecodeTerminal::terminal),
-            ),
-        }
-    }
-
-    pub fn publish_terminal(&self, load: ImageLoadToken, terminal: ImageDecodeTerminal) {
+    pub(crate) fn publish_terminal(&self, load: ImageLoadToken, terminal: ImageDecodeTerminal) {
         self.begin_terminal_publication().publish(load, terminal);
     }
 
@@ -183,6 +156,7 @@ impl ImageRenderState {
         self.begin_terminal_publication().publish_band(load, rows);
     }
 
+    #[cfg(test)]
     /// The newest band published for `load`, if one is.
     ///
     /// Only the newest: a band supersedes the one before it, so what is
@@ -196,15 +170,12 @@ impl ImageRenderState {
         }
     }
 
-    pub fn remove_terminal(&self, load: ImageLoadToken) {
-        self.begin_terminal_publication().remove(load);
-    }
-
-    pub fn clear_image_terminals(&self, image: ImageId) {
+    pub(crate) fn clear_image_terminals(&self, image: ImageId) {
         self.begin_terminal_publication().clear_image(image);
     }
 
-    pub fn wait_for_terminal(
+    #[cfg(test)]
+    pub(crate) fn wait_for_terminal(
         &self,
         load: ImageLoadToken,
         timeout: std::time::Duration,
@@ -240,40 +211,26 @@ impl ImageRenderState {
         }
     }
 
-    pub fn publish_cache_usage(&self, usage: ImageCacheUsage) {
+    pub(crate) fn publish_cache_usage(&self, usage: ImageCacheUsage) {
         self.cache_bytes
             .store(usage.total_bytes(), Ordering::Release);
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn cached_size_bytes(&self) -> u64 {
         self.cache_bytes.load(Ordering::Acquire)
     }
 }
 
-pub type SharedImageRenderState = Arc<ImageRenderState>;
+pub(crate) type SharedImageRenderState = Arc<ImageRenderState>;
 
 /// Shared storage for monitor info accessible from both threads.
 /// The Condvar is notified once monitors have been populated.
-pub type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
+pub(crate) type SharedMonitorInfo = Arc<(Mutex<Vec<MonitorInfo>>, std::sync::Condvar)>;
 
 pub(super) fn backend_uses_winit_logical_pixels() -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        crate::display_scale::active_window_coordinate_system().map_or_else(
-            || std::env::var_os("WAYLAND_DISPLAY").is_some(),
-            |system| {
-                matches!(
-                    system,
-                    crate::display_scale::WindowCoordinateSystem::WinitLogical
-                )
-            },
-        )
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        true
-    }
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 pub(super) fn effective_window_scale_factor(raw_scale_factor: f64) -> f64 {
@@ -430,7 +387,6 @@ pub(super) struct WindowChrome {
     /// and pretending otherwise made the first click within the double-click
     /// interval of opening a window maximize it instead of dragging it.
     pub(super) last_titlebar_click: Option<EventTime>,
-    pub(super) is_fullscreen: bool,
     pub(super) corner_radius: f32,
 }
 
@@ -444,7 +400,6 @@ impl Default for WindowChrome {
             titlebar_height: 30.0,
             titlebar_hover: 0,
             last_titlebar_click: None,
-            is_fullscreen: false,
             corner_radius: 0.0,
         }
     }
@@ -1004,15 +959,15 @@ pub(super) struct RenderLifecycle {
 }
 
 impl RenderLifecycle {
-    pub fn request_shutdown(&mut self, reason: RenderShutdownReason) {
+    pub(crate) fn request_shutdown(&mut self, reason: RenderShutdownReason) {
         self.shutdown_reason.get_or_insert(reason);
     }
 
-    pub fn is_shutting_down(&self) -> bool {
+    pub(crate) fn is_shutting_down(&self) -> bool {
         self.shutdown_reason.is_some()
     }
 
-    pub fn shutdown_reason(&self) -> Option<RenderShutdownReason> {
+    pub(crate) fn shutdown_reason(&self) -> Option<RenderShutdownReason> {
         self.shutdown_reason
     }
 
@@ -1052,14 +1007,6 @@ impl RenderApp {
             quality_mode = ?next_policy.mode(),
             "applying render-quality policy"
         );
-        let frame_shader_availability = if next_policy.frame_post_disposition().is_enabled() {
-            FrameShaderAvailability::Available
-        } else {
-            FrameShaderAvailability::SuppressedByQualityPolicy
-        };
-        self.comms
-            .capabilities
-            .publish_frame_shader_availability(frame_shader_availability);
         if !next_policy.allows_dynamic_effects() {
             self.frame_windows.discard_top_level_renderer_effects();
         }
@@ -1117,7 +1064,6 @@ impl RenderApp {
                         ..WindowChrome::default()
                     },
                     geometry_hints: None,
-                    fullscreen: None,
                 },
                 render: GuiFrameRenderState::new_without_device(
                     0,

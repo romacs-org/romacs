@@ -134,10 +134,6 @@ impl<M: GlyphMaterial> PageToken<M> {
     pub fn generation(self) -> u32 {
         self.generation
     }
-
-    pub fn page_id(self) -> PageId<M> {
-        PageId::new(self.index)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +141,7 @@ impl<M: GlyphMaterial> PageToken<M> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PixelSize {
+pub(crate) struct PixelSize {
     width: NonZeroU32,
     height: NonZeroU32,
 }
@@ -249,7 +245,7 @@ impl UvRect {
         self.max
     }
 
-    pub fn from_content_rect(content: AtlasContentRect, page_size: u32) -> Self {
+    pub(crate) fn from_content_rect(content: AtlasContentRect, page_size: u32) -> Self {
         let ps = page_size as f32;
         Self {
             min: [content.x as f32 / ps, content.y as f32 / ps],
@@ -297,7 +293,7 @@ impl<M: GlyphMaterial> AtlasEntry<M> {
         Self::new_with_sampling(page, generation, rect, uv, metrics, GlyphSampling::Linear)
     }
 
-    pub fn new_with_sampling(
+    pub(crate) fn new_with_sampling(
         page: PageId<M>,
         generation: u32,
         rect: AtlasContentRect,
@@ -321,7 +317,7 @@ impl<M: GlyphMaterial> AtlasEntry<M> {
     pub fn generation(self) -> u32 {
         self.generation
     }
-    pub fn matches_generation(self, generation: u32) -> bool {
+    pub(crate) fn matches_generation(self, generation: u32) -> bool {
         self.generation == generation
     }
     pub fn token(self) -> PageToken<M> {
@@ -349,7 +345,7 @@ pub enum AnyAtlasEntry {
 }
 
 impl AnyAtlasEntry {
-    pub fn material_kind(self) -> GlyphMaterialKind {
+    pub(crate) fn material_kind(self) -> GlyphMaterialKind {
         match self {
             Self::Alpha(_) => GlyphMaterialKind::AlphaMask,
             Self::Subpixel(_) => GlyphMaterialKind::SubpixelMask,
@@ -365,7 +361,7 @@ impl AnyAtlasEntry {
         }
     }
 
-    pub fn page_id_value(self) -> (GlyphMaterialKind, u32) {
+    pub(crate) fn page_id_value(self) -> (GlyphMaterialKind, u32) {
         match self {
             Self::Alpha(e) => (GlyphMaterialKind::AlphaMask, e.page().get()),
             Self::Subpixel(e) => (GlyphMaterialKind::SubpixelMask, e.page().get()),
@@ -373,7 +369,7 @@ impl AnyAtlasEntry {
         }
     }
 
-    pub fn binding_id_value(self) -> (GlyphMaterialKind, u32, GlyphSampling) {
+    pub(crate) fn binding_id_value(self) -> (GlyphMaterialKind, u32, GlyphSampling) {
         let (material, page) = self.page_id_value();
         (material, page, self.sampling())
     }
@@ -416,14 +412,14 @@ impl AnyAtlasEntry {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub enum RasterizedGlyphPixels {
+pub(crate) enum RasterizedGlyphPixels {
     Alpha { size: PixelSize, bytes: Vec<u8> },
     Subpixel { size: PixelSize, rgba: Vec<u8> },
     Color { size: PixelSize, rgba_srgb: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlyphAtlasError {
+pub(crate) enum GlyphAtlasError {
     Whitespace,
     InvalidCharCode(u32),
     RasterizeFailed,
@@ -498,27 +494,11 @@ impl RasterizedGlyphPixels {
         Ok(self)
     }
 
-    pub fn material(&self) -> GlyphMaterialKind {
-        match self {
-            Self::Alpha { .. } => GlyphMaterialKind::AlphaMask,
-            Self::Subpixel { .. } => GlyphMaterialKind::SubpixelMask,
-            Self::Color { .. } => GlyphMaterialKind::ColorRgba,
-        }
-    }
-
     pub fn size(&self) -> PixelSize {
         match self {
             Self::Alpha { size, .. } => *size,
             Self::Subpixel { size, .. } => *size,
             Self::Color { size, .. } => *size,
-        }
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        match self {
-            Self::Alpha { bytes, .. } => bytes,
-            Self::Subpixel { rgba, .. } => rgba,
-            Self::Color { rgba_srgb, .. } => rgba_srgb,
         }
     }
 }
@@ -533,29 +513,23 @@ pub enum SubpixelRequest {
     Enabled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GlyphRasterMode {
-    Alpha,
-    Subpixel,
-}
-
 // ---------------------------------------------------------------------------
 // Atlas config
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GlyphAtlasConfig {
+pub(crate) struct GlyphAtlasConfig {
     pub page_size: u32,
     pub padding: u32,
     pub max_pages_per_material: usize,
 }
 
 impl GlyphAtlasConfig {
-    pub const DEFAULT_PAGE_SIZE: u32 = 2048;
-    pub const DEFAULT_PADDING: u32 = 1;
-    pub const DEFAULT_MAX_PAGES: usize = 8;
+    pub(crate) const DEFAULT_PAGE_SIZE: u32 = 2048;
+    pub(crate) const DEFAULT_PADDING: u32 = 1;
+    pub(crate) const DEFAULT_MAX_PAGES: usize = 8;
 
-    pub fn default_for_device(_device: &wgpu::Device) -> Self {
+    pub(crate) fn default_for_device(_device: &wgpu::Device) -> Self {
         Self {
             page_size: Self::DEFAULT_PAGE_SIZE,
             padding: Self::DEFAULT_PADDING,
@@ -563,11 +537,11 @@ impl GlyphAtlasConfig {
         }
     }
 
-    pub fn max_content_size(self) -> u32 {
+    pub(crate) fn max_content_size(self) -> u32 {
         self.page_size.saturating_sub(2 * self.padding)
     }
 
-    pub fn can_fit(self, size: PixelSize) -> bool {
+    pub(crate) fn can_fit(self, size: PixelSize) -> bool {
         let max_content = self.max_content_size();
         size.width() <= max_content && size.height() <= max_content
     }
@@ -581,20 +555,6 @@ impl Default for GlyphAtlasConfig {
             max_pages_per_material: Self::DEFAULT_MAX_PAGES,
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Page allocation result
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageAllocationResult<M: GlyphMaterial> {
-    Allocated {
-        page: PageId<M>,
-        rect: AtlasContentRect,
-    },
-    NeedNewPage,
-    GlyphTooLarge,
 }
 
 // ---------------------------------------------------------------------------

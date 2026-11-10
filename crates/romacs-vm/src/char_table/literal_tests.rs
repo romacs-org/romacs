@@ -46,7 +46,7 @@ fn literal_ascii_is_explicit_and_single_writes_preserve_detached_identity() {
     let value = raw(&mut vm, leaf, integer(9));
     assert_eq!(vm.char_table_get(value, 65).unwrap(), integer(7));
     assert_eq!(vm.char_table_get(value, 128).unwrap(), integer(9));
-    let t = &mut vm.objects[value.index(0).unwrap() - 1];
+    let t = vm.objects.entry_mut(value.index(0).unwrap() - 1);
     let data::Object::CharTable(t) = t else { panic!() };
     t.set(65, integer(10)).unwrap();
     assert_eq!(t.get(65).unwrap(), integer(10));
@@ -134,7 +134,7 @@ fn literal_malformed_geometry_is_retained_but_lookup_and_write_refuse() {
     let leaf = sub(&mut vm, 3, 17, integer(7));
     let value = raw(&mut vm, Value::NIL, leaf);
     assert!(vm.char_table_get(value, 65535).is_err());
-    let data::Object::CharTable(t) = &mut vm.objects[value.index(0).unwrap() - 1] else { panic!() };
+    let data::Object::CharTable(t) = vm.objects.entry_mut(value.index(0).unwrap() - 1) else { panic!() };
     assert_eq!(t.set(128, integer(9)).unwrap_err(), "invalid sub-char-table geometry");
     assert!(vm.print_render(value, true, Value::NIL, false).is_ok());
 }

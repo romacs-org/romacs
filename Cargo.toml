@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/romacs-brand",
     "crates/romacs-snapshot",
     "crates/romacs-vm",
     "crates/romacs-layout-input",

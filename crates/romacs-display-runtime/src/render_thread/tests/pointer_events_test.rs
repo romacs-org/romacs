@@ -7,7 +7,8 @@ use romacs_display_protocol::{
 
 #[test]
 fn native_titlebar_is_not_a_menu_hit_and_popup_anchor_stays_frame_local() {
-    let mut frame = crate::core::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 572.0);
+    let mut frame =
+        romacs_display_protocol::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 572.0);
     frame.frame_chrome = FrameChrome::layout(
         FrameSize::new(800.0, 572.0).unwrap(),
         vec![ChromeBandRequest::new(
@@ -60,7 +61,6 @@ fn native_titlebar_is_not_a_menu_hit_and_popup_anchor_stays_frame_local() {
             last_ime_cursor_area: None,
             chrome: Default::default(),
             geometry_hints: None,
-            fullscreen: None,
         },
         render,
     };

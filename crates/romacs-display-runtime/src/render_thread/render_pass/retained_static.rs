@@ -87,7 +87,7 @@ pub(super) fn draw(
     native: &GuiFrameNativeWindowState,
     render: &mut GuiFrameRenderState,
     composition_view: &wgpu::TextureView,
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     inputs: &FrameDrawInputs<'_>,
     hovered_scroll_bar: Option<romacs_display_protocol::ScrollBarIdentity>,
 ) -> Result<ModelPicture, super::surface::FrameRenderFailure> {
@@ -277,11 +277,11 @@ pub(in crate::render_thread) fn retained_scene_is_current(
 /// results are reused across cursor-only frames so the font tables are not
 /// cloned every frame.
 pub(super) fn build_filled_box_cursor_cells(
-    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
     scale: f32,
     pointer_appearance: &PointerAppearanceState,
 ) -> Vec<RetainedCursorCell> {
-    use crate::core::frame_glyphs::{CursorStyle, FrameGlyphBuffer};
+    use romacs_display_protocol::frame_glyphs::{CursorStyle, FrameGlyphBuffer};
     if !pointer_appearance_allowed(pointer_appearance) {
         return Vec::new();
     }
@@ -346,7 +346,7 @@ fn composite_filled_box_cursor_cells(
     render: &mut GuiFrameRenderState,
     surface_view: &wgpu::TextureView,
     present_mapping: romacs_display_protocol::PresentMapping,
-    animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    animated_cursor: Option<romacs_display_protocol::types::AnimatedCursor>,
 ) {
     let Some(atlas) = render.compositor.glyph_atlas.as_mut() else {
         return;

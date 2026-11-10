@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    DisplayFrameId, GeometryError, GeometryRect, LogicalPixels, ParentFrameSpace, PresentationId,
+    DisplayFrameId, GeometryRect, LogicalPixels, ParentFrameSpace, PresentationId,
     RootSurfaceSpace, SpaceTranslation,
 };
 
@@ -17,8 +17,6 @@ pub type ParentFrameRect = GeometryRect<ParentFrameSpace, LogicalPixels>;
 
 /// A derived frame rectangle in root-surface coordinates.
 pub type RootSurfaceRect = GeometryRect<RootSurfaceSpace, LogicalPixels>;
-
-pub type FramePlacementError = GeometryError;
 
 /// Explicit placement of one presented frame in its immediate parent's content
 /// coordinate space. Root placement is always `(0, 0)` and never includes

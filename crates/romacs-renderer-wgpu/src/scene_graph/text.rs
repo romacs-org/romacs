@@ -35,7 +35,7 @@ pub struct SceneFont {
 
 /// Resolves draw-list fonts to realised ones; the frame's font table at
 /// wiring time, a pinned test font in tests.
-pub type FontLookup<'a> = dyn Fn(&Font) -> Option<SceneFont> + 'a;
+pub(crate) type FontLookup<'a> = dyn Fn(&Font) -> Option<SceneFont> + 'a;
 
 pub(super) struct GlyphContext<'a> {
     pub atlas: &'a mut WgpuGlyphAtlas,

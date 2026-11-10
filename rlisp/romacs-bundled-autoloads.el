@@ -612,6 +612,11 @@ recompiling; signals an error if no frame shader is installed
 (register-definition-prefixes "romacs-surface" '("romacs-"))
 
 
+;;; Generated autoloads from romacs-syntax.el
+
+(register-definition-prefixes "romacs-syntax" '("romacs-"))
+
+
 ;;; Generated autoloads from romacs-term.el
 
 (register-definition-prefixes "romacs-term" '("kill-ring" "romacs-term"))

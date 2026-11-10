@@ -405,12 +405,12 @@ impl Vm {
             self.slots[slot].plist = self.private_image_root(self.slots[slot].plist, &mut copies, &mut pending)?;
         }
         for index in 0..self.closures.len() {
-            self.closures[index].document = self.private_image_root(self.closures[index].document, &mut copies, &mut pending)?;
+            self.closures.entry_mut(index).document = self.private_image_root(self.closures[index].document, &mut copies, &mut pending)?;
             for slot in 0..self.closures[index].metadata.len() {
-                self.closures[index].metadata[slot] = self.private_image_root(self.closures[index].metadata[slot], &mut copies, &mut pending)?;
+                self.closures.entry_mut(index).metadata[slot] = self.private_image_root(self.closures[index].metadata[slot], &mut copies, &mut pending)?;
             }
             for capture in 0..self.closures[index].captures.len() {
-                self.closures[index].captures[capture] = self.private_image_root(self.closures[index].captures[capture], &mut copies, &mut pending)?;
+                self.closures.entry_mut(index).captures[capture] = self.private_image_root(self.closures[index].captures[capture], &mut copies, &mut pending)?;
             }
         }
         let mut conditions = std::mem::take(&mut self.conditions);
@@ -425,7 +425,8 @@ impl Vm {
             let (car, cdr) = self.cons_pair(source)?;
             let car = self.private_image_root(car, &mut copies, &mut pending)?;
             let cdr = self.private_image_root(cdr, &mut copies, &mut pending)?;
-            self.conses[destination] = (car, cdr);
+            self.conses.set_car(destination, car);
+            self.conses.set_cdr(destination, cdr);
         }
         Ok(())
     }

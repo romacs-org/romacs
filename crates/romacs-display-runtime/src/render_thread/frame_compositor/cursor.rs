@@ -11,7 +11,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::render_thread::cursor::{CursorState, CursorTarget};
 use crate::render_thread::frame_windows::GuiFrameRenderState;
-use romacs_renderer_wgpu::WgpuRenderer;
 
 impl GuiFrameRenderState {
     pub(in crate::render_thread) fn tick_cursor_animation(

@@ -84,7 +84,7 @@ impl ImageFormatName {
     /// data and not the type. Formatting the wrong one would invent a message
     /// GNU never prints.
     #[must_use]
-    pub fn words_signature_mismatch(&self) -> bool {
+    pub(crate) fn words_signature_mismatch(&self) -> bool {
         matches!(self, Self::Png | Self::Pbm)
     }
 }
@@ -226,7 +226,8 @@ pub enum ImageDiagnostic {
 
 impl ImageDiagnostic {
     /// GNU's `image_size_error` text, verbatim from `src/image.c:1434`.
-    pub const INVALID_SIZE_MESSAGE: &'static str = "Invalid image size (see `max-image-size')";
+    pub(crate) const INVALID_SIZE_MESSAGE: &'static str =
+        "Invalid image size (see `max-image-size')";
 
     /// The diagnostic as GNU's `image_error` would word it, before
     /// `text-quoting-style` rewrites the grave accents.

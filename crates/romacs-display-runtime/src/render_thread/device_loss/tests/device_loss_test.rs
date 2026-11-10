@@ -1,4 +1,6 @@
-use super::{CONSECUTIVE_SURFACE_LOST_THRESHOLD, DeviceLossDetector, Fault, MAX_FAILED_RECOVERIES, fault};
+use super::{
+    CONSECUTIVE_SURFACE_LOST_THRESHOLD, DeviceLossDetector, Fault, MAX_FAILED_RECOVERIES, fault,
+};
 use std::sync::atomic::Ordering;
 
 #[test]

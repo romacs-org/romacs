@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/lib/divergence_index.py",
-  "input_hash": "102dbce68530f6a23be033b3f19f34247044a048c88ed5d083b93526fb8f2a97",
+  "input_hash": "0f0572ce95a32063f5788ef21bab67008c716667822499ef6acb286635157d55",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 391,
-  "symbols": 1191,
+  "rows": 392,
+  "symbols": 1192,
   "rows_without_symbols": 14
  },
  "by_symbol": {
@@ -72,7 +72,7 @@
    94
   ],
   "[:class:]": [
-   390
+   391
   ],
   "\\": [
    298
@@ -690,8 +690,8 @@
    167,
    195,
    233,
-   382,
-   386
+   383,
+   387
   ],
   "define-category": [
    334
@@ -890,7 +890,7 @@
    369
   ],
   "downcase_char_code_emacs_compat": [
-   389
+   390
   ],
   "elt": [
    36,
@@ -905,7 +905,7 @@
    203
   ],
   "emacs_downcase_compat": [
-   389
+   390
   ],
   "emoji": [
    30
@@ -1051,17 +1051,17 @@
    164,
    165,
    166,
-   382,
    383,
-   386
+   384,
+   387
   ],
   "face-family": [
    162,
-   385
+   386
   ],
   "face-font": [
    161,
-   384
+   385
   ],
   "face-ignored-fonts": [
    248
@@ -1077,7 +1077,7 @@
    165,
    166,
    267,
-   388
+   389
   ],
   "face-set-after-frame-default": [
    271
@@ -2282,7 +2282,8 @@
    343
   ],
   "modify-syntax-entry": [
-   199
+   199,
+   381
   ],
   "monospace": [
    29
@@ -2445,7 +2446,8 @@
    357
   ],
   "parse-partial-sexp": [
-   200
+   200,
+   381
   ],
   "permanent-local": [
    202
@@ -2842,7 +2844,7 @@
   ],
   "reset": [
    164,
-   381
+   382
   ],
   "resize-mini-windows": [
    367
@@ -3350,10 +3352,10 @@
    160,
    161,
    162,
-   383,
    384,
    385,
-   387
+   386,
+   388
   ],
   "set-file-acl": [
    11
@@ -3472,10 +3474,10 @@
    34
   ],
   "skip-chars-backward": [
-   390
+   391
   ],
   "skip-chars-forward": [
-   390
+   391
   ],
   "sleep-for": [
    226,
@@ -3620,6 +3622,9 @@
   ],
   "syntax-class-to-char": [
    200
+  ],
+  "syntax-ppss": [
+   381
   ],
   "syntax-table": [
    199
@@ -4915,7 +4920,7 @@
    "planned": false,
    "mechanism": "Collection inhibition",
    "gnu": "`alloc.c:6044` returns nil without collecting when collection is inhibited; otherwise GNU may collect inside any Lisp call, its conservative stack scan keeping C locals alive.",
-   "romacs": "Collection runs only where no native frame keeps heap Values in untraced Rust storage (`Vm::may_collect`): every running engine other than the collecting one is suspended (state, code and registers traced), no compiler builder is open, and no watcher notification comes from a native writer that has not rooted its frame. Native frames keep later-used Values in traced storage (a root frame, a binding, a `#:` slot); `crates/romacs-vm/tests/fixtures/reentry-sites.txt` classifies every reentry call site. So `eval`, `load`, `require`, `macroexpand`, autoloads, lazy bodies, `signal-hook-function`, handler-bind callbacks, reader callbacks, `(lambda ...)` list calls and watchers of `setq`, `let` and its unwinding in compiled code collect. Inhibited, and `garbage-collect` returns nil: Lisp a leaf, T2 continuation or legacy primitive reaches without suspending its engine (watchers of `set`, `set-default`, `defvaralias`, `makunbound` and other writes made inside primitives, a `defalias-fset-function`, a face's function `:height`); watchers of variables the loader and other native code bind or set; and macro expansion while a compiler builder is open.",
+   "romacs": "Collection runs only where no native frame keeps heap Values in untraced Rust storage (`Vm::may_collect`): every running engine other than the collecting one is suspended (state, code and registers traced), no compiler builder is open, and no watcher notification comes from a native writer that has not rooted its frame. Native frames keep later-used Values in traced storage (a root frame, a binding, a `#:` slot); `crates/romacs-vm/tests/fixtures/reentry-sites.txt` classifies every reentry call site. So `eval`, `load`, `require`, `macroexpand`, autoloads, lazy bodies, `signal-hook-function`, handler-bind callbacks, reader callbacks, `(lambda ...)` list calls and watchers of `setq`, `let` and its unwinding in compiled code collect. Inhibited, and `garbage-collect` returns nil: Lisp a leaf, T2 continuation or legacy primitive reaches without suspending its engine (watchers of `set`, `makunbound` and the VM's other own writes, a `defalias-fset-function`, a face's function `:height`); watchers of variables the loader and other native code bind or set; and macro expansion while a compiler builder is open.",
    "why": "A Rust frame cannot be scanned conservatively: each inhibited region holds Values in locals that have not been audited for a moving collection. The heap grows only within one such call, never across a load, prompt or `eval`. No collection or fake statistics are claimed in those regions. Tests: `crates/romacs-vm/tests/gc_reentry.rs` (forced moving collections, `ROMACS_GC_STRESS`), `tests/reentry_sites.rs`.",
    "symbols": [
     "garbage-collect"
@@ -4930,8 +4935,8 @@
    "planned": false,
    "mechanism": "When finalizers run",
    "gnu": "`make-finalizer` (`alloc.c:3978`) makes an object whose function runs once after the collection that finds it unreachable: `garbage_collect` dooms the unmarked finalizers after the roots and before weak tables (`queue_doomed_finalizers`), keeps them and their functions, and calls each before it returns, with `inhibit-quit` t and a signal logged to *Messages* as `finalizer failed: ...` (`run_finalizers`, `alloc.c:3960`), automatic collections included, wherever they are reached: inside `unbind_to`'s cleanups and unbinding watchers too, and nested inside a running finalizer. Its conservative stack scan may keep a finalizer a C frame still mentions.",
-   "romacs": "The collector dooms finalizers at GNU's point in marking and keeps them, with their functions, until they run (`crates/romacs-vm/src/gc.rs`). `romacs--run-finalizers` (`rlisp/vm/prelude.el`) calls them as `run_finalizers` does, and then `post-gc-hook`. An explicit `garbage-collect` runs them before it returns, as GNU's, inside a cleanup or a running finalizer too. After any other collection they wait, pending, for the next safe point, whichever collection doomed them: an engine's ordinary poll (a back-jump, a call, a handler's landing); the end of an embedder's request or of `Vm::execute`, before its result is handed back; an isolate job's end, before it replies; a wait for input (`romacs--timer-check-idle`, a prompt's `romacs--collect-idle`). Every one of them asks one gate (`Vm::safe_runner`, `romacs--safepoint`): no escape is being unwound and no cleanup is running in any engine, and no run is in progress. So none runs between an unwinder and its cleanup, inside a cleanup, in a watcher an unbinding runs, or nested inside a running finalizer or hook; a collection entering a cleanup only collects. A finalizer doomed while a long cleanup runs, and what only it reaches, waits for that cleanup's end. A finalizer a register of the running top-level evaluation still holds survives until that register is reused. A child forked from a zygote drops the finalizers it inherits, each running once, in the zygote; the `post-gc-hook` it inherits runs for its own collections.",
-   "why": "GNU's place lets a finalizer's escape abandon a cleanup before it begins or halfway through, and start a second run inside a long finalizer; Romacs keeps automatic Lisp off the unwinding path instead. Timing only: GNU's run before `garbage_collect` returns, ours at the next safe point, and nothing in gnu-lisp/, GNU's test/ or rlisp/ depends on where. A job's memory budget is enforced outside the job (VM2-ISOLATE-MEMORY), so nothing of it runs in the job's Lisp. An interrupt naming a job is taken only while the job's claim, a marker above its handler's entry (`romacs--isolate-claim`), stands, and waits while finalizers or `post-gc-hook` run, so it always becomes the job's reply. A caught host panic pops the bindings and handlers made since, without their watchers, and runs no cleanup; what they owned (the hook's run, `inhibit-quit`, a job's claim) ends with them. Tests: `crates/romacs-vm/tests/garbage_collect.rs` (GNU-compared where GNU agrees), `tests/isolate_zygotes.rs`, the panic cases in `src/threaded_reader_gc_tests.rs`, `finalizer-object-type` in GNU's alloc-tests.el.",
+   "romacs": "The collector dooms finalizers at GNU's point in marking and keeps them, with their functions, until they run (`crates/romacs-vm/src/gc.rs`). `romacs--run-finalizers` (`rlisp/vm/prelude.el`) calls them as `run_finalizers` does, and then `post-gc-hook`. An explicit `garbage-collect` runs them before it returns, as GNU's, inside a cleanup or a running finalizer too. After any other collection they wait, pending, for the next safe point, whichever collection doomed them: an engine's ordinary poll (a back-jump, a call, a handler's landing); the end of an embedder's request or of `Vm::execute`, before its result is handed back; an isolate job's end, before it replies; a wait for input (`romacs--timer-check-idle`, a prompt's `romacs--collect-idle`). Every one of them asks one gate (`Vm::safe_runner`, `romacs--safepoint`): no escape is being unwound and no cleanup is running in any engine, and no run is in progress. So none runs between an unwinder and its cleanup, inside a cleanup, in a watcher an unbinding runs, or nested inside a running finalizer or hook; a collection entering a cleanup only collects. A finalizer doomed while a long cleanup runs, and what only it reaches, waits for that cleanup's end. A finalizer, or a weak table's entry, that only a register of a running frame still holds survives until that register is overwritten or the frame returns: registers carry no liveness, so every register of a live activation is a root, dead ones and ones not yet written included. Registers above an engine's innermost activation are not: each register file is traced only to its engine's top, and a collection clears what lies above it. A child forked from a zygote drops the finalizers it inherits, each running once, in the zygote; the `post-gc-hook` it inherits runs for its own collections.",
+   "why": "GNU's place lets a finalizer's escape abandon a cleanup before it begins or halfway through, and start a second run inside a long finalizer; Romacs keeps automatic Lisp off the unwinding path instead. Timing only: GNU's run before `garbage_collect` returns, ours at the next safe point, and nothing in gnu-lisp/, GNU's test/ or rlisp/ depends on where. A dead or not-yet-written register is a separate difference, visible from Lisp: in a `let` or function body that discards a new finalizer and then calls `garbage-collect`, pinned GNU runs the finalizer there, from source and from byte code; Romacs runs it once the frame returns. Weak entries show the same: a frame collecting with registers it has not yet written can hold a key a callee left there (`ft-weak-*-removal-wide` in `test/src/fns-weak-tests.el`, expected to fail), where GNU's conservative stack keeps 0 to 2 such entries depending on the shape. Closing it needs per-register liveness (stack maps over the compiled code), planned with the execution core's redesign; clearing registers at scope exit would be a second mechanism for the same job. A job's memory budget is enforced outside the job (VM2-ISOLATE-MEMORY), so nothing of it runs in the job's Lisp. An interrupt naming a job is taken only while the job's claim, a marker above its handler's entry (`romacs--isolate-claim`), stands, and waits while finalizers or `post-gc-hook` run, so it always becomes the job's reply. A caught host panic pops the bindings and handlers made since, without their watchers, and runs no cleanup; what they owned (the hook's run, `inhibit-quit`, a job's claim) ends with them. Tests: `crates/romacs-vm/tests/garbage_collect.rs` (GNU-compared where GNU agrees), `tests/isolate_zygotes.rs`, the panic cases in `src/threaded_reader_gc_tests.rs`, `finalizer-object-type` in GNU's alloc-tests.el.",
    "symbols": [
     "make-finalizer",
     "garbage-collect"
@@ -10277,10 +10282,10 @@
    "section": "Detail",
    "observable": false,
    "planned": false,
-   "mechanism": "Variable watchers of native writes run with collection held",
+   "mechanism": "A primitive's watched writes wait for its return; the VM's own run with collection held",
    "gnu": "`add-variable-watcher` (`src/data.c:1857`) accepts any function; `notify_variable_watchers` calls it before every `set`, `let`, `unlet`, `makunbound` and `defvaralias` of the variable, with WHERE the buffer of a buffer-local binding",
-   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls every watcher before `set`, `set-default` and `defvar` (as `set`), `let`, `unlet`, `makunbound`, `kill-local-variable` and `defvaralias`, with WHERE the current buffer when the variable is local if set there (`local-variable-if-set-p`), and the variable untrapped while they run. It walks the live list, which `remove-variable-watcher` splices as `Fdelete` does. Bindings follow `specbind`/`do_one_unbind`: a `let` records the binding before its watchers run; restoring a localized or per-buffer default binding, or binding a per-buffer default, reports `set` with WHERE nil; restoring a global forwarded variable reports `set` then `unlet`, and its `set-default` reports twice; restoring a killed local, and `kill-local-variable` of a forwarded variable, report nothing. A native leaf subr runs in place; any other watcher is funcalled at the write point. A write from compiled code (`setq`, `let`, a `(lambda ...)` list's parameters, their unbinding) suspends its engine and roots the value, so the watcher may collect; a native writer's watchers (`set`, `set-default`, `defvaralias`, `kill-local-variable`, a load's own bindings) run with collection held until they return, because that writer's locals are not rooted (`tests/variable_watchers.rs`, `tests/gc_reentry.rs`, VM2-GC-INHIBITED). A watcher's signal aborts the write or restore and reaches its handlers once; its `throw` leaves `setq`, `let` and `set` but is refused with a VM2 error when a native primitive (`set-default`, `defvaralias`, `kill-local-variable`) made the write. A code image of a world with watchers is refused",
-   "why": "**Package-observable**: memory a long-running Lisp watcher of a native write allocates is not reclaimed until it returns; a `throw` out of a watcher of a native write signals instead",
+   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls every watcher before `set`, `set-default` and `defvar` (as `set`), `let`, `unlet`, `makunbound`, `kill-local-variable` and `defvaralias`, with WHERE the current buffer when the variable is local if set there (`local-variable-if-set-p`), and the variable untrapped while they run. It walks the live list, which `remove-variable-watcher` splices as `Fdelete` does. Bindings follow `specbind`/`do_one_unbind`: a `let` records the binding before its watchers run; restoring a localized or per-buffer default binding, or binding a per-buffer default, reports `set` with WHERE nil; restoring a global forwarded variable reports `set` then `unlet`, and its `set-default` reports twice; restoring a killed local, and `kill-local-variable` of a forwarded variable, report nothing. A native leaf subr runs in place; any other watcher is funcalled. Writes GNU's C makes by assignment (`last-coding-system-used`, `coding-category-list`, `last-command-event`, the command variables `call-interactively` restores, `current-load-list`, `load-history`, `default-frame-alist`) are stores no watcher hears, as in GNU. A write from compiled code (`setq`, `let`, a `(lambda ...)` list's parameters, their unbinding) suspends its engine and roots the value, so the watcher may collect. A primitive's write GNU makes through `Fset` or `set_internal` (`set-default`, `defvaralias`, `kill-local-variable`, `kill-all-local-variables`, `deactivate-mark`, `buffer-file-coding-system`, `coding-category-*`, `frame-or-buffer-changed-p`'s variable, a command's history) is queued to the primitive's return, after its outcome is published and before the next instruction, its callee or its escape's handlers: the watcher runs in the buffer the write was made in, sees the old value, may collect and throw, and its signal or throw prevents that store and drops those queued after it. The VM's own writers (`set`, `defvar`, a load's bindings and unbinding) still run watchers at the write point with collection held until they return, because their locals are not rooted (`tests/variable_watchers.rs`, `tests/gc_reentry.rs`, VM2-GC-INHIBITED). A watcher's signal aborts the write or restore and reaches its handlers once. A code image of a world with watchers is refused",
+   "why": "**Package-observable**, only for a variable with a watcher: (1) when a queued write's watcher runs, the rest of the primitive has already run, so its buffer edits, a `defvaralias`'s docstring and its result stand even if the watcher signals, and a backtrace from the watcher does not show the primitive; (2) a primitive that reads a variable it has itself just written sees the old value. Memory a long-running Lisp watcher of one of the VM's own writes allocates is not reclaimed until it returns",
    "symbols": [
     "add-variable-watcher",
     "remove-variable-watcher",
@@ -10988,6 +10993,23 @@
     "autoload",
     "use-package",
     "romacs-init-layer-exclude"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-SYNTAX-SUMMARIES",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package: syntax summaries",
+   "observable": true,
+   "planned": false,
+   "mechanism": "A long `parse-partial-sexp`, and `syntax-ppss`",
+   "gnu": "Every call scans each character from FROM to TO; `syntax-ppss` parses from states syntax.el caches, invalidated below each edit.",
+   "romacs": "From FROM to TO over at least four leaves of a multibyte text, with no TARGETDEPTH, STOPBEFORE or COMMENTSTOP and, where `syntax-table` properties are honoured, propertized past TO, the scan reads only its two end leaves and composes kept summaries of the leaves between (`crates/romacs-vm/src/syntax_index.rs`, `syntax_summary.rs`); every value, point included, is the scanner's. Summaries are kept per syntax table, by a serial no other table takes (not its address), and per count of char-table writes, which every change of any char table's characters, default, parent or extras (`modify-syntax-entry`, `aset`, `set-char-table-range`, `set-char-table-parent`, `set-char-table-extra-slot`, `optimize-char-table`) advances, per `comment-end-can-be-escaped` and per `parse-sexp-lookup-properties`; a `syntax-table` property change drops those of the text it covers. A syntax descriptor changed in place (`setcar` on a `(CODE . MATCH)` cons a table or a `syntax-table` property holds) is not seen until some char table, or that property, changes: descriptor conses are shared values (`string-to-syntax` returns one cons for every plain descriptor, as GNU's `syntax_code_object` does), and no GNU or bundled code mutates one. `syntax-ppss` is syntax.el's; its long parses from the states it caches are the ones served. `romacs-inhibit-syntax-summaries` scans every character; `romacs-syntax-summaries-check` scans as well and signals where they differ; `romacs-syntax-summaries-stats` shows what was served.",
+   "why": "An edit near the top of a large file no longer costs a scan of all the text after it. Tests: `tests/syntax_summaries.rs` (against pinned GNU, with edits), the seeded property tests in `syntax_scan.rs`, `syntax_summary.rs` and `syntax_index.rs`.",
+   "symbols": [
+    "parse-partial-sexp",
+    "syntax-ppss",
+    "modify-syntax-entry"
    ],
    "symbols_derived": false
   },

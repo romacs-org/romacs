@@ -116,21 +116,21 @@ impl Vm {
         members.dedup();
         if ia != ib {
             self.objects.swap(ia, ib);
-            let (a, b) = (take_identity(&mut self.objects[ia]), take_identity(&mut self.objects[ib]));
-            put_identity(&mut self.objects[ia], b);
-            put_identity(&mut self.objects[ib], a);
+            let (a, b) = (take_identity(self.objects.entry_mut(ia)), take_identity(self.objects.entry_mut(ib)));
+            put_identity(self.objects.entry_mut(ia), b);
+            put_identity(self.objects.entry_mut(ib), a);
             // The identities came back; the text's variables go with it.
             let slots: Vec<u16> = TEXT_VARIABLES.iter().filter_map(|name| match self.forwarded.lookup(name) {
                 Some(crate::forwarded::Fwd::Buffer(i)) => Some(i),
                 _ => None,
             }).collect();
-            let mut b_vars = std::mem::take(per_buffer(&mut self.objects[ib]));
-            per_buffer(&mut self.objects[ia]).swap_text_slots(&mut b_vars, &slots);
-            *per_buffer(&mut self.objects[ib]) = b_vars;
+            let mut b_vars = std::mem::take(per_buffer(self.objects.entry_mut(ib)));
+            per_buffer(self.objects.entry_mut(ia)).swap_text_slots(&mut b_vars, &slots);
+            *per_buffer(self.objects.entry_mut(ib)) = b_vars;
             // The markers and overlays of each text now belong to the other.
             let swapped = |b: Value| if b == current { Some(other) } else if b == other { Some(current) } else { None };
             for i in members {
-                let to = match &mut self.objects[i] {
+                let to = match self.objects.entry_mut(i) {
                     Object::Marker(m) => swapped(m.buffer).inspect(|&to| m.buffer = to),
                     Object::Overlay(o) => swapped(o.buffer).inspect(|&to| o.buffer = to),
                     _ => None,
@@ -138,7 +138,7 @@ impl Vm {
                 if let Some(to) = to { self.note_referrer(to, i); }
             }
         }
-        for index in [ia, ib] { state(&mut self.objects[index]).record_change(true); }
+        for index in [ia, ib] { state(self.objects.entry_mut(index)).record_change(true); }
         // A window's markers stay in its own buffer: point at BEGV and the
         // start at 1, as set-window-buffer starts (VM2-WB1).
         let windows: Vec<Value> = self.referrers().windows.clone().into_iter().filter_map(|i| match &self.objects[i] {

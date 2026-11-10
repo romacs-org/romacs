@@ -1,6 +1,8 @@
-use crate::core::frame_glyphs::{CursorStyle, DisplaySlotId, FrameGlyphBuffer, WindowCursor};
 use crate::render_thread::state::{PointerAppearanceState, PresentedAppearanceKey};
 use romacs_display_protocol::frame_chrome::PresentationId;
+use romacs_display_protocol::frame_glyphs::{
+    CursorStyle, DisplaySlotId, FrameGlyphBuffer, WindowCursor,
+};
 use romacs_display_protocol::{
     Color, DisplayWindowId, EffectsConfig, FrameRate, PointerAppearanceId,
 };

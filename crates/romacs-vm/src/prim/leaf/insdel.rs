@@ -90,7 +90,7 @@ impl Leaf<'_> {
     /// Fwiden for erase-buffer.
     pub(crate) fn widen_current(&mut self) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.widen(),
             data::Object::ByteBuffer(b) => b.restriction = crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(b.bytes.len()),
             _ => return Err(Fault::Error("buffer required".into())),

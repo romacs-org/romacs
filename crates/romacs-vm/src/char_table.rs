@@ -12,6 +12,104 @@ mod tests {
 
     fn run(vm: &mut Vm, source: &str) -> Value { vm.eval_source_raw(source).unwrap() }
 
+    thread_local! {
+        /// Calls of `wrote` on this thread.
+        pub(super) static WROTE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// The calls of `wrote` that WRITE makes.
+    fn funnelled(write: impl FnOnce()) -> usize {
+        let before = WROTE.with(std::cell::Cell::get);
+        write();
+        WROTE.with(std::cell::Cell::get) - before
+    }
+
+    /// A copy whose root lands where a freed table's was is still another
+    /// table to what keys on serials, and a new table and a literal read each
+    /// take a serial of their own.
+    #[test]
+    fn a_copy_where_a_freed_table_was_has_its_own_serial() {
+        let template = CharTable::new(Value::NIL);
+        let mut landed = 0;
+        for _ in 0..1000 {
+            let freed = CharTable::new(Value::NIL);
+            let (address, serial) = (Arc::as_ptr(&freed.root), freed.serial);
+            drop(freed);
+            let copy = template.clone();
+            if Arc::as_ptr(&copy.root) == address {
+                landed += 1;
+                assert_ne!(copy.serial, serial, "a copy where a freed table was took its serial");
+            }
+        }
+        assert!(landed > 0, "no copy landed where a freed table was: the case is not exercised");
+        let mut vm = Vm::new();
+        let literal = run(&mut vm, &format!("#^[nil nil test nil{}]", " nil".repeat(64)));
+        let made = run(&mut vm, "(make-char-table 'test)");
+        let serials = [vm.char_table_serial(literal), vm.char_table_serial(made), template.serial];
+        assert!(serials.iter().all(|&serial| serial != 0), "{serials:?}");
+        assert!(serials[0] != serials[1] && serials[0] != serials[2] && serials[1] != serials[2], "{serials:?}");
+    }
+
+    /// A read of the entries sees what a map would, in its order, once for a
+    /// node two slots share, and passes nothing to the funnel nor counts an edit.
+    #[test]
+    fn a_read_of_the_entries_is_a_maps_walk_and_writes_nothing() {
+        let int = |n| Value::integer(n).unwrap();
+        let mut table = CharTable::new(Value::NIL);
+        table.set(200, int(1)).unwrap();
+        table.set(300, int(2)).unwrap();
+        table.set(0x10005, int(3)).unwrap();
+        table.set_range(0x20000, 0x2ffff, int(4)).unwrap();
+        // A node two root slots share, made here by hand (`set-char-table-range`
+        // with a sub-char-table shares one too): the walk visits it once.
+        let shared = table.root.lock().unwrap().slots[0].clone();
+        table.root.lock().unwrap().slots[5] = shared;
+        let mut before = vec![];
+        table.map_entries(&mut |value| before.push(*value));
+        let edits = table.edits;
+        let mut read = vec![];
+        assert_eq!(funnelled(|| read = table.entry_values()), 0, "a read passes nothing");
+        assert_eq!(table.edits, edits, "a read counts no edit");
+        let mut after = vec![];
+        table.map_entries(&mut |value| after.push(*value));
+        assert_eq!(read, before, "a read sees what a map would, in its order");
+        assert_eq!(after, before, "a read leaves the entries as they were");
+        assert!(read.contains(&int(2)) && read.contains(&int(3)) && read.contains(&int(4)));
+        assert_eq!(read.iter().filter(|&&v| v == int(1)).count(), 1, "the shared node once");
+    }
+
+    /// Each way to write a table's contents tells the funnel what it stores.
+    #[test]
+    fn every_content_write_passes_the_funnel() {
+        let one = Value::integer(1).unwrap();
+        let mut table = CharTable::new(Value::NIL);
+        assert_eq!(funnelled(|| table.set_range(0x10000, 0x1ffff, one).unwrap()), 1, "a whole slot");
+        assert_eq!(funnelled(|| table.set(200, one).unwrap()), 4, "three splits, then the character");
+        assert_eq!(funnelled(|| table.set(5, one).unwrap()), 3, "a split, the character, the ASCII slot");
+        assert!(matches!(table.ascii, CharTableSlot::Node(_)));
+        assert_eq!(funnelled(|| table.set(6, one).unwrap()), 1, "the ASCII path");
+        assert_eq!(funnelled(|| table.fill(&CharTableSlot::Value(Value::NIL))), 65, "every root slot, then the ASCII slot");
+        assert_eq!(funnelled(|| table.set_default(one)), 1, "the default");
+        assert_eq!(funnelled(|| table.set_parent(Value::NIL)), 1, "the parent");
+        table.set(200, one).unwrap();
+        let block = child(&child(&table.root, 0), 0);
+        assert_eq!(block.lock().unwrap().depth, 2);
+        let expanded = funnelled(|| { table.expand(&block, 1, vec![one; 128]); });
+        assert_eq!(expanded, 2, "the new block, then the ASCII slot");
+        // Uniform but subdivided: the block, its parents and the root collapse.
+        table.fill(&CharTableSlot::Value(one));
+        table.set(200, one).unwrap();
+        let lifted = funnelled(|| optimize(&table.root, &mut |a, b| Ok::<bool, ()>(a == b)).unwrap());
+        assert_eq!(lifted, 3, "a Value lifted into each of three parents");
+        assert!(matches!(table.root.lock().unwrap().slots[0], CharTableSlot::Value(v) if v == one));
+        let mapped = funnelled(|| table.map_entries(&mut |value| *value = Value::NIL));
+        assert_eq!(mapped, 65, "each root Value written back, then the ASCII slot");
+        let mut extra = CharTable::new(Value::NIL);
+        extra.initialize(2, Value::NIL).unwrap();
+        assert_eq!(funnelled(|| extra.set_extra(0, one)), 1, "an extra slot");
+        assert_eq!(funnelled(|| extra.set_extras(&[one, one])), 2, "every extra slot");
+    }
+
     fn child(node: &CharTableNodeHandle, slot: usize) -> CharTableNodeHandle {
         let node = node.lock().unwrap();
         let CharTableSlot::Node(child) = &node.slots[slot] else { panic!("expected retained subdivision") };
@@ -120,14 +218,14 @@ mod tests {
         table.root.lock().unwrap().slots[0] = CharTableSlot::Node(Arc::clone(&shared));
         table.root.lock().unwrap().slots[1] = CharTableSlot::Node(Arc::clone(&shared));
         let mut count = 0;
-        table.visit_values(&mut |value| {
+        table.collector_visit_values(&mut HashSet::default(), &mut |value| {
             if *value == Value::TRUE { count += 1; }
         });
         assert_eq!(count, 16, "each physical slot is visited once, not each incoming edge");
         let mut seen = HashSet::default();
-        visit_char_table_node_values(&table.root, &mut seen, &mut |_| {});
+        collector_visit_node(&table.root, &mut seen, &mut |_| {});
         let mut revisits = 0;
-        visit_char_table_node_values(&shared, &mut seen, &mut |_| { revisits += 1; });
+        collector_visit_node(&shared, &mut seen, &mut |_| { revisits += 1; });
         assert_eq!(revisits, 0, "shared collector state also covers a retained handle");
     }
 
@@ -345,6 +443,15 @@ impl Vm {
         Ok(value)
     }
 
+    /// TABLE's serial, which no other table has had (0 for a value that is
+    /// not a char table).
+    pub(crate) fn char_table_serial(&self, table: Value) -> u64 {
+        match self.object_if(table) {
+            Some(data::Object::CharTable(t)) => t.serial,
+            _ => 0,
+        }
+    }
+
     /// TABLE's own runs of one value, in character order, each slot of the
     /// table once: char_table_ref_and_range walked over the characters.
     pub(crate) fn char_table_edits(&self, table: Value) -> Result<u64> {
@@ -403,7 +510,7 @@ pub(crate) fn uniprop_block(codes: &[u32]) -> Result<Vec<Value>> {
 
 /// Cloning a handle retains native storage after its parent slot is replaced.
 /// A detached handle's Lisp payloads must also be rooted and forwarded through
-/// `visit_char_table_node_values`; an Arc alone is not a Lisp GC root.
+/// `collector_visit_node`; an Arc alone is not a Lisp GC root.
 pub(super) type CharTableNodeHandle = Arc<Mutex<CharTableNode>>;
 
 #[derive(Clone)]
@@ -417,9 +524,9 @@ romacs_snapshot::snapshot_enum!(CharTableSlot {
 });
 
 pub(super) struct CharTableNode {
-    pub(super) depth: usize,
-    pub(super) min_char: usize,
-    pub(super) slots: Vec<CharTableSlot>,
+    depth: usize,
+    min_char: usize,
+    slots: Vec<CharTableSlot>,
 }
 romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots });
 
@@ -433,6 +540,23 @@ impl CharTableNode {
             min_char,
             slots: vec![CharTableSlot::Value(value); Self::SIZES[depth]],
         }))
+    }
+
+    pub(super) fn depth(&self) -> usize {
+        self.depth
+    }
+    pub(super) fn min_char(&self) -> usize {
+        self.min_char
+    }
+    /// This node's slots, to read.
+    pub(super) fn slots(&self) -> &[CharTableSlot] {
+        &self.slots
+    }
+
+    /// Store SLOT at I, through the funnel.
+    fn store(&mut self, i: usize, slot: CharTableSlot) {
+        wrote(&slot);
+        self.slots[i] = slot;
     }
 
     /// Test-only convenience for known-valid native nodes. Runtime callers
@@ -543,10 +667,11 @@ impl CharTableNode {
             if start > to { break; }
             if from <= start && start + width - 1 <= to {
                 // Whole-slot writes discard subdivision even when values compare equal.
-                node.slots[i] = value.clone();
+                node.store(i, value.clone());
             } else {
                 if let CharTableSlot::Value(old) = node.slots[i] {
-                    node.slots[i] = CharTableSlot::Node(Self::new(depth + 1, start, old));
+                    // The split moves OLD into a node no entry has traced yet.
+                    node.store(i, CharTableSlot::Node(Self::new(depth + 1, start, old)));
                 }
                 let CharTableSlot::Node(child) = &node.slots[i] else { unreachable!() };
                 Self::set_range(child, from, to, value);
@@ -572,9 +697,100 @@ pub(super) fn char_table_node_id(node: &CharTableNodeHandle) -> usize {
     Arc::as_ptr(node) as usize
 }
 
+/// chartab.c Foptimize_char_table under ROOT: collapse every sub-table whose
+/// slots are all values SAME as the first, children first. The caller resets
+/// the table's ASCII slot after.
+pub(super) fn optimize<E>(root: &CharTableNodeHandle, same: &mut impl FnMut(Value, Value) -> std::result::Result<bool, E>) -> std::result::Result<(), E> {
+    let slots = root.lock().unwrap().slots.clone();
+    for (i, slot) in slots.into_iter().enumerate() {
+        if let CharTableSlot::Node(child) = slot {
+            let optimized = optimize_node(&child, same)?;
+            root.lock().unwrap().store(i, optimized);
+        }
+    }
+    Ok(())
+}
+
+/// optimize_sub_char_table: NODE's slot in its parent after optimizing.
+fn optimize_node<E>(node: &CharTableNodeHandle, same: &mut impl FnMut(Value, Value) -> std::result::Result<bool, E>) -> std::result::Result<CharTableSlot, E> {
+    let mut slots = node.lock().unwrap().slots.clone();
+    let mut children = Vec::new();
+    for (i, slot) in slots.iter_mut().enumerate() {
+        if let CharTableSlot::Node(child) = slot {
+            *slot = optimize_node(&child.clone(), same)?;
+            children.push(i);
+        }
+    }
+    // Each child's slot, a collapsed one's Value moving up into NODE, once
+    // every child has optimized.
+    let mut parent = node.lock().unwrap();
+    for i in children {
+        parent.store(i, slots[i].clone());
+    }
+    drop(parent);
+    let CharTableSlot::Value(first) = slots[0] else {
+        return Ok(CharTableSlot::Node(node.clone()));
+    };
+    for slot in &slots[1..] {
+        let CharTableSlot::Value(this) = *slot else {
+            return Ok(CharTableSlot::Node(node.clone()));
+        };
+        if !same(this, first)? {
+            return Ok(CharTableSlot::Node(node.clone()));
+        }
+    }
+    Ok(CharTableSlot::Value(first))
+}
+
+/// Every write to a char table's contents passes here first, with what it
+/// stores: a slot a range write, fill or expansion puts in, a node a split
+/// makes, a Value an optimize lifts into a parent, a new default or parent,
+/// each Value a map writes back. The collector's barrier hooks here, and the
+/// write generation is bumped here. A node may be shared by several entries
+/// (a `CharTable`, a `SubCharTable`, a keymap cursor), so this is not
+/// `Table`'s barrier, which hooks one entry. It runs with the parent node
+/// locked, and a node it is handed may be that parent, so a hook must queue
+/// a `Node`'s handle, never lock it here.
+#[inline]
+fn wrote(_stored: &CharTableSlot) {
+    WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    tests::WROTE.with(|n| n.set(n.get() + 1));
+}
+
+/// The writes to char tables' contents so far in this process, all tables
+/// counted together: what is derived from a table's contents (the syntax
+/// summaries) keys on it with the table's serial, so a write
+/// anywhere, through a parent or a node shared with another table
+/// included, renews the key.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) fn writes() -> u64 {
+    WRITES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The next table serial: one per table made, copied or read, never handed
+/// out twice in a process or across the world image it restores.
+static SERIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn fresh_serial() -> u64 {
+    SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+/// The counters a world image records: the next serial and the writes.
+pub(crate) fn image_counters() -> [u64; 2] {
+    [SERIALS.load(std::sync::atomic::Ordering::Relaxed), writes()]
+}
+/// Continue a restored world's COUNTERS: a table in it keeps its serial,
+/// and what was derived under its writes stays valid until the next one.
+pub(crate) fn restore_counters([serials, writes]: [u64; 2]) {
+    SERIALS.fetch_max(serials, std::sync::atomic::Ordering::Relaxed);
+    WRITES.fetch_max(writes, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The collector's own visit of HANDLE's Values, which forwarding rewrites in
+/// place past the funnel (`tests/no_remote_references.rs` keeps it there).
+/// `map_entries` and `entry_values` walk by it too, so their orders match.
 /// Callers may share SEEN across table and cursor roots during a collection.
 /// The visitor must not reenter these node locks or run Lisp callbacks.
-pub(super) fn visit_char_table_node_values(
+pub(super) fn collector_visit_node(
     handle: &CharTableNodeHandle,
     seen: &mut HashSet<usize>,
     visit: &mut impl FnMut(&mut Value),
@@ -584,7 +800,7 @@ pub(super) fn visit_char_table_node_values(
     for slot in &mut node.slots {
         match slot {
             CharTableSlot::Value(value) => visit(value),
-            CharTableSlot::Node(child) => visit_char_table_node_values(child, seen, visit),
+            CharTableSlot::Node(child) => collector_visit_node(child, seen, visit),
         }
     }
 }
@@ -629,16 +845,19 @@ impl CharTableView {
 }
 
 pub(super) struct CharTable {
-    pub purpose: Value,
-    pub(super) root: CharTableNodeHandle,
-    pub(super) ascii: CharTableSlot,
-    pub default: Value,
-    pub parent: Value,
-    pub extras: Vec<Value>,
+    purpose: Value,
+    root: CharTableNodeHandle,
+    ascii: CharTableSlot,
+    default: Value,
+    parent: Value,
+    extras: Vec<Value>,
     /// Counts the writes to its characters, for what is derived from them.
-    pub(crate) edits: u64,
+    edits: u64,
+    /// This table among all others, made, copied or read (`fresh_serial`):
+    /// what derived data keys on, since an address may be reused or moved.
+    serial: u64,
 }
-romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits });
+romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits, serial });
 
 impl CharTable {
     /// Whether no character has a value, as a new table's: read without
@@ -664,6 +883,7 @@ impl Clone for CharTable {
             parent: self.parent,
             extras: self.extras.clone(),
             edits: 0,
+            serial: fresh_serial(),
         }
     }
 }
@@ -687,16 +907,45 @@ impl CharTable {
         slots.extend(self.extras.iter().copied().map(CharTableSlot::Value));
         slots
     }
+    /// A new table sharing OTHER's nodes, as no Lisp operation makes one.
+    #[cfg(test)]
+    pub(super) fn sharing_nodes_of(other: &Self) -> Self {
+        Self { root: Arc::clone(&other.root), ascii: other.ascii.clone(), ..Self::new(Value::NIL) }
+    }
+    pub(super) fn root(&self) -> &CharTableNodeHandle {
+        &self.root
+    }
+    pub(super) fn default(&self) -> Value {
+        self.default
+    }
+    pub(super) fn parent(&self) -> Value {
+        self.parent
+    }
+    pub(super) fn purpose(&self) -> Value {
+        self.purpose
+    }
+    pub(super) fn extras(&self) -> &[Value] {
+        &self.extras
+    }
+    /// Extra slot I, which must exist, as VALUE.
+    pub(super) fn set_extra(&mut self, i: usize, value: Value) {
+        wrote(&CharTableSlot::Value(value));
+        self.extras[i] = value;
+    }
+    /// Every extra slot, as VALUES, one each.
+    pub(super) fn set_extras(&mut self, values: &[Value]) {
+        for &value in values { wrote(&CharTableSlot::Value(value)); }
+        self.extras.copy_from_slice(values);
+    }
     pub fn new(purpose: Value) -> Self {
-        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0 }
+        Self { purpose, root: CharTableNode::new(0, 0, Value::NIL), ascii: CharTableSlot::Value(Value::NIL), default: Value::NIL, parent: Value::NIL, extras: vec![], edits: 0, serial: fresh_serial() }
     }
     // Called before publication, in a leaf allocation window (never collects).
     pub fn initialize(&mut self, count: usize, init: Value) -> Result<()> {
         self.extras.try_reserve_exact(count).map_err(|_| "Memory exhausted".to_owned())?;
         self.extras.resize(count, init);
-        self.default = init;
-        self.ascii = CharTableSlot::Value(init);
-        self.root.lock().unwrap().slots.fill(CharTableSlot::Value(init));
+        self.set_default(init);
+        self.fill(&CharTableSlot::Value(init));
         Ok(())
     }
     /// Raw fields for the uniform-table printer. A retained child is not uniform
@@ -766,36 +1015,84 @@ impl CharTable {
             if let CharTableSlot::Node(node) = &self.ascii {
                 let mut node = node.lock().unwrap();
                 if node.depth != 3 || node.min_char != 0 { return Err("invalid ASCII sub-char-table".into()); }
-                let slot = node.slots.get_mut(from).ok_or("invalid ASCII sub-char-table")?;
-                *slot = value;
+                if from >= node.slots.len() { return Err("invalid ASCII sub-char-table".into()); }
+                node.store(from, value);
                 return Ok(());
             }
         }
         CharTableNode::validate_geometry(&self.root, 0, 0, from, to)?;
         CharTableNode::set_range(&self.root, from, to, &value);
-        if from < 128 { self.ascii = Self::ascii_from_root(&self.root); }
+        if from < 128 { self.reset_ascii(); }
         Ok(())
+    }
+    /// Every root slot SLOT, as a new table's are.
+    pub(super) fn fill(&mut self, slot: &CharTableSlot) {
+        let mut root = self.root.lock().unwrap();
+        for i in 0..root.slots.len() {
+            root.store(i, slot.clone());
+        }
+        drop(root);
+        self.reset_ascii();
+    }
+    pub(super) fn set_default(&mut self, value: Value) {
+        wrote(&CharTableSlot::Value(value));
+        self.default = value;
+    }
+    pub(super) fn set_parent(&mut self, value: Value) {
+        wrote(&CharTableSlot::Value(value));
+        self.parent = value;
+    }
+    /// The ASCII slot read again from the root, after a write below it
+    /// (set_char_table_ascii).
+    pub(super) fn reset_ascii(&mut self) {
+        let ascii = Self::ascii_from_root(&self.root);
+        wrote(&ascii);
+        self.ascii = ascii;
+    }
+    /// Slot INDEX of NODE, one of this table's 128-character blocks, as the
+    /// depth-three node of VALUES that a compressed block decodes to
+    /// (uniprop_table_uncompress). The new slot.
+    pub(super) fn expand(&mut self, node: &CharTableNodeHandle, index: usize, values: Vec<Value>) -> CharTableSlot {
+        let mut parent = node.lock().unwrap();
+        let from = parent.min_char + index * CharTableNode::WIDTHS[parent.depth];
+        let slots = values.into_iter().map(CharTableSlot::Value).collect();
+        let expanded = CharTableSlot::Node(Arc::new(Mutex::new(CharTableNode { depth: 3, min_char: from, slots })));
+        parent.store(index, expanded.clone());
+        drop(parent);
+        self.reset_ascii();
+        expanded
+    }
+    /// Every character entry's Value, by `map_entries`' own walk: a read,
+    /// whose visitor writes nothing, so nothing passes the funnel.
+    pub(crate) fn entry_values(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| out.push(*value));
+        out
     }
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.
     pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
         self.edits += 1;
-        visit_char_table_node_values(&self.root, &mut HashSet::default(), map);
-        self.ascii = Self::ascii_from_root(&self.root);
+        collector_visit_node(&self.root, &mut HashSet::default(), &mut |value| {
+            let mut new = *value;
+            map(&mut new);
+            wrote(&CharTableSlot::Value(new));
+            *value = new;
+        });
+        self.reset_ascii();
     }
-    pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.visit_values_seen(&mut HashSet::default(), visit);
-    }
-    pub(super) fn visit_values_seen(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
+    /// The collector's own visit of every Value, past the funnel, as
+    /// `collector_visit_node`'s.
+    pub(super) fn collector_visit_values(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.purpose);
         visit(&mut self.default);
         visit(&mut self.parent);
         for value in &mut self.extras { visit(value); }
         match &mut self.ascii {
             CharTableSlot::Value(value) => visit(value),
-            CharTableSlot::Node(node) => visit_char_table_node_values(node, seen, visit),
+            CharTableSlot::Node(node) => collector_visit_node(node, seen, visit),
         }
-        visit_char_table_node_values(&self.root, seen, visit);
+        collector_visit_node(&self.root, seen, visit);
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
         self.storage_bytes_seen(capacity, &mut HashSet::default())

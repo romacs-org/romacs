@@ -221,7 +221,6 @@ pub(super) fn wayland_read(
 ) -> Result<TextRead, String> {
     match selection {
         ClipboardSelection::Clipboard => text_or_fallback(native, data_control),
-        ClipboardSelection::Primary => text_or_fallback(native, || Ok(None)),
     }
 }
 
