@@ -507,6 +507,10 @@ instances) is derived again when it changes.")
       Messages wait until ready;
   :resume-environment ENTRIES   added to its environment on a resume;
   :native-id-p (STRING)   whether STRING can name its conversation;
+  :forks (SESSION)   present when a session can start from another's
+      conversation as it stands, by the harness's own fork (its options'
+      :fork, the source's native id): whether SESSION's next run forks its
+      source again, having no conversation of its own yet;
   :history PLIST   reading its transcripts: :files (DIRECTORY LIMIT),
       :keep, :describe and :events (`romacs-agent-history').
 
@@ -1033,6 +1037,10 @@ itself, so the turn goes on whatever becomes of this server."
               (when (plist-get event :permission-mode)
                 (setf (romacs-agent-permission-mode session) (plist-get event :permission-mode))))
     ('usage (setf (romacs-agent-context-used session) (plist-get event :context-used)))
+    ;; What a fork was last forked from, folded from its journal.
+    ('forked (setf (romacs-agent-options session)
+                   (plist-put (copy-sequence (romacs-agent-options session))
+                              :forked (list (plist-get event :from) (plist-get event :seq-from)))))
     ('selection (let ((model (plist-get (plist-get event :to) :model)))
                   (unless (equal model (plist-get (plist-get event :from) :model))
                     ;; The context held stays; its window was the last model's.
@@ -1192,7 +1200,9 @@ other; empty for none."
                                ("run" (list (list :type 'run)))
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
-                                                        :to (romacs-agent--selection-of (gethash "to" note)))))))))) 
+                                                        :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ("fork" (list (list :type 'forked :from (gethash "from" note) :title (gethash "title" note)
+                                                   :seq-from (gethash "seq" note) :turns (gethash "turns" note) :after (gethash "after" note)))))))))
           ;; :last marks a record's last event: a view that has shown it has
           ;; shown the whole record.
           (while events
@@ -1618,7 +1628,7 @@ waiting."
 
 (defconst romacs-agent--option-keys
   '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
-    (:wake . "wake") (:worktree . "worktree") (:branch . "branch"))
+    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:fork . "forkedFrom"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
@@ -1842,6 +1852,57 @@ reads TRANSCRIPT."
           (romacs-agent--attach session 50))
         session))))
 
+(defun romacs-agent-fork (session)
+  "Start a session going on from SESSION's conversation as it stands, in
+its directory, on its instance, model and effort, by its harness's own
+fork: SESSION's harness and its transcript are not touched, and both go
+on apart.  Its first record says what it was forked from, so its chat
+shows SESSION's transcript to there.  Refused while SESSION's harness is
+busy, or after it ended in the middle of a turn: half a turn is no state
+to go on from.  A delegating session's fork has none of its tasks: they
+go on reporting to SESSION.  A delegated task's fork works in its
+directory, the task's worktree, but has no :worktree or :branch of its
+own: the task's parent merges the task's.  Return the new session."
+  (unless (romacs-agent--harness-get session :forks)
+    (user-error "%s cannot fork a session" (romacs-agent--harness-get session :display)))
+  (unless (romacs-agent--harness-free-p session)
+    (user-error "Session %s is busy: fork it when it is idle" (romacs-agent-title session)))
+  (when (romacs-agent-interrupted session)
+    (user-error "Session %s ended in the middle of a turn: resume it, then fork it when it is idle"
+                (romacs-agent-title session)))
+  (unless (or (> (romacs-agent-turns session) 0) (romacs-agent-input-seq session) (romacs-agent-imported session))
+    (user-error (if (plist-get (romacs-agent-options session) :fork)
+                    "Session %s is a fork with nothing of its own yet: send it a message first"
+                  "Session %s has no conversation to fork yet")
+                (romacs-agent-title session)))
+  (let ((instance (romacs-agent--configured (romacs-agent-provider session))))
+    ;; The harness finds the conversation in the directory it was kept in.
+    (unless (and instance (equal (romacs-agent--config-dir instance) (romacs-agent-config-dir session)))
+      (user-error "Session %s's instance %s no longer keeps its conversations where it did"
+                  (romacs-agent-title session) (romacs-agent-provider session))))
+  (romacs-agent-start (romacs-agent-cwd session) nil
+                      (format "%s (fork)" (string-remove-suffix " (fork)" (romacs-agent-title session)))
+                      (romacs-agent-provider session)
+                      (append (romacs-agent--wanted session) (list :fork (romacs-agent--native-id session)))
+                      ;; Journaled before its supervisor's first record, which follows on from it.
+                      (lambda (fork) (romacs-agent--note fork (romacs-agent--fork-note session 0)))))
+
+(defun romacs-agent--fork-note (source after)
+  "The note saying a fork goes on from SOURCE as it stands now; AFTER is
+the seq of SOURCE's the fork's last such note took it to, 0 for none."
+  (romacs-mcp--object "type" "fork" "from" (romacs-agent-id source) "title" (romacs-agent-title source)
+                      "seq" (romacs-agent-seq source) "turns" (romacs-agent-turns source) "after" after))
+
+(defun romacs-agent--refork (session)
+  "SESSION's next run forks its source again: when the source went on since
+SESSION's last fork note, a new one says how far the fork now goes."
+  (when-let* ((forking (romacs-agent--harness-get session :forks))
+              ((funcall forking session))
+              (forked (plist-get (romacs-agent-options session) :forked))
+              (source (romacs-agent-get (car forked)))
+              ((> (romacs-agent-seq source) (cadr forked))))
+    (romacs-agent--note session (romacs-agent--fork-note source (cadr forked)))))
+
 (defun romacs-agent--continue (session)
   "SESSION, going on: attached to its supervisor when one runs, else
 resumed; a per-turn harness goes on with its next message."
@@ -1942,6 +2003,7 @@ keeps the conversation there."
   (when (romacs-agent--per-turn-p session)
     (user-error "Session %s continues with its next message" (romacs-agent-title session)))
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
+  (romacs-agent--refork session)
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   (let ((process-environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
     (romacs-agent--launch session (romacs-agent--argv session t)))

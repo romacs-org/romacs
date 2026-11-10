@@ -636,6 +636,7 @@ or a repeat."
          (unless (member (plist-get event :text) '("requesting" "compacting" "detached" "selection armed"))
            (romacs-agent-ui--line session event (format "  · %s" (plist-get event :text)) 'face 'romacs-agent-dim)))
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
+        ('forked (romacs-agent-ui--draw-source session event))
         ('selection
          (romacs-agent-ui--line session event
                                 (format "── %s → %s ──" (romacs-agent-ui--selection-label (plist-get event :from))
@@ -1119,7 +1120,20 @@ harness's own transcript it was imported from, when it was."
   (when (romacs-agent-imported session)
     (require 'romacs-agent-history)
     (romacs-agent-history-draw session (romacs-agent-imported session)))
-  ;; A copy parses, so the live session's own state is not replayed over.
+  (let ((scratch (romacs-agent-ui--scratch session)))
+    (let ((romacs-agent-event-functions
+           (list (lambda (_ event)
+                   ;; The scratch copy's turn data, for the footers it draws.
+                   (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
+                   ;; With no supervisor, no event reached the session: its
+                   ;; harness's subagents are known from here.
+                   (romacs-agent-ui--track-children session event)
+                   (romacs-agent-ui--render session event)))))
+      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
+
+(defun romacs-agent-ui--scratch (session)
+  "A copy of SESSION to parse its journal again with: the live session's
+own state is not replayed over, and nothing it parses writes anything."
   (let ((scratch (copy-romacs-agent session)))
     (setf (romacs-agent-seq scratch) 0 (romacs-agent-turns scratch) 0
           (romacs-agent-title-auto scratch) nil
@@ -1136,15 +1150,47 @@ harness's own transcript it was imported from, when it was."
           ;; The live session's: a confirmation replayed here is not this copy's.
           (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
-    (let ((romacs-agent-event-functions
-           (list (lambda (_ event)
-                   ;; The scratch copy's turn data, for the footers it draws.
-                   (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
-                   ;; With no supervisor, no event reached the session: its
-                   ;; harness's subagents are known from here.
-                   (romacs-agent-ui--track-children session event)
-                   (romacs-agent-ui--render session event)))))
-      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record))))))
+    scratch))
+
+(defun romacs-agent-ui--draw-source (session event)
+  "Draw in SESSION's chat what its fork EVENT took from its source: the
+source's records after the last fork's (EVENT's :after) to EVENT's :seq-from,
+the source's own source and imported transcript first, then a rule."
+  (let ((source (romacs-agent-get (plist-get event :from)))
+        (after (or (plist-get event :after) 0)) (upto (or (plist-get event :seq-from) 0)))
+    (if (not source)
+        (romacs-agent-ui--line session event "  · its source is no longer recorded" 'face 'romacs-agent-dim)
+      (when (and (= after 0) (romacs-agent-imported source))
+        (require 'romacs-agent-history)
+        ;; Drawn as the fork's: its rows name the fork, its facts are the fork's.
+        (romacs-agent-history-draw session (romacs-agent-imported source)))
+      (let ((scratch (romacs-agent-ui--scratch source)) (buffer (current-buffer)))
+        (let ((romacs-agent-event-functions
+               ;; Read in a buffer of its own: drawn in the chat's.
+               (list (lambda (_ drawn)
+                       (with-current-buffer buffer (romacs-agent-ui--draw-as session scratch drawn))))))
+          (romacs-agent--read-journal
+           source (lambda (record)
+                    (let ((seq (or (gethash "seq" record) 0)))
+                      ;; The records before AFTER are parsed too: their state is the source's then.
+                      (when (<= seq upto)
+                        (let ((romacs-agent-event-functions (if (> seq after) romacs-agent-event-functions nil)))
+                          (romacs-agent--record scratch record)))))))))
+    (romacs-agent-ui--line session event
+                           (format (if (> after 0) "── Forked again from %s, now at its turn %s ──"
+                                     "── Forked from %s at its turn %s ──")
+                                   (plist-get event :title) (plist-get event :turns))
+                           'face 'romacs-agent-dim)))
+
+(defun romacs-agent-ui--draw-as (session source event)
+  "Draw SOURCE's EVENT in SESSION's chat, SOURCE's turn start and tool
+calls lent to SESSION for it: its footers time SOURCE's turns, its rows
+nest under SOURCE's calls."
+  (let ((start (romacs-agent-turn-start session)) (tools (romacs-agent-tools session)))
+    (setf (romacs-agent-turn-start session) (romacs-agent-turn-start source)
+          (romacs-agent-tools session) (romacs-agent-tools source))
+    (unwind-protect (romacs-agent-ui--draw session event (current-buffer))
+      (setf (romacs-agent-turn-start session) start (romacs-agent-tools session) tools))))
 
 (defun romacs-agent-ui--composer-text ()
   (string-trim (buffer-substring-no-properties romacs-agent-ui--end (point-max))))
@@ -1581,6 +1627,12 @@ what was there."
   (interactive nil romacs-agent-chat-mode)
   (romacs-agent-ui--set-outputs t))
 
+(defun romacs-agent-chat-fork ()
+  "Go on from this session's conversation in a new session, its own chat;
+this one goes on too (`romacs-agent-fork')."
+  (interactive nil romacs-agent-chat-mode)
+  (romacs-agent-show (romacs-agent-fork romacs-agent-ui--session)))
+
 (defun romacs-agent-chat-rename (title)
   "Name this session TITLE."
   (interactive (list (read-string "Title: " (romacs-agent-title romacs-agent-ui--session)))
@@ -1949,6 +2001,8 @@ view."
   "t" ("Switch thread" romacs-agent-switch)
   "n" ("New session" romacs-agent-chat-new)
   "R" ("Rename" romacs-agent-chat-rename)
+  "f" ("Fork" romacs-agent-chat-fork
+       :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-ui--session))))
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
   "x" ("Stop" romacs-agent-chat-stop :inapt-if (lambda () (eq (romacs-agent-state romacs-agent-ui--session) 'ended)))
   "h" ("Home page" romacs-agent-chat-home)

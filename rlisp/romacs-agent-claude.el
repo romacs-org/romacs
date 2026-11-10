@@ -13,6 +13,12 @@
 (require 'romacs-agent)
 (require 'romacs-agent-gate)
 
+(defun romacs-agent--claude-forking (session)
+  "Whether SESSION, a fork, still has to be made: Claude Code writes the
+fork's transcript with its first message, so until one was sent every
+run forks its source again."
+  (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-input-seq session))))
+
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
 RESUME is non-nil."
@@ -36,8 +42,11 @@ RESUME is non-nil."
                   "--permission-prompt-tool" "stdio"
                   "--mcp-config" (expand-file-name "mcp.json" dir)
                   "--append-system-prompt" (romacs-agent--instructions session))
-            (if resume (list "--resume" (romacs-agent--native-id session))
-              (list "--session-id" (romacs-agent-id session)))
+            (cond ((romacs-agent--claude-forking session)
+                   (list "--resume" (plist-get (romacs-agent-options session) :fork) "--fork-session"
+                         "--session-id" (romacs-agent-id session)))
+                  (resume (list "--resume" (romacs-agent--native-id session)))
+                  (t (list "--session-id" (romacs-agent-id session))))
             (romacs-agent--option-words session "--model" "--effort")
             (plist-get instance :arguments))))
 
@@ -408,7 +417,7 @@ answers in its input, and for the session when asked."
   :scrub '("CLAUDECODE" "CLAUDE_AGENT_SDK_VERSION" "CLAUDE_CODE_CHILD_SESSION" "CLAUDE_CODE_ENTRYPOINT"
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
-  :lifetime 'persistent
+  :lifetime 'persistent :forks #'romacs-agent--claude-forking
   :next #'romacs-agent--claude-next
   :select #'romacs-agent--claude-select
   :argv #'romacs-agent--claude-argv
