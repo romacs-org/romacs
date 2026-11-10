@@ -44,7 +44,7 @@ impl Leaf<'_> {
     }
     pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(byte),
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(byte),
             _ => unreachable!(),
@@ -54,7 +54,7 @@ impl Leaf<'_> {
     /// Point to character position POSITION (1-based), already in range.
     pub fn goto_char_position(&mut self, position: i64) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = b.byte_of_char(crate::coordinates::CharOffset(position as usize - 1)).map_err(Fault::Error)?,
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(position as usize - 1),
             _ => unreachable!(),
@@ -94,7 +94,7 @@ impl Leaf<'_> {
             at += width(c);
         }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
             crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
             _ => unreachable!(),

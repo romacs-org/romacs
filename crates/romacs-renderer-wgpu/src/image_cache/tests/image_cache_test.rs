@@ -2110,8 +2110,8 @@ fn bands_do_not_consume_the_load_attempt() {
         load,
         decoded: test_band(),
     };
-    assert!(matches!(loads.take_current(band()), Some(_)));
-    assert!(matches!(loads.take_current(band()), Some(_)));
+    assert!(loads.take_current(band()).is_some());
+    assert!(loads.take_current(band()).is_some());
     assert!(loads.is_current(load), "bands leave the attempt alone");
 
     // The attempt is superseded while its bands are still arriving.

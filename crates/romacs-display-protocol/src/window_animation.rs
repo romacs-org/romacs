@@ -230,7 +230,7 @@ impl Default for WindowAnimationsConfig {
 
 /// Opening a window: niri's `window-open`, 150ms ease-out-expo.
 #[must_use]
-pub fn default_window_open() -> WindowAnimation {
+pub(crate) fn default_window_open() -> WindowAnimation {
     WindowAnimation::easing(150, TransitionEasing::EaseOutExpo)
 }
 
@@ -245,7 +245,7 @@ pub fn default_window_open() -> WindowAnimation {
 /// the doubled, half-transparent text that `delete-window` shipped with for one
 /// afternoon.
 #[must_use]
-pub fn default_window_close() -> WindowAnimation {
+pub(crate) fn default_window_close() -> WindowAnimation {
     WindowAnimation {
         enabled: false,
         ..WindowAnimation::easing(150, TransitionEasing::EaseOutQuad)
@@ -254,7 +254,7 @@ pub fn default_window_close() -> WindowAnimation {
 
 /// Resizing a pane: niri's `window-resize`, a critically damped spring.
 #[must_use]
-pub fn default_window_resize() -> WindowAnimation {
+pub(crate) fn default_window_resize() -> WindowAnimation {
     WindowAnimation::spring(1.0, 800)
 }
 
@@ -278,7 +278,7 @@ pub fn default_window_resize() -> WindowAnimation {
 /// translation, and `geometry_role` already returns it -- the slot is wired,
 /// not stubbed. Anyone tuning it should know it will not take effect today.
 #[must_use]
-pub fn default_window_movement() -> WindowAnimation {
+pub(crate) fn default_window_movement() -> WindowAnimation {
     WindowAnimation::spring(1.0, 800)
 }
 

@@ -37,8 +37,6 @@ fn gnu_frame_alpha_survives_display_snapshot_materialization() {
 }
 use crate::DisplayFrameId;
 
-#[path = "row_appearance_test.rs"]
-mod row_appearance_test;
 use crate::face::Face;
 use crate::frame_chrome::PresentationId;
 use crate::frame_glyphs::{DisplaySlotId, PhysCursor};
@@ -2923,7 +2921,8 @@ fn resolved_fonts_survive_materialize_and_round_trip() {
     state.faces.insert(FaceId::new(0), face);
     state.fonts.insert(
         font_id,
-        ResolvedFont { underline: Default::default(),
+        ResolvedFont {
+            underline: Default::default(),
             id: font_id,
             identity: ResolvedFontIdentity::from_file("/fonts/mono.ttf", 0, None),
             replay: FontReplay::Swash {

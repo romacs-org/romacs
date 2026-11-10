@@ -38,7 +38,6 @@ fn run_xtask(repo_root: PathBuf, args: impl IntoIterator<Item = OsString>) -> Re
         }
         Some("render-window-icon") => window_icon::run(&repo_root, args),
         Some("pin-reference") => run_workspace_cli(&repo_root, "romacs-parity-reference", args),
-        Some("infra") => run_workspace_cli(&repo_root, "romacs-infra", args),
         Some("test") => test::run(repo_root, args),
         Some("fresh-build" | "test-daemon-gui" | "check-bootstrap-autoloads" | "gc-stress" | "perf") => {
             Err(format!(
@@ -96,7 +95,6 @@ Commands:
   test -- [cargo test arguments]       Run Cargo tests without legacy Lisp preparation
   check-dependency-coherence           Check Windows native dependency type families
   pin-reference [ARGS]                Manage the pinned GNU parity reference
-  infra [ARGS]                        Manage shared editor-configuration fixtures
   render-window-icon --out-dir DIR    Render the canonical macOS iconset
 
 Build and run VM2 targets directly with Cargo. The legacy fresh-build,

@@ -557,47 +557,6 @@ fn test_scene_clear_borders() {
 // Floating video / image management
 // ---------------------------------------------------------------
 
-#[test]
-fn test_floating_video_add_remove_clear() {
-    let mut scene = Scene::new(800.0, 600.0);
-    scene.add_floating_video(VideoId::new(1), 10.0, 20.0, 320.0, 240.0);
-    scene.add_floating_video(VideoId::new(2), 400.0, 20.0, 320.0, 240.0);
-    assert_eq!(scene.floating_videos.len(), 2);
-
-    scene.remove_floating_video(VideoId::new(1));
-    assert_eq!(scene.floating_videos.len(), 1);
-    assert_eq!(scene.floating_videos[0].video_id.get(), 2);
-
-    scene.clear_floating_videos();
-    assert!(scene.floating_videos.is_empty());
-}
-
-#[test]
-fn test_floating_image_add_remove_clear() {
-    let mut scene = Scene::new(800.0, 600.0);
-    scene.add_floating_image(ImageId::new(10), 0.0, 0.0, 128.0, 128.0);
-    assert_eq!(scene.floating_images.len(), 1);
-    assert_eq!(scene.floating_images[0].image_id.get(), 10);
-
-    scene.remove_floating_image(ImageId::new(10));
-    assert!(scene.floating_images.is_empty());
-
-    scene.add_floating_image(ImageId::new(20), 0.0, 0.0, 64.0, 64.0);
-    scene.add_floating_image(ImageId::new(21), 64.0, 0.0, 64.0, 64.0);
-    scene.clear_floating_images();
-    assert!(scene.floating_images.is_empty());
-}
-
-#[test]
-fn test_remove_nonexistent_floating_is_noop() {
-    let mut scene = Scene::new(800.0, 600.0);
-    scene.add_floating_video(VideoId::new(1), 0.0, 0.0, 100.0, 100.0);
-    // Removing a non-existent ID should not panic or change existing entries
-    scene.remove_floating_video(VideoId::new(999));
-    assert_eq!(scene.floating_videos.len(), 1);
-    scene.remove_floating_image(ImageId::new(999));
-}
-
 // ---------------------------------------------------------------
 // Mutations mark dirty
 // ---------------------------------------------------------------
@@ -605,21 +564,6 @@ fn test_remove_nonexistent_floating_is_noop() {
 #[test]
 fn test_mutations_mark_dirty() {
     let mut scene = Scene::new(800.0, 600.0);
-
-    // add_floating_video marks dirty
-    scene.add_floating_video(VideoId::new(1), 0.0, 0.0, 100.0, 100.0);
-    assert!(scene.dirty.is_some());
-    scene.clear_dirty();
-
-    // remove_floating_video marks dirty
-    scene.remove_floating_video(VideoId::new(1));
-    assert!(scene.dirty.is_some());
-    scene.clear_dirty();
-
-    // add_floating_image marks dirty
-    scene.add_floating_image(ImageId::new(1), 0.0, 0.0, 100.0, 100.0);
-    assert!(scene.dirty.is_some());
-    scene.clear_dirty();
 
     // add_border marks dirty
     scene.add_border(0.0, 0.0, 2.0, 600.0, Color::WHITE);

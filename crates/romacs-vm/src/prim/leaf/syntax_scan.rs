@@ -304,7 +304,7 @@ impl Leaf<'_> {
         }
     }
     fn buffer_state_mut(&mut self, index: usize) -> &mut crate::bytes::BufferState {
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => &mut b.state,
             data::Object::ByteBuffer(b) => &mut b.state,
             _ => unreachable!("buffer_index validates"),
@@ -317,7 +317,7 @@ impl Leaf<'_> {
     }
     pub(crate) fn syntax_set_point(&mut self, charpos: i64) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.point = b.byte_of_char(CharOffset(charpos as usize - 1)).map_err(Fault::Error)?,
             data::Object::ByteBuffer(b) => b.point = ByteOffset(charpos as usize - 1),
             _ => unreachable!("buffer_index validates"),
@@ -477,7 +477,7 @@ impl Leaf<'_> {
             let epoch = self.vm.defun_start_epoch;
             self.buffer_state_mut(index).defun_start = Some((epoch, cache));
         }
-        let set_point = |leaf: &mut Self, at: Pos| match &mut leaf.vm.objects[index] {
+        let set_point = |leaf: &mut Self, at: Pos| match leaf.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.point = ByteOffset(at.byte),
             data::Object::ByteBuffer(b) => b.point = ByteOffset(at.byte),
             _ => unreachable!("buffer_index validates"),

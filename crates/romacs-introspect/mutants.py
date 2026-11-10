@@ -92,7 +92,7 @@ MUTANTS = [
      ['-p', 'romacs-introspect', '--test', 'index'], 'observable_divergent_primitives_include_maphash_and_report_what_was_excluded',
      'observable-only means observable rows'),
     ('M19', f'{I}/Cargo.toml', '[dependencies]\nserde_json.workspace = true\n',
-     '[dependencies]\nserde_json.workspace = true\nromacs-chars = { path = "../romacs-chars" }\n',
+     '[dependencies]\nserde_json.workspace = true\nromacs-snapshot = { path = "../romacs-snapshot" }\n',
      ['-p', 'romacs-introspect', '--test', 'boundary'], 'no_romacs_crate_is_a_dependency',
      'the crate stays runtime-free'),
     ('M20', f'{I}/src/registry.rs', '                None => d.core_added.push(n.to_string()),', '                None => {}',

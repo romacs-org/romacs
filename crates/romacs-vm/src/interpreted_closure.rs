@@ -236,9 +236,9 @@ impl Vm {
             })
     }
     pub(super) fn write_capture_cell(&mut self, index: usize, value: Value) {
-        self.cells[index] = value;
+        self.cells.set(index, value);
         if let Some(&pair) = self.cell_pairs.get(&index) {
-            self.conses[pair.index(3).expect("private lexical pair")].1 = value;
+            self.conses.set_cdr(pair.index(3).expect("private lexical pair"), value);
         }
     }
     fn lexical_pair(&mut self, name: Value, capture: Value) -> Value {
@@ -306,15 +306,16 @@ impl Vm {
                 if a[4] != Value::NIL {
                     metadata.extend([Value::NIL, a[4]]);
                 }
-                self.closures[index].metadata = metadata;
-                self.closures[index].document = a[4];
+                let closure = self.closures.entry_mut(index);
+                closure.metadata = metadata;
+                closure.document = a[4];
                 Ok(a[0])
             }
             Primitive::ClosureDocument => {
                 if !(2..=3).contains(&n) {
                     return Err("wrong primitive arity".into());
                 }
-                let closure = &mut self.closures[a[0].index(4)?];
+                let closure = self.closures.entry_mut(a[0].index(4)?);
                 closure.document = a[1];
                 if closure.metadata.is_empty() {
                     return Ok(a[0]);

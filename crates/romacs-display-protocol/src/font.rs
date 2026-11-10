@@ -228,7 +228,7 @@ pub struct ResolvedFontIdentity {
 /// This is intentionally not interchangeable with a collection face index:
 /// Fontconfig/FreeType also encode a named variable-font instance in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BackendFontSelector(u32);
+pub(crate) struct BackendFontSelector(u32);
 
 impl BackendFontSelector {
     const fn from_raw(raw: u32) -> Self {
@@ -274,41 +274,6 @@ impl ResolvedFontIdentity {
         }
     }
 
-    /// Exact file-backed identity selected by a native platform backend.
-    ///
-    /// The native adapter remains available as diagnostic provenance while
-    /// the stable key records only the collection face and exact variations.
-    /// This makes an instance discovered through CoreText or DirectWrite
-    /// identical to the same instance discovered through another catalog.
-    pub fn from_platform_file_with_variations(
-        backend: FontBackendKind,
-        file_path: &str,
-        face_selector: u32,
-        postscript_name: Option<String>,
-        variation_coords: Vec<FontVariationCoord>,
-    ) -> Self {
-        if backend == FontBackendKind::Fontconfig {
-            return Self::from_file_with_variations(
-                file_path,
-                face_selector,
-                postscript_name,
-                variation_coords,
-            );
-        }
-        let variation_coords = FontVariationSet::new(variation_coords);
-        let mut stable_key = format!("{file_path}#{face_selector}");
-        append_variation_key(&mut stable_key, variation_coords.as_slice());
-
-        Self {
-            backend,
-            stable_key,
-            file_path: Some(file_path.to_string()),
-            face_selector: BackendFontSelector::from_raw(face_selector),
-            postscript_name,
-            variation_coords,
-        }
-    }
-
     /// Identity for a font already resident in the layout font database.
     pub fn from_memory(
         backend: FontBackendKind,
@@ -347,8 +312,9 @@ impl ResolvedFontIdentity {
         }
     }
 
+    #[cfg(test)]
     /// The opaque selector value for diagnostics and platform-native APIs.
-    pub fn backend_selector(&self) -> u32 {
+    pub(crate) fn backend_selector(&self) -> u32 {
         self.face_selector.raw()
     }
 
@@ -371,8 +337,9 @@ impl ResolvedFontIdentity {
         }
     }
 
+    #[cfg(test)]
     /// FreeType named-instance index carried by a Fontconfig selector.
-    pub fn named_instance_index(&self) -> Option<u32> {
+    pub(crate) fn named_instance_index(&self) -> Option<u32> {
         match self.backend {
             FontBackendKind::Fontconfig => {
                 let index = (self.face_selector.raw() >> 16) & 0x7fff;
@@ -758,8 +725,9 @@ pub enum ResolvedFontAdvance {
 }
 
 impl ResolvedFontAdvance {
+    #[cfg(test)]
     #[must_use]
-    pub fn fixed_cell(advance_px: f32) -> Self {
+    pub(crate) fn fixed_cell(advance_px: f32) -> Self {
         FontAdvancePx::new(advance_px)
             .map(Self::FixedCell)
             .unwrap_or(Self::PerGlyph)
@@ -842,7 +810,12 @@ pub struct FontUnderline {
 }
 
 impl Default for FontUnderline {
-    fn default() -> Self { Self { position: -1, thickness: 0 } }
+    fn default() -> Self {
+        Self {
+            position: -1,
+            thickness: 0,
+        }
+    }
 }
 
 impl FontUnderline {
@@ -850,7 +823,14 @@ impl FontUnderline {
     /// ftcrfont_open raises a line thicker than 2 pixels by half its
     /// thickness.
     pub fn scaled(position: i32, thickness: i32) -> Self {
-        Self { position: if thickness > 2 { position - thickness / 2 } else { position }, thickness }
+        Self {
+            position: if thickness > 2 {
+                position - thickness / 2
+            } else {
+                position
+            },
+            thickness,
+        }
     }
 }
 

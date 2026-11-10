@@ -135,8 +135,11 @@ impl Leaf<'_> {
     fn initialize_case_roots(&mut self) -> std::result::Result<(), Fault> {
         self.standard_case_table()?;
         let roots = self.vm.standard_case_tables;
-        for object in self.vm.objects.iter_mut() {
-            let buffer_roots = match object {
+        for i in 0..self.vm.objects.len() {
+            if !matches!(self.vm.objects[i], Object::Buffer(_) | Object::ByteBuffer(_)) {
+                continue;
+            }
+            let buffer_roots = match self.vm.objects.entry_mut(i) {
                 Object::Buffer(b) if b.state.live => &mut b.case_tables,
                 Object::ByteBuffer(b) if b.state.live => &mut b.case_tables,
                 _ => continue,
@@ -156,7 +159,7 @@ impl Leaf<'_> {
             _ => unreachable!(),
         };
         if uninitialized { self.initialize_case_roots()?; }
-        let roots = match &mut self.vm.objects[index] {
+        let roots = match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => &mut b.case_tables,
             Object::ByteBuffer(b) => &mut b.case_tables,
             _ => unreachable!(),
@@ -327,7 +330,7 @@ impl Leaf<'_> {
             self.vm.standard_case_tables = roots;
         } else {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            match &mut self.vm.objects[index] {
+            match self.vm.objects.entry_mut(index) {
                 Object::Buffer(b) => b.case_tables = roots,
                 Object::ByteBuffer(b) => b.case_tables = roots,
                 _ => unreachable!(),

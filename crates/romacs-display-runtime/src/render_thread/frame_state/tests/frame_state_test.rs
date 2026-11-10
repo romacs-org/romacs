@@ -1,7 +1,9 @@
 use super::*;
-use crate::core::face::Face;
-use crate::core::frame_glyphs::{CursorStyle, FrameGlyphBuffer, GlyphRowRole, PhysCursor};
 use crate::thread_comm::ThreadComms;
+use romacs_display_protocol::face::Face;
+use romacs_display_protocol::frame_glyphs::{
+    CursorStyle, FrameGlyphBuffer, GlyphRowRole, PhysCursor,
+};
 use romacs_display_protocol::types::FaceId;
 use romacs_display_protocol::types::{Color, DisplayWindowId};
 use rustc_hash::FxHashMap as HashMap;

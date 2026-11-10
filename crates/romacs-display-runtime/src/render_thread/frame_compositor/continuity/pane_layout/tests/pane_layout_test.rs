@@ -845,7 +845,8 @@ fn install(
     windows: &[WindowInfo],
     at: EventTime,
 ) {
-    let mut frame = crate::core::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
+    let mut frame =
+        romacs_display_protocol::frame_glyphs::FrameGlyphBuffer::with_size(800.0, 600.0);
     frame.presentation_id = romacs_display_protocol::PresentationId::new(1);
     frame.window_infos = windows.to_vec();
     render.measure_pane_layout(Some(&frame), at);

@@ -69,7 +69,7 @@ DISPLAY_PACKAGES = {
     'romacs-display-runtime', 'romacs-renderer-wgpu',
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
     'romacs-font-materializer', 'romacs-test-fonts', 'romacs-video',
-    'romacs-video-model', 'romacs-webview', 'romacs-layout-input',
+    'romacs-video-model', 'romacs-layout-input',
     'romacs-layout2', 'romacs-vm-gui',
 }
 GATE_PROFILE = ['--config', 'profile.gate.inherits="release"', '--config', 'profile.gate.lto="off"',
@@ -631,7 +631,7 @@ def mirror_files(root):
 # what may run Lisp, what may hold a value across it, what each primitive
 # declares, which derived files match.  Together a few minutes at worst, of which
 # compile_boundaries, the compile-fail fixtures of the rooting rules, is most.
-STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules', 'romacs-vm::heap_boundary',
+STRUCTURAL = ('romacs-vm::reentry_sites', 'romacs-vm::compile_boundaries', 'romacs-vm::rooting_brand_rules', 'romacs-vm::no_remote_references', 'romacs-vm::heap_boundary',
               'romacs-vm::oclosure_boundary', 'romacs-vm::gc_threads_forbidden', 'romacs-vm::primitive_registry',
               'romacs-vm::production_registry', 'romacs-vm::host_boundary_lint', 'romacs-vm::primitive_gc_boundary',
               'romacs-introspect::boundary', 'romacs-introspect::derived_artifacts', 'romacs-introspect::derive',
@@ -714,6 +714,18 @@ def reuse(wt, args, group):
     return 0 if reason is None else 1
 
 
+def provision_fixtures(src):
+    """Fill the pinned test-fixture cache before any test runs: tests read
+    it and never download (crates/romacs-test-fonts/fixtures.json)."""
+    script = src / 'scripts/fetch-test-fixtures'
+    if not script.is_file():
+        return
+    fixtures_env = dict(os.environ, ROMACS_TEST_FONTS_DIR=os.environ.get(
+        'ROMACS_TEST_FONTS_DIR', str(HOME / '.cache/romacs-test-fonts')))
+    if subprocess.call([sys.executable, '-I', str(script)], env=fixtures_env) != 0:
+        raise MissingTool('pinned test fixtures (scripts/fetch-test-fixtures failed)')
+
+
 def inner(args):
     global ORACLE
     wt, run_dir = pathlib.Path(args.worktree), pathlib.Path(args.run_dir)
@@ -740,6 +752,8 @@ def inner(args):
             ORACLE = _override_oracle(args.oracle) if args.oracle else _pinned_oracle(root)
             fingerprint, env_hashes, tool_hashes = environment_identity(src, root)
             sync(root, src)
+        if not build_only:
+            provision_fixtures(src)
         threads = {'vm2': args.threads, 'display': args.display_threads}
         failed = build_and_run(src, run_dir, args.expr, threads, not build_only, t0, suites, args.repeat)
         if failed is None:

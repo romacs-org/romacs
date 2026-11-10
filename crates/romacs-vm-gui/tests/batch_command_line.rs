@@ -201,7 +201,7 @@ fn batch_startup_beside_a_huge_directory_matches_pinned_gnu() {
     }
     let args: Vec<String> = ["-Q", "--batch", "--eval",
         "(princ (format \"%S\\n\" (list (file-name-case-insensitive-p default-directory) (abbreviate-file-name default-directory) (file-name-case-insensitive-p \"../entry-7\"))))"]
-        .iter().map(|a| a.to_string()).collect();
+        .iter().map(ToString::to_string).collect();
     let expected = run(&gnu, &home, &args, false);
     let actual = run(romacs, &home, &args, false);
     let _ = std::fs::remove_dir_all(&dir);
@@ -217,7 +217,7 @@ fn batch_without_worlds_boots_from_source_as_pinned_gnu_does() {
     let gnu = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
     let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (princ (list noninteractive window-system (length command-line-args))) (kill-emacs 4))"]
-        .iter().map(|a| a.to_string()).collect();
+        .iter().map(ToString::to_string).collect();
     for world in [false, true] {
         let dir = std::env::temp_dir().join(format!("romacs-batch-source-{}-{world}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -344,4 +344,18 @@ fn a_batch_world_restores_under_another_processor_affinity() {
         assert_eq!((stored(&dir, "rwi"), modified(&image[0])), (image, built_at), "the world was not rebuilt");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// A process with no world to restore, as the ERT runner starts them, is no
+/// builder: nothing it allocates becomes an image, so it times its collections
+/// (`arena::heap_is_image`) as a session does.
+#[test]
+fn a_process_booted_from_source_times_its_collections() {
+    let dir = std::env::temp_dir().join(format!("romacs-batch-from-source-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let args: Vec<String> = ["-Q", "--batch", "--eval", "(progn (garbage-collect) (princ (list (> gc-elapsed 0.0))))"]
+        .iter().map(ToString::to_string).collect();
+    let (status, stdout, stderr) = run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir, &args, false);
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!((status, stdout.as_str()), (Some(0), "(t)"), "{stderr}");
 }

@@ -28,26 +28,25 @@ fn unknown_commands_and_build_flags_are_not_fresh_builds() {
 
 #[test]
 fn retained_workspace_launchers_preserve_arguments_and_root() {
-    for package in ["romacs-parity-reference", "romacs-infra"] {
-        let command = workspace_cli_command(
-            Path::new("/repo"),
+    let package = "romacs-parity-reference";
+    let command = workspace_cli_command(
+        Path::new("/repo"),
+        package,
+        ["--help", "space separated"].map(OsString::from),
+    );
+    assert_eq!(command.get_current_dir(), Some(Path::new("/repo")));
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        [
+            "run",
+            "--quiet",
+            "-p",
             package,
-            ["--help", "space separated"].map(OsString::from),
-        );
-        assert_eq!(command.get_current_dir(), Some(Path::new("/repo")));
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            [
-                "run",
-                "--quiet",
-                "-p",
-                package,
-                "--",
-                "--help",
-                "space separated"
-            ]
-        );
-    }
+            "--",
+            "--help",
+            "space separated"
+        ]
+    );
 }
 
 #[test]

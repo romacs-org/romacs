@@ -4,9 +4,9 @@ use ash::vk;
 use std::ffi::c_void;
 
 pub const TIMING: &std::ffi::CStr = c"VK_EXT_present_timing";
-pub const ID2: &std::ffi::CStr = c"VK_KHR_present_id2";
-pub const FIRST_PIXEL_OUT: u32 = 4;
-pub const SWAPCHAIN_LOCAL: i32 = 1000208000;
+pub(crate) const ID2: &std::ffi::CStr = c"VK_KHR_present_id2";
+pub(crate) const FIRST_PIXEL_OUT: u32 = 4;
+pub(crate) const SWAPCHAIN_LOCAL: i32 = 1000208000;
 
 macro_rules! structure {
     ($name:ident, $ty:expr, {$($field:ident: $field_ty:ty = $default:expr),* $(,)?}) => {
@@ -48,7 +48,7 @@ structure!(PastInfo, 1000208005, {
 });
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct StageTime {
+pub(crate) struct StageTime {
     pub stage: u32,
     pub time: u64,
 }
@@ -63,10 +63,11 @@ structure!(PastProperties, 1000208006, {
     timings: *mut PastTiming = std::ptr::null_mut(),
 });
 
-pub type SetQueueSize = unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, u32) -> vk::Result;
-pub type GetDomains =
+pub(crate) type SetQueueSize =
+    unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, u32) -> vk::Result;
+pub(crate) type GetDomains =
     unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, *mut Domains, *mut u64) -> vk::Result;
-pub type GetPast =
+pub(crate) type GetPast =
     unsafe extern "system" fn(vk::Device, *const PastInfo, *mut PastProperties) -> vk::Result;
 
 #[cfg(test)]

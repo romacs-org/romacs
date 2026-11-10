@@ -26,9 +26,7 @@ pub use romacs_display_protocol::font::{
     BitmapStrikeKey, FixedFontSpacing, FontFileAsset, FontReplay, GlyphSampling,
 };
 
-#[cfg(any(windows, target_os = "linux"))]
 use freetype::Library;
-#[cfg(any(windows, target_os = "linux"))]
 use freetype::face::LoadFlag;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,8 +92,6 @@ pub struct OpenedFontMetrics {
 pub enum FontMaterializationError {
     #[error("requested font size must be positive and finite")]
     InvalidRequestedSize,
-    #[error("FreeType is unavailable on this target")]
-    BackendUnavailable,
     #[error("FreeType initialization failed: {0}")]
     BackendInitialization(String),
     #[error("failed opening exact font face {path}: {reason}")]
@@ -132,8 +128,7 @@ pub struct OpenedFont {
     replay: FontReplay,
     metrics: OpenedFontMetrics,
     device_scale: f32,
-    #[cfg(any(windows, target_os = "linux"))]
-    _face: freetype::Face,
+    face: freetype::Face,
 }
 
 impl Clone for OpenedFont {
@@ -142,8 +137,7 @@ impl Clone for OpenedFont {
             replay: self.replay.clone(),
             metrics: self.metrics,
             device_scale: self.device_scale,
-            #[cfg(any(windows, target_os = "linux"))]
-            _face: self._face.clone(),
+            face: self.face.clone(),
         }
     }
 }
@@ -168,88 +162,72 @@ impl OpenedFont {
     }
 
     pub fn glyph_for_char(&self, ch: char) -> Option<ResolvedGlyphId> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            self._face
-                .get_char_index(ch as usize)
-                .map(ResolvedGlyphId::new)
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = ch;
-            None
-        }
+        self.face
+            .get_char_index(ch as usize)
+            .map(ResolvedGlyphId::new)
     }
 
     pub fn rasterize(
         &self,
         glyph: ResolvedGlyphId,
     ) -> Result<RasterizedGlyph, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            self._face
-                .load_glyph(glyph.get(), LoadFlag::RENDER | LoadFlag::COLOR)
-                .map_err(|error| FontMaterializationError::LoadGlyph {
-                    glyph_id: glyph.get(),
-                    reason: error.to_string(),
-                })?;
-            let slot = self._face.glyph();
-            let bitmap = slot.bitmap();
-            let mode = bitmap.pixel_mode().map_err(|error| {
-                FontMaterializationError::UnsupportedPixelMode(error.to_string())
+        self.face
+            .load_glyph(glyph.get(), LoadFlag::RENDER | LoadFlag::COLOR)
+            .map_err(|error| FontMaterializationError::LoadGlyph {
+                glyph_id: glyph.get(),
+                reason: error.to_string(),
             })?;
-            let pixels = match mode {
-                freetype::bitmap::PixelMode::Mono => RasterPixels::Mask8(normalize_mono_bitmap(
+        let slot = self.face.glyph();
+        let bitmap = slot.bitmap();
+        let mode = bitmap.pixel_mode().map_err(|error| {
+            FontMaterializationError::UnsupportedPixelMode(error.to_string())
+        })?;
+        let pixels = match mode {
+            freetype::bitmap::PixelMode::Mono => RasterPixels::Mask8(normalize_mono_bitmap(
+                &bitmap,
+                bitmap.width() as u32,
+                bitmap.rows() as u32,
+            )?),
+            freetype::bitmap::PixelMode::Gray => RasterPixels::Mask8(normalize_gray_bitmap(
+                &bitmap,
+                bitmap.width() as u32,
+                bitmap.rows() as u32,
+            )?),
+            freetype::bitmap::PixelMode::Gray2 => {
+                RasterPixels::Mask8(normalize_packed_gray_bitmap(
                     &bitmap,
                     bitmap.width() as u32,
                     bitmap.rows() as u32,
-                )?),
-                freetype::bitmap::PixelMode::Gray => RasterPixels::Mask8(normalize_gray_bitmap(
+                    2,
+                )?)
+            }
+            freetype::bitmap::PixelMode::Gray4 => {
+                RasterPixels::Mask8(normalize_packed_gray_bitmap(
                     &bitmap,
                     bitmap.width() as u32,
                     bitmap.rows() as u32,
-                )?),
-                freetype::bitmap::PixelMode::Gray2 => {
-                    RasterPixels::Mask8(normalize_packed_gray_bitmap(
-                        &bitmap,
-                        bitmap.width() as u32,
-                        bitmap.rows() as u32,
-                        2,
-                    )?)
-                }
-                freetype::bitmap::PixelMode::Gray4 => {
-                    RasterPixels::Mask8(normalize_packed_gray_bitmap(
-                        &bitmap,
-                        bitmap.width() as u32,
-                        bitmap.rows() as u32,
-                        4,
-                    )?)
-                }
-                freetype::bitmap::PixelMode::Bgra => RasterPixels::Bgra8(normalize_bgra_bitmap(
-                    &bitmap,
-                    bitmap.width() as u32,
-                    bitmap.rows() as u32,
-                )?),
-                other => {
-                    return Err(FontMaterializationError::UnsupportedPixelMode(format!(
-                        "{other:?}"
-                    )));
-                }
-            };
-            Ok(RasterizedGlyph {
-                width_px: bitmap.width() as u32,
-                height_px: bitmap.rows() as u32,
-                left_px: slot.bitmap_left(),
-                top_px: slot.bitmap_top(),
-                advance_px: (slot.metrics().horiAdvance >> 6) as f32 / self.device_scale,
-                pixels,
-            })
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = glyph;
-            Err(FontMaterializationError::BackendUnavailable)
-        }
+                    4,
+                )?)
+            }
+            freetype::bitmap::PixelMode::Bgra => RasterPixels::Bgra8(normalize_bgra_bitmap(
+                &bitmap,
+                bitmap.width() as u32,
+                bitmap.rows() as u32,
+            )?),
+            other => {
+                return Err(FontMaterializationError::UnsupportedPixelMode(format!(
+                    "{other:?}"
+                )));
+            }
+        };
+        Ok(RasterizedGlyph {
+            width_px: bitmap.width() as u32,
+            height_px: bitmap.rows() as u32,
+            left_px: slot.bitmap_left(),
+            top_px: slot.bitmap_top(),
+            advance_px: (slot.metrics().horiAdvance >> 6) as f32 / self.device_scale,
+            pixels,
+        })
     }
 
     /// Return the glyph's logical horizontal advance without rendering it.
@@ -259,26 +237,17 @@ impl OpenedFont {
         &self,
         glyph: ResolvedGlyphId,
     ) -> Result<f32, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            self._face
-                .load_glyph(glyph.get(), LoadFlag::DEFAULT)
-                .map_err(|error| FontMaterializationError::LoadGlyph {
-                    glyph_id: glyph.get(),
-                    reason: error.to_string(),
-                })?;
-            Ok((self._face.glyph().metrics().horiAdvance >> 6) as f32 / self.device_scale)
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = glyph;
-            Err(FontMaterializationError::BackendUnavailable)
-        }
+        self.face
+            .load_glyph(glyph.get(), LoadFlag::DEFAULT)
+            .map_err(|error| FontMaterializationError::LoadGlyph {
+                glyph_id: glyph.get(),
+                reason: error.to_string(),
+            })?;
+        Ok((self.face.glyph().metrics().horiAdvance >> 6) as f32 / self.device_scale)
     }
 }
 
 pub struct FontMaterializer {
-    #[cfg(any(windows, target_os = "linux"))]
     library: Library,
 }
 
@@ -290,32 +259,17 @@ impl std::fmt::Debug for FontMaterializer {
 
 impl FontMaterializer {
     pub fn new() -> Result<Self, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            let library = Library::init().map_err(|error| {
-                FontMaterializationError::BackendInitialization(error.to_string())
-            })?;
-            Ok(Self { library })
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            Err(FontMaterializationError::BackendUnavailable)
-        }
+        let library = Library::init().map_err(|error| {
+            FontMaterializationError::BackendInitialization(error.to_string())
+        })?;
+        Ok(Self { library })
     }
 
     pub fn open(
         &self,
         request: FontOpenRequest<'_>,
     ) -> Result<OpenedFont, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            self.open_freetype_bitmap(request)
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = request;
-            Err(FontMaterializationError::BackendUnavailable)
-        }
+        self.open_freetype_bitmap(request)
     }
 
     /// Inspect whether the exact file asset has a native realization this
@@ -324,35 +278,27 @@ impl FontMaterializer {
         &self,
         asset: &FontFileAsset,
     ) -> Result<FontCapability, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            let path = asset.path();
-            let face = self
-                .library
-                .new_face(path, asset.face_index() as isize)
-                .map_err(|error| FontMaterializationError::OpenFace {
-                    path: path.to_owned(),
-                    reason: error.to_string(),
-                })?;
-            if face.is_scalable() || !face.has_fixed_sizes() || face.raw().num_fixed_sizes <= 0 {
-                return Err(FontMaterializationError::NotBitmapFace);
-            }
-            Ok(FontCapability::FreeTypeBitmap {
-                strikes: (0..face.raw().num_fixed_sizes as u32)
-                    .filter_map(|index| strike_at(&face, index).map(|strike| (index, strike)))
-                    .map(|(index, strike)| BitmapStrikeKey {
-                        index,
-                        x_ppem_26_6: ft_pos_i64(strike.x_ppem),
-                        y_ppem_26_6: ft_pos_i64(strike.y_ppem),
-                    })
-                    .collect(),
-            })
+        let path = asset.path();
+        let face = self
+            .library
+            .new_face(path, asset.face_index() as isize)
+            .map_err(|error| FontMaterializationError::OpenFace {
+                path: path.to_owned(),
+                reason: error.to_string(),
+            })?;
+        if face.is_scalable() || !face.has_fixed_sizes() || face.raw().num_fixed_sizes <= 0 {
+            return Err(FontMaterializationError::NotBitmapFace);
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = asset;
-            Err(FontMaterializationError::BackendUnavailable)
-        }
+        Ok(FontCapability::FreeTypeBitmap {
+            strikes: (0..face.raw().num_fixed_sizes as u32)
+                .filter_map(|index| strike_at(&face, index).map(|strike| (index, strike)))
+                .map(|(index, strike)| BitmapStrikeKey {
+                    index,
+                    x_ppem_26_6: ft_pos_i64(strike.x_ppem),
+                    y_ppem_26_6: ft_pos_i64(strike.y_ppem),
+                })
+                .collect(),
+        })
     }
 
     pub fn reopen(
@@ -360,57 +306,48 @@ impl FontMaterializer {
         request: FontOpenRequest<'_>,
         replay: FontReplay,
     ) -> Result<OpenedFont, FontMaterializationError> {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            let FontReplay::FreeTypeBitmap {
-                asset,
-                strike,
-                spacing,
-                ..
-            } = &replay
-            else {
-                return Err(FontMaterializationError::ReplayMethodMismatch);
-            };
-            if asset != request.asset {
-                return Err(FontMaterializationError::ReplayAssetMismatch);
-            }
-            let strike = *strike;
-            let request = FontOpenRequest {
-                spacing: *spacing,
-                ..request
-            };
-            let face = self.open_bitmap_face(request)?;
-            let recorded = strike_at(&face, strike.index)
-                .ok_or(FontMaterializationError::ReplayStrikeMismatch)?;
-            if ft_pos_i64(recorded.x_ppem) != strike.x_ppem_26_6
-                || ft_pos_i64(recorded.y_ppem) != strike.y_ppem_26_6
-            {
-                return Err(FontMaterializationError::ReplayStrikeMismatch);
-            }
-            face.select_size(strike.index as i32).map_err(|error| {
-                FontMaterializationError::SelectStrike {
-                    index: strike.index,
-                    reason: error.to_string(),
-                }
-            })?;
-            let size = face
-                .size_metrics()
-                .ok_or(FontMaterializationError::MissingSizeMetrics)?;
-            if i64::from(size.x_ppem) << 6 != strike.x_ppem_26_6
-                || i64::from(size.y_ppem) << 6 != strike.y_ppem_26_6
-            {
-                return Err(FontMaterializationError::ReplayStrikeMismatch);
-            }
-            Ok(opened_bitmap_font(request, face, replay, size))
+        let FontReplay::FreeTypeBitmap {
+            asset,
+            strike,
+            spacing,
+            ..
+        } = &replay
+        else {
+            return Err(FontMaterializationError::ReplayMethodMismatch);
+        };
+        if asset != request.asset {
+            return Err(FontMaterializationError::ReplayAssetMismatch);
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
+        let strike = *strike;
+        let request = FontOpenRequest {
+            spacing: *spacing,
+            ..request
+        };
+        let face = self.open_bitmap_face(request)?;
+        let recorded = strike_at(&face, strike.index)
+            .ok_or(FontMaterializationError::ReplayStrikeMismatch)?;
+        if ft_pos_i64(recorded.x_ppem) != strike.x_ppem_26_6
+            || ft_pos_i64(recorded.y_ppem) != strike.y_ppem_26_6
         {
-            let _ = (request, replay);
-            Err(FontMaterializationError::BackendUnavailable)
+            return Err(FontMaterializationError::ReplayStrikeMismatch);
         }
+        face.select_size(strike.index as i32).map_err(|error| {
+            FontMaterializationError::SelectStrike {
+                index: strike.index,
+                reason: error.to_string(),
+            }
+        })?;
+        let size = face
+            .size_metrics()
+            .ok_or(FontMaterializationError::MissingSizeMetrics)?;
+        if i64::from(size.x_ppem) << 6 != strike.x_ppem_26_6
+            || i64::from(size.y_ppem) << 6 != strike.y_ppem_26_6
+        {
+            return Err(FontMaterializationError::ReplayStrikeMismatch);
+        }
+        Ok(opened_bitmap_font(request, face, replay, size))
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
     fn open_freetype_bitmap(
         &self,
         request: FontOpenRequest<'_>,
@@ -479,7 +416,6 @@ impl FontMaterializer {
         Ok(opened_bitmap_font(request, face, replay, size))
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
     fn open_bitmap_face(
         &self,
         request: FontOpenRequest<'_>,
@@ -502,7 +438,6 @@ impl FontMaterializer {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn opened_bitmap_font(
     request: FontOpenRequest<'_>,
     face: freetype::Face,
@@ -557,11 +492,10 @@ fn opened_bitmap_font(
             average_advance_px,
         },
         device_scale: scale,
-        _face: face,
+        face,
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn fixed_font_horizontal_metrics(
     spacing: FixedFontSpacing,
     max_advance_px: f32,
@@ -574,7 +508,6 @@ fn fixed_font_horizontal_metrics(
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn bitmap_line_height(
     ascent_px: f32,
     descent_px: f32,
@@ -587,11 +520,10 @@ fn bitmap_line_height(
     }
 }
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(test)]
 #[path = "tests/lib_test.rs"]
 mod lib_test;
 
-#[cfg(any(windows, target_os = "linux"))]
 fn normalize_mono_bitmap(
     bitmap: &freetype::Bitmap,
     width: u32,
@@ -610,7 +542,6 @@ fn normalize_mono_bitmap(
     Ok(mask)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn normalize_gray_bitmap(
     bitmap: &freetype::Bitmap,
     width: u32,
@@ -628,7 +559,6 @@ fn normalize_gray_bitmap(
     Ok(mask)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn normalize_packed_gray_bitmap(
     bitmap: &freetype::Bitmap,
     width: u32,
@@ -651,7 +581,6 @@ fn normalize_packed_gray_bitmap(
     Ok(mask)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn normalize_bgra_bitmap(
     bitmap: &freetype::Bitmap,
     width: u32,
@@ -665,7 +594,6 @@ fn normalize_bgra_bitmap(
     Ok(pixels)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn bitmap_row(
     bitmap: &freetype::Bitmap,
     y: usize,
@@ -673,29 +601,39 @@ fn bitmap_row(
 ) -> Result<&[u8], FontMaterializationError> {
     let pitch = bitmap.pitch();
     let row_bytes = pitch.unsigned_abs() as usize;
+    let rows = usize::try_from(bitmap.rows()).unwrap_or(0);
     let buffer = bitmap.raw().buffer;
-    if buffer.is_null() || row_bytes < required_len {
+    if buffer.is_null() || row_bytes < required_len || y >= rows {
         return Err(FontMaterializationError::MalformedBitmapBuffer {
             expected: required_len,
             actual: row_bytes,
         });
     }
-    // FreeType defines `pitch` as the signed offset from one logical row to
-    // the next. The buffer remains valid until the next face operation.
-    Ok(unsafe {
-        std::slice::from_raw_parts(buffer.offset(y as isize * pitch as isize), required_len)
-    })
+    // FreeType's buffer holds `rows` rows of |pitch| bytes; a negative pitch
+    // stores them bottom row first (ftbitmap.c's flow handling).
+    let row_start = if pitch >= 0 { y } else { rows - 1 - y } * row_bytes;
+    // SAFETY: `y < rows` and `required_len <= row_bytes`, so the slice lies
+    // inside the `rows * row_bytes` block FreeType owns for this bitmap, which
+    // stays valid and unwritten while `bitmap` borrows its face's slot.
+    Ok(unsafe { std::slice::from_raw_parts(buffer.add(row_start), required_len) })
 }
 
-#[cfg(any(windows, target_os = "linux"))]
-fn selected_strike_index(face: &freetype::Face, x_ppem: u16, y_ppem: u16) -> Option<u32> {
+/// The face's fixed strikes: FreeType's `available_sizes` array.
+fn strikes(face: &freetype::Face) -> &[freetype::ffi::FT_Bitmap_Size] {
     let raw = face.raw();
-    if raw.num_fixed_sizes <= 0 || raw.available_sizes.is_null() {
-        return None;
+    let Ok(count) = usize::try_from(raw.num_fixed_sizes) else {
+        return &[];
+    };
+    if count == 0 || raw.available_sizes.is_null() {
+        return &[];
     }
-    let strikes =
-        unsafe { std::slice::from_raw_parts(raw.available_sizes, raw.num_fixed_sizes as usize) };
-    strikes
+    // SAFETY: FreeType sets `available_sizes` to an array of
+    // `num_fixed_sizes` entries that lives, unchanged, as long as the face.
+    unsafe { std::slice::from_raw_parts(raw.available_sizes, count) }
+}
+
+fn selected_strike_index(face: &freetype::Face, x_ppem: u16, y_ppem: u16) -> Option<u32> {
+    strikes(face)
         .iter()
         .position(|strike| {
             ft_pos_i64(strike.x_ppem) == i64::from(x_ppem) << 6
@@ -704,15 +642,8 @@ fn selected_strike_index(face: &freetype::Face, x_ppem: u16, y_ppem: u16) -> Opt
         .map(|index| index as u32)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn closest_strike_index(face: &freetype::Face, target_ppem_26_6: i64) -> Option<u32> {
-    let raw = face.raw();
-    if raw.num_fixed_sizes <= 0 || raw.available_sizes.is_null() {
-        return None;
-    }
-    let strikes =
-        unsafe { std::slice::from_raw_parts(raw.available_sizes, raw.num_fixed_sizes as usize) };
-    strikes
+    strikes(face)
         .iter()
         .enumerate()
         .min_by_key(|(index, strike)| {
@@ -725,35 +656,20 @@ fn closest_strike_index(face: &freetype::Face, target_ppem_26_6: i64) -> Option<
         .map(|(index, _)| index as u32)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn exact_strike_index(face: &freetype::Face, target_ppem_26_6: i64) -> Option<u32> {
-    let raw = face.raw();
-    if raw.num_fixed_sizes <= 0 || raw.available_sizes.is_null() {
-        return None;
-    }
-    let strikes =
-        unsafe { std::slice::from_raw_parts(raw.available_sizes, raw.num_fixed_sizes as usize) };
-    strikes
+    strikes(face)
         .iter()
         .position(|strike| ft_pos_i64(strike.y_ppem) == target_ppem_26_6)
         .map(|index| index as u32)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn ft_pos_i64(value: freetype::ffi::FT_Pos) -> i64 {
     std::cfg_select! {
-        any(windows, target_pointer_width = "32") => i64::from(value),
+        target_pointer_width = "32" => i64::from(value),
         _ => value,
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
 fn strike_at(face: &freetype::Face, index: u32) -> Option<freetype::ffi::FT_Bitmap_Size> {
-    let raw = face.raw();
-    if raw.num_fixed_sizes <= 0 || raw.available_sizes.is_null() {
-        return None;
-    }
-    let strikes =
-        unsafe { std::slice::from_raw_parts(raw.available_sizes, raw.num_fixed_sizes as usize) };
-    strikes.get(index as usize).copied()
+    strikes(face).get(index as usize).copied()
 }

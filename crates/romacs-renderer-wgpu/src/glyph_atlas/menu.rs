@@ -34,7 +34,7 @@ impl WgpuGlyphAtlas {
 
 impl WgpuGlyphAtlas {
     /// Replay a layout-resolved heading without selecting fonts or measuring text.
-    pub fn menu_label_atlas(
+    pub(crate) fn menu_label_atlas(
         &mut self,
         label: &romacs_display_protocol::frame_chrome::ResolvedMenuLabel,
         device: &wgpu::Device,

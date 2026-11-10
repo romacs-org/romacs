@@ -61,7 +61,7 @@ impl Vm {
     /// write, so the writes keep their order.
     pub(crate) fn write_from_native(&mut self, write: NativeWrite) -> std::result::Result<(), Fault> {
         let heard = self.variable_trapped(self.indirect_variable(write.slot));
-        if !self.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended_code.len()) {
+        if !self.deferred_writes.is_empty() || (heard && self.running_engines > self.suspended.len()) {
             let buffer = self.slots[self.buffer_slot].value;
             self.deferred_writes.push((write, buffer));
             return Ok(());
@@ -193,9 +193,9 @@ impl Vm {
         // A watcher may collect only for a writer that rooted its own frame
         // (an engine write, `threaded::watched_write'); any other native
         // writer may keep Values in locals, so it holds collection.
-        let _unwind = self.unwind_mark();
         // GNU untraps the variable while its watchers run (no recursion),
-        // and traps it again as they end; a panic out of them, at the mark.
+        // and traps it again as they end; a panic out of them, by whatever
+        // catches it (`Vm::catching`).
         self.trapped.remove(&base);
         self.retrap.push(base);
         let held = usize::from(!self.rooted_write);

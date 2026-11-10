@@ -317,36 +317,6 @@ impl Host {
         self.shrink(id);
     }
 
-    /// The anchor boxes `layout2` published for the window of a placement.
-    pub fn set_anchors(
-        &mut self,
-        id: SceneId,
-        placement: PlacementId,
-        anchors: BTreeMap<AnchorId, Rect>,
-    ) {
-        if let Some(p) = self
-            .entries
-            .get_mut(&id)
-            .and_then(|e| e.placements.get_mut(&placement))
-            && p.anchors != anchors
-        {
-            p.anchors = anchors;
-            p.solved = None;
-        }
-    }
-
-    /// Font state changed (face, `text-scale`, default font, DPI): every
-    /// text measurement is stale.
-    pub fn fonts_changed(&mut self) {
-        for p in self
-            .entries
-            .values_mut()
-            .flat_map(|e| e.placements.values_mut())
-        {
-            p.solved = None;
-        }
-    }
-
     /// The solved layout of a placement, cached per revision.
     pub fn layout(
         &mut self,
@@ -443,14 +413,6 @@ impl Host {
             .filter(|(_, e)| e.scene.animating())
             .map(|(id, _)| *id)
             .collect()
-    }
-
-    /// `romacs-animation` changed: motions it no longer allows settle now.
-    pub fn set_policy(&mut self, policy: Policy) {
-        self.policy = policy;
-        for e in self.entries.values_mut() {
-            e.scene = e.scene.retime(policy);
-        }
     }
 
     /// The display was reset: every frame and GPU object is gone. Frames'

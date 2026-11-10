@@ -388,6 +388,15 @@ impl Vm {
         };
         Ok(Some((self.root_frame(&[file]), noerror, must_suffix)))
     }
+    /// A top-level form of PATH at LINE has finished as its STEP. A session's
+    /// own file's forms are its steps; a library's are inside the step that
+    /// loaded it.
+    fn form_done(&mut self, (step, path, line): (usize, &Path, usize)) {
+        self.loader.step_ok(step);
+        if self.loader.active_depth() == 1 {
+            crate::flight::step(|| format!("form {}:{line}", path.display()), || self.flight_step_fingerprint());
+        }
+    }
     /// `require` after its load of PATH, the empty path when none was found.
     fn require_finished(&mut self, args: &RootFrame, out: Out<'_>, path: &Path) -> Result<()> {
         let feature = self.rooted(args, 0);
@@ -834,7 +843,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
         let evaluated = m.leaf((evaluated, &form, out), |vm, (evaluated, form, out)| vm.layer_form_finished(evaluated, form, out));
         drop(site);
         match evaluated {
-            Ok(()) => m.leaf(step, |vm, step| vm.loader.step_ok(step)),
+            Ok(()) => m.leaf((step, path, line), Vm::form_done),
             Err(e) => {
                 m.leaf((step, e.clone(), form_source.to_string()), |vm, (step, error, source)| vm.loader.step_failed(step, error, source));
                 return Err(format!(
@@ -908,7 +917,7 @@ fn run_compiled_units<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Pat
         });
         let evaluated = entry.and_then(|entry| crate::threaded::run_function(m, gc.by_ref(), entry, (entry, out), finished_form));
         match evaluated {
-            Ok(()) => m.leaf(step, |vm, step| vm.loader.step_ok(step)),
+            Ok(()) => m.leaf((step, path, line), Vm::form_done),
             Err(e) => {
                 // The form's text, for the report, from the source.
                 let text = crate::host::read_file(path).ok()

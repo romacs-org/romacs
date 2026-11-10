@@ -428,7 +428,8 @@ fn a_bar_s_box_is_one_run_and_a_segment_s_its_own() {
         cells.sort_by(|a, b| a.0.total_cmp(&b.0));
         cells
     };
-    let shape = |cells: &[(f32, char, BoxVerticalEdges, f32, f32, Option<f32>)]| cells.iter().map(|c| (c.1, c.2)).collect::<Vec<_>>();
+    type Cell = (f32, char, BoxVerticalEdges, f32, f32, Option<f32>);
+    let shape = |cells: &[Cell]| cells.iter().map(|c| (c.1, c.2)).collect::<Vec<_>>();
     // The band's box over a segment with its own: one baseline, and every
     // cell fills the band, the box's lines on its edges.
     let own = vec![FaceRun { bytes: 0..2, face: FaceHandle(1) }];

@@ -143,7 +143,7 @@ impl Leaf<'_> {
         let index = buffer.index(0).unwrap() - 1;
         if kill_permanent == reset { self.vm.reset_forwarded_visit(index); }
         let case_tables = self.standard_case_roots()?;
-        match &mut self.vm.objects[index] {
+        match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
             Object::ByteBuffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }
             _ => unreachable!(),

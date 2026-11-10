@@ -263,7 +263,7 @@ fn underlines_go_where_gnu_puts_them_and_a_band_s_face_fills_it() {
     // Half the descent would be above the minimum offset of 7.
     assert_eq!(face(2).underline_placement, UnderlinePosition::FontMetric { offset_from_baseline: 7 });
     // The mode line's rest: a stretch to the band's edge in its face.
-    let rest = frame.glyphs.iter().filter_map(|g| match g { FrameGlyph::Stretch { x, width, face_id, .. } => Some((*x, *width, *face_id)), _ => None }).last().unwrap();
+    let rest = frame.glyphs.iter().filter_map(|g| match g { FrameGlyph::Stretch { x, width, face_id, .. } => Some((*x, *width, *face_id)), _ => None }).next_back().unwrap();
     assert_eq!(rest.0 + rest.1, 400.0);
     assert!(frame.faces[&rest.2].attributes.contains(romacs_display_protocol::FaceAttributes::OVERLINE));
 }
@@ -470,7 +470,7 @@ fn tabs_and_bands_keep_their_box_runs_whole() {
     let band: Vec<_> = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).filter_map(|g| g.box_vertical_edges()).collect();
     assert_eq!((band.first(), band.last()), (Some(&BoxVerticalEdges::Left), Some(&BoxVerticalEdges::Right)));
     // The closing glyph's cell ends at the band's edge, where its border shows.
-    let last = frame.glyphs.iter().filter(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).last().unwrap();
+    let last = frame.glyphs.iter().rfind(|g| g.row_role() == Some(GlyphRowRole::ModeLine)).unwrap();
     let (x, width) = match last { FrameGlyph::Char { x, width, .. } => (*x, *width), _ => panic!("{last:?}") };
     assert_eq!(x + width, 400.0);
     // A segment with a box outside its text between plain characters.

@@ -563,7 +563,7 @@ impl Vm {
             // ByteBuffer::replace moves the saved positions as
             // adjust_markers_for_replace does.
             let (a, z) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
-            let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+            let Object::ByteBuffer(b) = self.objects.entry_mut(index) else { unreachable!("unibyte buffer") };
             b.replace(a..z, &bytes).map_err(Fault::Error)?;
             self.evaporate_unibyte(buffer, a..ByteOffset(a.0 + bytes.len())).map_err(Fault::Error)?;
             self.display_state.version += 1;
@@ -599,7 +599,7 @@ impl Vm {
     fn set_change_point(&mut self, buffer: Value, position: i64) -> Faulty<()> {
         let at = self.change_byte(buffer, position)?;
         let index = buffer.index(0).map_err(Fault::Error)? - 1;
-        match &mut self.objects[index] {
+        match self.objects.entry_mut(index) {
             Object::Buffer(b) => b.point = at,
             Object::ByteBuffer(b) => b.point = at,
             _ => return Err(Fault::Error("buffer required".into())),

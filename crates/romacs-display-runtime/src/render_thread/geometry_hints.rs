@@ -63,6 +63,8 @@ fn apply_x11_geometry_hints(window: &dyn Window, geometry_hints: GuiFrameGeometr
         RawDisplayHandle::Xcb(_) => None,
         _ => return,
     }
+    // SAFETY: XOpenDisplay(NULL) opens the default display and has no
+    // precondition; a null result is handled.
     .or_else(|| unsafe {
         let display_ptr = (xlib.XOpenDisplay)(ptr::null());
         if display_ptr.is_null() {
@@ -78,6 +80,9 @@ fn apply_x11_geometry_hints(window: &dyn Window, geometry_hints: GuiFrameGeometr
         return;
     };
 
+    // SAFETY: DISPLAY_PTR is a live connection (the window's own or one opened
+    // above), XWINDOW is that display's window, and XSizeHints is a plain C
+    // struct for which all-zero is a valid value.
     unsafe {
         let mut size_hints: xlib::XSizeHints = std::mem::zeroed();
         let mut supplied_return: libc::c_long = 0;

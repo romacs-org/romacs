@@ -31,7 +31,8 @@ fn frame_default_resolved_font_is_one_coherent_binding_lookup() {
     frame.faces.insert(default_face.id, default_face);
     frame.fonts.insert(
         font_id,
-        ResolvedFont { underline: Default::default(),
+        ResolvedFont {
+            underline: Default::default(),
             id: font_id,
             identity: ResolvedFontIdentity::from_file("/test-fixtures/default-font.ttf", 0, None),
             replay: FontReplay::Swash {
@@ -1050,50 +1051,6 @@ fn add_window_info_minibuffer() {
 }
 
 #[test]
-fn derive_transition_hint_reports_buffer_content_replacement() {
-    let prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let curr = make_window_info(1, 200, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-
-    let hint = derive_buffer_replacement_hint(&prev, &curr).unwrap();
-    assert_eq!(
-        hint,
-        ContentTransitionHint::BufferReplaced {
-            target: BufferTransitionTarget::Window {
-                window_id: DisplayWindowId::new(1),
-                region: curr.geometry.buffer_viewport().unwrap(),
-            },
-            intent: ContentTransitionIntent::Replace,
-        }
-    );
-}
-
-#[test]
-fn derive_transition_hint_requires_complete_previous_viewport_geometry() {
-    let mut prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let curr = make_window_info(1, 200, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    prev.geometry = PresentedWindowGeometry::Skipped {
-        cell_origin: PresentedCellOrigin::default(),
-        outer: prev.bounds,
-    };
-
-    assert_eq!(derive_buffer_replacement_hint(&prev, &curr), None);
-}
-
-#[test]
-fn derive_transition_hint_rejects_changed_viewport_inside_stable_outer_bounds() {
-    let prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let mut curr = make_window_info(1, 200, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let PresentedWindowGeometry::Complete { regions, .. } = &mut curr.geometry else {
-        panic!("test window has complete geometry");
-    };
-    regions.text_body.y += 18.0;
-    regions.text_body.height -= 18.0;
-    regions.tab_line = Some(Rect::new(0.0, 0.0, 800.0, 18.0));
-
-    assert_eq!(derive_buffer_replacement_hint(&prev, &curr), None);
-}
-
-#[test]
 fn presented_window_regions_expose_only_the_buffer_viewport() {
     let regions = PresentedWindowRegions {
         outer: Rect::new(10.0, 20.0, 240.0, 180.0),
@@ -1118,35 +1075,6 @@ fn presented_window_regions_expose_only_the_buffer_viewport() {
         .expect("complete text geometry has a buffer viewport");
 
     assert_eq!(viewport.bounds(), Rect::new(26.0, 50.0, 192.0, 110.0));
-}
-
-#[test]
-fn derive_transition_hint_skips_window_geometry_change() {
-    let prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 664.0, 646.0));
-    let curr = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 1100.0, 760.0));
-
-    assert_eq!(derive_buffer_replacement_hint(&prev, &curr), None);
-}
-
-#[test]
-fn a_viewport_scroll_is_no_longer_a_producer_hint() {
-    // Scrolling within the same buffer produces no hint at all now: how far a
-    // viewport moved is measured by the compositor from anchor rows, not
-    // declared here from a character count. Only a change of content identity
-    // is still the producer's to report.
-    let prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let curr = make_window_info(1, 100, 42, Rect::new(0.0, 0.0, 800.0, 600.0));
-
-    assert_eq!(derive_buffer_replacement_hint(&prev, &curr), None);
-}
-
-#[test]
-fn derive_transition_hint_skips_minibuffer() {
-    let prev = make_window_info(1, 100, 10, Rect::new(0.0, 0.0, 800.0, 600.0));
-    let mut curr = make_window_info(1, 100, 20, Rect::new(0.0, 0.0, 800.0, 600.0));
-    curr.is_minibuffer = true;
-
-    assert!(derive_buffer_replacement_hint(&prev, &curr).is_none());
 }
 
 // =======================================================================
@@ -2043,31 +1971,6 @@ fn stipple_builtin_named_bitmaps_match_x11() {
         Some((4, 2))
     );
     assert_eq!(StipplePattern::builtin("not-a-bitmap"), None);
-}
-
-#[test]
-fn stipple_from_xbm_parses_hex_and_char_token_forms() {
-    // Standard X11 form (hex tokens).
-    let hex = "#define g_width 4\n#define g_height 4\n\
-               static char g_bits[] = {\n   0x01, 0x00, 0x04, 0x00};\n";
-    assert_eq!(
-        StipplePattern::from_xbm_source(hex),
-        Some(StipplePattern {
-            width: 4,
-            height: 4,
-            bits: vec![0x01, 0x00, 0x04, 0x00]
-        })
-    );
-    // GNU src form (C char escapes) must parse identically.
-    let chars = "#define g_width 4\n#define g_height 4\n\
-                 static char g_bits[] = {\n  '\\x01','\\x00','\\x04','\\x00'};\n";
-    assert_eq!(
-        StipplePattern::from_xbm_source(chars),
-        StipplePattern::from_xbm_source(hex)
-    );
-    // Too few bytes for the declared size => rejected.
-    let short = "#define g_width 8\n#define g_height 4\nstatic char g_bits[] = { 0x01 };\n";
-    assert_eq!(StipplePattern::from_xbm_source(short), None);
 }
 
 /// The renderer reads `line_number_field` off a `WindowInfo` that reached it

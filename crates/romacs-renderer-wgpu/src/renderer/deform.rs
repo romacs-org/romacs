@@ -11,13 +11,13 @@
 use std::f32::consts::PI;
 
 /// Simple 2D hash-based noise (deterministic, no external dependency).
-pub fn noise2d(x: f32, y: f32) -> f32 {
+pub(crate) fn noise2d(x: f32, y: f32) -> f32 {
     let n = (x * 12.9898 + y * 78.233).sin() * 43_758.547;
     n.fract()
 }
 
 /// Smooth noise with bilinear interpolation.
-pub fn smooth_noise2d(x: f32, y: f32) -> f32 {
+pub(crate) fn smooth_noise2d(x: f32, y: f32) -> f32 {
     let ix = x.floor() as i32;
     let iy = y.floor() as i32;
     let fx = x.fract();
@@ -42,7 +42,7 @@ pub fn smooth_noise2d(x: f32, y: f32) -> f32 {
 ///
 /// Returns (x_offset, y_offset) for a given strip at normalized position `t`.
 /// `eased_t` is the overall animation progress, `direction` is ±1.
-pub fn wobbly_deform(
+pub(crate) fn wobbly_deform(
     _strip: usize,
     _num_strips: usize,
     t: f32,
@@ -60,7 +60,7 @@ pub fn wobbly_deform(
 }
 
 /// Compute parameters for the Liquid/fluid effect.
-pub fn liquid_deform(
+pub(crate) fn liquid_deform(
     _strip: usize,
     _num_strips: usize,
     t: f32,
@@ -80,7 +80,7 @@ pub fn liquid_deform(
 ///
 /// Returns (x_offset, y_offset, alpha) where alpha handles the
 /// backside darkening of the curled page.
-pub fn page_curl_transform(t: f32, curl_progress: f32, bounds_h: f32) -> (f32, f32, f32) {
+pub(crate) fn page_curl_transform(t: f32, curl_progress: f32, bounds_h: f32) -> (f32, f32, f32) {
     // The curl line moves from bottom to top as progress increases
     let curl_y = 1.0 - curl_progress;
 

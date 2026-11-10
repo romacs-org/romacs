@@ -747,29 +747,88 @@ impl Program {
         }
     }
 }
-/// A suspended engine's lowered code and entry caches, visited in place by
-/// the collector while a nested call runs (`Vm::suspended_code`): copying
-/// them into the root list cost a pass over all code per `read' call.
-pub(super) struct SuspendedCode {
-    code: *mut Vec<Vec<Inst>>,
-    entries: *mut Vec<EntryCache>,
+/// A suspended engine's own state, moved here while a nested call or a
+/// collection runs (`Vm::suspended`) and moved back as it resumes. The Vm owns
+/// it for that long, so the collector reads and rewrites it in place, with no
+/// pointer into the engine's frame and no copy. The instruction and entry
+/// buffers themselves do not move, so the addresses a suspended handler holds
+/// stay good; its registers stay in `Vm::stack` or `Vm::suspended_stacks`.
+pub(super) struct Suspended {
+    code: Vec<Vec<Inst>>,
+    entries: Vec<EntryCache>,
+    rest: RestStack,
+    apply_function: Option<Value>,
+    controls: Vec<Control>,
+    escape: Option<Escape>,
+    frames: Vec<Frame>,
+    /// Where its registers are: `Vm::suspended_stacks[file]`, or `Vm::stack`
+    /// until something sets them aside.
+    file: usize,
+    function: usize,
+    regs: *mut Value,
 }
-impl SuspendedCode {
-    /// SAFETY: as for `visit_values`.
-    pub(super) unsafe fn code_len(&self) -> usize {
-        // SAFETY: the function's contract: the suspended engine's code is in place.
-        unsafe { (*self.code).iter().map(Vec::len).sum() }
+impl Suspended {
+    pub(super) fn code_len(&self) -> usize {
+        self.code.iter().map(Vec::len).sum()
     }
-    /// SAFETY: the engine owning both vectors stays suspended, neither moved
-    /// nor touched, until this reference is popped.
-    pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
-        // SAFETY: the function's contract: the suspended engine's code is in place.
-        unsafe {
-            visit_code(&mut *self.code, visit);
-            for entry in &mut *self.entries {
-                visit(&mut entry.target);
-            }
+    /// The Values its code and entry caches hold, each instruction read on a
+    /// copy: what a mark's threads may do while they work.
+    pub(super) fn code_values(&self, value: &mut impl FnMut(Value)) {
+        for inst in self.code.iter().flatten() {
+            let mut copy = *inst;
+            copy.visit_values(&mut |v| value(*v));
         }
+        for entry in &self.entries {
+            value(entry.target);
+        }
+    }
+    /// Whether a cleanup of this engine is running: an escape's or a normal
+    /// exit's, its record not yet popped (`Op::ResumeExit`).
+    pub(super) fn in_cleanup(&self) -> bool {
+        self.controls.iter().any(Control::is_cleanup)
+    }
+    /// Every Value but its code's and entry caches'.
+    pub(super) fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.rest.visit_values(visit);
+        if let Some(function) = &mut self.apply_function { visit(function); }
+        for control in &mut self.controls {
+            control.visit_values(visit);
+        }
+        if let Some(exit) = &mut self.escape {
+            exit.visit_values(visit);
+        }
+    }
+    /// Every Value it holds, for a compaction's rewrite.
+    pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        visit_code(&mut self.code, visit);
+        for entry in &mut self.entries {
+            visit(&mut entry.target);
+        }
+        self.visit_state_values(visit);
+    }
+}
+impl Vm {
+    /// Every suspended engine's activations, oldest engine first, as Lisp data:
+    /// ((ENGINE KIND FUNCTION FILE START)...). KIND is `function` or
+    /// `continuation` (`K_CODE`) for those its frames saved; the one it was in keeps
+    /// no instruction here to say which, so it is `running`, and its function is
+    /// its caller's in a continuation. FILE and START say where its registers are.
+    pub(crate) fn suspended_activations(&mut self) -> Value {
+        let number = |n: usize| Value::integer(i64::try_from(n).expect("an index fits i64")).expect("an index fits a fixnum");
+        let [function, continuation, running] = ["function", "continuation", "running"].map(|kind| self.intern(kind));
+        let mut rows = Vec::new();
+        for (engine, record) in self.suspended.iter().enumerate() {
+            let base = self.suspended_stacks.get(record.file).unwrap_or(&self.stack).as_ptr() as usize;
+            let start = |regs: *mut Value| (regs as usize).wrapping_sub(base) / std::mem::size_of::<Value>();
+            let row = |kind, code: usize, regs| [number(engine), kind, number(code), number(record.file), number(start(regs))];
+            for frame in &record.frames {
+                let kind = if K_CODE.as_ptr_range().contains(&frame.pc) { continuation } else { function };
+                rows.push(row(kind, frame.function as usize, frame.regs));
+            }
+            rows.push(row(running, record.function, record.regs));
+        }
+        let rows: Vec<Value> = rows.iter().map(|row| self.list_value(row)).collect();
+        self.list_value(&rows)
     }
 }
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
@@ -837,6 +896,11 @@ enum ControlKind {
         exit: Escape,
         diagnostic: Option<String>,
     },
+}
+impl Control {
+    fn is_cleanup(&self) -> bool {
+        matches!(self.kind, ControlKind::Resume { .. })
+    }
 }
 struct Control {
     kind: ControlKind,
@@ -1021,8 +1085,6 @@ fn unrouted(e: &mut Engine<'_>, original: Option<&str>) -> Escape {
 #[inline]
 fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> {
     let control = e.controls.pop().unwrap();
-    // A cleanup an escape from it leaves unfinished.
-    if matches!(control.kind, ControlKind::Resume { .. }) { e.vm.aftermath_held -= 1; }
     let matches = match (&control.kind, e.escape.as_ref().expect("a routed escape")) {
         (ControlKind::Protect { .. }, _) => true,
         (ControlKind::Catch(tag), Escape::Throw(wanted, _)) => {
@@ -1040,7 +1102,6 @@ fn land(e: &mut Engine<'_>, original: &Option<String>) -> Option<(usize, bool)> 
     match control.kind {
         ControlKind::Protect { end } => {
             // Its cleanup runs until `Op::ResumeExit' pops the record.
-            e.vm.aftermath_held += 1;
             e.controls.push(Control {
                 kind: ControlKind::Resume {
                     exit: escape,
@@ -1162,13 +1223,13 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
     if m.leaf((), |e, ()| no_catch(e)) && !prepare_signal(&mut m, gc.by_ref(), false, None) {
         m.leaf((), |e, ()| if let Some(Escape::Error { object, .. }) = e.escape { e.vm.thrown_no_catch.push(object) });
     }
-    // From here routing holds aftermath (`Vm::aftermath_held'; the driver
+    // From here routing holds aftermath (`Vm::unwinding`; the driver
     // gives it back): the watchers its restores run, and the hooks and
     // handlers it calls while unwinding, start none. The signal-time calls
     // above come before any control is popped, so an escape from them only
     // replaces the signal, and a debugger they enter holds nothing back.
     m.leaf((), |e, ()| {
-        e.vm.aftermath_held += 1;
+        e.vm.unwinding += 1;
         leave_native(e);
         e.apply_function = None;
         if let Some(mark) = e.apply_mark.take() { e.vm.trace_leave(mark); }
@@ -1321,17 +1382,19 @@ pub(super) struct Engine<'a> {
     resume: Option<(*mut Value, *const Inst)>,
 }
 impl Engine<'_> {
+    fn in_cleanup(&self) -> bool {
+        self.controls.iter().any(Control::is_cleanup)
+    }
+    /// `Vm::safe_runner` from this running engine, its own cleanups included.
+    fn safe_runner(&mut self) -> Option<Value> {
+        if self.in_cleanup() { None } else { self.vm.safe_runner(1) }
+    }
     #[cfg(test)]
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit_code(&mut self.code, visit);
         for entry in &mut self.entries {
             visit(&mut entry.target);
         }
-        self.visit_state_values(visit);
-    }
-    /// Every Value but the code and entry caches, which `lend`'s suspension
-    /// hands to the collector in place.
-    fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.rest.visit_values(visit);
         if let Some(function) = &mut self.apply_function { visit(function); }
         for control in &mut self.controls {
@@ -1423,7 +1486,6 @@ impl Vm {
     /// pointers). FUNCTION and ARGS are rooted in the trampoline's registers;
     /// the caller keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
-        let _unwind = self.unwind_mark();
         // Compiling a trampoline allocates nothing that can collect.
         let trampoline = self.reader_trampoline(args.len())?;
         let registers: Vec<Value> = if args.len() <= TRAMPOLINE_ARITY {
@@ -1541,7 +1603,6 @@ pub(super) fn execute(vm: &mut Vm, function: usize) -> Result<Value> {
     execute_args(vm, function, &[])
 }
 pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Value> {
-    let _unwind = vm.unwind_mark();
     // Native reentry (eval/load/macro expansion) shares the Lisp budget, but
     // receives another native stack segment before Rust can exhaust it.
     stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
@@ -1649,7 +1710,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // This engine holds collection until it suspends; a writer's rooted
     // watcher notification does not extend into it.
     engine.vm.running_engines += 1;
-    let held = engine.vm.aftermath_held;
     let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
     if engine.vm.stress_due() && engine.vm.may_collect(1) {
         orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), stress_collect, done);
@@ -1680,7 +1740,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         // Routing holds aftermath once it starts unwinding (`route_escape'
         // takes the hold, this gives it back).
         let routed = orchestrate(Eng::lend(&mut engine, gc.by_ref()), (), route_escape, routed);
-        engine.vm.aftermath_held -= 1;
+        engine.vm.unwinding -= 1;
         let Some((regs, pc, cleanup)) = routed else { break };
         // Region exits are strand wait points too: suspended payloads are
         // activation-owned roots before any cleanup instruction can allocate.
@@ -1719,11 +1779,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
     engine.vm.rooted_write = rooted_write;
-    // What this engine still held ends with it (an image failure, a normal
-    // exit crossing its activation). Aftermath it left pending is polled for
-    // soon by the engine it returns to.
-    debug_assert!(engine.error.is_some() || engine.fatal_image_failure || engine.vm.aftermath_held == held);
-    engine.vm.aftermath_held = held;
+    // Aftermath it left pending is polled for soon by the engine it returns to.
     engine.vm.collect_poll |= engine.vm.aftermath_pending();
     engine.vm.running_engines -= 1;
     match engine.error {
@@ -2216,7 +2272,7 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // test first: most polls find neither, and a handler landing is one.
     let runner = m.leaf((), |e, ()| {
         if !e.vm.aftermath_flagged() { return None; }
-        let runner = e.vm.safe_runner(1);
+        let runner = e.safe_runner();
         plain_runner(e.vm, runner)
     });
     if let Some(runner) = runner && !aftermath(&mut m, gc.by_ref(), runner) {
@@ -3420,13 +3476,9 @@ static K_CODE: [Inst; 3] = [k_inst(t2_call), k_inst(t2_resume), k_inst(ret)];
 fn k_count(v: Value) -> usize {
     v.integer_value().expect("continuation count register") as usize
 }
-/// Registers used by the continuation activation at `k`.
-/// # Safety
-/// K is a continuation activation's registers (`take_step`), its counts in
-/// place.
-unsafe fn k_width(k: *mut Value) -> usize {
-    // SAFETY: K as the function's contract.
-    unsafe { K_SAVED + k_count(*k.add(K_SAVED_N)) + k_count(*k.add(K_ARGS_N)) }
+/// Registers used by a continuation activation with these count registers.
+fn k_width(saved_n: Value, args_n: Value) -> usize {
+    K_SAVED + k_count(saved_n) + k_count(args_n)
 }
 /// Where a handler continues after a Step, as plain data in two words, the
 /// registers the current frame's: a step's argument vectors are owned and
@@ -3731,7 +3783,8 @@ unsafe fn take_step(
         } else {
             if !depth_room(e) { return Continue::Stop; }
             let width = if std::ptr::eq(pc, &K_CODE[0]) {
-                k_width(r)
+                // R is a continuation activation here, so its count registers hold fixnums.
+                k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N))
             } else {
                 e.vm.functions.get_unchecked(e.function).regs.max(1)
             };
@@ -4055,7 +4108,8 @@ unsafe fn t2_prepare_apply(
 /// # Safety
 /// R is the running engine's current frame (`Engine::regs`) and PC an
 /// instruction of the function running in it: the registers and constants
-/// its operands name lie in that frame and code, as lowering checked.
+/// its operands name lie in that frame and code, as lowering checked. R is a
+/// continuation activation: this is reached only from `t2_call` in `K_CODE`.
 unsafe fn t2_enter_closure(
     mut e: Eng<'_, '_>,
     r: *mut Value,
@@ -4097,7 +4151,7 @@ unsafe fn t2_enter_closure(
             enter_native(en, r, pc, target, start, argc);
             return closure_arity_error(en, function, argc);
         }
-        let new = r.add(k_width(r));
+        let new = r.add(k_width(*r.add(K_SAVED_N), *r.add(K_ARGS_N)));
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
         // As in the cached entry: read every argument, the backtrace's
@@ -4844,7 +4898,7 @@ fn collect_idle<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, pc: Pc<
     let collected = lend::collect(&mut m, gc.by_ref(), true);
     let runner = m.leaf((pc.a(), collected), |e, (dest, collected)| {
         e.set_reg(dest, if collected { Value::TRUE } else { Value::NIL });
-        let runner = if collected { e.vm.safe_runner(1) } else { None };
+        let runner = if collected { e.safe_runner() } else { None };
         plain_runner(e.vm, runner)
     });
     collected_then(&mut m, gc, pc, runner)
@@ -4859,20 +4913,18 @@ fn after_if(ok: bool, pc: Pc<'_>) -> Continue<'_> {
     if ok { Continue::After(pc) } else { Continue::Stop }
 }
 impl Vm {
-    /// One run of a collection's aftermath: RUNNER (`romacs--run-finalizers')
+    /// One run of a collection's aftermath: RUNNER (`romacs--run-finalizers`)
     /// through the trampoline, holding aftermath until it returns, so that an
     /// automatic collection inside it defers to its loop or a later safe
-    /// point, never nesting (a panic's hold: the caller's `UnwindMark'). With
+    /// point, never nesting. With
     /// PROPAGATE its escape is the caller's.
     pub(super) fn run_aftermath(&mut self, runner: Value, propagate: bool) -> Result<Value> {
         let trampoline = self.reader_trampoline(0)?;
-        self.aftermath_held += 1;
         self.aftermath_runs += 1;
         self.propagate_next = propagate;
         let outcome = execute_args(self, trampoline, &[runner]);
         self.propagate_next = false;
         self.aftermath_runs -= 1;
-        self.aftermath_held -= 1;
         outcome
     }
 }
@@ -5009,14 +5061,14 @@ numeric!(inc, numbers::op::ADD, |x: Value, _y: Value| (x.0 as i64)
 numeric!(dec, numbers::op::SUB, |x: Value, _y: Value| (x.0 as i64)
     .checked_sub(4)
     .map(|n| Value(n as u64)), |_, _| Value(5));
-fn boolean(holds: bool) -> Option<Value> {
-    Some(if holds { Value::TRUE } else { Value::NIL })
+fn truth(holds: bool) -> Value {
+    if holds { Value::TRUE } else { Value::NIL }
 }
-numeric!(less, numbers::op::LESS, |x: Value, y: Value| boolean((x.0 as i64) < (y.0 as i64)));
-numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| boolean((x.0 as i64) > (y.0 as i64)));
-numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) <= (y.0 as i64)));
-numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| boolean((x.0 as i64) >= (y.0 as i64)));
-numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| boolean(x == y));
+numeric!(less, numbers::op::LESS, |x: Value, y: Value| Some(truth((x.0 as i64) < (y.0 as i64))));
+numeric!(greater, numbers::op::GREATER, |x: Value, y: Value| Some(truth((x.0 as i64) > (y.0 as i64))));
+numeric!(less_equal, numbers::op::LESS_EQUAL, |x: Value, y: Value| Some(truth((x.0 as i64) <= (y.0 as i64))));
+numeric!(greater_equal, numbers::op::GREATER_EQUAL, |x: Value, y: Value| Some(truth((x.0 as i64) >= (y.0 as i64))));
+numeric!(equal, numbers::op::EQUAL, |x: Value, y: Value| Some(truth(x == y)));
 // A zero divisor and the one quotient past the fixnums are the primitive's.
 numeric!(divide, numbers::op::DIV, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_div((y.0 as i64) >> 2)
@@ -5138,13 +5190,7 @@ fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
     }
     // Only an insertion that runs no Lisp skips the general bracket.
     let quiet = vm.quiet_insertion()?;
-    let (source, target) = if a < b {
-        let (x, y) = vm.objects.split_at_mut(b);
-        (&x[a], &mut y[0])
-    } else {
-        let (x, y) = vm.objects.split_at_mut(a);
-        (&y[0], &mut x[b])
-    };
+    let (target, source) = vm.objects.entry_mut_with(b, a);
     // An edit of shared text moves the other buffers' positions: the
     // general path does that.
     let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
@@ -5249,7 +5295,7 @@ fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
     if v == Value::NIL || v.tag() != 0 {
         return None;
     }
-    let Some(data::Object::Buffer(t)) = vm.objects.get_mut(v.payload() as usize - 1) else {
+    let Some(data::Object::Buffer(t)) = vm.objects.get_entry_mut(v.payload() as usize - 1) else {
         return None;
     };
     let kind = (target.0 >> 3) as usize;
@@ -5422,7 +5468,7 @@ unsafe fn nconc2(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
             last = next;
             steps += 1;
         }
-        e.vm.conses[last.payload() as usize].1 = tail;
+        e.vm.conses.set_cdr(last.payload() as usize, tail);
         *r.add(i.a) = list;
         advance(e, r, pc)
     }
@@ -5709,13 +5755,12 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Optio
                     let ControlKind::Resume { exit, diagnostic } = control.kind else {
                         return Err("invalid image resume region".into());
                     };
-                    e.vm.aftermath_held -= 1;
                     match exit {
                         Escape::Normal(value) => {
                             *r.add(control.dest) = value;
                             // The protected form is done: aftermath its cleanup
                             // or body left pending is the next poll's, soon.
-                            if e.vm.aftermath_held == 0 && e.vm.aftermath_pending() { e.budget = 0; }
+                            if e.vm.aftermath_pending() && !e.in_cleanup() && !e.vm.aftermath_held() { e.budget = 0; }
                             return Ok(());
                         }
                         exit => {

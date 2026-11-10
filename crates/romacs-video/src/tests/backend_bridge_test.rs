@@ -1,4 +1,3 @@
-#![cfg(target_os = "linux")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6,8 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use romacs_display_protocol::types::VideoId;
 
 use super::{
-    BackendEvent, DecodedFrame, DecodedFrameImport, DecoderOutputGeneration,
-    MeasurementEpochDisposition, backend_bridge,
+    BackendEvent, DecodedFrame, DecoderOutputGeneration,
+    backend_bridge,
 };
 use crate::{
     FrameTiming, MediaTime, PackedVideoFormat, PlaybackEpoch, VideoColorimetry, VideoFrameFormat,
@@ -85,37 +84,6 @@ fn measurement_boundary_rejects_an_in_flight_old_generation_publication() {
     ));
 }
 
-#[test]
-fn every_backend_event_has_an_explicit_measurement_epoch_disposition() {
-    let id = VideoId::new(1);
-    assert!(MeasurementEpochDisposition::Retain.retains_event());
-    assert!(!MeasurementEpochDisposition::Discard.retains_event());
-    assert_eq!(
-        BackendEvent::Frame {
-            id,
-            frame: frame(1),
-        }
-        .measurement_epoch_disposition(),
-        MeasurementEpochDisposition::Discard
-    );
-    assert_eq!(
-        BackendEvent::<u64>::FramesReplaced { id, count: 1 }.measurement_epoch_disposition(),
-        MeasurementEpochDisposition::Discard
-    );
-    assert_eq!(
-        BackendEvent::<u64>::Ended { id }.measurement_epoch_disposition(),
-        MeasurementEpochDisposition::Retain
-    );
-    assert_eq!(
-        BackendEvent::<u64>::OutputReconfigured {
-            id,
-            generation: DecoderOutputGeneration::INITIAL.next(),
-        }
-        .measurement_epoch_disposition(),
-        MeasurementEpochDisposition::Retain
-    );
-}
-
 fn frame(lease: u64) -> DecodedFrame<u64> {
     DecodedFrame {
         lease,
@@ -129,6 +97,5 @@ fn frame(lease: u64) -> DecodedFrame<u64> {
         format: VideoFrameFormat::Packed(PackedVideoFormat::Rgba8),
         colorimetry: VideoColorimetry::SRGB,
         output_generation: DecoderOutputGeneration::INITIAL,
-        decoder_import: DecodedFrameImport::Deferred,
     }
 }
