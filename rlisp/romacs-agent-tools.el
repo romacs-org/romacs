@@ -24,6 +24,7 @@
 (require 'romacs-mcp-editor)
 (require 'romacs-mcp-session)
 (require 'romacs-agent)
+(require 'romacs-agent-worktree)
 
 (defcustom romacs-agent-eval-budget 5000
   "Milliseconds an agent's `romacs_eval' may run before it is quit, as
@@ -312,6 +313,7 @@ call stays running until its answer is ready."
      "role" (funcall null (plist-get options :role)) "parent" (funcall null (plist-get options :parent))
      "turns" (romacs-agent-turns session) "result" (funcall null (romacs-agent-reply session))
      "cost" (funcall null (romacs-agent-cost session))
+     "worktree" (funcall null (plist-get options :worktree)) "branch" (funcall null (plist-get options :branch))
      "pendingApproval" (if (> (hash-table-count (romacs-agent-approvals session)) 0) t :false)
      "next" (if (equal status "running") (romacs-agent-tools--running-next session) :null))))
 
@@ -550,7 +552,8 @@ the call (and retire this wait) and drop its answer."
 started with the same clientRequestId.  The child runs on the instance
 its target names, else on its delegating session's own (claude to
 claude, codex to codex); a caller that is no agent session gets the
-default instance."
+default instance.  With isolation \"worktree\" it runs in a new
+worktree of its directory's repository (`romacs-agent-worktree-create')."
   (romacs-mcp--instance arguments)
   (let* ((parent (romacs-agent-tools--caller))
          (request (gethash "clientRequestId" arguments))
@@ -558,24 +561,75 @@ default instance."
          (options (gethash "options" target (romacs-mcp--object)))
          (provider (or (gethash "provider" target)
                        (and parent (romacs-agent-get parent) (romacs-agent-provider (romacs-agent-get parent)))))
-         (child (or (and request (romacs-agent-requested parent request))
-                    (romacs-agent-start
-                     (or (gethash "cwd" arguments)
-                         (and parent (romacs-agent-get parent) (romacs-agent-cwd (romacs-agent-get parent)))
-                         default-directory)
-                     (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
-                     (gethash "title" arguments) provider
-                     (list :model (gethash "model" target)
-                           :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
-                           :role (gethash "role" arguments) :parent parent :request request
-                           :wake (let ((wake (gethash "wake" arguments)))
-                                   (if (member wake romacs-agent-tools--wake-rules) wake
-                                     (and wake (user-error "wake must be one of %s"
-                                                           (string-join romacs-agent-tools--wake-rules ", "))))))))))
-    (if (equal (gethash "mode" arguments) "wait")
-        (romacs-agent-tools--wait child (gethash "timeoutMs" arguments)
-                                  (or (plist-get romacs-mcp--active :arrived) (float-time)))
-      (romacs-agent-tools--task child))))
+         ;; Refused before anything starts, or any worktree is made.
+         (wake (let ((wake (gethash "wake" arguments)))
+                 (if (member wake romacs-agent-tools--wake-rules) wake
+                   (and wake (user-error "wake must be one of %s"
+                                         (string-join romacs-agent-tools--wake-rules ", "))))))
+         (cwd (or (gethash "cwd" arguments)
+                  (and parent (romacs-agent-get parent) (romacs-agent-cwd (romacs-agent-get parent)))
+                  default-directory))
+         ;; This request's arrival: a deferred answer runs with none active.
+         (arrived (or (plist-get romacs-mcp--active :arrived) (float-time)))
+         (start (lambda (cwd &rest worktree)
+                  (romacs-agent-start
+                   cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
+                   (gethash "title" arguments) provider
+                   (append (list :model (gethash "model" target)
+                                 :effort (or (gethash "reasoningEffort" options) (gethash "effort" options))
+                                 :role (gethash "role" arguments) :parent parent :request request
+                                 :wake wake)
+                           worktree))))
+         (answer (lambda (child)
+                   (if (equal (gethash "mode" arguments) "wait")
+                       (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
+                     (romacs-agent-tools--task child))))
+         (known (and request (romacs-agent-requested parent request))))
+    (cond (known (funcall answer known))
+          ((equal (gethash "isolation" arguments) "worktree")
+           ;; A child that cannot start leaves no worktree behind.
+           (romacs-agent--start-instance provider)
+           (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start) answer))
+          (t (funcall answer (funcall start cwd))))))
+
+(defvar romacs-agent-tools--making (make-hash-table :test #'equal)
+  "A caller's (PARENT . CLIENT-REQUEST-ID) to its isolated task being made:
+the same request repeated meanwhile waits for that one.")
+
+(defun romacs-agent-tools--isolating (key cwd start)
+  "The making of KEY's isolated task, a cell whose car becomes (:child
+SESSION) or (:error MESSAGE): CWD's worktree made in the background, then
+the child START starts in it, whether or not anyone still waits."
+  (or (and (cdr key) (gethash key romacs-agent-tools--making))
+      (let ((cell (list nil)))
+        (when (cdr key) (puthash key cell romacs-agent-tools--making))
+        (romacs-agent-worktree-create
+         cwd (lambda (made)
+               (remhash key romacs-agent-tools--making)
+               (setcar cell
+                       (if (plist-get made :error) made
+                         (condition-case err
+                             (list :child (funcall start (plist-get made :cwd) :worktree (plist-get made :path)
+                                                   :branch (plist-get made :branch)))
+                           (error (list :error (format "Worktree %s (branch %s) was made, but the child did not start: %s"
+                                                       (plist-get made :path) (plist-get made :branch)
+                                                       (error-message-string err)))))))))
+        cell)))
+
+(defun romacs-agent-tools--isolated (cell answer)
+  "A deferred answer: ANSWER's value for the child CELL comes to hold, or
+CELL's error as the call's."
+  (let ((next nil))
+    (romacs-mcp-defer
+     (lambda ()
+       (let ((made (car cell)))
+         (cond (next (funcall next))
+               ((null made) nil)
+               ((plist-get made :error) (user-error "%s" (plist-get made :error)))
+               (t (let ((value (funcall answer (plist-get made :child))))
+                    (if (eq (car-safe value) 'romacs-mcp--deferred)
+                        (funcall (setq next (cadr value)))
+                      (list value))))))))))
 
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
@@ -843,7 +897,9 @@ the taskId and wakes you with the child's result when its turn ends: end your tu
 together or while you work wake you once. wake: end (default), failure (only a failure wakes you), all (one wake when \
 every task you delegated with all has ended), none (read it with romacs_task_status). mode wait answers when it ends, asks for an \
 approval, or timeoutMs (default 600000) passes, and the child goes on. The same clientRequestId returns the task it \
-started before."))
+started before. isolation \"worktree\" gives the child its own checkout of cwd's repository, on a new branch at your \
+HEAD: it commits there, and you merge the branch and remove the worktree (the task's worktree and branch); Romacs \
+never removes one. Use it for children that edit files at the same time."))
 
 (romacs-mcp-register-tool
  "romacs_delegate_task"
@@ -864,6 +920,7 @@ started before."))
                                         "model" (romacs-mcp--object "type" "string")
                                         "options" (romacs-mcp--object "type" "object")))
                 "cwd" (romacs-mcp--object "type" "string") "title" (romacs-mcp--object "type" "string")
+                "isolation" (romacs-mcp--object "type" "string" "enum" ["shared" "worktree"])
                 "timeoutMs" (romacs-mcp--object "type" "integer")
                 "clientRequestId" (romacs-mcp--object "type" "string"))
   "required" ["task"] "additionalProperties" :false)
