@@ -79,6 +79,10 @@ root; nil when it is no git project or git fails.  Only a `start' or
         (if (car queued) (setcdr (cdr queued) cell) (setcar queued cell))
         (setcdr queued cell)))))
 
+(defun romacs-agent-diff--settled-p (session)
+  "Whether SESSION has no snapshot running or waiting."
+  (eq (gethash (romacs-agent-id session) romacs-agent-diff--queues :none) :none))
+
 (defun romacs-agent-diff--next (session)
   "SESSION's snapshot ended: run the next one waiting, if any."
   (let* ((id (romacs-agent-id session)) (queued (gethash id romacs-agent-diff--queues))

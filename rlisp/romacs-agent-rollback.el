@@ -115,7 +115,9 @@ longer its conversation's, or one with no checkpoint when :files."
   (let* ((records (romacs-agent--live-records (romacs-agent--journal-records session)))
          (turns (romacs-agent-rollback--turns records request)))
     (unless (cdr turns) (user-error "That prompt is no longer this session's conversation"))
-    (when (and (plist-get options :files)
+    ;; With no snapshot pending, the checkpoints are all there: refuse now.
+    ;; Else the start may still be coming: it is looked for behind them.
+    (when (and (plist-get options :files) (romacs-agent-diff--settled-p session)
                (not (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start)))
                               (romacs-agent-diff--checkpoints session))))
       (user-error "No checkpoint of this turn's files (no git project, or a turn from before checkpoints)"))

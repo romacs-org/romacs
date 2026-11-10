@@ -253,6 +253,19 @@ rolls back by the line (revert REQUEST)."
       (should (equal released (list session)))
       (should (equal (file "a.txt") "two\n")))))
 
+(ert-deftest romacs-agent-rollback-waits-for-a-pending-start-checkpoint ()
+  ;; A turn so quick that its start checkpoint is still being taken: the
+  ;; rollback is not refused, and finds the start behind it.
+  (romacs-agent-rollback-tests--project
+    (romacs-agent-rollback-tests--journal
+     session (romacs-agent-rollback-tests--prompt 10 "make it two") (romacs-agent-rollback-tests--assistant "u1")
+     (romacs-agent-rollback-tests--prompt 20 "make it three") (romacs-agent-rollback-tests--assistant "u2")
+     (romacs-agent-rollback-tests--prompt 30 "make it four") (romacs-agent-rollback-tests--assistant "u3"))
+    (romacs-agent-diff--snapshot session 30 'start)
+    (should-not (romacs-agent-diff--settled-p session))
+    (should (equal (romacs-agent-rollback-tests--run session 30 :files t) '(:done 1)))
+    (should (equal (file "a.txt") "three\n"))))
+
 (ert-deftest romacs-agent-rollback-a-failure-leaves-it-to-try-again ()
   ;; Files that will not come back: nothing journaled, the harness untold.
   (romacs-agent-rollback-tests--project
