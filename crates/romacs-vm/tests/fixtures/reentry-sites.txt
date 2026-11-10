@@ -76,16 +76,16 @@ prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not susp
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
 protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect
 protocol.rs submit prepare_source 2 clean  # no caller Values
-reader.rs character_name reader_call 1 rooted  # the reader's partial forms live in external_roots
-reader.rs compile_source compile 1 held  # an open compiler builder holds collection
-reader.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
-reader.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
-reader.rs eval_source_inner execute_raw 1 clean  # a cached submission, nothing held
-reader.rs eval_source_raw finish_request 1 collector  # the request's result is its root
-reader.rs get reader_call 1 rooted  # the stream and partial forms live in external_roots
-reader.rs request_source_ir compile_request 1 held  # an open compiler builder holds collection
-reader.rs request_source_ir finish_request 1 collector  # no Values outstanding
-reader.rs unget reader_call 1 rooted  # the stream and partial forms live in external_roots
+reader/mod.rs compile_source compile 1 held  # an open compiler builder holds collection
+reader/mod.rs eval_source_forms cached_source_form 1 held  # an open compiler builder holds collection
+reader/mod.rs eval_source_forms execute_raw 1 rooted  # the last value is a frame; the form's objects are rooted
+reader/mod.rs eval_source_inner execute_raw 1 clean  # a cached submission, nothing held
+reader/mod.rs eval_source_raw finish_request 1 collector  # the request's result is its root
+reader/mod.rs request_source_ir compile_request 1 held  # an open compiler builder holds collection
+reader/mod.rs request_source_ir finish_request 1 collector  # no Values outstanding
+reader/parse.rs character_name reader_call 1 rooted  # the reader's partial forms live in external_roots
+reader/parse.rs get reader_call 1 rooted  # the stream and partial forms live in external_roots
+reader/parse.rs unget reader_call 1 rooted  # the stream and partial forms live in external_roots
 request_code.rs compile_request compile 1 held  # an open compiler builder holds collection
 request_code.rs eval_datum_raw cached_datum 1 held  # an open compiler builder holds collection
 request_code.rs eval_datum_raw eval_form_raw 1 clean  # FORM's objects are rooted

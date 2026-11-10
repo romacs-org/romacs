@@ -931,22 +931,22 @@ fn reader_chartable_minimum() {
 
 #[test]
 fn reader_chartable_uniform() {
-    reader_table_fixture(include_str!("reader_fixtures/uniform.el"));
+    reader_table_fixture(include_str!("fixtures/uniform.el"));
 }
 
 #[test]
 fn reader_chartable_subdivision() {
-    reader_table_fixture(include_str!("reader_fixtures/subdivision.el"));
+    reader_table_fixture(include_str!("fixtures/subdivision.el"));
 }
 
 #[test]
 fn reader_chartable_case() {
-    reader_table_fixture(include_str!("reader_fixtures/case.el"));
+    reader_table_fixture(include_str!("fixtures/case.el"));
 }
 
 #[test]
 fn reader_chartable_syntax() {
-    reader_table_fixture(include_str!("reader_fixtures/syntax.el"));
+    reader_table_fixture(include_str!("fixtures/syntax.el"));
 }
 
 fn reader_table_fixture(literal: &str) {
