@@ -234,6 +234,25 @@ rolls back by the line (revert REQUEST)."
   (should (eq (lookup-key romacs-agent-chat-actions-map "u") 'romacs-agent-chat-rollback))
   (should (equal (command-modes 'romacs-agent-chat-rollback) '(romacs-agent-chat-mode))))
 
+(ert-deftest romacs-agent-rollback-holds-messages-sent-meanwhile ()
+  ;; A message sent while the rollback reads the project waits in the
+  ;; queue: it is never accepted and then rolled back.  The turns' end
+  ;; checkpoints are read once the snapshots before it are done.
+  (romacs-agent-rollback-tests--project
+    (let ((outcome nil) (end (+ (float-time) 30)) (released nil))
+      (romacs-agent-rollback session 20 (lambda (result) (setq outcome result)) :files t)
+      (should (plist-get (romacs-agent-driver-state session) :rolling-back))
+      (romacs-agent-send session "meanwhile")
+      (should (equal (car (car (romacs-agent-queue session))) "meanwhile"))
+      (should-not written)
+      ;; Once released, what waited goes on as usual.
+      (cl-letf (((symbol-function 'romacs-agent--send-next) (lambda (s &rest _) (push s released))))
+        (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
+      (should (equal outcome '(:done 1)))
+      (should-not (plist-get (romacs-agent-driver-state session) :rolling-back))
+      (should (equal released (list session)))
+      (should (equal (file "a.txt") "two\n")))))
+
 (ert-deftest romacs-agent-rollback-a-failure-leaves-it-to-try-again ()
   ;; Files that will not come back: nothing journaled, the harness untold.
   (romacs-agent-rollback-tests--project

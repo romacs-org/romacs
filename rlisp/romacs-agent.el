@@ -1743,8 +1743,10 @@ harness's starts a turn.  One dispatch at a time: a turn that ends while
 its message is being sent (a run that ends before it is attached) asks
 for the next, sent once this one is off the queue."
   (cond
-   ;; Nothing reaches a harness while its selection changes.
-   ((romacs-agent-pending-selection session))
+   ;; Nothing reaches a harness while its selection changes, or while a
+   ;; rollback holds it.
+   ((or (romacs-agent-pending-selection session)
+        (plist-get (romacs-agent-driver-state session) :rolling-back)))
    ((romacs-agent-dispatch session)
     (setf (romacs-agent-dispatch session) 'again))
    (t
@@ -2107,7 +2109,10 @@ DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
 given, then says it is no longer wanted.  IMAGES are the files the user
 attached to it."
-  (cond ((romacs-agent-pending-selection session)
+  (cond ((or (romacs-agent-pending-selection session)
+             ;; A rollback holds it: the message goes to the conversation
+             ;; as the rollback leaves it.
+             (plist-get (romacs-agent-driver-state session) :rolling-back))
          (romacs-agent--enqueue session (list text delivered valid images)))
         ((and (not (romacs-agent--per-turn-p session)) (romacs-agent--ready-p session))
          (romacs-agent--input session text images)

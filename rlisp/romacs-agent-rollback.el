@@ -43,8 +43,12 @@ and NOW, the project's tree now: (:root ROOT :start TREE :touched NAMES
 :clobbered NAMES), the files the turns changed and those of them changed
 by anything else, between them or since.  Nil when the first turn has
 no start checkpoint."
-  (cl-flet ((edge (turn kind) (nth 2 (seq-find (lambda (c) (and (equal (car c) turn) (eq (nth 1 c) kind))) checkpoints))))
-    (when-let* ((first (seq-find (lambda (c) (and (equal (car c) (car turns)) (eq (nth 1 c) 'start))) checkpoints)))
+  (let ((edges (make-hash-table :test #'equal)))
+    ;; Each turn's edges by (TURN . KIND), once: no scan per turn.
+    (dolist (c checkpoints) (unless (gethash (cons (car c) (nth 1 c)) edges)
+                              (puthash (cons (car c) (nth 1 c)) c edges)))
+   (cl-flet ((edge (turn kind) (nth 2 (gethash (cons turn kind) edges))))
+    (when-let* ((first (gethash (cons (car turns) 'start) edges)))
       (let ((root (nth 3 first)) (touched nil) (outside nil) (tail turns))
         (while tail
           (let* ((start (edge (car tail) 'start))
@@ -55,8 +59,10 @@ no start checkpoint."
             (setq outside (append (romacs-agent-rollback--changed root end (or next now)) outside))
             (setq tail (cdr tail))))
         (setq touched (delete-dups touched))
-        (list :root root :start (nth 2 first) :touched touched
-              :clobbered (seq-filter (lambda (name) (member name outside)) touched))))))
+        (let ((elsewhere (make-hash-table :test #'equal)))
+          (dolist (name outside) (puthash name t elsewhere))
+          (list :root root :start (nth 2 first) :touched touched
+                :clobbered (seq-filter (lambda (name) (gethash name elsewhere)) touched))))))))
 
 (defun romacs-agent-rollback--restore (session plan)
   "Put PLAN's touched files back as they were in its start tree: through a
@@ -104,28 +110,60 @@ longer its conversation's, or one with no checkpoint when :files."
     (user-error "%s cannot roll a session back" (romacs-agent--harness-get session :display)))
   (unless (and (romacs-agent--harness-free-p session) (not (romacs-agent-interrupted session)))
     (user-error "Session %s is busy: roll it back when it is idle" (romacs-agent-title session)))
+  (when (romacs-agent-rollback--holder session)
+    (user-error "Session %s is rolling back already" (romacs-agent-title session)))
   (let* ((records (romacs-agent--live-records (romacs-agent--journal-records session)))
-         (turns (romacs-agent-rollback--turns records request))
-         (checkpoints (and (plist-get options :files) (romacs-agent-diff--checkpoints session))))
+         (turns (romacs-agent-rollback--turns records request)))
     (unless (cdr turns) (user-error "That prompt is no longer this session's conversation"))
     (when (and (plist-get options :files)
-               (not (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start))) checkpoints)))
+               (not (seq-find (lambda (c) (and (equal (car c) request) (eq (nth 1 c) 'start)))
+                              (romacs-agent-diff--checkpoints session))))
       (user-error "No checkpoint of this turn's files (no git project, or a turn from before checkpoints)"))
-    (let ((commit (lambda (plan) (romacs-agent-rollback--commit session records request (car turns)
-                                                                (romacs-agent--prompt-text session (cdr turns))
-                                                                plan then))))
+    ;; Held from here to the end: messages sent meanwhile wait in its queue
+    ;; (`romacs-agent-send'), so none is accepted and then rolled back.
+    (let* ((token (list request))
+           (then (lambda (outcome)
+                   (unless (eq (car outcome) :done) (romacs-agent-rollback--release session token))
+                   (funcall then outcome)))
+           (commit (lambda (plan) (romacs-agent-rollback--commit session token records request (car turns)
+                                                                 (romacs-agent--prompt-text session (cdr turns))
+                                                                 plan then))))
+      (romacs-agent-rollback--hold session token)
       (if (not (plist-get options :files))
           (funcall commit nil)
         (romacs-agent-diff--snapshot
          session request 'now
          (lambda (now _root)
            (condition-case err
-               (let ((plan (romacs-agent-rollback--files checkpoints (car turns) now)))
+               ;; Read now, behind every snapshot queued before this one:
+               ;; the last turn's end checkpoint among them.
+               (let ((plan (and now (romacs-agent-rollback--files (romacs-agent-diff--checkpoints session)
+                                                                  (car turns) now))))
                  (cond ((not now) (funcall then (list :error "Could not read the project now")))
+                       ((not (equal (length (romacs-agent--live-records (romacs-agent--journal-records session)))
+                                    (length records)))
+                        (funcall then (list :error "The session moved on meanwhile: roll it back again")))
+                       ((not plan) (funcall then (list :error "No checkpoint of this turn's files")))
                        ((and (plist-get plan :clobbered) (not (plist-get options :force)))
                         (funcall then (list :clobbered (plist-get plan :clobbered))))
                        (t (funcall commit plan))))
              (error (funcall then (list :error (error-message-string err)))))))))))
+
+(defun romacs-agent-rollback--holder (session)
+  "The token of the rollback holding SESSION, or nil."
+  (plist-get (romacs-agent-driver-state session) :rolling-back))
+
+(defun romacs-agent-rollback--hold (session token)
+  "Hold SESSION for the rollback TOKEN names."
+  (setf (romacs-agent-driver-state session)
+        (plist-put (romacs-agent-driver-state session) :rolling-back token)))
+
+(defun romacs-agent-rollback--release (session token &optional quiet)
+  "End TOKEN's hold on SESSION, if it still holds it: what waited goes,
+unless QUIET."
+  (when (eq (romacs-agent-rollback--holder session) token)
+    (romacs-agent-rollback--hold session nil)
+    (when (and (not quiet) (romacs-agent-queue session)) (romacs-agent--send-next session nil))))
 
 (defun romacs-agent-rollback--await (session token match then)
   "Call THEN with SESSION's first event MATCH accepts, once: while SESSION
@@ -139,22 +177,20 @@ rollback failed).  The waiter goes either way."
                             (funcall then event))))))
     (add-hook 'romacs-agent-event-functions waiter)))
 
-(defun romacs-agent-rollback--commit (session records request turns prompt plan then)
+(defun romacs-agent-rollback--commit (session token records request turns prompt plan then)
   "Roll SESSION back to before REQUEST, the first of TURNS, whose text is
-PROMPT, and PLAN's files when given; THEN as `romacs-agent-rollback' says.
+PROMPT, and PLAN's files when given, under the hold TOKEN; THEN as
+`romacs-agent-rollback' says.
 In this order: the files (the step likeliest to fail, and safe to take
 again); the harness's own rollback, answered; the journal's note, the
 rollback's commit point; a relaunch, which reads the note.  A failure
 before the note leaves the conversation as it was, to try again."
-  (let* ((token (list request))
-         (state (lambda (value)
-                  (setf (romacs-agent-driver-state session)
-                        (plist-put (romacs-agent-driver-state session) :rolling-back value))))
-         (fail (lambda (why) (funcall state nil) (funcall then (list :error why))))
+  (let* ((fail (lambda (why) (funcall then (list :error why))))
          (how nil))
     (cl-labels
         ((noted (_event)
-           (funcall state nil)
+           ;; A relaunch sends what waited once its harness is attached.
+           (romacs-agent-rollback--release session token (eq (car-safe how) 'relaunch))
            (condition-case err
                (progn (when (eq (car-safe how) 'relaunch)
                         (when (cadr how) (funcall (cadr how)))
@@ -170,13 +206,9 @@ before the note leaves the conversation as it was, to try again."
                (romacs-agent--note session (romacs-mcp--object "type" "rollback" "to" request "turns" (length turns)
                                                                "prompt" (or prompt "") "files" (if plan t :false)))
              (error (funcall fail (error-message-string err))))))
-      ;; Before taking the token: another rollback's is not this one's to clear.
-      (when (plist-get (romacs-agent-driver-state session) :rolling-back)
-        (user-error "Session %s is rolling back already" (romacs-agent-title session)))
       (condition-case err
           (progn
             (setq how (funcall (romacs-agent--harness-get session :rollback) session records request))
-            (funcall state token)
             (when plan (romacs-agent-rollback--restore session plan))
             (if (eq (car-safe how) 'relaunch)
                 (note)
