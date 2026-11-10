@@ -8,7 +8,8 @@
 //! it. MARK is a collection's: marking sets it, after a completed mark the dead
 //! are the entries in use without it, and `sweep' frees those and clears it.
 //! So after a finished collection a table holds no marks; one a key press or a
-//! panic ended keeps them, unread, until the next mark clears them (`raw').
+//! panic ended keeps them, unread, until the next mark clears them (`raw'),
+//! or a settle does.
 //!
 //! OLD and DIRTY serve the generations (section 4.16 of the design note). A
 //! sweep leaves each survivor exactly OLD and clean; an entry allocated since is
@@ -1002,6 +1003,8 @@ mod tests {
         }));
         assert!(caught.is_err());
         assert!(t.colors.len() >= t.entries.len());
+        // Memory safety is all that is left to ask of this table: its
+        // colours no longer describe its entries.
         for i in 0..t.entries.len() { t.set_car(i, Value::TRUE); }
     }
 
