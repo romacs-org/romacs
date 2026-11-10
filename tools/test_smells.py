@@ -198,6 +198,12 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(both['layout']['root'], ['crates', 'ledger', 'tools'])
         self.assertEqual(both['layout']['legacy_primitives'], 5)
 
+    def test_a_conflict_across_a_change_of_form_keeps_the_newer_form(self):
+        ours, theirs = floors(), floors()
+        theirs['layout']['generated'] = 1
+        self.assertEqual(smells.resolved(ours, theirs)['layout']['generated'], ['Cargo.lock'])
+        self.assertEqual(smells.resolved(theirs, ours)['layout']['generated'], ['Cargo.lock'])
+
     def test_the_dump_is_the_floors(self):
         self.assertEqual(json.loads(smells.dump(floors())), floors())
 

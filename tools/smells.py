@@ -249,10 +249,16 @@ def resolved(ours, theirs):
     """The floors that hold both sides of a merge: the larger of each count,
     the union of each list."""
     def larger(a, b):
-        return {k: larger(a.get(k, {}), b.get(k, {})) if isinstance(a.get(k, b.get(k)), dict)
-                else sorted(set(a.get(k, [])) | set(b.get(k, []))) if isinstance(a.get(k, b.get(k)), list)
-                else max(a.get(k, 0), b.get(k, 0))
-                for k in sorted(set(a) | set(b))}
+        return {k: one(a.get(k), b.get(k)) for k in sorted(set(a) | set(b))}
+
+    def one(x, y):
+        """The larger of two values of one key. Where the file's form changed
+        between the sides (a count that became a list), the list is the newer."""
+        if isinstance(x, dict) or isinstance(y, dict):
+            return larger(x if isinstance(x, dict) else {}, y if isinstance(y, dict) else {})
+        if isinstance(x, list) or isinstance(y, list):
+            return sorted(set(x if isinstance(x, list) else []) | set(y if isinstance(y, list) else []))
+        return max(x or 0, y or 0)
     return {**ours, 'crates': larger(ours['crates'], theirs['crates']),
             'lints': larger(ours['lints'], theirs['lints']), 'layout': larger(ours['layout'], theirs['layout'])}
 
