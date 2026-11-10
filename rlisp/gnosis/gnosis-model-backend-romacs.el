@@ -238,6 +238,16 @@ Return non-nil on retirement; a stale claim never touches a successor."
                   :color gnosis-model-cue-color))
           gnosis-model-backend-romacs--cues))
 
+;; The renderer paints at most `romacs-model-max-highlight-layers'; cues
+;; give way to what is drawn above them, so a pick or an answer always shows.
+(defun gnosis-model-backend-romacs--fit-layers (beneath above)
+  "Return layers BENEATH, then ABOVE, within the renderer's layer limit.
+ABOVE (picks, answers) are kept first, its last ones when it alone is
+too many; BENEATH (cues) fill the room left."
+  (let* ((limit romacs-model-max-highlight-layers)
+         (above (last above limit)))
+    (append (seq-take beneath (- limit (length above))) above)))
+
 (defun gnosis-model-backend-romacs-cue (targets)
   "Paint cue TARGETS beneath picks; nil TARGETS removes them.
 Return non-nil if painted; without colored layers decline."
@@ -288,7 +298,8 @@ otherwise select the picked mesh.  Cues stay beneath."
          (mark (cond (spot (list :target spot :color gnosis-model-pick-color))
                      (mesh (list :mesh mesh :color gnosis-model-pick-color)))))
     (cond ((and layers gnosis-model-backend-romacs--cues)
-           (list :layers (append (gnosis-model-backend-romacs--cue-layers) (delq nil (list mark)))))
+           (list :layers (gnosis-model-backend-romacs--fit-layers
+                          (gnosis-model-backend-romacs--cue-layers) (delq nil (list mark)))))
           (spot (list :layers (list mark)))
           (t (list :target nil :selected mesh)))))
 
@@ -314,19 +325,20 @@ otherwise select the picked mesh.  Cues stay beneath."
          (wrong-color (plist-get reveal :wrong-color))
          (wrong (plist-get reveal :wrong-mesh))
          (pick (gnosis-model-backend-romacs--pick-spec (plist-get reveal :wrong-pick) radius)))
-    (delq nil
-          (append
-           (mapcar (lambda (cue) (list :target (gnosis-model-backend-romacs--spec cue)
-                                       :color (plist-get reveal :cue-color)))
-                   (plist-get reveal :cues))
-           (list (and wrong (list :mesh wrong :color wrong-color))
-                 (and pick (list :target pick :color wrong-color)))
-           (mapcar (lambda (target)
-                     (and target
-                          (list :target (gnosis-model-backend-romacs--reveal-target target radius)
-                                :color correct)))
-                   (append (plist-get reveal :alternates)
-                           (list (plist-get reveal :target))))))))
+    (gnosis-model-backend-romacs--fit-layers
+     (mapcar (lambda (cue) (list :target (gnosis-model-backend-romacs--spec cue)
+                                 :color (plist-get reveal :cue-color)))
+             (plist-get reveal :cues))
+     (delq nil
+           (append
+            (list (and wrong (list :mesh wrong :color wrong-color))
+                  (and pick (list :target pick :color wrong-color)))
+            (mapcar (lambda (target)
+                      (and target
+                           (list :target (gnosis-model-backend-romacs--reveal-target target radius)
+                                 :color correct)))
+                    (append (plist-get reveal :alternates)
+                            (list (plist-get reveal :target)))))))))
 
 (defun gnosis-model-backend-romacs--await (model)
   "Wait until MODEL presents its latest request or the reveal timeout.

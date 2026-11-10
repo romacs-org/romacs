@@ -142,6 +142,8 @@ IDs painted as cues.  Signal if the native renderer is unavailable."
       (setq-local header-line-format '(:eval (gnosis-model-explore--header)))
       (add-hook 'gnosis-model-backend-selection-hook #'gnosis-model-explore--selection nil t)
       (add-hook 'kill-buffer-hook #'gnosis-model-explore--retire nil t)
+      ;; A new major mode tears the native attachment down: the viewer goes.
+      (add-hook 'change-major-mode-hook #'gnosis-model-explore--retire nil t)
       (when highlight (gnosis-model-backend-cue highlight))
       (puthash id buffer gnosis-model-explore--viewers))
     id))
@@ -161,7 +163,7 @@ IDs painted as cues.  Signal if the native renderer is unavailable."
 (defun gnosis-model-explore-observe (id)
   "Return what viewer ID shows now: its scene, renderer state and picks.
 :pick is the learner's latest click as an observation, with :current
-nil once the picture changed since; :targets lists the targets that
+nil once the picture changed since or is not current yet; :targets lists the targets that
 contain it.  No answer is submitted or graded."
   (with-current-buffer (gnosis-model-explore--buffer id)
     (let* ((state gnosis-model-explore--state)
@@ -174,8 +176,12 @@ contain it.  No answer is submitted or graded."
             :labels (and (plist-get state :labels) t)
             :highlight (plist-get state :highlight)
             :picks (plist-get state :picks)
-            :pick (and pick (append (list :current (equal (plist-get pick :frame)
-                                                         (gnosis-model-backend-get :frame)))
+            ;; A pick is current only on the picture shown now: the same
+            ;; frame, with no request or renderer loss pending since.
+            :pick (and pick (append (list :current (and (gnosis-model-backend-get :ready)
+                                                        (equal (plist-get pick :frame)
+                                                               (gnosis-model-backend-get :frame))
+                                                        t))
                                     pick))))))
 
 (defun gnosis-model-explore-close (id)
