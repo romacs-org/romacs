@@ -469,6 +469,7 @@ impl Vm {
         self.unwinding = 0;
         self.aftermath_runs = 0;
         self.rooted_write = false;
+        self.deferred_writes.clear();
         self.site_leaf = (0, 0);
     }
     pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
@@ -517,12 +518,14 @@ impl Vm {
     /// collection may run only when no frame keeps heap Values in untraced
     /// Rust storage. Those are OWN unsuspended engines (the caller's own),
     /// no other running engine outside `suspended`, no open compiler
-    /// builder and no watcher notification from an unrooted native writer.
+    /// builder, no watcher notification from an unrooted native writer, and
+    /// no native write waiting for its engine (`deferred_writes`, untraced).
     /// Every other native frame on the stack holds its Values in traced
     /// storage: a binding, a `#:` slot or a [`RootFrame`]
     /// (tests/fixtures/reentry-sites.txt lists each call site).
     pub(crate) fn may_collect(&self, own: usize) -> bool {
-        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended.len()) == own
+        self.gc_holds == 0 && self.deferred_writes.is_empty()
+            && self.running_engines.saturating_sub(self.suspended.len()) == own
     }
     /// Set the suspended engine's register stack aside for a nested run,
     /// still traced, its allocation unmoved for the frames' raw pointers.

@@ -1,5 +1,6 @@
 //! Owned command boundary. Lisp-visible state stays in ordinary traced slots.
 use super::*;
+use crate::brand::{Gc, Mx};
 use data::Object;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandEvent {
@@ -27,6 +28,139 @@ fn call(s: &str, a: Vec<Form>) -> Form {
 }
 fn quote(f: Form) -> Form {
     call("quote", vec![f])
+}
+/// A signal as text: its condition and its data.
+type SignalText = (String, String);
+/// The command the event's binding names and a signal it ended in, or None for
+/// an undefined key. It holds the permission and no Value (`crate::brand`): each
+/// request's value goes straight to a leaf.
+fn run_command_event<'b>(mut m: Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, event: Form) -> Result<Option<(String, Option<SignalText>)>> {
+    let m = &mut m;
+    let set_event = call("setq", vec![
+        sym("last-command-event"),
+        quote(event.clone()),
+        sym(crate::prim::prims::keyboard::COMMAND_KEYS),
+        Form::Vector(vec![event.clone()]),
+        sym(crate::prim::prims::keyboard::SINGLE_KEY_START),
+        Form::Int(0),
+    ]);
+    threaded::eval_form(m, gc.by_ref(), &set_event, (), ignored)?;
+    // The GUI records the keys of a sequence it resolved itself.
+    m.leaf(&event, |vm, event| {
+        if !matches!(event, Form::Sym(name) if name == "romacs-gui-sequence") {
+            vm.record_recent_key(match event { Form::Int(c) => RecentKey::Char(*c), Form::Sym(name) => RecentKey::Event(name.clone()), _ => unreachable!("an event's form") });
+        }
+    });
+    let binding = call("key-binding", vec![Form::Vector(vec![event])]);
+    let Some(command) = threaded::eval_form(m, gc.by_ref(), &binding, (), bound_command)? else {
+        threaded::eval_form(m, gc.by_ref(), &call("setq", vec![sym("prefix-arg"), sym("nil")]), (), ignored)?;
+        return Ok(None);
+    };
+    // command_loop_1: the previous command's undo boundaries, then the
+    // point record_point compares against.
+    let boundary = call("if", vec![
+        call("fboundp", vec![quote(sym("undo-auto--add-boundary"))]),
+        call("undo-auto--add-boundary", vec![]),
+    ]);
+    threaded::eval_form(m, gc.by_ref(), &boundary, (), ignored)?;
+    m.leaf((), |vm, ()| vm.note_command_point())?;
+    let signal = threaded::eval_form(m, gc.by_ref(), &command_form(), (), command_signal)?;
+    let finished = call("setq", vec![
+        sym("last-command"), sym("this-command"),
+        sym("real-last-command"), sym("real-this-command"),
+    ]);
+    threaded::eval_form(m, gc.by_ref(), &finished, (), ignored)?;
+    Ok(Some((command, signal)))
+}
+fn ignored(_: &mut Vm, (): (), value: Result<Value>) -> Result<()> {
+    value.map(|_| ())
+}
+/// The key's binding, installed as the command to run and named; None when it
+/// runs no command, which GNU records as the pseudo-event (nil . nil).
+fn bound_command(vm: &mut Vm, (): (), binding: Result<Value>) -> Result<Option<String>> {
+    let binding = binding?;
+    if binding == Value::NIL || vm.resolve_keymap(binding).is_some() {
+        if binding == Value::NIL { vm.record_recent_key(RecentKey::Command("nil".into())); }
+        return Ok(None);
+    }
+    // GNU's Vthis_command is the binding itself: a symbol, or a closure such
+    // as a keymap's lambda (keyboard.c command_loop_1).  The variable roots it.
+    let symbol = binding.index(7).ok().and_then(|i| vm.symbol_names.get(i.saturating_sub(1)).cloned());
+    let this_command = vm.slot("this-command");
+    vm.assign_variable(this_command, binding)?;
+    let command = match &symbol {
+        Some(name) => name.clone(),
+        None => vm.display(binding)?,
+    };
+    if let Some(name) = symbol { vm.record_recent_key(RecentKey::Command(name)); }
+    Ok(Some(command))
+}
+/// The signal the command form's value reports, as text.
+fn command_signal(vm: &mut Vm, (): (), outcome: Result<Value>) -> Result<Option<SignalText>> {
+    let outcome = outcome?;
+    if outcome == Value::NIL { return Ok(None); }
+    let (condition, data) = vm.cons_pair(outcome)?;
+    Ok(Some((vm.display(condition)?, vm.display(data)?)))
+}
+/// Run `this-command' as GNU's command loop does: the value is nil, or the
+/// signal `condition-case' caught.
+fn command_form() -> Form {
+    let form = call(
+        "progn",
+        vec![
+            call("setq", vec![
+                sym("real-this-command"), sym("this-command"),
+                sym("current-prefix-arg"), sym("prefix-arg"),
+                sym("prefix-arg"), sym("nil"),
+            ]),
+            call(
+                "condition-case",
+                vec![
+                    sym("#:command-error"),
+                    call(
+                        "progn",
+                        vec![
+                            call(
+                                "unless",
+                                vec![
+                                    call(
+                                        "and",
+                                        vec![
+                                            call("fboundp", vec![quote(sym("romacs-delete-selection-before-command"))]),
+                                            call("romacs-delete-selection-before-command", vec![sym("this-command")]),
+                                        ],
+                                    ),
+                                    call("call-interactively", vec![sym("real-this-command")]),
+                                ],
+                            ),
+                            sym("nil"),
+                        ],
+                    ),
+                    Form::List(vec![
+                        Form::List(vec![sym("error"), sym("quit")]),
+                        call("setq", vec![sym("prefix-arg"), sym("nil")]),
+                        sym("#:command-error"),
+                    ]),
+                ],
+            ),
+        ],
+    );
+    call("let", vec![
+        Form::List(vec![
+            Form::List(vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
+            Form::List(vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
+        ]),
+        call("prog1", vec![form,
+            call("when", vec![
+                call("and", vec![
+                    call("eq", vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
+                    call("/=", vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
+                    call("fboundp", vec![quote(sym("deactivate-mark"))]),
+                ]),
+                call("deactivate-mark", vec![sym("t")]),
+            ]),
+        ]),
+    ])
 }
 enum CommandFault {
     Internal(String),
@@ -268,127 +402,17 @@ impl Vm {
                 sym(&name)
             }
         };
-        self.eval_form_raw(&call(
-            "setq",
-            vec![
-                sym("last-command-event"),
-                quote(event_form.clone()),
-                sym(crate::prim::prims::keyboard::COMMAND_KEYS),
-                Form::Vector(vec![event_form.clone()]),
-                sym(crate::prim::prims::keyboard::SINGLE_KEY_START),
-                Form::Int(0),
-            ],
-        ))?;
-        // The GUI records the keys of a sequence it resolved itself.
-        if !matches!(&event_form, Form::Sym(name) if name == "romacs-gui-sequence") {
-            self.record_recent_key(match &event_form { Form::Int(c) => RecentKey::Char(*c), Form::Sym(name) => RecentKey::Event(name.clone()), _ => unreachable!("an event form") });
-        }
-        let binding = self.eval_form_raw(&call("key-binding", vec![Form::Vector(vec![event_form])]))?;
-        if binding == Value::NIL || self.resolve_keymap(binding).is_some() {
-            // An undefined key runs no command: GNU's pseudo-event (nil . nil).
-            if binding == Value::NIL { self.record_recent_key(RecentKey::Command("nil".into())); }
-            self.eval_form_raw(&call("setq", vec![sym("prefix-arg"), sym("nil")]))?;
-            let message = "Key is undefined".to_owned();
-
+        let ran = threaded::toplevel(self, event_form, run_command_event)?;
+        let Some((command, signal)) = ran else {
             return Ok(CommandOutcome {
                 command: None,
                 signal: None,
                 bell: true,
-                message: Some(message),
+                message: Some("Key is undefined".to_owned()),
                 redisplay: true,
             });
-        }
-        // GNU's Vthis_command is the binding itself: a symbol, or a closure
-        // such as a keymap's lambda (keyboard.c command_loop_1).  The variable
-        // roots it; eval_form may compact on every invocation.
-        let symbol = binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned());
-        let this_command = self.slot("this-command");
-        self.set_variable_value(this_command, binding)?;
-        let command = match &symbol {
-            Some(name) => name.clone(),
-            None => self.display(binding)?,
         };
-        if let Some(name) = &symbol { self.record_recent_key(RecentKey::Command(name.clone())); }
-        // command_loop_1: the previous command's undo boundaries, then the
-        // point record_point compares against.
-        self.eval_form_raw(&call("if", vec![
-            call("fboundp", vec![quote(sym("undo-auto--add-boundary"))]),
-            call("undo-auto--add-boundary", vec![]),
-        ]))?;
-        self.note_command_point()?;
-        let form = call(
-            "progn",
-            vec![
-                call("setq", vec![
-                    sym("real-this-command"), sym("this-command"),
-                    sym("current-prefix-arg"), sym("prefix-arg"),
-                    sym("prefix-arg"), sym("nil"),
-                ]),
-                call(
-                    "condition-case",
-                    vec![
-                        sym("#:command-error"),
-                        call(
-                            "progn",
-                            vec![
-                                call(
-                                    "unless",
-                                    vec![
-                                        call(
-                                            "and",
-                                            vec![
-                                                call("fboundp", vec![quote(sym("romacs-delete-selection-before-command"))]),
-                                                call("romacs-delete-selection-before-command", vec![sym("this-command")]),
-                                            ],
-                                        ),
-                                        call("call-interactively", vec![sym("real-this-command")]),
-                                    ],
-                                ),
-                                sym("nil"),
-                            ],
-                        ),
-                        Form::List(vec![
-                            Form::List(vec![sym("error"), sym("quit")]),
-                            call("setq", vec![sym("prefix-arg"), sym("nil")]),
-                            sym("#:command-error"),
-                        ]),
-                    ],
-                ),
-            ],
-        );
-        let form = call("let", vec![
-            Form::List(vec![
-                Form::List(vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
-                Form::List(vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
-            ]),
-            call("prog1", vec![form,
-                call("when", vec![
-                    call("and", vec![
-                        call("eq", vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
-                        call("/=", vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
-                        call("fboundp", vec![quote(sym("deactivate-mark"))]),
-                    ]),
-                    call("deactivate-mark", vec![sym("t")]),
-                ]),
-            ]),
-        ]);
-        let outcome = self.eval_form_raw(&form)?;
-        let signal = if outcome == Value::NIL {
-            None
-        } else {
-            let (condition, data) = self.cons_pair(outcome)?;
-            Some(CommandSignal {
-                condition: self.display(condition)?,
-                data: self.display(data)?,
-            })
-        };
-        self.eval_form_raw(&call(
-            "setq",
-            vec![
-                sym("last-command"), sym("this-command"),
-                sym("real-last-command"), sym("real-this-command"),
-            ],
-        ))?;
+        let signal = signal.map(|(condition, data)| CommandSignal { condition, data });
         let message = signal
             .as_ref()
             .map(|s| format!("{}: {}", s.condition, s.data));
