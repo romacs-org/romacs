@@ -813,16 +813,12 @@ romacs_delegate_task starts a separate agent that sees only the brief you write.
   "What every session's harness is told of where it runs, beside its own
 instructions.")
 
-(defconst romacs-agent--child-note
-  "You are a delegated task: your parent sees only your final reply.  Do the work yourself, \
-start no delegated tasks unless your task says to, and end with a self-contained result."
-  "What a delegated session's harness is told besides.")
-
-(defun romacs-agent--instructions (session)
-  "What SESSION's harness is told of Romacs, for its system prompt."
-  (if (plist-get (romacs-agent-options session) :parent)
-      (concat romacs-agent--runtime-note "\n\n" romacs-agent--child-note)
-    romacs-agent--runtime-note))
+(defun romacs-agent--instructions (_session)
+  "What a session's harness is told of Romacs, for its system prompt: the
+same for every session, so a delegated one on the same model can reuse its
+parent's cached prompt.  What a delegated one is told besides is in its
+brief."
+  romacs-agent--runtime-note)
 
 ;;; Writing to a harness
 

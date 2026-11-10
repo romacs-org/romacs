@@ -346,11 +346,18 @@ the rest is."
           (if (nth 2 end) "failed" "completed")
           (romacs-agent-tools--wake-result (romacs-agent-id session) (or (nth 1 end) ""))))
 
+(defconst romacs-agent-tools--child-note
+  "You are a delegated task: your parent sees only your final reply.  Do the work yourself, \
+start no delegated tasks unless your task says to, and end with a self-contained result."
+  "What a delegated session is told after its task: in its first message,
+not its system prompt, which stays its parent's.")
+
 (defun romacs-agent-tools--brief (role task)
-  "What a child is started on: TASK, as the ROLE sub-agent when one is named."
-  (if (and role (not (string-empty-p role)))
-      (format "Act as the %s sub-agent for this task.\n\n%s" role task)
-    task))
+  "What a child is started on: TASK, as the ROLE sub-agent when one is
+named, then `romacs-agent-tools--child-note'; an empty TASK stays empty."
+  (if (string-empty-p (string-trim task)) task
+   (concat (if (and role (not (string-empty-p role))) (format "Act as the %s sub-agent for this task.\n\n" role) "")
+          task "\n\n" romacs-agent-tools--child-note)))
 
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as a `romacs-agent-tools--wake-text', a plist of :id

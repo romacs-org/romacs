@@ -14,10 +14,13 @@
   (require 'romacs-agent-claude))
 
 (ert-deftest romacs-agent-delegate-brief-names-the-role ()
-  (should (equal (romacs-agent-tools--brief "reviewer" "Read x.el")
-                 "Act as the reviewer sub-agent for this task.\n\nRead x.el"))
-  (should (equal (romacs-agent-tools--brief nil "Read x.el") "Read x.el"))
-  (should (equal (romacs-agent-tools--brief "" "Read x.el") "Read x.el"))
+  (should (string-prefix-p "Act as the reviewer sub-agent for this task.\n\nRead x.el\n\n"
+                           (romacs-agent-tools--brief "reviewer" "Read x.el")))
+  (should (string-prefix-p "Read x.el\n\n" (romacs-agent-tools--brief nil "Read x.el")))
+  (should (string-prefix-p "Read x.el\n\n" (romacs-agent-tools--brief "" "Read x.el")))
+  (should (equal (romacs-agent-tools--brief nil "") ""))
+  ;; What a child is told besides is its brief's, after its task.
+  (should (string-suffix-p romacs-agent-tools--child-note (romacs-agent-tools--brief nil "Read x.el")))
   ;; The child is still named after its task.
   (should (equal (romacs-agent--task-line (romacs-agent-tools--brief "reviewer" "Read x.el")) "Read x.el")))
 
@@ -47,8 +50,8 @@
   (let ((top (romacs-agent--make :id "a" :harness 'claude))
         (child (romacs-agent--make :id "b" :harness 'claude :options '(:parent "a"))))
     (should (string-match-p "inside Romacs" (romacs-agent--instructions top)))
-    (should-not (string-match-p "delegated task" (romacs-agent--instructions top)))
-    (should (string-match-p "do the work yourself" (romacs-agent--instructions child)))
+    ;; One system prompt for parent and child: a child shares the cached one.
+    (should (equal (romacs-agent--instructions child) (romacs-agent--instructions top)))
     (cl-letf (((symbol-function 'romacs-agent--write-json) #'ignore))
       (should (equal (cadr (member "--append-system-prompt" (romacs-agent--claude-argv child nil)))
                      (romacs-agent--instructions child))))))
