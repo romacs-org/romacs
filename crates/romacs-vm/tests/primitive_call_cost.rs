@@ -94,3 +94,20 @@ fn the_syntax_memo_follows_every_change_to_a_table() {
         "((2 2) (4 4) (4 4) (2 2) (4 4) (2 2) (2 2) (4 4) (2 2))"
     );
 }
+
+/// A search reads the variable itself, not whatever its name is interned
+/// as now: uninterning `case-fold-search` and setting a new symbol of
+/// that name leaves searches folding case, as in GNU, where the search
+/// reads a C variable. Looking the name up on every search followed the
+/// new symbol, and panicked while there was none.
+#[test]
+fn a_search_reads_its_variables_not_their_names() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    assert_eq!(eval(&mut vm, "(string-match \"A\" \"a\")"), "0");
+    // Pinned GNU's answers to the same forms.
+    assert_eq!(
+        eval(&mut vm, "(progn (unintern \"case-fold-search\" obarray) (list (string-match \"A\" \"a\") (progn (set (intern \"case-fold-search\") nil) (string-match \"A\" \"a\"))))"),
+        "(0 0)"
+    );
+}

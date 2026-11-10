@@ -184,8 +184,9 @@ pub(crate) struct PatternCache {
     len: usize,
     /// Uses so far: the clock `CachedPattern::used` reads.
     clock: u64,
-    /// The slots of the variables every search reads, found by name once:
-    /// a slot keeps its index for the life of the VM.
+    /// The slots of the variables every search reads, found by name at the
+    /// first search and kept: a search reads the variable itself, as
+    /// GNU's reads its C variable, whatever its name is interned as later.
     slots: Option<SearchSlots>,
     /// What the last search learned of its syntax table.
     syntax: syntax::SyntaxMemo,
@@ -197,8 +198,6 @@ struct SearchSlots {
     match_buffer: usize,
     standard_syntax: usize,
     lookup_properties: usize,
-    /// The symbol a syntax table's purpose names, once it is interned.
-    syntax_purpose: Option<usize>,
 }
 impl PatternCache {
     pub(crate) fn is_empty(&self) -> bool {
@@ -644,15 +643,13 @@ impl Vm {
     fn search_slots(&mut self) -> SearchSlots {
         if let Some(slots) = self.regexp_cache.slots { return slots; }
         let slots = SearchSlots {
-            case_fold: self.names["case-fold-search"],
-            preserve_match_data: self.names["inhibit-changing-match-data"],
-            match_buffer: self.names["#:vm2-match-buffer"],
-            standard_syntax: self.names["#:vm2-standard-syntax"],
-            lookup_properties: self.names["parse-sexp-lookup-properties"],
-            syntax_purpose: self.names.get("syntax-table").copied(),
+            case_fold: self.slot("case-fold-search"),
+            preserve_match_data: self.slot("inhibit-changing-match-data"),
+            match_buffer: self.slot("#:vm2-match-buffer"),
+            standard_syntax: self.slot("#:vm2-standard-syntax"),
+            lookup_properties: self.slot("parse-sexp-lookup-properties"),
         };
-        // Kept only once the purpose symbol exists: it is interned late.
-        if slots.syntax_purpose.is_some() { self.regexp_cache.slots = Some(slots); }
+        self.regexp_cache.slots = Some(slots);
         slots
     }
     fn regexp_preserve(&mut self) -> bool {

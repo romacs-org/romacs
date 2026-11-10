@@ -450,7 +450,8 @@ impl Vm {
     /// Whether the memo holds for TABLE as it is now.
     fn syntax_memo_holds(&self, table: Value) -> bool {
         let memo = &self.regexp_cache.syntax;
-        memo.table == table && memo.writes == crate::char_table::writes() && memo.serial == self.char_table_serial(table)
+        // Serial 0 is no table's: the empty memo holds for nothing.
+        memo.serial != 0 && memo.table == table && memo.writes == crate::char_table::writes() && memo.serial == self.char_table_serial(table)
     }
     pub(crate) fn regexp_table_class(&self, table: Value, code: u32) -> Option<SyntaxClass> {
         let entry = self.char_table_get(table, code as usize).ok()?;
