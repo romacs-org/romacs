@@ -8,7 +8,6 @@ members = [
     "crates/romacs-vm-gui",
     "crates/romacs-grammars",
     "tests/coordinate-contract",
-    "tests/retired-vm-contract",
     "crates/romacs-logo",
     "crates/romacs-regex-engine",
     "crates/romacs-mcp",

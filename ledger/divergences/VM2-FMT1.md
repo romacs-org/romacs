@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-FMT1 | `format` conversion language and numeric arguments | GNU parses positional `N$`, flags, width and precision and accepts floating and integer/character conversions (`src/editfns.c:3611-3653,3729-3730,3829-3845`). | The shared formatter supports those fields and `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including exact bignum integer output and float coercion/rounding. Width, precision and field-number components above 2^20 refuse; GNU string-identity behavior remains unsupported. Text properties follow styled_format: the format string's move to where its characters land, and each `%s` string argument's start at its text (after left padding) with runs ending at its end extended over the field; `%S` of a propertized string prints it as `prin1` does. | Live GNU comparisons are in `tests/format_numeric.rs` and `tests/format_properties.rs`. Locale/quoting capability limits remain VM2-FORMAT-MESSAGE1; this is not full GNU formatting parity. | <!-- symbols: format -->

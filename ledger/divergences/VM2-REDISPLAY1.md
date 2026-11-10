@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-REDISPLAY1 | `redisplay` does not redraw synchronously | GNU `redisplay` (`src/dispnew.c:7020`) processes pending events and redraws before returning t (nil while a keyboard macro runs) | VM2 returns the same values; the GUI host redraws only after the command finishes, and pending events are not swallowed. Once a host lays the frame out, `redisplay` settles each live window's start and hscroll as that redraw will (`Vm::redisplay_point_visibility_now`, redisplay's point-visibility step) and records the end it will show, so `window-start` and `window-end` after it (or after `sit-for`) answer the display the command leaves: isearch's lazy highlighting covers the window a match scrolled into view. It paints nothing and runs no fontification | **Package-observable** in the GUI: progress drawn by a long command appears when it ends | Needs a synchronous layout and present path from the VM to the host | <!-- symbols: redisplay -->

@@ -1,0 +1,5 @@
+## Detail
+
+| crate | file | entries |
+|---|---|---|
+| VM2-DEFAULT1 | `make-variable-buffer-local` of a void variable leaves its default void | `Fmake_variable_buffer_local` (`src/data.c:2178`, line 2214) sets a void variable's default value to nil before making it automatically buffer-local, so `(progn (make-variable-buffer-local 'v) (default-boundp 'v))` is t | VM2's `make-variable-buffer-local` installs the local table without touching the default, so the default stays void: `default-boundp` (which itself matches GNU on every other harness row) answers nil, and `default-value`/reading the variable in a buffer without a local signal `void-variable`. The one pinned `default-boundp` harness row, `default-boundp/0034`, is exactly this | **Package-observable** for code that makes a never-set variable automatically buffer-local and then reads its default; a `defvar` with a value first (the usual pattern) behaves as in GNU | <!-- symbols: make-variable-buffer-local, default-boundp, default-value -->

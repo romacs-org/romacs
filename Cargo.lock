@@ -3723,13 +3723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-retired-vm-contract"
-version = "0.1.0"
-dependencies = [
- "romacs-vm",
-]
-
-[[package]]
 name = "romacs-scene"
 version = "0.0.20"
 dependencies = [
