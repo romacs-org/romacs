@@ -23,16 +23,15 @@ impl PresentationObserver {
         layout: romacs_display_protocol::PresentationId,
         size: (u32, u32),
         scale: f64,
-        projected: &[romacs_display_protocol::input_latency::InputToken],
     ) {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         match window.window_handle().map(|handle| handle.as_raw()) {
             Ok(RawWindowHandle::Wayland(_)) => self
                 .wayland
-                .before_present(window, frame, layout, size, scale, projected),
-            Ok(RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_)) => self.x11.before_present(
-                device, surface, generation, frame, layout, size, scale, projected,
-            ),
+                .before_present(window, frame, layout, size, scale),
+            Ok(RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_)) => self
+                .x11
+                .before_present(device, surface, generation, frame, layout, size, scale),
             _ => {}
         }
     }

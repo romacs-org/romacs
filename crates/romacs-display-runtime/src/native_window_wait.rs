@@ -76,5 +76,4 @@ impl NativeWindowWaits {
 }
 
 #[cfg(test)]
-#[path = "native_window_wait/tests/mod.rs"]
 mod tests;

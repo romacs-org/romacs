@@ -283,7 +283,6 @@ pub(crate) fn default_window_movement() -> WindowAnimation {
 }
 
 #[cfg(test)]
-#[path = "window_animation/tests/window_animation_test.rs"]
 mod tests;
 
 crate::effect_schema!(WindowAnimation {

@@ -7,7 +7,7 @@
 //! position derived from the PREVIOUS buffer's length.
 //!
 //! This exercises the real producer chain rather than a hand-built snapshot:
-//! the VM publishes a frame, `romacs-layout2` lays it out and reports where each
+//! the VM publishes a frame, `romacs-layout` lays it out and reports where each
 //! window's text ends, that result is applied back through the journal, and only
 //! then is `(window-end)` asked. An equivalent in-crate regression exists, but
 //! this is the one that reproduces the reviewer's original observation through
@@ -19,7 +19,7 @@ use romacs_vm::Vm;
 fn buffer_swap_resets_the_window_end_after_real_layout_and_journal() {
     let mut vm = Vm::new();
     let face = vm.display_default_face().unwrap();
-    let (line, column) = romacs_layout2::frame_metrics(&face).unwrap();
+    let (line, column) = romacs_layout::frame_metrics(&face).unwrap();
     vm.set_frame_geometry(column * 80, line * 24, line, column).unwrap();
     vm.eval_source(&format!(
         r#"(progn (set-buffer (get-buffer-create "long-end")) (insert {:?})
@@ -33,7 +33,7 @@ fn buffer_swap_resets_the_window_end_after_real_layout_and_journal() {
     .unwrap();
 
     let snapshot = vm.frame_snapshot(column * 80, line * 24).unwrap();
-    let (_, ends) = romacs_layout2::layout_frame(&snapshot, 1).unwrap();
+    let (_, ends) = romacs_layout::layout_frame(&snapshot, 1).unwrap();
     let end = ends
         .iter()
         .find(|end| end.id == snapshot.windows[0].snapshot.id)

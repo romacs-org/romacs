@@ -141,5 +141,4 @@ impl<T: Pod> FrameVertexArena<T> {
 }
 
 #[cfg(test)]
-#[path = "dynamic_buffer/tests/dynamic_buffer_test.rs"]
 mod tests;

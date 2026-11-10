@@ -279,5 +279,4 @@ impl Default for GpuBudget {
 }
 
 #[cfg(test)]
-#[path = "gpu_budget/tests/gpu_budget_test.rs"]
 mod tests;

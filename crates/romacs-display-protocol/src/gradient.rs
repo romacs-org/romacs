@@ -276,5 +276,4 @@ impl fmt::Display for Gradient {
 }
 
 #[cfg(test)]
-#[path = "gradient/tests/gradient_test.rs"]
 mod tests;

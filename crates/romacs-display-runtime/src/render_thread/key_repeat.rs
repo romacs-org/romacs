@@ -38,5 +38,4 @@ impl KeyRepeats {
 }
 
 #[cfg(test)]
-#[path = "key_repeat/tests.rs"]
 mod tests;

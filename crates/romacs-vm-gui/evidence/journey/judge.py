@@ -135,7 +135,7 @@ def judge(mode, sid):
             return ('WORKS', ev + '; the active cursor is painted in the selected window')
         if not [x for x in L.get('rows', []) if x[0] == 'ModeLine']:
             return ('BLOCKED', ev + '; NO cursor is painted for any window, and no mode line either: '
-                    'layout draws a cursor only in a window that has a mode line (romacs-layout2 '
+                    'layout draws a cursor only in a window that has a mode line (romacs-layout '
                     'layout_frame_inner); traced for --gnu-lisp to a void mode-line-format, '
                     'see evidence/loadup/LOADUP.md')
         return ('BLOCKED', ev + '; NO cursor is painted for any window (cause not traced)')

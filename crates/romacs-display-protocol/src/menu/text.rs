@@ -117,19 +117,3 @@ impl MeasuredMenu {
         &self.text
     }
 }
-
-/// Only the root panel displays the menu's optional title.
-#[derive(Clone, Copy, Debug)]
-pub enum MenuPanelRole {
-    Root,
-    Submenu,
-}
-
-impl MenuPanelRole {
-    pub fn title(self, menu: &MeasuredMenu) -> Option<&MenuTextRun> {
-        match self {
-            Self::Root => menu.text().title(),
-            Self::Submenu => None,
-        }
-    }
-}

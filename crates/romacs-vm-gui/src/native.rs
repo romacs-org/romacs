@@ -5,7 +5,7 @@ use romacs_vm::CommandEvent;
 pub fn translate(event: InputEvent) -> Option<CommandEvent> {
     use romacs_display_runtime::backend::wgpu::*;
     let (key, modifiers) = match event {
-        InputEvent::Tracked { event, .. } | InputEvent::Observed { event, .. } => return translate(*event),
+        InputEvent::Tracked { event, .. } => return translate(*event),
         InputEvent::Key { key, modifiers, pressed: true, .. } => (key, modifiers),
         _ => return None,
     };

@@ -65,15 +65,6 @@ impl WgpuRenderer {
 }
 
 impl DrawContext<'_, '_> {
-    pub fn paint_menu(
-        &mut self,
-        menu: &romacs_display_protocol::menu::MenuPanelPaint<'_>,
-        atlas: &mut crate::WgpuGlyphAtlas,
-    ) {
-        self.renderer
-            .paint_menu(self.target, &self.parameters, menu, atlas);
-    }
-
     /// Place one certified crop without clearing any neighboring pixels.
     pub fn blit_snapshot_region(&mut self, region: super::SnapshotRegion<'_>) {
         assert_eq!(

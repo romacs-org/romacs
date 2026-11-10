@@ -14,7 +14,7 @@ use crate::types::{
     WebViewId, XwidgetId,
 };
 use crate::xwidget_extent::XwidgetPresentationGeometry;
-use crate::{ContentTransitionIntent, FrameSpace, GeometryRect, LogicalPixels};
+use crate::{ContentTransitionIntent, FrameSpace};
 use rustc_hash::FxHashMap as HashMap;
 
 pub use crate::cursor::{CursorKind, CursorSpec, CursorStyle};
@@ -1212,7 +1212,7 @@ pub struct FrameGlyphBuffer {
     /// Where the painter put each character of the status bar's text, in
     /// its order: its left edge in the frame and its width, or None where
     /// the bar clipped it; a marker's characters span its room. A click
-    /// reads it (`romacs_layout2::status_bar_extents`).
+    /// reads it (`romacs_layout::status_bar_extents`).
     pub status_bar_places: Vec<Option<(f32, f32)>>,
 
     /// Rounded backgrounds behind chrome rows' text (`RoundedFill`).
@@ -1333,8 +1333,9 @@ impl FrameGlyphBuffer {
         self.presented_hit_index.resolve_unified(query)
     }
 
+    #[cfg(test)]
     /// Semantic hit index installed for this exact rendered presentation.
-    pub fn presented_hit_index(&self) -> &crate::presented_pointer::PresentedHitIndex {
+    pub(crate) fn presented_hit_index(&self) -> &crate::presented_pointer::PresentedHitIndex {
         &self.presented_hit_index
     }
 
@@ -2006,32 +2007,6 @@ impl FrameGlyphBuffer {
         });
     }
 
-    /// Add an xwidget glyph whose slot is `slot_width` wide: the widget's
-    /// `content` width when nothing cropped it, less when the right edge did.
-    pub fn add_xwidget(
-        &mut self,
-        xwidget_id: XwidgetId,
-        webview_id: WebViewId,
-        presentation: XwidgetPresentationGeometry<FrameSpace>,
-    ) {
-        let clip = self.current_clip_rect.map(|clip| {
-            GeometryRect::<FrameSpace, LogicalPixels>::new(clip.x, clip.y, clip.width, clip.height)
-                .expect("a frame draw-context clip has valid geometry")
-        });
-        let presentation = presentation.with_clip(clip);
-        let origin = presentation.origin();
-        self.glyphs.push(FrameGlyph::Xwidget {
-            window_id: self.current_window_id,
-            row_role: self.current_row_role,
-            slot_id: Some(self.current_slot_id(origin.x(), origin.y())),
-            xwidget_id,
-            webview_id,
-            presentation,
-            face_id: self.current_face_id,
-            box_vertical_edges: BoxVerticalEdges::Both,
-        });
-    }
-
     /// Register a resolved fringe bitmap for this frame, keyed by registry
     /// index. Idempotent: the same index may be registered once per row that
     /// references it; we keep a single copy.
@@ -2138,12 +2113,6 @@ impl FrameGlyphBuffer {
         fallback: &'a EffectsConfig,
     ) -> &'a EffectsConfig {
         self.window_cursor_effects(window_id).unwrap_or(fallback)
-    }
-
-    /// Return the active physical cursor's effect profile, if any.
-    pub fn phys_cursor_effects(&self) -> Option<&EffectsConfig> {
-        self.active_cursor()
-            .and_then(|cursor| self.window_cursor_effects(cursor.window_id))
     }
 
     /// Resolve the effect profile used to render and schedule the active
@@ -2510,5 +2479,4 @@ impl FrameGlyphBuffer {
 }
 
 #[cfg(test)]
-#[path = "frame_glyphs/tests/frame_glyphs_test.rs"]
 mod tests;
