@@ -90,8 +90,10 @@ be written at all the form is not evaluated again: its claim stays."
     (when (file-exists-p response) (delete-file response))
     (with-temp-file request (insert "(9 . (unbalanced"))
     (parity-probe--poll)
-    (should (equal (with-temp-buffer (insert-file-contents response) (car (read (current-buffer)))) nil))
-    (should-not (file-exists-p request))))
+    (should (pcase (with-temp-buffer (insert-file-contents response) (read (current-buffer)))
+              (`(nil error (end-of-file . ,_)) t)))
+    (should-not (file-exists-p request))
+    (should-not (file-exists-p (parity-probe--file "request.busy")))))
 
 (provide 'parity-probe-tests)
 ;;; parity-probe-tests.el ends here

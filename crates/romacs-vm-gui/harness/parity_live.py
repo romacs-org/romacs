@@ -253,6 +253,9 @@ class Engine:
             raise
         value = read_sexp(response.read_text(encoding='utf-8'))
         response.unlink()
+        if value[0] is None:
+            # The probe could not read the request: its answer says why.
+            raise LispError(self.name, form, value[2])
         if value[0] != self.serial:
             raise RuntimeError(f'{self.name}: answer {value[0]} for request {self.serial}')
         if value[1] != 'ok':
