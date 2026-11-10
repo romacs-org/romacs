@@ -515,6 +515,54 @@ fn a_status_missed_without_a_connection_is_told_at_the_next() {
     assert!(client.pump().unwrap().is_empty(), "once");
 }
 
+/// A helper is a child the session talks to directly, over a socketpair
+/// whose other end the keeper keeps. The keeper's exec does not touch it:
+/// the session's duplicate goes on working, and the helper is still the
+/// keeper's child.
+#[test]
+fn an_exec_leaves_a_helper_and_its_conversation_alone() {
+    let keeper = Fixture::start(60_000);
+    let mut client = keeper.client();
+    let before = client.info().unwrap();
+    let spec = Spec { fds: vec![(0, End::Null), (1, End::Null), (2, End::Null), (3, End::Socket)], ..shell("cat <&3 >&3; exit 6") };
+    let (helper, fds) = client.spawn("helper", 1, b"", true, &spec).unwrap();
+    let (plain, _plain_fds) = client.spawn("test", 1, b"", false, &shell("sleep 600")).unwrap();
+    let mut talk = std::os::unix::net::UnixStream::from(fds.into_iter().next().unwrap());
+    let say = |talk: &mut std::os::unix::net::UnixStream, line: &[u8]| {
+        talk.write_all(line).unwrap();
+        let mut back = vec![0; line.len()];
+        talk.read_exact(&mut back).unwrap();
+        back
+    };
+    assert_eq!(say(&mut talk, b"before\n"), b"before\n");
+    client.exec(Path::new(NEXT)).unwrap();
+    assert_eq!(client.info().unwrap().pid, before.pid);
+    assert_eq!(say(&mut talk, b"after\n"), b"after\n", "the session's duplicate never noticed");
+    assert_eq!((parent_of(helper.pid), parent_of(plain.pid)), (before.pid, before.pid));
+    // End of file for the helper needs both holders of the socket to close.
+    talk.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(status_event(&mut client, helper.handle, Status::ended), Status::Exited(6), "its exit reaches the new image");
+    client.signal(plain.handle, libc::SIGKILL, false).unwrap();
+    assert_eq!(status_event(&mut client, plain.handle, Status::ended), Status::Signaled(libc::SIGKILL));
+}
+
+/// Spawns sent into the exec are each answered by one keeper or the other:
+/// none is lost and none is done twice.
+#[test]
+fn spawns_in_flight_across_the_exec_happen_once() {
+    let keeper = Fixture::start(60_000);
+    let mut client = keeper.client();
+    let mut other = keeper.session();
+    writeln!(other.input, "burst 300").unwrap();
+    wait_for("the burst to be under way", || client.info().unwrap().handles > 20);
+    client.exec(Path::new(NEXT)).unwrap();
+    let mid = client.info().unwrap().handles;
+    assert_eq!(other.answer(), "300");
+    let bursts = client.list().unwrap().iter().filter(|row| row.tag == "burst").count();
+    assert_eq!(bursts, 300, "the exec came with {mid} spawned");
+    assert!(mid < 300, "the exec fell inside the burst: {mid}");
+}
+
 /// A child that exits while the keeper execs is reported once, and a
 /// spawn sent into the exec is answered by one keeper or the other.
 #[test]

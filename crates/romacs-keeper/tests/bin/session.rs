@@ -34,6 +34,20 @@ fn main() {
                 let fd = fds[&handle(rest).raw()][0].try_clone().expect("clone");
                 std::fs::File::from(fd).read_exact(&mut bytes).map(|()| String::from_utf8_lossy(&bytes).replace('\n', ",")).map_err(|e| e.to_string())
             }
+            // Spawn COUNT children one after another. A keeper that execs
+            // mid-request answers or hangs up; hung up on, the request was
+            // not taken, so it is sent again to the keeper found anew.
+            "burst" => {
+                let count: usize = rest.parse().unwrap_or(0);
+                let mut done = 0;
+                while done < count {
+                    match client.spawn("burst", 1, b"", false, &shell("sleep 600")) {
+                        Ok(_) => done += 1,
+                        Err(_) => client.reconnect().expect("the keeper answers again"),
+                    }
+                }
+                Ok(done.to_string())
+            }
             "kept" => client.set_kept(handle(rest), true).map(|()| "ok".into()),
             "quit" => client.detach(true).map(|()| "ok".into()),
             other => Err(format!("unknown command {other}")),

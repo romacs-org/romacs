@@ -6,6 +6,8 @@
 
 (require (quote ert))
 (require 'romacs-keeper)
+(require 'seq)
+(require 'subr-x)
 
 (defmacro romacs-keeper-test--with (&rest body)
   "Run BODY attached to a fresh keeper, `socket' bound to its socket."
@@ -162,6 +164,91 @@
       (let ((deadline (+ (float-time) 10)))
         (while (and (romacs-keeper-test--row handle) (< (float-time) deadline)) (sleep-for 0.01)))
       (should-not (romacs-keeper-test--row handle)))))
+
+;; The unit path, as a session started by systemd runs: the session is a
+;; transient user unit holding a pty child through a keeper it started.
+;; Killing the session's unit kills everything in its cgroup, and must not
+;; reach the keeper or the child.  A late successor still finds the handle,
+;; owns it alone, and the keeper leaves once nothing is left.
+(defconst romacs-keeper-test--unit-session
+  '(progn
+     (require 'romacs-keeper)
+     (let ((romacs-keeper-idle-seconds 1))
+       (romacs-keeper--attach-socket socket)
+       (romacs--keeper-call 'configure 1000)
+       (let ((row (romacs-keeper-spawn
+                   "test" 1 '("/bin/sh" "-c" "i=0; while :; do echo tick $i; i=$((i+1)); sleep 0.05; done")
+                   :environment '("PATH=/usr/bin:/bin") :session t
+                   :descriptors '((0 . pty) (1 . pty) (2 . pty)))))
+         (write-region (format "%S" (list (plist-get row :handle) (plist-get row :pid)
+                                          (romacs-keeper-attached-p) (emacs-pid)))
+                       nil (expand-file-name "told" directory) nil 'silent)
+         (while t (sleep-for 1))))))
+
+(defun romacs-keeper-test--unit-of (pid)
+  "The systemd unit PID runs in, from its cgroup."
+  (with-temp-buffer
+    (insert-file-contents (format "/proc/%d/cgroup" pid))
+    (file-name-nondirectory (string-trim (buffer-string)))))
+
+(ert-deftest keeper-outlives-a-killed-session-unit ()
+  (skip-unless (and (executable-find "systemd-run")
+                    (eql 0 (call-process "systemctl" nil nil nil "--user" "show-environment"))))
+  (let* ((dir (make-temp-file "rk" t))
+         (socket (expand-file-name "keeper.sock" dir))
+         (unit (format "romacs-keeper-test-%d-%d" (emacs-pid) (random 100000)))
+         (form `(let ((socket ,socket) (directory ,dir)) ,romacs-keeper-test--unit-session))
+         (told-file (expand-file-name "told" dir)))
+    (unwind-protect
+        (progn
+          (should (eql 0 (call-process "systemd-run" nil nil nil "--user" "--quiet" "--collect" "--unit" unit
+                                       "--setenv" (concat "HOME=" (getenv "HOME"))
+                                       "--setenv" (concat "ROMACS_LISP_DIR=" (or (getenv "ROMACS_LISP_DIR") ""))
+                                       "--" (expand-file-name invocation-name invocation-directory)
+                                       "-Q" "--batch" "-L" (file-name-directory (locate-library "romacs-keeper"))
+                                       "--eval" (format "%S" form))))
+          (let ((deadline (+ (float-time) 30)))
+            (while (and (not (file-exists-p told-file)) (< (float-time) deadline)) (sleep-for 0.05)))
+          (let* ((told (with-temp-buffer (insert-file-contents told-file) (car (read-from-string (buffer-string)))))
+                 (handle (nth 0 told)) (child (nth 1 told)) (keeper (nth 2 told)) (session (nth 3 told)))
+            ;; The keeper and the child are in a unit of the keeper's own.
+            (should (equal (romacs-keeper-test--unit-of session) (concat unit ".service")))
+            (should-not (equal (romacs-keeper-test--unit-of keeper) (concat unit ".service")))
+            (should (equal (romacs-keeper-test--unit-of child) (romacs-keeper-test--unit-of keeper)))
+            (call-process "systemctl" nil nil nil "--user" "kill" "--signal=KILL" (concat unit ".service"))
+            (let ((deadline (+ (float-time) 10)))
+              (while (and (file-directory-p (format "/proc/%d" session)) (< (float-time) deadline)) (sleep-for 0.05)))
+            (should-not (file-directory-p (format "/proc/%d" session)))
+            ;; A successor that is slow to come.
+            (sleep-for 1.5)
+            (should (file-directory-p (format "/proc/%d" keeper)))
+            (should (file-directory-p (format "/proc/%d" child)))
+            (should (eql (plist-get (romacs-keeper--attach-socket socket) :pid) keeper))
+            (let ((row (romacs-keeper-test--row handle)))
+              (should (equal (plist-get row :status) '(running)))
+              (should-not (plist-get row :owner-alive)))
+            (romacs-keeper-claim handle)
+            (should (eql (plist-get (romacs-keeper-test--row handle) :owner) (emacs-pid)))
+            ;; The shell on the pty kept printing: its ticks are there, in order.
+            (let ((text "") (deadline (+ (float-time) 10)))
+              (while (and (< (length (split-string text "\n" t)) 5) (< (float-time) deadline))
+                (let ((chunk (romacs-keeper-read handle 0 4096 1)))
+                  (when (stringp chunk) (setq text (concat text chunk)))))
+              (let ((ticks (mapcar (lambda (line) (string-to-number (substring line 5)))
+                                   (seq-filter (lambda (line) (string-match-p "\\`tick [0-9]+\r?\\'" line))
+                                               (split-string text "\n" t)))))
+                (should (>= (length ticks) 3))
+                (should (equal ticks (number-sequence (car ticks) (+ (car ticks) (length ticks) -1))))))
+            ;; Cleanup happens: a quit closes the handle, the shell gets its
+            ;; hangup, and the idle keeper leaves with its unit.
+            (romacs-keeper-detach t)
+            (let ((deadline (+ (float-time) 15)))
+              (while (and (file-directory-p (format "/proc/%d" keeper)) (< (float-time) deadline)) (sleep-for 0.1)))
+            (should-not (file-directory-p (format "/proc/%d" child)))
+            (should-not (file-directory-p (format "/proc/%d" keeper)))))
+      (ignore-errors (call-process "systemctl" nil nil nil "--user" "stop" (concat unit ".service")))
+      (ignore-errors (when (romacs-keeper-attached-p) (romacs-keeper-shutdown)))
+      (delete-directory dir t))))
 
 (provide (quote romacs-keeper-tests))
 ;;; romacs-keeper-tests.el ends here
